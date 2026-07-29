@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="vigia" width="720">
+<img src="assets/banner.jpg" alt="vigia: a watchtower sweeping a beam of light across changed lines of code" width="100%">
 
 *Portuguese: a watchman, the one who keeps watch.*
 
