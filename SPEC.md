@@ -1,0 +1,151 @@
+# vigia — Specification
+
+Status: **v0, 2026-07-30.** Source of truth. Code is written against this
+document; see `CLAUDE.md` § Method for the drift rule.
+
+---
+
+## 1. Problem
+
+Running a full git TUI in a pane beside an AI coding agent, to watch changes as
+they land, is the wrong tool. A multi-panel git client spends the pane on
+branches, commits, stashes and status. In a pane already halved against the
+agent, every panel is a few lines tall and names truncate.
+
+What is wanted: **the live diff, fullscreen, auto-updating, scrollable,
+mouse-driven, and beautiful.** Nothing else.
+
+## 2. Product class — the load-bearing decision
+
+`vigia` is a **monitor**, not a reviewer. That single distinction generates every
+budget below, and the budgets are the product.
+
+| | Reviewer | **Monitor (`vigia`)** |
+|---|---|---|
+| How it starts | Launched per review | Already open |
+| Interaction | The point | Rare or never |
+| Correct when untouched | No | **Required** |
+| Runtime | Minutes | **Days** |
+| Latency budget | Seconds | **A frame** |
+
+`btop` is the reference for what monitor-class feels like: you read state from
+shape and colour, glance away, glance back, and never configure anything.
+
+Design rationale beyond this section is recorded outside the codebase; call
+`recall` when a decision needs it.
+
+## 3. Invariants
+
+Numbered because tests reference them. Each must have a test that fails on
+violation. **An invariant without a failing test is a wish.**
+
+Budgets are **absolute** and chosen to be defensible on their own terms, not
+relative to any other tool.
+
+| # | Invariant | Budget | How it is proven |
+|---|---|---|---|
+| **I1** | Redraw is **event-driven**, never a fixed timer. No filesystem event and no git index change means no work. | **0 wakeups** while idle | CPU sampled over a 60s idle window; assert no render calls |
+| **I2** | Re-highlighting is **incremental** — only changed hunks are re-parsed. | re-parse ∝ edit size, **not** file size | Assert re-parse count and byte count for a single-line edit in a large file |
+| **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak test: 24h of synthetic edits, RSS sampled every 5 min |
+| **I4** | **Streams, never buffers.** First paint is independent of total diff size. | **first paint < 100ms** on a 100k-line diff | `criterion`, gated in CI |
+| **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
+| **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns |
+| **I7** | Startup to first paint is imperceptible. | **< 50ms** | Timed, gated in CI |
+| **I8** | Terminal restored exactly on exit — including `SIGINT` and panic. | — | Alternate-screen assertions; panic hook test |
+| **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | `criterion` under a synthetic edit storm |
+
+A regression past any budget **fails the build.**
+
+## 4. Scope
+
+**In:** working-tree diff (unstaged by default), event-driven refresh, follow
+mode, scroll (keyboard + mouse wheel), syntax highlighting, per-file churn
+visualisation, responsive layout, theming.
+
+**Out of v1, deliberately:** staging, committing, rebasing, branch or commit
+browsing, annotations, comment threading, AI features, remote operations. Each is
+reviewer-class and each would cost an invariant.
+
+**Deferred, not rejected:** multi-worktree view (several agent sessions at once —
+the strongest differentiator after glanceability, and the most btop-shaped);
+Jujutsu and Sapling support.
+
+## 5. The differentiator: glanceability
+
+`btop`'s real achievement is that state is readable from **shape and colour**
+without reading text. `vigia`'s translation:
+
+- per-file **churn sparkline** — change density over time
+- a **heat strip** locating change within the file
+- live **+/− counters**
+- a **visual pulse** on what just changed
+
+This is what makes it a monitor rather than a narrow diff view, and it is where
+design effort goes once the invariants hold.
+
+## 6. Architecture
+
+Cargo workspace, two crates:
+
+- **`vigia-core`** — library. Git (`gix`), diff modelling, incremental
+  highlighting (`syntect`), the watch and coalesce engine. **No terminal I/O, no
+  ratatui.** Every invariant except I6 and I8 is testable here, headlessly.
+- **`vigia`** — binary. `ratatui` + `crossterm` shell: input, layout, theming.
+  Thin by design, so the TUI stays swappable and the engine stays provable.
+
+The split is a dependency decision, not a hedge: the TUI renders whatever the
+core produces, so the core has to work first or the TUI is being built on sand.
+
+## 7. Testing
+
+- **Snapshot tests over `ratatui::backend::TestBackend` with `insta`** — render
+  frames into an in-memory buffer, snapshot as text. This is what makes I5 and I6
+  assertable at all: the UI becomes diffable text.
+- **`criterion`** for I4, I7 and I9, gated in CI.
+- **Soak test** for I3, scheduled rather than per-commit.
+- **`proptest`** over diff parsing and hunk-boundary logic.
+
+## 8. Phases
+
+**Phase 1 — core engine.** `vigia-core` plus a `main` that prints frame timings.
+Prove `gix` gives working-tree-vs-index diffs at the fidelity and speed needed —
+it is the least-precedented dependency in the stack and everything sits on it.
+Land I1, I2, I4, I9. No TUI.
+
+**Phase 2 — minimum monitor.** ratatui + crossterm shell. Follow mode (I5),
+scroll, mouse, exit safety (I8), 40-column layout (I6). Snapshot suite.
+
+**Phase 3 — glanceability.** Section 5, plus theming.
+
+**Phase 4 — distribution.** `cargo-dist`, crates.io publish, personal Homebrew
+tap, prebuilt binaries on GitHub releases.
+
+**Phase 5 — deferred items**, only if daily use asks for them.
+
+## 9. Distribution
+
+- **crates.io** — `cargo install vigia`. A name **cannot be reserved; it must be
+  published**, and a publish is **permanent** (`cargo yank` hides a version from
+  new dependents, it does not delete it, and the name stays taken). So the first
+  publish should be a crate that does the minimal real thing. Verified free
+  2026-07-30.
+- **Homebrew** — `homebrew-core` **cannot be reserved** and requires notability:
+  ≥30 forks **or** ≥30 watchers **or** ≥75 stars, plus a stable versioned
+  release. Until then a **personal tap** (`breferrari/homebrew-tap`) gives
+  `brew install breferrari/tap/vigia` immediately, is fully under our control, and
+  is what `cargo-dist` generates.
+- **GitHub releases** — prebuilt binaries per platform via `cargo-dist`.
+- No domain. Not needed for a CLI.
+
+## 10. Open questions
+
+- [ ] Does `gix` cover working-tree-vs-index diff at the fidelity and speed
+      needed? Its own docs call the top-level crate "usable but evolving."
+      **Phase 1 answers this**, and it is the one dependency that could force a
+      rethink.
+- [ ] Is `syntect` fast enough incrementally to hold I2, or does it force
+      tree-sitter — and with it a C toolchain — back in?
+- [ ] Default view: unstaged only, or working-tree-vs-HEAD? Unstaged is the
+      thesis; confirm against a week of real use.
+- [ ] Windows: supported target or best-effort? Truecolor needs Win10+, and
+      legacy conhost degrades.
