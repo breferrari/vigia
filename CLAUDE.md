@@ -58,20 +58,25 @@ Propose it, get it into the spec, then build it.
 ## Where design decisions live
 
 Design rationale for this project is recorded outside this repo, reachable
-through the `vigil` MCP server. Two tools, holding different things:
+through the **`vigil` MCP server**. This repo declares its identity as `vigia` in
+`.om-project`, which is what scopes reads and writes to this project.
 
-- **`search`** reaches the full written record: why the product class is what it
-  is, why each dependency was chosen, which alternatives were rejected and on
-  what evidence, what each budget was set against. **Start here.** Search for
-  the decision you are about to touch, then read the note it returns.
-- **`recall`** returns short durable constraints for this project. It is
-  **empty until sessions put things in it**, so early on it will return nothing
-  and that is not a signal the record is missing. It fills as work happens, via
-  `remember` below, and once populated it is the cheaper first call.
+### Reading
 
-Do not conclude "there is no record" from an empty `recall`. Use `search`.
+| Tool | Use it for |
+|---|---|
+| **`search`** | The full written record: why the product class is what it is, why each dependency was chosen, which alternatives were rejected and on what evidence, what each budget was set against. **Start here.** |
+| **`expand`** | Once you have a specific note, see what it links to and what links back. Cheaper and more exact than searching again for the neighbourhood. |
+| **`recall`** | Short durable lessons scoped to this project. Pass `explain: true` when something you expected is missing: it distinguishes "scoped away" from "never existed". |
+| **`reason`** | A judgement that needs several notes weighed against each other, e.g. "is what I am about to do consistent with what was decided". It spawns a second session, so it is slower and costs more. Reach for it only when `search` returned the notes but not the answer. |
+| **`health`** | When something that should be there cannot be found. Every failure in this layer looks identical from the outside (no results), and this is what tells them apart. |
+| Resources | Notes are also exposed as `vault://note/<path>` and can be read directly when the title already answers the question. |
 
-Consult it before changing:
+**`recall` is empty until sessions put things in it.** Early on it returns
+nothing, and that is *not* evidence the record is missing. Do not conclude "there
+is no record" from an empty `recall`. Use `search`.
+
+Consult the record before changing:
 
 - the CLI surface (flags, subcommands, exit codes)
 - the rendering contract (what a "diff view" includes and excludes)
@@ -81,11 +86,41 @@ Consult it before changing:
 If that record and this repo disagree, the record holds the *why*. Reconcile
 before changing behaviour.
 
-## Recording what you learn
+### Writing
 
-Before finishing work that changed or clarified a decision here, record it with
-`remember`. A finding that stays in this session is a finding the next session
-pays for again.
+Two tools, and picking the wrong one is the common mistake. **The test is whether
+it would help someone working on a different project.**
+
+**`remember`** stores a durable **lesson**: a constraint you discovered, a gotcha
+that cost time, a rule that generalises. Not status, not a task summary, not
+anything you would resent being told again in six weeks.
+
+- `confidence` is `verified` | `inferred` | `unverified`. Be honest, it is what a
+  reader trusts. Supply `verification` whenever you claim `verified`: how you
+  know, i.e. the test you ran or the source you read.
+- `scope` is `project` | `platform` | `general`. For something specific to this
+  tool use `scope: "project"` with `projects: ["vigia"]`. Use `general` only when
+  it genuinely applies everywhere.
+- `links` connects it to existing notes by title. `supersedes` corrects an
+  earlier memory: the old one is kept and back-linked rather than deleted.
+- `dry_run: true` previews first.
+
+**`record_work`** files what happened **here** into the vault. Use it at the end
+of a real piece of work. Write it for a session that will not have your context
+and cannot re-read your diff, so fill every field you can: `summary`, `changes`
+(one line per file, what and why), `decisions` (especially where you rejected an
+alternative), `learned` (surprises and near-misses), `open` (unresolved threads
+nobody should assume are handled), `verification` (tests run and their result,
+failures stated honestly). `kind: "decision"` files it as a decision record;
+`informed_by` credits the notes you actually read.
+
+Rule of thumb: **a `gix` limitation that would bite any Rust project is a
+`remember`. "Landed the watch engine and here is what it cost" is a
+`record_work`.** Do both when both are true.
+
+Before finishing work that changed or clarified a decision here, write it down.
+A finding that stays in this session is a finding the next session pays for
+again.
 
 ## House rules
 
