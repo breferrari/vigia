@@ -58,8 +58,18 @@ Propose it, get it into the spec, then build it.
 ## Where design decisions live
 
 Design rationale for this project is recorded outside this repo, reachable
-through the `vigil` MCP server. Call `recall` first: it returns the decisions
-scoped to this project, with their reasoning.
+through the `vigil` MCP server. Two tools, holding different things:
+
+- **`search`** reaches the full written record: why the product class is what it
+  is, why each dependency was chosen, which alternatives were rejected and on
+  what evidence, what each budget was set against. **Start here.** Search for
+  the decision you are about to touch, then read the note it returns.
+- **`recall`** returns short durable constraints for this project. It is
+  **empty until sessions put things in it**, so early on it will return nothing
+  and that is not a signal the record is missing. It fills as work happens, via
+  `remember` below, and once populated it is the cheaper first call.
+
+Do not conclude "there is no record" from an empty `recall`. Use `search`.
 
 Consult it before changing:
 
