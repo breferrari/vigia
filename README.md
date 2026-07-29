@@ -1,17 +1,8 @@
 <div align="center">
 
-```
-   ██╗   ██╗██╗ ██████╗ ██╗ █████╗
-   ██║   ██║██║██╔════╝ ██║██╔══██╗
-   ██║   ██║██║██║  ███╗██║███████║
-   ╚██╗ ██╔╝██║██║   ██║██║██╔══██║
-    ╚████╔╝ ██║╚██████╔╝██║██║  ██║
-     ╚═══╝  ╚═╝ ╚═════╝ ╚═╝╚═╝  ╚═╝
-```
+<img src="assets/logo.svg" alt="vigia" width="720">
 
-**A live diff monitor for your terminal.** 🪟
-
-*Portuguese: a watchman. Also, at sea, a porthole.*
+*Portuguese: a watchman, the one who keeps watch.*
 
 `🚧 Early development. No release yet, nothing to install.`
 
@@ -19,7 +10,7 @@
 
 ---
 
-## 🪟 What it is
+## 🔭 What it is
 
 You run a coding agent in one pane. You run `vigia` in the pane beside it.
 
@@ -36,28 +27,9 @@ closed it for a week.
 
 ## 🖼️ Where it is going
 
-Target layout. **This is a sketch, not a screenshot.** Nothing renders yet.
+Target layout. **This is a mockup, not a screenshot.** Nothing renders yet.
 
-```
-┌─ vigia ──────────────────────────────────── watching · 3 files ─┐
-│                                                                 │
-│   src/engine/watch.rs     ▁▂▅▇█▅▂▁     +42 −7    ████████░░░░   │
-│   src/render/frame.rs     ▁▁▂▃▂▁▁▁     +11 −3    ███░░░░░░░░░   │
-│   Cargo.toml              ▁▁▁▁▁▂▁▁      +2 −0    █░░░░░░░░░░░   │
-│                                                                 │
-├─ src/engine/watch.rs ─────────────────────────── ● just changed ┤
-│                                                                 │
-│    38    fn coalesce(&mut self, ev: Event) -> Option<Frame> {   │
-│    39  +     if self.pending.is_empty() {                       │
-│    40  +         self.deadline = Instant::now() + DEBOUNCE;     │
-│    41  +     }                                                  │
-│    42        self.pending.insert(ev.path);                      │
-│    43  −     self.flush()                                       │
-│    44  +     None                                               │
-│    45    }                                                      │
-│                                                                 │
-└─ 0.8ms frame · 11MB · follow ⏵ ─────────────────────────────────┘
-```
+<img src="assets/preview.svg" alt="Mockup of the vigia interface: a file list with change sparklines above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
 
 The sparklines are change density over time. The bars locate change within each
 file. The frame time sits in the status bar because it is a promise, not a

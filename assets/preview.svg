@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" role="img"
+     aria-label="Mockup of the vigia terminal interface: a file list with change sparklines above a syntax highlighted diff, and a status bar showing frame time.">
+  <defs>
+    <clipPath id="win"><rect x="8" y="8" width="884" height="454" rx="12"/></clipPath>
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+      .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
+      .grn { fill: #3fb950 } .red { fill: #f85149 } .cyn { fill: #39c5cf }
+      .kw { fill: #ff7b72 } .fnn { fill: #d2a8ff } .typ { fill: #ffa657 }
+      .var { fill: #79c0ff } .con { fill: #e3b341 }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="884" height="454" rx="12" fill="#0d1117"/>
+
+  <g clip-path="url(#win)">
+    <!-- title bar -->
+    <rect x="8" y="8" width="884" height="46" fill="#161b22"/>
+    <circle cx="34" cy="31" r="6" fill="#f85149"/>
+    <circle cx="54" cy="31" r="6" fill="#e3b341"/>
+    <circle cx="74" cy="31" r="6" fill="#3fb950"/>
+    <text class="m fg" x="102" y="36" font-size="14" font-weight="700">vigia</text>
+    <text class="m dim" x="866" y="36" font-size="13" text-anchor="end">watching &#183; 3 files</text>
+
+    <!-- file rows -->
+    <g font-size="13.5">
+      <text class="m fg" x="32" y="92">src/engine/<tspan font-weight="700">watch.rs</tspan></text>
+      <g>
+        <rect x="300" y="86" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
+        <rect x="310" y="82" width="7" height="8" rx="1.5" fill="#2a8f4f"/>
+        <rect x="320" y="76" width="7" height="14" rx="1.5" fill="#3fb950"/>
+        <rect x="330" y="70" width="7" height="20" rx="1.5" fill="#56d364"/>
+        <rect x="340" y="66" width="7" height="24" rx="1.5" fill="#7ee787"/>
+        <rect x="350" y="74" width="7" height="16" rx="1.5" fill="#3fb950"/>
+        <rect x="360" y="82" width="7" height="8" rx="1.5" fill="#2a8f4f"/>
+        <rect x="370" y="86" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
+      </g>
+      <text class="m grn" x="452" y="92" text-anchor="end">+42</text>
+      <text class="m red" x="500" y="92" text-anchor="end">&#8722;7</text>
+      <g>
+        <rect x="540" y="82" width="11" height="8" rx="2" fill="#3fb950"/>
+        <rect x="554" y="82" width="11" height="8" rx="2" fill="#3fb950"/>
+        <rect x="568" y="82" width="11" height="8" rx="2" fill="#56d364"/>
+        <rect x="582" y="82" width="11" height="8" rx="2" fill="#56d364"/>
+        <rect x="596" y="82" width="11" height="8" rx="2" fill="#7ee787"/>
+        <rect x="610" y="82" width="11" height="8" rx="2" fill="#3fb950"/>
+        <rect x="624" y="82" width="11" height="8" rx="2" fill="#f85149"/>
+        <rect x="638" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="652" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="666" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="680" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="694" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      </g>
+
+      <text class="m fg" x="32" y="124">src/render/<tspan font-weight="700">frame.rs</tspan></text>
+      <g>
+        <rect x="300" y="88" width="7" height="2" rx="1" fill="#1f6f3f" transform="translate(0,32)"/>
+        <rect x="310" y="84" width="7" height="6" rx="1.5" fill="#2a8f4f" transform="translate(0,32)"/>
+        <rect x="320" y="80" width="7" height="10" rx="1.5" fill="#3fb950" transform="translate(0,32)"/>
+        <rect x="330" y="84" width="7" height="6" rx="1.5" fill="#2a8f4f" transform="translate(0,32)"/>
+        <rect x="340" y="86" width="7" height="4" rx="1.5" fill="#1f6f3f" transform="translate(0,32)"/>
+        <rect x="350" y="88" width="7" height="2" rx="1" fill="#1f6f3f" transform="translate(0,32)"/>
+        <rect x="360" y="88" width="7" height="2" rx="1" fill="#1f6f3f" transform="translate(0,32)"/>
+        <rect x="370" y="88" width="7" height="2" rx="1" fill="#1f6f3f" transform="translate(0,32)"/>
+      </g>
+      <text class="m grn" x="452" y="124" text-anchor="end">+11</text>
+      <text class="m red" x="500" y="124" text-anchor="end">&#8722;3</text>
+      <g>
+        <rect x="540" y="114" width="11" height="8" rx="2" fill="#3fb950"/>
+        <rect x="554" y="114" width="11" height="8" rx="2" fill="#56d364"/>
+        <rect x="568" y="114" width="11" height="8" rx="2" fill="#f85149"/>
+        <rect x="582" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="596" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="610" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="624" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="638" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="652" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="666" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="680" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="694" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      </g>
+
+      <text class="m dim" x="32" y="156">Cargo.toml</text>
+      <g>
+        <rect x="300" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="310" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="320" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="330" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="340" y="148" width="7" height="6" rx="1.5" fill="#2a8f4f"/>
+        <rect x="350" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="360" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="370" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+      </g>
+      <text class="m grn" x="452" y="156" text-anchor="end">+2</text>
+      <text class="m faint" x="500" y="156" text-anchor="end">&#8722;0</text>
+      <g>
+        <rect x="540" y="146" width="11" height="8" rx="2" fill="#3fb950"/>
+        <rect x="554" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="568" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="582" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="596" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="610" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="624" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="638" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="652" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="666" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="680" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+        <rect x="694" y="146" width="11" height="8" rx="2" fill="#21262d"/>
+      </g>
+    </g>
+
+    <!-- focused file header -->
+    <line x1="8" y1="178" x2="892" y2="178" stroke="#21262d" stroke-width="1"/>
+    <text class="m fg" x="32" y="202" font-size="13.5" font-weight="700">src/engine/watch.rs</text>
+    <circle cx="762" cy="197" r="4" fill="#39c5cf"/>
+    <text class="m cyn" x="866" y="202" font-size="13" text-anchor="end">just changed</text>
+
+    <!-- diff -->
+    <!-- Indentation is carried by explicit x offsets, never by leading spaces:
+         xml:space="preserve" is honoured inconsistently and leading whitespace
+         inside a tspan gets trimmed, which silently flattens every indent.
+         One monospace cell at 13.5px is ~8.1px, so 4 spaces is ~32.4px. -->
+    <g font-size="13.5">
+      <text class="m faint" x="60" y="238" text-anchor="end">38</text>
+      <text class="m" x="88" y="238"><tspan class="kw">fn </tspan><tspan class="fnn">coalesce</tspan><tspan class="fg">(&amp;</tspan><tspan class="kw">mut self</tspan><tspan class="fg">, </tspan><tspan class="var">ev</tspan><tspan class="fg">: </tspan><tspan class="typ">Event</tspan><tspan class="fg">) -&gt; </tspan><tspan class="typ">Option</tspan><tspan class="fg">&lt;</tspan><tspan class="typ">Frame</tspan><tspan class="fg">&gt; {</tspan></text>
+
+      <rect x="8" y="246" width="884" height="24" fill="#0f2c1c"/>
+      <rect x="8" y="246" width="3" height="24" fill="#3fb950"/>
+      <text class="m faint" x="60" y="264" text-anchor="end">39</text>
+      <text class="m grn" x="72" y="264">+</text>
+      <text class="m" x="120.4" y="264"><tspan class="kw">if self</tspan><tspan class="fg">.</tspan><tspan class="var">pending</tspan><tspan class="fg">.</tspan><tspan class="fnn">is_empty</tspan><tspan class="fg">() {</tspan></text>
+
+      <rect x="8" y="272" width="884" height="24" fill="#0f2c1c"/>
+      <rect x="8" y="272" width="3" height="24" fill="#3fb950"/>
+      <text class="m faint" x="60" y="290" text-anchor="end">40</text>
+      <text class="m grn" x="72" y="290">+</text>
+      <text class="m" x="152.8" y="290"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="var">deadline</tspan><tspan class="fg"> = </tspan><tspan class="typ">Instant</tspan><tspan class="fg">::</tspan><tspan class="fnn">now</tspan><tspan class="fg">() + </tspan><tspan class="con">DEBOUNCE</tspan><tspan class="fg">;</tspan></text>
+
+      <rect x="8" y="298" width="884" height="24" fill="#0f2c1c"/>
+      <rect x="8" y="298" width="3" height="24" fill="#3fb950"/>
+      <text class="m faint" x="60" y="316" text-anchor="end">41</text>
+      <text class="m grn" x="72" y="316">+</text>
+      <text class="m fg" x="120.4" y="316">}</text>
+
+      <text class="m faint" x="60" y="342" text-anchor="end">42</text>
+      <text class="m" x="120.4" y="342"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="var">pending</tspan><tspan class="fg">.</tspan><tspan class="fnn">insert</tspan><tspan class="fg">(</tspan><tspan class="var">ev</tspan><tspan class="fg">.</tspan><tspan class="var">path</tspan><tspan class="fg">);</tspan></text>
+
+      <rect x="8" y="350" width="884" height="24" fill="#2d1416"/>
+      <rect x="8" y="350" width="3" height="24" fill="#f85149"/>
+      <text class="m faint" x="60" y="368" text-anchor="end">43</text>
+      <text class="m red" x="72" y="368">&#8722;</text>
+      <text class="m" x="120.4" y="368"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="fnn">flush</tspan><tspan class="fg">()</tspan></text>
+
+      <rect x="8" y="376" width="884" height="24" fill="#0f2c1c"/>
+      <rect x="8" y="376" width="3" height="24" fill="#3fb950"/>
+      <text class="m faint" x="60" y="394" text-anchor="end">44</text>
+      <text class="m grn" x="72" y="394">+</text>
+      <text class="m kw" x="120.4" y="394">None</text>
+
+      <text class="m faint" x="60" y="420" text-anchor="end">45</text>
+      <text class="m fg" x="88" y="420">}</text>
+    </g>
+
+    <!-- status bar -->
+    <rect x="8" y="432" width="884" height="30" fill="#161b22"/>
+    <line x1="8" y1="432" x2="892" y2="432" stroke="#21262d" stroke-width="1"/>
+    <text class="m" x="32" y="452" font-size="12.5"><tspan class="cyn">0.8ms</tspan><tspan class="dim"> frame</tspan><tspan class="faint">  &#183;  </tspan><tspan class="cyn">11MB</tspan><tspan class="faint">  &#183;  </tspan><tspan class="dim">follow </tspan><tspan class="grn">&#9654;</tspan></text>
+    <text class="m faint" x="866" y="452" font-size="12.5" text-anchor="end">q quit  &#183;  f follow  &#183;  &#8593;&#8595; scroll</text>
+  </g>
+
+  <rect x="8.5" y="8.5" width="883" height="453" rx="12" fill="none" stroke="#30363d"/>
+</svg>

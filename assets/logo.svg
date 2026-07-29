@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200" width="720" height="200" role="img"
+     aria-label="vigia: a watchtower casting a beam of light across changed lines of code">
+  <defs>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#ffd479" stop-opacity="0.55"/>
+      <stop offset="45%"  stop-color="#e3b341" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#e3b341" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0%"   stop-color="#ffe9b0" stop-opacity="0.95"/>
+      <stop offset="45%"  stop-color="#ffd479" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffd479" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="stone" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#6e7681"/>
+      <stop offset="55%"  stop-color="#484f58"/>
+      <stop offset="100%" stop-color="#2b3138"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="720" height="200" rx="14" fill="#0d1117"/>
+
+  <!-- the beam, and the changed lines it falls on -->
+  <polygon points="130,62 648,16 648,74 130,80" fill="url(#beam)"/>
+  <g opacity="0.9">
+    <rect x="330" y="40" width="54" height="5" rx="2.5" fill="#3fb950" opacity="0.85"/>
+    <rect x="396" y="52" width="34" height="5" rx="2.5" fill="#f85149" opacity="0.8"/>
+    <rect x="442" y="34" width="72" height="5" rx="2.5" fill="#3fb950" opacity="0.7"/>
+    <rect x="526" y="46" width="42" height="5" rx="2.5" fill="#3fb950" opacity="0.5"/>
+    <rect x="580" y="30" width="30" height="5" rx="2.5" fill="#f85149" opacity="0.4"/>
+  </g>
+
+  <!-- lantern glow -->
+  <circle cx="120" cy="71" r="30" fill="url(#glow)"/>
+
+  <!-- tower -->
+  <polygon points="82,172 158,172 148,96 92,96" fill="url(#stone)"/>
+  <polygon points="82,172 120,172 120,96 92,96" fill="#ffffff" opacity="0.05"/>
+  <line x1="88" y1="132" x2="152" y2="132" stroke="#0d1117" stroke-opacity="0.45" stroke-width="2"/>
+  <line x1="85" y1="154" x2="155" y2="154" stroke="#0d1117" stroke-opacity="0.45" stroke-width="2"/>
+
+  <!-- battlements -->
+  <g fill="url(#stone)">
+    <rect x="90" y="84" width="10" height="13"/>
+    <rect x="103" y="84" width="10" height="13"/>
+    <rect x="116" y="84" width="10" height="13"/>
+    <rect x="129" y="84" width="10" height="13"/>
+    <rect x="141" y="84" width="9"  height="13"/>
+  </g>
+  <rect x="88" y="92" width="64" height="6" rx="1" fill="#6e7681"/>
+
+  <!-- lantern -->
+  <rect x="110" y="60" width="20" height="22" rx="3" fill="#1c2128" stroke="#6e7681" stroke-width="1.5"/>
+  <rect x="113" y="63" width="14" height="16" rx="2" fill="#ffd479"/>
+  <polygon points="106,60 134,60 120,48" fill="#484f58"/>
+
+  <text x="212" y="132" class="w" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="70" font-weight="700" fill="#e6edf3" letter-spacing="7">vigia</text>
+
+  <text x="216" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="16" fill="#7d8590" letter-spacing="1.6">a live diff monitor for your terminal</text>
+
+  <rect x="0.5" y="0.5" width="719" height="199" rx="14" fill="none" stroke="#30363d"/>
+</svg>
