@@ -57,6 +57,7 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ✅ | I6 legible at 40 columns | [#7](https://github.com/breferrari/vigia/issues/7) |
 | ✅ | I8 terminal restored on every exit the process controls | [#8](https://github.com/breferrari/vigia/issues/8) |
 | ✅ | A truncated `.git/index` aborts instead of reporting | [#13](https://github.com/breferrari/vigia/issues/13) |
+| ✅ | `vigia .` never redrew: a relative root matched no event path | [#30](https://github.com/breferrari/vigia/issues/30) |
 | ⬜ | I2b re-highlight only changed hunks (`syntect`) | [#4](https://github.com/breferrari/vigia/issues/4) |
 | ⬜ | I3 flat resources over days (soak) | [#5](https://github.com/breferrari/vigia/issues/5) |
 
