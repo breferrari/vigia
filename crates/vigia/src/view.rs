@@ -26,7 +26,7 @@
 //! [`vigia_core::FileChange`] cannot be constructed outside its crate, so a view
 //! assembled by hand is the only version of one a snapshot test can reach.
 
-use vigia_core::{ChangeKind, FileDiff, Frame, Highlighter, LineKind, Result, Span};
+use vigia_core::{ChangeKind, FileDiff, Frame, Highlighter, LineKind, Pass, Result, Span};
 
 /// What a row of the body is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,32 +200,17 @@ impl View {
     /// `position.file` is clamped rather than trusted, because
     /// [`vigia_core::Frame::diff`] panics on an index that has fallen off the
     /// end, and a scroll position is exactly the index that can.
-    /// Collect a screenful, bracketing the highlighter's frame around it.
-    ///
-    /// The bracket lives here rather than in [`crate::App`] or in the shell's
-    /// draw loop because it is what bounds the highlight cache by the viewport,
-    /// and a bound that every caller has to remember to apply is a bound that
-    /// one of them will not. Sweeping runs even when the walk fails: a frame
-    /// that could not be collected drew nothing, so there is nothing it should
-    /// be holding.
     pub fn collect(
         frame: &mut Frame,
         highlighter: &mut Highlighter,
         position: Position,
         height: usize,
     ) -> Result<Self> {
-        highlighter.begin();
-        let view = Self::gather(frame, highlighter, position, height);
-        highlighter.sweep();
-        view
-    }
-
-    fn gather(
-        frame: &mut Frame,
-        highlighter: &mut Highlighter,
-        position: Position,
-        height: usize,
-    ) -> Result<Self> {
+        // One pass, dropped at every exit including the `?`s below, which is
+        // what keeps the highlight cache bounded by the viewport. The guard
+        // rather than a pair of calls is `vigia_core::Highlighter::pass`'s
+        // business and its doc says why.
+        let mut highlighter = highlighter.pass();
         let files = frame.files().len();
         let mut view = Self {
             // Bounded by the screen, not by the diff. The cap keeps a caller
@@ -286,7 +271,7 @@ impl View {
                 placed = true;
             }
 
-            view.take_file(&change.kind, diff, highlighter, skip, height);
+            view.take_file(&change.kind, diff, &mut highlighter, skip, height);
             skip = 0;
             index += 1;
         }
@@ -309,7 +294,7 @@ impl View {
         &mut self,
         kind: &ChangeKind,
         diff: &FileDiff,
-        highlighter: &mut Highlighter,
+        highlighter: &mut Pass<'_>,
         skip: usize,
         height: usize,
     ) {

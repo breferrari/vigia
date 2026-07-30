@@ -44,8 +44,8 @@
 //! lines per change group and none at all in an all-additions hunk.
 //!
 //! **The cache is bounded by the viewport**, not by the diff and not by the
-//! session. [`Highlighter::begin`] and [`Highlighter::sweep`] bracket a frame and
-//! drop everything it did not draw, so a bulk edit across ten thousand files
+//! session. [`Highlighter::pass`] hands out a guard that drops everything the frame did
+//! not draw, and it sweeps in `Drop` so no caller can forget, so a bulk edit across ten thousand files
 //! cannot grow it: the screen is the bound. That is a stronger claim than the
 //! frame path's own, which is bounded by the current diff, and it is what keeps
 //! I3 out of reach of this module. It costs a re-parse when a hunk scrolls off
@@ -188,20 +188,86 @@ pub const CHECKPOINT_STRIDE: usize = 32;
 #[derive(Clone)]
 struct Sides {
     /// The index side: context and removals.
-    old: ParseState,
-    old_stack: ScopeStack,
+    old: Side,
     /// The working-tree side: context and additions.
-    new: ParseState,
-    new_stack: ScopeStack,
+    new: Side,
+}
+
+/// One file's parse position: where the grammar is, and what scope it is under.
+///
+/// The two travel together always, and pairing them structurally is not tidiness:
+/// with four flat fields, `spans_of(&mut self.old, &mut self.new_stack, ..)`
+/// compiles and colours a removal against the addition that replaced it.
+#[derive(Clone)]
+struct Side {
+    state: ParseState,
+    stack: ScopeStack,
+}
+
+impl Side {
+    fn new(syntax: &SyntaxReference) -> Self {
+        Self {
+            state: ParseState::new(syntax),
+            stack: ScopeStack::new(),
+        }
+    }
+
+    /// Run a line through this side without building spans for it.
+    ///
+    /// What a context line costs the side it is not drawn from.
+    fn advance(&mut self, buf: &str, syntaxes: &SyntaxSet) {
+        let Ok(ops) = self.state.parse_line(buf, syntaxes) else {
+            return;
+        };
+        for (_, op) in &ops {
+            if self.stack.apply(op).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Run a line through this side and turn its scope changes into spans.
+    fn spans(
+        &mut self,
+        buf: &str,
+        line: &Line,
+        syntaxes: &SyntaxSet,
+        table: &[(Scope, Class)],
+    ) -> Vec<Span> {
+        let text_len = line.text.len();
+        // A grammar that fails on a line leaves that line uncoloured rather than
+        // failing the frame. A monitor survives the file it cannot read;
+        // `SPEC.md` §2 makes a runtime measured in days turn every transient
+        // failure into a certainty.
+        let Ok(ops) = self.state.parse_line(buf, syntaxes) else {
+            return plain(text_len);
+        };
+
+        let mut spans: Vec<Span> = Vec::new();
+        let mut at = 0usize;
+        for (offset, op) in &ops {
+            // Clamped, because `buf` carries the newline the grammars need and
+            // the line does not. Everything at or past the end contributes no
+            // span while still advancing the state the next line starts from.
+            let offset = (*offset).min(text_len);
+            if offset > at {
+                push(&mut spans, offset - at, classify(&self.stack, table));
+                at = offset;
+            }
+            if self.stack.apply(op).is_err() {
+                break;
+            }
+        }
+        push(&mut spans, text_len - at, classify(&self.stack, table));
+        spans
+    }
 }
 
 impl Sides {
     fn new(syntax: &SyntaxReference) -> Self {
         Self {
-            old: ParseState::new(syntax),
-            old_stack: ScopeStack::new(),
-            new: ParseState::new(syntax),
-            new_stack: ScopeStack::new(),
+            old: Side::new(syntax),
+            new: Side::new(syntax),
         }
     }
 
@@ -228,32 +294,11 @@ impl Sides {
         buf.push('\n');
 
         match line.kind {
-            LineKind::Removed => spans_of(
-                &mut self.old,
-                &mut self.old_stack,
-                buf,
-                line,
-                syntaxes,
-                table,
-            ),
-            LineKind::Added => spans_of(
-                &mut self.new,
-                &mut self.new_stack,
-                buf,
-                line,
-                syntaxes,
-                table,
-            ),
+            LineKind::Removed => self.old.spans(buf, line, syntaxes, table),
+            LineKind::Added => self.new.spans(buf, line, syntaxes, table),
             LineKind::Context => {
-                advance(&mut self.old, &mut self.old_stack, buf, syntaxes);
-                spans_of(
-                    &mut self.new,
-                    &mut self.new_stack,
-                    buf,
-                    line,
-                    syntaxes,
-                    table,
-                )
+                self.old.advance(buf, syntaxes);
+                self.new.spans(buf, line, syntaxes, table)
             }
         }
     }
@@ -391,9 +436,8 @@ impl Entry {
 
 /// The syntax classes of whatever is on screen, kept between frames.
 ///
-/// Created once and driven per frame: [`begin`](Highlighter::begin), then
-/// [`spans`](Highlighter::spans) for every line drawn, then
-/// [`sweep`](Highlighter::sweep).
+/// Created once and driven per frame through [`Highlighter::pass`], which is the
+/// only way to reach a hunk's spans and which sweeps the cache when it drops.
 ///
 /// ```no_run
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -402,14 +446,14 @@ impl Entry {
 /// let mut highlighter = vigia_core::Highlighter::new();
 /// frame.advance()?;
 ///
-/// highlighter.begin();
 /// let (_, diff) = frame.diff(0)?;
 /// let path = diff.path.clone();
 /// let hunk = diff.hunks[0].clone();
+///
+/// let mut pass = highlighter.pass();
 /// for i in 0..hunk.lines.len() {
-///     println!("{:?}", highlighter.spans(&path, 0, &hunk, i));
+///     println!("{:?}", pass.spans(&path, 0, &hunk, i));
 /// }
-/// highlighter.sweep();
 /// # Ok(())
 /// # }
 /// ```
@@ -445,40 +489,35 @@ impl Highlighter {
         }
     }
 
-    /// Open a frame. Everything not asked for before [`Highlighter::sweep`] is
-    /// dropped.
-    pub fn begin(&mut self) {
+    /// Begin a frame, and hand back the only thing that can ask for spans.
+    ///
+    /// The bound is the guard, not a convention. Sweeping is *the* I3 claim for
+    /// this module, and the first version of it left the two halves as public
+    /// calls a caller had to bracket by hand: a mutation deleting the sweep left
+    /// the entire suite green while the cache grew by everything ever scrolled
+    /// past. Two of the five call sites in that same commit had already forgotten
+    /// it.
+    ///
+    /// So the sweep runs in [`Pass`]'s `Drop` and cannot be skipped, which is the
+    /// shape `Session` already uses for I8 in the shell: *"there is deliberately
+    /// no way to restore early and keep drawing"*. It also means a `?` between
+    /// the first span and the last still leaves the cache bounded, so a caller
+    /// needs no second function to make its error path safe.
+    pub fn pass(&mut self) -> Pass<'_> {
         for entry in &mut self.entries {
             entry.live = false;
         }
+        Pass { highlighter: self }
     }
 
-    /// Drop every hunk this frame did not draw.
-    ///
-    /// The whole of the I3 claim. Without it the cache would grow with
-    /// everything ever scrolled past, which over a runtime measured in days is
-    /// the same thing as unbounded.
-    pub fn sweep(&mut self) {
+    /// Drop every hunk the pass did not draw.
+    fn sweep(&mut self) {
         let before = self.entries.len();
         self.entries.retain(|entry| entry.live);
         self.stats.evicted += (before - self.entries.len()) as u64;
     }
 
-    /// Spans for display line `index` of `hunk`, which is hunk `ordinal` of
-    /// `path`.
-    ///
-    /// Reuses the previous frame's parse when the hunk's content is unchanged,
-    /// and parses forward within it when it is not. Content, not identity: a
-    /// diff recomputed inside the settle margin holds the same hunks, and
-    /// treating those as new would re-highlight files nobody edited.
-    ///
-    /// # Panics
-    ///
-    /// If `index` is past the end of `hunk.lines`, the same way indexing a slice
-    /// does, and for the same reason [`Frame::diff`](crate::Frame::diff) panics
-    /// on a stale index: a caller has to be walking a hunk it holds, and a
-    /// lenient accessor would turn that bug into a silently uncoloured row.
-    pub fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
+    fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
         // Destructured so the syntax set can be read while one entry and the
         // counters are written. Through `&mut self` alone the borrow checker
         // sees one whole thing.
@@ -537,6 +576,51 @@ impl Highlighter {
     /// viewport rather than by the session.
     pub fn tracked(&self) -> usize {
         self.entries.len()
+    }
+}
+
+/// One frame's worth of highlighting, which sweeps the cache when it is dropped.
+///
+/// Created by [`Highlighter::pass`] and the only way to reach a hunk's spans. See
+/// that method for why the bound is a guard rather than a pair of calls.
+pub struct Pass<'h> {
+    highlighter: &'h mut Highlighter,
+}
+
+impl Pass<'_> {
+    /// Spans for display line `index` of `hunk`, which is hunk `ordinal` of
+    /// `path`.
+    ///
+    /// Reuses the previous frame's parse when the hunk's content is unchanged,
+    /// rewinds to the deepest position it still agrees with when it is not, and
+    /// parses forward from there. Content, not identity: a diff recomputed inside
+    /// the settle margin holds the same hunks, and treating those as new would
+    /// re-highlight files nobody edited.
+    ///
+    /// **`ordinal` is the hunk's position in the file, not in the window.** It is
+    /// half of the cache key, so a caller that renumbered hunks per screen would
+    /// hand the same key to different content every time the view scrolled, and
+    /// the reader would see the colours of a hunk they are not looking at.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is past the end of `hunk.lines`, the same way indexing a slice
+    /// does, and for the same reason [`Frame::diff`](crate::Frame::diff) panics
+    /// on a stale index: a caller has to be walking a hunk it holds, and a
+    /// lenient accessor would turn that bug into a silently uncoloured row.
+    pub fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
+        self.highlighter.spans(path, ordinal, hunk, index)
+    }
+
+    /// Counters for what the highlighter has done, mid-pass.
+    pub fn stats(&self) -> HighlightStats {
+        self.highlighter.stats()
+    }
+}
+
+impl Drop for Pass<'_> {
+    fn drop(&mut self) {
+        self.highlighter.sweep();
     }
 }
 
@@ -631,57 +715,6 @@ fn content_of(hunk: &Hunk) -> Content {
     }
 }
 
-/// Run a line through a side without building spans for it.
-///
-/// What a context line costs the side it is not drawn from.
-fn advance(state: &mut ParseState, stack: &mut ScopeStack, buf: &str, syntaxes: &SyntaxSet) {
-    let Ok(ops) = state.parse_line(buf, syntaxes) else {
-        return;
-    };
-    for (_, op) in &ops {
-        if stack.apply(op).is_err() {
-            return;
-        }
-    }
-}
-
-/// Run a line through a side and turn its scope changes into spans.
-fn spans_of(
-    state: &mut ParseState,
-    stack: &mut ScopeStack,
-    buf: &str,
-    line: &Line,
-    syntaxes: &SyntaxSet,
-    table: &[(Scope, Class)],
-) -> Vec<Span> {
-    let text_len = line.text.len();
-    // A grammar that fails on a line leaves that line uncoloured rather than
-    // failing the frame. A monitor survives the file it cannot read; `SPEC.md`
-    // §2 makes a runtime measured in days turn every transient failure into a
-    // certainty.
-    let Ok(ops) = state.parse_line(buf, syntaxes) else {
-        return plain(text_len);
-    };
-
-    let mut spans: Vec<Span> = Vec::new();
-    let mut at = 0usize;
-    for (offset, op) in &ops {
-        // Clamped, because `buf` carries the newline the grammars need and the
-        // line does not. Everything at or past the end contributes no span while
-        // still advancing the state the next line starts from.
-        let offset = (*offset).min(text_len);
-        if offset > at {
-            push(&mut spans, offset - at, classify(stack, table));
-            at = offset;
-        }
-        if stack.apply(op).is_err() {
-            break;
-        }
-    }
-    push(&mut spans, text_len - at, classify(stack, table));
-    spans
-}
-
 /// Append `len` bytes of `class`, merging into the run before it when they
 /// agree.
 ///
@@ -744,9 +777,9 @@ mod tests {
     /// Every span of every line, for a whole hunk of one file.
     fn spans_for(path: &str, hunk: &Hunk) -> Vec<Vec<Span>> {
         let mut highlighter = Highlighter::new();
-        highlighter.begin();
+        let mut pass = highlighter.pass();
         (0..hunk.lines.len())
-            .map(|i| highlighter.spans(path, 0, hunk, i).to_vec())
+            .map(|i| pass.spans(path, 0, hunk, i).to_vec())
             .collect()
     }
 
@@ -875,8 +908,10 @@ mod tests {
     fn an_unrecognised_file_type_is_one_plain_span_and_parses_nothing() {
         let source = hunk(vec![line(LineKind::Added, "fn this is not any language")]);
         let mut highlighter = Highlighter::new();
-        highlighter.begin();
-        let spans = highlighter.spans("a/b.zzzznope", 0, &source, 0).to_vec();
+        let spans = highlighter
+            .pass()
+            .spans("a/b.zzzznope", 0, &source, 0)
+            .to_vec();
 
         assert_eq!(
             spans,
