@@ -319,23 +319,7 @@ impl<'repo> Watcher<'repo> {
             return Some(Accepted::default());
         }
 
-        // Walked backwards, because the last path an event names is the one
-        // that landed last: a rename reports `[from, to]`, and the destination
-        // is where the content is now. The first followable hit therefore
-        // wins, and it settles relevance at the same time, so the paths before
-        // it have nothing left to say.
-        let mut accepted = Accepted::default();
-        for path in event.paths.iter().rev() {
-            let Some(rela) = self.relative(path) else {
-                continue;
-            };
-            accepted.relevant = true;
-            accepted.newest = followable(rela);
-            if accepted.newest.is_some() {
-                break;
-            }
-        }
-
+        let accepted = accept_paths(&event.paths, |path| self.relative(path));
         if !accepted.relevant {
             self.stats.filtered += 1;
         }
@@ -390,6 +374,40 @@ impl<'repo> Watcher<'repo> {
             Err(_) => false,
         }
     }
+}
+
+/// Fold the paths one event named into what that event meant.
+///
+/// `resolve` decides whether a path matters and where it sits in the worktree.
+/// It needs the gitignore stack, so it cannot be pure; the **order** rule can
+/// be, and separating them is not tidiness. Nearly every event names exactly
+/// one path, where first and last are the same path, so no filesystem this
+/// suite can drive distinguishes the two: a version reading the paths forwards
+/// passed the entire integration suite, and only the unit tests below caught
+/// it. `SPEC.md` §7 names this shape.
+///
+/// **Walked backwards**, because the last path an event names is the one that
+/// landed last: a rename reports `[from, to]`, and the destination is where
+/// the content is now. The first followable hit wins and settles relevance at
+/// the same time, so the paths before it have nothing left to say. An
+/// unfollowable one does not stop the walk, which is what lets an event ending
+/// on `.git/index` still name the file beside it.
+fn accept_paths<'p>(
+    paths: &'p [PathBuf],
+    mut resolve: impl FnMut(&'p Path) -> Option<&'p Path>,
+) -> Accepted {
+    let mut accepted = Accepted::default();
+    for path in paths.iter().rev() {
+        let Some(rela) = resolve(path) else {
+            continue;
+        };
+        accepted.relevant = true;
+        accepted.newest = followable(rela);
+        if accepted.newest.is_some() {
+            break;
+        }
+    }
+    accepted
 }
 
 /// Where the view should move for a worktree-relative path an event named, or
@@ -506,5 +524,69 @@ mod tests {
     #[test]
     fn the_worktree_root_itself_is_not_a_file_to_follow() {
         assert_eq!(followable(Path::new("")), None);
+    }
+
+    /// Everything is inside the worktree and nothing is ignored, so the tests
+    /// below are about the order rule and only the order rule.
+    fn take_all(path: &Path) -> Option<&Path> {
+        Some(path)
+    }
+
+    /// The one case where the order of an event's paths is observable, and the
+    /// reason it is unreachable from an integration test: a rename is the only
+    /// event that names two files, and every other event makes first and last
+    /// the same path. Reading them forwards passed every integration test in
+    /// the suite.
+    #[test]
+    fn a_rename_follows_the_destination_rather_than_the_source() {
+        let paths = [native(&["src", "before.rs"]), native(&["src", "after.rs"])];
+        let accepted = accept_paths(&paths, take_all);
+
+        assert!(
+            accepted.relevant,
+            "a rename inside the worktree was ignored"
+        );
+        assert_eq!(
+            accepted.newest.as_deref(),
+            Some("src/after.rs"),
+            "the view would move to where the file used to be"
+        );
+    }
+
+    /// An unfollowable path does not end the walk. Staging an edit can put the
+    /// index after the file in one event, and stopping there would throw away
+    /// the answer that was one step further back.
+    #[test]
+    fn an_event_ending_on_the_index_still_names_the_file_beside_it() {
+        let paths = [native(&["src", "a.rs"]), native(&[".git", "index"])];
+        let accepted = accept_paths(&paths, take_all);
+
+        assert!(accepted.relevant);
+        assert_eq!(accepted.newest.as_deref(), Some("src/a.rs"));
+    }
+
+    /// Relevant and unfollowable are different answers and both have to
+    /// survive: a staging write must still redraw, and must still not move the
+    /// viewport.
+    #[test]
+    fn an_index_write_alone_is_relevant_and_names_nothing() {
+        let paths = [native(&[".git", "index"])];
+        let accepted = accept_paths(&paths, take_all);
+
+        assert!(
+            accepted.relevant,
+            "staging stopped producing a tick, so the left-hand side of every \
+             diff can change with nothing redrawn"
+        );
+        assert_eq!(accepted.newest, None);
+    }
+
+    #[test]
+    fn an_event_naming_nothing_the_display_depends_on_is_not_relevant() {
+        let paths = [native(&["target", "debug", "build.o"])];
+        let accepted = accept_paths(&paths, |_| None);
+
+        assert!(!accepted.relevant);
+        assert_eq!(accepted.newest, None);
     }
 }
