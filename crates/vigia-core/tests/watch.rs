@@ -225,6 +225,41 @@ fn a_tick_names_the_file_whose_write_landed_last() {
     }
 }
 
+/// The premise behind the ordering rule, checked against a real filesystem.
+///
+/// `accept_paths`'s unit tests prove that the *last* path an event names wins.
+/// They cannot prove that the last path is the destination, because they build
+/// the event by hand: that is a claim about what `notify` delivers, and it is
+/// only documented rather than verified.
+///
+/// This closes the gap from the other side. However the platform reports a
+/// rename, as one event carrying two paths or as two events inside one burst,
+/// the tick has to name where the file **is** rather than where it was. A
+/// backend that reported `[to, from]` would fail here and nowhere else.
+#[test]
+fn a_rename_is_followed_to_where_the_file_now_is() {
+    let scratch = Scratch::new("watch-rename");
+    scratch.write("before.txt", "x\n");
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let options = WatchOptions {
+        quiet: ORDERING_QUIET,
+        max_delay: Duration::from_secs(5),
+    };
+    let mut watcher = worktree.watch(options).expect("watch");
+
+    std::fs::rename(scratch.path_of("before.txt"), scratch.path_of("after.txt"))
+        .expect("rename the fixture file");
+
+    let tick = tick_within(&mut watcher, SETTLE).expect("a rename must produce a tick");
+    assert_eq!(
+        tick.newest.as_deref(),
+        Some("after.txt"),
+        "a rename named {:?}, so the view moves to a path that no longer exists",
+        tick.newest
+    );
+}
+
 #[test]
 fn a_continuous_writer_still_gets_a_tick_within_max_delay() {
     let scratch = committed_scratch("watch-max-delay");
