@@ -273,14 +273,13 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
 
 #[test]
 fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
-    // This snapshot used to be called `..._collide_at_forty_columns` and showed
-    // `q quit · f follow · jk scr`, a hint cut mid-word in the **default** state
-    // rather than an unusual one. It was #6's parting gift to #7.
+    // The hardest screen the footer has to lay out, and the **default** one: at
+    // forty columns with follow engaged, the hints and the state cannot share a
+    // line. The footer takes a second rather than shortening anything, with the
+    // state above and the hints keeping the bottom row they hold at eighty.
     //
-    // Now the footer takes a second line instead of shortening anything: the
-    // state above, the hints keeping the bottom row they had at eighty columns.
-    // The picture is here rather than only in `tests/legibility.rs` because that
-    // file can prove the layout is legal and only this one shows it is good.
+    // The picture is here as well as in `tests/legibility.rs` because that file
+    // can prove the layout is legal and only this one shows it is good.
     let view = one_file();
     insta::assert_snapshot!(screen(40, 6, &view, &following_chrome()));
 }
