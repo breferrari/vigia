@@ -36,6 +36,76 @@ step that makes the next session's first command work.
 `ROADMAP.md` is the plan; the issues are the truth. If they disagree, the issues
 win and the roadmap is stale, so fix the roadmap in the same pass.
 
+### Pre-flight: does the spec still agree with the tracker?
+
+That rule is right and nothing enforced it, so drift was only ever caught by
+someone happening to read both. It went wrong in **both** directions inside one
+hour: an issue described a design the spec had already moved past, and an issue
+sat open after the work it tracked had shipped.
+
+Run this before taking a task. Three commands gather the state; you do the
+comparing.
+
+```sh
+git fetch -q origin
+
+# Invariants the spec declares.
+git show origin/main:SPEC.md \
+  | grep -oE '^\| \*\*I[0-9]+[a-z]?\*\*' | grep -oE 'I[0-9]+[a-z]?' | sort -u
+
+# What the tracker holds.
+gh issue list --state all --limit 200 --json number,title,state,milestone
+
+# Roadmap rows that claim a state, with the issue they claim it for.
+git show origin/main:ROADMAP.md | grep -oE '^\| *(✅|🔨|⬜) *\|.*\[#[0-9]+\]'
+```
+
+Then four comparisons. Any hit is a finding to fix **in this pass**, not a note:
+
+1. **Untracked** — an invariant the spec declares that no issue title names.
+2. **Orphan** — an issue naming an `I<n>` token the spec no longer declares. This
+   is what catches a rename or a split that left the tracker behind.
+3. **State** — a roadmap row marked `✅` whose issue is open, or a row not marked
+   done whose issue is closed.
+4. **Unfiled** — an *open* issue with **no milestone**. This looks least like
+   drift and matters most: the query above filters *by* milestone, so an
+   unmilestoned issue is not deprioritised, it is **invisible** and will never be
+   returned however long it sits. Seven had accumulated before anyone noticed.
+
+> [!warning] Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree
+> The first run of this check read the checkout, which had a feature branch
+> active, and compared branch state against the live tracker. It reported the
+> roadmap as ahead of an issue when on `main` the two agreed — and **#2 was closed
+> on the strength of a line that was not merged.** A check whose answer depends on
+> which branch happens to be checked out is worse than no check.
+>
+> Comparing uncommitted state is occasionally what you want. It has to be asked
+> for out loud, never the default.
+
+Only the first two directions are cheap to eyeball; run all four anyway. A check
+that nags forever gets ignored exactly like one that stays silent, so if a
+finding is a false positive, fix the *check* here rather than learning to skip it.
+
+**Two traps if you match these with `jq`, both of which made the first run report
+every invariant as drifting in both directions at once:**
+
+- **`\b` does not work.** In a `jq` string, `\b` is the *backspace* character, so
+  `test("\\bI1\\b")` compiles a regex containing two backspaces and matches
+  nothing — silently, and in the "everything is broken" direction. Use an
+  explicit class instead of escaping harder:
+  ```sh
+  B='(^|[^A-Za-z0-9])'; A='([^A-Za-z0-9]|$)'
+  jq -e --arg i "$inv" --arg b "$B" --arg a "$A" 'any(.[]; .title | test($b+$i+$a))'
+  ```
+- **`jq` emits CRLF on Windows.** Its output into a shell loop carries `\r`, so
+  `grep -qxF "$token"` fails against a clean list for every token. Pipe through
+  `tr -d '\r'` before comparing.
+
+The two together produce a check that is *100% false positive* while looking like
+a catastrophic finding. Mutate it once before you trust it: point a comparison at
+a token you know is tracked and confirm it comes back **clean**. A drift check
+that cannot report "no drift" has not been tested.
+
 Take the **topmost unstarted task in the earliest open phase**. Do not skip ahead
 to something more interesting. If a later task genuinely blocks the current one,
 say so and take the blocker, but say it out loud first.
@@ -56,7 +126,62 @@ reasoning behind both is outside the repo, through the `vigil` MCP server:
 Read before deciding. A choice re-derived from scratch that contradicts a
 recorded one is the single most expensive mistake available here.
 
-## 3. Ship it
+## 3. Plan it, in plan mode, before touching code
+
+**Enter plan mode and write the plan. No code before an approved plan.** The plan
+is not ceremony and it is not for you — it is the only artifact the finished work
+can be *audited against*, and code cannot audit itself.
+
+Without it the completeness check downstream has nothing to compare to. `/harden`
+carries a plan-fidelity phase that explicitly skips when no written plan exists,
+so a session that skips planning silently disables the one gate designed to catch
+under-delivery. That gate exists because a session once passed five clean audit
+rounds with 501 tests green and had still quietly shipped three promises short.
+
+### The plan must be diffable
+
+Length is not the bar; **concreteness** is. Every promise has to be checkable
+later by reading, so write nouns, not intentions:
+
+- modules and files touched, function signatures, types
+- error codes emitted, and what emits them
+- the tests that will exist, by name and by what they assert
+- any deviation from `SPEC.md`, named upfront with the reason
+- anything explicitly **out** of scope
+
+"Fix the thing" is not a plan. It survives any audit precisely because it promised
+nothing — a plan that cannot be diffed passes the fidelity check while proving
+nothing, which is worse than having no plan at all, because it *looks* gated.
+
+Scale it to the diff. A two-line fix gets a short plan; it still names the file,
+the assertion, and the test. A phase gets a long one.
+
+### The plan has to outlive the session
+
+Put it in the issue or the PR body before implementing. A plan that exists only
+in conversation dies at the next compaction, and nobody but this session can ever
+check the work against it.
+
+### Deviations
+
+Reality will contradict the plan sometimes; that is normal and not a failure. The
+failure is deviating quietly.
+
+**Every deviation is a defect unless its justification was written down at the
+moment it was taken**, naming what the plan got wrong. A reason produced at audit
+time, about a choice made an hour earlier, is rationalisation — the same
+self-serving triage this skill refuses everywhere else, and it has a one-pushback
+half-life. Genuine plan-vs-reality conflicts route through the rule in the next
+section: stop, decide which side is wrong, change *that* one deliberately, in its
+own commit, and say which you changed.
+
+At the end of the pass, diff the shipment against the plan and report the result
+(step 6). Any deviation without a contemporaneous justification gets **corrected
+in this session** — not logged, not deferred, not carried into the PR as a note.
+
+---
+
+## 4. Ship it
 
 - **The unit is the issue.** One issue, one branch, one PR. Splitting one issue
   across several PRs fragments review and reads as progress theatre. If the issue
@@ -82,7 +207,7 @@ recorded one is the single most expensive mistake available here.
 - If reality contradicts the spec, **stop**. Decide which is wrong, change that
   one deliberately, in its own commit, and say which you changed.
 
-## 4. Scope the checks to the diff
+## 5. Scope the checks to the diff
 
 Running the full suite on a docs-only change wastes minutes and proves nothing.
 
@@ -98,18 +223,63 @@ even when changed alongside markdown. A README tweak plus a "tiny" manifest edit
 is a code diff. Log the scope decision in the PR body so a reviewer can challenge
 it.
 
-## 5. Prove it, then say so honestly
+## 6. Prove it, then say so honestly
 
 - `cargo test` green, and name the count
 - budget gates green, and quote the numbers against the budgets
 - state failures plainly; a green summary over a skipped check is a lie with good
   manners
 
-Then run `/harden` **until dry** if the change is foundational. Do not accept your
-own "not worth fixing" on a first pass: that dismissal has a one-pushback
-half-life here, and three out of four have historically been wrong.
+### Then diff the shipment against the plan
 
-## 6. Close the loop, all four places
+Tests prove the code does what it does. They cannot prove it does what step 3
+**said** it would — the plan lives outside the code, so no test run reaches it.
+This is a completeness check, done by reading both sides.
+
+Walk every promise the plan made — each module, signature, type, error code,
+named test, declared scope boundary — and mark it delivered or not. Then report
+the result out loud, including when it is clean.
+
+Three shapes to look for, because these are the three that actually shipped once
+behind five clean audit rounds and 501 green tests:
+
+- **Quietly narrowed** — the plan promised per-file `+N/−M` counts, the shipment
+  showed paths only.
+- **Quietly collapsed** — a three-value discriminated union became two.
+- **Promised and absent** — an error code defined in the plan, never emitted,
+  leaving dead code where it should have been.
+
+Any deviation lacking a justification **written when it was taken** is a defect,
+and it gets fixed in this pass. Not noted in the PR, not filed as a follow-up,
+not explained in the report. Correcting it is the requirement; reporting it is
+not a substitute. A reason invented now, for a choice made an hour ago, is
+rationalisation — and this skill does not accept self-authored triage anywhere
+else either.
+
+Then polish, and let the **diff** pick the instrument rather than your appetite:
+
+- **Under ~200 lines across ≤3 files** — `/simplify` alone. Five audit phases on a
+  small diff is theatre.
+- **Anything larger, or anything the rest of the system stands on** — `/harden`
+  **until dry**. It runs `/simplify` itself as its phase 4, so do not run one
+  first and then the other.
+
+Whichever runs, pass the docs carve-out into the invocation, because `/simplify`
+reduces and the comments explaining *why* something works are the ones nobody can
+reconstruct from the code:
+
+> Documentation is non-negotiable during `/simplify`. Do not shorten, remove, or
+> fold module-header docblocks, function doc comments, or `Why:` / invariant
+> notes. If a simplification would delete context about why something works, skip
+> the simplification.
+
+**"Foundational" is not a self-assessment you get to lower.** If the change
+touches the frame path, the watch engine, the diff oracle, or the budget gates,
+it is foundational — that is the whole system. Do not accept your own "not worth
+fixing" on a first pass either: that dismissal has a one-pushback half-life here,
+and three out of four have historically been wrong.
+
+## 7. Close the loop, all four places
 
 Skipping any of these is how the next session loses time.
 
@@ -124,15 +294,25 @@ Skipping any of these is how the next session loses time.
      A `gix` limitation that would bite any Rust project is a `remember`. "Landed
      the watch engine" is a `record_work`. Both, when both are true.
 
-## 7. Report
+## 8. Report
 
 What was taken, what shipped, the numbers, what moved on the roadmap, and what
 the next task is. Then stop. Do not start it.
+
+Include the **plan-fidelity result** explicitly — "every promise delivered", or
+the deviations and what was done about them. Silence here reads as clean, and a
+step whose absence is indistinguishable from success is a step that stops
+happening.
 
 ## Anti-patterns
 
 - Surveying the whole roadmap instead of taking one task
 - Taking a later task because it looks more interesting
+- Writing code before an approved plan exists
+- A plan too vague to diff — it passes the fidelity check by promising nothing
+- A plan that lives only in the conversation, so it dies at the next compaction
+- Justifying a deviation at audit time instead of when it was taken
+- Reporting a deviation instead of correcting it
 - Closing an issue whose invariant has no failing test
 - Filing a follow-up issue to avoid fixing something in scope
 - Running the full suite on a markdown diff, or skipping it on a manifest diff
