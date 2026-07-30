@@ -13,6 +13,14 @@
 //! are filtered against the same gitignore rules the diff uses. And an agent
 //! saving twelve files produces twelve events for one logical change, so
 //! accepted events are coalesced into a single tick.
+//!
+//! A tick also **names the file whose write landed last in it**, which is what
+//! follow mode moves to (`SPEC.md` §11.1, I5). That is not extra work: the
+//! gitignore filter already resolves every event against the worktree root, so
+//! the path is a by-product of a decision this module was making anyway. The
+//! alternative was deriving recency by `stat`-ing every changed file, which is
+//! the cost [#19](https://github.com/breferrari/vigia/issues/19) records as
+//! breaching I9 at scale, for an answer the event was carrying all along.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -52,12 +60,37 @@ impl Default for WatchOptions {
 }
 
 /// A coalesced signal that the working tree changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Not `Copy`, because [`Tick::newest`] owns a path. One allocation per burst,
+/// on a path that only exists while something is being edited.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tick {
     /// Accepted events folded into this tick.
     pub events: u32,
     /// How long the tick was held back to coalesce.
     pub coalesced_for: Duration,
+    /// Repository-relative path of the write that landed **last** in this
+    /// tick, spelled the way [`crate::FileChange::path`] spells it.
+    ///
+    /// This is what I5 follows, and `SPEC.md` §11.1 is the rule it obeys.
+    ///
+    /// `None` when the burst named no file the view could move to, which is an
+    /// ordinary outcome rather than a failure: a write to `.git/index` is a
+    /// real change and produces a real tick, because the index is the
+    /// left-hand side of every diff drawn, but it is not somewhere to scroll.
+    pub newest: Option<String>,
+}
+
+/// What one accepted message meant.
+///
+/// Two answers rather than one, because they are independent: an index write
+/// is relevant and unfollowable, and both facts have to survive the call.
+#[derive(Debug, Default)]
+struct Accepted {
+    /// The event named something the display depends on.
+    relevant: bool,
+    /// Where the view should move, if this event said.
+    newest: Option<String>,
 }
 
 /// Counters, so I1 can be asserted rather than believed.
@@ -215,7 +248,8 @@ impl<'repo> Watcher<'repo> {
         loop {
             let message = self.rx.recv().ok()?;
             self.stats.wakeups += 1;
-            if !self.accept(message)? {
+            let accepted = self.accept(message)?;
+            if !accepted.relevant {
                 continue;
             }
 
@@ -223,6 +257,7 @@ impl<'repo> Watcher<'repo> {
             let hard_deadline = started + self.options.max_delay;
             let mut quiet_until = started + self.options.quiet;
             let mut events = 1;
+            let mut newest = accepted.newest;
 
             // Inside a burst, and only inside it, waiting is bounded.
             loop {
@@ -239,11 +274,20 @@ impl<'repo> Watcher<'repo> {
                             // Stopped mid-burst: report what we already have,
                             // so the caller draws before it shuts down.
                             None => break,
-                            Some(true) => {
+                            Some(accepted) if accepted.relevant => {
                                 events += 1;
+                                // Overwritten only by an event that named a
+                                // file. An agent that edits and then stages
+                                // ends its burst on an index write, and
+                                // letting that blank the target would lose
+                                // follow mode's answer at the exact moment it
+                                // had one.
+                                if accepted.newest.is_some() {
+                                    newest = accepted.newest;
+                                }
                                 quiet_until = Instant::now() + self.options.quiet;
                             }
-                            Some(false) => {}
+                            Some(_) => {}
                         }
                     }
                     Err(RecvTimeoutError::Timeout) => break,
@@ -255,12 +299,13 @@ impl<'repo> Watcher<'repo> {
             return Some(Tick {
                 events,
                 coalesced_for: started.elapsed(),
+                newest,
             });
         }
     }
 
-    /// `None` means stop; `Some(false)` means the event was filtered out.
-    fn accept(&mut self, message: Message) -> Option<bool> {
+    /// `None` means stop.
+    fn accept(&mut self, message: Message) -> Option<Accepted> {
         let event = match message {
             Message::Stop => return None,
             Message::Event(event) => event,
@@ -271,25 +316,45 @@ impl<'repo> Watcher<'repo> {
         // read a file would be absurd.
         if matches!(event.kind, EventKind::Access(_)) {
             self.stats.filtered += 1;
-            return Some(false);
+            return Some(Accepted::default());
         }
 
-        let relevant = event.paths.iter().any(|path| self.is_relevant(path));
-        if !relevant {
+        // Walked backwards, because the last path an event names is the one
+        // that landed last: a rename reports `[from, to]`, and the destination
+        // is where the content is now. The first followable hit therefore
+        // wins, and it settles relevance at the same time, so the paths before
+        // it have nothing left to say.
+        let mut accepted = Accepted::default();
+        for path in event.paths.iter().rev() {
+            let Some(rela) = self.relative(path) else {
+                continue;
+            };
+            accepted.relevant = true;
+            accepted.newest = followable(rela);
+            if accepted.newest.is_some() {
+                break;
+            }
+        }
+
+        if !accepted.relevant {
             self.stats.filtered += 1;
         }
-        Some(relevant)
+        Some(accepted)
     }
 
-    fn is_relevant(&mut self, path: &Path) -> bool {
-        let Some(rela) = self
+    /// This event's path relative to the worktree, or `None` when nothing the
+    /// display depends on is behind it.
+    ///
+    /// Returns the path rather than a bool so the caller can both decide
+    /// relevance and learn *what* changed. Those were one question until
+    /// follow mode needed the second half, and computing the answer twice
+    /// would mean a second `symlink_metadata` per event.
+    fn relative<'p>(&mut self, path: &'p Path) -> Option<&'p Path> {
+        let rela = self
             .roots
             .iter()
-            .find_map(|root| path.strip_prefix(root).ok())
-        else {
             // Outside the worktree entirely. Nothing we display depends on it.
-            return false;
-        };
+            .find_map(|root| path.strip_prefix(root).ok())?;
 
         if rela.components().next().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
             // Inside the git directory only the index matters, because the
@@ -299,7 +364,7 @@ impl<'repo> Watcher<'repo> {
             // Matching on the file name rather than the full path also catches
             // `index.lock`'s rename into place, which is how git actually
             // publishes a new index.
-            return rela.file_name() == Some(OsStr::new("index"));
+            return (rela.file_name() == Some(OsStr::new("index"))).then_some(rela);
         }
 
         // The mode is not cosmetic. A rule like `target/` matches directories
@@ -314,7 +379,7 @@ impl<'repo> Watcher<'repo> {
             _ => gix::index::entry::Mode::FILE,
         };
 
-        !self.is_ignored(rela, mode)
+        (!self.is_ignored(rela, mode)).then_some(rela)
     }
 
     fn is_ignored(&mut self, rela: &Path, mode: gix::index::entry::Mode) -> bool {
@@ -324,5 +389,122 @@ impl<'repo> Watcher<'repo> {
             // is cheaper than a change the monitor never showed.
             Err(_) => false,
         }
+    }
+}
+
+/// Where the view should move for a worktree-relative path an event named, or
+/// `None` when there is nowhere to move.
+///
+/// Pure, and deliberately not inlined into [`Watcher::accept`], for the reason
+/// `SPEC.md` §7 gives: neither of the two things it decides has a reachable
+/// integration path on every platform. The separator rule is unobservable on
+/// Unix and load bearing on Windows, and the `.git` rule needs a burst that
+/// ends on an index write. A test that can only run on one platform, or only
+/// under a race, is not the gate this needs.
+///
+/// **`.git` is excluded rather than filtered earlier.** An index write is a
+/// real change, produces a real tick, and must keep doing so: the index is the
+/// left-hand side of every diff drawn, so staging changes what is on screen.
+/// It is simply not a file the viewport can sit on.
+///
+/// **Separators are normalised**, because this is compared against
+/// [`crate::FileChange::path`], which is git's spelling and always `/`. A
+/// Windows event arrives with `\`, so comparing unnormalised would match
+/// nothing and leave follow mode silently inert on one tier-1 platform while
+/// every test passed on the other two.
+///
+/// Joining components rather than replacing `\` with `/` is the reason this is
+/// not a one-liner: on Unix a backslash is an ordinary filename character, and
+/// replacing it would corrupt paths that are perfectly legal there.
+fn followable(rela: &Path) -> Option<String> {
+    let mut components = rela.components().peekable();
+    if components.peek().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
+        return None;
+    }
+
+    let mut path = String::new();
+    for component in components {
+        if !path.is_empty() {
+            path.push('/');
+        }
+        // Lossy for the same reason `FileChange::path` is, and it has to be
+        // the same reason or the two would not compare equal. That both sides
+        // lose the same information is what makes them match; that they lose
+        // it at all is
+        // [#17](https://github.com/breferrari/vigia/issues/17).
+        path.push_str(&component.as_os_str().to_string_lossy());
+    }
+
+    // An event on the worktree root itself strips to nothing. There is no file
+    // there to follow, and `Some("")` would match no change and read as an
+    // answer.
+    (!path.is_empty()).then_some(path)
+}
+
+#[cfg(test)]
+mod tests {
+    //! The follow-target rule, tested as the pure function it is.
+    //!
+    //! Both of its decisions are invisible from an integration test on at
+    //! least one tier-1 platform, which is exactly the case `SPEC.md` §7 says
+    //! to extract and test directly.
+
+    use super::*;
+
+    /// Build a path the way the host spells one, so the Windows run and the
+    /// Unix run are testing their own separator rather than a literal.
+    fn native(components: &[&str]) -> PathBuf {
+        components.iter().collect()
+    }
+
+    #[test]
+    fn a_worktree_file_is_followable() {
+        assert_eq!(
+            followable(&native(&["src", "watch.rs"])).as_deref(),
+            Some("src/watch.rs")
+        );
+    }
+
+    /// The separator rule, which is a no-op on Unix and the whole of the
+    /// feature on Windows.
+    #[test]
+    fn a_platform_separator_becomes_a_git_separator() {
+        let deep = followable(&native(&["crates", "vigia-core", "src", "watch.rs"]))
+            .expect("a nested worktree file is followable");
+        assert_eq!(deep, "crates/vigia-core/src/watch.rs");
+        assert!(
+            !deep.contains('\\'),
+            "a native separator survived into a path that is compared against \
+             FileChange::path, which git always spells with a forward slash"
+        );
+    }
+
+    /// Staging is a real change and produces a real tick, because the index is
+    /// the left-hand side of every diff. It is not somewhere to scroll to.
+    #[test]
+    fn an_index_write_names_no_file_to_follow() {
+        assert_eq!(followable(&native(&[".git", "index"])), None);
+        assert_eq!(followable(&native(&[".git", "index.lock"])), None);
+    }
+
+    /// A prefix match would take `.github/workflows/ci.yml` with it, and that
+    /// is an ordinary tracked file whose edits should be followed.
+    #[test]
+    fn a_dot_prefixed_directory_that_is_not_dot_git_is_still_followable() {
+        assert_eq!(
+            followable(&native(&[".github", "workflows", "ci.yml"])).as_deref(),
+            Some(".github/workflows/ci.yml")
+        );
+        assert_eq!(
+            followable(&native(&[".gitignore"])).as_deref(),
+            Some(".gitignore")
+        );
+    }
+
+    /// An event on the worktree root strips to nothing, and an empty path
+    /// matches no change while reading like an answer.
+    #[test]
+    fn the_worktree_root_itself_is_not_a_file_to_follow() {
+        assert_eq!(followable(Path::new("")), None);
     }
 }
