@@ -135,6 +135,57 @@ any issue — while [#10](https://github.com/breferrari/vigia/issues/10) carried
 four of them in a single line. That is the same failure as §11: behaviour that
 exists somewhere real, with no line claiming it.
 
+### 5.2 Where the mockup pulls against the invariants
+
+§5 says design effort goes here "once the invariants hold", and
+[#10](https://github.com/breferrari/vigia/issues/10) repeats it: *"depends on the
+invariants holding first."* **That framing is wrong, and correcting it is the most
+consequential thing in this section.** At least two elements need retained state
+the frame path does not produce, in `vigia-core` rather than in the shell. They do
+not sit on top of the invariants. They **move** them.
+
+**The sparkline needs precisely what eviction throws away.** `FrameStats.evicted`
+exists so the cached-diff map stays "bounded by the current diff rather than by
+everything ever edited" — that is how I3 is argued today. A churn sparkline is
+change density *over time*, so it has to survive a file settling: one that empties
+the moment a file stops changing shows nothing worth glancing at, and *"what was
+hot thirty seconds ago"* is the entire question it answers. Glanceability history
+therefore cannot live in the evicting map — and must not be unbounded either.
+
+> [!warning] Proposed I10 — bounded history
+> Deliberately **not** in the §3 table, because that table is for invariants with
+> a failing test and this has none. By this document's own rule it is a wish, and
+> writing it into the table would make the table lie.
+>
+> *Glanceability history is bounded by a fixed time window and a fixed cap on
+> tracked paths, independent of how many files have changed in the session.* A
+> bulk operation touching ten thousand files must not grow it past the cap, and a
+> path that ages out of the window is dropped entirely.
+>
+> It needs a budget and a soak assertion before it earns a row. Until then every
+> sparkline task is blocked on it, because **the data structure is the decision**
+> and the drawing is the easy part.
+
+**The heat strip needs a whole-file property.** Locating change within a file
+requires that file's **total line count**, and the frame path is built to avoid
+exactly that: pure revalidation reads **0 bytes** (§10), the number I2a is written
+against. Measured naively — every changed file, every frame — it reintroduces the
+read I2a removed. It is cacheable per `(path, blob id)`, since a file's length
+cannot change without its content changing, so it is payable once per version
+rather than once per frame. **That caching is not an optimisation; without it the
+heat strip breaks I2a.**
+
+**Two status readouts measure the thing they run inside.** `0.8ms frame` means
+instrumenting the render path and drawing the result — a readout whose own cost
+falls inside the budget it reports, gated by I9 at 16ms p99. `11MB` is a live RSS
+number, and I3 samples RSS in a **soak test** precisely because reading it is a
+syscall on some platforms rather than free per frame. Both are honest to show;
+neither is free to show; the spec said nothing about either.
+
+**Consequence for sequencing:** Phase 3 is not a rendering phase. Its two headline
+elements each need a core-side change with an invariant attached, so they belong
+in the same conversation as I2a and I3 rather than strictly after them.
+
 ## 6. Architecture
 
 Cargo workspace, two crates:

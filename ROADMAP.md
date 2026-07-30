@@ -110,6 +110,36 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ⬜ | Sparklines, heat strips, counters, pulse | [#10](https://github.com/breferrari/vigia/issues/10) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
+**This phase is mis-scoped and [#10](https://github.com/breferrari/vigia/issues/10)
+must split before anything here is taken.** Reading `assets/preview.svg` as the
+specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of
+work behind two rows, and #10 alone carries four features that share no
+implementation. `take-next` step 4 is explicit: *if the issue is genuinely two
+things, split the issue first.*
+
+The correction that matters is not the count. **It is that this is not a rendering
+phase** (`SPEC.md` §5.2). Two of its headline elements need retained state in
+`vigia-core`, so they move invariants rather than sit on top of them:
+
+- the **sparkline** needs history that survives a file settling — which is exactly
+  what `FrameStats.evicted` throws away to keep I3 provable. Blocked on **proposed
+  I10 (bounded history)**: the data structure is the decision, the drawing is the
+  easy part.
+- the **heat strip** needs each file's total line count, a whole-file read the
+  frame path exists to avoid. Cacheable per `(path, blob id)`; without that cache
+  it breaks I2a.
+
+Split #10 along the seams of what each element actually needs, not along what they
+look like: history-backed (sparkline, recency gradient, `just changed` decay — one
+clock, not three), whole-file-backed (heat strip), and free (per-file counters,
+which cost nothing because a file must be diffed to be drawn).
+
+Untracked entirely, and all visible in the mockup: the header **mode word**
+(`watching`, implying a mode set), the **status bar** (`0.8ms frame`, `11MB` — one
+measuring inside I9's budget, the other a syscall I3 only samples in soak), and the
+**key-hint bar**, which constrains I6 because roughly thirty columns of it has to
+degrade at forty.
+
 ## Phase 4 — distribution
 
 Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
