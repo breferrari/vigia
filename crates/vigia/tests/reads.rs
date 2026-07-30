@@ -316,6 +316,165 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
     );
 }
 
+/// Consecutive frames driven inside the settle margin.
+///
+/// Enough that a shell recomputing the whole worktree would be unmistakable
+/// rather than arguable.
+const MARGIN_FRAMES: usize = 20;
+
+/// Frames between rewrites, so the window cannot outrun the margin.
+///
+/// "Drive frames for two seconds and they will all be inside the margin" is a
+/// race against the machine, not an invariant: the margin is a fixed wall-clock
+/// duration and the frame rate is whatever the hardware gives. A runner slow
+/// enough would settle part-way through, those frames would reuse instead of
+/// recompute, and the comparison below would hold for the one reason that proves
+/// nothing. Rewriting on a fixed frame count instead means every frame sampled
+/// is within this many frames of a write, whatever the machine, and it keeps the
+/// two fixtures doing identical work in identical order rather than however much
+/// each got through in a fixed time.
+const REWRITE_EVERY: usize = 5;
+
+/// What a bulk rewrite cost one fixture over [`MARGIN_FRAMES`] frames.
+struct Margin {
+    cost: FrameStats,
+    /// Files the last frame asked the frame path for.
+    read: usize,
+    /// Rows the last frame drew, so a half-empty screen cannot pass as a full one.
+    rows: usize,
+    /// Changed files in the whole worktree, which is the term the two fixtures
+    /// are supposed to differ in.
+    ///
+    /// Reported rather than trusted from the argument. The guard inside
+    /// [`bulk_rewrite_window`] only proves a fixture matches *its own* argument,
+    /// so it is blind to the one mistake that empties this gate: both call sites
+    /// asking for the same size. That was confirmed by mutation, not by reading.
+    files: usize,
+}
+
+/// Draw [`MARGIN_FRAMES`] screens without ever letting the fixture settle.
+///
+/// Deliberately **not** settled during the window, which is the whole point.
+/// Every other structural gate in this file calls [`settle`] first, so the
+/// window in which the frame path can prove nothing and recomputes by design is
+/// the window none of them measure (`SPEC.md` §7). The fixture is settled
+/// *before* the first rewrite so the margin under test is the one those rewrites
+/// open and not the one building the fixture left behind.
+///
+/// Each rewrite carries a new round, because a rewrite with identical bytes
+/// moves the modification time but leaves the diff alone: the frame path would
+/// still recompute, and the highlighter would sit idle reusing a hunk that never
+/// changed. `Scratch::rewrite_all` has the measurement.
+fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
+    let scratch = Scratch::large_diff(name, files, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(
+        frame.files().len(),
+        files,
+        "fixture {name} is not {files} files"
+    );
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let height = body();
+
+    let before = frame.stats();
+    let mut read = 0;
+    let mut rows = 0;
+    let mut files_seen = 0;
+    for at in 0..MARGIN_FRAMES {
+        if at % REWRITE_EVERY == 0 {
+            scratch.rewrite_all(files, LINES, at / REWRITE_EVERY + 1);
+        }
+        frame.advance().expect("advance");
+        let view = app
+            .view(&mut frame, &mut highlighter, height)
+            .expect("view");
+        read = view.read;
+        rows = view.rows.len();
+        files_seen = view.files;
+    }
+
+    Margin {
+        cost: delta(before, frame.stats()),
+        read,
+        rows,
+        files: files_seen,
+    }
+}
+
+#[test]
+fn a_bulk_rewrite_recomputes_only_what_is_drawn() {
+    // I4 held through the settle margin, which is where `SPEC.md` §10 claimed
+    // the frame budget broke. It does break, over the *core* frame path, whose
+    // fixture materialises every file so its own gate cannot pass vacuously. The
+    // shell is a different shape and this is the assertion that says so: a
+    // formatter or a branch switch invalidates every diff at once, and for the
+    // whole margin nothing can be proved unchanged, so a shell that fetched
+    // ahead would recompute a hundred files a frame for two seconds.
+    //
+    // Structural rather than wall-clock, for the reason the file header gives,
+    // and two fixtures rather than one for the reason `one_screenful_costs_the_
+    // same_however_much_else_changed` gives: a shell reading everything inflates
+    // both sides of a single-fixture ratio and leaves it alone.
+    let few = bulk_rewrite_window("shell-bulk-few", FEW_FILES);
+    let many = bulk_rewrite_window("shell-bulk-many", FILES);
+
+    // The two fixtures have to have really been different sizes. Without this the
+    // whole two-fixture form is decorative: point both call sites at the same
+    // count and every equality below still holds, which is not a hypothetical.
+    assert_eq!(
+        few.files, FEW_FILES,
+        "the narrow fixture is not {FEW_FILES} files"
+    );
+    assert_eq!(many.files, FILES, "the wide fixture is not {FILES} files");
+
+    // Non-vacuity, and this is the guard the gate actually needs. Frames that
+    // settled would reuse rather than recompute, both sides would read zero, and
+    // the equality below would hold for the one reason that proves nothing.
+    // `REWRITE_EVERY` is what keeps that from being a race, and this is what says
+    // it worked rather than assuming it.
+    assert!(
+        many.cost.computed >= MARGIN_FRAMES as u64,
+        "{} diffs were recomputed across {MARGIN_FRAMES} frames, so frames \
+         settled between rewrites and this gate measured settled frames",
+        many.cost.computed
+    );
+    assert_eq!(
+        few.rows,
+        body(),
+        "the narrow fixture did not fill the screen"
+    );
+    assert_eq!(
+        many.rows,
+        body(),
+        "the wide fixture did not fill the screen"
+    );
+
+    assert_eq!(
+        few.cost.computed, many.cost.computed,
+        "{MARGIN_FRAMES} frames inside the margin recomputed {} diffs among \
+         {FEW_FILES} changed files and {} among {FILES}, so what a frame \
+         recomputes while nothing can be proved unchanged follows the worktree \
+         rather than the screen",
+        few.cost.computed, many.cost.computed
+    );
+    assert_eq!(
+        few.cost.bytes, many.cost.bytes,
+        "{MARGIN_FRAMES} frames inside the margin read {} bytes among \
+         {FEW_FILES} changed files and {} among {FILES}",
+        few.cost.bytes, many.cost.bytes
+    );
+    assert_eq!(
+        few.read, many.read,
+        "the view asked for {} files on the narrow fixture and {} on the wide \
+         one",
+        few.read, many.read
+    );
+}
+
 #[test]
 fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     // Why `App::view` writes `View::top` back. A position that overruns its file

@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use vigia_core::{CONTEXT, Frame, FrameStats, HighlightStats, Worktree};
@@ -56,6 +57,33 @@ pub fn slack() -> f64 {
 /// `base`, loosened by [`slack`].
 pub fn budget(base: Duration) -> Duration {
     base.mul_f64(slack())
+}
+
+/// Held for the timed region of an absolute gate, so two never overlap.
+///
+/// `cargo test` runs a binary's tests on parallel threads, so absolute gates in
+/// the same binary measure each other. That is tolerable while they all do the
+/// same light per-frame edit and stops being tolerable the moment one of them
+/// writes a fixture: a 1.5 MiB bulk rewrite took its two neighbours from passing
+/// to **53 and 54ms p99** against a 16ms budget, while their p50 stayed at 6.6
+/// and 7.6ms. A p50 that holds while the p99 goes eight times over is
+/// contention, not a regression, and no threshold tells the two apart.
+///
+/// Here rather than in one test binary for the same reason [`slack`] is here:
+/// it is one policy, `SPEC.md` §7 already calls an absolute gate on a shared
+/// machine a weak instrument, and two copies would be free to drift. Each test
+/// binary compiles its own `static`, which is exactly the scope wanted, since
+/// `cargo` runs the binaries themselves one at a time.
+///
+/// Poison is unwrapped through deliberately. A gate that fails while holding
+/// this has already reported the real number, and letting the panic cascade into
+/// poison failures would bury it under neighbours that are fine.
+static TIMED: Mutex<()> = Mutex::new(());
+
+pub fn exclusively_timed() -> MutexGuard<'static, ()> {
+    TIMED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Advance one frame and fetch every diff in it.
@@ -213,6 +241,36 @@ impl Scratch {
             });
         }
         scratch
+    }
+
+    /// Rewrite every file of a [`Scratch::large_diff`] fixture, line for line.
+    ///
+    /// A formatter, a branch switch and a multi-file agent edit all produce this
+    /// shape, and it is the event the settle margin is argued about: every file
+    /// changes at once, so for the length of the margin **no** file can be
+    /// proved unchanged and every one a caller asks for is recomputed.
+    ///
+    /// `round` varies the content, and what it buys is the *highlighter* rather
+    /// than the frame path. Measured both ways over two consecutive rewrites: a
+    /// rewrite with identical bytes still moves the modification time, so the
+    /// fingerprint differs and the frame path recomputes regardless
+    /// (`computed = 1` either way). What identical bytes leave alone is the
+    /// **diff**, so the visible hunk hashes the same and the parse is reused
+    /// (`parsed = 0, reused = 1, lines = 0` against `parsed = 1, lines = 20`).
+    /// A caller rewriting on a loop with a fixed `round` would therefore measure
+    /// frames with the syntax parser idle, which is the cheap half of a frame
+    /// and not the event.
+    ///
+    /// The caller passes `files` and `lines` rather than this remembering them,
+    /// because a fixture built with different numbers would be silently
+    /// truncated or padded here instead of failing.
+    pub fn rewrite_all(&self, files: usize, lines: usize, round: usize) {
+        for f in 0..files {
+            self.write(
+                &format!("src/mod_{f}.rs"),
+                generated(lines, &format!("bulk{round}")),
+            );
+        }
     }
 
     /// Absolute path of something inside the repository.

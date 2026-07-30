@@ -26,7 +26,7 @@ use ratatui::layout::Rect;
 use vigia::{App, body_height};
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, LineKind, Samples};
 
-use support::{Scratch, budget, highlight_delta, settle};
+use support::{Scratch, budget, delta, exclusively_timed, highlight_delta, settle};
 
 /// I9: steady-state frame time.
 const I9_FRAME: Duration = Duration::from_millis(16);
@@ -43,6 +43,28 @@ const LINES: usize = 500;
 /// The file rewritten before every frame, which is the one the view is sitting
 /// on.
 const EDITED_PATH: &str = "src/mod_0.rs";
+
+/// Timed frames between bulk rewrites in the gate at the bottom of this file.
+///
+/// The settle margin is a fixed two seconds of wall clock and the frame rate is
+/// whatever the machine gives, so "sample 250 frames and they will all be inside
+/// the margin" is a race rather than an invariant. Measured: one rewrite for the
+/// whole sample ran **1.79s against the 2s margin**, which is 1.12x and is not
+/// headroom, so a slower runner would settle part-way through and the tail would
+/// stop being the event. Rewriting before *every* frame is the opposite mistake
+/// and is recorded at the loop itself.
+///
+/// That 1.79s was taken before [`exclusively_timed`] existed, so it carries the
+/// contention of two neighbouring gates; serialised, the same single-rewrite
+/// window is nearer 670ms and about 3x. Quoted as measured rather than adjusted,
+/// and the conclusion is unchanged either way: 3x is still a number that depends
+/// on the runner, and a CI machine is allowed to be three times slower than this
+/// one by `VIGIA_BUDGET_SLACK` alone.
+///
+/// Fifty puts a chunk at **308ms** measured, so the premise holds with better
+/// than six times to spare and the gate stops depending on how fast the runner
+/// is, which is the whole reason to prefer a frame count over a duration here.
+const REWRITE_EVERY: usize = 50;
 
 /// Frames discarded before sampling, and frames sampled.
 ///
@@ -149,6 +171,8 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     if !absolute_gates_apply() {
         return;
     }
+
+    let _timed = exclusively_timed();
 
     // "Under continuous edits", taken literally and the same way the core's gate
     // takes it: one line is rewritten before every frame, so each frame
@@ -262,6 +286,175 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
         cost.parsed,
         cost.reused,
         cost.lines,
+        cost.bytes
+    );
+}
+
+#[test]
+fn the_frame_budget_holds_through_a_bulk_rewrite() {
+    // The third position in this gate's input space, after "at the top" and "deep
+    // in a hunk". Those two vary *where* the window is; this one varies *when*,
+    // and it is the axis `SPEC.md` §7 gained from this test existing: a gate that
+    // settles before it measures has measured the cheapest state.
+    //
+    // The event is a formatter, a branch switch or a multi-file agent edit. Every
+    // file changes at once, so for the whole settle margin no file can be proved
+    // unchanged and every one the shell asks for is recomputed rather than
+    // reused. §10 claimed that breaks I9 for about two seconds. It does over the
+    // core frame path, whose fixture materialises all hundred files: 98 of 182
+    // frames over budget, 22.34ms p99. The shell recomputes only what it draws,
+    // which is why this gate can exist at all, and `reads.rs` holds that half
+    // structurally. This is the wall clock agreeing.
+    let scratch = Scratch::large_diff("shell-i9-bulk", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let height = body(&app, FILES);
+
+    if !absolute_gates_apply() {
+        return;
+    }
+
+    let _timed = exclusively_timed();
+
+    let draw = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
+        time(|| {
+            frame.advance().expect("advance");
+            app.view(frame, highlighter, height).expect("view");
+        })
+    };
+
+    // Warm up *before* the first rewrite, not after. Warming afterwards would
+    // spend the margin this gate exists to measure and leave the samples in the
+    // settled state every other gate here already covers.
+    for _ in 0..WARMUP_FRAMES {
+        draw(&mut frame, &mut app, &mut highlighter);
+    }
+
+    // The event, re-established every `REWRITE_EVERY` frames, and the frame that
+    // absorbs its write-back deliberately not timed.
+    //
+    // Both halves were measured rather than chosen. One rewrite for the whole
+    // sample is not enough: the window ran 1.79s against a 2s margin, 1.12x
+    // headroom, so a runner any slower would settle part-way and the tail would
+    // stop being the event. Rewriting before every frame is worse: `rewrite_all`
+    // writes about 1.5 MiB, and while the call sits outside `time` its write-back
+    // does not, so thirteen of them took a 2.67ms p50 to a 27ms p99 and this gate
+    // measured the fixture. It also starved the two gates above, which share this
+    // binary and are timed: all three failed together and the other two passed
+    // under `--test-threads=1`.
+    //
+    // So the rewrite is periodic, and the one frame that pays for the harness's
+    // own write-back is spent untimed. `SPEC.md` §7 already puts the cold path
+    // outside I9 by definition, and this is that: the cost of a test fixture
+    // hitting the disk is not a cost of the shell.
+    let before = frame.stats();
+    let highlighted = highlighter.stats();
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for at in 0..SAMPLED_FRAMES {
+        if at % REWRITE_EVERY == 0 {
+            scratch.rewrite_all(FILES, LINES, at / REWRITE_EVERY + 1);
+            draw(&mut frame, &mut app, &mut highlighter);
+        }
+        // The drawn file, rewritten before each frame. One file rather than a
+        // hundred, the idiom the two gates above already use, and the term that
+        // decides frame cost, since only drawn files are fingerprinted at all.
+        scratch.edit_line(
+            EDITED_PATH,
+            0,
+            &format!("fn bulk_edited_{at}() {{ let value = {at}; }}"),
+        );
+        frames.push(draw(&mut frame, &mut app, &mut highlighter));
+    }
+    let cost = delta(before, frame.stats());
+    let parsed = highlight_delta(highlighted, highlighter.stats());
+
+    // Non-vacuity, first in the direction this whole file exists for. Highlighting
+    // has to have actually happened, or this measures the frame path the core
+    // already gates and reports it as a shell number. One re-parse per frame is
+    // the floor: the drawn file's hunk changes before every frame, so the steady
+    // state is exactly that and no reuse at all.
+    assert!(
+        parsed.lines > 0 && parsed.parsed >= SAMPLED_FRAMES as u64,
+        "{} hunks were re-parsed over {} lines across {SAMPLED_FRAMES} frames, so \
+         the visible hunk is not changing under the highlighter and this gate is \
+         timing the core's frame path with the syntax parser missing",
+        parsed.parsed,
+        parsed.lines
+    );
+
+    // Non-vacuity. A frame that reused rather than recomputed would be a cheap
+    // frame for a reason that is not the code, and a percentile diluted with
+    // them would pass while saying nothing. One recompute per frame is the floor,
+    // and the per-frame edit above is what makes that hold at any frame rate
+    // rather than only on a machine fast enough to finish inside the margin.
+    assert!(
+        cost.computed >= SAMPLED_FRAMES as u64,
+        "{} diffs were recomputed across {SAMPLED_FRAMES} frames, so frames were \
+         reusing and this gate timed settled frames",
+        cost.computed
+    );
+
+    // And the premise, checked rather than assumed: a file the viewport never
+    // drew is still inside its margin now, so it was for the whole window, since
+    // settledness only ever increases with time. Two diffs rather than one,
+    // because the first recomputes on any stale fingerprint and only the second
+    // can tell "still unsettled" from "settled and reusable". Without this the
+    // gate would quietly weaken on a runner slow enough to outrun the margin: the
+    // other ninety-nine files would settle, and a shell that fetched ahead would
+    // find them reusable and cheap.
+    let undrawn = FILES - 1;
+    let probed = frame.stats();
+    frame.diff(undrawn).expect("diff");
+    frame.diff(undrawn).expect("diff");
+    let probe = delta(probed, frame.stats());
+    assert_eq!(
+        probe.reused, 0,
+        "a file the viewport never drew was reusable after {SAMPLED_FRAMES} \
+         frames, so the bulk rewrite settled part-way through and the tail of \
+         this window was not the event"
+    );
+
+    // And the screen has to have been full, for the reason the gate above gives.
+    let view = app
+        .view(&mut frame, &mut highlighter, height)
+        .expect("view");
+    assert_eq!(
+        view.rows.len(),
+        height,
+        "the body drew {} of {height} rows, so the frames above were not full \
+         screens",
+        view.rows.len()
+    );
+
+    // Which also settles what the probe above assumed. It is named `undrawn` and
+    // nothing had checked that it was: a fixture whose files were short enough
+    // for the viewport to reach index {undrawn} would have fingerprinted it every
+    // frame, and the probe would be asking a question about the drawn path while
+    // reading as though it asked about the untouched one.
+    assert!(
+        view.top.file + view.read <= undrawn,
+        "the viewport drew files {}..{} of {FILES}, which reaches the file the \
+         settle probe treats as never drawn",
+        view.top.file,
+        view.top.file + view.read
+    );
+
+    let p99 = frames.percentile(0.99).expect("samples");
+    assert!(
+        p99 <= budget(I9_FRAME),
+        "I9: a frame inside the settle margin after every one of {FILES} files \
+         was rewritten at once was {p99:?} p99, over the {:?} budget (p50 {:?}, \
+         max {:?}, {} diffs recomputed, {} reused, {} bytes)",
+        budget(I9_FRAME),
+        frames.percentile(0.50).expect("samples"),
+        frames.max().expect("samples"),
+        cost.computed,
+        cost.reused,
         cost.bytes
     );
 }
