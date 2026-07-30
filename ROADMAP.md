@@ -54,10 +54,9 @@ Prove `gix` before anything is built on top, since everything sits on it. No TUI
 | ✅ | `gix` gives working-tree-vs-index diffs at fidelity and speed | closed by the Phase 1 spike, evidence in `SPEC.md` §10 |
 | ✅ | I1 redraw is event-driven, never a timer | [#1](https://github.com/breferrari/vigia/issues/1) |
 | ⬜ | I2a the frame path never re-diffs what did not change | [#2](https://github.com/breferrari/vigia/issues/2) |
-| 🔨 | Gate every Phase 1 budget in CI (I4, I7, I9) | [#3](https://github.com/breferrari/vigia/issues/3) |
+| ✅ | Gate every Phase 1 budget in CI (I4, I7, I9) | [#3](https://github.com/breferrari/vigia/issues/3) |
 
-**Phase 1 closes when #2 and #3 are closed.** Until #3 lands, "a regression past
-budget fails the build" is prose rather than a mechanism.
+**Phase 1 closes when #2 closes.** Everything else is in.
 
 ## Phase 2 — minimum monitor
 
