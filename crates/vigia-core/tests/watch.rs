@@ -120,7 +120,22 @@ fn an_idle_worktree_produces_no_tick_and_accepts_nothing() {
 
 #[test]
 fn a_burst_of_writes_becomes_one_tick() {
-    let scratch = committed_scratch("watch-burst");
+    let scratch = Scratch::new("watch-burst");
+    scratch.write("a.txt", "x\n");
+    // The burst directory has to exist, and be watched, before the burst lands
+    // in it. A recursive watch does not cover a directory that did not exist
+    // when it was armed: the backend has to notice the new directory and add a
+    // watch of its own, and on Linux anything written in the gap between those
+    // two is never reported. Creating the directory here rather than with the
+    // first write is what makes this test about coalescing rather than about
+    // inotify's directory race. Observed on CI as `got 1`, where the tick had
+    // folded the directory-creation event and nothing else.
+    //
+    // I1 does not care about the lost events: every tick triggers a full status
+    // walk, so the directory event alone would still have found all thirty
+    // files. It is this test's counter that cared.
+    scratch.write("burst/.keep", "\n");
+    scratch.commit_all("initial");
     let worktree = scratch.worktree();
     // A wide quiet window so the whole burst lands inside it even on a loaded
     // machine. The coalescing mechanism is under test, not the default timing.
