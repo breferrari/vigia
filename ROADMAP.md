@@ -53,10 +53,12 @@ Prove `gix` before anything is built on top, since everything sits on it. No TUI
 |---|---|---|
 | ✅ | `gix` gives working-tree-vs-index diffs at fidelity and speed | closed by the Phase 1 spike, evidence in `SPEC.md` §10 |
 | ✅ | I1 redraw is event-driven, never a timer | [#1](https://github.com/breferrari/vigia/issues/1) |
-| ⬜ | I2a the frame path never re-diffs what did not change | [#2](https://github.com/breferrari/vigia/issues/2) |
+| ✅ | I2a the frame path never re-diffs what did not change | [#2](https://github.com/breferrari/vigia/issues/2) |
 | ✅ | Gate every Phase 1 budget in CI (I4, I7, I9) | [#3](https://github.com/breferrari/vigia/issues/3) |
 
-**Phase 1 closes when #2 closes.** Everything else is in.
+**Phase 1 is closed.** The engine holds every budget it was written against, and
+`gix` was the right call: revalidating a 100-file frame over a 100k-line diff
+costs 3.93ms p99 and reads nothing, against 18.28ms and 3.6 MiB to recompute it.
 
 ## Phase 2 — minimum monitor
 
@@ -100,6 +102,7 @@ scope creep absorbed silently. Each one carries the phase it moved to.
 |---|---|---|---|
 | Multi-worktree view: several agent sessions at once | Market pass, 2026-07-30 | Phase 5 | The strongest differentiator after glanceability, and the most monitor-shaped. Needs the single-worktree frame path to be cheap first, or it multiplies a cost we have not paid down |
 | Jujutsu and Sapling support | Market pass, 2026-07-30 | Phase 5 | Git is the thesis. A second VCS before the first one is beautiful is scope, not reach |
+| A truncated `.git/index` aborts instead of reporting ([#13](https://github.com/breferrari/vigia/issues/13)) | I2a, 2026-07-30 | Phase 2, with I8 | A `gix` defect, not a frame-path one: an index shorter than the object hash underflows a slice and panics, and `panic = "abort"` makes it uncatchable. The local defences are worse than the problem, and terminal restoration on panic is settled by I8 anyway. What #2 gates is the part vigia owns: given an error, the previous frame survives it |
 
 ## Pull-forward log
 
