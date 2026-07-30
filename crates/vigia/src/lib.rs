@@ -98,9 +98,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
-        // Built before the screen is taken, so its 318µs of grammar loading is
-        // paid where a failure can still be reported on a terminal the reader
-        // can see, and where I7's 50ms has room for it.
+        // Its 318µs of grammar loading lands before first paint, which is where
+        // it belongs: I7 gives startup 50ms and measures 20ms, so this is 1.5%
+        // of what starting already costs, and deferring it would only move it
+        // onto the first frame that draws something.
+        //
+        // Not "before the screen is taken", which an earlier version of this
+        // comment claimed: struct fields evaluate in written order and
+        // `Session::enter` is written above, so the alternate screen is already
+        // ours by the time this runs. The placement is right and the reason was
+        // wrong.
         highlighter: Highlighter::new(),
         theme: Theme::default(),
         name: short_name(worktree.workdir()),

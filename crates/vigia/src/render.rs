@@ -31,7 +31,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span as TextSpan;
-use vigia_core::LineKind;
+use vigia_core::{Class, LineKind, Span};
 
 use crate::theme::Theme;
 use crate::view::{Row, View};
@@ -400,29 +400,45 @@ impl Painter<'_> {
     /// glyph, so overwriting the last column silently **drops** the mark and a
     /// clipped line is drawn as one that simply ends. `tests/legibility.rs`
     /// sweeps every width for that.
-    fn put_runs_marked(&mut self, x: u16, y: u16, runs: &[(String, Style)], limit: usize) {
+    ///
+    /// `total` is the runs' width, which the caller already accumulated while
+    /// building them. Passed in rather than re-derived: measuring it here walks
+    /// every line a second time and undoes the ASCII fast path [`printable`]
+    /// exists for.
+    fn put_runs_marked(
+        &mut self,
+        x: u16,
+        y: u16,
+        runs: &[(String, Style)],
+        total: usize,
+        limit: usize,
+    ) {
         if limit == 0 {
             return;
         }
 
-        let total: usize = runs.iter().map(|(text, _)| width_of(text)).sum();
         let overflows = total > limit;
         let budget = if overflows { limit - 1 } else { limit };
 
         // The style the mark inherits: whichever run ran out of room, so a
         // clipped comment is marked in the comment's colour rather than in
         // whatever the row started with.
-        let mut marked_in = self.theme.context;
+        //
+        // Seeded from the **first** run rather than from a theme default,
+        // because at `limit == 1` the budget is zero and the loop below writes
+        // nothing at all. Seeded with `context` instead, a one-column diff row
+        // marked in `Reset` where `put_marked` on the same content would have
+        // used the caller's style, and the two spellings of one rule had already
+        // drifted apart at the one width nothing tests.
+        let mut marked_in = runs.first().map_or(self.theme.context, |(_, style)| *style);
+        let end = x + budget as u16;
         let mut at = x;
-        let mut used = 0usize;
         for (text, style) in runs {
-            if used >= budget {
+            if at >= end {
                 break;
             }
             marked_in = *style;
-            let before = at;
-            at = self.put(at, y, text, budget - used, *style);
-            used += usize::from(at - before);
+            at = self.put(at, y, text, usize::from(end - at), *style);
         }
 
         if overflows {
@@ -613,14 +629,7 @@ impl Painter<'_> {
     /// background tint, and sixteen foreground-only colours cannot draw one, so
     /// the signal here is thinner than in the picture until #11 lands a
     /// truecolour path.
-    fn line_row(
-        &mut self,
-        area: Rect,
-        kind: LineKind,
-        number: u32,
-        text: &str,
-        spans: &[vigia_core::Span],
-    ) {
+    fn line_row(&mut self, area: Rect, kind: LineKind, number: u32, text: &str, spans: &[Span]) {
         let (diff, sigil) = match kind {
             LineKind::Added => (self.theme.added, '+'),
             LineKind::Removed => (self.theme.removed, '-'),
@@ -666,7 +675,17 @@ impl Painter<'_> {
             // Whatever the spans did not reach, which is the whole line when
             // there are none: an unrecognised file type, or a row a test built
             // by hand.
-            runs.push((printable(&text[at..], &mut column), self.theme.context));
+            //
+            // Styled through `class` rather than reaching for `context`
+            // directly, so that "an empty span list and one `Plain` span reach
+            // the screen identically" stays one rule instead of two expressions
+            // that happen to agree. #11 gives the classes their own palette, and
+            // the first `Plain` that is not `context` would otherwise leave this
+            // path quietly on the old colour.
+            runs.push((
+                printable(&text[at..], &mut column),
+                self.theme.class(Class::Plain),
+            ));
         }
 
         // Content is the one thing that can neither break nor elide: wrapping it
@@ -674,7 +693,9 @@ impl Painter<'_> {
         // identifying part the way a path's tail is. So it says it continues and
         // nothing more. `SPEC.md` §11.1 rules that this is not what I6 means by
         // a truncated label.
-        self.put_runs_marked(x, area.y, &runs, room);
+        // The sigil is one column and is pushed before the counter starts, so
+        // the runs' total width is the counter plus it.
+        self.put_runs_marked(x, area.y, &runs, column + 1, room);
     }
 }
 

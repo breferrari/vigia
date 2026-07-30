@@ -398,13 +398,11 @@ impl<'repo> Watcher<'repo> {
 /// its own target so it can own that directory; this is the rule.
 fn roots_of(workdir: &Path) -> Vec<PathBuf> {
     let mut roots = vec![workdir.to_path_buf()];
-    for spelling in [
-        std::path::absolute(workdir).ok(),
-        workdir.canonicalize().ok(),
-    ] {
-        if let Some(spelling) = spelling
-            && !roots.contains(&spelling)
-        {
+    for spelling in [std::path::absolute(workdir), workdir.canonicalize()]
+        .into_iter()
+        .flatten()
+    {
+        if !roots.contains(&spelling) {
             roots.push(spelling);
         }
     }

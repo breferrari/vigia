@@ -44,12 +44,17 @@
 //! lines per change group and none at all in an all-additions hunk.
 //!
 //! **The cache is bounded by the viewport**, not by the diff and not by the
-//! session. [`Highlighter::pass`] hands out a guard that drops everything the frame did
-//! not draw, and it sweeps in `Drop` so no caller can forget, so a bulk edit across ten thousand files
-//! cannot grow it: the screen is the bound. That is a stronger claim than the
-//! frame path's own, which is bounded by the current diff, and it is what keeps
-//! I3 out of reach of this module. It costs a re-parse when a hunk scrolls off
-//! and back, and a screenful is 1.53ms.
+//! session. [`Highlighter::pass`] hands out a guard that drops everything the
+//! frame did not draw, and it sweeps in `Drop` rather than asking a caller to,
+//! so a bulk edit across ten thousand files cannot grow it: the screen is the
+//! bound. That is a stronger claim than the frame path's own, which is bounded
+//! by the current diff, and it is what keeps I3 out of reach of this module. It
+//! costs a re-parse when a hunk scrolls off and back, and a screenful is 1.53ms.
+//!
+//! **A changed hunk rewinds rather than starting over.** Throwing the parse away
+//! made a frame cost the reader's scroll depth rather than what it drew, on
+//! every frame, for as long as the file being read was the file being written:
+//! 53ms p99 five hundred rows in. See [`CHECKPOINT_STRIDE`].
 //!
 //! What this module does **not** do is decide a colour. It maps a syntax scope
 //! onto one of nine [`Class`]es and stops, because `SPEC.md` §6 puts no terminal
@@ -70,7 +75,7 @@ use crate::hunk::{Hunk, Line, LineKind};
 /// worth a colour was decided before this code existed (`SPEC.md` §5.1). String,
 /// number and comment are added because a diff of real source is unreadable
 /// without them and the mockup's sample lines happen not to contain one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     /// Anything with no meaning worth colouring, which is most of a line.
     Plain,
