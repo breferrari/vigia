@@ -90,17 +90,31 @@ fn the_watcher_sleeps_until_something_actually_changes() {
 }
 
 #[test]
-fn an_untouched_worktree_delivers_no_events_at_all() {
+fn an_idle_worktree_produces_no_tick_and_accepts_nothing() {
     let scratch = committed_scratch("watch-idle");
     let worktree = scratch.worktree();
-    let watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
 
-    std::thread::sleep(IDLE);
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a tick arrived although nothing changed"
+    );
 
+    // Deliberately not asserting that the OS delivered nothing. inotify and
+    // FSEvents both report reads and attribute touches, so a tree nobody wrote
+    // to is not a tree the kernel is silent about, and an earlier version of
+    // this test failed on Linux and macOS for exactly that reason while the
+    // engine was behaving correctly.
+    //
+    // I1 is a claim about work done, so the portable form is that nothing which
+    // arrived was ever accepted as a change.
+    let stats = watcher.stats();
+    assert_eq!(stats.ticks, 0, "an idle tree produced a tick: {stats:?}");
     assert_eq!(
-        watcher.delivered(),
-        0,
-        "the OS delivered events for a worktree nobody touched"
+        stats.wakeups,
+        stats.filtered + 1,
+        "an idle tree accepted an event; every wakeup but the stop that ended \
+         the wait should have been filtered: {stats:?}"
     );
 }
 

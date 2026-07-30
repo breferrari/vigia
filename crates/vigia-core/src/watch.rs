@@ -118,26 +118,12 @@ impl<'repo> Watcher<'repo> {
         workdir: &Path,
         options: WatchOptions,
     ) -> Result<Self> {
-        let (tx, rx) = mpsc::channel();
-
-        let delivered = Arc::new(AtomicU64::new(0));
-        let counter = Arc::clone(&delivered);
-        let sender = tx.clone();
-        let mut backend = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            counter.fetch_add(1, Ordering::Relaxed);
-            // A watch error is not worth killing a monitor over. Dropping
-            // it costs at most one missed frame, and the next real event
-            // resynchronises us.
-            if let Ok(event) = res {
-                let _ = sender.send(Message::Event(Box::new(event)));
-            }
-        })
-        .map_err(|e| Error::Watch(Box::new(e)))?;
-
-        backend
-            .watch(workdir, RecursiveMode::Recursive)
-            .map_err(|e| Error::Watch(Box::new(e)))?;
-
+        // Everything that reads the repository happens before the watch is
+        // armed, so the watcher never observes its own construction. Reading
+        // `.git/index` and the gitignore files is enough to register on
+        // backends that report reads or attribute touches, and Linux and macOS
+        // both do.
+        //
         // An empty index is the correct fallback: a repository with no commits
         // still has gitignore files, and they are what the filter needs.
         let index = repo
@@ -157,6 +143,26 @@ impl<'repo> Watcher<'repo> {
         {
             roots.push(canonical);
         }
+
+        let (tx, rx) = mpsc::channel();
+
+        let delivered = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&delivered);
+        let sender = tx.clone();
+        let mut backend = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            counter.fetch_add(1, Ordering::Relaxed);
+            // A watch error is not worth killing a monitor over. Dropping
+            // it costs at most one missed frame, and the next real event
+            // resynchronises us.
+            if let Ok(event) = res {
+                let _ = sender.send(Message::Event(Box::new(event)));
+            }
+        })
+        .map_err(|e| Error::Watch(Box::new(e)))?;
+
+        backend
+            .watch(workdir, RecursiveMode::Recursive)
+            .map_err(|e| Error::Watch(Box::new(e)))?;
 
         Ok(Self {
             rx,
@@ -182,11 +188,18 @@ impl<'repo> Watcher<'repo> {
         self.stats
     }
 
-    /// Raw events the OS has delivered since the watcher started.
+    /// Raw events the OS has delivered since the watcher started, accepted and
+    /// filtered alike.
     ///
-    /// Readable without blocking and without `&mut`, which is what makes I1
-    /// checkable from outside: if this is still zero after an idle window,
-    /// nothing reached the process at all.
+    /// This is a non-vacuity guard, not a measure of idle cost. A test that
+    /// asserts some class of write produces no tick needs to know the OS
+    /// reported the write at all, or it would pass just as happily against a
+    /// watcher that was silently broken.
+    ///
+    /// It is deliberately not asserted to be zero on an idle tree: inotify and
+    /// FSEvents both report reads and attribute touches, so a quiet tree is not
+    /// a silent one, and I1 is a claim about work done rather than about
+    /// packets received.
     pub fn delivered(&self) -> u64 {
         self.delivered.load(Ordering::Relaxed)
     }
