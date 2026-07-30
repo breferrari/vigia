@@ -104,8 +104,10 @@ Cargo workspace, two crates:
   highlighting (`syntect`), filesystem events (`notify`), the watch and coalesce
   engine, the frame path. **No terminal I/O, no ratatui.** Every invariant except
   I6 and I8 is testable here, headlessly.
-- **`vigia`** — binary. `ratatui` + `crossterm` shell: input, layout, theming.
-  Thin by design, so the TUI stays swappable and the engine stays provable.
+- **`vigia`** — the `ratatui` + `crossterm` shell: input, layout, theming. Thin by
+  design, so the TUI stays swappable and the engine stays provable. A library
+  with a five-line binary on top rather than a binary alone, because §7 makes the
+  snapshot suite the proof for I5 and I6 and a test cannot import a `main.rs`.
 
 The split is a dependency decision, not a hedge: the TUI renders whatever the
 core produces, so the core has to work first or the TUI is being built on sand.
@@ -183,6 +185,13 @@ worktrees, which is what a monitor beside an agent watches, are unaffected.
     were set against optimised code, and with a slack multiplier
     (`VIGIA_BUDGET_SLACK`, default 1) so a shared runner's variance does not
     read as a code regression.
+- **An invariant the engine can only make possible gets a second structural gate
+  over the caller**, in `crates/vigia/tests/`. I4 is the case: the core fetches
+  content per file, so painting the top of a large diff without reading the bottom
+  is *available*, and nothing in the core stops a renderer from asking for every
+  file anyway. Asking is the natural way to write one. So what one screenful costs
+  is gated where the screen is, against two fixtures differing only in changed-file
+  count, for the reason the tier above gives.
 - **An invariant whose two failure modes are not symmetrical gets a gate for
   each.** I2a is the case that made this a rule. Reusing too *little* is slow and
   loud, and the budget gate catches it. Reusing too *much* is fast, passes every
@@ -301,6 +310,13 @@ tap, prebuilt binaries on GitHub releases.
       are drawn. What is open is whether both hold at ten thousand changed files,
       where the walk itself could exceed I4. Revisit together with rename
       tracking above, since they stand or fall together.
+- [ ] The header counts changed files and not changed lines. A repository-wide
+      `+`/`-` total needs every file's diff, and I4 makes first paint independent
+      of total diff size, so the two cannot both hold on the first frame. §5's
+      counters are per-file and cost nothing extra, since a file has to be diffed
+      to be drawn; only the total is affected. What is open is whether it is worth
+      computing behind the frame and revealing when it arrives, which belongs with
+      the rest of §5 in Phase 3.
 - [ ] Is `syntect` fast enough incrementally to hold I2b, or does it force
       tree-sitter — and with it a C toolchain — back in?
 - [ ] Default view: unstaged only, or working-tree-vs-HEAD? Unstaged is the
