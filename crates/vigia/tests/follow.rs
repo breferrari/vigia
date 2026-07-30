@@ -44,7 +44,13 @@ const TARGET: usize = 7;
 const OTHER: usize = 21;
 
 fn body() -> usize {
-    body_height(Rect::new(0, 0, 80, 24))
+    // Eighty columns, where the footer is one line whatever the state, so the
+    // row count here does not move when I6's two-line footer engages.
+    body_height(
+        Rect::new(0, 0, 80, 24),
+        &App::new().chrome("fixture"),
+        FILES,
+    )
 }
 
 fn fixture(name: &str) -> Scratch {
@@ -149,7 +155,8 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     }
 
     let area = Rect::new(0, 0, 64, 12);
-    let view = app.view(&mut frame, body_height(area)).expect("view");
+    let height = body_height(area, &app.chrome("fixture"), frame.files().len());
+    let view = app.view(&mut frame, height).expect("view");
     assert_eq!(view.files, 3, "the fixture is not three changed files");
 
     let theme = Theme::default();

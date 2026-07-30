@@ -30,7 +30,13 @@ const FILES: usize = 40;
 const SPAN: usize = 4;
 
 fn body() -> usize {
-    body_height(Rect::new(0, 0, 80, 24))
+    // Eighty columns, where the footer is one line whatever the state, so the
+    // scroll arithmetic below is not entangled with I6's two-line footer.
+    body_height(
+        Rect::new(0, 0, 80, 24),
+        &App::new().chrome("fixture"),
+        FILES,
+    )
 }
 
 /// Many files, each a single rewritten line, so scrolling crosses them quickly.
