@@ -206,6 +206,12 @@ impl Shell {
         // rather than the next one. Safe to differ from the chrome the height
         // came from: a notice cannot change how many rows the footer takes, by
         // construction. See `Footer::plan`.
+        //
+        // The *file count* can, and on a failed collect the screen drawn below
+        // is the previous one, whose count may differ from the frame's. That
+        // costs nothing worse than a row budget that was one out for a collect
+        // which failed anyway: the renderer plans and draws from the same
+        // `view.files`, so what reaches the screen is self-consistent either way.
         let chrome = self.app.chrome(&self.name);
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
