@@ -258,10 +258,21 @@ fn label_is_honest(row: &str, label: &str) -> bool {
 
 /// Every combination a sweep runs over, named so a failure says which.
 fn cases() -> Vec<(&'static str, View, Chrome)> {
+    // The hundred-file case is not a bigger version of the three-file one. The
+    // position it produces is `100/100` rather than `1/3`, which widens the
+    // state by four columns and moves every width at which the footer changes
+    // shape. A matrix of single-digit counts exercises one column-width class
+    // and reads as though it covered them all.
+    let many = View {
+        files: 100,
+        top: Position { file: 41, row: 0 },
+        ..every_row_kind()
+    };
     vec![
         ("every row kind, idle", every_row_kind(), chrome()),
         ("every row kind, following", every_row_kind(), following()),
         ("every row kind, notice", every_row_kind(), with_notice()),
+        ("a hundred files, following", many, following()),
         ("awkward content, following", awkward(), following()),
         ("clean worktree, following", empty(), following()),
         ("clean worktree, idle", empty(), chrome()),
