@@ -118,6 +118,13 @@ pub(crate) struct Crossterm<W: Write> {
     out: W,
 }
 
+impl Crossterm<Stdout> {
+    /// The console the shell actually runs on.
+    fn on_stdout() -> Self {
+        Self { out: stdout() }
+    }
+}
+
 impl<W: Write> Console for Crossterm<W> {
     fn take(&mut self, step: Step) -> io::Result<()> {
         match step {
@@ -171,13 +178,19 @@ impl<C: Console> Takeover<C> {
 
 impl<C: Console> Drop for Takeover<C> {
     fn drop(&mut self) {
-        for step in TAKEOVER[..self.taken].iter().rev() {
-            self.console.give_back(*step);
-        }
-        // So a second drop cannot double the work. Unreachable through `Drop`
-        // alone, and cheap insurance for the `?` path in `take`, where the value
-        // is moved out of a partially built state.
-        self.taken = 0;
+        give_back_all(&mut self.console, self.taken);
+    }
+}
+
+/// Give the first `taken` steps of [`TAKEOVER`] back, in reverse.
+///
+/// One function rather than a loop at each call site, because the reverse walk
+/// *is* the invariant: the guard and the panic hook are two different ways of
+/// leaving, and while each wrote its own loop only one of them was covered by the
+/// test that pins the order.
+fn give_back_all<C: Console>(console: &mut C, taken: usize) {
+    for step in TAKEOVER[..taken].iter().rev() {
+        console.give_back(*step);
     }
 }
 
@@ -216,7 +229,7 @@ impl Session {
         // frame still restores.
         install_hook();
 
-        let takeover = Takeover::take(Crossterm { out: stdout() })?;
+        let takeover = Takeover::take(Crossterm::on_stdout())?;
         // On the `?`, `takeover` drops and gives the terminal back. That is the
         // whole reason the guard is built before the screen rather than beside
         // it.
@@ -257,13 +270,29 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
 }
 
 /// Chain a restore onto the panic hook, once per process.
+///
+/// Builds its own console rather than borrowing a [`Session`]'s, because it has
+/// to run when there is no session to borrow: it is installed before the first
+/// step is taken, and a panic in that window is exactly the case `Drop` cannot
+/// reach.
 fn install_hook() {
-    install_hook_in(&HOOK, || {
-        let mut console = Crossterm { out: stdout() };
-        for step in TAKEOVER.iter().rev() {
-            console.give_back(*step);
-        }
-    });
+    install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
+}
+
+/// Give back the whole of [`TAKEOVER`], whatever was actually taken.
+///
+/// Named rather than inlined into the hook so the *decision* is assertable: the
+/// hook itself can only be observed by panicking a real process against a real
+/// terminal, so inlined, neither the count nor the direction would be reached by
+/// any test, and the panic path is the one that matters most when it is wrong.
+///
+/// Deliberately not symmetrical with [`Takeover`], which gives back only the
+/// prefix it took. At panic time there is no prefix to read, and the two
+/// directions are not equally bad: giving back a step never taken is a no-op or
+/// an escape sequence the terminal ignores, while failing to give back one that
+/// was leaves the reader with no echo.
+fn restore_everything<C: Console>(console: &mut C) {
+    give_back_all(console, TAKEOVER.len());
 }
 
 /// Chain `restore` onto the panic hook, at most once per `once`.
@@ -525,6 +554,24 @@ mod tests {
         assert_eq!(
             *order.lock().expect("order"),
             vec!["restore", "previous hook"]
+        );
+    }
+
+    #[test]
+    fn the_panic_hook_gives_back_everything_in_reverse() {
+        // What the hook does, minus which console it writes to. Without this the
+        // production panic path is reached by no test at all: the test below
+        // installs its own counting closure, so it pins that the hook fires once
+        // and says nothing about what the real one restores.
+        let mut recorder = Recorder::new();
+        restore_everything(&mut recorder);
+
+        let mut expected = TAKEOVER.to_vec();
+        expected.reverse();
+        assert_eq!(recorder.gave_back(), expected);
+        assert!(
+            recorder.took().is_empty(),
+            "restoring took something instead"
         );
     }
 
