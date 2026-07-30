@@ -51,7 +51,7 @@ and a regression past any of them fails the build.
 | 🎞️ **60fps** | Frame time under 16ms at p99, while files are being written |
 | 🧘 **Correct untouched** | Follows the newest change and scrolls to it with no input |
 | 📐 **Narrow panes** | Legible at 40 columns, because half a laptop screen is the point |
-| 🚪 **Clean exit** | Terminal restored exactly, including on Ctrl+C and on panic |
+| 🚪 **Clean exit** | Terminal restored on every exit it controls: the quit key, Ctrl+C, an error, or a panic |
 
 ## 🧱 Built with
 
