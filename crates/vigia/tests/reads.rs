@@ -342,6 +342,14 @@ struct Margin {
     read: usize,
     /// Rows the last frame drew, so a half-empty screen cannot pass as a full one.
     rows: usize,
+    /// Changed files in the whole worktree, which is the term the two fixtures
+    /// are supposed to differ in.
+    ///
+    /// Reported rather than trusted from the argument. The guard inside
+    /// [`bulk_rewrite_window`] only proves a fixture matches *its own* argument,
+    /// so it is blind to the one mistake that empties this gate: both call sites
+    /// asking for the same size. That was confirmed by mutation, not by reading.
+    files: usize,
 }
 
 /// Draw [`MARGIN_FRAMES`] screens without ever letting the fixture settle.
@@ -362,6 +370,11 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     settle(&mut frame);
+    assert_eq!(
+        frame.files().len(),
+        files,
+        "fixture {name} is not {files} files"
+    );
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
@@ -370,6 +383,7 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
     let before = frame.stats();
     let mut read = 0;
     let mut rows = 0;
+    let mut files_seen = 0;
     for at in 0..MARGIN_FRAMES {
         if at % REWRITE_EVERY == 0 {
             scratch.rewrite_all(files, LINES, at / REWRITE_EVERY + 1);
@@ -380,12 +394,14 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
             .expect("view");
         read = view.read;
         rows = view.rows.len();
+        files_seen = view.files;
     }
 
     Margin {
         cost: delta(before, frame.stats()),
         read,
         rows,
+        files: files_seen,
     }
 }
 
@@ -405,6 +421,15 @@ fn a_bulk_rewrite_recomputes_only_what_is_drawn() {
     // both sides of a single-fixture ratio and leaves it alone.
     let few = bulk_rewrite_window("shell-bulk-few", FEW_FILES);
     let many = bulk_rewrite_window("shell-bulk-many", FILES);
+
+    // The two fixtures have to have really been different sizes. Without this the
+    // whole two-fixture form is decorative: point both call sites at the same
+    // count and every equality below still holds, which is not a hypothetical.
+    assert_eq!(
+        few.files, FEW_FILES,
+        "the narrow fixture is not {FEW_FILES} files"
+    );
+    assert_eq!(many.files, FILES, "the wide fixture is not {FILES} files");
 
     // Non-vacuity, and this is the guard the gate actually needs. Frames that
     // settled would reuse rather than recompute, both sides would read zero, and
