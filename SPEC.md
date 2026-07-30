@@ -40,7 +40,7 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 | **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak test: 24h of synthetic edits, RSS sampled every 5 min |
 | **I4** | **Streams, never buffers.** First paint is independent of total diff size. | **first paint < 100ms** on a 100k-line diff | `criterion`, gated in CI |
 | **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
-| **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns |
+| **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns, plus structural gates in `crates/vigia/tests/legibility.rs` sweeping every width from 1 to 120: no row over-occupies, no hint is cut in half, and every label that lost characters says so |
 | **I7** | Startup to first paint is imperceptible. | **< 50ms** | Timed, gated in CI |
 | **I8** | Terminal restored on **every exit the process controls**: the quit key (Ctrl-C included), an error return, and a panic under `panic = "abort"`. An externally delivered signal is not covered — see [#24](https://github.com/breferrari/vigia/issues/24). | — | Takeover order and its exact inverse; the partial-failure unwinding; a panic-hook test; escape sequences against DEC's own numbers |
 | **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | Gated over the **frame path**, not the primitives: a settled frame, one line rewritten before each frame, every file materialised. `criterion` tracks the same shape |
@@ -113,8 +113,8 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 | `● just changed` on the diff header | The pulse, but drawn as a **persisting label with a dot**, not a flash. So it has a **decay**. **(unspecified: how long it persists, and whether it fades or cuts)** |
 | Status bar `0.8ms frame` | Instrumenting the render path and drawing the result. Self-referential: measuring and painting the number costs frame time that I9 gates. **(unspecified: sampled or per-frame, and which statistic)** |
 | Status bar `11MB` | A live RSS readout. I3 samples RSS in a **soak test**, never on screen; reading it per frame is a syscall on some platforms. **(unspecified entirely)** |
-| Status bar `follow ▶` | A follow-state indicator, which presumes the mode exists. **Landed with I5**, on the footer rather than a third chrome line: see §11.1. |
-| Key hints `q quit · f follow · ↑↓ scroll` | A hint bar, and it **constrains I6**: roughly thirty columns of it must degrade legibly at forty. **(unspecified: what it drops first)** |
+| Status bar `follow ▶` | A follow-state indicator, which presumes the mode exists. **Landed with I5**, on the footer rather than a third chrome line: see §11.1. I6 later gives it a line of its own, above the hints, at the widths where one line cannot hold both. |
+| Key hints `q quit · f follow · ↑↓ scroll` | A hint bar, and it **constrains I6**: roughly thirty columns of it must degrade legibly at forty. **Ruled 2026-07-30: it does not degrade by shortening.** The footer takes a second line instead, and only below the width where a whole line holds the bar does it drop hints, `jk scroll` first. See §11.1. |
 
 Two of these are corrections rather than gaps:
 
@@ -266,6 +266,18 @@ Most of this was back-filled from the implementation on 2026-07-30 rather than n
 Two boundaries are load bearing, because each is a way for the mode to be quietly wrong rather than visibly broken. A **terminal resize does not disengage**: it moves no viewport and expresses no intent, and a monitor beside an agent is resized constantly. And **`G` disengages rather than re-engaging**, because "jump to the last changed file" and "resume following" are different intents that would otherwise be the same key, leaving a reader unable to look at the newest file without also re-arming the view.
 
 **The newest change is the file whose write landed last in the settled batch**, and the batch is the coalesced tick. A monitor cannot find that file by looking: `stat`-ing every changed file is the cost [#19](https://github.com/breferrari/vigia/issues/19) already records as breaching I9 at scale, and I4 forbids reading files the frame does not draw. It does not have to look, because the filesystem event already carries the path. `Tick` reports it, so following costs no read, no `stat` and no diff. When the named path is not in the diff — an index write, or an edit reverted before the tick landed — the view stays where it is, because there is no newest *change* to follow.
+
+**How the chrome fits**, which is I6. One rule, and the layout follows from it: **a thing made of items breaks, a thing made of characters marks its edge, and content is neither.**
+
+The **hint bar is a list**, so when the footer cannot hold both halves on one line it takes a **second line** rather than shortening anything. The state moves to the upper of the two and the hints keep the bottom row, so narrowing a pane never moves the hints out from under a reader's eye. It grows only while at least two body rows survive — a monitor with no diff left in it has stopped being one — and only when there is a state worth moving. A notice, which replaces the hints, inherits that whole line.
+
+Below the width where even a full line holds the bar, it drops **whole hints** and never part of one: `jk scroll` first, then `q quit`, leaving `f follow` last. `q` and `jk` are pager reflexes and four keys reach quit, while `f` is the one nobody would guess and the only one that restores a state a reader can lose without noticing. The state has its own ladder, `follow ▶  N/M` then `follow ▶` alone, because the header already carries the file count. **State outlives advice at every width**, which is what keeps the mode visible when the pane is at its worst.
+
+The **header never grows**. A worktree name is not a list and has nowhere to break, so it marks its edge like every other single token.
+
+And a token that had to lose characters says so, in the direction it lost them. `…` on the **left** means the beginning is gone, and only a file path uses it, because the end of a path is what names the file. `›` on the **right** means it continues past the edge: the worktree name, a notice, a hunk header, a note, the empty-state line. A hunk header silently cut to `@@ -258,7 +25` reads as a different line number, which is the failure this closes.
+
+**A clipped diff line is marked too, and is not a truncated label.** Content cannot wrap, because a wrapped line moves every line below it and the shape of the screen stops meaning anything. Nor can it elide, because unlike a label no part of it is the identifying part. So it is clipped and marked `›`, and I6's "truncated-to-useless labels" is read as being about labels rather than about content. That is a ruling, not an omission: the alternative was a horizontal pan, which is a key and a mode this spec does not name.
 
 **CLI.** One optional positional path, defaulting to the working directory. No flags today.
 
