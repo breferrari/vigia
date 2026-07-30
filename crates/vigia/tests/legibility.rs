@@ -212,18 +212,25 @@ fn empty() -> View {
     }
 }
 
-/// `n` uniquely labelled body rows, so the ones actually drawn can be counted.
+/// `n` uniquely labelled body rows over a diff of `files` files, so the rows
+/// actually drawn can be counted.
 ///
 /// Four columns each including the sigil, which is why the sweep that uses this
 /// starts at eight rather than one: a marker clipped to nothing cannot be
 /// counted, and a test that silently counted zero would pass against a renderer
 /// that drew no body at all.
-fn numbered(n: usize) -> View {
+///
+/// **`files` is a parameter because the footer's height depends on it**, through
+/// the width of the widest position that count can produce. Every fixture here
+/// once reported one or three files, and `1/1` and `3/3` are the same width, so
+/// a renderer that ignored the count entirely and assumed one file was
+/// indistinguishable from a correct one. Found by mutation.
+fn numbered(n: usize, files: usize) -> View {
     View {
         rows: (0..n)
             .map(|i| line(LineKind::Added, 1, &format!("R{i:02}")))
             .collect(),
-        files: 1,
+        files,
         top: Position::default(),
         read: 1,
     }
@@ -344,24 +351,31 @@ fn the_body_gets_exactly_the_rows_the_caller_was_promised() {
     // the renderer's own arithmetic, which agrees with itself by construction.
     let mut saw_a_body = false;
     for chrome in [chrome(), following(), with_notice()] {
-        for width in 8..=120u16 {
-            for height in [3u16, 5, 6, 24] {
-                let area = Rect::new(0, 0, width, height);
-                let promised = body_height(area, &chrome, 1);
-                let view = numbered(promised + 3);
-                let rows = rows_at(width, height, &view, &chrome);
-                let painted = rows.join("\n");
+        // Three file counts, and the hundred is the one that earns its place:
+        // the position is `100/100` rather than `1/1`, which widens the state by
+        // four columns and moves the width at which the footer takes its second
+        // line. A sweep over single-digit counts alone cannot tell a renderer
+        // that reads the count from one that ignores it.
+        for files in [1usize, 3, 100] {
+            for width in 8..=120u16 {
+                for height in [3u16, 5, 6, 24] {
+                    let area = Rect::new(0, 0, width, height);
+                    let promised = body_height(area, &chrome, files);
+                    let view = numbered(promised + 3, files);
+                    let rows = rows_at(width, height, &view, &chrome);
+                    let painted = rows.join("\n");
 
-                let drawn = (0..promised + 3)
-                    .filter(|i| painted.contains(&format!("R{i:02}")))
-                    .count();
-                assert_eq!(
-                    drawn, promised,
-                    "at {width}x{height} the caller was promised {promised} body \
-                     rows and the renderer drew {drawn}"
-                );
-                if promised > 0 {
-                    saw_a_body = true;
+                    let drawn = (0..promised + 3)
+                        .filter(|i| painted.contains(&format!("R{i:02}")))
+                        .count();
+                    assert_eq!(
+                        drawn, promised,
+                        "at {width}x{height} over {files} files the caller was \
+                         promised {promised} body rows and the renderer drew {drawn}"
+                    );
+                    if promised > 0 {
+                        saw_a_body = true;
+                    }
                 }
             }
         }
