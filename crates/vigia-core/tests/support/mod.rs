@@ -215,6 +215,30 @@ impl Scratch {
         scratch
     }
 
+    /// Rewrite every file of a [`Scratch::large_diff`] fixture, line for line.
+    ///
+    /// A formatter, a branch switch and a multi-file agent edit all produce this
+    /// shape, and it is the event the settle margin is argued about: every file
+    /// changes at once, so for the length of the margin **no** file can be
+    /// proved unchanged and every one a caller asks for is recomputed.
+    ///
+    /// `round` varies the content, so calling this twice really changes bytes
+    /// both times. Without it the second call would rewrite each file with what
+    /// it already held, which a `stat` cannot tell from no write at all once the
+    /// length matches, and the fixture would quietly stop producing the event.
+    ///
+    /// The caller passes `files` and `lines` rather than this remembering them,
+    /// because a fixture built with different numbers would be silently
+    /// truncated or padded here instead of failing.
+    pub fn rewrite_all(&self, files: usize, lines: usize, round: usize) {
+        for f in 0..files {
+            self.write(
+                &format!("src/mod_{f}.rs"),
+                generated(lines, &format!("bulk{round}")),
+            );
+        }
+    }
+
     /// Absolute path of something inside the repository.
     pub fn path_of(&self, rela: &str) -> PathBuf {
         self.path.join(rela)
