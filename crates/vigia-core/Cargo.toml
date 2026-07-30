@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 gix.workspace = true
 notify.workspace = true
+syntect.workspace = true
 
 # Test fixtures are built by shelling out to `git` (see tests/support) rather
 # than through a fixture crate. That keeps the dependency list exactly what
