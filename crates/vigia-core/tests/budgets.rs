@@ -495,7 +495,7 @@ fn highlight_window(
         .position(|change| change.path == path)
         .unwrap_or_else(|| panic!("{path} is not a changed file"));
 
-    highlighter.begin();
+    let mut pass = highlighter.pass();
     let (_, diff) = frame.diff(index).expect("diff");
     assert!(
         diff.hunks.len() >= first + hunks,
@@ -507,11 +507,11 @@ fn highlight_window(
     let mut drawn = 0;
     for (offset, hunk) in diff.hunks[first..first + hunks].iter().enumerate() {
         for line in 0..hunk.lines.len() {
-            highlighter.spans(path, first + offset, hunk, line);
+            pass.spans(path, first + offset, hunk, line);
             drawn += 1;
         }
     }
-    highlighter.sweep();
+    drop(pass);
     drawn
 }
 
