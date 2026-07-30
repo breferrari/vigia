@@ -19,8 +19,10 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use support::{Scratch, budget, delta, materialise, settle};
-use vigia_core::{FileChange, FrameStats, LineKind, Samples, Worktree};
+use support::{Scratch, budget, delta, highlight_delta, materialise, settle};
+use vigia_core::{
+    FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, Samples, Worktree,
+};
 
 /// I4: first paint on a 100k-line diff.
 const I4_FIRST_PAINT: Duration = Duration::from_millis(100);
@@ -447,6 +449,339 @@ fn a_real_frame_holds_the_frame_budget() {
         cost.computed,
         cost.reused,
         cost.bytes
+    );
+}
+
+/// Lines between one change and the next in the I2b fixtures.
+///
+/// Comfortably over twice `CONTEXT`, so each change gets a hunk of its own and
+/// the gates below can name one. `Scratch::sparse_edits` asserts the same thing
+/// rather than trusting this constant to stay right.
+const HUNK_SPACING: usize = 20;
+
+/// Hunks one screenful of the sparse fixture shows.
+///
+/// Each hunk here is three context lines, a removal, an addition and three more
+/// context, under a header: nine rows. Three of them is an ordinary terminal.
+const WINDOW_HUNKS: usize = 3;
+
+/// The two file sizes I2b's claim is measured across.
+///
+/// Ten-fold, and identical wherever they overlap, because `generated` writes the
+/// same line at the same index whatever the file's length. That is what makes
+/// the comparison like for like.
+const SMALL_FILE: usize = 500;
+const LARGE_FILE: usize = 5_000;
+
+/// Highlight `hunks` hunks starting at `first`, every line of each.
+///
+/// One frame's worth of work for a viewport standing on that part of the file.
+/// The **ordinal passed is the hunk's real position in the file**, not its
+/// position in the window, because that is what makes a hunk the same hunk after
+/// the view scrolls.
+///
+/// Returns the lines drawn, so a window that drew nothing cannot satisfy a gate
+/// by costing nothing.
+fn highlight_window(
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    path: &str,
+    first: usize,
+    hunks: usize,
+) -> usize {
+    let index = frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .unwrap_or_else(|| panic!("{path} is not a changed file"));
+
+    highlighter.begin();
+    let (_, diff) = frame.diff(index).expect("diff");
+    assert!(
+        diff.hunks.len() >= first + hunks,
+        "the fixture has {} hunks, so a window of {hunks} at {first} runs off \
+         the end and the gate would measure a short window",
+        diff.hunks.len()
+    );
+
+    let mut drawn = 0;
+    for (offset, hunk) in diff.hunks[first..first + hunks].iter().enumerate() {
+        for line in 0..hunk.lines.len() {
+            highlighter.spans(path, first + offset, hunk, line);
+            drawn += 1;
+        }
+    }
+    highlighter.sweep();
+    drawn
+}
+
+/// Bytes of one hunk's lines, which is what highlighting that hunk has to cost.
+fn hunk_bytes(frame: &mut Frame, path: &str, ordinal: usize) -> u64 {
+    let index = frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .unwrap_or_else(|| panic!("{path} is not a changed file"));
+    let (_, diff) = frame.diff(index).expect("diff");
+    diff.hunks[ordinal]
+        .lines
+        .iter()
+        .map(|line| line.text.len() as u64)
+        .sum()
+}
+
+/// What re-highlighting cost after one line changed, and what it should have.
+struct Rehighlight {
+    /// What the **first** window cost, with nothing to reuse.
+    ///
+    /// Carried because the edit lands in hunk 1 of both fixtures, at the same
+    /// offset from the top of each, so a design that parsed forward from the
+    /// start of the file would cost the same in both and [`Rehighlight::cost`]
+    /// alone could not tell. A cold window is where a cost that follows the
+    /// file rather than the screen becomes visible.
+    first: HighlightStats,
+    cost: HighlightStats,
+    /// Bytes of the single hunk the edit landed in.
+    hunk: u64,
+    /// Lines the window drew, so an empty window cannot pass a gate.
+    drawn: usize,
+}
+
+/// Settle, draw a window, edit one line inside its middle hunk, and draw again.
+///
+/// The edit lands at `HUNK_SPACING * 2`, which the fixture puts in hunk 1: its
+/// n-th change sits at line `n * HUNK_SPACING`, so hunk 0 holds the first and
+/// hunk 1 the second. Hunks 0 and 2 are untouched and are what "reused" counts.
+fn cost_of_rehighlighting_a_one_line_edit(scratch: &Scratch) -> Rehighlight {
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut highlighter = Highlighter::new();
+    let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    assert_eq!(
+        highlighter.stats().parsed,
+        WINDOW_HUNKS as u64,
+        "the first window parsed {} hunks rather than {WINDOW_HUNKS}, so the \
+         measurement below starts from the wrong state",
+        highlighter.stats().parsed
+    );
+
+    let first = highlighter.stats();
+    scratch.edit_line(SHARED_PATH, HUNK_SPACING * 2, EDITED_LINE);
+
+    let before = highlighter.stats();
+    frame.advance().expect("advance");
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+
+    Rehighlight {
+        first,
+        cost: highlight_delta(before, highlighter.stats()),
+        hunk: hunk_bytes(&mut frame, SHARED_PATH, 1),
+        drawn,
+    }
+}
+
+#[test]
+fn only_the_hunk_that_changed_is_reparsed() {
+    // I2b, and the counts are exact rather than ratios, so this gate is
+    // hardware-independent and takes no slack.
+    //
+    // The fixture matters as much as the assertions. `large_diff` rewrites every
+    // line and so produces exactly **one** hunk per file, where reusing nothing
+    // and reusing everything are indistinguishable. `sparse_edits` gives a file
+    // many small hunks, which is the only shape in which "only the one that
+    // changed" is a claim at all.
+    let scratch = Scratch::sparse_edits("i2b-hunks", 1, SMALL_FILE, HUNK_SPACING);
+    let after = cost_of_rehighlighting_a_one_line_edit(&scratch);
+
+    assert!(
+        after.drawn > 0,
+        "the window drew no lines, so nothing was highlighted either way"
+    );
+    assert_eq!(
+        after.cost.parsed, 1,
+        "one line changed in one hunk, and the window re-parsed {} hunks",
+        after.cost.parsed
+    );
+    assert_eq!(
+        after.cost.reused,
+        (WINDOW_HUNKS - 1) as u64,
+        "the window reused {} of the {} hunks it drew, so the hunks nobody \
+         touched were thrown away",
+        after.cost.reused,
+        WINDOW_HUNKS - 1
+    );
+
+    // The strongest form: not merely "one hunk" but *that* hunk's bytes and no
+    // others'. A re-parse that quietly took the whole window would still report
+    // one hunk parsed.
+    assert_eq!(
+        after.cost.bytes, after.hunk,
+        "re-highlighting read {} bytes for a hunk of {}",
+        after.cost.bytes, after.hunk
+    );
+    assert!(
+        after.hunk > 0,
+        "the hunk the edit landed in is empty, so the equality above is two \
+         zeroes agreeing"
+    );
+}
+
+#[test]
+fn reparsing_after_an_edit_costs_the_same_however_large_the_file() {
+    // I2b's budget: re-parse follows the edit, not the file. One fixture cannot
+    // say that, for the reason `SPEC.md` §3 gives on both I2a's row and this
+    // one. The two differ ten-fold in length and are byte-identical wherever
+    // they overlap, so the hunk the edit lands in holds the same content in
+    // both and there is no shared term for a uniform inflation to cancel
+    // against.
+    let small = Scratch::sparse_edits("i2b-small", 1, SMALL_FILE, HUNK_SPACING);
+    let large = Scratch::sparse_edits("i2b-large", 1, LARGE_FILE, HUNK_SPACING);
+
+    let in_small = cost_of_rehighlighting_a_one_line_edit(&small);
+    let in_large = cost_of_rehighlighting_a_one_line_edit(&large);
+
+    // Guard the fixtures first, or the equalities below are two zeroes agreeing.
+    assert!(in_small.cost.bytes > 0 && in_small.cost.lines > 0);
+    assert_eq!(
+        in_small.hunk, in_large.hunk,
+        "the edited hunk is {} bytes in the {SMALL_FILE}-line file and {} in \
+         the {LARGE_FILE}-line one, so the two fixtures do not overlap and \
+         nothing below compares like with like",
+        in_small.hunk, in_large.hunk
+    );
+
+    assert_eq!(
+        in_small.cost.bytes, in_large.cost.bytes,
+        "one line changed cost {} bytes of re-parsing in a {SMALL_FILE}-line \
+         file and {} in a {LARGE_FILE}-line one, so the cost follows the file \
+         rather than the edit",
+        in_small.cost.bytes, in_large.cost.bytes
+    );
+    assert_eq!(
+        in_small.cost.lines, in_large.cost.lines,
+        "{} lines re-parsed in the small file against {} in the large one",
+        in_small.cost.lines, in_large.cost.lines
+    );
+    assert_eq!(in_small.cost.parsed, in_large.cost.parsed);
+
+    // And the same claim about the **cold** window, which is the half the
+    // re-highlight cost cannot make. The edit lands in hunk 1 of both fixtures,
+    // at the same offset from the top of each, so a highlighter that parsed
+    // forward from the start of the file would re-parse identical amounts in
+    // both and every equality above would hold. What such a design cannot hide
+    // is the first window, where a cost that follows the file rather than the
+    // screen shows up at full size.
+    assert_eq!(
+        in_small.drawn, in_large.drawn,
+        "the first window drew {} lines in the {SMALL_FILE}-line file and {} in \
+         the {LARGE_FILE}-line one",
+        in_small.drawn, in_large.drawn
+    );
+    assert_eq!(
+        in_small.first.bytes, in_large.first.bytes,
+        "a cold window parsed {} bytes in the {SMALL_FILE}-line file and {} in \
+         the {LARGE_FILE}-line one, so highlighting reaches past what it draws",
+        in_small.first.bytes, in_large.first.bytes
+    );
+    assert_eq!(
+        in_small.first.lines, in_large.first.lines,
+        "a cold window parsed {} lines against {}",
+        in_small.first.lines, in_large.first.lines
+    );
+}
+
+#[test]
+fn a_redraw_inside_the_settle_margin_reparses_nothing() {
+    // The gate that decides how a hunk is identified, and the reason the cache
+    // is keyed on content rather than on a counter the frame path bumps.
+    //
+    // For two seconds after a write the frame path cannot prove the file
+    // unchanged, so it re-diffs it on **every** frame by design. A highlighter
+    // keyed on "did the frame recompute this diff" would therefore re-parse
+    // every hunk of an edited file, every frame, for the whole margin. Content
+    // keying costs a hash and is exact.
+    let scratch = Scratch::sparse_edits("i2b-margin", 1, SMALL_FILE, HUNK_SPACING);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut highlighter = Highlighter::new();
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+
+    // Land an edit, and stay inside its margin for the rest of the test.
+    scratch.edit_line(SHARED_PATH, HUNK_SPACING * 2, EDITED_LINE);
+    frame.advance().expect("advance");
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+
+    let frame_before = frame.stats();
+    let highlight_before = highlighter.stats();
+    frame.advance().expect("advance");
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    let frame_cost = delta(frame_before, frame.stats());
+    let cost = highlight_delta(highlight_before, highlighter.stats());
+
+    // Non-vacuity, and it is the whole point: the frame really did recompute
+    // the diff, which is the condition a counter-keyed cache would trip over.
+    assert!(
+        frame_cost.computed > 0,
+        "the frame reused its diff, so this test never reached the settle \
+         margin it exists for"
+    );
+    assert_eq!(
+        cost.parsed, 0,
+        "{} hunks were re-parsed for a diff that was recomputed but identical",
+        cost.parsed
+    );
+    assert_eq!(cost.lines, 0, "{} lines were re-parsed", cost.lines);
+    assert_eq!(cost.bytes, 0, "{} bytes were re-parsed", cost.bytes);
+    assert_eq!(
+        cost.reused, WINDOW_HUNKS as u64,
+        "the window drew {WINDOW_HUNKS} hunks and reused {}",
+        cost.reused
+    );
+}
+
+#[test]
+fn the_highlight_cache_is_bounded_by_the_viewport() {
+    // I3's shape, held against the one structure this change adds. The frame
+    // path's own map is bounded by the current diff; this is bounded by the
+    // screen, which is the stronger claim and the one that survives a reader
+    // scrolling through a large file for a day.
+    const STEPS: usize = 30;
+
+    let scratch = Scratch::sparse_edits("i2b-bounded", 1, LARGE_FILE, HUNK_SPACING);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut highlighter = Highlighter::new();
+    for first in 0..STEPS {
+        highlight_window(
+            &mut frame,
+            &mut highlighter,
+            SHARED_PATH,
+            first,
+            WINDOW_HUNKS,
+        );
+        assert!(
+            highlighter.tracked() <= WINDOW_HUNKS,
+            "after scrolling to hunk {first} the cache holds {} hunks for a \
+             window of {WINDOW_HUNKS}, so it grows with what has been read \
+             rather than with what is on screen",
+            highlighter.tracked()
+        );
+    }
+
+    // Non-vacuity: a cache that never stored anything would satisfy the bound.
+    assert_eq!(highlighter.tracked(), WINDOW_HUNKS);
+    assert_eq!(
+        highlighter.stats().evicted,
+        (STEPS - 1) as u64,
+        "scrolling {STEPS} hunks evicted {}, so hunks are being kept after \
+         they leave the screen",
+        highlighter.stats().evicted
     );
 }
 
