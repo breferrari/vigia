@@ -72,9 +72,15 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ⬜ | I5 correct with zero interaction | [#6](https://github.com/breferrari/vigia/issues/6) |
 | ⬜ | I6 legible at 40 columns | [#7](https://github.com/breferrari/vigia/issues/7) |
 | ⬜ | I8 terminal restored exactly on exit | [#8](https://github.com/breferrari/vigia/issues/8) |
-| ⬜ | A truncated `.git/index` aborts instead of reporting | [#13](https://github.com/breferrari/vigia/issues/13) |
+| ✅ | A truncated `.git/index` aborts instead of reporting | [#13](https://github.com/breferrari/vigia/issues/13) |
 | ⬜ | I2b re-highlight only changed hunks (`syntect`) | [#4](https://github.com/breferrari/vigia/issues/4) |
 | ⬜ | I3 flat resources over days (soak) | [#5](https://github.com/breferrari/vigia/issues/5) |
+
+**Start with [#9](https://github.com/breferrari/vigia/issues/9), the shell.** The
+other rows render what it draws, so they cannot be tested before it exists. I8 is
+the exception and can go first if preferred: terminal restoration on exit is
+provable against a bare alternate-screen harness, and #13's abort is already
+covered by it.
 
 ## Phase 3 — glanceability
 
@@ -92,6 +98,23 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
+
+## Phase 5 — deferred findings
+
+Milestone: [Phase 5](https://github.com/breferrari/vigia/milestone/5)
+
+Everything on the deferral shelf below has a milestone here, so shelved work is
+still reachable by a milestone-filtered query rather than only readable in prose.
+The shelf carries the *reason*; this table carries the *state*.
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | A symlink diffs as its target's contents | [#15](https://github.com/breferrari/vigia/issues/15) |
+| ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
+| ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |
+| ⬜ | A frame reads a whole file to discover it is binary | [#18](https://github.com/breferrari/vigia/issues/18) |
+| ⬜ | An idle frame is one `stat` per changed file | [#19](https://github.com/breferrari/vigia/issues/19) |
+| ⬜ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
 
