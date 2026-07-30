@@ -117,15 +117,28 @@ struct Observed {
 /// The constant has to be an **upper bound** on the real granularity, so being
 /// generous is the safe direction.
 ///
-/// It is not free, and the cost is worse than "a few redundant diffs". A file
-/// written once is re-diffed for the whole margin, which for one file is nothing.
-/// A bulk rewrite is different: after all 100 files of the budget fixture change
-/// at once, every frame recomputes every diff for two seconds, 18 to 21ms a
-/// frame, which is over the I9 budget for about eighty consecutive frames. A
-/// formatter or a branch switch produces exactly that. The fix is not a smaller
-/// guess but a measured one: the smallest positive difference between the
-/// modification times status already reports bounds the real granularity, which
-/// on NTFS would mean 16ms rather than 2s. `SPEC.md` §10 holds the numbers.
+/// It is not free: a file written once is re-diffed for the whole margin, and a
+/// bulk rewrite puts every file in that state at the same time. The obvious
+/// answer is to stop guessing and measure the granularity per worktree, from the
+/// smallest positive difference between the modification times status already
+/// reports. **That does not work, and the reason is worth keeping.**
+///
+/// Granularity is not uniform within one volume, so the smallest gap observed
+/// bounds the *smallest* granule while soundness needs the *largest*. Measured on
+/// NTFS: 10,324 same-length rewrites of one file over three seconds produced
+/// 1,959 distinct stamps whose positive gaps spanned 502µs to 17,522µs, a 34.8x
+/// spread, and a hundred-file bulk write left a smallest cross-path gap of 998µs.
+/// A margin of 998µs would leave a real 17.5ms granule uncovered, which is
+/// precisely the stale diff this constant exists to prevent. Nothing passive does
+/// better, because a monitor never writes and so only ever sees the gaps its
+/// user's tools happened to leave. Measuring it properly would mean writing into
+/// the worktree, which is not something a monitor gets to do.
+///
+/// So the number stays a bound taken from the table above rather than a sample,
+/// and what it costs is bounded elsewhere: a caller reads only what it draws, so
+/// the shell recomputes about one file a frame through a bulk rewrite rather than
+/// a hundred. Both tiers of `crates/vigia/tests` gate that, measuring *inside*
+/// this margin rather than after it. `SPEC.md` §10 holds the numbers.
 const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
