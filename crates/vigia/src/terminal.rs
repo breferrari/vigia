@@ -35,11 +35,11 @@
 //! the other. `SPEC.md` §7 licenses this directly: where a correctness rule has no
 //! reachable integration path, the pure-function test *is* the gate.
 //!
-//! What that leaves untested is the mapping from a [`Step`] to the escape sequence
-//! it really emits, since a recorder cannot see it. `the_real_console_gives_back_every_mode_it_set`
-//! closes that by driving the real [`Crossterm`] into a byte sink, and the ANSI
-//! table below checks the commands against DEC's own mode numbers rather than
-//! against crossterm restating itself.
+//! What that leaves untested is the mapping from a [`Step`] to the escape
+//! sequence it really emits, since a recorder cannot see it. The last layer of
+//! the test module closes that by driving the real [`Crossterm`] into a byte
+//! sink, and the ANSI table beside it checks the commands against DEC's own mode
+//! numbers rather than against crossterm restating itself.
 //!
 //! **Not covered, deliberately:** an externally delivered signal. Raw mode means
 //! Ctrl-C is a key event and not a signal, so there is nothing to catch on the
@@ -354,14 +354,21 @@ mod tests {
 
     /// A console that records instead of acting, and can be told to fail.
     ///
-    /// `Arc<Mutex<..>>` rather than `Rc<RefCell<..>>` because the panic-hook test
-    /// needs the same log inside a `Send + Sync + 'static` closure.
+    /// The log is shared rather than owned because every one of these is handed
+    /// to a [`Takeover`] that then owns it, and the assertions run after that
+    /// takeover has been dropped. A clone the test keeps is the only way back to
+    /// what the moved-away copy saw.
     #[derive(Clone)]
     struct Recorder {
         log: Arc<Mutex<Vec<Event>>>,
         /// The index into [`TAKEOVER`] whose `take` fails, if any.
         fail_at: Option<usize>,
-        taken: usize,
+        /// Calls to [`Console::take`] so far, **including** the one that fails.
+        ///
+        /// Not the same quantity as [`Takeover`]'s `taken`, which counts only
+        /// steps that succeeded. Kept distinct on purpose: conflating the two is
+        /// how a test stops being able to tell the off-by-one it exists to catch.
+        attempts: usize,
     }
 
     impl Recorder {
@@ -369,7 +376,7 @@ mod tests {
             Self {
                 log: Arc::new(Mutex::new(Vec::new())),
                 fail_at: None,
-                taken: 0,
+                attempts: 0,
             }
         }
 
@@ -411,8 +418,8 @@ mod tests {
 
     impl Console for Recorder {
         fn take(&mut self, step: Step) -> io::Result<()> {
-            let at = self.taken;
-            self.taken += 1;
+            let at = self.attempts;
+            self.attempts += 1;
             if self.fail_at == Some(at) {
                 return Err(io::Error::other(INJECTED));
             }
