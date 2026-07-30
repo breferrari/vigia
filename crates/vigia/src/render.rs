@@ -137,6 +137,20 @@ pub struct Chrome {
     pub following: bool,
 }
 
+/// `N/M`, or nothing at all when there is no diff to be positioned within.
+///
+/// One function rather than two because it is built twice per frame from
+/// different inputs: [`Footer::plan`] wants the widest position a file count can
+/// produce, and the draw wants the real one. Written twice, the two would
+/// eventually disagree about a format the layout is measured against.
+fn position_of(file: usize, files: usize) -> String {
+    if files == 0 {
+        String::new()
+    } else {
+        format!("{}/{files}", file + 1)
+    }
+}
+
 /// The state's ladder, widest rung first.
 ///
 /// `follow ▶  N/M`, then the marker alone, then nothing. The position goes
@@ -214,13 +228,11 @@ impl<'a> Footer<'a> {
             };
         }
 
-        let widest_position = if files == 0 {
-            String::new()
-        } else {
-            format!("{files}/{files}")
-        };
+        // The last file's position is the widest this count can produce, since
+        // no position numbers higher than the count itself.
+        let widest = position_of(files.saturating_sub(1), files);
         let reserved = width_of(widest_fitting(
-            &state_rungs(chrome.following, &widest_position),
+            &state_rungs(chrome.following, &widest),
             width,
         ));
         // The gap keeps the state from touching the hints, and is only owed when
@@ -422,17 +434,13 @@ impl Painter<'_> {
     /// Takes the whole area rather than its own rows, because which rows it owns
     /// is what [`Footer::plan`] decided.
     fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome, footer: &Footer<'_>) {
-        let position = if view.files == 0 {
-            String::new()
-        } else {
-            format!("{}/{}", view.top.file + 1, view.files)
-        };
+        let position = position_of(view.top.file, view.files);
         // Clamped to what was reserved, not to the width. The plan handed the
         // rest of the line to the hints, and the drawn position can be narrower
         // than the widest one reserved for it, so a state sized to the width
         // would draw over them.
         let rungs = state_rungs(chrome.following, &position);
-        let state = widest_fitting(&rungs, footer.reserved).to_owned();
+        let state = widest_fitting(&rungs, footer.reserved);
 
         let style = if footer.alert {
             self.theme.alert
@@ -453,10 +461,10 @@ impl Painter<'_> {
                 y: bottom.y - 1,
                 ..bottom
             };
-            self.status_line(upper, "", self.theme.chrome_dim, &state);
+            self.status_line(upper, "", self.theme.chrome_dim, state);
             self.status_line(bottom, footer.left, style, "");
         } else {
-            self.status_line(bottom, footer.left, style, &state);
+            self.status_line(bottom, footer.left, style, state);
         }
     }
 
