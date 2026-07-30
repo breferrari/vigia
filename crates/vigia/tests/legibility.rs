@@ -115,6 +115,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
         kind,
         number,
         text: text.to_owned(),
+        spans: Vec::new(),
     }
 }
 

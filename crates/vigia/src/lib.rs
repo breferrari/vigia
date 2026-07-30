@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 
 use ratatui::layout::Rect;
-use vigia_core::{WatchOptions, Worktree};
+use vigia_core::{Highlighter, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
 ///
@@ -98,6 +98,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
+        // Built before the screen is taken, so its 318µs of grammar loading is
+        // paid where a failure can still be reported on a terminal the reader
+        // can see, and where I7's 50ms has room for it.
+        highlighter: Highlighter::new(),
         theme: Theme::default(),
         name: short_name(worktree.workdir()),
         screen: View::default(),
@@ -168,6 +172,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 struct Shell {
     session: Session,
     app: App,
+    /// The syntax classes of whatever is on screen, kept between frames.
+    ///
+    /// Held here rather than in [`App`] so that type stays cheap to clone; see
+    /// [`App::view`]. Bounded by the viewport rather than by the diff, so a day
+    /// of scrolling leaves it the size of one screen.
+    highlighter: Highlighter,
     theme: Theme,
     /// What the header calls the working tree.
     name: String,
@@ -197,7 +207,7 @@ impl Shell {
         // keeps this row budget and the renderer's layout in agreement.
         let chrome = self.app.chrome(&self.name);
         let height = body_height(self.area()?, &chrome, frame.files().len());
-        match self.app.view(frame, height) {
+        match self.app.view(frame, &mut self.highlighter, height) {
             Ok(view) => self.screen = view,
             Err(e) => self.app.warn(e.to_string()),
         }

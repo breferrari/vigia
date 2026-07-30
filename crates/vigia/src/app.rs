@@ -5,7 +5,7 @@
 //! optional message. A monitor with more state than that has started becoming a
 //! reviewer.
 
-use vigia_core::{Frame, Result};
+use vigia_core::{Frame, Highlighter, Result};
 
 use crate::input::Action;
 use crate::render::Chrome;
@@ -240,8 +240,19 @@ impl App {
     /// other pane has shortened, is resolved by walking the files it crosses; a
     /// resolved one starts on the file it draws. Writing the answer back means
     /// that walk is paid once per scroll rather than once per frame.
-    pub fn view(&mut self, frame: &mut Frame, height: usize) -> Result<View> {
-        let view = View::collect(frame, self.position, height)?;
+    /// The highlighter is passed in rather than held here, and that is not an
+    /// accident of plumbing. [`App`] is `Clone` and `Default` because it is a
+    /// scroll position and a message, which is all `SPEC.md` §6 wants the shell
+    /// to remember; a [`Highlighter`] owns seventy-five compiled grammars, and
+    /// putting one behind a derived `Clone` leaves a two-megabyte copy one
+    /// keystroke away from being made by accident.
+    pub fn view(
+        &mut self,
+        frame: &mut Frame,
+        highlighter: &mut Highlighter,
+        height: usize,
+    ) -> Result<View> {
+        let view = View::collect(frame, highlighter, self.position, height)?;
         self.position = view.top;
         Ok(view)
     }

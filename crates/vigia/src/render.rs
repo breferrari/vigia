@@ -30,7 +30,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Span;
+use ratatui::text::Span as TextSpan;
 use vigia_core::LineKind;
 
 use crate::theme::Theme;
@@ -388,6 +388,49 @@ impl Painter<'_> {
             .set_stringn(x + limit as u16 - 1, y, CONTINUES, 1, style);
     }
 
+    /// Write a sequence of styled runs under **one** limit, marking the edge.
+    ///
+    /// The many-run form of [`Painter::put_marked`], and it has to be one call
+    /// rather than a `put_marked` per run. The limit belongs to the row, but the
+    /// mark belongs to whichever run happens to reach the edge, and a per-run
+    /// version would either mark every run or none of them.
+    ///
+    /// The mark gets a reserved column for exactly the reason `put_marked` gives:
+    /// `ratatui` refuses to write into the continuation cell of a two-column
+    /// glyph, so overwriting the last column silently **drops** the mark and a
+    /// clipped line is drawn as one that simply ends. `tests/legibility.rs`
+    /// sweeps every width for that.
+    fn put_runs_marked(&mut self, x: u16, y: u16, runs: &[(String, Style)], limit: usize) {
+        if limit == 0 {
+            return;
+        }
+
+        let total: usize = runs.iter().map(|(text, _)| width_of(text)).sum();
+        let overflows = total > limit;
+        let budget = if overflows { limit - 1 } else { limit };
+
+        // The style the mark inherits: whichever run ran out of room, so a
+        // clipped comment is marked in the comment's colour rather than in
+        // whatever the row started with.
+        let mut marked_in = self.theme.context;
+        let mut at = x;
+        let mut used = 0usize;
+        for (text, style) in runs {
+            if used >= budget {
+                break;
+            }
+            marked_in = *style;
+            let before = at;
+            at = self.put(at, y, text, budget - used, *style);
+            used += usize::from(at - before);
+        }
+
+        if overflows {
+            self.buf
+                .set_stringn(x + limit as u16 - 1, y, CONTINUES, 1, marked_in);
+        }
+    }
+
     /// Write `text` so that it ends at the right edge of `area`.
     ///
     /// Dropped entirely rather than truncated when it does not fit. Half a count
@@ -520,8 +563,13 @@ impl Painter<'_> {
                     let text = format!("  {note}");
                     self.put_marked(area.x, y, &text, usize::from(area.width), self.theme.note);
                 }
-                Row::Line { kind, number, text } => {
-                    self.line_row(Rect { y, ..area }, *kind, *number, text);
+                Row::Line {
+                    kind,
+                    number,
+                    text,
+                    spans,
+                } => {
+                    self.line_row(Rect { y, ..area }, *kind, *number, text, spans);
                 }
             }
         }
@@ -557,8 +605,23 @@ impl Painter<'_> {
     }
 
     /// `  128 +    let value = 1;`
-    fn line_row(&mut self, area: Rect, kind: LineKind, number: u32, text: &str) {
-        let (style, sigil) = match kind {
+    ///
+    /// **The sigil carries the diff, the text carries the syntax**, which is
+    /// `SPEC.md` §11.1's ruling and the mockup's own layout: added, removed and
+    /// context lines are highlighted identically, and only the `+` or `-` says
+    /// which is which. What the picture uses to make that legible is a row
+    /// background tint, and sixteen foreground-only colours cannot draw one, so
+    /// the signal here is thinner than in the picture until #11 lands a
+    /// truecolour path.
+    fn line_row(
+        &mut self,
+        area: Rect,
+        kind: LineKind,
+        number: u32,
+        text: &str,
+        spans: &[vigia_core::Span],
+    ) {
+        let (diff, sigil) = match kind {
             LineKind::Added => (self.theme.added, '+'),
             LineKind::Removed => (self.theme.removed, '-'),
             LineKind::Context => (self.theme.context, ' '),
@@ -573,23 +636,50 @@ impl Painter<'_> {
             room = room.saturating_sub(gutter + 1);
         }
 
+        let mut runs = Vec::with_capacity(spans.len() + 2);
+        runs.push((sigil.to_string(), diff));
+
         // Tab stops are counted from the start of the line's own content, not
         // from the left edge of the screen. The gutter and the sigil shift every
         // row by the same amount, so including them would align tabs to the
         // buffer and leave the file's indentation looking nothing like it does in
-        // an editor.
-        let body = format!("{sigil}{}", printable(text));
+        // an editor. The counter therefore runs **across** span boundaries: a tab
+        // in the middle of a line advances to the next stop measured from the
+        // line's own start, not from the start of whatever run it landed in.
+        let mut column = 0usize;
+        let mut at = 0usize;
+        for span in spans {
+            let end = (at + span.len).min(text.len());
+            let Some(piece) = text.get(at..end) else {
+                // A span boundary that is not a character boundary. It should not
+                // happen and it must not panic, because the alternative to one
+                // uncoloured line is a monitor that dies on a file. The rest of
+                // the line is drawn unclassified.
+                break;
+            };
+            if !piece.is_empty() {
+                runs.push((printable(piece, &mut column), self.theme.class(span.class)));
+            }
+            at = end;
+        }
+        if at < text.len() {
+            // Whatever the spans did not reach, which is the whole line when
+            // there are none: an unrecognised file type, or a row a test built
+            // by hand.
+            runs.push((printable(&text[at..], &mut column), self.theme.context));
+        }
+
         // Content is the one thing that can neither break nor elide: wrapping it
         // would move every line below it, and no part of a line is its
         // identifying part the way a path's tail is. So it says it continues and
         // nothing more. `SPEC.md` §11.1 rules that this is not what I6 means by
         // a truncated label.
-        self.put_marked(x, area.y, &body, room, style);
+        self.put_runs_marked(x, area.y, &runs, room);
     }
 }
 
 fn width_of(text: &str) -> usize {
-    Span::raw(text).width()
+    TextSpan::raw(text).width()
 }
 
 /// One side of a hunk header, in git's own shorthand.
@@ -678,31 +768,34 @@ fn elide_head(text: &str, room: usize) -> String {
 /// cursor or open an escape sequence, which corrupts the whole screen rather
 /// than one row.
 ///
-/// Columns are counted from the start of `text`, which is where the file counts
-/// them from too.
-fn printable(text: &str) -> String {
+/// Columns are counted from the start of the **line**, which is where the file
+/// counts them from too, so `column` is threaded in by the caller and carried
+/// across the runs one line is made of. A per-run counter would reset at every
+/// syntax boundary and align a tab to the token before it rather than to the
+/// line, which is invisible until a file indents with tabs and then wrong on
+/// every row of it.
+fn printable(text: &str, column: &mut usize) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut column = 0usize;
     for (i, c) in text.char_indices() {
         match c {
             '\t' => {
-                let stop = TAB_STOP - (column % TAB_STOP);
+                let stop = TAB_STOP - (*column % TAB_STOP);
                 out.extend(std::iter::repeat_n(' ', stop));
-                column += stop;
+                *column += stop;
             }
             c if c.is_control() => {
                 out.push(UNPRINTABLE);
-                column += 1;
+                *column += 1;
             }
             c if c.is_ascii() => {
                 out.push(c);
-                column += 1;
+                *column += 1;
             }
             c => {
                 out.push(c);
                 // Only the non-ASCII tail pays for a width lookup, which keeps
                 // the common line off the measuring path entirely.
-                column += width_of(&text[i..i + c.len_utf8()]);
+                *column += width_of(&text[i..i + c.len_utf8()]);
             }
         }
     }

@@ -9,6 +9,7 @@
 //! that work attaches to, not an attempt at it.
 
 use ratatui::style::{Color, Modifier, Style};
+use vigia_core::Class;
 
 /// Every colour the shell draws with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,49 @@ pub struct Theme {
     pub note: Style,
     /// Something went wrong and the reader should know.
     pub alert: Style,
+
+    /// `fn`, `if`, `pub`, `mut`.
+    pub keyword: Style,
+    /// A type's name.
+    pub type_name: Style,
+    /// A function's name.
+    pub function: Style,
+    /// A binding, a parameter, a field.
+    pub variable: Style,
+    /// A named constant, and a language literal.
+    pub constant: Style,
+    /// A string literal.
+    pub string: Style,
+    /// A numeric literal.
+    pub number: Style,
+    /// A comment.
+    pub comment: Style,
+}
+
+impl Theme {
+    /// The style a run of `class` is drawn in.
+    ///
+    /// [`Class::Plain`] takes [`Theme::context`] whatever line it lands on, and
+    /// that is `SPEC.md` §11.1's ruling rather than an oversight: the mockup
+    /// colours added, removed and context lines identically and leaves the diff
+    /// signal to the sigil, so unclassified text on an added line is *not*
+    /// green. What the picture uses instead is a row background tint, which
+    /// sixteen foreground-only colours cannot draw, so the signal is thinner
+    /// here than it is there until [#11](https://github.com/breferrari/vigia/issues/11)
+    /// lands one.
+    pub fn class(&self, class: Class) -> Style {
+        match class {
+            Class::Plain => self.context,
+            Class::Keyword => self.keyword,
+            Class::Type => self.type_name,
+            Class::Function => self.function,
+            Class::Variable => self.variable,
+            Class::Constant => self.constant,
+            Class::String => self.string,
+            Class::Number => self.number,
+            Class::Comment => self.comment,
+        }
+    }
 }
 
 impl Default for Theme {
@@ -54,6 +98,25 @@ impl Default for Theme {
             context: Style::new().fg(Color::Reset),
             note: Style::new().fg(Color::Magenta),
             alert: Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+
+            // The mockup's hues, mapped onto the sixteen names every terminal
+            // resolves. `assets/preview.svg` picks salmon for keywords, purple
+            // for functions, orange for types, blue for variables and gold for
+            // constants, so the bright half of the palette is where most of
+            // these land. String, number and comment are not in the picture and
+            // are chosen to sit clear of the diff colours: a green string on a
+            // red removal would read as an addition.
+            keyword: Style::new().fg(Color::LightRed),
+            type_name: Style::new().fg(Color::LightYellow),
+            function: Style::new().fg(Color::LightMagenta),
+            variable: Style::new().fg(Color::LightBlue),
+            constant: Style::new().fg(Color::Yellow),
+            string: Style::new().fg(Color::LightGreen),
+            number: Style::new().fg(Color::LightCyan),
+            // The mockup draws comments no differently from its own dimmed
+            // text, and a comment is the one thing on a diff line a reader
+            // routinely wants to skip.
+            comment: Style::new().fg(Color::DarkGray),
         }
     }
 }

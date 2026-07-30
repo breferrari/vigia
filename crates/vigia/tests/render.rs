@@ -27,7 +27,7 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use vigia::{Chrome, Position, Row, Theme, View, body_height, render};
-use vigia_core::LineKind;
+use vigia_core::{Class, LineKind, Span};
 
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
@@ -72,7 +72,62 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
         kind,
         number,
         text: text.to_owned(),
+        spans: Vec::new(),
     }
+}
+
+/// A one-line view whose single content row carries `spans`.
+///
+/// Built by hand because that is the only way to hand the renderer a *chosen*
+/// classification: `rows.rs` covers the other half, where the spans come from a
+/// real diff through a real highlighter.
+fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
+    // Guard the fixture. `Span` promises the runs of a line sum to its bytes,
+    // and a fixture that broke that would have the renderer drawing an
+    // unclassified tail while the assertions below read columns nobody
+    // classified.
+    //
+    // No spans at all is the exception and is legal: that is what a file type
+    // nothing recognises produces, and drawing it is its own test below.
+    let covered: usize = spans.iter().map(|span| span.len).sum();
+    assert!(
+        spans.is_empty() || covered == text.len(),
+        "the fixture's spans cover {covered} bytes of {}",
+        text.len()
+    );
+
+    View {
+        rows: vec![
+            file('M', "src/a.rs", 1, 0),
+            Row::Hunk {
+                old_start: 5,
+                old_lines: 0,
+                new_start: 5,
+                new_lines: 1,
+            },
+            Row::Line {
+                kind,
+                number: 5,
+                text: text.to_owned(),
+                spans,
+            },
+        ],
+        files: 1,
+        top: Position::default(),
+        read: 1,
+    }
+}
+
+/// The first column of row `y` holding `needle`.
+///
+/// Found rather than computed, because where the text starts depends on the
+/// gutter's width, and a test that recomputed that would be a second
+/// implementation of it agreeing with itself.
+fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .find(|x| buffer[(*x, y)].symbol() == needle)
+        .unwrap_or_else(|| panic!("no {needle:?} anywhere on row {y}"))
 }
 
 fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
@@ -457,4 +512,139 @@ fn the_palette_reaches_the_cells() {
         "the line number is not drawn in the gutter colour"
     );
     row_of('v', 0);
+}
+
+/// The row of content this file's syntax tests read.
+const CONTENT_ROW: u16 = 3;
+
+#[test]
+fn a_syntax_class_reaches_the_cells_while_the_sigil_keeps_the_diff() {
+    // `SPEC.md` §11.1's ruling, as cells, and it is two claims at once. The
+    // mockup colours added, removed and context lines identically and leaves the
+    // diff signal to the sigil, so the text must take its class colour *and* the
+    // `+` must keep the green the text no longer has.
+    //
+    // Invisible to every snapshot in this file, for the reason the palette test
+    // above gives: `TestBackend`'s `Display` writes symbols and drops styles.
+    let theme = Theme::default();
+    // l0 e1 t2 ' '3 v4 a5 l6 u7 e8 ' '9 =10 ' '11 1(12) ;13
+    let text = "let value = 1;";
+    let view = highlighted(
+        LineKind::Added,
+        text,
+        vec![
+            Span {
+                len: 3,
+                class: Class::Keyword,
+            },
+            Span {
+                len: 9,
+                class: Class::Plain,
+            },
+            Span {
+                len: 1,
+                class: Class::Number,
+            },
+            Span {
+                len: 1,
+                class: Class::Plain,
+            },
+        ],
+    );
+
+    let backend = screen(80, 6, &view, &chrome());
+    let sigil = column_of(&backend, CONTENT_ROW, "+");
+    let buffer = backend.buffer();
+    let at = |offset: u16| buffer[(sigil + 1 + offset, CONTENT_ROW)].style().fg;
+
+    assert_eq!(
+        buffer[(sigil, CONTENT_ROW)].style().fg,
+        theme.added.fg,
+        "the sigil stopped carrying the diff, which at sixteen colours is the \
+         only thing that still does"
+    );
+    assert_eq!(at(0), theme.keyword.fg, "`let` is not drawn as a keyword");
+    assert_eq!(at(12), theme.number.fg, "`1` is not drawn as a number");
+    assert_eq!(
+        at(4),
+        theme.context.fg,
+        "unclassified text on an added line is not drawn plain"
+    );
+    assert_ne!(
+        at(4),
+        theme.added.fg,
+        "the body of an added line is still green, which is the rule §11.1 \
+         considered and rejected in favour of following the mockup"
+    );
+    assert_ne!(
+        theme.keyword.fg, theme.number.fg,
+        "two classes share a colour, which is the one thing the class set exists \
+         to prevent"
+    );
+}
+
+#[test]
+fn a_line_with_no_spans_draws_exactly_as_it_did_before_highlighting() {
+    // A file type nothing recognises, which `SPEC.md` §11.1 rules is ordinary
+    // rather than an error. The renderer has to draw the whole line from the
+    // uncovered-tail path, so this is the fallback's only gate.
+    let theme = Theme::default();
+    let text = "nothing here has a grammar";
+    let view = highlighted(LineKind::Context, text, Vec::new());
+
+    let backend = screen(80, 6, &view, &chrome());
+    let buffer = backend.buffer();
+    let drawn: String = (0..buffer.area.width)
+        .map(|x| buffer[(x, CONTENT_ROW)].symbol())
+        .collect::<String>();
+
+    assert!(
+        drawn.contains(text),
+        "an unclassified line drew {drawn:?}, which does not contain its own text"
+    );
+    let start = column_of(&backend, CONTENT_ROW, "n");
+    assert_eq!(
+        buffer[(start, CONTENT_ROW)].style().fg,
+        theme.context.fg,
+        "an unclassified line is not drawn in the plain style"
+    );
+}
+
+#[test]
+fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
+    // The subtle half of drawing a line as runs. Tab stops are measured from the
+    // start of the line's own content, so the column counter has to be carried
+    // **across** span boundaries. Reset per span, a tab in the second run would
+    // advance to a stop measured from that run's start, which is invisible until
+    // a file indents with tabs and then wrong on every row of it.
+    //
+    // `a` sits at column 0, so the tab after it advances three columns to the
+    // stop at four. Counted from the span instead, it would advance four.
+    let view = highlighted(
+        LineKind::Context,
+        "a\tb",
+        vec![
+            Span {
+                len: 1,
+                class: Class::Keyword,
+            },
+            Span {
+                len: 2,
+                class: Class::Plain,
+            },
+        ],
+    );
+
+    let backend = screen(80, 6, &view, &chrome());
+    let a = column_of(&backend, CONTENT_ROW, "a");
+    let b = column_of(&backend, CONTENT_ROW, "b");
+
+    assert_eq!(
+        b - a,
+        4,
+        "`b` landed {} columns after `a`; a tab from column zero reaches the \
+         stop at four, and only a counter that restarted at the span boundary \
+         would put it anywhere else",
+        b - a
+    );
 }

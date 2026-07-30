@@ -18,7 +18,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Position, Row, body_height};
-use vigia_core::Frame;
+use vigia_core::{Frame, Highlighter};
 
 use support::{Scratch, materialise};
 
@@ -45,9 +45,14 @@ fn fixture(name: &str) -> Scratch {
 }
 
 /// Drive one action and report where the next frame would start from.
-fn after(app: &mut App, frame: &mut Frame, action: Action) -> Position {
+fn after(
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    action: Action,
+) -> Position {
     app.apply(action, frame, body()).expect("apply");
-    app.view(frame, body()).expect("view").top
+    app.view(frame, highlighter, body()).expect("view").top
 }
 
 #[test]
@@ -80,15 +85,24 @@ fn scrolling_down_and_back_up_returns_to_where_it_started() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     for rows in [1, 3, SPAN as isize, 17, (SPAN * 12) as isize] {
-        let start = app.view(&mut frame, body()).expect("view").top;
-        let moved = after(&mut app, &mut frame, Action::Scroll(rows));
+        let start = app
+            .view(&mut frame, &mut highlighter, body())
+            .expect("view")
+            .top;
+        let moved = after(&mut app, &mut frame, &mut highlighter, Action::Scroll(rows));
         assert_ne!(
             moved, start,
             "scrolling {rows} rows from {start:?} moved nowhere"
         );
-        let back = after(&mut app, &mut frame, Action::Scroll(-rows));
+        let back = after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Scroll(-rows),
+        );
         assert_eq!(
             back, start,
             "scrolling {rows} rows down from {start:?} and back up landed on \
@@ -107,10 +121,16 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let mut seen = Vec::new();
     for _ in 0..(SPAN * 3) {
-        seen.push(after(&mut app, &mut frame, Action::Scroll(1)));
+        seen.push(after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Scroll(1),
+        ));
     }
 
     let expected: Vec<Position> = (1..=SPAN * 3)
@@ -141,9 +161,15 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let start = SPAN * 3;
-    let landed = after(&mut app, &mut frame, Action::Scroll(start as isize));
+    let landed = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Scroll(start as isize),
+    );
     assert_eq!(
         landed,
         Position { file: 3, row: 0 },
@@ -152,7 +178,12 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
 
     let mut seen = Vec::new();
     for _ in 0..start {
-        seen.push(after(&mut app, &mut frame, Action::Scroll(-1)));
+        seen.push(after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Scroll(-1),
+        ));
     }
 
     // Absolute row `start` counting down, resolved back into a file and an offset.
@@ -181,10 +212,12 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let landed = after(
         &mut app,
         &mut frame,
+        &mut highlighter,
         Action::Scroll((SPAN * FILES * 4) as isize),
     );
     assert_eq!(
@@ -196,7 +229,9 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
         "scrolling far past the end did not rest on the last row"
     );
 
-    let view = app.view(&mut frame, body()).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     assert_eq!(
         view.rows.len(),
         1,
@@ -221,16 +256,17 @@ fn home_and_end_go_to_the_first_and_last_file() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     assert_eq!(
-        after(&mut app, &mut frame, Action::Bottom),
+        after(&mut app, &mut frame, &mut highlighter, Action::Bottom),
         Position {
             file: FILES - 1,
             row: 0
         }
     );
     assert_eq!(
-        after(&mut app, &mut frame, Action::Top),
+        after(&mut app, &mut frame, &mut highlighter, Action::Top),
         Position { file: 0, row: 0 }
     );
 }
@@ -245,9 +281,10 @@ fn a_page_keeps_one_row_of_overlap() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let rows = body();
-    let landed = after(&mut app, &mut frame, Action::Page(1));
+    let landed = after(&mut app, &mut frame, &mut highlighter, Action::Page(1));
     let absolute = landed.file * SPAN + landed.row;
     assert_eq!(
         absolute,
@@ -256,7 +293,7 @@ fn a_page_keeps_one_row_of_overlap() {
     );
 
     assert_eq!(
-        after(&mut app, &mut frame, Action::Page(-1)),
+        after(&mut app, &mut frame, &mut highlighter, Action::Page(-1)),
         Position { file: 0, row: 0 },
         "paging back did not return to the top"
     );
@@ -273,8 +310,9 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
-    let far = after(&mut app, &mut frame, Action::Bottom);
+    let far = after(&mut app, &mut frame, &mut highlighter, Action::Bottom);
     assert_eq!(
         far.file,
         FILES - 1,
@@ -288,7 +326,9 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     frame.advance().expect("advance");
     assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
 
-    let view = app.view(&mut frame, body()).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     assert_eq!(
         view.top.file,
         FILES / 2 - 1,
@@ -304,7 +344,9 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     frame.advance().expect("advance");
     assert_eq!(frame.files().len(), 0, "the worktree is not clean");
 
-    let view = app.view(&mut frame, body()).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     assert_eq!(view.files, 0);
     assert_eq!(view.top, Position::default());
     assert!(view.rows.is_empty());
@@ -320,12 +362,14 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     // Scroll somewhere first, or the assertion below cannot tell a preserved
     // position from a reset one: they are both (0, 0) at the top of the diff.
     let before = after(
         &mut app,
         &mut frame,
+        &mut highlighter,
         Action::Scroll((SPAN * 7 + 2) as isize),
     );
     assert_eq!(
@@ -335,7 +379,9 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     );
 
     for height in [0, 1] {
-        let view = app.view(&mut frame, height).expect("view");
+        let view = app
+            .view(&mut frame, &mut highlighter, height)
+            .expect("view");
         assert_eq!(view.rows.len(), height);
         assert_eq!(view.files, FILES);
         // A frame with no room to draw must not decide where the reader is. It
@@ -351,7 +397,9 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 
     // And the position survives being dragged short and back, which is the whole
     // sequence a reader actually performs.
-    let view = app.view(&mut frame, body()).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     assert_eq!(view.rows.len(), body());
     assert_eq!(
         view.top, before,
