@@ -43,8 +43,9 @@ fn theme() -> Theme {
     Theme::default()
 }
 
-/// Draw and hand back the rows as plain strings, trailing blanks trimmed.
-fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String> {
+/// Draw one screen and hand back the backend, which is both a picture and a
+/// grid of cells.
+fn drawn(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
     let theme = theme();
     terminal
@@ -53,7 +54,12 @@ fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String>
             render(f.buffer_mut(), area, view, &theme, chrome);
         })
         .expect("draw");
-    let backend = terminal.backend().clone();
+    terminal.backend().clone()
+}
+
+/// Draw and hand back the rows as plain strings, trailing blanks trimmed.
+fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String> {
+    let backend = drawn(width, height, view, chrome);
     format!("{backend}")
         .lines()
         // `TestBackend`'s Display quotes each row.
@@ -68,15 +74,7 @@ fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String>
 /// under-counts. The row has to be walked the way a terminal walks it, skipping
 /// what the previous symbol already covered.
 fn occupied(width: u16, height: u16, view: &View, chrome: &Chrome, y: u16) -> usize {
-    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
-    let theme = theme();
-    terminal
-        .draw(|f| {
-            let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, chrome);
-        })
-        .expect("draw");
-    let backend = terminal.backend().clone();
+    let backend = drawn(width, height, view, chrome);
     let buffer = backend.buffer();
 
     let mut total = 0usize;
@@ -262,6 +260,50 @@ fn no_row_ever_occupies_more_columns_than_the_screen() {
             }
         }
     }
+}
+
+#[test]
+fn a_mark_never_lands_on_the_second_half_of_a_wide_glyph() {
+    // Why `put_marked` reserves a column for the mark instead of writing it over
+    // the last one. A two-column glyph occupies one cell and leaves the next as
+    // a placeholder; stamping the mark into that placeholder leaves half a
+    // character on screen, and the half already drawn cannot be taken back.
+    //
+    // **The occupancy gate above cannot see this.** It skips placeholders by
+    // construction, so a row with a mark sitting in one still measures as
+    // well-formed. Found by mutation: replacing `limit - 1` with `limit` in
+    // `put_marked` left all eleven other gates green.
+    let mut saw_wide = false;
+    for (name, view, chrome) in cases() {
+        for width in WIDTHS {
+            for height in [3u16, 6] {
+                let backend = drawn(width, height, &view, &chrome);
+                let buffer = backend.buffer();
+                for y in 0..height {
+                    for x in 0..width.saturating_sub(1) {
+                        if Span::raw(buffer[(x, y)].symbol()).width() != 2 {
+                            continue;
+                        }
+                        saw_wide = true;
+                        // Blank rather than empty: ratatui writes a space into
+                        // the cell a wide glyph covers, not an empty symbol.
+                        // What must never appear there is anything visible.
+                        let after = buffer[(x + 1, y)].symbol();
+                        assert!(
+                            after.trim().is_empty(),
+                            "{name}: at {width}x{height} the cell after the wide \
+                             glyph at ({x}, {y}) holds {after:?}, so half a \
+                             character is on screen"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        saw_wide,
+        "no wide glyph was drawn anywhere in the sweep, so this proves nothing"
+    );
 }
 
 #[test]
