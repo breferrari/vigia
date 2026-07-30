@@ -348,8 +348,11 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
         budget(I7_STARTUP)
     );
 
-    // I9: a steady-state frame is one enumeration plus the file that changed.
-    // p99 rather than a mean, because the budget is a tail claim.
+    // I9 over the primitives: one enumeration plus the file that changed. This
+    // is the floor, not a frame any monitor has, because it has no memory of the
+    // frame before it. `a_real_frame_holds_the_frame_budget` gates the shape a
+    // monitor actually drives. p99 rather than a mean, because the budget is a
+    // tail claim.
     let frame = || {
         time(|| {
             let change = worktree
@@ -375,6 +378,76 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
         budget(I9_FRAME),
         frames.percentile(0.50).expect("samples"),
         frames.max().expect("samples")
+    );
+}
+
+#[test]
+fn a_real_frame_holds_the_frame_budget() {
+    // I9 through the type a monitor drives, which the gate above does not touch:
+    // it times the primitives, and a frame path with no memory of the previous
+    // frame is not a frame shape that exists once I2a is in.
+    //
+    // "Under continuous edits" is taken literally. One line is rewritten before
+    // every frame, so each frame revalidates ninety-nine files and recomputes
+    // the one that moved, which is the steady state the budget describes. The
+    // edit is deliberately outside the timed region: it stands in for the agent
+    // in the other pane, and its cost is not ours.
+    let scratch = Scratch::large_diff("i9-frame", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
+
+    if !absolute_gates_apply() {
+        return;
+    }
+
+    let mut edits = 0usize;
+    let mut next_frame = |frame: &mut vigia_core::Frame| {
+        scratch.edit_line(SHARED_PATH, 0, &format!("fn edited_{edits}() {{ }}"));
+        edits += 1;
+        time(|| materialise(frame))
+    };
+
+    for _ in 0..WARMUP_FRAMES {
+        next_frame(&mut frame);
+    }
+
+    let before = frame.stats();
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(next_frame(&mut frame));
+    }
+    let cost = delta(before, frame.stats());
+
+    // Non-vacuity, both directions. A frame that recomputed nothing would be
+    // timing pure revalidation and calling it "under edits"; one that recomputed
+    // everything would mean I2a had stopped working and the budget below is the
+    // only thing that would notice.
+    assert!(
+        cost.computed >= SAMPLED_FRAMES as u64,
+        "{} recomputes over {SAMPLED_FRAMES} frames that each edited a file, so \
+         the edits are not reaching the frame",
+        cost.computed
+    );
+    assert!(
+        cost.computed <= (SAMPLED_FRAMES * 2) as u64,
+        "{} recomputes over {SAMPLED_FRAMES} frames, so a frame is recomputing \
+         files nobody edited",
+        cost.computed
+    );
+
+    let p99 = frames.percentile(0.99).expect("samples");
+    assert!(
+        p99 <= budget(I9_FRAME),
+        "I9: a real frame over {FILES} files was {p99:?} p99, over the {:?} \
+         budget (p50 {:?}, max {:?}, {} recomputed, {} reused, {} read)",
+        budget(I9_FRAME),
+        frames.percentile(0.50).expect("samples"),
+        frames.max().expect("samples"),
+        cost.computed,
+        cost.reused,
+        cost.bytes
     );
 }
 

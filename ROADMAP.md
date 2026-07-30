@@ -57,8 +57,10 @@ Prove `gix` before anything is built on top, since everything sits on it. No TUI
 | ✅ | Gate every Phase 1 budget in CI (I4, I7, I9) | [#3](https://github.com/breferrari/vigia/issues/3) |
 
 **Phase 1 is closed.** The engine holds every budget it was written against, and
-`gix` was the right call: revalidating a 100-file frame over a 100k-line diff
-costs 3.93ms p99 and reads nothing, against 18.28ms and 3.6 MiB to recompute it.
+`gix` was the right call. On a 100-file, 100k-line diff: a real frame under
+continuous edits is 3.93ms p99 to revalidate and 6.97ms p99 with a file edited
+before every frame, against 18.28ms and 3.6 MiB for a cold frame with nothing to
+reuse. The 16ms budget holds with room, and only the cold frame breaches it.
 
 ## Phase 2 — minimum monitor
 
@@ -70,6 +72,7 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ⬜ | I5 correct with zero interaction | [#6](https://github.com/breferrari/vigia/issues/6) |
 | ⬜ | I6 legible at 40 columns | [#7](https://github.com/breferrari/vigia/issues/7) |
 | ⬜ | I8 terminal restored exactly on exit | [#8](https://github.com/breferrari/vigia/issues/8) |
+| ⬜ | A truncated `.git/index` aborts instead of reporting | [#13](https://github.com/breferrari/vigia/issues/13) |
 | ⬜ | I2b re-highlight only changed hunks (`syntect`) | [#4](https://github.com/breferrari/vigia/issues/4) |
 | ⬜ | I3 flat resources over days (soak) | [#5](https://github.com/breferrari/vigia/issues/5) |
 

@@ -64,9 +64,10 @@ pub struct FileDiff {
     pub removed: u32,
     /// Bytes compared: index-side content plus worktree-side content.
     ///
-    /// Recorded because I2 is a claim about work being proportional to edit
-    /// size rather than file size, and that is only checkable against a byte
-    /// count.
+    /// Recorded because I2a is a claim about work being proportional to what
+    /// changed rather than to worktree size, and that is only checkable against
+    /// a byte count. It is what the frame path sums to prove a reuse read
+    /// nothing.
     pub bytes: u64,
 }
 

@@ -419,6 +419,18 @@ fn a_failed_advance_leaves_the_frame_intact() {
         .advance()
         .expect_err("a corrupt index was walked without complaint");
 
+    // Pin the boundary itself, so a `gix` bump that fixes #13 makes this test
+    // say so instead of leaving the comment above quietly wrong. Twenty bytes is
+    // the first length that reports rather than aborts, so it must still report.
+    // The panicking side cannot be asserted from here: the release profile sets
+    // `panic = "abort"`, so a `#[should_panic]` test would take the whole binary
+    // with it.
+    std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 20]).expect("truncate the index");
+    worktree
+        .frame()
+        .advance()
+        .expect_err("a 20-byte index no longer reports an error, so #13 may have moved");
+
     assert_eq!(
         frame.files(),
         files.as_slice(),
