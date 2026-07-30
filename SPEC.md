@@ -88,13 +88,28 @@ design effort goes once the invariants hold.
 Cargo workspace, two crates:
 
 - **`vigia-core`** — library. Git (`gix`), diff modelling, incremental
-  highlighting (`syntect`), the watch and coalesce engine. **No terminal I/O, no
-  ratatui.** Every invariant except I6 and I8 is testable here, headlessly.
+  highlighting (`syntect`), filesystem events (`notify`), the watch and coalesce
+  engine. **No terminal I/O, no ratatui.** Every invariant except I6 and I8 is
+  testable here, headlessly.
 - **`vigia`** — binary. `ratatui` + `crossterm` shell: input, layout, theming.
   Thin by design, so the TUI stays swappable and the engine stays provable.
 
 The split is a dependency decision, not a hedge: the TUI renders whatever the
 core produces, so the core has to work first or the TUI is being built on sand.
+
+`notify` is named here because I1 requires filesystem events rather than a
+timer, and each platform delivers them differently: `inotify` on Linux,
+`FSEvents` on macOS, `ReadDirectoryChangesW` on Windows. `notify` is the
+standard Rust abstraction over those three, and it keeps the binary pure Rust.
+Verified 2026-07-30 against `x86_64-pc-windows-msvc`,
+`x86_64-unknown-linux-musl` and `aarch64-apple-darwin`: no `cc`, `cmake` or
+`bindgen` in any of the three graphs. The `-sys` crates it pulls
+(`inotify-sys`, `fsevent-sys`, `windows-sys`) are FFI declarations against
+facilities the OS already ships, so they compile no C.
+
+**Coalescing stays ours.** `notify` has a companion debouncer crate, and taking
+it would move coalesce policy out of `vigia-core`, which is the one place I1 is
+testable. `notify` supplies raw events and nothing else.
 
 ## 7. Testing
 
@@ -139,10 +154,24 @@ tap, prebuilt binaries on GitHub releases.
 
 ## 10. Open questions
 
-- [ ] Does `gix` cover working-tree-vs-index diff at the fidelity and speed
-      needed? Its own docs call the top-level crate "usable but evolving."
-      **Phase 1 answers this**, and it is the one dependency that could force a
-      rethink.
+- [x] ~~Does `gix` cover working-tree-vs-index diff at the fidelity and speed
+      needed?~~ **Answered 2026-07-30: yes.** Hunk boundaries match
+      `git diff -U3` exactly, with git used as the oracle at every edit gap from
+      0 to 10 lines. On a 100k-line diff, release build: first change available
+      in 3.84ms against the 100ms I4 budget, single-file re-diff 3.27ms p99
+      against the 16ms I9 budget, process start to first paint 20.37ms against
+      the 50ms I7 budget. The dependency that could have forced a rethink did
+      not.
+- [ ] Rename tracking cannot stream. Pairing a deletion with an addition needs
+      the whole walk, so with it on the first change arrives at 97% of the walk
+      and time-to-first equals time-to-last. It is on by default anyway, because
+      reporting a move as an unrelated delete plus add misdescribes what the
+      agent did. Confirm against a week of real use, or paint without renames
+      and reconcile them on a later frame.
+- [ ] Re-diffing every changed file costs 18.58ms p99 on a 100k-line diff,
+      over the I9 budget, against 3.27ms for a single file. I2 is therefore
+      load-bearing rather than an optimisation, and the frame path must never
+      re-diff what did not change.
 - [ ] Is `syntect` fast enough incrementally to hold I2, or does it force
       tree-sitter — and with it a C toolchain — back in?
 - [ ] Default view: unstaged only, or working-tree-vs-HEAD? Unstaged is the

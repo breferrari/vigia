@@ -30,6 +30,7 @@ the change is wrong.** Reject it and say why.
 |---|---|---|
 | TUI | `ratatui` + `crossterm` | `bottom`, a btop-class system monitor, runs exactly this pair. `crossterm` is the only backend with Windows plus cross-platform mouse; `termion` is Unix-only |
 | Git | `gix` | In-process diff. No `git diff` subprocess per tick |
+| Watch | `notify` | Native FS events per platform, which I1 requires instead of a timer. Pure Rust: no `cc` on any tier-1 target. Coalescing is ours, not its debouncer crate |
 | Highlighting | `syntect` | Pure Rust, so no C toolchain in CI. What `delta` and `bat` use |
 | Release | `cargo-dist` | Cross-platform binaries + Homebrew formula + GH workflow |
 
@@ -38,8 +39,11 @@ gives a static binary with no cross-toolchain, and macOS/Windows are tier-1.
 **Choosing tree-sitter over `syntect` reintroduces a C toolchain** — that is a
 spec change, not an implementation detail.
 
-`gix` is the least-precedented dependency here (`delta` uses `git2`/libgit2
-instead, likely for age reasons). **Prove `gix` first.**
+`gix` was the least-precedented dependency here (`delta` uses `git2`/libgit2
+instead, likely for age reasons), so Phase 1 proved it before anything was built
+on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and
+every Phase 1 budget holds with room. Evidence and the one constraint it came
+with are in `SPEC.md` §10.
 
 ## Method: spec-driven, drift-enforced
 
