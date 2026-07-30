@@ -302,7 +302,16 @@ impl<'w> Frame<'w> {
     ///
     /// # Panics
     ///
-    /// If `index` is out of range, the same way indexing a slice does.
+    /// If `index` is out of range, the same way indexing a slice does. The way
+    /// to hit that is to hold an index across [`Frame::advance`], which is what
+    /// a scroll position is: the agent in the other pane commits, the list
+    /// shrinks, and the index now points past the end.
+    ///
+    /// Panicking is the deliberate choice there rather than returning `None`. A
+    /// caller has to clamp such an index against [`Frame::files`] for its own
+    /// correctness anyway, or it renders a selection that no longer exists, so a
+    /// lenient accessor would turn a caller bug into a silently wrong row
+    /// instead of preventing it.
     pub fn diff(&mut self, index: usize) -> Result<(&FileChange, &FileDiff)> {
         let change = &self.files[index];
         let path = self.worktree.workdir().join(&change.path);
