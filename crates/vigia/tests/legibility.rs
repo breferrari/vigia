@@ -58,12 +58,31 @@ fn drawn(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
 }
 
 /// Draw and hand back the rows as plain strings, trailing blanks trimmed.
+///
+/// Rebuilt from the cells rather than parsed out of `TestBackend`'s `Display`.
+/// That `Display` appends `Hidden by multi-width symbols: [...]` to any row
+/// holding a two-column glyph, so every assertion about how a row *ends* was
+/// silently reading that note instead of the row. Walking the cells the way a
+/// terminal does, skipping what the previous symbol already covered, gives back
+/// exactly what a reader would see.
 fn rows_at(width: u16, height: u16, view: &View, chrome: &Chrome) -> Vec<String> {
     let backend = drawn(width, height, view, chrome);
-    format!("{backend}")
-        .lines()
-        // `TestBackend`'s Display quotes each row.
-        .map(|line| line.trim_matches('"').trim_end().to_owned())
+    let buffer = backend.buffer();
+    (0..height)
+        .map(|y| {
+            let mut row = String::new();
+            let mut covered = 0usize;
+            for x in 0..width {
+                if covered > 0 {
+                    covered -= 1;
+                    continue;
+                }
+                let symbol = buffer[(x, y)].symbol();
+                row.push_str(symbol);
+                covered = Span::raw(symbol).width().saturating_sub(1);
+            }
+            row.trim_end().to_owned()
+        })
         .collect()
 }
 
@@ -263,46 +282,52 @@ fn no_row_ever_occupies_more_columns_than_the_screen() {
 }
 
 #[test]
-fn a_mark_never_lands_on_the_second_half_of_a_wide_glyph() {
+fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
     // Why `put_marked` reserves a column for the mark instead of writing it over
-    // the last one. A two-column glyph occupies one cell and leaves the next as
-    // a placeholder; stamping the mark into that placeholder leaves half a
-    // character on screen, and the half already drawn cannot be taken back.
+    // the last one, and the reason is not the one it looks like.
     //
-    // **The occupancy gate above cannot see this.** It skips placeholders by
-    // construction, so a row with a mark sitting in one still measures as
-    // well-formed. Found by mutation: replacing `limit - 1` with `limit` in
-    // `put_marked` left all eleven other gates green.
-    let mut saw_wide = false;
-    for (name, view, chrome) in cases() {
-        for width in WIDTHS {
-            for height in [3u16, 6] {
-                let backend = drawn(width, height, &view, &chrome);
-                let buffer = backend.buffer();
-                for y in 0..height {
-                    for x in 0..width.saturating_sub(1) {
-                        if Span::raw(buffer[(x, y)].symbol()).width() != 2 {
-                            continue;
-                        }
-                        saw_wide = true;
-                        // Blank rather than empty: ratatui writes a space into
-                        // the cell a wide glyph covers, not an empty symbol.
-                        // What must never appear there is anything visible.
-                        let after = buffer[(x + 1, y)].symbol();
-                        assert!(
-                            after.trim().is_empty(),
-                            "{name}: at {width}x{height} the cell after the wide \
-                             glyph at ({x}, {y}) holds {after:?}, so half a \
-                             character is on screen"
-                        );
-                    }
-                }
+    // Overwriting cannot corrupt the row: ratatui refuses to write into the
+    // continuation cell a two-column glyph covers. What it does instead is
+    // **drop the mark silently**. Fill the line to its last column and the mark
+    // has nowhere left to go, so a row that continues past the edge is drawn as
+    // one that simply ends, which is the single thing the mark exists to
+    // prevent.
+    //
+    // A plain ASCII line never reaches this: it ends on a one-column character,
+    // so the mark always lands. It needs a glyph that ends exactly on the edge,
+    // which is why this sweeps the double-width fixture. Found by mutation,
+    // where `limit - 1` becoming `limit` left all eleven other gates green.
+    let view = awkward();
+    let mut saw_swallowable = false;
+    for width in WIDTHS {
+        let rows = rows_at(width, 6, &view, &chrome());
+        for (y, full) in [(2usize, "見出し a 見出し b 見出し c"), (3, "🙂🙂🙂 tail")]
+        {
+            let row = &rows[y];
+            if row.is_empty() {
+                continue;
+            }
+            // The sigil costs a column beyond the text itself.
+            if Span::raw(full).width() < usize::from(width) {
+                continue;
+            }
+            assert!(
+                row.ends_with(CONTINUES),
+                "at {width} columns a clipped line of wide glyphs was drawn as \
+                 one that ends: {row:?}"
+            );
+            // Non-vacuity that matters more than the usual kind: only the widths
+            // where a glyph lands on the final column can lose the mark, so a
+            // sweep that never hit one would pass against the defect.
+            if Span::raw(row.trim_end_matches(CONTINUES)).width() + 1 == usize::from(width) {
+                saw_swallowable = true;
             }
         }
     }
     assert!(
-        saw_wide,
-        "no wide glyph was drawn anywhere in the sweep, so this proves nothing"
+        saw_swallowable,
+        "no width put a glyph against the final column, so the sweep never \
+         reached the case this test is about"
     );
 }
 
