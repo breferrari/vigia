@@ -340,10 +340,12 @@ fn a_real_repository_draws() {
     // frame produces are the ones the renderer was designed against; the rest of
     // this file builds rows and never draws them.
     //
-    // What it still does not cover, and what
-    // [#8](https://github.com/breferrari/vigia/issues/8) is for: the terminal
-    // itself. Raw mode, the alternate screen, mouse capture and the panic hook
-    // are all outside a `TestBackend`.
+    // What it still does not cover is the terminal itself: raw mode, the
+    // alternate screen, mouse capture and the panic hook are all outside a
+    // `TestBackend`, so none of them can be reached from here.
+    // [#8](https://github.com/breferrari/vigia/issues/8) proves them where they
+    // live instead, in `crates/vigia/src/terminal.rs`, against a recorded console
+    // rather than a real one.
     let scratch = Scratch::new("shell-rows-draw");
     scratch.write("src/lib.rs", numbered(12));
     scratch.write("README.md", unique("readme", 3));
