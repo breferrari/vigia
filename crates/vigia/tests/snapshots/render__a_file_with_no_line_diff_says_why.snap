@@ -1,0 +1,12 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(60, 8, &view, &chrome())"
+---
+"vigia                                                3 files"
+"M assets/banner.jpg                                         "
+"  binary                                                    "
+"U src/merge.rs                                              "
+"  unresolved conflict                                       "
+"R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs +0 -0"
+"                                                            "
+"q quit  jk scroll                                        1/3"

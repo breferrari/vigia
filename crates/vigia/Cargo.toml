@@ -9,4 +9,12 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+ratatui.workspace = true
 vigia-core = { path = "../vigia-core", version = "0.0.0" }
+
+# The tests reach `vigia-core/tests/support` by `#[path]`, the way
+# `vigia-core/benches/engine.rs` does, so a shell test and an engine gate cannot
+# drift into measuring different repositories. That module shells out to real
+# `git`, which is also what keeps this list exactly what SPEC.md names.
+[dev-dependencies]
+insta.workspace = true

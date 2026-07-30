@@ -1,0 +1,10 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(40, 6, &view, &chrome())"
+---
+"vigia                            0 files"
+"working tree clean                      "
+"                                        "
+"                                        "
+"                                        "
+"q quit  jk scroll                       "
