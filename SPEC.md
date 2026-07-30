@@ -37,7 +37,7 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 | **I1** | Redraw is **event-driven**, never a fixed timer. No filesystem event and no git index change means no work. | **0 wakeups** while idle | CPU sampled over a 60s idle window; assert no render calls |
 | **I2a** | **Re-diffing is incremental** — the frame path never re-diffs a file that did not change. | re-diff cost ∝ what changed, **not** worktree size | Assert the re-diff count and byte count for a single-line edit, across **two** fixtures differing only in changed-file count. One fixture cannot prove it: see §7 |
 | **I2b** | **Re-highlighting is incremental** — only changed hunks are re-parsed. | re-parse ∝ edit size, **not** file size | Assert the re-parse count and byte count for a single-line edit, across **two** fixtures differing only in file size. One fixture cannot prove it, for the reason I2a's row gives: see §7 |
-| **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak test: 24h of synthetic edits, RSS sampled every 5 min |
+| **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak: synthetic edits driven through the whole pipeline, RSS sampled at a fixed count across the window. Scheduled rather than per-commit, and the scheduled window is shorter than 24h for a reason that is not ours: see the note below and §7 |
 | **I4** | **Streams, never buffers.** First paint is independent of total diff size. | **first paint < 100ms** on a 100k-line diff | `criterion`, gated in CI |
 | **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
 | **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns, plus structural gates in `crates/vigia/tests/legibility.rs` sweeping every width from 1 to 120: no row over-occupies, no hint is cut in half, and every label that lost characters says so |
@@ -77,6 +77,24 @@ A regression past any budget **fails the build.**
 > as worse than one stated uniformly. Tracked as
 > [#24](https://github.com/breferrari/vigia/issues/24) rather than assumed away,
 > and the invariant above now states its own limit instead of overselling it.
+
+> [!note] Why the scheduled soak is not twenty-four hours long
+> The budget is a claim about a day and it stays one. What changed is the proof
+> column, because the number in it was unrunnable: a **GitHub-hosted job is
+> terminated at six hours** of execution time, where a self-hosted one gets five
+> days. Verified against GitHub's published limits, 2026-07-31.
+>
+> So the scheduled run takes the longest window that fits under the cap, and the
+> full 24h is reached by `workflow_dispatch`, which carries the duration, on a
+> machine with no cap. The shape of the measurement does not change with the
+> window: the sample **count** is fixed, so the cadence is exactly the five
+> minutes above at 24h and proportionally tighter below it, and the statistic is
+> computed identically either way.
+>
+> What does not scale down is the warmup. Every process climbs to an allocator
+> plateau before it is flat, so a window short enough to be all warmup can only
+> measure warmup, and the gate refuses to assert there rather than reporting a
+> number it cannot stand behind. §7 carries that as a rule.
 
 ## 4. Scope
 
@@ -191,7 +209,9 @@ The rule that closes it has to account for **flooring**. A filesystem stamps a m
 - **Gates are mutation tested before they are trusted.** Break the code deliberately, confirm the gate goes red, restore. Two of the flaws found this way were invisible to reading: a structural gate comparing one call against the sum of its own calls, and a p99 over too few cold samples.
 - **Steady-state budgets are sampled after a warmup**, and over enough frames for a percentile to be one. I9 is a claim about steady state, so the cold path is outside its scope by definition; measured cold frames run ~40ms against a warm p99 of ~3ms, and at 30 samples a nearest-rank p99 is just the maximum.
 - **A CI guard fails the build if `cc`, `cmake` or `bindgen` enters the dependency graph** on any tier-1 target, plus a musl build asserting the binary links no shared libraries. The pure-Rust constraint is what makes musl-static and Windows cheap, so it is enforced rather than trusted.
-- **Soak test** for I3, scheduled rather than per-commit.
+- **The soak drives the whole pipeline, not the engine.** I3 is a claim about the process a reader leaves open, so measuring `vigia-core` alone would prove it about a program nobody runs. The harness is `vigia::run` with the terminal removed: a real `notify` watch thread, real coalescing, `Frame::advance` per tick, follow and scroll through `App`, `View::collect` driving the `Highlighter`, and `render` into a `ratatui` buffer. What it leaves out is named rather than discovered later: the terminal takeover, which needs a tty and is I8's; the input thread; and index writes, because the loop reaches the same mass-eviction state by reverting files and keeping `git` out of the measured window is what makes the temp-file gate exact.
+- **The soak is two tiers, like every other budget here.** *Structural* gates — the retained caches bounded by the current diff and by the viewport, eviction actually happening, and **zero temp files retained** — are counters and directory entries, so they are hardware-independent, take no slack, and run in every `cargo test`. The *absolute* gate is RSS drift, and it is the one that has to be scheduled.
+- **A drift gate over a window shorter than its own warmup is measuring warmup.** RSS climbs to an allocator plateau in the first minutes of any process and only then goes flat, so a short window reads that climb as a leak and a generous threshold would then wave a real leak through. The gate therefore discards a warmup prefix, compares the median of the first quarter of what remains against the median of the last quarter, and **refuses to assert at all** below a window where that leaves two ends worth comparing. Refusing is the point: a gate that cannot say "no drift" has not been tested, and one that says it from four samples is worse than absent.
 - **`proptest`** over diff parsing and hunk-boundary logic.
 
 ## 8. Phases
