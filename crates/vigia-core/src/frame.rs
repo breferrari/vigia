@@ -115,10 +115,17 @@ struct Observed {
 /// plausibly sit on. FAT and exFAT quantise to 2s, HFS+ and ext3 to 1s, NTFS to
 /// somewhere between 1ms and 16ms, and ext4, APFS, xfs and btrfs to far less.
 /// The constant has to be an **upper bound** on the real granularity, so being
-/// generous is the safe direction: it costs redundant diffs of files written in
-/// the last two seconds, and those are files that just changed. It could be
-/// narrowed by estimating a worktree's real granularity from the modification
-/// times status already reports, which `SPEC.md` §10 keeps open.
+/// generous is the safe direction.
+///
+/// It is not free, and the cost is worse than "a few redundant diffs". A file
+/// written once is re-diffed for the whole margin, which for one file is nothing.
+/// A bulk rewrite is different: after all 100 files of the budget fixture change
+/// at once, every frame recomputes every diff for two seconds, 18 to 21ms a
+/// frame, which is over the I9 budget for about eighty consecutive frames. A
+/// formatter or a branch switch produces exactly that. The fix is not a smaller
+/// guess but a measured one: the smallest positive difference between the
+/// modification times status already reports bounds the real granularity, which
+/// on NTFS would mean 16ms rather than 2s. `SPEC.md` §10 holds the numbers.
 const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
