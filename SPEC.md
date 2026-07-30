@@ -116,7 +116,32 @@ testable. `notify` supplies raw events and nothing else.
 - **Snapshot tests over `ratatui::backend::TestBackend` with `insta`** — render
   frames into an in-memory buffer, snapshot as text. This is what makes I5 and I6
   assertable at all: the UI becomes diffable text.
-- **`criterion`** for I4, I7 and I9, gated in CI.
+- **`criterion`** for I4, I7 and I9, **tracking rather than gating.** Criterion
+  compares a run against a saved baseline, and the budgets in §3 are absolute,
+  so it is the right instrument for "this got 20% slower" and the wrong one for
+  a pass/fail line. Compiled in CI so the benchmarks cannot rot; not timed
+  there, because a shared runner cannot produce a number worth comparing.
+- **Budget gates** in `crates/vigia-core/tests/budgets.rs`, in **two tiers**,
+  because an absolute wall-clock threshold is a strong instrument on a known
+  machine and a weak one on a hosted runner:
+  - *Structural* gates compare the engine against itself across fixtures that
+    differ only in how much changed. They are ratios and exact byte counts, so
+    they are hardware-independent, take **no slack**, and are what actually
+    catches a regression. Making the frame path re-read every changed file is a
+    5x wall-clock change that a generous threshold waves through, and a 100x
+    byte-count change that these cannot.
+  - *Absolute* gates hold the wall clock to §3. Release only, since the budgets
+    were set against optimised code, and with a slack multiplier
+    (`VIGIA_BUDGET_SLACK`, default 1) so a shared runner's variance does not
+    read as a code regression.
+- **Steady-state budgets are sampled after a warmup**, and over enough frames
+  for a percentile to be one. I9 is a claim about steady state, so the cold path
+  is outside its scope by definition; measured cold frames run ~40ms against a
+  warm p99 of ~3ms, and at 30 samples a nearest-rank p99 is just the maximum.
+- **A CI guard fails the build if `cc`, `cmake` or `bindgen` enters the
+  dependency graph** on any tier-1 target, plus a musl build asserting the
+  binary links no shared libraries. The pure-Rust constraint is what makes
+  musl-static and Windows cheap, so it is enforced rather than trusted.
 - **Soak test** for I3, scheduled rather than per-commit.
 - **`proptest`** over diff parsing and hunk-boundary logic.
 
