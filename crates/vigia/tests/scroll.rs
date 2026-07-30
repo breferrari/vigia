@@ -315,13 +315,40 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     materialise(&mut frame);
     let mut app = App::new();
 
+    // Scroll somewhere first, or the assertion below cannot tell a preserved
+    // position from a reset one: they are both (0, 0) at the top of the diff.
+    let before = after(
+        &mut app,
+        &mut frame,
+        Action::Scroll((SPAN * 7 + 2) as isize),
+    );
+    assert_eq!(
+        before,
+        Position { file: 7, row: 2 },
+        "the scroll did not land"
+    );
+
     for height in [0, 1] {
         let view = app.view(&mut frame, height).expect("view");
         assert_eq!(view.rows.len(), height);
         assert_eq!(view.files, FILES);
+        // A frame with no room to draw must not decide where the reader is. It
+        // resolved nothing, so it has nothing to say about the position, and
+        // reporting one would drag the reader back to the top of the file for as
+        // long as the pane stayed short.
+        assert_eq!(
+            view.top, before,
+            "a {height}-row screen moved the reader from {before:?} to {:?}",
+            view.top
+        );
     }
 
-    // And the position it was left with is still usable once there is room again.
+    // And the position survives being dragged short and back, which is the whole
+    // sequence a reader actually performs.
     let view = app.view(&mut frame, body()).expect("view");
     assert_eq!(view.rows.len(), body());
+    assert_eq!(
+        view.top, before,
+        "dragging the pane short and back lost the reader's place"
+    );
 }

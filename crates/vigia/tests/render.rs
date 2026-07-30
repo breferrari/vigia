@@ -245,6 +245,57 @@ fn tabs_become_columns_and_control_characters_become_visible() {
 }
 
 #[test]
+fn a_double_width_character_is_never_cut_in_half() {
+    // Diffs carry whatever is in the files, and a CJK ideograph or an emoji
+    // occupies two columns. Writing one into the last column of a row would
+    // either overflow the buffer or print half a glyph, and either way every
+    // column after it on that row is wrong. Swept across widths because the
+    // failure only happens when a character straddles the exact clip boundary,
+    // so a single width tests one alignment out of two.
+    let view = View {
+        rows: vec![
+            file('M', "docs/読み方.md", 2, 0),
+            line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
+            line(LineKind::Added, 2, "🙂🙂🙂 tail"),
+        ],
+        files: 1,
+        top: Position::default(),
+        read: 1,
+    };
+
+    for width in 6..48u16 {
+        let backend = screen(width, 5, &view, &chrome());
+        let buffer = backend.buffer();
+        for y in 0..5 {
+            // A two-column symbol lives in one cell and the cell after it is left
+            // as a blank placeholder. Counting that placeholder as a column is
+            // wrong, and getting it wrong the first time made a correct row
+            // measure two columns over: the row has to be reconstructed the way a
+            // terminal walks it, skipping what the previous symbol already
+            // covered.
+            let mut occupied = 0usize;
+            let mut covered = 0usize;
+            for x in 0..width {
+                let cell = ratatui::text::Span::raw(buffer[(x, y)].symbol()).width();
+                if covered > 0 {
+                    covered -= 1;
+                    continue;
+                }
+                occupied += cell;
+                covered = cell.saturating_sub(1);
+            }
+            assert!(
+                occupied <= usize::from(width),
+                "row {y} at width {width} occupies {occupied} columns, so a \
+                 double-width character was split or overflowed"
+            );
+        }
+    }
+
+    insta::assert_snapshot!(screen(40, 5, &view, &chrome()));
+}
+
+#[test]
 fn the_gutter_gives_way_before_the_text_does() {
     // The rule is that line numbers go when they would leave the content less
     // than a readable column. Both sides are asserted, because a rule that only

@@ -39,9 +39,12 @@ impl App {
     /// Record that something went wrong without giving up the screen.
     ///
     /// A monitor beside an agent sees a repository mid-`git gc` and files that
-    /// vanish between being named and being read. `SPEC.md` §6 and the core's
-    /// own error docs both call those ordinary, so they belong on the footer,
-    /// not on the way out.
+    /// vanish between being named and being read. The core calls both ordinary
+    /// and says so where it matters: [`vigia_core::Error::MissingBlob`] is
+    /// documented as something a monitor must survive rather than exit on, and
+    /// [`vigia_core::Frame::advance`] leaves the previous frame intact rather
+    /// than blanking a pane. `SPEC.md` §2 is why: a runtime measured in days
+    /// makes every transient failure a certainty rather than a possibility.
     pub fn warn(&mut self, message: impl Into<String>) {
         self.notice = Some(message.into());
     }
@@ -77,7 +80,11 @@ impl App {
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
-                let step = height.saturating_sub(1).max(1) as isize;
+                let rows = height.saturating_sub(1).max(1);
+                // `as isize` would turn an absurd height into a negative step and
+                // send a page-down upwards. A terminal cannot be that tall, which
+                // is a reason to convert rather than to rely on it.
+                let step = isize::try_from(rows).unwrap_or(isize::MAX);
                 self.scroll(pages.saturating_mul(step), frame)?;
             }
             Action::Top => self.position = Position::default(),
@@ -94,23 +101,24 @@ impl App {
         Ok(true)
     }
 
+    /// The two directions are deliberately not symmetrical, and the signatures
+    /// say so rather than hiding it.
+    ///
+    /// Down needs neither the frame nor a way to fail: it adds to the offset and
+    /// lets [`View::collect`] carry the overrun into the following files, which is
+    /// what keeps resolving and drawing to one diff per file instead of two. Up
+    /// cannot do that. Stepping off the top of a file means knowing how tall the
+    /// one above it is, which is a question only the frame can answer and which
+    /// can fail.
     fn scroll(&mut self, rows: isize, frame: &mut Frame) -> Result<()> {
         match rows.cmp(&0) {
             std::cmp::Ordering::Equal => Ok(()),
-            std::cmp::Ordering::Greater => self.down(rows.unsigned_abs(), frame),
+            std::cmp::Ordering::Greater => {
+                self.position.row = self.position.row.saturating_add(rows.unsigned_abs());
+                Ok(())
+            }
             std::cmp::Ordering::Less => self.up(rows.unsigned_abs(), frame),
         }
-    }
-
-    /// Scrolling down needs no arithmetic against the file at all.
-    ///
-    /// [`View::collect`] resolves a row offset that overruns its file by carrying
-    /// it into the following ones, and reports where it landed. Doing it there
-    /// rather than here is what keeps the resolve and the draw to one diff per
-    /// file instead of two.
-    fn down(&mut self, rows: usize, _frame: &mut Frame) -> Result<()> {
-        self.position.row = self.position.row.saturating_add(rows);
-        Ok(())
     }
 
     fn up(&mut self, rows: usize, frame: &mut Frame) -> Result<()> {

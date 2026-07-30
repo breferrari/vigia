@@ -143,6 +143,29 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
 }
 
 #[test]
+fn a_shifted_key_still_carries_its_meaning() {
+    // `G` cannot be typed without shift, and a terminal reports the modifier
+    // alongside it. Only CONTROL is special-cased in the map, so this is really
+    // asserting that the special case did not grow to swallow every modifier:
+    // filtering on `modifiers.is_empty()` anywhere would make the End binding
+    // unreachable on every terminal that reports SHIFT, which is all of them.
+    assert_eq!(
+        action_for(&with(KeyModifiers::SHIFT, KeyCode::Char('G'))),
+        Some(Action::Bottom)
+    );
+    assert_eq!(
+        action_for(&with(KeyModifiers::SHIFT, KeyCode::End)),
+        Some(Action::Bottom)
+    );
+    // ALT is not a modifier this map assigns meaning to, so an alt-arrow keeps
+    // the arrow's meaning rather than becoming inert.
+    assert_eq!(
+        action_for(&with(KeyModifiers::ALT, KeyCode::Down)),
+        Some(Action::Scroll(1))
+    );
+}
+
+#[test]
 fn a_resize_redraws_without_moving_anything() {
     // A resize changes what fits without changing where the reader is, so it is
     // the one event that has to cost a frame and must not cost a scroll.

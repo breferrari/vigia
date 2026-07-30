@@ -65,11 +65,20 @@ enum Wake {
     Input(ratatui::crossterm::event::Event),
     /// The working tree changed, coalesced into one signal by the core.
     Tick,
-    /// The watch could not be established, so the shell is a still picture.
+    /// The watch stopped, so the shell is a still picture.
     ///
     /// Reported rather than fatal. A diff nobody is watching for changes is
     /// still a diff, and the reader should be told which of the two they have.
     WatchLost(String),
+    /// Terminal input stopped, so nothing can reach the shell any more.
+    ///
+    /// Fatal, and it is the one wake-up that is. In raw mode every way out is a
+    /// key event: the terminal does not turn Ctrl-C into a signal, and there is
+    /// no handler that would catch one. So a shell that kept drawing after this
+    /// would hold the alternate screen with no way to leave it, and the only
+    /// remaining exit is a kill, which runs neither the guard nor the panic hook
+    /// and hands back a terminal in raw mode. Leaving is the smaller failure.
+    InputLost,
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
@@ -98,8 +107,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     spawn_watch(path.to_path_buf(), tx.clone());
     spawn_input(tx);
 
+    let mut lost_input = false;
     while let Ok(wake) = rx.recv() {
         match wake {
+            Wake::InputLost => {
+                lost_input = true;
+                break;
+            }
             Wake::Input(event) => {
                 let Some(action) = action_for(&event) else {
                     // Not every event is a request. Redrawing for a key release
@@ -127,6 +141,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         }
 
         shell.draw(&mut frame)?;
+    }
+
+    // Dropped before the message is written, so the terminal is out of the
+    // alternate screen and the sentence lands where the reader will see it
+    // rather than on a page that is about to be torn down.
+    drop(shell);
+    if lost_input {
+        return Err("terminal input ended, so there was no way left to quit".into());
     }
 
     Ok(())
@@ -165,6 +187,9 @@ impl Shell {
         }
 
         let chrome = self.app.chrome(&self.name);
+        // Borrowed out of `self` before the draw, not for style: the closure would
+        // otherwise hold `&self` while `self.session` is borrowed mutably to reach
+        // the terminal.
         let (theme, screen) = (&self.theme, &self.screen);
         self.session.screen().draw(|f| {
             let area = f.area();
@@ -201,6 +226,15 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
                 return;
             }
         }
+
+        // Falling out of that loop should be unreachable: the only thing that
+        // ends it is a `Stop`, and nothing here holds one. Saying so out loud
+        // costs a line and turns "the pane quietly stopped updating" into
+        // something the reader can see, which is the difference between a bug
+        // they report and one they work around for a week.
+        let _ = tx.send(Wake::WatchLost(
+            "the watch ended; this diff is no longer live".to_owned(),
+        ));
     });
 }
 
@@ -212,6 +246,7 @@ fn spawn_input(tx: Sender<Wake>) {
                 return;
             }
         }
+        let _ = tx.send(Wake::InputLost);
     });
 }
 

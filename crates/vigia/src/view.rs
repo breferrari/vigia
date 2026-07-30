@@ -199,13 +199,24 @@ impl View {
             // asking for an absurd height from allocating for it up front.
             rows: Vec::with_capacity(height.min(64)),
             files,
+            // Until the walk below runs, the request is passed through with only
+            // its file clamped. That matters for `height == 0`: a frame with no
+            // room to draw resolved nothing, so it has nothing to say about where
+            // the reader is, and reporting a row of zero would drag them to the
+            // top of the file for as long as the pane stayed too short to have a
+            // body at all. A caller storing this back keeps its place.
             top: Position {
                 file: position.file.min(files.saturating_sub(1)),
-                row: 0,
+                row: position.row,
             },
             read: 0,
         };
-        if files == 0 || height == 0 {
+        if files == 0 {
+            // Nothing to point at, so nothing to preserve either.
+            view.top.row = 0;
+            return Ok(view);
+        }
+        if height == 0 {
             return Ok(view);
         }
 

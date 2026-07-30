@@ -59,11 +59,32 @@ impl Session {
         install_hook();
 
         enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide)?;
+
+        // Every failure from here on has to undo what already succeeded, and
+        // cannot lean on `Drop` to do it: there is no `Session` yet. A bare `?`
+        // on either line below returns an error to a caller that prints it into
+        // a terminal still in raw mode, with no echo and no line editing, which
+        // is a worse outcome than the failure it is reporting.
+        Self::or_restore(execute!(
+            stdout(),
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            Hide
+        ))?;
 
         Ok(Self {
-            screen: Some(Terminal::new(CrosstermBackend::new(stdout()))?),
+            screen: Some(Self::or_restore(Terminal::new(CrosstermBackend::new(
+                stdout(),
+            )))?),
         })
+    }
+
+    /// Put the terminal back before handing a failure to the caller.
+    fn or_restore<T>(result: io::Result<T>) -> io::Result<T> {
+        if result.is_err() {
+            restore();
+        }
+        result
     }
 
     /// The terminal to draw through.
@@ -76,9 +97,14 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // Dropped first: it owns a handle to the same stdout that `restore`
-        // writes the escape sequences to, and flushing a buffered frame after
-        // leaving the alternate screen would print it to the reader's shell.
+        // Dropped before the restore so that no live `Terminal` outlives the
+        // screen it draws on, even for the length of this function.
+        //
+        // Checked rather than assumed, because the intuitive reason is the wrong
+        // one: neither `ratatui::Terminal` nor `CrosstermBackend` implements
+        // `Drop`, so there is no buffered frame here that could flush itself into
+        // the reader's shell after the alternate screen is gone. Ordering these
+        // two lines is tidiness, not a fix for that.
         self.screen = None;
         restore();
     }
@@ -89,7 +115,12 @@ impl Drop for Session {
 /// Nothing useful can be done about an error here. It runs while a process is
 /// already leaving, sometimes while it is panicking, and reporting it would mean
 /// writing to a terminal whose state is exactly what is in doubt.
-pub fn restore() {
+///
+/// Private, and the three callers are all in this file. Restoring is a
+/// consequence of giving up a [`Session`] or of dying, never something a caller
+/// asks for: a shell that could put the terminal back and keep drawing would be
+/// drawing onto the reader's shell prompt.
+fn restore() {
     // Raw mode first: it has more side effects than the alternate screen, and
     // ratatui's own restore path orders it this way for that reason.
     let _ = disable_raw_mode();
