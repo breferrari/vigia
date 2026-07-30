@@ -31,7 +31,7 @@ const SECOND: &str = "src/mod_1.rs";
 fn diffs(frame: &mut Frame) -> Vec<FileDiff> {
     frame.advance().expect("advance");
     (0..frame.files().len())
-        .map(|i| frame.diff(i).expect("diff").clone())
+        .map(|i| frame.diff(i).expect("diff").1.clone())
         .collect()
 }
 
@@ -369,7 +369,7 @@ fn a_removed_file_is_diffed_from_the_index_alone_and_reused() {
         .position(|change| change.path == FIRST)
         .expect("the deleted file is still a change against the index");
     assert_eq!(frame.files()[removed].kind, ChangeKind::Removed);
-    let diff = frame.diff(removed).expect("diff").clone();
+    let diff = frame.diff(removed).expect("diff").1.clone();
     assert!(
         diff.removed == LINES as u32 && diff.added == 0,
         "deleting a {LINES}-line file reported +{} -{}",
