@@ -130,15 +130,16 @@ const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 /// no test could reach. Written as a function, every mutation of the arithmetic
 /// is caught by the unit tests at the bottom of this file.
 fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
-    match mtime.checked_add(SETTLE_MARGIN) {
-        Some(granule_closed) => granule_closed <= read_started,
-        // Adding two seconds only overflows within two seconds of the largest
-        // time the platform can represent, which no filesystem reports and no
-        // test can construct where `SystemTime` has headroom. Checked anyway,
-        // because the alternative is a panic in a monitor, and "cannot prove"
-        // is the safe answer for a time that absurd.
-        None => false,
-    }
+    // Subtraction rather than addition on purpose. Adding the margin to `mtime`
+    // needs an overflow arm for a time within two seconds of the largest the
+    // platform represents, and that arm is unreachable: no filesystem reports
+    // such a time and no portable test can build one, so it would be a branch
+    // nothing could ever check. Going the other way, a modification time in the
+    // future is an `Err`, which is the same "cannot prove" answer and is
+    // reachable.
+    read_started
+        .duration_since(mtime)
+        .is_ok_and(|gap| gap >= SETTLE_MARGIN)
 }
 
 /// One path's diff, with everything needed to know it is still true.

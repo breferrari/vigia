@@ -154,6 +154,12 @@ change time to catch those, and `std` exposes no equivalent on Windows, so
 closing it is a dependency decision rather than an implementation detail. Tracked
 on the deferral shelf rather than assumed away.
 
+**And it assumes the modification time is stamped by the local clock.** The
+margin compares a filesystem timestamp against this process's clock, so on a
+network filesystem the server's skew subtracts directly from it: a server two
+seconds behind consumes the whole margin and the flooring problem returns. Local
+worktrees, which is what a monitor beside an agent watches, are unaffected.
+
 ## 7. Testing
 
 - **Snapshot tests over `ratatui::backend::TestBackend` with `insta`** — render
@@ -272,12 +278,22 @@ tap, prebuilt binaries on GitHub releases.
       removes. Every number in this bullet is a frame-path measurement; the
       18.58ms above is the spike's, over `Worktree::diff` called per file.
 - [ ] The settle margin is a fixed 2 seconds, sized for the coarsest filesystem
-      anyone might use rather than the one in front of us, so on ext4 or APFS it
-      is roughly a thousand times more conservative than it needs to be. It could
-      be narrowed per worktree without any extra I/O: the smallest positive
-      difference between modification times status already reports is an upper
-      bound on that filesystem's granularity. Worth doing only if the redundant
-      diffs ever show up in a real session.
+      anyone might use rather than the one in front of us, so on NTFS it is over a
+      hundred times more conservative than it needs to be and on APFS far more.
+      **Measured cost, and it is not only redundant work:** after a bulk rewrite
+      of all 100 files in the 100k-line fixture, every frame recomputes every diff
+      for the whole margin, 18 to 21ms per frame, putting 82 of 620 consecutive
+      frames over the 16ms I9 budget for about two seconds. A formatter, a branch
+      switch or a multi-file agent edit all produce that shape. Single-file
+      editing is unaffected: one write costs 503 redundant diffs over 2.004s and
+      never approaches the budget, and autosave every 500ms stayed under it on
+      every one of 973 frames.
+      It can be narrowed per worktree with no extra I/O, which removes the breach
+      rather than tolerating it: the smallest positive difference between the
+      modification times status already reports is an upper bound on that
+      filesystem's granularity, which on NTFS would take the margin from 2s to
+      about 16ms. Do this before the soak test, since I3 will see the redundant
+      work too.
 - [ ] The frame path walks status to completion before it reports a file list,
       so it does not stream the way the raw change iterator does. Two reasons it
       costs nothing today: rename tracking cannot stream either and is on by
