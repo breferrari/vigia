@@ -151,9 +151,10 @@ fn reusable(cached: &Cached, current: &FileChange, fresh: Option<Fingerprint>) -
 /// let mut frame = worktree.frame();
 /// frame.advance()?;
 /// for i in 0..frame.files().len() {
-///     let diff = frame.diff(i)?;
-///     println!("{} +{} -{}", diff.path, diff.added, diff.removed);
+///     let (change, diff) = frame.diff(i)?;
+///     println!("{:?} {} +{} -{}", change.kind, diff.path, diff.added, diff.removed);
 /// }
+/// println!("{:?}", frame.stats());
 /// # Ok(())
 /// # }
 /// ```
@@ -228,13 +229,20 @@ impl<'w> Frame<'w> {
         self.cached.len()
     }
 
-    /// The diff for `files()[index]`, computed now or reused from an earlier
-    /// frame.
+    /// The change at `index` and its diff, computed now or reused from an
+    /// earlier frame.
+    ///
+    /// Both, rather than the diff alone, because a renderer needs both and
+    /// cannot have them separately: the returned reference is derived from
+    /// `&mut self`, so while it is alive [`Frame::files`] cannot be called. A
+    /// caller wanting the kind as well would have to clone the change first,
+    /// once per visible file per frame, on the one path this whole type exists
+    /// to keep cheap.
     ///
     /// # Panics
     ///
     /// If `index` is out of range, the same way indexing a slice does.
-    pub fn diff(&mut self, index: usize) -> Result<&FileDiff> {
+    pub fn diff(&mut self, index: usize) -> Result<(&FileChange, &FileDiff)> {
         let change = &self.files[index];
         let path = self.worktree.workdir().join(&change.path);
 
@@ -253,7 +261,7 @@ impl<'w> Frame<'w> {
 
         if reuse {
             self.stats.reused += 1;
-            return Ok(&self.cached[&change.path].diff);
+            return Ok((change, &self.cached[&change.path].diff));
         }
 
         // Timed from before the read starts, so the window a write would have
@@ -281,7 +289,7 @@ impl<'w> Frame<'w> {
                 diff,
             },
         );
-        Ok(&self.cached[&change.path].diff)
+        Ok((change, &self.cached[&change.path].diff))
     }
 }
 
