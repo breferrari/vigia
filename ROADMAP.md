@@ -53,7 +53,7 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | | Task | Issue |
 |---|---|---|
 | ✅ | The `ratatui` + `crossterm` shell | [#9](https://github.com/breferrari/vigia/issues/9) |
-| ⬜ | I5 correct with zero interaction | [#6](https://github.com/breferrari/vigia/issues/6) |
+| ✅ | I5 correct with zero interaction | [#6](https://github.com/breferrari/vigia/issues/6) |
 | ⬜ | I6 legible at 40 columns | [#7](https://github.com/breferrari/vigia/issues/7) |
 | ✅ | I8 terminal restored on every exit the process controls | [#8](https://github.com/breferrari/vigia/issues/8) |
 | ✅ | A truncated `.git/index` aborts instead of reporting | [#13](https://github.com/breferrari/vigia/issues/13) |
@@ -64,11 +64,11 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 
 **The shell is now safe to leave running.** [#8](https://github.com/breferrari/vigia/issues/8) closed the last untested module: the takeover is data, giving it back is asserted as its exact inverse, and a half-finished `Session::enter` undoes exactly what it took. Seven mutations, each killed by a named test. It also settled what I8 can honestly promise: raw mode means Ctrl-C is a key event and never a signal, so an externally delivered `kill` is out of reach without a dependency `SPEC.md` does not name. That is [#24](https://github.com/breferrari/vigia/issues/24), on the shelf below.
 
-**[#6](https://github.com/breferrari/vigia/issues/6) is what remains of the phase's correctness half.** I5 is follow mode, the last thing that makes the monitor correct with nobody touching it, which is the product class. Nothing in the shell reads follow state today: #9 deliberately shipped no `f` toggle rather than a key that flips a bool nothing consumes. It is **not** takeable yet, for the reason two paragraphs down.
+**The phase's correctness half is done.** [#6](https://github.com/breferrari/vigia/issues/6) landed I5: the view moves itself to the file that just changed, with nothing pressed. It was blocked on a decision rather than on code, so **B1 and B2 were ruled first, in their own commit**, and the implementation was written against the ruled spec. Ruling second would have settled the question by accident inside a snapshot test.
 
-[#7](https://github.com/breferrari/vigia/issues/7) then has a baseline to argue with: there are 40- and 80-column snapshots already, and what I6 still needs is the assertions that make it an invariant rather than a screenshot. A diff line does lose its tail at 40 columns today.
+What ruling it exposed is worth more than the ruling. "The newest change" needs a recency signal, and the obvious one — `stat` every changed file — is [#19](https://github.com/breferrari/vigia/issues/19)'s recorded breach of I9 at scale. The filesystem event already names the path, and the gitignore filter was already resolving it and throwing it away, so `Tick` now carries it and following costs no read, no `stat` and no diff. The cheap answer and the correct one coincided, which is luck rather than design and is why it is written down.
 
-**[#6](https://github.com/breferrari/vigia/issues/6) is blocked on a decision, not on code.** I5 promises the view follows the newest change untouched, and no follow mode exists yet, so what happens when the reader scrolls is undecided — `SPEC.md` §11.2 **B1**. Implementing #6 first would settle it accidentally inside a snapshot test, which is how a behaviour becomes permanent without anyone choosing it. Rule on B1, then take #6. **B2** — which file wins when a batch changes several — is the same decision one layer down and lands with it.
+**[#7](https://github.com/breferrari/vigia/issues/7) inherits a sharper problem than it had.** There were 40- and 80-column snapshots already, and what I6 still needs is the assertions that make it an invariant rather than a screenshot. I5 added to the pile rather than subtracting from it: the footer now carries hints, follow state and position on one line, and at forty columns `q quit · f follow · jk scroll` truncates to `q quit · f follow · jk scr`. That is the truncated-to-useless shape I6 forbids, it is the **default** state rather than an unusual one, and `SPEC.md` §5.1 still marks what the hint bar drops first as unspecified. `render__the_follow_state_and_the_hints_collide_at_forty_columns` is a snapshot of exactly that collision, added as #7's input rather than as a claim that anything holds. A diff line also still loses its tail at 40 columns.
 
 ## Phase 3 — glanceability
 
