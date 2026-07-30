@@ -306,9 +306,12 @@ pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: 
         return;
     }
 
-    // Planned from `view.files`, which is the same number `body_height`'s caller
-    // passed: `View::collect` copies it straight off the frame and changes
-    // nothing. That is what makes the two agree.
+    // Planned from `view.files`, which on the path that matters is the same
+    // number `body_height`'s caller passed: `View::collect` copies it straight
+    // off the frame and changes nothing. Where they can differ is a caller
+    // redrawing a *stale* view after a failed collect, and that costs nothing,
+    // because the plan and the draw below both read this one value and are
+    // therefore consistent with each other whatever it holds.
     let footer = Footer::plan(area, chrome, view.files);
 
     let mut painter = Painter {
@@ -363,22 +366,26 @@ impl Painter<'_> {
     /// hint bar can, and none has an identifying half the way a path does, so
     /// the honest thing is to fill the room and mark the edge.
     ///
-    /// The mark gets a **reserved** column rather than overwriting the last one.
-    /// Overwriting could land on the second cell of a double-width glyph, which
-    /// leaves half a character on screen and is the one thing that cannot be
-    /// undrawn.
-    fn put_marked(&mut self, x: u16, y: u16, text: &str, limit: usize, style: Style) -> u16 {
+    /// The mark gets a **reserved** column rather than overwriting the last one,
+    /// and the reason is not the one it looks like. Overwriting cannot corrupt
+    /// the row: `ratatui` refuses to write into the continuation cell a
+    /// two-column glyph covers. What it does instead is **drop the mark**, so a
+    /// row filled to its last column by a wide glyph is drawn as one that simply
+    /// ends. Reserving the column is what guarantees the mark always lands.
+    /// `tests/legibility.rs` gates it, and a plain ASCII line never reaches the
+    /// case because it ends on a one-column character.
+    fn put_marked(&mut self, x: u16, y: u16, text: &str, limit: usize, style: Style) {
         if limit == 0 || text.is_empty() {
-            return x;
+            return;
         }
         if width_of(text) <= limit {
-            return self.put(x, y, text, limit, style);
+            self.put(x, y, text, limit, style);
+            return;
         }
         // `limit` is always derived from a screen width, so it fits in a `u16`.
         self.put(x, y, text, limit - 1, style);
         self.buf
             .set_stringn(x + limit as u16 - 1, y, CONTINUES, 1, style);
-        x + limit as u16
     }
 
     /// Write `text` so that it ends at the right edge of `area`.
