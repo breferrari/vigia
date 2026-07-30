@@ -116,15 +116,35 @@ task is worse than one session idle.
 
 ## 2. Load the why before touching code
 
-The issue carries acceptance criteria. `SPEC.md` carries the contract. The
-reasoning behind both is outside the repo, through the `vigil` MCP server:
+**Read the repo first.** The issue carries acceptance criteria, `SPEC.md` carries
+the contract, and — unusually for a repo — a great deal of the *reasoning* is here
+too: §10's open questions carry their measurements, the invariant callouts explain
+why they split, and the commit messages argue rather than announce. Most "why did
+we do it this way" questions are answered inside the checkout.
 
-- `search` for the decision you are about to touch
-- `recall` for accumulated constraints, remembering it is empty early and that
-  empty is not evidence of no record
+Then reach outside it, through the `vigil` MCP server, for the three things the
+repo deliberately does **not** hold:
 
-Read before deciding. A choice re-derived from scratch that contradicts a
-recorded one is the single most expensive mistake available here.
+- **What cannot be public.** This repo is public. The competitive read, the market
+  position, the objection this project was started against — none of that belongs
+  in a file anyone can clone, and it is the reason the vault exists at all.
+- **What generalises past this repo.** A `gix` limitation or a measurement trap is
+  true for every Rust project, so it lives where other projects can reach it.
+- **What predates or outlives the code.** Why this is monitor-class rather than
+  review-class was decided before the first commit, and re-deriving it is the most
+  expensive mistake available here.
+
+```
+search   the decision you are about to touch
+recall   accumulated constraints — empty early, and empty is not evidence of none
+```
+
+**Consulting the vault is deliberate, not reflexive.** Reaching for it when the
+answer is in `SPEC.md` wastes a call; reaching for it out of habit while writing a
+*public* commit message loads strategic context that must never land in one. That
+direction is the one with a hook guarding it, because a squash commit merged to a
+public `main` stays reachable by SHA forever. Know which of the three you are
+asking for before you ask.
 
 ## 3. Plan it, in plan mode, before touching code
 

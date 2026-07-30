@@ -323,3 +323,122 @@ tap, prebuilt binaries on GitHub releases.
       thesis; confirm against a week of real use.
 - [ ] Windows: supported target or best-effort? Truecolor needs Win10+, and
       legacy conhost degrades.
+
+## 11. Behaviour
+
+§3 says how well `vigia` does things. Every number in it is defensible and every
+one has a test. Nothing above says **what happens when you press a key, or when
+nothing has changed** — and that gap is why the product reads as a screenshot
+with budgets attached.
+
+Two parts: what the shell already does, recorded because it was decided in code
+first, and what is still undecided.
+
+> [!warning] Behaviour decided in code without a line here is a defect
+> The README says this file is the source of truth, written before the code. That
+> was **not true** for the whole interaction surface on 2026-07-30: the keymap and
+> the treatment of untracked files were both settled in implementation and appear
+> nowhere above. §11.1 repays that, and the rule it leaves behind is the same
+> shape as §3's: **an invariant without a failing test is a wish, and a behaviour
+> without a spec line is an accident.** Neither is caught by `take-next`'s
+> pre-flight, which compares invariant tokens rather than behaviour.
+
+### 11.1 What the shell does today
+
+Back-filled from the implementation on 2026-07-30, not newly decided. Where this
+disagrees with the code, the code is the bug.
+
+**What the diff contains.** Working tree against the index. **Untracked files are
+included** and diff as all-additions — load-bearing rather than incidental, since
+creating new files is among the most common things an agent does, and a tool blind
+to them would miss its own use case. Rename tracking is **on by default**: showing
+a move as an unrelated delete plus add misdescribes what the agent did. Its
+streaming cost is the open question in §10, not a settled trade.
+
+**Keys.**
+
+| Key | Action |
+|---|---|
+| `q`, `Esc`, `Ctrl-C`, `Ctrl-D` | quit |
+| `j`, `↓` | scroll down one row |
+| `k`, `↑` | scroll up one row |
+| `Space`, `PgDn` | page down |
+| `PgUp` | page up |
+| `g`, `Home` | first changed file |
+| `G`, `End` | last changed file |
+| mouse wheel | scroll |
+| terminal resize | redraw, no state change |
+
+**Scroll position is `(file, offset within that file)`, never a row index.** A
+frame that changes something above the viewport therefore does not teleport the
+view. This is a correctness property, not an implementation detail: with a row
+index, an agent writing to a file earlier in the list would yank the reader's
+position on every keystroke it makes.
+
+**CLI.** One optional positional path, defaulting to the working directory. No
+flags today.
+
+### 11.2 Undecided — these gate Phase 2
+
+Each carries a recommendation marked **(proposed)**. None is settled until ruled
+on, and none may contradict §3 — if one does, §3 wins and the recommendation is
+wrong.
+
+**B1 — What happens to follow mode when the reader scrolls.** I5 promises the
+view "auto-follows the newest change and scrolls to it, untouched", and **no
+follow mode exists in the code yet** — `Action` is quit, scroll, page, top,
+bottom, redraw. So the relationship between following and scrolling is genuinely
+open, and [#6](https://github.com/breferrari/vigia/issues/6) will otherwise
+settle it by accident inside a snapshot test.
+
+*(proposed)* `less +F` semantics. Follow is **on** at startup; **any manual
+scroll disengages it**; `G` / `End` re-engages, since "go to the newest thing" is
+already that key. The status bar states which mode is active. Rationale: it is
+the idiom every terminal user already has, disengage-on-scroll is the only rule
+that never fights a reader mid-read, and re-engaging costs a keystroke that
+already exists rather than a new binding.
+
+**B2 — Which file wins when several change at once.** An agent rewriting five
+files in one action is the normal case, not an edge case. "The newest change" is
+ambiguous the moment a batch coalesces.
+
+*(proposed)* Follow the file whose write landed **last** in the settled batch,
+and let §5's visual pulse carry the others. Rationale: it reads "newest"
+literally, it is stable rather than heuristic, and the pulse already exists to
+say "these moved too" without moving the viewport for each.
+
+**B3 — The empty state.** Zero changes is not an edge case; it is the state the
+tool sits in most of the time, and it is the **first** thing anyone sees when
+they open it beside an agent that has not written yet. A blank pane is
+indistinguishable from a hang.
+
+*(proposed)* Name it: repository, branch, "no changes", and an explicit statement
+that it is watching. This screen is the product's first impression and currently
+has no specification at all.
+
+**B4 — Is the file list navigable?** The README mockup shows a file list above
+the diff. Selectable, with the diff jumping to the selection, or a map rather
+than a menu?
+
+*(proposed)* **Not navigable in v1** — one continuous scroll, list as map.
+Rationale: selection implies focus, focus implies a second mode, and modes are
+reviewer-class (§2). The pane is 40 columns beside an agent, not a full-screen
+client.
+
+**B5 — Not a git repository, and submodules.** Neither appears anywhere in this
+spec.
+
+*(proposed)* Not a repository: exit non-zero with one line, **before** entering
+the alternate screen — an error painted inside a TUI that then restores the
+terminal is an error nobody reads. Submodules: out of v1, shown as an opaque
+directory and said so, because recursing into them costs the incremental
+guarantees in I2a.
+
+**B6 — CLI surface and configuration.** No flags exist; §5 theming arrives in
+Phase 3 with nowhere to configure it.
+
+*(proposed)* Hold the CLI at one positional path plus `--version` / `--help`
+through v1, and add flags only when something asks for one. Configuration lands
+**with** theming in Phase 3, not before: a config file with one thing in it
+invites a second thing, and every option is a behaviour that needs a line in this
+section.
