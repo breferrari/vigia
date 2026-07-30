@@ -503,9 +503,9 @@ fn observed_rungs() -> Vec<String> {
 
 #[test]
 fn the_hint_bar_drops_whole_hints_and_never_half_of_one() {
-    // The truncated-to-useless shape I6 forbids, in the one place it was
-    // actually happening: before this, forty columns following drew
-    // `q quit · f follow · jk scr`.
+    // The truncated-to-useless shape I6 forbids, stated as the thing that must
+    // never appear: a bar reading `q quit · f follow · jk scr`, where the last
+    // hint names a key without naming what it does.
     let rungs = observed_rungs();
     let widest = rungs.first().expect("at least one bar").clone();
     let whole: Vec<&str> = widest.split(HINT_SEPARATOR).collect();
