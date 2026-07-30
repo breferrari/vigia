@@ -210,6 +210,52 @@ fn an_idle_frame_recomputes_nothing() {
 }
 
 #[test]
+fn a_file_written_moments_ago_is_never_reused() {
+    // The *producer* half of the racily-clean rule, and the half nothing else
+    // here reaches. The unit tests over `settled` check the arithmetic; this
+    // checks that the code recording a fingerprint actually consults it. Hard
+    // code the answer to "trusted" and this is the test that goes red.
+    //
+    // Deterministic, with no race to lose: a filesystem floors the modification
+    // time it stamps, so the granule a just-written file was stamped in may still
+    // be open, and no fingerprint taken inside it can be trusted however much it
+    // matches. The frame therefore has to re-read a recently written file on
+    // *every* frame until its granule has provably closed, not merely on the
+    // first frame after the write.
+    let scratch = Scratch::large_diff("frame-recent", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    scratch.edit_line(FIRST, 0, "fn edited() { let value = 1; }");
+
+    // Frame one: recomputes the edited file because its content changed.
+    let before = frame.stats();
+    materialise(&mut frame);
+    assert_eq!(
+        delta(before, frame.stats()).computed,
+        1,
+        "the edit itself was not picked up"
+    );
+
+    // Frame two, with nothing touched in between. The file is unchanged now, and
+    // it must *still* be recomputed, because "unchanged" is not yet provable.
+    let before = frame.stats();
+    materialise(&mut frame);
+    let cost = delta(before, frame.stats());
+    assert_eq!(
+        cost.computed, 1,
+        "a file written moments ago was trusted as unchanged, so a same-length \
+         rewrite inside its modification-time granule would be served stale"
+    );
+    assert_eq!(
+        cost.reused,
+        (FILES - 1) as u64,
+        "the other files stopped being reused, so this is measuring the wrong thing"
+    );
+}
+
+#[test]
 fn touching_a_file_costs_one_redundant_diff() {
     // Documenting the trade rather than complaining about it. The rule is
     // "reuse only what can be proved unchanged", and a new modification time is

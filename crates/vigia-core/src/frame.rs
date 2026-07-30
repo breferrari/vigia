@@ -23,19 +23,31 @@
 //! The third is the one that needs care, and the trap has a name in git:
 //! *racily clean*. Two writes of the same length inside one modification-time
 //! granule are indistinguishable by `stat`, and an in-place one-character edit
-//! repeated quickly is precisely that shape. So a fingerprint counts as proof
-//! only when its modification time is **strictly older than the moment the
-//! content was read**. After that, any write at all must move the time forward,
-//! so an unchanged time means unchanged bytes. Everything else is re-diffed.
-//! That costs a redundant diff of a file being actively written, which is a file
-//! that changed anyway, and buys never showing a stale one.
+//! repeated quickly is precisely that shape.
+//!
+//! The subtlety, and it is the whole of [`settled`]: a filesystem **floors** the
+//! time it stamps to its own granularity, so a write that happens *after* a read
+//! can record a time *before* it. "Modification time earlier than the read"
+//! therefore proves nothing, because the granule may still be open. Measured on
+//! NTFS, that mistake serves a stale diff on roughly one in four hundred
+//! same-length rewrites, and on a 1s-granule volume it would be most of them. So
+//! a fingerprint counts as proof only once a **full granule** has passed between
+//! the stamp and the read, and everything else is re-diffed. That costs
+//! redundant diffs of files written in the last two seconds, which are files
+//! that just changed, and buys never showing a stale one.
+//!
+//! What this still cannot see is a writer that restores a modification time it
+//! did not advance, which is `cp -p`, `rsync -t`, `unzip` and `touch -r`. Git
+//! carries the inode change time for exactly that reason, and `std` does not
+//! expose one on Windows, so it is recorded rather than guessed at: see the
+//! deferral shelf in `ROADMAP.md`.
 //!
 //! Content is never hashed to make this decision. Hashing is the read I2a
 //! exists to avoid.
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::change::{ChangeKind, FileChange};
 use crate::error::Result;
@@ -82,10 +94,51 @@ struct Fingerprint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Observed {
     print: Fingerprint,
-    /// True when `print.mtime` was already strictly in the past when the read
-    /// began. That is what makes an unchanged fingerprint proof of unchanged
-    /// bytes instead of a guess; see the module comment on racily clean.
+    /// True when the granule `print.mtime` was stamped in had already closed
+    /// before the read began. That, and not merely a modification time in the
+    /// past, is what makes an unchanged fingerprint proof of unchanged bytes.
+    /// See [`settled`].
     settled: bool,
+}
+
+/// How far in the past a modification time has to sit before it identifies the
+/// bytes that were read.
+///
+/// A filesystem stamps a modification time by **flooring** the current time to
+/// its own granularity, so a write landing *after* a read can still record a
+/// time *before* that read. Comparing an mtime against a precise clock therefore
+/// proves nothing by itself: the granule the write fell in may still be open,
+/// and a second write of the same length inside it is invisible. A full granule
+/// of margin is what closes it.
+///
+/// Two seconds, because that is the coarsest granularity a git worktree can
+/// plausibly sit on. FAT and exFAT quantise to 2s, HFS+ and ext3 to 1s, NTFS to
+/// somewhere between 1ms and 16ms, and ext4, APFS, xfs and btrfs to far less.
+/// The constant has to be an **upper bound** on the real granularity, so being
+/// generous is the safe direction: it costs redundant diffs of files written in
+/// the last two seconds, and those are files that just changed. It could be
+/// narrowed by estimating a worktree's real granularity from the modification
+/// times status already reports, which `SPEC.md` §10 keeps open.
+const SETTLE_MARGIN: Duration = Duration::from_secs(2);
+
+/// Whether a modification time observed by a read starting at `read_started`
+/// identifies the bytes that read returned.
+///
+/// Pure, and deliberately not inlined into the read. This is the one rule in the
+/// engine that cannot be tested by racing a filesystem: the window is smaller
+/// than the machinery needed to hit it, so an inline comparison would be a rule
+/// no test could reach. Written as a function, every mutation of the arithmetic
+/// is caught by the unit tests at the bottom of this file.
+fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
+    match mtime.checked_add(SETTLE_MARGIN) {
+        Some(granule_closed) => granule_closed <= read_started,
+        // Adding two seconds only overflows within two seconds of the largest
+        // time the platform can represent, which no filesystem reports and no
+        // test can construct where `SystemTime` has headroom. Checked anyway,
+        // because the alternative is a panic in a monitor, and "cannot prove"
+        // is the safe answer for a time that absurd.
+        None => false,
+    }
 }
 
 /// One path's diff, with everything needed to know it is still true.
@@ -280,7 +333,7 @@ impl<'w> Frame<'w> {
             self.stats.probes += 1;
             fingerprint(&path).map(|print| Observed {
                 print,
-                settled: print.mtime < read_started,
+                settled: settled(print.mtime, read_started),
             })
         } else {
             None
@@ -354,17 +407,98 @@ mod tests {
         }
     }
 
-    /// A settled fingerprint that still matches: the only reusable case.
-    fn settled(len: u64, mtime: SystemTime) -> Option<Observed> {
+    /// A fingerprint already proved to identify its bytes: the reusable case.
+    fn trusted(len: u64, mtime: SystemTime) -> Option<Observed> {
         Some(Observed {
             print: print(len, mtime),
             settled: true,
         })
     }
 
+    /// The rule that cannot be raced, so it is checked arithmetically instead.
+    ///
+    /// Every case below is a real filesystem's granularity. The mtime is floored
+    /// to the granule, exactly as a filesystem stamps it, and the read happens
+    /// somewhere inside that same granule: the shape of a write that lands after
+    /// the read and is invisible to it.
+    #[test]
+    fn a_read_inside_the_granule_it_was_stamped_in_is_never_settled() {
+        // NTFS observed at 1ms, Windows' default timer at 15.625ms, ext4 at a
+        // jiffy, HFS+ and ext3 at 1s, FAT and exFAT at 2s.
+        for granule in [
+            Duration::from_nanos(100),
+            Duration::from_micros(1),
+            Duration::from_millis(1),
+            Duration::from_micros(15_625),
+            Duration::from_millis(4),
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+        ] {
+            let stamped = epoch(1_000_000);
+            // Anywhere in `[stamped, stamped + granule)` is a time the very next
+            // write could still be stamped with.
+            for offset in [Duration::ZERO, granule / 2, granule - granule / 100] {
+                let read_started = stamped + offset;
+                assert!(
+                    !settled(stamped, read_started),
+                    "a read {offset:?} into a {granule:?} granule was trusted, so a \
+                     same-length write later in that granule would be reused"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_read_a_full_margin_after_the_stamp_is_settled() {
+        let stamped = epoch(1_000_000);
+        assert!(
+            settled(stamped, stamped + SETTLE_MARGIN),
+            "the margin itself has to be enough, or nothing is ever reusable"
+        );
+        assert!(settled(
+            stamped,
+            stamped + SETTLE_MARGIN + Duration::from_secs(60)
+        ));
+    }
+
+    /// Strictness matters in both directions: a hair short is not settled.
+    ///
+    /// A hair is a microsecond rather than a nanosecond because `SystemTime` is
+    /// not infinitely precise. Windows resolves it to 100ns, so subtracting 1ns
+    /// from a timestamp is a no-op and the test would be asserting nothing.
+    #[test]
+    fn a_read_just_short_of_the_margin_is_not_settled() {
+        let stamped = epoch(1_000_000);
+        let just_short = stamped + SETTLE_MARGIN - Duration::from_micros(1);
+        assert!(
+            just_short < stamped + SETTLE_MARGIN,
+            "the clock cannot represent the gap this test needs"
+        );
+        assert!(!settled(stamped, just_short));
+    }
+
+    /// A network share with a fast clock, or an archive unpacked with bad
+    /// timestamps, leaves a modification time ahead of ours. It cannot be proved
+    /// settled, and the safe answer is to re-diff for as long as that is true.
+    #[test]
+    fn a_modification_time_in_the_future_is_never_settled() {
+        let read_started = epoch(1_000_000);
+        assert!(!settled(
+            read_started + Duration::from_secs(3600),
+            read_started
+        ));
+
+        // A year ahead, which is what a wrong clock or a bad archive actually
+        // produces, rather than a synthetic edge.
+        assert!(!settled(
+            read_started + Duration::from_secs(365 * 24 * 3600),
+            read_started
+        ));
+    }
+
     #[test]
     fn an_unchanged_file_is_reusable() {
-        let entry = cached(ChangeKind::Modified, blob(1), settled(40, epoch(10)));
+        let entry = cached(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
         assert!(reusable(&entry, &now, Some(print(40, epoch(10)))));
     }
@@ -373,14 +507,14 @@ mod tests {
     fn a_new_index_blob_invalidates_without_the_file_moving() {
         // Staging some other change rewrites the index, and the index is the
         // left-hand side of this diff. The bytes on disk are untouched.
-        let entry = cached(ChangeKind::Modified, blob(1), settled(40, epoch(10)));
+        let entry = cached(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(2));
         assert!(!reusable(&entry, &now, Some(print(40, epoch(10)))));
     }
 
     #[test]
     fn a_new_kind_invalidates() {
-        let entry = cached(ChangeKind::Modified, blob(1), settled(40, epoch(10)));
+        let entry = cached(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(
             ChangeKind::Renamed {
                 from: "src/old.rs".to_owned(),
@@ -392,14 +526,14 @@ mod tests {
 
     #[test]
     fn a_changed_length_invalidates() {
-        let entry = cached(ChangeKind::Modified, blob(1), settled(40, epoch(10)));
+        let entry = cached(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
         assert!(!reusable(&entry, &now, Some(print(41, epoch(10)))));
     }
 
     #[test]
     fn a_changed_mtime_invalidates() {
-        let entry = cached(ChangeKind::Modified, blob(1), settled(40, epoch(10)));
+        let entry = cached(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
         assert!(!reusable(&entry, &now, Some(print(40, epoch(11)))));
     }
@@ -425,7 +559,7 @@ mod tests {
 
     #[test]
     fn a_file_that_cannot_be_fingerprinted_now_is_not_reusable() {
-        let entry = cached(ChangeKind::Modified, blob(1), settled(40, epoch(10)));
+        let entry = cached(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
         assert!(!reusable(&entry, &now, None));
     }

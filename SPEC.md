@@ -133,12 +133,26 @@ hashing is the read I2a exists to avoid.
 
 A `stat` on its own is not proof, and the gap is the one git calls *racily
 clean*: two writes of the same length inside a single modification-time granule
-are indistinguishable by `stat`. So a fingerprint is trusted only when the
-modification time it records is **strictly older than the moment the content was
-read**, and anything else is re-diffed. That trades a redundant diff of a file
-being actively written, which is a file that changed anyway, for never showing a
-stale one. It assumes the wall clock does not step backwards mid-frame, which is
-the assumption git's own index makes.
+are indistinguishable by `stat`.
+
+The rule that closes it has to account for **flooring**. A filesystem stamps a
+modification time by truncating the current time to its own granularity, so a
+write landing *after* a read can record a time *before* it. "Older than the
+read" therefore proves nothing, because the granule may still be open: measured
+on NTFS, that mistake serves a stale diff on about one same-length rewrite in
+four hundred, and on a 1s-granule volume it would be most of them. So a
+fingerprint is trusted only once a **full granule has passed** between the stamp
+and the read, and anything else is re-diffed. The margin is a constant that must
+be an upper bound on real granularity: **2 seconds**, since FAT and exFAT
+quantise to 2s and HFS+ to 1s, where NTFS, ext4 and APFS are milliseconds or
+finer. That trades redundant diffs of files written in the last two seconds,
+which are files that just changed, for never showing a stale one.
+
+**What it still cannot see** is a writer that restores a modification time it did
+not advance: `cp -p`, `rsync -t`, `unzip`, `touch -r`. Git carries the inode
+change time to catch those, and `std` exposes no equivalent on Windows, so
+closing it is a dependency decision rather than an implementation detail. Tracked
+on the deferral shelf rather than assumed away.
 
 ## 7. Testing
 
@@ -257,6 +271,13 @@ tap, prebuilt binaries on GitHub releases.
       the 18.58ms the spike measured over the primitives and is the cost I2a
       removes. Every number in this bullet is a frame-path measurement; the
       18.58ms above is the spike's, over `Worktree::diff` called per file.
+- [ ] The settle margin is a fixed 2 seconds, sized for the coarsest filesystem
+      anyone might use rather than the one in front of us, so on ext4 or APFS it
+      is roughly a thousand times more conservative than it needs to be. It could
+      be narrowed per worktree without any extra I/O: the smallest positive
+      difference between modification times status already reports is an upper
+      bound on that filesystem's granularity. Worth doing only if the redundant
+      diffs ever show up in a real session.
 - [ ] The frame path walks status to completion before it reports a file list,
       so it does not stream the way the raw change iterator does. Two reasons it
       costs nothing today: rename tracking cannot stream either and is on by
