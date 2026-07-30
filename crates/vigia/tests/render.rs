@@ -29,6 +29,13 @@ use ratatui::backend::TestBackend;
 use vigia::{Chrome, Position, Row, Theme, View, body_height, render};
 use vigia_core::{Class, LineKind, Span};
 
+/// The mark the renderer writes where a row runs past its edge.
+///
+/// Restated here rather than imported: it is one character of published
+/// behaviour, and a test that shared the constant would agree with the renderer
+/// by construction instead of checking it.
+const CONTINUES: &str = "›";
+
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -607,6 +614,59 @@ fn a_line_with_no_spans_draws_exactly_as_it_did_before_highlighting() {
         buffer[(start, CONTENT_ROW)].style().fg,
         theme.context.fg,
         "an unclassified line is not drawn in the plain style"
+    );
+}
+
+#[test]
+fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
+    // Untested until now, and that is how the two spellings of the marking rule
+    // drifted apart: `put_marked` used the caller's style and `put_runs_marked`
+    // fell back to a default at the one width where its loop writes nothing.
+    //
+    // Both widths below are that rule. At a workable width the mark belongs to
+    // whichever run ran out of room, so a clipped comment is marked in the
+    // comment's colour. At one column there is no room for any run at all, and
+    // the mark still has to mean something: it takes the first run's style,
+    // which is the sigil's, so a clipped added line is marked in green rather
+    // than in whatever the theme's default happened to be.
+    let theme = Theme::default();
+    let text = "let // a comment long enough to run off the end of the row";
+    let view = || {
+        highlighted(
+            LineKind::Added,
+            text,
+            vec![
+                Span {
+                    len: 3,
+                    class: Class::Keyword,
+                },
+                Span {
+                    len: text.len() - 3,
+                    class: Class::Comment,
+                },
+            ],
+        )
+    };
+
+    let wide = screen(30, 6, &view(), &chrome());
+    let mark = column_of(&wide, CONTENT_ROW, CONTINUES);
+    assert_eq!(
+        wide.buffer()[(mark, CONTENT_ROW)].style().fg,
+        theme.comment.fg,
+        "the mark is not drawn in the colour of the comment it cut"
+    );
+
+    let narrow = screen(1, 6, &view(), &chrome());
+    assert_eq!(
+        narrow.buffer()[(0, CONTENT_ROW)].symbol(),
+        CONTINUES,
+        "a one-column row did not mark that it continues"
+    );
+    assert_eq!(
+        narrow.buffer()[(0, CONTENT_ROW)].style().fg,
+        theme.added.fg,
+        "at one column the mark fell back to a default instead of taking the \
+         sigil's style, which is the divergence from `put_marked` this pins"
     );
 }
 
