@@ -120,6 +120,52 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
 }
 
 #[test]
+fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
+    // The mirror of the test above, and not a duplicate of it. Down hands the
+    // overrun to `View::collect` to carry; up walks back and asks each file how
+    // tall it is, so the two boundary crossings are different code.
+    //
+    // A round trip cannot tell them apart, which is the point of doing this
+    // separately. Every round trip in this file ends at file zero, and file zero
+    // clamps to row zero, so a step that lands one row short at every boundary
+    // still arrives at exactly (0, 0). Found by mutation: subtracting one from
+    // the previous file's height left the whole suite green.
+    let scratch = fixture("shell-scroll-back");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    let start = SPAN * 3;
+    let landed = after(&mut app, &mut frame, Action::Scroll(start as isize));
+    assert_eq!(
+        landed,
+        Position { file: 3, row: 0 },
+        "the walk did not start"
+    );
+
+    let mut seen = Vec::new();
+    for _ in 0..start {
+        seen.push(after(&mut app, &mut frame, Action::Scroll(-1)));
+    }
+
+    // Absolute row `start` counting down, resolved back into a file and an offset.
+    let expected: Vec<Position> = (0..start)
+        .map(|step| {
+            let absolute = start - step - 1;
+            Position {
+                file: absolute / SPAN,
+                row: absolute % SPAN,
+            }
+        })
+        .collect();
+    assert_eq!(
+        seen, expected,
+        "stepping up one row at a time did not walk file boundaries cleanly"
+    );
+}
+
+#[test]
 fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     // Scrolling past the end must rest on the last row, not past it. Past it
     // draws an empty pane, which in a monitor is indistinguishable from a broken
