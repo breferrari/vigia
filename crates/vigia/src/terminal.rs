@@ -66,7 +66,7 @@ static HOOK: Once = Once::new();
 
 /// One thing a session takes from the terminal and has to give back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Step {
+enum Step {
     /// No line buffering, no echo, and no signal translation.
     RawMode,
     /// The alternate screen, so the reader's scrollback survives being watched.
@@ -83,7 +83,7 @@ pub(crate) enum Step {
 /// effects than anything else here, and ratatui's own restore path orders it the
 /// same way for that reason: the escape sequences that leave the alternate screen
 /// should be written while the terminal is still in the mode they were written in.
-pub(crate) const TAKEOVER: [Step; 4] = [
+const TAKEOVER: [Step; 4] = [
     Step::RawMode,
     Step::AlternateScreen,
     Step::MouseCapture,
@@ -95,7 +95,7 @@ pub(crate) const TAKEOVER: [Step; 4] = [
 /// Exists so the order in [`TAKEOVER`] and the unwinding in [`Takeover::take`] can
 /// be asserted against a recorder. See this module's header for why the real
 /// terminal cannot be the oracle.
-pub(crate) trait Console {
+trait Console {
     /// Take one step, or report why it could not be taken.
     fn take(&mut self, step: Step) -> io::Result<()>;
 
@@ -114,7 +114,7 @@ pub(crate) trait Console {
 /// is always [`stdout`], and [`Step::RawMode`] ignores the sink entirely because
 /// both platforms change the mode through a syscall rather than an escape
 /// sequence.
-pub(crate) struct Crossterm<W: Write> {
+struct Crossterm<W: Write> {
     out: W,
 }
 
@@ -151,7 +151,7 @@ impl<W: Write> Console for Crossterm<W> {
 /// reason a half-finished [`Session::enter`] can be undone exactly. A bare "did we
 /// start?" flag would either give back a step that was never taken or leak one
 /// that was.
-pub(crate) struct Takeover<C: Console> {
+struct Takeover<C: Console> {
     console: C,
     taken: usize,
 }
@@ -163,7 +163,7 @@ impl<C: Console> Takeover<C> {
     /// no `Takeover` yet. A bare `?` here would hand an error to a caller that
     /// prints it into a terminal still in raw mode, with no echo and no line
     /// editing, which is a worse outcome than the failure it is reporting.
-    pub(crate) fn take(console: C) -> io::Result<Self> {
+    fn take(console: C) -> io::Result<Self> {
         let mut takeover = Self { console, taken: 0 };
         for step in TAKEOVER {
             takeover.console.take(step)?;
@@ -784,7 +784,16 @@ mod tests {
             .expect("lib.rs");
         let declared: Vec<&str> = lib
             .lines()
-            .filter_map(|line| line.trim().strip_prefix("mod "))
+            .map(str::trim)
+            // Visibility stripped first, or `pub mod foo;` slips past the check
+            // that keeps this list honest and the module is silently exempt from
+            // the scan below. That is the one way this gate rots quietly.
+            .map(|line| {
+                line.strip_prefix("pub(crate) ")
+                    .or_else(|| line.strip_prefix("pub "))
+                    .unwrap_or(line)
+            })
+            .filter_map(|line| line.strip_prefix("mod "))
             .filter_map(|rest| rest.strip_suffix(';'))
             .collect();
         assert!(!declared.is_empty(), "no modules found in lib.rs");
