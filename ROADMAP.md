@@ -93,6 +93,14 @@ with: there are 40- and 80-column snapshots already, and what I6 still needs is
 the assertions that make it an invariant rather than a screenshot. A diff line
 does lose its tail at 40 columns today.
 
+**[#6](https://github.com/breferrari/vigia/issues/6) is blocked on a decision, not
+on code.** I5 promises the view follows the newest change untouched, and no follow
+mode exists yet, so what happens when the reader scrolls is undecided — `SPEC.md`
+§11.2 **B1**. Implementing #6 first would settle it accidentally inside a snapshot
+test, which is how a behaviour becomes permanent without anyone choosing it. Rule
+on B1, then take #6. **B2** — which file wins when a batch changes several — is
+the same decision one layer down and lands with it.
+
 ## Phase 3 — glanceability
 
 Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
