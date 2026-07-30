@@ -45,7 +45,8 @@ relative to any other tool.
 | # | Invariant | Budget | How it is proven |
 |---|---|---|---|
 | **I1** | Redraw is **event-driven**, never a fixed timer. No filesystem event and no git index change means no work. | **0 wakeups** while idle | CPU sampled over a 60s idle window; assert no render calls |
-| **I2** | Re-highlighting is **incremental** — only changed hunks are re-parsed. | re-parse ∝ edit size, **not** file size | Assert re-parse count and byte count for a single-line edit in a large file |
+| **I2a** | **Re-diffing is incremental** — the frame path never re-diffs a file that did not change. | re-diff cost ∝ what changed, **not** worktree size | Assert the re-diff count and byte count for a single-line edit in a large worktree |
+| **I2b** | **Re-highlighting is incremental** — only changed hunks are re-parsed. | re-parse ∝ edit size, **not** file size | Assert the re-parse count and byte count for a single-line edit in a large file |
 | **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak test: 24h of synthetic edits, RSS sampled every 5 min |
 | **I4** | **Streams, never buffers.** First paint is independent of total diff size. | **first paint < 100ms** on a 100k-line diff | `criterion`, gated in CI |
 | **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
@@ -55,6 +56,18 @@ relative to any other tool.
 | **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | `criterion` under a synthetic edit storm |
 
 A regression past any budget **fails the build.**
+
+> [!note] Why I2 is two numbers
+> It was written as one, reading "re-highlighting is incremental", and that
+> conflated two invariants with **different dependencies and different phases**.
+> Incremental re-*diffing* needs only `gix` and is Phase 1. Incremental
+> re-*highlighting* needs `syntect`, which Phase 1 does not include, so Phase 1
+> could not close while one number meant both. Split deliberately rather than
+> absorbed silently, per the drift rule. Measurement that forced it: re-diffing
+> every changed file costs **18.58ms p99** on a 100k-line diff against **3.27ms**
+> for a single file, so I2a is load bearing rather than an optimisation.
+> Issues [#2](https://github.com/breferrari/vigia/issues/2) and
+> [#4](https://github.com/breferrari/vigia/issues/4).
 
 ## 4. Scope
 
@@ -147,13 +160,18 @@ testable. `notify` supplies raw events and nothing else.
 
 ## 8. Phases
 
+Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
+shape; that file is the state. Work is taken one task at a time via
+`.claude/skills/take-next/`.
+
 **Phase 1 — core engine.** `vigia-core` plus a `main` that prints frame timings.
 Prove `gix` gives working-tree-vs-index diffs at the fidelity and speed needed —
 it is the least-precedented dependency in the stack and everything sits on it.
-Land I1, I2, I4, I9. No TUI.
+Land **I1, I2a, I4, I9**, each gated. No TUI.
 
 **Phase 2 — minimum monitor.** ratatui + crossterm shell. Follow mode (I5),
-scroll, mouse, exit safety (I8), 40-column layout (I6). Snapshot suite.
+scroll, mouse, exit safety (I8), 40-column layout (I6). Plus **I2b** (needs
+`syntect`) and **I3** (soak). Snapshot suite.
 
 **Phase 3 — glanceability.** Section 5, plus theming.
 
@@ -194,10 +212,10 @@ tap, prebuilt binaries on GitHub releases.
       agent did. Confirm against a week of real use, or paint without renames
       and reconcile them on a later frame.
 - [ ] Re-diffing every changed file costs 18.58ms p99 on a 100k-line diff,
-      over the I9 budget, against 3.27ms for a single file. I2 is therefore
+      over the I9 budget, against 3.27ms for a single file. I2a is therefore
       load-bearing rather than an optimisation, and the frame path must never
       re-diff what did not change.
-- [ ] Is `syntect` fast enough incrementally to hold I2, or does it force
+- [ ] Is `syntect` fast enough incrementally to hold I2b, or does it force
       tree-sitter — and with it a C toolchain — back in?
 - [ ] Default view: unstaged only, or working-tree-vs-HEAD? Unstaged is the
       thesis; confirm against a week of real use.
