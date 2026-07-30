@@ -54,6 +54,13 @@ const EDITED_PATH: &str = "src/mod_0.rs";
 /// stop being the event. Rewriting before *every* frame is the opposite mistake
 /// and is recorded at the loop itself.
 ///
+/// That 1.79s was taken before [`exclusively_timed`] existed, so it carries the
+/// contention of two neighbouring gates; serialised, the same single-rewrite
+/// window is nearer 670ms and about 3x. Quoted as measured rather than adjusted,
+/// and the conclusion is unchanged either way: 3x is still a number that depends
+/// on the runner, and a CI machine is allowed to be three times slower than this
+/// one by `VIGIA_BUDGET_SLACK` alone.
+///
 /// Fifty puts a chunk at **308ms** measured, so the premise holds with better
 /// than six times to spare and the gate stops depending on how fast the runner
 /// is, which is the whole reason to prefer a frame count over a duration here.
@@ -373,7 +380,9 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     // state is exactly that and no reuse at all.
     assert!(
         parsed.lines > 0 && parsed.parsed >= SAMPLED_FRAMES as u64,
-        "{} hunks were re-parsed over {} lines across {SAMPLED_FRAMES} frames, so          the visible hunk is not changing under the highlighter and this gate is          timing the core's frame path with the syntax parser missing",
+        "{} hunks were re-parsed over {} lines across {SAMPLED_FRAMES} frames, so \
+         the visible hunk is not changing under the highlighter and this gate is \
+         timing the core's frame path with the syntax parser missing",
         parsed.parsed,
         parsed.lines
     );
