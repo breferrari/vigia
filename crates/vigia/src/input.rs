@@ -27,8 +27,37 @@ pub enum Action {
     Top,
     /// Go to the last changed file.
     Bottom,
+    /// Engage follow mode, or disengage it.
+    ///
+    /// Its own action rather than a flag on the others, because `SPEC.md`
+    /// §11.1 makes re-engaging a jump as well as a state change: `f` moves to
+    /// the newest change rather than waiting for the next one.
+    ToggleFollow,
     /// Draw again with no state change, which is what a resize needs.
     Redraw,
+}
+
+impl Action {
+    /// Whether this is the reader moving the viewport themselves.
+    ///
+    /// `SPEC.md` §11.1 hangs follow mode on this: a manual scroll disengages
+    /// it, so that following never fights a reader mid-read.
+    ///
+    /// Written as an exhaustive match rather than a `matches!` list on
+    /// purpose. The two are identical today and differ the moment an action is
+    /// added: this one stops compiling and asks, where the list would answer
+    /// "does not disengage" on its own and be right about half the time.
+    pub fn is_manual_scroll(self) -> bool {
+        match self {
+            Self::Scroll(_) | Self::Page(_) | Self::Top | Self::Bottom => true,
+            // A resize moves no viewport and expresses no intent, and a pane
+            // beside an agent is resized constantly, so treating it as a
+            // scroll would disengage follow mode for free. `ToggleFollow` is
+            // the reader asking for the opposite of disengaging, and quitting
+            // has nothing left to disengage from.
+            Self::Quit | Self::Redraw | Self::ToggleFollow => false,
+        }
+    }
 }
 
 /// The intention behind one terminal event, or `None` if there was not one.
@@ -80,6 +109,11 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::PageUp => Some(Action::Page(-1)),
         KeyCode::Home | KeyCode::Char('g') => Some(Action::Top),
         KeyCode::End | KeyCode::Char('G') => Some(Action::Bottom),
+        // Lower case only, and `G` above is why. `g`/`G` already mean two
+        // different things here, so a reader has been taught that shift
+        // matters, and folding case would hand `F` a meaning nobody asked for
+        // next to a key where case is load bearing.
+        KeyCode::Char('f') => Some(Action::ToggleFollow),
         _ => None,
     }
 }

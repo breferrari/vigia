@@ -75,6 +75,54 @@ fn arrows_and_their_vi_equivalents_agree() {
 }
 
 #[test]
+fn f_toggles_follow_and_shift_f_does_not() {
+    // The key the mockup published, and the one nobody would guess: `q` and
+    // `jk` are pager reflexes and `f` is not.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('f'))),
+        Some(Action::ToggleFollow)
+    );
+    // Case matters here because it already matters next door: `g` and `G` are
+    // two different actions, so folding case would hand `F` a meaning by
+    // accident beside a key where the distinction is load bearing.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('F'))),
+        None,
+        "shift-f did something, next to a key map where `g` and `G` differ"
+    );
+}
+
+#[test]
+fn only_the_actions_that_move_the_viewport_disengage_follow() {
+    // `SPEC.md` §11.1 hangs follow mode on this split, and both sides are a way
+    // for I5 to be quietly wrong rather than loudly broken. Too eager and a
+    // resize switches following off for free, on a pane that is resized
+    // constantly. Too lax and a reader who scrolled away gets dragged back on
+    // the next write.
+    for action in [
+        Action::Scroll(1),
+        Action::Scroll(-1),
+        Action::Page(1),
+        Action::Page(-1),
+        Action::Top,
+        Action::Bottom,
+    ] {
+        assert!(
+            action.is_manual_scroll(),
+            "{action:?} does not disengage follow mode, so it drags the reader \
+             back on the next write"
+        );
+    }
+
+    for action in [Action::Quit, Action::Redraw, Action::ToggleFollow] {
+        assert!(
+            !action.is_manual_scroll(),
+            "{action:?} disengages follow mode, and none of these moved a viewport"
+        );
+    }
+}
+
+#[test]
 fn the_wheel_scrolls_both_ways_by_the_same_amount() {
     // Symmetry is the claim. A wheel that moves three rows down and one up feels
     // broken in a way that is hard to name and easy to ship.

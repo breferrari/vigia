@@ -18,17 +18,40 @@ pub struct App {
     position: Position,
     /// What the footer should say instead of the key hints.
     notice: Option<String>,
+    /// Whether the viewport moves itself to what just changed.
+    following: bool,
+    /// The last path a tick named, whether or not it was followed.
+    ///
+    /// Kept while disengaged so `f` can jump to the newest change rather than
+    /// waiting for the next one, which is what `less +F` does and what
+    /// `SPEC.md` §11.1 rules. One path, replaced per tick: bounded by one
+    /// string rather than by the session, so I3 never sees it.
+    newest: Option<String>,
 }
 
 impl App {
-    /// A shell looking at the top of the diff.
+    /// A shell looking at the top of the diff, and following.
+    ///
+    /// Not `Self::default()`, and the difference is I5 rather than style:
+    /// follow is **on** before anything is touched, because a monitor that
+    /// needs a keypress to show the current state is not a monitor. `Default`
+    /// gives `false` for a bool and cannot be made to say otherwise without
+    /// hand-writing the impl, so the honest place for the decision is here.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            following: true,
+            ..Self::default()
+        }
     }
 
     /// Where the viewport currently starts.
     pub fn position(&self) -> Position {
         self.position
+    }
+
+    /// Whether the viewport is moving itself to what just changed.
+    pub fn following(&self) -> bool {
+        self.following
     }
 
     /// The message the footer is carrying, if any.
@@ -59,7 +82,57 @@ impl App {
         Chrome {
             worktree: worktree.to_owned(),
             notice: self.notice.clone(),
+            following: self.following,
         }
+    }
+
+    /// Record what changed most recently, and move to it if following.
+    ///
+    /// This is I5. `path` is [`vigia_core::Tick::newest`], and the whole of
+    /// "auto-follows the newest change" is the jump below happening with no
+    /// input on the reader's side.
+    ///
+    /// Takes `&Frame` rather than `&mut Frame` deliberately, and the signature
+    /// is the guarantee: following reads the file *list*, which the frame
+    /// already holds, so it cannot diff, cannot read and cannot `stat`. A
+    /// `&mut` here would make it possible for a later change to start paying
+    /// for a jump, which is what I4 forbids and what
+    /// `tests/follow.rs::following_a_file_costs_no_diff_and_no_read` gates.
+    ///
+    /// Returns whether the viewport moved.
+    pub fn follow(&mut self, path: &str, frame: &Frame) -> bool {
+        // Stored even while disengaged, so `f` has somewhere to jump to.
+        self.newest = Some(path.to_owned());
+        self.following && self.jump_to_newest(frame)
+    }
+
+    /// Move the viewport to the newest changed file, if it is still one.
+    ///
+    /// The path can name nothing in the diff, and that is ordinary rather than
+    /// exceptional: an edit reverted before the tick landed, or a file written
+    /// to the bytes the index already holds. There is no newest *change* then,
+    /// so the view stays where it is instead of jumping somewhere arbitrary.
+    ///
+    /// Row zero rather than a computed offset. The heading is the top of what
+    /// changed, and finding any other row would mean asking how tall the file
+    /// is, which costs the diff this method exists to avoid.
+    fn jump_to_newest(&mut self, frame: &Frame) -> bool {
+        let Some(newest) = self.newest.as_deref() else {
+            return false;
+        };
+        // Linear over the changed files, not over the worktree, and once per
+        // tick rather than once per frame. At the 2000-file shape #19 measures
+        // this is string comparison against a list already in memory, where
+        // the rejected alternative was 2000 syscalls.
+        let Some(file) = frame
+            .files()
+            .iter()
+            .position(|change| change.path == newest)
+        else {
+            return false;
+        };
+        self.position = Position { file, row: 0 };
+        true
     }
 
     /// Apply one intention.
@@ -73,9 +146,27 @@ impl App {
     ///
     /// Returns `false` when the action was to quit.
     pub fn apply(&mut self, action: Action, frame: &mut Frame, height: usize) -> Result<bool> {
+        // Once, above the match, rather than repeated in each arm that moves
+        // the view. A rule spelled out four times is a rule that is eventually
+        // spelled out three times, and the arm that forgot it would fail
+        // silently: follow mode would simply keep dragging the reader back.
+        if action.is_manual_scroll() {
+            self.following = false;
+        }
+
         match action {
             Action::Quit => return Ok(false),
             Action::Redraw => {}
+            // Re-engaging jumps rather than arming: `less +F` goes to the end
+            // when you ask it to follow, and a reader who presses `f` is
+            // asking to see what changed, not to wait for the next thing that
+            // does. `SPEC.md` §11.1.
+            Action::ToggleFollow => {
+                self.following = !self.following;
+                if self.following {
+                    self.jump_to_newest(frame);
+                }
+            }
             Action::Scroll(rows) => self.scroll(rows, frame)?,
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.

@@ -42,10 +42,28 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
     terminal.backend().clone()
 }
 
+/// The neutral chrome, which is deliberately **not** the state a shell starts
+/// in.
+///
+/// Follow mode is on by default (I5), so most of these snapshots show a footer
+/// no reader will see on their first frame. That is on purpose: this file is
+/// about what the *body* draws, and `follow ▶` in every picture would be a
+/// constant nothing here tests, eating footer width in the forty-column
+/// baseline that [#7](https://github.com/breferrari/vigia/issues/7) is
+/// measured against. The follow state gets its own snapshots instead, below.
 fn chrome() -> Chrome {
     Chrome {
         worktree: "vigia".to_owned(),
         notice: None,
+        following: false,
+    }
+}
+
+/// The chrome a shell actually starts with.
+fn following_chrome() -> Chrome {
+    Chrome {
+        following: true,
+        ..chrome()
     }
 }
 
@@ -214,8 +232,44 @@ fn a_notice_takes_the_footer_from_the_key_hints() {
     let chrome = Chrome {
         worktree: "vigia".to_owned(),
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
+        following: false,
     };
     insta::assert_snapshot!(screen(80, 6, &view, &chrome));
+}
+
+#[test]
+fn the_footer_shows_that_follow_is_engaged() {
+    // I5 is otherwise invisible. A view that has not moved because nothing
+    // changed and one that has not moved because following was switched off
+    // look identical, and the reader's next action differs completely between
+    // them.
+    let view = one_file();
+    insta::assert_snapshot!(screen(80, 6, &view, &following_chrome()));
+}
+
+#[test]
+fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
+    // A notice replaces the *hints*, which is advice the reader can spare.
+    // Whether what they are looking at is still live is not advice, and it is
+    // most worth knowing precisely when something has just gone wrong.
+    let view = one_file();
+    let chrome = Chrome {
+        notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
+        ..following_chrome()
+    };
+    insta::assert_snapshot!(screen(80, 6, &view, &chrome));
+}
+
+#[test]
+fn the_follow_state_and_the_hints_collide_at_forty_columns() {
+    // Recorded rather than solved. `SPEC.md` §5.1 marks what the hint bar drops
+    // first as unspecified and assigns it to
+    // [#7](https://github.com/breferrari/vigia/issues/7), so this snapshot is
+    // that issue's input: the worst case is hints plus follow state plus
+    // position on one forty-column line, and it is the default state rather
+    // than an unusual one. Nothing here claims I6 holds.
+    let view = one_file();
+    insta::assert_snapshot!(screen(40, 6, &view, &following_chrome()));
 }
 
 #[test]
