@@ -48,7 +48,7 @@ mod worktree;
 pub use change::{ChangeKind, FileChange};
 pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
-pub use highlight::{Class, HighlightStats, Highlighter, Span};
+pub use highlight::{CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Span};
 pub use hunk::{CONTEXT, FileDiff, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};

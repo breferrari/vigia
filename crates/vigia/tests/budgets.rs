@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use vigia::{App, body_height};
-use vigia_core::{Frame, Highlighter, LineKind, Samples};
+use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, LineKind, Samples};
 
 use support::{Scratch, budget, highlight_delta, settle};
 
@@ -85,7 +85,36 @@ fn time(mut work: impl FnMut()) -> Duration {
 
 #[test]
 fn a_real_frame_with_highlighting_holds_the_frame_budget() {
-    let scratch = Scratch::large_diff("shell-i9", FILES, LINES);
+    frame_budget_at_depth("shell-i9", 0);
+}
+
+#[test]
+fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
+    // The case the gate above is structurally blind to, and it is not exotic:
+    // `App::new()` starts at row zero, so measuring only there measures the
+    // cheapest position of the shape being tested.
+    //
+    // Highlighting a hunk is forward-only, so drawing row N needs the N rows
+    // above it parsed. That is paid once while the hunk is stable. Under
+    // continuous edits it is not stable: the file being written is the file
+    // being read, its hunk changes before every frame, and a reader who scrolled
+    // in to follow along pays the whole walk on every tick with no input at all.
+    // Measured before the rewind existed: 29ms p50 and 53ms p99 here, against a
+    // 16ms budget, sustained.
+    //
+    // The depth is inside the *first* hunk rather than across files. Each file
+    // is five hundred rewritten lines, so one hunk is a thousand display rows
+    // and there is no file boundary to reset anything.
+    frame_budget_at_depth("shell-i9-deep", 500);
+}
+
+/// Sample the frame budget with the viewport `depth` rows into the diff.
+///
+/// One function rather than two tests with a constant swapped, because the two
+/// depths have to agree about every other term for the comparison to mean
+/// anything.
+fn frame_budget_at_depth(name: &str, depth: usize) {
+    let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     settle(&mut frame);
@@ -94,6 +123,28 @@ fn a_real_frame_with_highlighting_holds_the_frame_budget() {
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let height = body(&app, FILES);
+
+    if depth > 0 {
+        // A manual scroll, which disengages follow exactly as a reader's would
+        // (`SPEC.md` §11.1). The view then stays where it was put while the
+        // edits keep landing, which is the whole point.
+        app.apply(
+            vigia::Action::Scroll(isize::try_from(depth).expect("a sane depth")),
+            &mut frame,
+            height,
+        )
+        .expect("scroll");
+        let view = app
+            .view(&mut frame, &mut highlighter, height)
+            .expect("view");
+        assert_eq!(
+            view.top.row, depth,
+            "the scroll landed at row {} rather than {depth}, so the fixture \
+             does not have one hunk deep enough to measure",
+            view.top.row
+        );
+        assert_eq!(view.top.file, 0, "the scroll crossed into another file");
+    }
 
     if !absolute_gates_apply() {
         return;
@@ -183,14 +234,20 @@ fn a_real_frame_with_highlighting_holds_the_frame_budget() {
         cost.parsed
     );
 
-    // And the cost has to follow the screen. A frame that re-highlighted the
-    // whole hunk would parse a thousand lines rather than a screenful, which is
-    // the 61ms-per-frame shape `vigia_core::highlight` exists to avoid.
+    // And the cost has to follow the screen rather than the hunk, at any depth.
+    //
+    // The bound is a screenful **plus one checkpoint stride**, not a screenful:
+    // a hunk whose content changed rewinds to the deepest parse position the new
+    // content still agrees with, and that position sits at worst a whole stride
+    // above the first drawn row. Without the rewind this number was the reader's
+    // scroll depth, which is the 53ms-per-frame shape it exists to avoid.
     let per_frame = cost.lines / SAMPLED_FRAMES as u64;
+    let bound = (height + CHECKPOINT_STRIDE) as u64;
     assert!(
-        per_frame <= height as u64,
-        "{per_frame} lines were highlighted per frame for a {height}-row body, \
-         so a frame is parsing more of the hunk than it draws"
+        per_frame <= bound,
+        "{per_frame} lines were highlighted per frame for a {height}-row body at \
+         depth {depth}, over the {bound} a rewind to the last checkpoint can \
+         cost, so a frame is parsing more of the hunk than it draws"
     );
 
     let p99 = frames.percentile(0.99).expect("samples");
