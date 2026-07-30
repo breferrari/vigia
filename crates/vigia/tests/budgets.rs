@@ -431,6 +431,19 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         view.rows.len()
     );
 
+    // Which also settles what the probe above assumed. It is named `undrawn` and
+    // nothing had checked that it was: a fixture whose files were short enough
+    // for the viewport to reach index {undrawn} would have fingerprinted it every
+    // frame, and the probe would be asking a question about the drawn path while
+    // reading as though it asked about the untouched one.
+    assert!(
+        view.top.file + view.read <= undrawn,
+        "the viewport drew files {}..{} of {FILES}, which reaches the file the \
+         settle probe treats as never drawn",
+        view.top.file,
+        view.top.file + view.read
+    );
+
     let p99 = frames.percentile(0.99).expect("samples");
     assert!(
         p99 <= budget(I9_FRAME),
