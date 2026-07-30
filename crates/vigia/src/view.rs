@@ -26,7 +26,7 @@
 //! [`vigia_core::FileChange`] cannot be constructed outside its crate, so a view
 //! assembled by hand is the only version of one a snapshot test can reach.
 
-use vigia_core::{ChangeKind, FileDiff, Frame, LineKind, Result};
+use vigia_core::{ChangeKind, FileDiff, Frame, Highlighter, LineKind, Result, Span};
 
 /// What a row of the body is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +61,14 @@ pub enum Row {
         number: u32,
         /// The text, already stripped of its line ending by the core.
         text: String,
+        /// What each run of `text` means, covering it exactly.
+        ///
+        /// Empty is legal and means "no highlighting", which is what a file type
+        /// nothing recognises produces and what a hand-built row in a test
+        /// carries. The renderer draws an uncovered tail in the plain style, so
+        /// an empty list and a single [`vigia_core::Class::Plain`] span reach the
+        /// screen identically.
+        spans: Vec<Span>,
     },
     /// Why a file has no lines under it.
     Note(&'static str),
@@ -192,7 +200,32 @@ impl View {
     /// `position.file` is clamped rather than trusted, because
     /// [`vigia_core::Frame::diff`] panics on an index that has fallen off the
     /// end, and a scroll position is exactly the index that can.
-    pub fn collect(frame: &mut Frame, position: Position, height: usize) -> Result<Self> {
+    /// Collect a screenful, bracketing the highlighter's frame around it.
+    ///
+    /// The bracket lives here rather than in [`crate::App`] or in the shell's
+    /// draw loop because it is what bounds the highlight cache by the viewport,
+    /// and a bound that every caller has to remember to apply is a bound that
+    /// one of them will not. Sweeping runs even when the walk fails: a frame
+    /// that could not be collected drew nothing, so there is nothing it should
+    /// be holding.
+    pub fn collect(
+        frame: &mut Frame,
+        highlighter: &mut Highlighter,
+        position: Position,
+        height: usize,
+    ) -> Result<Self> {
+        highlighter.begin();
+        let view = Self::gather(frame, highlighter, position, height);
+        highlighter.sweep();
+        view
+    }
+
+    fn gather(
+        frame: &mut Frame,
+        highlighter: &mut Highlighter,
+        position: Position,
+        height: usize,
+    ) -> Result<Self> {
         let files = frame.files().len();
         let mut view = Self {
             // Bounded by the screen, not by the diff. The cap keeps a caller
@@ -253,7 +286,7 @@ impl View {
                 placed = true;
             }
 
-            view.take_file(&change.kind, diff, skip, height);
+            view.take_file(&change.kind, diff, highlighter, skip, height);
             skip = 0;
             index += 1;
         }
@@ -266,7 +299,20 @@ impl View {
     /// `skip` rows are passed over and `height` bounds the total. Skipped rows
     /// are counted, never built: `n` tracks the row index within this file, and
     /// a hunk wholly above the window advances it in one step.
-    fn take_file(&mut self, kind: &ChangeKind, diff: &FileDiff, skip: usize, height: usize) {
+    ///
+    /// Highlighting is asked for **only on a row that is actually pushed**, so
+    /// it follows the screen the way reads already do. Within a hunk it cannot:
+    /// `syntect` parses a line from the state the line before it left, so
+    /// drawing row five hundred of a hunk parses the five hundred above it. That
+    /// is paid once, because [`vigia_core::Highlighter`] keeps what it parsed.
+    fn take_file(
+        &mut self,
+        kind: &ChangeKind,
+        diff: &FileDiff,
+        highlighter: &mut Highlighter,
+        skip: usize,
+        height: usize,
+    ) {
         let mut n = 0usize;
 
         if n >= skip {
@@ -286,7 +332,7 @@ impl View {
             return;
         }
 
-        for hunk in &diff.hunks {
+        for (ordinal, hunk) in diff.hunks.iter().enumerate() {
             if self.rows.len() >= height {
                 return;
             }
@@ -315,7 +361,7 @@ impl View {
             // advances the side it exists on; context advances both.
             let mut old = hunk.old_start;
             let mut new = hunk.new_start;
-            for line in &hunk.lines {
+            for (within, line) in hunk.lines.iter().enumerate() {
                 let number = match line.kind {
                     LineKind::Removed => {
                         old += 1;
@@ -339,6 +385,9 @@ impl View {
                         kind: line.kind,
                         number,
                         text: line.text.clone(),
+                        spans: highlighter
+                            .spans(&diff.path, ordinal, hunk, within)
+                            .to_vec(),
                     });
                 }
                 n += 1;

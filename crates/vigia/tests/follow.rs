@@ -29,7 +29,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use vigia::{Action, App, Position, Row, Theme, body_height, render};
-use vigia_core::Frame;
+use vigia_core::{Frame, Highlighter};
 
 use support::{Scratch, delta};
 
@@ -72,8 +72,8 @@ fn path_at(frame: &Frame, index: usize) -> String {
 /// The oracle for every assertion in this file. Following is a claim about
 /// what the reader sees, so it is checked against what would be drawn rather
 /// than against the position that produced it.
-fn top_file(app: &mut App, frame: &mut Frame) -> String {
-    let view = app.view(frame, body()).expect("view");
+fn top_file(app: &mut App, frame: &mut Frame, highlighter: &mut Highlighter) -> String {
+    let view = app.view(frame, highlighter, body()).expect("view");
     match view.rows.first() {
         Some(Row::File { path, .. }) => path.clone(),
         other => panic!("the top row is {other:?}, not a file heading"),
@@ -98,6 +98,7 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let target = path_at(&frame, TARGET);
     let first = path_at(&frame, 0);
@@ -108,12 +109,12 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
         target, first,
         "the fixture put the follow target where the view already was"
     );
-    assert_eq!(top_file(&mut app, &mut frame), first);
+    assert_eq!(top_file(&mut app, &mut frame, &mut highlighter), first);
 
     app.follow(&target, &frame);
 
     assert_eq!(
-        top_file(&mut app, &mut frame),
+        top_file(&mut app, &mut frame, &mut highlighter),
         target,
         "the view did not move to the file that changed"
     );
@@ -140,6 +141,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     // The script. Each step is an edit and the tick it produces, in the order
     // an agent would make them, and nothing else: no key is pressed anywhere
@@ -156,7 +158,9 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
 
     let area = Rect::new(0, 0, 64, 12);
     let height = body_height(area, &app.chrome("fixture"), frame.files().len());
-    let view = app.view(&mut frame, height).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, height)
+        .expect("view");
     assert_eq!(view.files, 3, "the fixture is not three changed files");
 
     let theme = Theme::default();
@@ -178,11 +182,12 @@ fn scrolling_disengages_follow_and_the_next_change_does_not_move_the_view() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let target = path_at(&frame, TARGET);
     let other = path_at(&frame, OTHER);
     app.follow(&target, &frame);
-    assert_eq!(top_file(&mut app, &mut frame), target);
+    assert_eq!(top_file(&mut app, &mut frame, &mut highlighter), target);
 
     app.apply(Action::Scroll(1), &mut frame, body())
         .expect("scroll");
@@ -212,6 +217,7 @@ fn f_re_engages_follow_and_jumps_to_the_newest_change() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     app.apply(Action::Scroll(1), &mut frame, body())
         .expect("scroll");
@@ -237,7 +243,7 @@ fn f_re_engages_follow_and_jumps_to_the_newest_change() {
 
     assert!(app.following(), "`f` did not re-engage follow mode");
     assert_eq!(
-        top_file(&mut app, &mut frame),
+        top_file(&mut app, &mut frame, &mut highlighter),
         other,
         "`f` re-armed the view without moving it, so the reader has to wait for \
          another write to see the change they pressed it for"
@@ -259,6 +265,7 @@ fn a_resize_does_not_disengage_follow() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     app.apply(Action::Redraw, &mut frame, body())
         .expect("redraw");
@@ -267,7 +274,7 @@ fn a_resize_does_not_disengage_follow() {
     let target = path_at(&frame, TARGET);
     app.follow(&target, &frame);
     assert_eq!(
-        top_file(&mut app, &mut frame),
+        top_file(&mut app, &mut frame, &mut highlighter),
         target,
         "the view stopped following after a resize"
     );
@@ -375,17 +382,18 @@ fn a_position_survives_the_file_it_points_at_being_committed() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let last = path_at(&frame, FILES - 1);
     app.follow(&last, &frame);
-    assert_eq!(top_file(&mut app, &mut frame), last);
+    assert_eq!(top_file(&mut app, &mut frame, &mut highlighter), last);
 
     scratch.commit_all("the agent in the other pane commits");
     frame.advance().expect("advance");
     assert_eq!(frame.files().len(), 0, "the commit left changes behind");
 
     let view = app
-        .view(&mut frame, body())
+        .view(&mut frame, &mut highlighter, body())
         .expect("a shrunken list must not panic");
     assert!(view.rows.is_empty(), "a clean worktree drew rows");
     assert_eq!(

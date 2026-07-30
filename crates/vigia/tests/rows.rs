@@ -22,7 +22,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use vigia::{App, Position, Row, Theme, View, body_height, render};
-use vigia_core::LineKind;
+use vigia_core::{Highlighter, LineKind};
 
 use support::Scratch;
 
@@ -82,14 +82,20 @@ fn every_line_number_names_the_line_it_is_on() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let view = app.view(&mut frame, ALL_ROWS).expect("view");
+    let mut highlighter = Highlighter::new();
+    let view = app
+        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .expect("view");
 
     let mut counts = [0usize; 3];
     let mut hunks = 0usize;
     let mut diverged = false;
 
     for row in &view.rows {
-        let Row::Line { kind, number, text } = row else {
+        let Row::Line {
+            kind, number, text, ..
+        } = row
+        else {
             if matches!(row, Row::Hunk { .. }) {
                 hunks += 1;
             }
@@ -155,7 +161,10 @@ fn a_file_is_its_heading_then_its_hunks() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let view = app.view(&mut frame, ALL_ROWS).expect("view");
+    let mut highlighter = Highlighter::new();
+    let view = app
+        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .expect("view");
 
     let mut headings = 0usize;
     for (index, row) in view.rows.iter().enumerate() {
@@ -220,7 +229,10 @@ fn each_kind_of_change_gets_its_own_letter() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let view = app.view(&mut frame, ALL_ROWS).expect("view");
+    let mut highlighter = Highlighter::new();
+    let view = app
+        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .expect("view");
 
     let mut seen: Vec<(char, String, Option<String>)> = view
         .rows
@@ -289,8 +301,15 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
 
-    let whole = View::collect(&mut frame, Position { file: 0, row: 0 }, ALL_ROWS).expect("view");
+    let whole = View::collect(
+        &mut frame,
+        &mut highlighter,
+        Position { file: 0, row: 0 },
+        ALL_ROWS,
+    )
+    .expect("view");
     let hunks = whole
         .rows
         .iter()
@@ -306,6 +325,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
     for offset in 0..whole.rows.len() {
         let window = View::collect(
             &mut frame,
+            &mut highlighter,
             Position {
                 file: 0,
                 row: offset,
@@ -357,11 +377,14 @@ fn a_real_repository_draws() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
     let height = body_height(area, &app.chrome("fixture"), frame.files().len());
-    let view = app.view(&mut frame, height).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, height)
+        .expect("view");
     // Non-vacuity: the fixture has to have produced something to draw, or the
     // snapshot below is a picture of an empty pane.
     assert_eq!(view.files, 2, "the fixture is not two changed files");
@@ -391,7 +414,10 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let view = app.view(&mut frame, ALL_ROWS).expect("view");
+    let mut highlighter = Highlighter::new();
+    let view = app
+        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .expect("view");
 
     assert!(
         matches!(view.rows.first(), Some(Row::File { churn: None, .. })),

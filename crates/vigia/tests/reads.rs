@@ -21,7 +21,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{App, Position, body_height};
-use vigia_core::FrameStats;
+use vigia_core::{FrameStats, Highlighter};
 
 use support::{Scratch, delta, materialise, settle};
 
@@ -72,8 +72,11 @@ fn one_screen(name: &str, files: usize) -> Screen {
     );
 
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
     let before = frame.stats();
-    let view = app.view(&mut frame, body()).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
 
     Screen {
         cost: delta(before, frame.stats()),
@@ -168,8 +171,11 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
     settle(&mut frame);
 
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
     let before = frame.stats();
-    let view = app.view(&mut frame, body()).expect("view");
+    let view = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     let cost = delta(before, frame.stats());
 
     assert_eq!(view.rows.len(), body(), "the screen did not fill");
@@ -204,6 +210,7 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     settle(&mut frame);
 
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
     // Each file here is one rewritten line: a file row, a hunk row and two
     // content rows. Scrolling by forty files' worth of rows lands well inside the
     // list rather than at either end.
@@ -216,7 +223,9 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     )
     .expect("scroll");
 
-    let crossing = app.view(&mut frame, body()).expect("view");
+    let crossing = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     assert_eq!(
         crossing.top,
         Position { file: 40, row: 0 },
@@ -231,7 +240,9 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     // Ceiling, not division: the last file on screen is usually a partial one,
     // and it is still a file the frame had to be asked for.
     let drawn = body().div_ceil(span);
-    let settled = app.view(&mut frame, body()).expect("view");
+    let settled = app
+        .view(&mut frame, &mut highlighter, body())
+        .expect("view");
     assert_eq!(settled.top, crossing.top, "the position drifted while idle");
     assert_eq!(
         settled.read, drawn,
@@ -252,9 +263,12 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
     materialise(&mut frame);
 
     let mut app = App::new();
+    let mut highlighter = Highlighter::new();
     let span = 4;
     for height in [span, span * 2, span * 5] {
-        let view = app.view(&mut frame, height).expect("view");
+        let view = app
+            .view(&mut frame, &mut highlighter, height)
+            .expect("view");
         assert_eq!(
             view.read,
             height / span,
