@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/vigia-core", "crates/vigia"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/breferrari/vigia"
+authors = ["Brenno Ferrari"]
+
+[workspace.dependencies]
+# Pure Rust throughout. Adding a dependency with a C build script is a spec
+# change, not an implementation detail; see CLAUDE.md.
+#
+# `default-features = false` is deliberate. gix's defaults pull in credentials,
+# mailmap, blame, worktree-archive and worktree-mutation, none of which a
+# read-only monitor uses, and all of which cost startup against I7.
+gix = { version = "0.86", default-features = false, features = [
+    "status",
+    "max-performance-safe",
+    "sha1",
+] }
+
+[profile.release]
+# I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+# Benchmarks and the soak test need symbols without giving up optimisation.
+# `panic` is deliberately absent: cargo ignores it for the bench profile.
+[profile.bench]
+inherits = "release"
+debug = true

@@ -1,0 +1,17 @@
+[package]
+name = "vigia-core"
+description = "Watch and diff engine for vigia. No terminal I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+gix.workspace = true
+
+# No dev-dependencies on purpose. Test fixtures are built by shelling out to
+# `git` (see tests/support), which keeps the dependency list exactly what
+# SPEC.md names and has the side benefit of proving gix against repositories
+# real git wrote, not ones we wrote ourselves.
