@@ -19,7 +19,7 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use support::{Scratch, delta, materialise, settle};
+use support::{Scratch, budget, delta, materialise, settle};
 use vigia_core::{FileChange, FrameStats, LineKind, Samples, Worktree};
 
 /// I4: first paint on a 100k-line diff.
@@ -35,23 +35,6 @@ const I9_FRAME: Duration = Duration::from_millis(16);
 /// 100k-line diff I4 is written against.
 const FILES: usize = 100;
 const LINES: usize = 500;
-
-/// Multiplier applied to the absolute budgets, and to nothing else.
-///
-/// Defaults to 1, so a developer machine is held to `SPEC.md` exactly. CI
-/// raises it because hosted runners are shared and their variance is not a
-/// property of this code. The structural gates ignore it entirely.
-fn slack() -> f64 {
-    std::env::var("VIGIA_BUDGET_SLACK")
-        .ok()
-        .and_then(|raw| raw.parse().ok())
-        .filter(|value: &f64| *value >= 1.0)
-        .unwrap_or(1.0)
-}
-
-fn budget(base: Duration) -> Duration {
-    base.mul_f64(slack())
-}
 
 /// Whether the absolute wall-clock gates should assert.
 ///
