@@ -35,6 +35,29 @@ const SETTLE_FRAMES: usize = 8;
 /// test.
 const SETTLE_WAIT: Duration = Duration::from_millis(2_500);
 
+/// Multiplier applied to absolute wall-clock bounds, and to nothing else.
+///
+/// Defaults to 1, so a developer machine is held to `SPEC.md` exactly. CI raises
+/// it because hosted runners are shared and their variance is not a property of
+/// this code. Structural gates ignore it entirely.
+///
+/// Shared rather than declared per test binary, which is the exception to how the
+/// rest of these suites handle helpers. It is one policy, named in `SPEC.md` §7 by
+/// its environment variable, and two copies of it would be free to drift into
+/// disagreeing about what CI is allowed to be slow by.
+pub fn slack() -> f64 {
+    std::env::var("VIGIA_BUDGET_SLACK")
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .filter(|value: &f64| *value >= 1.0)
+        .unwrap_or(1.0)
+}
+
+/// `base`, loosened by [`slack`].
+pub fn budget(base: Duration) -> Duration {
+    base.mul_f64(slack())
+}
+
 /// Advance one frame and fetch every diff in it.
 ///
 /// Fetching *all* of them is the point. A frame path that lazily diffs nothing

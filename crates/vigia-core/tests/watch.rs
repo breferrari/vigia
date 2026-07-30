@@ -15,7 +15,7 @@ mod support;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use support::Scratch;
+use support::{Scratch, budget};
 use vigia_core::{Tick, WatchOptions, Watcher};
 
 /// How long to insist that nothing happens.
@@ -29,6 +29,13 @@ const SETTLE: Duration = Duration::from_secs(10);
 
 /// How long the writer thread waits before touching anything.
 const DELAY: Duration = Duration::from_millis(400);
+
+/// The longest a burst held open by a continuous writer may last.
+///
+/// The `max_delay` under test is 300ms, and this is the deadline plus room for
+/// one event's processing to straddle it. See the assertion that uses it for why
+/// the engine cannot make the overshoot smaller than a single syscall.
+const MAX_DELAY_BOUND: Duration = Duration::from_millis(500);
 
 /// Block on `next_tick`, but have another thread stop the watcher after
 /// `timeout`.
@@ -190,10 +197,27 @@ fn a_continuous_writer_still_gets_a_tick_within_max_delay() {
     let _ = stop_writing.send(());
     writer.join().expect("writer thread");
 
+    // Two assertions in one, and it is worth separating what each catches. That a
+    // tick arrived at all is the invariant: `quiet` is 500ms and is reset by every
+    // accepted event, so while the writer runs it can never be satisfied, and only
+    // `max_delay` can end the burst. Drop `max_delay` from the engine and the
+    // `expect` above fires.
+    //
+    // The bound below adds "and at roughly the configured value", which catches a
+    // deadline honoured at the wrong length. It takes slack because it is an
+    // absolute wall-clock bound on a shared runner, which `SPEC.md` §7 already
+    // calls a weak instrument, and because the engine cannot make it tight: the
+    // burst loop re-checks its deadline once per event, so the overshoot is
+    // whatever one `accept` costs, and one `accept` is a `stat` plus a gitignore
+    // probe. On a Windows CI runner scanning files created milliseconds earlier
+    // that single syscall has been measured at 244ms past the deadline, which is
+    // not something the loop can preempt. A developer machine still runs this at
+    // zero slack.
     assert!(
-        tick.coalesced_for < Duration::from_millis(500),
-        "the burst was held for {:?}, past its max_delay",
-        tick.coalesced_for
+        tick.coalesced_for < budget(MAX_DELAY_BOUND),
+        "the burst was held for {:?}, past the {:?} its max_delay allows",
+        tick.coalesced_for,
+        budget(MAX_DELAY_BOUND)
     );
 }
 
