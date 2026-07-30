@@ -135,10 +135,14 @@ fn main() -> ExitCode {
         }
     }
 
-    println!("steady state  (warm, n={WARM_SWEEPS})");
+    // Deliberately not labelled I9. These are the raw primitives with no memory
+    // of the previous frame, which is the floor a frame cannot beat rather than
+    // any frame a monitor has. The frame path is measured below, and it is what
+    // `tests/budgets.rs` gates I9 over.
+    println!("primitives, the floor  (warm, n={WARM_SWEEPS})");
     if let (Some(p50), Some(p99)) = (incremental.percentile(0.50), incremental.percentile(0.99)) {
         println!(
-            "  I9  re-diff one file    p99 {:>9}  budget {:>8}  {}   (p50 {})",
+            "      re-diff one file    p99 {:>9}  budget {:>8}  {}   (p50 {})",
             ms(p99),
             ms(BUDGET_FRAME),
             verdict(p99, BUDGET_FRAME),
@@ -165,6 +169,10 @@ fn main() -> ExitCode {
         Ok(frames) => {
             println!();
             println!("frame path  (Frame, every file materialised, n={WARM_SWEEPS})");
+            println!(
+                "      no edit is simulated, so the warm line is a revalidating \
+                 frame, not I9's"
+            );
             if let (Some(p50), Some(p99)) =
                 (frames.cold.percentile(0.50), frames.cold.percentile(0.99))
             {
