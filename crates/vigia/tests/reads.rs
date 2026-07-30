@@ -21,7 +21,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{App, Position, body_height};
-use vigia_core::{FrameStats, Highlighter};
+use vigia_core::{FrameStats, HighlightStats, Highlighter};
 
 use support::{Scratch, delta, materialise, settle};
 
@@ -49,6 +49,13 @@ fn body() -> usize {
 /// What one screenful cost, and what it produced.
 struct Screen {
     cost: FrameStats,
+    /// What highlighting that same screenful cost.
+    ///
+    /// I2b's caller-side half. The core will parse exactly the lines it is asked
+    /// for and nothing in it stops a renderer from asking for every hunk of
+    /// every file, which is the shape `SPEC.md` §7 says needs a second gate over
+    /// the caller.
+    highlight: HighlightStats,
     /// Files the view asked the frame for.
     read: usize,
     rows: usize,
@@ -80,6 +87,7 @@ fn one_screen(name: &str, files: usize) -> Screen {
 
     Screen {
         cost: delta(before, frame.stats()),
+        highlight: highlighter.stats(),
         read: view.read,
         rows: view.rows.len(),
         files: view.files,
@@ -119,6 +127,54 @@ fn one_screenful_costs_the_same_however_much_else_changed() {
         "one screen computed {} diffs among {FEW_FILES} changed files and {} \
          among {FILES}",
         few.cost.computed, many.cost.computed
+    );
+}
+
+#[test]
+fn one_screenful_highlights_the_same_however_much_else_changed() {
+    // I2b held against the shell rather than against the core, which is the same
+    // shape `one_screenful_costs_the_same_however_much_else_changed` holds I4 in
+    // and is needed for the same reason. `vigia_core::Highlighter` parses
+    // exactly the lines it is asked for; asking it for every hunk of every file
+    // is the natural way to write a renderer, and would satisfy every gate in
+    // `vigia-core/tests/budgets.rs` while making a frame cost the worktree.
+    let few = one_screen("shell-highlight-few", FEW_FILES);
+    let many = one_screen("shell-highlight-many", FILES);
+
+    // Non-vacuity: a renderer that highlighted nothing would satisfy every
+    // equality below, and it would look exactly like today's screen because a
+    // line with no spans is drawn plain.
+    assert!(
+        many.highlight.lines > 0 && many.highlight.bytes > 0,
+        "one screen parsed {} lines and {} bytes, so nothing was highlighted at \
+         all",
+        many.highlight.lines,
+        many.highlight.bytes
+    );
+    assert!(
+        many.highlight.lines <= many.rows as u64,
+        "one screen of {} rows parsed {} lines, so it is highlighting rows it \
+         does not draw",
+        many.rows,
+        many.highlight.lines
+    );
+
+    assert_eq!(
+        few.highlight.bytes, many.highlight.bytes,
+        "one screen highlighted {} bytes among {FEW_FILES} changed files and {} \
+         among {FILES}, so what a frame parses follows the worktree rather than \
+         the screen",
+        few.highlight.bytes, many.highlight.bytes
+    );
+    assert_eq!(
+        few.highlight.lines, many.highlight.lines,
+        "one screen parsed {} lines against {}",
+        few.highlight.lines, many.highlight.lines
+    );
+    assert_eq!(
+        few.highlight.parsed, many.highlight.parsed,
+        "one screen parsed {} hunks against {}",
+        few.highlight.parsed, many.highlight.parsed
     );
 }
 
