@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use vigia_core::{CONTEXT, Frame, FrameStats, HighlightStats, Worktree};
@@ -56,6 +57,33 @@ pub fn slack() -> f64 {
 /// `base`, loosened by [`slack`].
 pub fn budget(base: Duration) -> Duration {
     base.mul_f64(slack())
+}
+
+/// Held for the timed region of an absolute gate, so two never overlap.
+///
+/// `cargo test` runs a binary's tests on parallel threads, so absolute gates in
+/// the same binary measure each other. That is tolerable while they all do the
+/// same light per-frame edit and stops being tolerable the moment one of them
+/// writes a fixture: a 1.5 MiB bulk rewrite took its two neighbours from passing
+/// to **53 and 54ms p99** against a 16ms budget, while their p50 stayed at 6.6
+/// and 7.6ms. A p50 that holds while the p99 goes eight times over is
+/// contention, not a regression, and no threshold tells the two apart.
+///
+/// Here rather than in one test binary for the same reason [`slack`] is here:
+/// it is one policy, `SPEC.md` §7 already calls an absolute gate on a shared
+/// machine a weak instrument, and two copies would be free to drift. Each test
+/// binary compiles its own `static`, which is exactly the scope wanted, since
+/// `cargo` runs the binaries themselves one at a time.
+///
+/// Poison is unwrapped through deliberately. A gate that fails while holding
+/// this has already reported the real number, and letting the panic cascade into
+/// poison failures would bury it under neighbours that are fine.
+static TIMED: Mutex<()> = Mutex::new(());
+
+pub fn exclusively_timed() -> MutexGuard<'static, ()> {
+    TIMED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Advance one frame and fetch every diff in it.

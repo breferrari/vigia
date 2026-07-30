@@ -20,14 +20,13 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
-use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use vigia::{App, body_height};
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, LineKind, Samples};
 
-use support::{Scratch, budget, delta, highlight_delta, settle};
+use support::{Scratch, budget, delta, exclusively_timed, highlight_delta, settle};
 
 /// I9: steady-state frame time.
 const I9_FRAME: Duration = Duration::from_millis(16);
@@ -97,30 +96,6 @@ fn time(mut work: impl FnMut()) -> Duration {
     let start = Instant::now();
     work();
     start.elapsed()
-}
-
-/// Held for the timed region of every gate in this file.
-///
-/// `cargo test` runs a binary's tests on parallel threads, so without this the
-/// three absolute gates here measure each other. That was tolerable while all
-/// three did the same light per-frame edit and stopped being tolerable the moment
-/// one of them wrote a fixture: the bulk-rewrite gate's 1.5 MiB rewrites took the
-/// other two from passing to **53 and 54ms p99** against a 16ms budget, while
-/// their p50 stayed at 6.6 and 7.6ms. A p50 that holds while the p99 goes eight
-/// times over is contention, not a regression, and no threshold distinguishes
-/// them: `SPEC.md` §7 already calls an absolute gate on a shared machine a weak
-/// instrument, and three of them sharing a machine *with each other* is that
-/// weakness self-inflicted.
-///
-/// Poison is unwrapped through deliberately. A gate that fails while holding this
-/// has already reported the real number, and letting the panic cascade into two
-/// poison failures would bury it under two tests that are fine.
-static TIMED: Mutex<()> = Mutex::new(());
-
-fn exclusively_timed() -> MutexGuard<'static, ()> {
-    TIMED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[test]
@@ -371,6 +346,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     // outside I9 by definition, and this is that: the cost of a test fixture
     // hitting the disk is not a cost of the shell.
     let before = frame.stats();
+    let highlighted = highlighter.stats();
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for at in 0..SAMPLED_FRAMES {
         if at % REWRITE_EVERY == 0 {
@@ -388,6 +364,19 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         frames.push(draw(&mut frame, &mut app, &mut highlighter));
     }
     let cost = delta(before, frame.stats());
+    let parsed = highlight_delta(highlighted, highlighter.stats());
+
+    // Non-vacuity, first in the direction this whole file exists for. Highlighting
+    // has to have actually happened, or this measures the frame path the core
+    // already gates and reports it as a shell number. One re-parse per frame is
+    // the floor: the drawn file's hunk changes before every frame, so the steady
+    // state is exactly that and no reuse at all.
+    assert!(
+        parsed.lines > 0 && parsed.parsed >= SAMPLED_FRAMES as u64,
+        "{} hunks were re-parsed over {} lines across {SAMPLED_FRAMES} frames, so          the visible hunk is not changing under the highlighter and this gate is          timing the core's frame path with the syntax parser missing",
+        parsed.parsed,
+        parsed.lines
+    );
 
     // Non-vacuity. A frame that reused rather than recomputed would be a cheap
     // frame for a reason that is not the code, and a percentile diluted with

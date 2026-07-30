@@ -338,8 +338,9 @@ const REWRITE_EVERY: usize = 5;
 /// What a bulk rewrite cost one fixture over [`MARGIN_FRAMES`] frames.
 struct Margin {
     cost: FrameStats,
-    /// Files the last frame asked for, and the rows it drew.
+    /// Files the last frame asked the frame path for.
     read: usize,
+    /// Rows the last frame drew, so a half-empty screen cannot pass as a full one.
     rows: usize,
 }
 
@@ -364,6 +365,7 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let height = body();
 
     let before = frame.stats();
     let mut read = 0;
@@ -374,7 +376,7 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
         }
         frame.advance().expect("advance");
         let view = app
-            .view(&mut frame, &mut highlighter, body())
+            .view(&mut frame, &mut highlighter, height)
             .expect("view");
         read = view.read;
         rows = view.rows.len();
