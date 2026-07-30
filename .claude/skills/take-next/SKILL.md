@@ -14,11 +14,24 @@ repo now for that reason. Do not move it out.
 
 ## 1. Find your place
 
-Do not guess and do not scroll the code looking for where things stopped.
+Do not guess and do not scroll the code looking for where things stopped. One
+command finds the work:
 
+```sh
+# The earliest milestone that still HAS open issues, then its issues.
+gh api "repos/{owner}/{repo}/milestones?state=open&sort=due_on&direction=asc" \
+  --jq '[.[] | select(.open_issues > 0)][0].title'
+gh issue list --state open --milestone "<that title>"
 ```
-gh issue list --state open --milestone "<earliest open milestone>"
-```
+
+**Not "the earliest open milestone".** A finished phase leaves its milestone open
+until someone closes it, so the earliest *open* milestone can be one with zero
+open issues, and the query then returns nothing and the session has no work to
+take. That happened the first time this was tried: Phase 1 was complete, merged,
+and still open, so `take-next` found the plan and then found nothing in it.
+
+**If you finish the last issue in a milestone, close the milestone.** It is the
+step that makes the next session's first command work.
 
 `ROADMAP.md` is the plan; the issues are the truth. If they disagree, the issues
 win and the roadmap is stale, so fix the roadmap in the same pass.
@@ -50,8 +63,16 @@ recorded one is the single most expensive mistake available here.
   is genuinely two things, say so and split the *issue* first.
 - **Never defer a finding into a new issue to get the PR closed.** If work
   surfaces something inside the scope of the task, fix it here. A new issue is
-  for something genuinely out of scope, and it goes on the deferral shelf in
-  `ROADMAP.md` with its reason.
+  for something genuinely out of scope, and it needs **all three** of a
+  milestone, a `ROADMAP.md` row, and a shelf entry giving the reason it moved.
+  Miss the milestone and the issue is **invisible**, not deprioritised: the query
+  in step 1 filters by milestone and will never return it. Seven accumulated that
+  way before anyone noticed, so file it in one command rather than intending to
+  come back:
+
+  ```sh
+  gh issue create --title "..." --body-file f.md --milestone "Phase 5 — deferred findings"
+  ```
 - **An invariant is not landed until a test fails when it is violated.** Write
   the failing test first, watch it fail, then make it pass. A test that passes
   against broken code is worse than no test.
