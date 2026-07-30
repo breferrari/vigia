@@ -147,7 +147,10 @@ fn position_of(file: usize, files: usize) -> String {
     if files == 0 {
         String::new()
     } else {
-        format!("{}/{files}", file + 1)
+        // Saturating because [`View`] has public fields and [`render`] is public,
+        // so nothing stops a caller handing over a position past the end of its
+        // own file list. [`View::collect`] always clamps, but the type does not.
+        format!("{}/{files}", file.saturating_add(1))
     }
 }
 
