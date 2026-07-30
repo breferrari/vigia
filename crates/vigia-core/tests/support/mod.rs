@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use vigia_core::{Frame, FrameStats, Worktree};
 
@@ -22,6 +23,17 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 /// Generous because a spare frame costs milliseconds, and because the assertion
 /// [`settle`] ends with is what gives the number teeth.
 const SETTLE_FRAMES: usize = 8;
+
+/// How long to wait for a fixture's own writes to become provably old.
+///
+/// This has to exceed the engine's own settle margin, which is two seconds
+/// because a filesystem's modification-time granularity can be that coarse. It
+/// is a real wait and cannot be a spin: the whole point of the margin is that no
+/// amount of looking at a file makes its granule close sooner.
+///
+/// Tests run concurrently, so this costs the suite one wait rather than one per
+/// test.
+const SETTLE_WAIT: Duration = Duration::from_millis(2_500);
 
 /// Advance one frame and fetch every diff in it.
 ///
@@ -35,18 +47,19 @@ pub fn materialise(frame: &mut Frame) {
     }
 }
 
-/// Drive the frame until it stops re-reading, then prove that it stopped.
+/// Wait for the frame's files to become provably unchanged, then prove they did.
 ///
-/// A file written microseconds ago cannot yet be *proved* unchanged: its
-/// modification time is not strictly older than the read that fingerprinted it,
-/// which is the racily-clean rule doing its job. Fixtures are written
-/// immediately before a test runs, so the first frames legitimately re-read
-/// them. I2a is a claim about the frame after an edit has landed, not the frame
-/// racing the write, so measurement starts here.
+/// A file written moments ago cannot be *proved* unchanged, because a filesystem
+/// floors the modification time it stamps and the granule may still be open. So
+/// this waits out the engine's margin before measuring anything. Fixtures are
+/// written immediately before a test runs, so without the wait the first frames
+/// legitimately re-read everything. I2a is a claim about the frame after an edit
+/// has landed, not the frame racing the write.
 ///
 /// This cannot wait out a broken cache. A frame path that never reuses anything
 /// never settles, and the panic below is what it gets.
 pub fn settle(frame: &mut Frame) {
+    std::thread::sleep(SETTLE_WAIT);
     for _ in 0..SETTLE_FRAMES {
         let before = frame.stats().computed;
         materialise(frame);
