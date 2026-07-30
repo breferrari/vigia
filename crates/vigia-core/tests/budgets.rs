@@ -20,7 +20,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use support::{Scratch, delta, materialise, settle};
-use vigia_core::{FileChange, FrameStats, Samples, Worktree};
+use vigia_core::{FileChange, FrameStats, LineKind, Samples, Worktree};
 
 /// I4: first paint on a 100k-line diff.
 const I4_FIRST_PAINT: Duration = Duration::from_millis(100);
@@ -403,8 +403,10 @@ fn a_real_frame_holds_the_frame_budget() {
     }
 
     let mut edits = 0usize;
+    let mut marker = String::new();
     let mut next_frame = |frame: &mut vigia_core::Frame| {
-        scratch.edit_line(SHARED_PATH, 0, &format!("fn edited_{edits}() {{ }}"));
+        marker = format!("fn edited_{edits}() {{ }}");
+        scratch.edit_line(SHARED_PATH, 0, &marker);
         edits += 1;
         time(|| materialise(frame))
     };
@@ -420,15 +422,29 @@ fn a_real_frame_holds_the_frame_budget() {
     }
     let cost = delta(before, frame.stats());
 
-    // Non-vacuity, both directions. A frame that recomputed nothing would be
-    // timing pure revalidation and calling it "under edits"; one that recomputed
-    // everything would mean I2a had stopped working and the budget below is the
-    // only thing that would notice.
+    // Non-vacuity, and it deliberately does not count recomputes. A recompute
+    // count cannot show that the edits are landing: one write keeps its file
+    // unsettled for the whole settle margin, so every frame inside that window
+    // recomputes it whether or not anything is still being edited. Counting
+    // would pass against a test that edited once and then sat still.
+    //
+    // What cannot be manufactured by the margin is the *content*: the frame has
+    // to be handing back the last edit actually made.
+    let last = marker.clone();
+    let shared = frame
+        .files()
+        .iter()
+        .position(|change| change.path == SHARED_PATH)
+        .expect("the edited file is still a change");
+    let (_, diff) = frame.diff(shared).expect("diff");
     assert!(
-        cost.computed >= SAMPLED_FRAMES as u64,
-        "{} recomputes over {SAMPLED_FRAMES} frames that each edited a file, so \
-         the edits are not reaching the frame",
-        cost.computed
+        diff.hunks.iter().any(|hunk| {
+            hunk.lines
+                .iter()
+                .any(|line| line.kind == LineKind::Added && line.text == last)
+        }),
+        "the frame's diff for {SHARED_PATH} does not contain {last:?}, so the \
+         edits stopped reaching it"
     );
     assert!(
         cost.computed <= (SAMPLED_FRAMES * 2) as u64,
