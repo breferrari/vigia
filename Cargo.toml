@@ -33,6 +33,23 @@ notify = { version = "8.2", default-features = false, features = [
 criterion = { version = "0.8", default-features = false, features = [
     "cargo_bench_support",
 ] }
+# The `crossterm` feature is not a preference, it is SPEC.md section 6: ratatui
+# also ships termion, termwiz and termina, and termion is Unix-only. It carries
+# crossterm in as `ratatui::crossterm`, which is why crossterm is not declared
+# separately. Two declarations of the same crate that drift apart by a major
+# version become two incompatible `Event` types.
+#
+# Everything else is off, including the default widget set and macros. The shell
+# writes cells directly: a `Paragraph` would wrap, and a wrapped diff line moves
+# every line below it, so the shape of the screen stops meaning anything. Not
+# taking the widgets also keeps `time` and its transitive tree out of the graph.
+ratatui = { version = "0.30", default-features = false, features = [
+    "crossterm",
+] }
+# Named by SPEC.md section 7 as the snapshot instrument. Defaults kept, unlike
+# every pin above: the one default is coloured diffs, and a diff is the entire
+# output of a failing snapshot test.
+insta = "1.48"
 
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.

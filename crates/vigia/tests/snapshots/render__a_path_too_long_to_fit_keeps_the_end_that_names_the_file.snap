@@ -1,0 +1,8 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(40, 4, &view, &chrome())"
+---
+"vigia                             1 file"
+"M …/deeply/nested/module/frame.rs +12 -3"
+"                                        "
+"q quit  jk scroll                    1/1"

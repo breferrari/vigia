@@ -1,3 +1,9 @@
 /target
 **/*.rs.bk
 *.pdb
+
+# insta writes a rejected snapshot beside the accepted one when they disagree.
+# The accepted `.snap` files are reviewed and committed; these are scratch, and
+# a committed one silently becomes the thing the next run compares against.
+*.snap.new
+*.pending-snap
