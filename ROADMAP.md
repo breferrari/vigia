@@ -1,11 +1,8 @@
 # vigia — Roadmap
 
-**This file answers "what is next".** `SPEC.md` answers "what is true and why". Code
-is written against the spec; work is taken from here.
+**This file answers "what is next".** `SPEC.md` answers "what is true and why". Code is written against the spec; work is taken from here.
 
-Every task links to an issue, so "done" has an external source of truth (issue
-closed, PR merged) rather than a self-report. If this file and the issues
-disagree, the issues win and this file is stale: fix it in the same pass.
+Every task links to an issue, so "done" has an external source of truth (issue closed, PR merged) rather than a self-report. If this file and the issues disagree, the issues win and this file is stale: fix it in the same pass.
 
 Status legend: ✅ done · 🔨 in progress · ⬜ not started
 
@@ -13,31 +10,22 @@ Status legend: ✅ done · 🔨 in progress · ⬜ not started
 
 ## Principles
 
-Each of these is a filter you can quote back at a proposal to kill or delay it.
-If a line here cannot do that, it is ornament and should be cut.
+Each of these is a filter you can quote back at a proposal to kill or delay it. If a line here cannot do that, it is ornament and should be cut.
 
-1. **Monitor, not reviewer.** If a change makes vigia a better tool to *sit down
-   and review with*, at the cost of being correct-while-ignored, it is wrong.
-2. **The budgets are the product.** A feature that cannot hold the frame budget
-   is not a feature, it is a regression with a changelog entry.
-3. **An invariant without a failing test is a wish.** Nothing counts as landed
-   until a test fails when it is violated.
-4. **Pure Rust, no C toolchain.** Any dependency pulling `cc`, `cmake` or
-   `bindgen` breaks static Linux builds and Windows tier-1. That is a spec
-   change, argued in the spec, never an implementation detail.
-5. **Measure, never assume.** A type signature is not evidence. A single green
-   run is not evidence. Numbers or it did not happen.
+1. **Monitor, not reviewer.** If a change makes vigia a better tool to *sit down and review with*, at the cost of being correct-while-ignored, it is wrong.
+2. **The budgets are the product.** A feature that cannot hold the frame budget is not a feature, it is a regression with a changelog entry.
+3. **An invariant without a failing test is a wish.** Nothing counts as landed until a test fails when it is violated.
+4. **Pure Rust, no C toolchain.** Any dependency pulling `cc`, `cmake` or `bindgen` breaks static Linux builds and Windows tier-1. That is a spec change, argued in the spec, never an implementation detail.
+5. **Measure, never assume.** A type signature is not evidence. A single green run is not evidence. Numbers or it did not happen.
 
 ## Non-goals, permanent
 
 Not "later". Never. Listed so the debate does not have to recur.
 
-- **Staging, committing, rebasing.** Reviewer-class, and each would cost an
-  invariant. Use a git client.
+- **Staging, committing, rebasing.** Reviewer-class, and each would cost an invariant. Use a git client.
 - **Branch and commit browsing.** Same.
 - **Annotations and comment threads.** Reviewer-class by definition.
-- **AI features of any kind.** The tool watches files. It does not summarise,
-  explain or judge them.
+- **AI features of any kind.** The tool watches files. It does not summarise, explain or judge them.
 - **Remote operations.** No fetch, no push, no network.
 - **A GUI.** Terminal only.
 
@@ -56,11 +44,7 @@ Prove `gix` before anything is built on top, since everything sits on it. No TUI
 | ✅ | I2a the frame path never re-diffs what did not change | [#2](https://github.com/breferrari/vigia/issues/2) |
 | ✅ | Gate every Phase 1 budget in CI (I4, I7, I9) | [#3](https://github.com/breferrari/vigia/issues/3) |
 
-**Phase 1 is closed.** The engine holds every budget it was written against, and
-`gix` was the right call. On a 100-file, 100k-line diff: a real frame under
-continuous edits is 3.93ms p99 to revalidate and 6.97ms p99 with a file edited
-before every frame, against 18.28ms and 3.6 MiB for a cold frame with nothing to
-reuse. The 16ms budget holds with room, and only the cold frame breaches it.
+**Phase 1 is closed.** The engine holds every budget it was written against, and `gix` was the right call. On a 100-file, 100k-line diff: a real frame under continuous edits is 3.93ms p99 to revalidate and 6.97ms p99 with a file edited before every frame, against 18.28ms and 3.6 MiB for a cold frame with nothing to reuse. The 16ms budget holds with room, and only the cold frame breaches it.
 
 ## Phase 2 — minimum monitor
 
@@ -76,39 +60,15 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ⬜ | I2b re-highlight only changed hunks (`syntect`) | [#4](https://github.com/breferrari/vigia/issues/4) |
 | ⬜ | I3 flat resources over days (soak) | [#5](https://github.com/breferrari/vigia/issues/5) |
 
-**The shell is in, so the rest of this phase has something to render into.** It
-draws the working-tree diff, follows the watch engine's ticks, scrolls by keyboard
-and wheel, and holds its own half of I4: one screenful reads only the files it
-draws, gated across two fixtures in `crates/vigia/tests/reads.rs`.
+**The shell is in, so the rest of this phase has something to render into.** It draws the working-tree diff, follows the watch engine's ticks, scrolls by keyboard and wheel, and holds its own half of I4: one screenful reads only the files it draws, gated across two fixtures in `crates/vigia/tests/reads.rs`.
 
-**The shell is now safe to leave running.** [#8](https://github.com/breferrari/vigia/issues/8)
-closed the last untested module: the takeover is data, giving it back is asserted
-as its exact inverse, and a half-finished `Session::enter` undoes exactly what it
-took. Seven mutations, each killed by a named test. It also settled what I8 can
-honestly promise: raw mode means Ctrl-C is a key event and never a signal, so an
-externally delivered `kill` is out of reach without a dependency `SPEC.md` does
-not name. That is [#24](https://github.com/breferrari/vigia/issues/24), on the
-shelf below.
+**The shell is now safe to leave running.** [#8](https://github.com/breferrari/vigia/issues/8) closed the last untested module: the takeover is data, giving it back is asserted as its exact inverse, and a half-finished `Session::enter` undoes exactly what it took. Seven mutations, each killed by a named test. It also settled what I8 can honestly promise: raw mode means Ctrl-C is a key event and never a signal, so an externally delivered `kill` is out of reach without a dependency `SPEC.md` does not name. That is [#24](https://github.com/breferrari/vigia/issues/24), on the shelf below.
 
-**[#6](https://github.com/breferrari/vigia/issues/6) is what remains of the
-phase's correctness half.** I5 is follow mode, the last thing that makes the
-monitor correct with nobody touching it, which is the product class. Nothing in
-the shell reads follow state today: #9 deliberately shipped no `f` toggle rather
-than a key that flips a bool nothing consumes. It is **not** takeable yet, for the
-reason two paragraphs down.
+**[#6](https://github.com/breferrari/vigia/issues/6) is what remains of the phase's correctness half.** I5 is follow mode, the last thing that makes the monitor correct with nobody touching it, which is the product class. Nothing in the shell reads follow state today: #9 deliberately shipped no `f` toggle rather than a key that flips a bool nothing consumes. It is **not** takeable yet, for the reason two paragraphs down.
 
-[#7](https://github.com/breferrari/vigia/issues/7) then has a baseline to argue
-with: there are 40- and 80-column snapshots already, and what I6 still needs is
-the assertions that make it an invariant rather than a screenshot. A diff line
-does lose its tail at 40 columns today.
+[#7](https://github.com/breferrari/vigia/issues/7) then has a baseline to argue with: there are 40- and 80-column snapshots already, and what I6 still needs is the assertions that make it an invariant rather than a screenshot. A diff line does lose its tail at 40 columns today.
 
-**[#6](https://github.com/breferrari/vigia/issues/6) is blocked on a decision, not
-on code.** I5 promises the view follows the newest change untouched, and no follow
-mode exists yet, so what happens when the reader scrolls is undecided — `SPEC.md`
-§11.2 **B1**. Implementing #6 first would settle it accidentally inside a snapshot
-test, which is how a behaviour becomes permanent without anyone choosing it. Rule
-on B1, then take #6. **B2** — which file wins when a batch changes several — is
-the same decision one layer down and lands with it.
+**[#6](https://github.com/breferrari/vigia/issues/6) is blocked on a decision, not on code.** I5 promises the view follows the newest change untouched, and no follow mode exists yet, so what happens when the reader scrolls is undecided — `SPEC.md` §11.2 **B1**. Implementing #6 first would settle it accidentally inside a snapshot test, which is how a behaviour becomes permanent without anyone choosing it. Rule on B1, then take #6. **B2** — which file wins when a batch changes several — is the same decision one layer down and lands with it.
 
 ## Phase 3 — glanceability
 
@@ -119,35 +79,16 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ⬜ | Sparklines, heat strips, counters, pulse | [#10](https://github.com/breferrari/vigia/issues/10) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
-**This phase is mis-scoped and [#10](https://github.com/breferrari/vigia/issues/10)
-must split before anything here is taken.** Reading `assets/preview.svg` as the
-specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of
-work behind two rows, and #10 alone carries four features that share no
-implementation. `take-next` step 4 is explicit: *if the issue is genuinely two
-things, split the issue first.*
+**This phase is mis-scoped and [#10](https://github.com/breferrari/vigia/issues/10) must split before anything here is taken.** Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carries four features that share no implementation. `take-next` step 4 is explicit: *if the issue is genuinely two things, split the issue first.*
 
-The correction that matters is not the count. **It is that this is not a rendering
-phase** (`SPEC.md` §5.2). Two of its headline elements need retained state in
-`vigia-core`, so they move invariants rather than sit on top of them:
+The correction that matters is not the count. **It is that this is not a rendering phase** (`SPEC.md` §5.2). Two of its headline elements need retained state in `vigia-core`, so they move invariants rather than sit on top of them:
 
-- the **sparkline** needs history that survives a file settling — which is exactly
-  what `FrameStats.evicted` throws away to keep I3 provable. Blocked on **proposed
-  I10 (bounded history)**: the data structure is the decision, the drawing is the
-  easy part.
-- the **heat strip** needs each file's total line count, a whole-file read the
-  frame path exists to avoid. Cacheable per `(path, blob id)`; without that cache
-  it breaks I2a.
+- the **sparkline** needs history that survives a file settling — which is exactly what `FrameStats.evicted` throws away to keep I3 provable. Blocked on **proposed I10 (bounded history)**: the data structure is the decision, the drawing is the easy part.
+- the **heat strip** needs each file's total line count, a whole-file read the frame path exists to avoid. Cacheable per `(path, blob id)`; without that cache it breaks I2a.
 
-Split #10 along the seams of what each element actually needs, not along what they
-look like: history-backed (sparkline, recency gradient, `just changed` decay — one
-clock, not three), whole-file-backed (heat strip), and free (per-file counters,
-which cost nothing because a file must be diffed to be drawn).
+Split #10 along the seams of what each element actually needs, not along what they look like: history-backed (sparkline, recency gradient, `just changed` decay — one clock, not three), whole-file-backed (heat strip), and free (per-file counters, which cost nothing because a file must be diffed to be drawn).
 
-Untracked entirely, and all visible in the mockup: the header **mode word**
-(`watching`, implying a mode set), the **status bar** (`0.8ms frame`, `11MB` — one
-measuring inside I9's budget, the other a syscall I3 only samples in soak), and the
-**key-hint bar**, which constrains I6 because roughly thirty columns of it has to
-degrade at forty.
+Untracked entirely, and all visible in the mockup: the header **mode word** (`watching`, implying a mode set), the **status bar** (`0.8ms frame`, `11MB` — one measuring inside I9's budget, the other a syscall I3 only samples in soak), and the **key-hint bar**, which constrains I6 because roughly thirty columns of it has to degrade at forty.
 
 ## Phase 4 — distribution
 
@@ -161,9 +102,7 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 
 Milestone: [Phase 5](https://github.com/breferrari/vigia/milestone/5)
 
-Everything on the deferral shelf below has a milestone here, so shelved work is
-still reachable by a milestone-filtered query rather than only readable in prose.
-The shelf carries the *reason*; this table carries the *state*.
+Everything on the deferral shelf below has a milestone here, so shelved work is still reachable by a milestone-filtered query rather than only readable in prose. The shelf carries the *reason*; this table carries the *state*.
 
 | | Task | Issue |
 |---|---|---|
@@ -179,9 +118,7 @@ The shelf carries the *reason*; this table carries the *state*.
 
 ## Deferral shelf
 
-Items that surfaced mid-phase and would have derailed the block they surfaced
-in. Deferral is a first-class outcome recorded here, not a dropped ball and not
-scope creep absorbed silently. Each one carries the phase it moved to.
+Items that surfaced mid-phase and would have derailed the block they surfaced in. Deferral is a first-class outcome recorded here, not a dropped ball and not scope creep absorbed silently. Each one carries the phase it moved to.
 
 | Item | Surfaced | Moved to | Why |
 |---|---|---|---|
@@ -197,9 +134,7 @@ scope creep absorbed silently. Each one carries the phase it moved to.
 
 ## Pull-forward log
 
-Items that moved into an *earlier* phase than planned. Recorded for the same
-reason as deferrals: movement should be visible. Over time the balance of this
-list against the shelf says whether the plan was too ambitious or too cautious.
+Items that moved into an *earlier* phase than planned. Recorded for the same reason as deferrals: movement should be visible. Over time the balance of this list against the shelf says whether the plan was too ambitious or too cautious.
 
 | Item | Moved | Why |
 |---|---|---|
