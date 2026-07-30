@@ -17,16 +17,29 @@
 //! * **first paint** diffs only what a screen could show. That is what I7 and
 //!   I4 are about.
 //! * **full sweep** diffs every changed file. No frame ever has to do this
-//!   once incremental re-diffing (I2) exists, so it is reported as the cost
+//!   once incremental re-diffing (I2a) exists, so it is reported as the cost
 //!   that incrementality has to remove, not as a frame time.
+//!
+//! It reads and never writes. Every number here is measured against the
+//! repository as it stands, which is why the frame section reports a
+//! *revalidating* frame rather than one following a simulated edit: fabricating
+//! an edit would mean writing to someone's working tree to benchmark it.
 
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use vigia_core::{ChangeOptions, Error, Samples, Worktree};
+use vigia_core::{ChangeOptions, Error, Frame, FrameStats, Samples, Worktree};
 
 /// Sweeps taken after the cold one, for a steady-state percentile.
 const WARM_SWEEPS: usize = 20;
+
+/// Frames allowed for a working tree's recent writes to fall settled.
+///
+/// A file written moments ago cannot be *proved* unchanged, so a frame taken
+/// right after a save re-reads it by design. This is not a retry loop: it stops
+/// as soon as a frame reuses everything, and the report names anything still
+/// being re-read.
+const SETTLE_FRAMES: usize = 8;
 
 /// Files a first paint is assumed to need. A tall terminal shows fewer.
 const FIRST_PAINT_FILES: usize = 1;
@@ -136,7 +149,7 @@ fn main() -> ExitCode {
         println!(
             "      re-diff everything  p99 {:>9}  {:>17}   (p50 {})",
             ms(p99),
-            "cost I2 removes",
+            "cost I2a removes",
             ms(p50)
         );
     }
@@ -144,6 +157,55 @@ fn main() -> ExitCode {
         "      of which enumerate      {:>9}   paid by every frame regardless",
         ms(full.enumerate)
     );
+
+    // I2a on a real repository. The two lines below run the same work through
+    // the same type; the only difference is whether the previous frame's
+    // answers were available. Their ratio is what incrementality bought.
+    match frame_costs(&worktree) {
+        Ok(frames) => {
+            println!();
+            println!("frame path  (Frame, every file materialised, n={WARM_SWEEPS})");
+            if let (Some(p50), Some(p99)) =
+                (frames.cold.percentile(0.50), frames.cold.percentile(0.99))
+            {
+                println!(
+                    "      cold, no frame to reuse   p99 {:>9}   {:>10} read   (p50 {})",
+                    ms(p99),
+                    bytes(frames.cold_stats.bytes),
+                    ms(p50)
+                );
+            }
+            if let (Some(p50), Some(p99)) =
+                (frames.warm.percentile(0.50), frames.warm.percentile(0.99))
+            {
+                println!(
+                    "  I2a revalidating a frame      p99 {:>9}   {:>10} read   (p50 {})",
+                    ms(p99),
+                    bytes(frames.warm_stats.bytes),
+                    ms(p50)
+                );
+            }
+            println!(
+                "      {} files, {} diffs held, {} recomputed, {} reused, {} stats",
+                frames.files,
+                frames.tracked,
+                frames.warm_stats.computed,
+                frames.warm_stats.reused,
+                frames.warm_stats.probes
+            );
+            if frames.warm_stats.computed > 0 {
+                println!(
+                    "      note: {} file(s) were written too recently to prove unchanged, \
+                     so they were re-read",
+                    frames.warm_stats.computed
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("vigia: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     // Rename tracking is the one option that changes the *shape* of the
     // stream rather than only its cost, so the harness reports both.
@@ -178,6 +240,85 @@ fn main() -> ExitCode {
     println!("Numbers are evidence against this repository, not a CI verdict.");
 
     ExitCode::SUCCESS
+}
+
+/// What the frame path cost with and without a previous frame to lean on.
+struct FrameCosts {
+    /// A fresh [`Frame`] each time, so nothing can be reused.
+    cold: Samples,
+    /// A settled frame, revalidating what it already holds.
+    warm: Samples,
+    /// Counters for one cold frame, and for one warm frame.
+    cold_stats: FrameStats,
+    warm_stats: FrameStats,
+    files: usize,
+    tracked: usize,
+}
+
+/// Advance one frame and fetch every diff in it.
+fn materialise(frame: &mut Frame) -> Result<(), Error> {
+    frame.advance()?;
+    for i in 0..frame.files().len() {
+        frame.diff(i)?;
+    }
+    Ok(())
+}
+
+fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
+    FrameStats {
+        computed: after.computed - before.computed,
+        reused: after.reused - before.reused,
+        bytes: after.bytes - before.bytes,
+        probes: after.probes - before.probes,
+        evicted: after.evicted - before.evicted,
+    }
+}
+
+/// Measure I2a against this repository: the same frame, with and without memory.
+///
+/// The warm frame is settled first. A file written moments ago cannot be proved
+/// unchanged, so a frame taken immediately after a save legitimately re-reads
+/// it; measuring that as steady state would understate incrementality for a
+/// reason that is not about the code.
+fn frame_costs(worktree: &Worktree) -> Result<FrameCosts, Error> {
+    let mut cold = Samples::new(WARM_SWEEPS);
+    let mut warm = Samples::new(WARM_SWEEPS);
+
+    let mut cold_stats = FrameStats::default();
+    for _ in 0..WARM_SWEEPS {
+        let mut frame = worktree.frame();
+        let start = Instant::now();
+        materialise(&mut frame)?;
+        cold.push(start.elapsed());
+        cold_stats = frame.stats();
+    }
+
+    let mut frame = worktree.frame();
+    for _ in 0..SETTLE_FRAMES {
+        let before = frame.stats().computed;
+        materialise(&mut frame)?;
+        if frame.stats().computed == before {
+            break;
+        }
+    }
+
+    let mut warm_stats = FrameStats::default();
+    for _ in 0..WARM_SWEEPS {
+        let before = frame.stats();
+        let start = Instant::now();
+        materialise(&mut frame)?;
+        warm.push(start.elapsed());
+        warm_stats = delta(before, frame.stats());
+    }
+
+    Ok(FrameCosts {
+        cold,
+        warm,
+        cold_stats,
+        warm_stats,
+        files: frame.files().len(),
+        tracked: frame.tracked(),
+    })
 }
 
 /// What one measured sweep produced.
