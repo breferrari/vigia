@@ -113,12 +113,12 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 | `● just changed` on the diff header | The pulse, but drawn as a **persisting label with a dot**, not a flash. So it has a **decay**. **(unspecified: how long it persists, and whether it fades or cuts)** |
 | Status bar `0.8ms frame` | Instrumenting the render path and drawing the result. Self-referential: measuring and painting the number costs frame time that I9 gates. **(unspecified: sampled or per-frame, and which statistic)** |
 | Status bar `11MB` | A live RSS readout. I3 samples RSS in a **soak test**, never on screen; reading it per frame is a syscall on some platforms. **(unspecified entirely)** |
-| Status bar `follow ▶` | A follow-state indicator, which presumes the mode exists — see §11.2 B1. |
+| Status bar `follow ▶` | A follow-state indicator, which presumes the mode exists. **Landed with I5**, on the footer rather than a third chrome line: see §11.1. |
 | Key hints `q quit · f follow · ↑↓ scroll` | A hint bar, and it **constrains I6**: roughly thirty columns of it must degrade legibly at forty. **(unspecified: what it drops first)** |
 
 Two of these are corrections rather than gaps:
 
-1. **`f` toggles follow.** The mockup shows a dedicated key and a state indicator. That is the answer to §11.2 B1, and it was published before the question was asked — `f` simply does not exist in `input.rs` yet.
+1. **`f` toggles follow.** The mockup shows a dedicated key and a state indicator. That is the answer to §11.2 B1, and it was published before the question was asked. Ruled and implemented 2026-07-30; `f` is in `input.rs` and the rule is §11.1.
 2. **The dimmed row and the `just changed` label are one mechanism**, not two: both are recency rendered as intensity. Specifying them separately would produce two decay clocks that disagree on screen.
 
 **A picture in a public README is a specification whether or not it is written down.** This one implied a retained time series, a recency gradient, two status readouts and a keybinding, none of which appeared in the spec, the roadmap, or any issue — while [#10](https://github.com/breferrari/vigia/issues/10) carried four of them in a single line. That is the same failure as §11: behaviour that exists somewhere real, with no line claiming it.
@@ -161,6 +161,8 @@ The split is a dependency decision, not a hedge: the TUI renders whatever the co
 `notify` is named here because I1 requires filesystem events rather than a timer, and each platform delivers them differently: `inotify` on Linux, `FSEvents` on macOS, `ReadDirectoryChangesW` on Windows. `notify` is the standard Rust abstraction over those three, and it keeps the binary pure Rust. Verified 2026-07-30 against `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-musl` and `aarch64-apple-darwin`: no `cc`, `cmake` or `bindgen` in any of the three graphs. The `-sys` crates it pulls (`inotify-sys`, `fsevent-sys`, `windows-sys`) are FFI declarations against facilities the OS already ships, so they compile no C.
 
 **Coalescing stays ours.** `notify` has a companion debouncer crate, and taking it would move coalesce policy out of `vigia-core`, which is the one place I1 is testable. `notify` supplies raw events and nothing else.
+
+A coalesced tick also **names the file whose write landed last in it**, which is what I5 follows and what §11.1 specifies. The path is a by-product of the gitignore filter, which already resolves every event against the worktree root, so carrying it costs no syscall. This is the second thing the debouncer crate would have taken away.
 
 **The frame path keeps its diffs between frames.** I2a forbids re-diffing a file that did not change, so the core holds the previous frame's diff per path and revalidates instead of recomputing. Validity is decided from three things that cost no file read: the index blob the change names, the kind of change, and a `stat` of the working-tree file. Content is never hashed to decide this, because hashing is the read I2a exists to avoid.
 
@@ -238,7 +240,7 @@ Two parts: what the shell already does, recorded because it was decided in code 
 
 ### 11.1 What the shell does today
 
-Back-filled from the implementation on 2026-07-30, not newly decided. Where this disagrees with the code, the code is the bug.
+Most of this was back-filled from the implementation on 2026-07-30 rather than newly decided. **Follow mode is the exception**: it was ruled on 2026-07-30, as B1 and B2 below, and written here *before* the code existed — which is the order the README claims for everything and which §11's warning exists because this file did not keep. Where this disagrees with the code, the code is the bug.
 
 **What the diff contains.** Working tree against the index. **Untracked files are included** and diff as all-additions — load-bearing rather than incidental, since creating new files is among the most common things an agent does, and a tool blind to them would miss its own use case. Rename tracking is **on by default**: showing a move as an unrelated delete plus add misdescribes what the agent did. Its streaming cost is the open question in §10, not a settled trade.
 
@@ -253,28 +255,31 @@ Back-filled from the implementation on 2026-07-30, not newly decided. Where this
 | `PgUp` | page up |
 | `g`, `Home` | first changed file |
 | `G`, `End` | last changed file |
+| `f` | engage follow mode, or disengage it |
 | mouse wheel | scroll |
 | terminal resize | redraw, no state change |
 
 **Scroll position is `(file, offset within that file)`, never a row index.** A frame that changes something above the viewport therefore does not teleport the view. This is a correctness property, not an implementation detail: with a row index, an agent writing to a file earlier in the list would yank the reader's position on every keystroke it makes.
 
+**Follow mode**, which is I5. `less +F` semantics, and the toggle the README mockup already published: follow is **on at startup**, **any manual scroll disengages it**, and **`f` re-engages it and jumps straight to the newest change** rather than waiting for the next one. The footer shows `follow ▶` while it is engaged.
+
+Two boundaries are load bearing, because each is a way for the mode to be quietly wrong rather than visibly broken. A **terminal resize does not disengage**: it moves no viewport and expresses no intent, and a monitor beside an agent is resized constantly. And **`G` disengages rather than re-engaging**, because "jump to the last changed file" and "resume following" are different intents that would otherwise be the same key, leaving a reader unable to look at the newest file without also re-arming the view.
+
+**The newest change is the file whose write landed last in the settled batch**, and the batch is the coalesced tick. A monitor cannot find that file by looking: `stat`-ing every changed file is the cost [#19](https://github.com/breferrari/vigia/issues/19) already records as breaching I9 at scale, and I4 forbids reading files the frame does not draw. It does not have to look, because the filesystem event already carries the path. `Tick` reports it, so following costs no read, no `stat` and no diff. When the named path is not in the diff — an index write, or an edit reverted before the tick landed — the view stays where it is, because there is no newest *change* to follow.
+
 **CLI.** One optional positional path, defaulting to the working directory. No flags today.
 
 ### 11.2 Undecided — these gate Phase 2
 
-Each carries a recommendation marked **(proposed)**. None is settled until ruled on, and none may contradict §3 — if one does, §3 wins and the recommendation is wrong.
+Each carries a recommendation marked **(proposed)**. None is settled until ruled on, and none may contradict §3 — if one does, §3 wins and the recommendation is wrong. A ruled item moves to §11.1 and leaves its number behind here, because the numbers are cited elsewhere and renumbering would silently repoint those citations.
 
-**B1 — What happens to follow mode when the reader scrolls.** I5 promises the view "auto-follows the newest change and scrolls to it, untouched", and **no follow mode exists in the code yet** — `Action` is quit, scroll, page, top, bottom, redraw. So the relationship between following and scrolling is genuinely open, and [#6](https://github.com/breferrari/vigia/issues/6) will otherwise settle it by accident inside a snapshot test.
+**B1 — What happens to follow mode when the reader scrolls. Ruled 2026-07-30: the proposal stands. See §11.1.** `less +F` semantics, on at startup, disengaged by any manual scroll, re-engaged by `f`. Rationale, kept because it is the part a later reader will want to argue with: disengage-on-scroll is the only rule that never fights a reader mid-read, and a dedicated toggle beats overloading `G`/`End`, because "jump to the last file" and "resume following" are different intents that would otherwise be the same key.
 
-*(proposed)* `less +F` semantics, with the toggle **the README mockup already published**: follow is **on** at startup, **any manual scroll disengages it**, and **`f` re-engages** — the status bar shows `follow ▶` for the state and `f follow` in the hints. `f` does not exist in `input.rs` yet.
+*An earlier draft of this bullet proposed `G`/`End` as the re-engage key. That contradicted the mockup, which is public and predates the question. When a published artifact already answers an open question, it is the answer — the question is only whether to keep it. It was kept.*
 
-Rationale: disengage-on-scroll is the only rule that never fights a reader mid-read, and a dedicated toggle beats overloading `G`/`End`, because "jump to the last file" and "resume following" are different intents that would otherwise be the same key — you would be unable to look at the newest file without also re-arming the view.
+**B2 — Which file wins when several change at once. Ruled 2026-07-30: the proposal stands. See §11.1.** Follow the file whose write landed **last** in the settled batch, and let §5's visual pulse carry the others. Rationale: it reads "newest" literally, it is stable rather than heuristic, and the pulse already exists to say "these moved too" without moving the viewport for each.
 
-*An earlier draft of this bullet proposed `G`/`End` as the re-engage key. That contradicted the mockup, which is public and predates the question. When a published artifact already answers an open question, it is the answer — the question is only whether to keep it.*
-
-**B2 — Which file wins when several change at once.** An agent rewriting five files in one action is the normal case, not an edge case. "The newest change" is ambiguous the moment a batch coalesces.
-
-*(proposed)* Follow the file whose write landed **last** in the settled batch, and let §5's visual pulse carry the others. Rationale: it reads "newest" literally, it is stable rather than heuristic, and the pulse already exists to say "these moved too" without moving the viewport for each.
+What ruling it exposed, and what §11.1 now records: "last in the batch" is only affordable because the filesystem event names the path. Deriving it instead would mean `stat`-ing every changed file, which is [#19](https://github.com/breferrari/vigia/issues/19)'s breach, so the cheap answer and the correct one happened to coincide here rather than by design.
 
 **B3 — The empty state.** Zero changes is not an edge case; it is the state the tool sits in most of the time, and it is the **first** thing anyone sees when they open it beside an agent that has not written yet. A blank pane is indistinguishable from a hang.
 
