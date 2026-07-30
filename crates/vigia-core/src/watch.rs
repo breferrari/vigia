@@ -134,11 +134,7 @@ pub struct Watcher<'repo> {
     /// Dropping this stops the OS watch, so it must outlive the receiver.
     _backend: notify::RecommendedWatcher,
     excludes: gix::AttributeStack<'repo>,
-    /// Prefixes an event path may carry for the same worktree.
-    ///
-    /// Two of them because macOS reports FSEvents paths through `/private`
-    /// while the worktree was opened as `/var`, and Windows canonicalises to a
-    /// `\\?\` prefix that events never use.
+    /// Prefixes an event path may carry for the same worktree. See [`roots_of`].
     roots: Vec<PathBuf>,
     options: WatchOptions,
     stats: WatchStats,
@@ -170,12 +166,7 @@ impl<'repo> Watcher<'repo> {
             )
             .map_err(|e| Error::Watch(Box::new(e)))?;
 
-        let mut roots = vec![workdir.to_path_buf()];
-        if let Ok(canonical) = workdir.canonicalize()
-            && canonical != workdir
-        {
-            roots.push(canonical);
-        }
+        let roots = roots_of(workdir);
 
         let (tx, rx) = mpsc::channel();
 
@@ -376,6 +367,50 @@ impl<'repo> Watcher<'repo> {
     }
 }
 
+/// Every spelling of the worktree root that an event path might carry.
+///
+/// Three, because the root is spelled by three parties that do not agree and
+/// none of them is wrong.
+///
+/// * **As given.** `gix` hands back the path it was discovered with, so
+///   `vigia .` leaves this as `"."`. Kept first because a backend that does not
+///   resolve the watched path at all reports events under exactly this.
+/// * **Absolute.** `notify` resolves the watch before asking the OS for it, and
+///   builds every event path by joining the change onto that. This is the one
+///   that was missing, and without it a relative root matched **nothing**: the
+///   monitor drew its first frame and then silently ignored every event for the
+///   rest of the session. `Components` normalises an interior `.` away, so an
+///   event at `C:\w\.\SPEC.md` strips against `C:\w` even though the strings do
+///   not share a prefix.
+/// * **Canonical.** macOS reports FSEvents paths through `/private` for a
+///   worktree opened as `/var`, which neither of the two above covers. On
+///   Windows this is the `\\?\` verbatim form, which events never use, so it
+///   earns its place on one platform and is inert on another.
+///
+/// Deduplicated, because in the ordinary case of an absolute argument the first
+/// two are the same path and a repeated root would make every event cost an
+/// extra comparison.
+///
+/// Pure, and separated from the watcher for the reason `SPEC.md` §7 gives: the
+/// case it exists for cannot be reached from the rest of the suite without
+/// changing the process working directory, which is global and races every other
+/// test in the binary. `tests/relative.rs` is the one end-to-end gate, alone in
+/// its own target so it can own that directory; this is the rule.
+fn roots_of(workdir: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![workdir.to_path_buf()];
+    for spelling in [
+        std::path::absolute(workdir).ok(),
+        workdir.canonicalize().ok(),
+    ] {
+        if let Some(spelling) = spelling
+            && !roots.contains(&spelling)
+        {
+            roots.push(spelling);
+        }
+    }
+    roots
+}
+
 /// Fold the paths one event named into what that event meant.
 ///
 /// `resolve` decides whether a path matters and where it sits in the worktree.
@@ -473,6 +508,54 @@ mod tests {
     /// Unix run are testing their own separator rather than a literal.
     fn native(components: &[&str]) -> PathBuf {
         components.iter().collect()
+    }
+
+    /// `vigia .`, which is the default invocation and the one the name is built
+    /// on, and which redrew exactly once before this test existed.
+    ///
+    /// `gix` hands back the path it was given, so a relative argument leaves
+    /// `workdir()` as `"."`. `notify` resolves the watch to an absolute path and
+    /// joins each change onto it, so an event never begins with `"."`, and the
+    /// canonicalised root carries a `\\?\` prefix on Windows that events never
+    /// use. With neither matching, every event is discarded as outside the
+    /// worktree and `next_tick` blocks forever on a live channel: no tick, no
+    /// error, and nothing on the footer to say so.
+    ///
+    /// Reproducing it needs the root to be `"."` exactly. Rust's `Components`
+    /// normalises a `.` away everywhere except the start of a path, so even
+    /// `<absolute>/.` strips correctly and looks fine.
+    #[test]
+    fn a_relative_worktree_root_matches_the_paths_events_carry() {
+        let roots = roots_of(Path::new("."));
+        // Where `notify` will have resolved the watch to, and therefore what
+        // every event path begins with. Read rather than set, so this test
+        // stays safe beside every other test in the binary.
+        let resolved = std::path::absolute(".").expect("an absolute working directory");
+        let event = resolved.join("SPEC.md");
+
+        assert!(
+            roots.iter().any(|root| event.strip_prefix(root).is_ok()),
+            "an event at {event:?} matched none of {roots:?}, so every event a \
+             relative worktree reports is dropped as outside itself"
+        );
+    }
+
+    /// The macOS case the canonicalised root is there for, kept alongside so a
+    /// later simplification cannot drop one while satisfying the other.
+    #[test]
+    fn the_root_set_keeps_the_spelling_it_was_given() {
+        let roots = roots_of(Path::new("."));
+        assert_eq!(
+            roots.first().map(PathBuf::as_path),
+            Some(Path::new(".")),
+            "the workdir's own spelling has to stay in the set: it is what \
+             matches on a platform whose events are not resolved at all"
+        );
+        assert!(
+            roots.len() > 1,
+            "a relative root collapsed to one spelling, so only one of the \
+             three ways an event can be spelled is covered"
+        );
     }
 
     #[test]

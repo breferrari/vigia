@@ -14,7 +14,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use vigia_core::{Frame, FrameStats, Worktree};
+use vigia_core::{CONTEXT, Frame, FrameStats, HighlightStats, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -96,6 +96,20 @@ pub fn settle(frame: &mut Frame) {
     );
 }
 
+/// What one frame cost the highlighter, as the difference between two readings.
+///
+/// The same shape as [`delta`], and for the same reason: I2b is a claim about
+/// one frame, and the counters are cumulative so a test can subtract.
+pub fn highlight_delta(before: HighlightStats, after: HighlightStats) -> HighlightStats {
+    HighlightStats {
+        parsed: after.parsed - before.parsed,
+        reused: after.reused - before.reused,
+        lines: after.lines - before.lines,
+        bytes: after.bytes - before.bytes,
+        evicted: after.evicted - before.evicted,
+    }
+}
+
 /// What one frame cost, as the difference between two cumulative readings.
 pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
     FrameStats {
@@ -151,6 +165,52 @@ impl Scratch {
         scratch.commit_all("baseline");
         for f in 0..files {
             scratch.write(&format!("src/mod_{f}.rs"), generated(lines, "after"));
+        }
+        scratch
+    }
+
+    /// A repository whose files differ from the index at every `every`th line,
+    /// and nowhere else.
+    ///
+    /// The shape I2b needs and [`Scratch::large_diff`] cannot give it. Rewriting
+    /// every line produces exactly **one** hunk per file, and "only the hunk that
+    /// changed is re-parsed" cannot be measured against a file with one hunk in
+    /// it: reusing nothing and reusing everything look identical.
+    ///
+    /// Two lines closer together than twice [`CONTEXT`] share a hunk, so `every`
+    /// has to clear that with room rather than sit on the boundary. The first
+    /// edit is at index `every` rather than 0, so every hunk has leading context
+    /// and they are all the same shape, which is what lets a test name a hunk by
+    /// its ordinal and know how tall it is.
+    ///
+    /// Each edited line is written as [`generated`] would have written it, so two
+    /// fixtures of **different lengths hold identical content wherever they
+    /// overlap**. That is what makes the two-fixture form of the I2b gate a
+    /// like-for-like comparison rather than two unrelated numbers.
+    pub fn sparse_edits(name: &str, files: usize, lines: usize, every: usize) -> Self {
+        assert!(
+            every > CONTEXT as usize * 2 + 1,
+            "edits {every} lines apart share a hunk, so the fixture has fewer \
+             hunks than it looks like"
+        );
+        assert!(
+            lines > every,
+            "a {lines}-line file edited every {every} lines has no hunks at all"
+        );
+
+        let scratch = Self::new(name);
+        for f in 0..files {
+            scratch.write(&format!("src/mod_{f}.rs"), generated(lines, "before"));
+        }
+        scratch.commit_all("baseline");
+        for f in 0..files {
+            scratch.rewrite(&format!("src/mod_{f}.rs"), |lines| {
+                let mut at = every;
+                while at < lines.len() {
+                    lines[at] = generated_line(at, "after");
+                    at += every;
+                }
+            });
         }
         scratch
     }
@@ -280,9 +340,24 @@ impl Scratch {
 
 /// Plausible source lines, distinct on both sides so every line differs.
 fn generated(lines: usize, tag: &str) -> String {
-    (1..=lines)
-        .map(|n| format!("fn {tag}_{n}() {{ let value = {}; }}\n", n * 7))
+    (0..lines)
+        .map(|at| {
+            let mut line = generated_line(at, tag);
+            line.push('\n');
+            line
+        })
         .collect()
+}
+
+/// The one line [`generated`] writes at `at`, with no line ending.
+///
+/// Split out so [`Scratch::sparse_edits`] can write a single line the same way,
+/// which is what keeps two fixtures of different lengths byte-identical wherever
+/// they overlap. Written twice, the two would eventually disagree and the
+/// two-fixture gates would compare unlike things while still passing.
+fn generated_line(at: usize, tag: &str) -> String {
+    let n = at + 1;
+    format!("fn {tag}_{n}() {{ let value = {}; }}", n * 7)
 }
 
 /// Parse `@@ -a,b +c,d @@`, where `,b` is omitted when the count is 1.
