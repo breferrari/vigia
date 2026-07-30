@@ -33,8 +33,17 @@ const FEW_FILES: usize = 4;
 const LINES: usize = 500;
 
 /// An ordinary terminal, which is where the row count comes from.
+///
+/// Eighty columns, so the footer is one line whatever the state and the two
+/// fixtures below are compared over the same number of rows. At forty this would
+/// still be honest but the row count would be one lower, which is I6's business
+/// rather than I4's.
 fn body() -> usize {
-    body_height(Rect::new(0, 0, 80, 24))
+    body_height(
+        Rect::new(0, 0, 80, 24),
+        &App::new().chrome("fixture"),
+        FILES,
+    )
 }
 
 /// What one screenful cost, and what it produced.

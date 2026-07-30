@@ -7,12 +7,25 @@
 //! **No borders, no boxes.** `btop` frames everything, and `btop` has the whole
 //! screen. Half a laptop screen beside an agent is the case I6 names, and a box
 //! spends two of forty columns and two of twenty-four rows on decoration. Every
-//! cell here goes to the diff or to one line of chrome at each end.
+//! cell here goes to the diff or to the chrome: one line at the top, and one at
+//! the bottom that takes a second only when forty columns cannot hold it.
 //!
 //! Content is written cell by cell rather than through the widget set. A
 //! `Paragraph` would wrap, and wrapping is the one thing a monitor must not do:
 //! a wrapped diff line moves every line below it, so the shape of the screen
 //! stops meaning anything. Lines are clipped instead.
+//!
+//! ## I6, which is the whole of the layout
+//!
+//! `SPEC.md` §11.1 states the rule this module implements: **a thing made of
+//! items breaks, a thing made of characters marks its edge, and content is
+//! neither.**
+//!
+//! The hint bar is the only thing on screen made of items, so it is the only
+//! thing that breaks — onto [`Footer`]'s second line, and then by dropping whole
+//! rungs of [`HINT_RUNGS`]. Everything else is one token and says which end it
+//! lost: [`ELIDED`] on the left for a file path, whose tail names the file, and
+//! [`CONTINUES`] on the right for everything else, content included.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -41,18 +54,51 @@ const UNPRINTABLE: char = '·';
 /// Shown where a path had to lose its head to fit.
 const ELIDED: char = '…';
 
-/// The footer's left-hand side when there is nothing wrong.
+/// Shown where anything else ran past the right edge.
 ///
-/// `f follow` is here because the mockup published it and because the key is
-/// the one nobody would guess: `q` and `jk` are pager reflexes, and follow mode
-/// is the behaviour a reader has to be told they can turn back on.
+/// The two marks are two directions and never overlap: [`ELIDED`] on the left
+/// says the beginning is gone, this one on the right says it continues. A
+/// reader never has to work out which end they are missing.
+const CONTINUES: &str = "›";
+
+/// The footer's left-hand side when there is nothing wrong, widest rung first.
 ///
-/// It does not fit at forty columns, and that is I6's to solve rather than
-/// this line's to pre-empt. `SPEC.md` §5.1 marks what the hint bar drops first
-/// as unspecified and assigns it to
-/// [#7](https://github.com/breferrari/vigia/issues/7); the forty-column
-/// snapshot is a baseline for that work, not a gate this has to pass.
-const HINTS: &str = "q quit · f follow · jk scroll";
+/// **Each rung is the one above it minus whole hints**, and nothing is reworded
+/// on the way down: a bar that shortened `jk scroll` to `jk scr` is the
+/// truncated-to-useless shape I6 forbids, and one that invented a shorter
+/// wording would teach a second dialect at exactly the width where the reader
+/// has least to go on. `tests/legibility.rs` gates both properties over the
+/// rungs it observes by rendering, so this table cannot drift from what ships.
+///
+/// The drop order is `SPEC.md` §11.1's ruling. `jk scroll` goes first and
+/// `f follow` is last standing: `q` and `jk` are pager reflexes and four keys
+/// reach quit, while `f` is the one nobody would guess and the only one that
+/// restores a state a reader can lose without noticing. It only fires below
+/// twenty-nine columns, because above that [`Footer`] gives the bar a line of
+/// its own rather than shortening it.
+const HINT_RUNGS: [&str; 4] = [
+    "q quit · f follow · jk scroll",
+    "q quit · f follow",
+    "f follow",
+    "",
+];
+
+/// What joins two hints.
+///
+/// Exported because `tests/legibility.rs` splits the rendered bar on it to check
+/// that every hint on screen is a whole one. A test that restated the separator
+/// as its own literal would be a second implementation of the parse, agreeing
+/// with itself while disagreeing with the screen. The ladder is deliberately
+/// **not** exported for the same reason inverted: a test comparing the rung
+/// table against itself proves nothing, so the rungs are observed by rendering.
+pub const HINT_SEPARATOR: &str = " · ";
+
+/// The smallest body a second footer line may leave behind.
+///
+/// Two rows, because that is the shortest thing that still reads as a diff: a
+/// file heading and one line under it. Below that the footer would be buying
+/// legibility with the content it exists to make legible.
+const MIN_BODY: u16 = 2;
 
 /// Shown on the footer while the viewport is moving itself.
 ///
@@ -91,16 +137,151 @@ pub struct Chrome {
     pub following: bool,
 }
 
+/// The state's ladder, widest rung first.
+///
+/// `follow ▶  N/M`, then the marker alone, then nothing. The position goes
+/// before the marker because the header already carries the file count, so
+/// `N/M` is the half a reader can reconstruct; whether the view is still live is
+/// not recoverable from anywhere else on the screen.
+///
+/// Always ends in an empty rung, which is what makes [`widest_fitting`] total.
+fn state_rungs(following: bool, position: &str) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(3);
+    match (following, position.is_empty()) {
+        // `follow ▶ ` with nothing after it would read as a truncation rather
+        // than a state, so a clean worktree gets the marker on its own.
+        (true, false) => {
+            rungs.push(format!("{FOLLOWING}  {position}"));
+            rungs.push(FOLLOWING.to_owned());
+        }
+        (true, true) => rungs.push(FOLLOWING.to_owned()),
+        (false, false) => rungs.push(position.to_owned()),
+        (false, true) => {}
+    }
+    rungs.push(String::new());
+    rungs
+}
+
+/// The widest rung of `ladder` that fits in `room`.
+///
+/// Ladders are written widest first, so this is the first that fits. Every
+/// ladder ends in an empty rung, so the fallback is unreachable rather than a
+/// silent default.
+fn widest_fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
+    ladder
+        .iter()
+        .map(AsRef::as_ref)
+        .find(|rung| width_of(rung) <= room)
+        .unwrap_or("")
+}
+
+/// What the footer will draw, and how many rows it needs.
+///
+/// Planned rather than drawn, because two callers need the answer before there
+/// is anything to draw: [`body_height`] has to know how many rows are left for
+/// the body, and [`render`] has to put the body somewhere that does not collide
+/// with it. Both go through here with the same inputs, so the row budget and the
+/// layout are one computation and cannot drift apart.
+struct Footer<'a> {
+    /// One, or two when a single line cannot hold both halves. Zero on a screen
+    /// with no room for a footer at all.
+    rows: u16,
+    /// Columns the state may take on its line.
+    reserved: usize,
+    /// The hints rung, or the notice.
+    left: &'a str,
+    /// Whether `left` is a notice, which is what decides its colour.
+    alert: bool,
+}
+
+impl<'a> Footer<'a> {
+    /// Decide the footer's shape from the width, the state, and the file count.
+    ///
+    /// **From the file count, never the scroll position.** `{files}/{files}` is
+    /// the widest position that count can produce, so reserving it means the
+    /// footer cannot gain or lose a row while a reader scrolls from file 9 to
+    /// file 10. A layout that reflowed under scrolling would be worse than one
+    /// that is occasionally a column meaner than it had to be, and the meanness
+    /// only shows below seventeen columns.
+    fn plan(area: Rect, chrome: &'a Chrome, files: usize) -> Self {
+        let width = usize::from(area.width);
+        if area.height < 2 {
+            return Self {
+                rows: 0,
+                reserved: 0,
+                left: "",
+                alert: false,
+            };
+        }
+
+        let widest_position = if files == 0 {
+            String::new()
+        } else {
+            format!("{files}/{files}")
+        };
+        let reserved = width_of(widest_fitting(
+            &state_rungs(chrome.following, &widest_position),
+            width,
+        ));
+        // The gap keeps the state from touching the hints, and is only owed when
+        // there is a state to keep away from them.
+        let taken = if reserved == 0 { 0 } else { reserved + 1 };
+
+        // A second line is worth taking only if it buys something: there has to
+        // be a state to move up to it, and a body still worth showing
+        // underneath. One header, two footer rows and `MIN_BODY` is the shortest
+        // screen where both hold.
+        //
+        // **Measured against the hints, never against a notice.** A notice is
+        // transient — a file that vanished between being named and being read,
+        // a repository mid-`git gc` — so letting it decide the height would jog
+        // the reader's diff down a row and back every time one flickered. That
+        // is the same thing I5 ruled out for a terminal resize: a monitor does
+        // not move content for something that expresses no intent. It also means
+        // this height is a function of width, follow state and file count alone,
+        // so a caller that sampled the chrome before a notice was raised still
+        // gets the answer the renderer will use.
+        let grows =
+            width_of(HINT_RUNGS[0]) + taken > width && reserved > 0 && area.height >= 3 + MIN_BODY;
+        let rows = if grows { 2 } else { 1 };
+
+        let room = if grows {
+            width
+        } else {
+            width.saturating_sub(taken)
+        };
+        // A notice is one token: it takes whatever room the line gives it and
+        // marks the cut. The hints are a list, so they drop whole rungs instead.
+        let (left, alert) = match &chrome.notice {
+            Some(notice) => (notice.as_str(), true),
+            None => (widest_fitting(&HINT_RUNGS, room), false),
+        };
+
+        Self {
+            rows,
+            reserved,
+            left,
+            alert,
+        }
+    }
+}
+
 /// Body height available for rows in this area, which is what a caller has to
 /// ask [`View::collect`] for.
 ///
-/// One line goes to the header and one to the footer. Saturating rather than
-/// clamped so a one-row terminal asks for nothing instead of underflowing.
-pub fn body_height(area: Rect) -> usize {
-    usize::from(area.height).saturating_sub(2)
+/// One line goes to the header and one or two to the footer, so this needs the
+/// same inputs the footer is planned from: `files` is
+/// [`vigia_core::Frame::files`]'s length, which a caller knows before collecting
+/// anything and which equals [`View::files`] afterwards.
+///
+/// Saturating rather than clamped so a one-row terminal asks for nothing instead
+/// of underflowing.
+pub fn body_height(area: Rect, chrome: &Chrome, files: usize) -> usize {
+    let footer = Footer::plan(area, chrome, files);
+    usize::from(area.height).saturating_sub(1 + usize::from(footer.rows))
 }
 
-/// Draw a whole screen: one header line, the body, one footer line.
+/// Draw a whole screen: one header line, the body, and one or two footer lines.
 ///
 /// Any area is legal, including one too short for a body and one column wide. A
 /// monitor that panics when a pane is dragged narrow is worse than one that
@@ -110,6 +291,11 @@ pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: 
         return;
     }
 
+    // Planned from `view.files`, which is the same number `body_height`'s caller
+    // passed: `View::collect` copies it straight off the frame and changes
+    // nothing. That is what makes the two agree.
+    let footer = Footer::plan(area, chrome, view.files);
+
     let mut painter = Painter {
         buf,
         theme,
@@ -118,23 +304,16 @@ pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: 
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
 
-    if area.height >= 2 {
-        painter.footer(
-            Rect {
-                y: area.y + area.height - 1,
-                height: 1,
-                ..area
-            },
-            view,
-            chrome,
-        );
+    if footer.rows > 0 {
+        painter.footer(area, view, chrome, &footer);
     }
 
-    if area.height >= 3 {
+    let rows = area.height.saturating_sub(1 + footer.rows);
+    if rows > 0 {
         painter.body(
             Rect {
                 y: area.y + 1,
-                height: area.height - 2,
+                height: rows,
                 ..area
             },
             view,
@@ -159,6 +338,32 @@ impl Painter<'_> {
         }
         let (next, _) = self.buf.set_stringn(x, y, text, limit, style);
         next
+    }
+
+    /// Write `text` clipped to `limit`, and say so when it did not fit.
+    ///
+    /// This is I6's rule for everything that is one token rather than a list:
+    /// the worktree name, a notice, a hunk header, a note, the empty-state line
+    /// and a line of file content. None of them can drop an item the way the
+    /// hint bar can, and none has an identifying half the way a path does, so
+    /// the honest thing is to fill the room and mark the edge.
+    ///
+    /// The mark gets a **reserved** column rather than overwriting the last one.
+    /// Overwriting could land on the second cell of a double-width glyph, which
+    /// leaves half a character on screen and is the one thing that cannot be
+    /// undrawn.
+    fn put_marked(&mut self, x: u16, y: u16, text: &str, limit: usize, style: Style) -> u16 {
+        if limit == 0 || text.is_empty() {
+            return x;
+        }
+        if width_of(text) <= limit {
+            return self.put(x, y, text, limit, style);
+        }
+        // `limit` is always derived from a screen width, so it fits in a `u16`.
+        self.put(x, y, text, limit - 1, style);
+        self.buf
+            .set_stringn(x + limit as u16 - 1, y, CONTINUES, 1, style);
+        x + limit as u16
     }
 
     /// Write `text` so that it ends at the right edge of `area`.
@@ -194,7 +399,7 @@ impl Painter<'_> {
         self.buf.set_style(area, self.theme.chrome_dim);
         let taken = self.put_right(area, right, self.theme.chrome_dim);
         let room = usize::from(area.width).saturating_sub(taken);
-        self.put(area.x, area.y, left, room, style);
+        self.put_marked(area.x, area.y, left, room, style);
     }
 
     fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
@@ -205,32 +410,59 @@ impl Painter<'_> {
         // The worktree name and nothing else on the left. A title bar reading
         // `vigia` spends six of forty columns telling the reader which program
         // they started, which is the one thing they already know.
+        //
+        // The header never takes a second line the way the footer does. A name
+        // is not a list and has nowhere to break, so a second line could not
+        // guarantee a fit and would spend a body row on a maybe.
         self.status_line(area, &chrome.worktree, self.theme.chrome, &files);
     }
 
-    fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome) {
+    /// The footer, on the bottom one or two rows of `area`.
+    ///
+    /// Takes the whole area rather than its own rows, because which rows it owns
+    /// is what [`Footer::plan`] decided.
+    fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome, footer: &Footer<'_>) {
         let position = if view.files == 0 {
             String::new()
         } else {
             format!("{}/{}", view.top.file + 1, view.files)
         };
-        // A clean worktree has no position to show, and `follow ▶ ` with
-        // nothing after it would read as a truncation rather than a state.
-        let right = match (chrome.following, position.is_empty()) {
-            (false, _) => position,
-            (true, true) => FOLLOWING.to_owned(),
-            (true, false) => format!("{FOLLOWING}  {position}"),
+        // Clamped to what was reserved, not to the width. The plan handed the
+        // rest of the line to the hints, and the drawn position can be narrower
+        // than the widest one reserved for it, so a state sized to the width
+        // would draw over them.
+        let rungs = state_rungs(chrome.following, &position);
+        let state = widest_fitting(&rungs, footer.reserved).to_owned();
+
+        let style = if footer.alert {
+            self.theme.alert
+        } else {
+            self.theme.chrome_dim
         };
-        let (left, style) = match &chrome.notice {
-            Some(notice) => (notice.as_str(), self.theme.alert),
-            None => (HINTS, self.theme.chrome_dim),
+        let bottom = Rect {
+            y: area.y + area.height - 1,
+            height: 1,
+            ..area
         };
-        self.status_line(area, left, style, &right);
+
+        if footer.rows == 2 {
+            // State above, hints below. The hints keep the bottom row they had
+            // at eighty columns, so narrowing a pane moves the new line in
+            // rather than moving the old one out from under the reader.
+            let upper = Rect {
+                y: bottom.y - 1,
+                ..bottom
+            };
+            self.status_line(upper, "", self.theme.chrome_dim, &state);
+            self.status_line(bottom, footer.left, style, "");
+        } else {
+            self.status_line(bottom, footer.left, style, &state);
+        }
     }
 
     fn body(&mut self, area: Rect, view: &View) {
         if view.files == 0 {
-            self.put(
+            self.put_marked(
                 area.x,
                 area.y,
                 "working tree clean",
@@ -261,11 +493,14 @@ impl Painter<'_> {
                         span(*old_start, *old_lines),
                         span(*new_start, *new_lines)
                     );
-                    self.put(area.x, y, &text, usize::from(area.width), self.theme.hunk);
+                    // Marked rather than clipped, and this is the row where it
+                    // matters most: `@@ -258,7 +25` is not a shortened header,
+                    // it is a header naming a different line.
+                    self.put_marked(area.x, y, &text, usize::from(area.width), self.theme.hunk);
                 }
                 Row::Note(note) => {
                     let text = format!("  {note}");
-                    self.put(area.x, y, &text, usize::from(area.width), self.theme.note);
+                    self.put_marked(area.x, y, &text, usize::from(area.width), self.theme.note);
                 }
                 Row::Line { kind, number, text } => {
                     self.line_row(Rect { y, ..area }, *kind, *number, text);
@@ -326,7 +561,12 @@ impl Painter<'_> {
         // buffer and leave the file's indentation looking nothing like it does in
         // an editor.
         let body = format!("{sigil}{}", printable(text));
-        self.put(x, area.y, &body, room, style);
+        // Content is the one thing that can neither break nor elide: wrapping it
+        // would move every line below it, and no part of a line is its
+        // identifying part the way a path's tail is. So it says it continues and
+        // nothing more. `SPEC.md` §11.1 rules that this is not what I6 means by
+        // a truncated label.
+        self.put_marked(x, area.y, &body, room, style);
     }
 }
 
@@ -375,10 +615,20 @@ fn gutter_width(view: &View, width: usize) -> usize {
 ///
 /// The tail, because the end of a path is the part that identifies the file. A
 /// column reading `crates/vigia-core/…` names nothing, which is exactly the
-/// truncated-to-useless label I6 forbids.
+/// truncated-to-useless label I6 forbids. This is the **only** direction on the
+/// screen that keeps its end rather than its start, and it is why the two marks
+/// are different characters: a path says its head is gone, everything else says
+/// its tail continues.
+///
+/// One column is enough to say so. At `room == 1` the whole path is gone and the
+/// result is a bare [`ELIDED`], which is honest about naming nothing rather than
+/// showing an arbitrary first character as if it were a name.
 fn elide_head(text: &str, room: usize) -> String {
-    if width_of(text) <= room || room <= 1 {
+    if width_of(text) <= room {
         return text.to_owned();
+    }
+    if room == 0 {
+        return String::new();
     }
 
     // Walked backwards, accumulating width, rather than forwards testing each

@@ -360,7 +360,8 @@ fn a_real_repository_draws() {
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
-    let view = app.view(&mut frame, body_height(area)).expect("view");
+    let height = body_height(area, &app.chrome("fixture"), frame.files().len());
+    let view = app.view(&mut frame, height).expect("view");
     // Non-vacuity: the fixture has to have produced something to draw, or the
     // snapshot below is a picture of an empty pane.
     assert_eq!(view.files, 2, "the fixture is not two changed files");

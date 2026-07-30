@@ -12,11 +12,11 @@
 //! snapshot cannot see a theme at all. The palette is checked by reading cells
 //! instead, at the bottom of this file.
 //!
-//! I6. Legibility at 40, 80 and 120 columns is
-//! [#7](https://github.com/breferrari/vigia/issues/7), and the assertions that
-//! make it an invariant rather than a screenshot belong there. The 40-column
-//! snapshot here is the shell's own baseline: something for that work to change
-//! visibly rather than a claim that the invariant already holds.
+//! I6, mostly. The snapshots at 40, 80 and 120 columns that `SPEC.md` §3 names
+//! are here, and they are worth having: a picture is the only artifact that
+//! shows a layout is *good* rather than merely legal. But a snapshot records one
+//! width and asserts no rule, so the invariant itself lives in
+//! `tests/legibility.rs`, which sweeps every width from 1 to 120.
 //!
 //! Views are built by hand, not from a repository. That is forced, and it is
 //! worth knowing: `vigia_core::FileChange` keeps a private field, so no test
@@ -48,9 +48,9 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 /// Follow mode is on by default (I5), so most of these snapshots show a footer
 /// no reader will see on their first frame. That is on purpose: this file is
 /// about what the *body* draws, and `follow ▶` in every picture would be a
-/// constant nothing here tests, eating footer width in the forty-column
-/// baseline that [#7](https://github.com/breferrari/vigia/issues/7) is
-/// measured against. The follow state gets its own snapshots instead, below.
+/// constant nothing here tests. It also keeps the forty-column body pictures on
+/// a one-line footer, so they show the widest body rather than I6's two-line
+/// one. The follow state gets its own snapshots instead, below.
 fn chrome() -> Chrome {
     Chrome {
         worktree: "vigia".to_owned(),
@@ -126,9 +126,20 @@ fn a_screenful_of_diff() {
 
 #[test]
 fn the_same_screenful_at_forty_columns() {
-    // The baseline #7 will be measured against, not a claim that I6 holds.
+    // The width I6 exists for: half a laptop screen beside an agent. Two content
+    // lines run past the edge and say so with `›`, which is what `SPEC.md` §11.1
+    // rules is not a truncated label.
     let view = one_file();
     insta::assert_snapshot!(screen(40, 14, &view, &chrome()));
+}
+
+#[test]
+fn the_same_screenful_at_a_hundred_and_twenty_columns() {
+    // The third of the three widths §3 names, and the one nothing covered. Wide
+    // enough that nothing degrades, which is the point: it is the picture that
+    // says the marks and the ladders are absent when they are not needed.
+    let view = one_file();
+    insta::assert_snapshot!(screen(120, 14, &view, &chrome()));
 }
 
 #[test]
@@ -261,13 +272,15 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
 }
 
 #[test]
-fn the_follow_state_and_the_hints_collide_at_forty_columns() {
-    // Recorded rather than solved. `SPEC.md` §5.1 marks what the hint bar drops
-    // first as unspecified and assigns it to
-    // [#7](https://github.com/breferrari/vigia/issues/7), so this snapshot is
-    // that issue's input: the worst case is hints plus follow state plus
-    // position on one forty-column line, and it is the default state rather
-    // than an unusual one. Nothing here claims I6 holds.
+fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
+    // This snapshot used to be called `..._collide_at_forty_columns` and showed
+    // `q quit · f follow · jk scr`, a hint cut mid-word in the **default** state
+    // rather than an unusual one. It was #6's parting gift to #7.
+    //
+    // Now the footer takes a second line instead of shortening anything: the
+    // state above, the hints keeping the bottom row they had at eighty columns.
+    // The picture is here rather than only in `tests/legibility.rs` because that
+    // file can prove the layout is legal and only this one shows it is good.
     let view = one_file();
     insta::assert_snapshot!(screen(40, 6, &view, &following_chrome()));
 }
@@ -382,16 +395,19 @@ fn the_gutter_gives_way_before_the_text_does() {
 fn any_area_renders_including_the_ones_that_fit_nothing() {
     // A pane being dragged narrow steps through every one of these sizes. A
     // monitor that panics on the way is worse than one that draws something
-    // cramped, and `body_height` is what the caller uses to ask for rows, so the
-    // two have to agree about a screen with no body at all.
+    // cramped, and `body_height` is what the caller uses to ask for rows, so it
+    // must never ask for more rows than the screen has after its chrome.
+    //
+    // That it asks for exactly the right number is a stronger claim and it is
+    // `tests/legibility.rs` that makes it, by counting the rows that come back
+    // rather than by restating the renderer's own arithmetic.
     let view = one_file();
     for (width, height) in [(0, 0), (1, 1), (1, 2), (80, 1), (80, 2), (80, 3), (2, 30)] {
         let backend = screen(width, height, &view, &chrome());
         let area = ratatui::layout::Rect::new(0, 0, width, height);
-        assert_eq!(
-            body_height(area),
-            usize::from(height).saturating_sub(2),
-            "body_height disagreed with the renderer at {width}x{height}"
+        assert!(
+            body_height(area, &chrome(), view.files) < usize::from(height).max(1),
+            "body_height asked for more rows than {width}x{height} has"
         );
         // Non-vacuity: the loop must actually have produced a buffer of the size
         // asked for, or it proved only that nothing was drawn.

@@ -41,7 +41,7 @@ mod view;
 
 pub use app::App;
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Chrome, body_height, render};
+pub use render::{Chrome, HINT_SEPARATOR, body_height, render};
 pub use terminal::{Screen, Session};
 pub use theme::Theme;
 pub use view::{Position, Row, View, rows_in};
@@ -127,7 +127,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // reason nobody asked for.
                     continue;
                 };
-                let height = body_height(shell.area()?);
+                let chrome = shell.app.chrome(&shell.name);
+                let height = body_height(shell.area()?, &chrome, frame.files().len());
                 match shell.app.apply(action, &mut frame, height) {
                     Ok(true) => {}
                     Ok(false) => break,
@@ -189,12 +190,22 @@ impl Shell {
 
     /// Collect a screenful and paint it.
     fn draw(&mut self, frame: &mut vigia_core::Frame) -> Result<(), Failure> {
-        let height = body_height(self.area()?);
+        // The chrome is built before the height, not after, because the footer
+        // takes a second line at narrow widths and `body_height` has to know
+        // whether this frame is one of those. `frame.files().len()` is the same
+        // number `View::collect` will report as `View::files`, which is what
+        // keeps this row budget and the renderer's layout in agreement.
+        let chrome = self.app.chrome(&self.name);
+        let height = body_height(self.area()?, &chrome, frame.files().len());
         match self.app.view(frame, height) {
             Ok(view) => self.screen = view,
             Err(e) => self.app.warn(e.to_string()),
         }
 
+        // Rebuilt so a notice raised by the collect above reaches this frame
+        // rather than the next one. Safe to differ from the chrome the height
+        // came from: a notice cannot change how many rows the footer takes, by
+        // construction. See `Footer::plan`.
         let chrome = self.app.chrome(&self.name);
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
