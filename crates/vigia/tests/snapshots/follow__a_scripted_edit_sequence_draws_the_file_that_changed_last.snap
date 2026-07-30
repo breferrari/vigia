@@ -1,0 +1,16 @@
+---
+source: crates/vigia/tests/follow.rs
+expression: terminal.backend()
+---
+"fixture                                                  3 files"
+"M src/second.rs                                            +1 -1"
+"@@ -1 +1 @@                                                     "
+"1 -fn second() {}                                               "
+"1 +fn second() { let b = 2; }                                   "
+"                                                                "
+"                                                                "
+"                                                                "
+"                                                                "
+"                                                                "
+"                                                                "
+"q quit · f follow · jk scroll                      follow ▶  3/3"

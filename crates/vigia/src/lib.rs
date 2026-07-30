@@ -64,7 +64,12 @@ enum Wake {
     /// The terminal reported something.
     Input(ratatui::crossterm::event::Event),
     /// The working tree changed, coalesced into one signal by the core.
-    Tick,
+    ///
+    /// Carries the path of the write that landed last in the burst, when it
+    /// named one, which is what follow mode moves to. `None` is ordinary: a
+    /// staging write changes every diff's left-hand side and is nowhere to
+    /// scroll to.
+    Tick(Option<String>),
     /// The watch stopped, so the shell is a still picture.
     ///
     /// Reported rather than fatal. A diff nobody is watching for changes is
@@ -129,13 +134,24 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     Err(e) => shell.app.warn(e.to_string()),
                 }
             }
-            Wake::Tick => {
+            Wake::Tick(newest) => {
                 shell.app.clear_notice();
                 // The core leaves the frame exactly as it was on failure, so the
                 // previous diff is still valid to draw. Saying so on the footer
                 // beats blanking a pane for a reason the reader cannot see.
-                if let Err(e) = frame.advance() {
-                    shell.app.warn(e.to_string());
+                match frame.advance() {
+                    // Advance first, follow second, and the order is the
+                    // whole of it: the path is looked up in the file list,
+                    // and before the walk that list is the previous frame's.
+                    // Following into it would jump to wherever that file used
+                    // to sit, which is the shape of a bug that only appears
+                    // when the list changes length.
+                    Ok(()) => {
+                        if let Some(path) = newest {
+                            shell.app.follow(&path, &frame);
+                        }
+                    }
+                    Err(e) => shell.app.warn(e.to_string()),
                 }
             }
             Wake::WatchLost(message) => shell.app.warn(message),
@@ -214,8 +230,8 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
         // needs: every tick triggers one status walk, and a walk finds whatever
         // the events missed. That is what makes a recursive watch's blind spot
         // over freshly created directories harmless here.
-        while watcher.next_tick().is_some() {
-            if tx.send(Wake::Tick).is_err() {
+        while let Some(tick) = watcher.next_tick() {
+            if tx.send(Wake::Tick(tick.newest)).is_err() {
                 return;
             }
         }

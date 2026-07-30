@@ -41,6 +41,27 @@ const UNPRINTABLE: char = '·';
 /// Shown where a path had to lose its head to fit.
 const ELIDED: char = '…';
 
+/// The footer's left-hand side when there is nothing wrong.
+///
+/// `f follow` is here because the mockup published it and because the key is
+/// the one nobody would guess: `q` and `jk` are pager reflexes, and follow mode
+/// is the behaviour a reader has to be told they can turn back on.
+///
+/// It does not fit at forty columns, and that is I6's to solve rather than
+/// this line's to pre-empt. `SPEC.md` §5.1 marks what the hint bar drops first
+/// as unspecified and assigns it to
+/// [#7](https://github.com/breferrari/vigia/issues/7); the forty-column
+/// snapshot is a baseline for that work, not a gate this has to pass.
+const HINTS: &str = "q quit · f follow · jk scroll";
+
+/// Shown on the footer while the viewport is moving itself.
+///
+/// The mockup's own words. It sits with the position rather than with the
+/// hints because it is **state**, not advice, and a notice replaces the hints:
+/// a reader being told a file could not be read still needs to know whether
+/// what they are looking at is live.
+const FOLLOWING: &str = "follow ▶";
+
 /// The narrowest the text column may get before line numbers are dropped.
 ///
 /// Below this the gutter costs more than it explains, which is the shape of
@@ -61,6 +82,13 @@ pub struct Chrome {
     /// hints because a reader who has just been told something is wrong does not
     /// need reminding that `q` quits.
     pub notice: Option<String>,
+    /// Whether the viewport is moving itself to what just changed.
+    ///
+    /// Drawn, because I5 is otherwise invisible: a view that has not moved
+    /// because nothing changed and one that has not moved because following
+    /// was switched off look identical, and the reader's next action differs
+    /// completely between them.
+    pub following: bool,
 }
 
 /// Body height available for rows in this area, which is what a caller has to
@@ -186,11 +214,18 @@ impl Painter<'_> {
         } else {
             format!("{}/{}", view.top.file + 1, view.files)
         };
+        // A clean worktree has no position to show, and `follow ▶ ` with
+        // nothing after it would read as a truncation rather than a state.
+        let right = match (chrome.following, position.is_empty()) {
+            (false, _) => position,
+            (true, true) => FOLLOWING.to_owned(),
+            (true, false) => format!("{FOLLOWING}  {position}"),
+        };
         let (left, style) = match &chrome.notice {
             Some(notice) => (notice.as_str(), self.theme.alert),
-            None => ("q quit  jk scroll", self.theme.chrome_dim),
+            None => (HINTS, self.theme.chrome_dim),
         };
-        self.status_line(area, left, style, &position);
+        self.status_line(area, left, style, &right);
     }
 
     fn body(&mut self, area: Rect, view: &View) {

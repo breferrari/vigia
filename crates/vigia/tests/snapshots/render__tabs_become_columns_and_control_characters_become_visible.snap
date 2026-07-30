@@ -6,4 +6,4 @@ expression: backend
 "M Makefile                                             +1 -0"
 "1 +    cargo build a   b                                    "
 "2  bell·esc·[31mnul·                                        "
-"q quit  jk scroll                                        1/1"
+"q quit · f follow · jk scroll                            1/1"
