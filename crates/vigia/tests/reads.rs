@@ -179,6 +179,69 @@ fn one_screenful_highlights_the_same_however_much_else_changed() {
 }
 
 #[test]
+fn scrolling_for_a_long_time_does_not_grow_the_highlight_cache() {
+    // I3's shape, held against the shell, and it exists because a mutation
+    // survived without it. `vigia_core::Highlighter` bounds itself by whatever
+    // the last frame asked for, but only `View::collect` says where a frame
+    // begins and ends: delete its `sweep` and the cache grows by everything ever
+    // scrolled past, for as long as the process runs, with every gate in
+    // `vigia-core/tests/budgets.rs` still green because they drive the
+    // highlighter directly.
+    const SCREENS: usize = 40;
+    /// Lines apart, so each change gets a hunk of its own. Matches the constant
+    /// `Scratch::sparse_edits` is documented against.
+    const SPACING: usize = 20;
+    /// Long enough that forty screens do not reach the end of it.
+    const LONG_FILE: usize = 5_000;
+
+    let scratch = Scratch::sparse_edits("shell-highlight-bound", 1, LONG_FILE, SPACING);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let height = body();
+
+    let mut most = 0usize;
+    for screen in 0..SCREENS {
+        app.apply(vigia::Action::Page(1), &mut frame, height)
+            .expect("page down");
+        let view = app
+            .view(&mut frame, &mut highlighter, height)
+            .expect("view");
+
+        // Non-vacuity per screen: a scroll that ran off the end would draw a
+        // short screen, cache almost nothing, and satisfy the bound by having
+        // stopped rather than by being bounded.
+        assert_eq!(
+            view.rows.len(),
+            height,
+            "screen {screen} drew {} of {height} rows, so the scroll left the diff",
+            view.rows.len()
+        );
+
+        most = most.max(highlighter.tracked());
+        assert!(
+            highlighter.tracked() <= height,
+            "after {screen} screens the highlighter holds {} hunks for a \
+             {height}-row body, so the cache follows what has been read rather \
+             than what is on screen",
+            highlighter.tracked()
+        );
+    }
+
+    assert!(
+        most > 0,
+        "nothing was ever cached, so the bound proves nothing"
+    );
+    assert!(
+        highlighter.stats().evicted > 0,
+        "forty screens evicted nothing, so hunks are being kept after they leave"
+    );
+}
+
+#[test]
 fn a_screen_a_single_file_fills_reads_that_single_file() {
     // The sharper version of the claim above, and the one a reader can check
     // against the fixture by hand: each file here is five hundred rewritten
