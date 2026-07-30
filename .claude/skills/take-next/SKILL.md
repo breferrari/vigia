@@ -103,6 +103,18 @@ recall   accumulated constraints — empty early, and empty is not evidence of n
 
 Without it the completeness check downstream has nothing to compare to. `/harden` carries a plan-fidelity phase that explicitly skips when no written plan exists, so a session that skips planning silently disables the one gate designed to catch under-delivery. That gate exists because a session once passed five clean audit rounds with 501 tests green and had still quietly shipped three promises short.
 
+### The plan states what it stands on
+
+Step 2 sends you to the record before touching code. **The plan is where you show what came back**, and it is the last point at which a contradiction is still free to fix.
+
+Name, in the plan itself:
+
+- the decisions this plan rests on, by title, from `search` / `recall` / `SPEC.md`
+- anything you found that argues **against** the approach, and why you are proceeding regardless
+- an explicit "nothing recorded on this" when the record is empty — a real finding, not a blank to skip past
+
+Consultation at step 2 alone fires exactly once, at the moment you know least about what you will need. Naming the result here moves it to the moment you commit. A choice re-derived from scratch that contradicts a recorded one is the most expensive mistake available in this repo, and the plan is the only place it is visible while it still costs nothing.
+
 ### The plan must be diffable
 
 Length is not the bar; **concreteness** is. Every promise has to be checkable later by reading, so write nouns, not intentions:
@@ -208,6 +220,8 @@ Skipping any of these is how the next session loses time.
 What was taken, what shipped, the numbers, what moved on the roadmap, and what the next task is. Then stop. Do not start it.
 
 Include the **plan-fidelity result** explicitly — "every promise delivered", or the deviations and what was done about them. Silence here reads as clean, and a step whose absence is indistinguishable from success is a step that stops happening.
+
+Say what the record gave you, too: which recorded decisions the work stood on, or that there were none. The same reasoning applies — a consultation nobody reports is a consultation nobody can tell you skipped.
 
 ## Anti-patterns
 
