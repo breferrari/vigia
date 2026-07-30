@@ -96,6 +96,45 @@ without reading text. `vigia`'s translation:
 This is what makes it a monitor rather than a narrow diff view, and it is where
 design effort goes once the invariants hold.
 
+### 5.1 What the README mockup commits to
+
+`assets/preview.svg` is the most detailed design artifact in the project, it is
+**public**, and until now it was specified by a three-sentence caption. A picture
+in a README is a promise; these are the promises in it, and what each one costs.
+
+Elements the four bullets above do **not** cover are marked **(unspecified)** —
+they are in the picture, so they are committed, and they had nowhere to be
+described.
+
+| Element in the mockup | What it needs |
+|---|---|
+| Header: `watching · 3 files` | A **mode word**, so there is a set of modes. `watching` implies at least a settling state and an idle one. Changed-file count is the §10 header question. **(unspecified: the mode set)** |
+| Per-file **sparkline** | A **retained time series per file** — samples of churn over a window, bucketed. This is the only unbounded state in the design and it is the one I3 forbids growing: the window and the sample rate are part of the invariant, not a rendering detail. **(unspecified: window, bucket width, eviction)** |
+| Per-file **heat strip** | Hunk line-ranges projected onto a fixed number of buckets across the file's length, so it needs the file's **total line count**, not only its diff. Colour rule when one bucket holds both additions and deletions. **(unspecified: bucket count, mixed-bucket colour)** |
+| Per-file `+42 −7` | Covered. Per-file counters are free — a file must be diffed to be drawn (§10). |
+| A **dimmed row** (`Cargo.toml` in the mockup renders fainter than the rows above it) | A **recency gradient**: rows fade as their last change ages. **(unspecified entirely — and it is doing real work in the picture, since it is how the eye finds what moved without reading)** |
+| `● just changed` on the diff header | The pulse, but drawn as a **persisting label with a dot**, not a flash. So it has a **decay**. **(unspecified: how long it persists, and whether it fades or cuts)** |
+| Status bar `0.8ms frame` | Instrumenting the render path and drawing the result. Self-referential: measuring and painting the number costs frame time that I9 gates. **(unspecified: sampled or per-frame, and which statistic)** |
+| Status bar `11MB` | A live RSS readout. I3 samples RSS in a **soak test**, never on screen; reading it per frame is a syscall on some platforms. **(unspecified entirely)** |
+| Status bar `follow ▶` | A follow-state indicator, which presumes the mode exists — see §11.2 B1. |
+| Key hints `q quit · f follow · ↑↓ scroll` | A hint bar, and it **constrains I6**: roughly thirty columns of it must degrade legibly at forty. **(unspecified: what it drops first)** |
+
+Two of these are corrections rather than gaps:
+
+1. **`f` toggles follow.** The mockup shows a dedicated key and a state
+   indicator. That is the answer to §11.2 B1, and it was published before the
+   question was asked — `f` simply does not exist in `input.rs` yet.
+2. **The dimmed row and the `just changed` label are one mechanism**, not two:
+   both are recency rendered as intensity. Specifying them separately would
+   produce two decay clocks that disagree on screen.
+
+**A picture in a public README is a specification whether or not it is written
+down.** This one implied a retained time series, a recency gradient, two status
+readouts and a keybinding, none of which appeared in the spec, the roadmap, or
+any issue — while [#10](https://github.com/breferrari/vigia/issues/10) carried
+four of them in a single line. That is the same failure as §11: behaviour that
+exists somewhere real, with no line claiming it.
+
 ## 6. Architecture
 
 Cargo workspace, two crates:
@@ -391,12 +430,21 @@ bottom, redraw. So the relationship between following and scrolling is genuinely
 open, and [#6](https://github.com/breferrari/vigia/issues/6) will otherwise
 settle it by accident inside a snapshot test.
 
-*(proposed)* `less +F` semantics. Follow is **on** at startup; **any manual
-scroll disengages it**; `G` / `End` re-engages, since "go to the newest thing" is
-already that key. The status bar states which mode is active. Rationale: it is
-the idiom every terminal user already has, disengage-on-scroll is the only rule
-that never fights a reader mid-read, and re-engaging costs a keystroke that
-already exists rather than a new binding.
+*(proposed)* `less +F` semantics, with the toggle **the README mockup already
+published**: follow is **on** at startup, **any manual scroll disengages it**, and
+**`f` re-engages** — the status bar shows `follow ▶` for the state and `f follow`
+in the hints. `f` does not exist in `input.rs` yet.
+
+Rationale: disengage-on-scroll is the only rule that never fights a reader
+mid-read, and a dedicated toggle beats overloading `G`/`End`, because "jump to the
+last file" and "resume following" are different intents that would otherwise be
+the same key — you would be unable to look at the newest file without also
+re-arming the view.
+
+*An earlier draft of this bullet proposed `G`/`End` as the re-engage key. That
+contradicted the mockup, which is public and predates the question. When a
+published artifact already answers an open question, it is the answer — the
+question is only whether to keep it.*
 
 **B2 — Which file wins when several change at once.** An agent rewriting five
 files in one action is the normal case, not an edge case. "The newest change" is
