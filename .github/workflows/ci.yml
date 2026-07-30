@@ -13,7 +13,11 @@ env:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # On a branch, only the newest push is worth checking. On main every commit
+  # gets a full run: superseding them means the slowest leg, which is Windows,
+  # is the one perpetually cancelled, and a commit nobody verified lands looking
+  # like it was.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
