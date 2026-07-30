@@ -28,6 +28,22 @@ gix = { version = "0.86", default-features = false, features = [
 notify = { version = "8.2", default-features = false, features = [
     "macos_fsevent",
 ] }
+# Incremental re-highlighting, which is I2b. `default-features = false` is not
+# tidiness here, it is the pure-Rust rule: syntect's default regex engine is
+# `regex-onig`, which is oniguruma, which is C. Taking the defaults puts `cc` in
+# the graph and costs musl-static and Windows tier-1. `regex-fancy` is the
+# pure-Rust engine, and the `no C toolchain` CI job is what keeps it that way.
+#
+# `default-syntaxes` brings the bundled grammars, and with them `flate2` and
+# `miniz_oxide`, which are pure Rust too. `default-themes`, `html`, `plist-load`
+# and `yaml-load` are all off, because the engine emits classes rather than
+# colours (SPEC.md section 11.1): a theme is the shell's business, so loading one
+# in the core would be paying for a decision made somewhere else.
+syntect = { version = "5.3", default-features = false, features = [
+    "parsing",
+    "default-syntaxes",
+    "regex-fancy",
+] }
 # Named by SPEC.md section 7 for I4, I7 and I9. Trimmed: plotters and rayon
 # only produce nicer local reports and cost CI compile time.
 criterion = { version = "0.8", default-features = false, features = [
