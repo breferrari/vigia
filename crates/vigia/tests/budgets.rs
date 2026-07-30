@@ -302,33 +302,67 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         })
     };
 
-    // Warm up *before* the rewrite, not after. Warming afterwards would spend the
-    // margin this gate exists to measure and leave the samples in the settled
-    // state every other gate here already covers.
+    // Warm up *before* the first rewrite, not after. Warming afterwards would
+    // spend the margin this gate exists to measure and leave the samples in the
+    // settled state every other gate here already covers.
     for _ in 0..WARMUP_FRAMES {
         draw(&mut frame, &mut app, &mut highlighter);
     }
 
+    // The event, once. Rewriting on a loop was tried and is the wrong
+    // instrument: `rewrite_all` writes about 1.5 MiB, and while the call sits
+    // outside `time` its write-back does not, so thirteen of them turned a
+    // 2.67ms p50 into a 27ms p99 and this gate measured the fixture rather than
+    // the frame. It also starved the two gates above, which share this binary and
+    // are timed: they failed together at 51 and 58ms p99 and passed serially.
     let before = frame.stats();
     scratch.rewrite_all(FILES, LINES, 1);
 
+    // What keeps every sampled frame inside the margin is the *drawn* file being
+    // rewritten before each one, which is one file rather than a hundred and is
+    // the idiom the two gates above already use. Only drawn files are
+    // fingerprinted at all, so this is also the term that decides frame cost.
     let mut frames = Samples::new(SAMPLED_FRAMES);
-    for _ in 0..SAMPLED_FRAMES {
+    for edits in 0..SAMPLED_FRAMES {
+        scratch.edit_line(
+            EDITED_PATH,
+            0,
+            &format!("fn bulk_edited_{edits}() {{ let value = {edits}; }}"),
+        );
         frames.push(draw(&mut frame, &mut app, &mut highlighter));
     }
     let cost = delta(before, frame.stats());
 
-    // Non-vacuity, and it is the whole gate. Two hundred and fifty frames take a
-    // few hundred milliseconds here, comfortably inside a two-second margin, but
-    // on a slow enough runner they would not be: the tail would settle, those
-    // frames would reuse instead of recomputing, and a percentile diluted with
-    // cheap settled frames would pass while saying nothing. One recompute per
-    // frame is the floor for a window that never left the margin.
+    // Non-vacuity. A frame that reused rather than recomputed would be a cheap
+    // frame for a reason that is not the code, and a percentile diluted with
+    // them would pass while saying nothing. One recompute per frame is the floor,
+    // and the per-frame edit above is what makes that hold at any frame rate
+    // rather than only on a machine fast enough to finish inside the margin.
     assert!(
         cost.computed >= SAMPLED_FRAMES as u64,
-        "{} diffs were recomputed across {SAMPLED_FRAMES} frames, so the sampled \
-         window outran the settle margin and this gate timed settled frames",
+        "{} diffs were recomputed across {SAMPLED_FRAMES} frames, so frames were \
+         reusing and this gate timed settled frames",
         cost.computed
+    );
+
+    // And the premise, checked rather than assumed: a file the viewport never
+    // drew is still inside its margin now, so it was for the whole window, since
+    // settledness only ever increases with time. Two diffs rather than one,
+    // because the first recomputes on any stale fingerprint and only the second
+    // can tell "still unsettled" from "settled and reusable". Without this the
+    // gate would quietly weaken on a runner slow enough to outrun the margin: the
+    // other ninety-nine files would settle, and a shell that fetched ahead would
+    // find them reusable and cheap.
+    let undrawn = FILES - 1;
+    let probed = frame.stats();
+    frame.diff(undrawn).expect("diff");
+    frame.diff(undrawn).expect("diff");
+    let probe = delta(probed, frame.stats());
+    assert_eq!(
+        probe.reused, 0,
+        "a file the viewport never drew was reusable after {SAMPLED_FRAMES} \
+         frames, so the bulk rewrite settled part-way through and the tail of \
+         this window was not the event"
     );
 
     // And the screen has to have been full, for the reason the gate above gives.

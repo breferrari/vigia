@@ -222,10 +222,16 @@ impl Scratch {
     /// changes at once, so for the length of the margin **no** file can be
     /// proved unchanged and every one a caller asks for is recomputed.
     ///
-    /// `round` varies the content, so calling this twice really changes bytes
-    /// both times. Without it the second call would rewrite each file with what
-    /// it already held, which a `stat` cannot tell from no write at all once the
-    /// length matches, and the fixture would quietly stop producing the event.
+    /// `round` varies the content, and what it buys is the *highlighter* rather
+    /// than the frame path. Measured both ways over two consecutive rewrites: a
+    /// rewrite with identical bytes still moves the modification time, so the
+    /// fingerprint differs and the frame path recomputes regardless
+    /// (`computed = 1` either way). What identical bytes leave alone is the
+    /// **diff**, so the visible hunk hashes the same and the parse is reused
+    /// (`parsed = 0, reused = 1, lines = 0` against `parsed = 1, lines = 20`).
+    /// A caller rewriting on a loop with a fixed `round` would therefore measure
+    /// frames with the syntax parser idle, which is the cheap half of a frame
+    /// and not the event.
     ///
     /// The caller passes `files` and `lines` rather than this remembering them,
     /// because a fixture built with different numbers would be silently

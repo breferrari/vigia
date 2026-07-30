@@ -319,9 +319,21 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
 /// Consecutive frames driven inside the settle margin.
 ///
 /// Enough that a shell recomputing the whole worktree would be unmistakable
-/// rather than arguable, and few enough to finish well inside the two-second
-/// margin on any machine slow enough to still run the rest of this suite.
+/// rather than arguable.
 const MARGIN_FRAMES: usize = 20;
+
+/// Frames between rewrites, so the window cannot outrun the margin.
+///
+/// "Drive frames for two seconds and they will all be inside the margin" is a
+/// race against the machine, not an invariant: the margin is a fixed wall-clock
+/// duration and the frame rate is whatever the hardware gives. A runner slow
+/// enough would settle part-way through, those frames would reuse instead of
+/// recompute, and the comparison below would hold for the one reason that proves
+/// nothing. Rewriting on a fixed frame count instead means every frame sampled
+/// is within this many frames of a write, whatever the machine, and it keeps the
+/// two fixtures doing identical work in identical order rather than however much
+/// each got through in a fixed time.
+const REWRITE_EVERY: usize = 5;
 
 /// What a bulk rewrite cost one fixture over [`MARGIN_FRAMES`] frames.
 struct Margin {
@@ -331,14 +343,19 @@ struct Margin {
     rows: usize,
 }
 
-/// Rewrite every file, then draw [`MARGIN_FRAMES`] screens without settling.
+/// Draw [`MARGIN_FRAMES`] screens without ever letting the fixture settle.
 ///
-/// Deliberately **not** settled after the rewrite, which is the whole point.
+/// Deliberately **not** settled during the window, which is the whole point.
 /// Every other structural gate in this file calls [`settle`] first, so the
 /// window in which the frame path can prove nothing and recomputes by design is
 /// the window none of them measure (`SPEC.md` §7). The fixture is settled
-/// *before* the rewrite so the margin under test is the one that rewrite opened
-/// and not the one building the fixture left behind.
+/// *before* the first rewrite so the margin under test is the one those rewrites
+/// open and not the one building the fixture left behind.
+///
+/// Each rewrite carries a new round, because a rewrite with identical bytes
+/// moves the modification time but leaves the diff alone: the frame path would
+/// still recompute, and the highlighter would sit idle reusing a hunk that never
+/// changed. `Scratch::rewrite_all` has the measurement.
 fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
@@ -347,12 +364,14 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
-    scratch.rewrite_all(files, LINES, 1);
 
     let before = frame.stats();
     let mut read = 0;
     let mut rows = 0;
-    for _ in 0..MARGIN_FRAMES {
+    for at in 0..MARGIN_FRAMES {
+        if at % REWRITE_EVERY == 0 {
+            scratch.rewrite_all(files, LINES, at / REWRITE_EVERY + 1);
+        }
         frame.advance().expect("advance");
         let view = app
             .view(&mut frame, &mut highlighter, body())
@@ -385,14 +404,15 @@ fn a_bulk_rewrite_recomputes_only_what_is_drawn() {
     let few = bulk_rewrite_window("shell-bulk-few", FEW_FILES);
     let many = bulk_rewrite_window("shell-bulk-many", FILES);
 
-    // Non-vacuity, and this is the guard the gate actually needs. If the window
-    // had drifted outside the margin the frames would be reusing rather than
-    // recomputing, both sides would read zero, and the equality below would hold
-    // for the one reason that proves nothing.
+    // Non-vacuity, and this is the guard the gate actually needs. Frames that
+    // settled would reuse rather than recompute, both sides would read zero, and
+    // the equality below would hold for the one reason that proves nothing.
+    // `REWRITE_EVERY` is what keeps that from being a race, and this is what says
+    // it worked rather than assuming it.
     assert!(
         many.cost.computed >= MARGIN_FRAMES as u64,
-        "{} diffs were recomputed across {MARGIN_FRAMES} frames, so the window \
-         left the settle margin and this gate measured settled frames",
+        "{} diffs were recomputed across {MARGIN_FRAMES} frames, so frames \
+         settled between rewrites and this gate measured settled frames",
         many.cost.computed
     );
     assert_eq!(
