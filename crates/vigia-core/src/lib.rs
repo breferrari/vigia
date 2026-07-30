@@ -29,10 +29,12 @@ mod change;
 mod error;
 mod hunk;
 mod timing;
+mod watch;
 mod worktree;
 
 pub use change::{ChangeKind, FileChange};
 pub use error::{Error, Result};
 pub use hunk::{CONTEXT, FileDiff, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
+pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{ChangeOptions, Changes, Worktree};

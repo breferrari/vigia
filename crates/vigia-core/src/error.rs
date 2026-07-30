@@ -22,6 +22,8 @@ pub enum Error {
         /// The underlying I/O failure.
         source: std::io::Error,
     },
+    /// The filesystem watch could not be established.
+    Watch(Box<dyn std::error::Error + Send + Sync>),
     /// A blob named by the index is absent from the object database.
     ///
     /// A monitor must survive this rather than exit: it happens legitimately
@@ -38,6 +40,7 @@ impl fmt::Display for Error {
             Error::Discover(e) => write!(f, "not a git repository: {e}"),
             Error::Bare => f.write_str("repository is bare, so it has no working tree to watch"),
             Error::Status(e) => write!(f, "could not read working tree status: {e}"),
+            Error::Watch(e) => write!(f, "could not watch the working tree: {e}"),
             Error::Read { path, source } => write!(f, "could not read {path}: {source}"),
             Error::MissingBlob { path } => {
                 write!(f, "the index entry for {path} points at a missing blob")
@@ -50,7 +53,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Discover(e) => Some(e),
-            Error::Status(e) => Some(e.as_ref()),
+            Error::Status(e) | Error::Watch(e) => Some(e.as_ref()),
             Error::Read { source, .. } => Some(source),
             Error::Bare | Error::MissingBlob { .. } => None,
         }

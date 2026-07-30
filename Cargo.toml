@@ -22,6 +22,12 @@ gix = { version = "0.86", default-features = false, features = [
     "max-performance-safe",
     "sha1",
 ] }
+# Native filesystem events, which I1 requires instead of a timer. The
+# companion debouncer crate is deliberately not taken: coalesce policy lives in
+# vigia-core, which is the only place I1 is testable.
+notify = { version = "8.2", default-features = false, features = [
+    "macos_fsevent",
+] }
 
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.

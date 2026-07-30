@@ -6,6 +6,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 use crate::change::{ChangeKind, FileChange};
 use crate::error::{Error, Result};
 use crate::hunk::{self, FileDiff};
+use crate::watch::{WatchOptions, Watcher};
 
 /// Knobs that change what a change sweep costs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +74,14 @@ impl Worktree {
             .into_index_worktree_iter(Vec::<BString>::new())
             .map_err(|e| Error::Status(Box::new(e)))?;
         Ok(Changes { inner: iter })
+    }
+
+    /// Start watching this working tree for change.
+    ///
+    /// The watcher borrows the repository, because the gitignore rules it
+    /// filters against are resolved through it.
+    pub fn watch(&self, options: WatchOptions) -> Result<Watcher<'_>> {
+        Watcher::new(&self.repo, &self.workdir, options)
     }
 
     /// Compute the line-level diff for one change.

@@ -1,3 +1,7 @@
+// Each test binary compiles this module separately, so anything only one of
+// them uses reads as dead code in the others.
+#![allow(dead_code)]
+
 //! A disposable git repository, built by real `git`.
 //!
 //! Fixtures are created by shelling out rather than by `gix` on purpose. The
@@ -42,6 +46,11 @@ impl Scratch {
         scratch.git(&["config", "user.name", "vigia tests"]);
         scratch.git(&["config", "commit.gpgsign", "false"]);
         scratch
+    }
+
+    /// Absolute path of something inside the repository.
+    pub fn path_of(&self, rela: &str) -> PathBuf {
+        self.path.join(rela)
     }
 
     /// Run a git command, asserting it succeeded.

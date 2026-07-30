@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 gix.workspace = true
+notify.workspace = true
 
 # No dev-dependencies on purpose. Test fixtures are built by shelling out to
 # `git` (see tests/support), which keeps the dependency list exactly what
