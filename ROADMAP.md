@@ -71,7 +71,7 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ✅ | The `ratatui` + `crossterm` shell | [#9](https://github.com/breferrari/vigia/issues/9) |
 | ⬜ | I5 correct with zero interaction | [#6](https://github.com/breferrari/vigia/issues/6) |
 | ⬜ | I6 legible at 40 columns | [#7](https://github.com/breferrari/vigia/issues/7) |
-| ⬜ | I8 terminal restored exactly on exit | [#8](https://github.com/breferrari/vigia/issues/8) |
+| ✅ | I8 terminal restored on every exit the process controls | [#8](https://github.com/breferrari/vigia/issues/8) |
 | ✅ | A truncated `.git/index` aborts instead of reporting | [#13](https://github.com/breferrari/vigia/issues/13) |
 | ⬜ | I2b re-highlight only changed hunks (`syntect`) | [#4](https://github.com/breferrari/vigia/issues/4) |
 | ⬜ | I3 flat resources over days (soak) | [#5](https://github.com/breferrari/vigia/issues/5) |
@@ -81,12 +81,20 @@ draws the working-tree diff, follows the watch engine's ticks, scrolls by keyboa
 and wheel, and holds its own half of I4: one screenful reads only the files it
 draws, gated across two fixtures in `crates/vigia/tests/reads.rs`.
 
-**Take [#8](https://github.com/breferrari/vigia/issues/8) next.** The restoration
-it proves is already implemented, in `crates/vigia/src/terminal.rs`, and it is the
-one module in the shell with no test at all: raw mode, the alternate screen, mouse
-capture and the panic hook are all outside a `TestBackend`, which is what the rest
-of the suite is built on. It is also the only thing standing between the shell
-being usable and being safe to leave running, and #13's abort is covered by it.
+**The shell is now safe to leave running.** [#8](https://github.com/breferrari/vigia/issues/8)
+closed the last untested module: the takeover is data, giving it back is asserted
+as its exact inverse, and a half-finished `Session::enter` undoes exactly what it
+took. Seven mutations, each killed by a named test. It also settled what I8 can
+honestly promise: raw mode means Ctrl-C is a key event and never a signal, so an
+externally delivered `kill` is out of reach without a dependency `SPEC.md` does
+not name. That is [#24](https://github.com/breferrari/vigia/issues/24), on the
+shelf below.
+
+**Take [#6](https://github.com/breferrari/vigia/issues/6) next.** I5 is follow
+mode, and it is the last thing that makes the monitor correct with nobody
+touching it, which is the product class. Nothing in the shell reads follow state
+today: #9 deliberately shipped no `f` toggle rather than a key that flips a bool
+nothing consumes.
 
 [#7](https://github.com/breferrari/vigia/issues/7) then has a baseline to argue
 with: there are 40- and 80-column snapshots already, and what I6 still needs is
@@ -163,6 +171,7 @@ The shelf carries the *reason*; this table carries the *state*.
 | ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ⬜ | A frame reads a whole file to discover it is binary | [#18](https://github.com/breferrari/vigia/issues/18) |
 | ⬜ | An idle frame is one `stat` per changed file | [#19](https://github.com/breferrari/vigia/issues/19) |
+| ⬜ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
@@ -183,6 +192,7 @@ scope creep absorbed silently. Each one carries the phase it moved to.
 | Two paths differing outside UTF-8 collapse onto one cache key ([#17](https://github.com/breferrari/vigia/issues/17)) | I2a, 2026-07-30 | Phase 2 | `to_str_lossy` makes `FileChange::path` both the filesystem identity and the display string, and those are different jobs. The read half predates the frame path. Fixing it changes a published type, so it wants deciding rather than patching |
 | A frame reads a whole file to discover it is binary ([#18](https://github.com/breferrari/vigia/issues/18)) | I2a, 2026-07-30 | Phase 2 | 64 MiB read and 16.24ms for a file the first 8000 bytes already condemn, with no size cap on either side. Pre-existing in `Worktree::diff`. Belongs with I3, which is where a memory ceiling gets decided |
 | An idle frame is one `stat` per changed file ([#19](https://github.com/breferrari/vigia/issues/19)) | I2a, 2026-07-30 | Phase 2, with the shell | 36.71ms at 2000 changed files against a 16ms budget, almost all of it syscalls. The fix is to revalidate what is drawn rather than everything, which I4 already licenses and which needs a UI that knows what is visible. Not a defect in the rule, a consequence of the test having to materialise every file to avoid passing vacuously |
+| An external kill leaves the terminal in raw mode ([#24](https://github.com/breferrari/vigia/issues/24)) | I8, 2026-07-30 | Phase 5 | I8 promised "including `SIGINT`" and the shell falsified the premise: raw mode clears `ISIG` and `ENABLE_PROCESSED_INPUT`, so the interrupt key is a key event and never a signal. What is left is a signal nobody at this keyboard sent, and `std` has no way to catch one, so closing it is a dependency decision rather than an implementation detail. The single-task version is Unix-only (`signal-hook`, with `SetConsoleCtrlHandler` needed separately on Windows), which is the same asymmetric guarantee #16 already rejected as worse than one stated uniformly. `SPEC.md` I8 was narrowed to say so out loud instead of overselling |
 
 ## Pull-forward log
 
