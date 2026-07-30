@@ -52,7 +52,7 @@ relative to any other tool.
 | **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
 | **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns |
 | **I7** | Startup to first paint is imperceptible. | **< 50ms** | Timed, gated in CI |
-| **I8** | Terminal restored exactly on exit — including `SIGINT` and panic. | — | Alternate-screen assertions; panic hook test |
+| **I8** | Terminal restored on **every exit the process controls**: the quit key (Ctrl-C included), an error return, and a panic under `panic = "abort"`. An externally delivered signal is not covered — see [#24](https://github.com/breferrari/vigia/issues/24). | — | Takeover order and its exact inverse; the partial-failure unwinding; a panic-hook test; escape sequences against DEC's own numbers |
 | **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | Gated over the **frame path**, not the primitives: a settled frame, one line rewritten before each frame, every file materialised. `criterion` tracks the same shape |
 
 A regression past any budget **fails the build.**
@@ -68,6 +68,25 @@ A regression past any budget **fails the build.**
 > for a single file, so I2a is load bearing rather than an optimisation.
 > Issues [#2](https://github.com/breferrari/vigia/issues/2) and
 > [#4](https://github.com/breferrari/vigia/issues/4).
+
+> [!note] Why I8 no longer says `SIGINT`
+> It read "restored exactly on exit — including `SIGINT` and panic", and the
+> `SIGINT` half encoded an assumption the shell falsified. **Raw mode removes the
+> signal.** `enable_raw_mode` clears `ISIG` on Unix and `ENABLE_PROCESSED_INPUT`
+> on Windows, so Ctrl-C is never translated: it arrives as an ordinary key event
+> and is handled by the key map, which is why `Session` never needed a handler and
+> why no test could ever have been written for the clause as worded.
+>
+> What that leaves genuinely uncovered is a signal nobody at this keyboard sent:
+> `kill -INT` or `-TERM` from another pane, which runs neither `Drop` nor the panic
+> hook. `std` has no signal API, so closing it is a **dependency decision** rather
+> than an implementation detail, and the single-platform version of it
+> (`signal-hook` on Unix, with `SetConsoleCtrlHandler` needed separately on
+> Windows) ships a guarantee whose meaning differs by tier-1 platform. That is the
+> same trade [#16](https://github.com/breferrari/vigia/issues/16) already rejected
+> as worse than one stated uniformly. Tracked as
+> [#24](https://github.com/breferrari/vigia/issues/24) rather than assumed away,
+> and the invariant above now states its own limit instead of overselling it.
 
 ## 4. Scope
 
