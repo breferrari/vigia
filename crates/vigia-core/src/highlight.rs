@@ -160,7 +160,32 @@ const CLASSES: [(&str, Class); 16] = [
     ("variable", Class::Variable),
 ];
 
+/// Lines between the parse positions a later frame can rewind to.
+///
+/// The constant that turns "re-parse the whole prefix" into "re-parse a bounded
+/// tail of it", and it is load bearing rather than a tuning knob.
+///
+/// Without it a hunk whose content changed threw its whole parse away, so a
+/// frame cost the reader's **scroll depth** rather than what it drew. That is
+/// paid on every frame in exactly the situation the tool exists for: the file
+/// being written is the file being read, its hunk changes before every frame,
+/// and a reader who scrolled in to follow along never gets a stable hunk to
+/// amortise against. Measured at five hundred rows deep, before this existed:
+/// 29ms p50 and 53ms p99 against a 16ms budget, sustained, with no input.
+///
+/// The trade is memory against that tail. A rewind re-parses at most one stride
+/// plus what is drawn, and each stride costs one cloned parse position for as
+/// long as the reader stays that deep in the hunk. Thirty-two keeps the tail
+/// near two screenfuls while a thousand-line hunk holds thirty-one positions.
+pub const CHECKPOINT_STRIDE: usize = 32;
+
 /// Both sides of one hunk, each parsed as the file it describes.
+///
+/// `Clone` because a [`Checkpoint`] is one of these frozen at a line boundary.
+/// The newline scratch buffer is deliberately **not** in here: it lives on
+/// [`Entry`], so that cloning a parse position does not clone a buffer whose
+/// contents are worthless one line later.
+#[derive(Clone)]
 struct Sides {
     /// The index side: context and removals.
     old: ParseState,
@@ -241,6 +266,23 @@ struct Entry {
     ordinal: usize,
     /// Content digest of the hunk this parse describes.
     digest: u64,
+    /// Digest of every whole stride of this hunk, deepest last.
+    ///
+    /// Held for the content currently cached, so the next frame can find how
+    /// far down the two agree without re-reading what it already parsed.
+    marks: Vec<u64>,
+    /// Parse positions this entry can rewind to, one per whole stride
+    /// **parsed**, deepest last.
+    ///
+    /// Indexed to match `marks`: entry `i` is the state after exactly
+    /// `(i + 1) * CHECKPOINT_STRIDE` lines, and `marks[i]` is the digest of
+    /// those same lines. That pairing is what makes a rewind exact, and it is
+    /// why the digest is not stored here as well: one copy cannot disagree with
+    /// itself.
+    ///
+    /// Shorter than `marks` whenever the reader has not scrolled to the bottom
+    /// of the hunk, which is almost always.
+    checkpoints: Vec<Sides>,
     /// Whether the frame in progress has claimed it. See [`Highlighter::sweep`].
     live: bool,
     /// `None` when nothing recognises the file type, which is not an error.
@@ -252,16 +294,55 @@ struct Entry {
 }
 
 impl Entry {
-    fn new(path: &str, ordinal: usize, digest: u64, syntaxes: &SyntaxSet) -> Self {
+    fn new(path: &str, ordinal: usize, content: Content, syntaxes: &SyntaxSet) -> Self {
         Self {
             path: path.to_owned(),
             ordinal,
-            digest,
+            digest: content.digest,
+            marks: content.marks,
+            checkpoints: Vec::new(),
             live: true,
             sides: syntax_for(syntaxes, path).map(Sides::new),
             lines: Vec::new(),
             buf: String::new(),
         }
+    }
+
+    /// Keep as much of this parse as `content` still agrees with, and report
+    /// whether anything survived.
+    ///
+    /// The alternative is what this used to do: throw the whole parse away and
+    /// start at line zero. That made a frame cost the reader's scroll depth
+    /// rather than what it drew, on every frame, for as long as the file being
+    /// read was the file being written. See [`CHECKPOINT_STRIDE`].
+    ///
+    /// Exact, not approximate. Two hunks whose first *n* lines hash the same
+    /// parse those lines the same way, because a line's scopes depend only on
+    /// what came before it, so the spans above the deepest agreeing checkpoint
+    /// are still the right answer.
+    fn rewind(&mut self, content: Content) -> bool {
+        // How many whole strides of the new content match what is cached, and
+        // of those, how many were actually parsed deep enough to have a
+        // position to resume from.
+        let agreed = self
+            .marks
+            .iter()
+            .zip(&content.marks)
+            .take_while(|(cached, fresh)| cached == fresh)
+            .count();
+        let usable = agreed.min(self.checkpoints.len());
+        if usable == 0 {
+            return false;
+        }
+
+        self.checkpoints.truncate(usable);
+        self.lines.truncate(usable * CHECKPOINT_STRIDE);
+        // Cloned rather than taken: the reader may sit here for many frames, and
+        // each one needs to rewind to this same position again.
+        self.sides = Some(self.checkpoints[usable - 1].clone());
+        self.digest = content.digest;
+        self.marks = content.marks;
+        true
     }
 
     /// Parse forward until line `index` has spans.
@@ -278,6 +359,20 @@ impl Entry {
         stats: &mut HighlightStats,
     ) {
         while self.lines.len() <= index {
+            // A whole stride has been parsed, so freeze where it left off.
+            // Taken here rather than after the last line of the stride so that a
+            // checkpoint is always on a clean line boundary, and guarded on the
+            // count so re-entering `fill_to` at the same depth cannot push a
+            // second copy of a position already held.
+            let done = self.lines.len();
+            if done > 0
+                && done % CHECKPOINT_STRIDE == 0
+                && self.checkpoints.len() < done / CHECKPOINT_STRIDE
+                && let Some(sides) = &self.sides
+            {
+                self.checkpoints.push(sides.clone());
+            }
+
             let line = &hunk.lines[self.lines.len()];
             let spans = match &mut self.sides {
                 Some(sides) => {
@@ -403,19 +498,24 @@ impl Highlighter {
             // rather than once per line.
             Some(slot) if entries[slot].live => slot,
             Some(slot) => {
-                let digest = digest_of(hunk);
-                if entries[slot].digest == digest {
+                let content = content_of(hunk);
+                if entries[slot].digest == content.digest {
                     stats.reused += 1;
                     entries[slot].live = true;
                 } else {
                     stats.parsed += 1;
-                    entries[slot] = Entry::new(path, ordinal, digest, syntaxes);
+                    // Rewind to the deepest position the new content still
+                    // agrees with, and only start over when there is none.
+                    if !entries[slot].rewind(content.clone()) {
+                        entries[slot] = Entry::new(path, ordinal, content, syntaxes);
+                    }
+                    entries[slot].live = true;
                 }
                 slot
             }
             None => {
                 stats.parsed += 1;
-                entries.push(Entry::new(path, ordinal, digest_of(hunk), syntaxes));
+                entries.push(Entry::new(path, ordinal, content_of(hunk), syntaxes));
                 entries.len() - 1
             }
         };
@@ -491,7 +591,22 @@ fn syntax_for<'s>(syntaxes: &'s SyntaxSet, path: &str) -> Option<&'s SyntaxRefer
         })
 }
 
-/// A hunk's content, as sixty-four bits.
+/// A hunk's content, hashed whole and at every stride boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Content {
+    /// Digest of the whole hunk, which is what decides reuse.
+    digest: u64,
+    /// Digest of the first `(i + 1) * CHECKPOINT_STRIDE` lines, deepest last.
+    marks: Vec<u64>,
+}
+
+/// Hash a hunk, keeping the running value at every stride boundary.
+///
+/// One walk rather than two. The whole-hunk digest answers "may this parse be
+/// reused at all", and the marks answer "how much of it survives" when the
+/// answer to the first is no. Computing the marks costs a `DefaultHasher` clone
+/// per stride, which is a few words, against a walk of the hunk that was
+/// happening anyway.
 ///
 /// The **kind** is hashed alongside the text because the two sides parse
 /// separately: the same string can be a removal in one frame and context in the
@@ -500,13 +615,20 @@ fn syntax_for<'s>(syntaxes: &'s SyntaxSet, path: &str) -> Option<&'s SyntaxRefer
 ///
 /// Line numbers are deliberately left out. A hunk that moved is the same hunk to
 /// look at, so it keeps its colours.
-fn digest_of(hunk: &Hunk) -> u64 {
+fn content_of(hunk: &Hunk) -> Content {
     let mut hasher = DefaultHasher::new();
-    for line in &hunk.lines {
+    let mut marks = Vec::with_capacity(hunk.lines.len() / CHECKPOINT_STRIDE);
+    for (at, line) in hunk.lines.iter().enumerate() {
         (line.kind as u8).hash(&mut hasher);
         line.text.hash(&mut hasher);
+        if (at + 1) % CHECKPOINT_STRIDE == 0 {
+            marks.push(hasher.clone().finish());
+        }
     }
-    hasher.finish()
+    Content {
+        digest: hasher.finish(),
+        marks,
+    }
 }
 
 /// Run a line through a side without building spans for it.
@@ -828,11 +950,11 @@ mod tests {
         let added = hunk(vec![line(LineKind::Added, text)]);
         let context = hunk(vec![line(LineKind::Context, text)]);
 
-        assert_ne!(digest_of(&removed), digest_of(&added));
-        assert_ne!(digest_of(&added), digest_of(&context));
+        assert_ne!(content_of(&removed).digest, content_of(&added).digest);
+        assert_ne!(content_of(&added).digest, content_of(&context).digest);
         assert_eq!(
-            digest_of(&added),
-            digest_of(&hunk(vec![line(LineKind::Added, text)]))
+            content_of(&added).digest,
+            content_of(&hunk(vec![line(LineKind::Added, text)])).digest
         );
     }
 
@@ -847,6 +969,6 @@ mod tests {
             new_start: 901,
             ..hunk(lines)
         };
-        assert_eq!(digest_of(&here), digest_of(&moved));
+        assert_eq!(content_of(&here).digest, content_of(&moved).digest);
     }
 }
