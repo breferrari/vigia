@@ -30,6 +30,20 @@ const SETTLE: Duration = Duration::from_secs(10);
 /// How long the writer thread waits before touching anything.
 const DELAY: Duration = Duration::from_millis(400);
 
+/// Gap between two writes whose *order* is what is under test.
+///
+/// Long enough that the OS reports them in the order they happened, short
+/// enough to sit far inside [`ORDERING_QUIET`] so they still coalesce.
+const ORDERING_GAP: Duration = Duration::from_millis(50);
+
+/// Quiet window for the ordering test.
+///
+/// Twenty times [`ORDERING_GAP`]. Generous because a burst that splits in two
+/// does not merely loosen that test, it inverts it: the first half's tick would
+/// name the *first* write, which is precisely the wrong answer it exists to
+/// catch. Cheap to buy the margin, expensive to debug without it.
+const ORDERING_QUIET: Duration = Duration::from_secs(1);
+
 /// The longest a burst held open by a continuous writer may last.
 ///
 /// The `max_delay` under test is 300ms, and this is the deadline plus room for
@@ -166,6 +180,49 @@ fn a_burst_of_writes_becomes_one_tick() {
         tick_within(&mut watcher, IDLE).is_none(),
         "one burst produced a second tick"
     );
+}
+
+/// I5's input: B2 says follow the write that landed **last** in the batch.
+///
+/// Both orders are exercised, and that is the whole design of the test. With
+/// one order, "the last write" and "any write in the burst" give the same
+/// answer, so a implementation that returned the *first* path, or an arbitrary
+/// one, would pass. Only the pair separates them.
+#[test]
+fn a_tick_names_the_file_whose_write_landed_last() {
+    let scratch = Scratch::new("watch-newest");
+    scratch.write("a.txt", "x\n");
+    scratch.write("b.txt", "x\n");
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    // Both files sit at the worktree root, which exists when the watch is
+    // armed. `a_burst_of_writes_becomes_one_tick` explains why that matters:
+    // a recursive watch does not cover a directory created after it.
+    //
+    // A wide quiet window because the burst folding is a precondition here
+    // rather than the subject. If the two writes fell into separate ticks the
+    // assertion below would be about a batch of one.
+    let options = WatchOptions {
+        quiet: ORDERING_QUIET,
+        max_delay: Duration::from_secs(5),
+    };
+    let mut watcher = worktree.watch(options).expect("watch");
+
+    for (first, last) in [("a.txt", "b.txt"), ("b.txt", "a.txt")] {
+        scratch.write(first, "1\n");
+        // Far enough apart that the OS reports them in the order they
+        // happened, and far inside the quiet window so they still coalesce.
+        std::thread::sleep(ORDERING_GAP);
+        scratch.write(last, "2\n");
+
+        let tick = tick_within(&mut watcher, SETTLE).expect("a burst must produce a tick");
+        assert_eq!(
+            tick.newest.as_deref(),
+            Some(last),
+            "wrote {first} then {last}, and the tick named {:?}",
+            tick.newest
+        );
+    }
 }
 
 #[test]
