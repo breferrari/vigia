@@ -90,11 +90,12 @@ externally delivered `kill` is out of reach without a dependency `SPEC.md` does
 not name. That is [#24](https://github.com/breferrari/vigia/issues/24), on the
 shelf below.
 
-**Take [#6](https://github.com/breferrari/vigia/issues/6) next.** I5 is follow
-mode, and it is the last thing that makes the monitor correct with nobody
-touching it, which is the product class. Nothing in the shell reads follow state
-today: #9 deliberately shipped no `f` toggle rather than a key that flips a bool
-nothing consumes.
+**[#6](https://github.com/breferrari/vigia/issues/6) is what remains of the
+phase's correctness half.** I5 is follow mode, the last thing that makes the
+monitor correct with nobody touching it, which is the product class. Nothing in
+the shell reads follow state today: #9 deliberately shipped no `f` toggle rather
+than a key that flips a bool nothing consumes. It is **not** takeable yet, for the
+reason two paragraphs down.
 
 [#7](https://github.com/breferrari/vigia/issues/7) then has a baseline to argue
 with: there are 40- and 80-column snapshots already, and what I6 still needs is
