@@ -107,12 +107,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     spawn_watch(path.to_path_buf(), tx.clone());
     spawn_input(tx);
 
-    let mut lost_input = false;
     while let Ok(wake) = rx.recv() {
         match wake {
+            // Returning rather than breaking, so the reason travels with the
+            // exit. `shell` drops on the way out, which puts the terminal back
+            // before `main` prints this where the reader will see it.
             Wake::InputLost => {
-                lost_input = true;
-                break;
+                return Err("terminal input ended, so there was no way left to quit".into());
             }
             Wake::Input(event) => {
                 let Some(action) = action_for(&event) else {
@@ -141,14 +142,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         }
 
         shell.draw(&mut frame)?;
-    }
-
-    // Dropped before the message is written, so the terminal is out of the
-    // alternate screen and the sentence lands where the reader will see it
-    // rather than on a page that is about to be torn down.
-    drop(shell);
-    if lost_input {
-        return Err("terminal input ended, so there was no way left to quit".into());
     }
 
     Ok(())

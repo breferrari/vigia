@@ -154,46 +154,43 @@ impl Painter<'_> {
         width + 1
     }
 
-    fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
+    /// One line of chrome: something on the left, something on the right, and the
+    /// right-hand side wins the space.
+    ///
+    /// The header and the footer are the same shape, and having them share it is
+    /// not only brevity. The right-hand text is placed first so that a long name
+    /// on the left loses characters to it rather than the other way round: the
+    /// number is what changes, and what changes is what a glance is for. Written
+    /// twice, one of them eventually stops doing that.
+    fn status_line(&mut self, area: Rect, left: &str, style: Style, right: &str) {
         self.buf.set_style(area, self.theme.chrome_dim);
+        let taken = self.put_right(area, right, self.theme.chrome_dim);
+        let room = usize::from(area.width).saturating_sub(taken);
+        self.put(area.x, area.y, left, room, style);
+    }
 
+    fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
         let files = match view.files {
             1 => "1 file".to_owned(),
             n => format!("{n} files"),
         };
-        // The count is placed first so a long worktree name loses characters to
-        // it rather than the other way round: the number is what changes, and
-        // what changes is what a glance is for.
-        let taken = self.put_right(area, &files, self.theme.chrome_dim);
-        let room = usize::from(area.width).saturating_sub(taken);
-
-        // The worktree name and nothing else. A title bar reading `vigia` spends
-        // six of forty columns telling the reader which program they started,
-        // which is the one thing they already know.
-        self.put(area.x, area.y, &chrome.worktree, room, self.theme.chrome);
+        // The worktree name and nothing else on the left. A title bar reading
+        // `vigia` spends six of forty columns telling the reader which program
+        // they started, which is the one thing they already know.
+        self.status_line(area, &chrome.worktree, self.theme.chrome, &files);
     }
 
     fn footer(&mut self, area: Rect, view: &View, chrome: &Chrome) {
-        self.buf.set_style(area, self.theme.chrome_dim);
-
         let position = if view.files == 0 {
             String::new()
         } else {
             format!("{}/{}", view.top.file + 1, view.files)
         };
-        let taken = self.put_right(area, &position, self.theme.chrome_dim);
-        let room = usize::from(area.width).saturating_sub(taken);
-
-        match &chrome.notice {
-            Some(notice) => self.put(area.x, area.y, notice, room, self.theme.alert),
-            None => self.put(
-                area.x,
-                area.y,
-                "q quit  jk scroll",
-                room,
-                self.theme.chrome_dim,
-            ),
+        let (left, style) = match &chrome.notice {
+            Some(notice) => (notice.as_str(), self.theme.alert),
+            None => ("q quit  jk scroll", self.theme.chrome_dim),
         };
+        self.status_line(area, left, style, &position);
     }
 
     fn body(&mut self, area: Rect, view: &View) {
@@ -349,12 +346,20 @@ fn elide_head(text: &str, room: usize) -> String {
         return text.to_owned();
     }
 
+    // Walked backwards, accumulating width, rather than forwards testing each
+    // suffix. The forward form re-measures the whole tail once per candidate,
+    // which is quadratic in the path length and runs once per visible file row.
     let budget = room - 1;
-    let start = text
-        .char_indices()
-        .map(|(i, _)| i)
-        .find(|&i| width_of(&text[i..]) <= budget)
-        .unwrap_or(text.len());
+    let mut start = text.len();
+    let mut kept_width = 0usize;
+    for (i, c) in text.char_indices().rev() {
+        let next = kept_width + width_of(&text[i..i + c.len_utf8()]);
+        if next > budget {
+            break;
+        }
+        kept_width = next;
+        start = i;
+    }
 
     let mut kept = String::with_capacity(text.len() - start + ELIDED.len_utf8());
     kept.push(ELIDED);
