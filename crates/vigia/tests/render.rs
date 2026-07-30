@@ -178,6 +178,37 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
 }
 
 #[test]
+fn a_hunk_covering_one_line_is_written_git_s_way() {
+    // Git omits the count when a side covers exactly one line, and a reader
+    // calibrated on `git diff` reads its absence as "one". Reproducing that is
+    // cheaper than teaching them a second dialect, and a one-line file is the
+    // only way to reach it: with three lines of context either side, no larger
+    // file produces a single-line hunk. Found by mutation, which is also why it
+    // has a test of its own rather than a comment.
+    let view = View {
+        rows: vec![
+            file('M', "VERSION", 1, 1),
+            Row::Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: 1,
+            },
+            line(LineKind::Removed, 1, "0.0.0"),
+            line(LineKind::Added, 1, "0.1.0"),
+        ],
+        files: 1,
+        top: Position::default(),
+        read: 1,
+    };
+    let rendered = format!("{}", screen(40, 6, &view, &chrome()));
+    assert!(
+        rendered.contains("@@ -1 +1 @@"),
+        "a one-line hunk is not written the way git writes it:\n{rendered}"
+    );
+}
+
+#[test]
 fn a_notice_takes_the_footer_from_the_key_hints() {
     let view = one_file();
     let chrome = Chrome {
