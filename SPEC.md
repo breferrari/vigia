@@ -124,6 +124,22 @@ facilities the OS already ships, so they compile no C.
 it would move coalesce policy out of `vigia-core`, which is the one place I1 is
 testable. `notify` supplies raw events and nothing else.
 
+**The frame path keeps its diffs between frames.** I2a forbids re-diffing a file
+that did not change, so the core holds the previous frame's diff per path and
+revalidates instead of recomputing. Validity is decided from three things that
+cost no file read: the index blob the change names, the kind of change, and a
+`stat` of the working-tree file. Content is never hashed to decide this, because
+hashing is the read I2a exists to avoid.
+
+A `stat` on its own is not proof, and the gap is the one git calls *racily
+clean*: two writes of the same length inside a single modification-time granule
+are indistinguishable by `stat`. So a fingerprint is trusted only when the
+modification time it records is **strictly older than the moment the content was
+read**, and anything else is re-diffed. That trades a redundant diff of a file
+being actively written, which is a file that changed anyway, for never showing a
+stale one. It assumes the wall clock does not step backwards mid-frame, which is
+the assumption git's own index makes.
+
 ## 7. Testing
 
 - **Snapshot tests over `ratatui::backend::TestBackend` with `insta`** — render
@@ -211,10 +227,16 @@ tap, prebuilt binaries on GitHub releases.
       reporting a move as an unrelated delete plus add misdescribes what the
       agent did. Confirm against a week of real use, or paint without renames
       and reconcile them on a later frame.
-- [ ] Re-diffing every changed file costs 18.58ms p99 on a 100k-line diff,
-      over the I9 budget, against 3.27ms for a single file. I2a is therefore
-      load-bearing rather than an optimisation, and the frame path must never
-      re-diff what did not change.
+- [x] ~~Re-diffing every changed file costs 18.58ms p99 on a 100k-line diff,
+      over the I9 budget, against 3.27ms for a single file.~~ **Closed
+      2026-07-30:** I2a is enforced. The frame path revalidates from the index
+      blob, the change kind and a `stat`, so a single-line edit in a 100-file
+      worktree recomputes exactly one diff and reads exactly that file.
+- [ ] The frame path walks status to completion before it reports a file list,
+      so it does not stream the way the raw change iterator does. Today that
+      costs nothing, because rename tracking cannot stream either and is on by
+      default. If renames ever move off the first frame, this becomes the thing
+      that forfeits streaming and it has to be revisited with them.
 - [ ] Is `syntect` fast enough incrementally to hold I2b, or does it force
       tree-sitter — and with it a C toolchain — back in?
 - [ ] Default view: unstaged only, or working-tree-vs-HEAD? Unstaged is the
