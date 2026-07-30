@@ -158,9 +158,14 @@ the assertion, and the test. A phase gets a long one.
 
 ### The plan has to outlive the session
 
-Put it in the issue or the PR body before implementing. A plan that exists only
-in conversation dies at the next compaction, and nobody but this session can ever
-check the work against it.
+**Comment it on the issue before implementing.** The issue is the only durable
+surface that exists at planning time — the PR does not exist yet, since there are
+no commits to open it from, so "put it in the PR body" is unexecutable here and
+quietly becomes "keep it in my head". Carry it into the PR body at PR time as
+well, where the reviewer and `/harden`'s fidelity phase will both look for it.
+
+A plan that lives only in the conversation dies at the next compaction, and
+nobody but this session can ever check the work against it.
 
 ### Deviations
 
@@ -258,11 +263,14 @@ else either.
 
 Then polish, and let the **diff** pick the instrument rather than your appetite:
 
-- **Under ~200 lines across ≤3 files** — `/simplify` alone. Five audit phases on a
-  small diff is theatre.
+- **Under ~200 lines across ≤3 files** — `/simplify` alone. A full audit workflow
+  on a small diff is theatre. (`/harden` states this floor itself and will
+  decline; the number lives there, so if the two ever disagree, harden wins.)
 - **Anything larger, or anything the rest of the system stands on** — `/harden`
-  **until dry**. It runs `/simplify` itself as its phase 4, so do not run one
-  first and then the other.
+  **until dry**. It runs `/simplify` as one of its own phases, so do not run one
+  first and then the other. It also carries its own plan-fidelity phase: tell it
+  the diff above was already done, so it records the result instead of repeating
+  it.
 
 Whichever runs, pass the docs carve-out into the invocation, because `/simplify`
 reduces and the comments explaining *why* something works are the ones nobody can
