@@ -1,0 +1,126 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # A warning that reaches main is a warning nobody will ever fix.
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: fmt and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets
+
+  test:
+    name: test and budgets (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Windows and macOS fail for different reasons than Linux does, and
+      # cancelling the others hides which.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Correctness first, in debug, where the structural budget gates still
+      # apply and the absolute ones report that they are skipped.
+      - name: test
+        run: cargo test --workspace
+
+      # Then the budgets, in release, because that is what they were set
+      # against. Slack applies to the absolute wall-clock gates only: hosted
+      # runners are shared, and their variance is not a property of this code.
+      # The structural gates take no slack and are what catch a real regression.
+      - name: budgets
+        run: cargo test --release --test budgets
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
+  benches:
+    name: benches compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Not run for timings: a hosted runner cannot produce a number worth
+      # comparing. Compiled so they cannot rot unnoticed.
+      - run: cargo bench --no-run
+
+  pure-rust:
+    name: no C toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # CLAUDE.md calls a C toolchain in the graph a spec change, not an
+      # implementation detail. This is that rule with teeth: it is the whole
+      # reason musl-static and Windows are cheap.
+      - name: assert no cc, cmake or bindgen on any tier-1 target
+        run: |
+          set -euo pipefail
+          status=0
+          for target in \
+            x86_64-unknown-linux-musl \
+            x86_64-pc-windows-msvc \
+            aarch64-apple-darwin
+          do
+            found=$(cargo tree --target "$target" -e normal,build \
+              | grep -oiE '\bcc v[0-9.]+|\bcmake v[0-9.]+|\bbindgen v[0-9.]+' \
+              | sort -u || true)
+            if [ -n "$found" ]; then
+              echo "::error::a C build dependency entered the graph for $target: $found"
+              status=1
+            else
+              echo "$target: clean"
+            fi
+          done
+          exit $status
+
+  musl:
+    name: static musl binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      # The claim in CLAUDE.md is a static binary with no cross-toolchain.
+      # Building is half of it; being actually static is the other half.
+      - name: assert the binary is static
+        run: |
+          set -euo pipefail
+          binary=target/x86_64-unknown-linux-musl/release/vigia
+          file "$binary"
+          # A resolved shared library prints as `libfoo.so => /path`. Matching
+          # on that rather than on ldd's summary line, which is "statically
+          # linked" for a static-pie build and "not a dynamic executable" for a
+          # plain one, so keying off either would misfire on the other.
+          if ldd "$binary" 2>&1 | grep -q '=>'; then
+            echo "::error::the musl binary links shared libraries"
+            ldd "$binary" || true
+            exit 1
+          fi

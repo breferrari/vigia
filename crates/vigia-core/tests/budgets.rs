@@ -1,0 +1,319 @@
+//! The budgets from `SPEC.md` §3, as gates rather than aspirations.
+//!
+//! The gates come in two tiers, because absolute wall-clock thresholds are a
+//! weak instrument on a shared CI runner and a strong one on a known machine.
+//!
+//! **Structural gates** compare the engine against itself: bytes read for one
+//! file versus all of them, time to diff one versus time to diff every one.
+//! They are ratios, so they are hardware-independent, they take no slack, and
+//! they are what actually catches the regression that matters. Making the frame
+//! path re-diff everything is a 5x wall-clock change that a generous absolute
+//! threshold would wave through, and a 100x ratio change that these cannot.
+//!
+//! **Absolute gates** hold the wall clock to the numbers in `SPEC.md`. They run
+//! only in release, because the budgets were set against optimised code, and
+//! they accept a slack multiplier so a hosted runner's variance does not read
+//! as a code regression. A developer machine runs them with no slack at all.
+
+mod support;
+
+use std::time::{Duration, Instant};
+
+use support::Scratch;
+use vigia_core::{FileChange, Samples, Worktree};
+
+/// I4: first paint on a 100k-line diff.
+const I4_FIRST_PAINT: Duration = Duration::from_millis(100);
+/// I7: startup to first paint.
+const I7_STARTUP: Duration = Duration::from_millis(50);
+/// I9: steady-state frame time.
+const I9_FRAME: Duration = Duration::from_millis(16);
+
+/// Files in the large fixture, and lines in each.
+///
+/// 100 x 500, rewritten line for line, is 50k removed plus 50k added: the
+/// 100k-line diff I4 is written against.
+const FILES: usize = 100;
+const LINES: usize = 500;
+
+/// Multiplier applied to the absolute budgets, and to nothing else.
+///
+/// Defaults to 1, so a developer machine is held to `SPEC.md` exactly. CI
+/// raises it because hosted runners are shared and their variance is not a
+/// property of this code. The structural gates ignore it entirely.
+fn slack() -> f64 {
+    std::env::var("VIGIA_BUDGET_SLACK")
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .filter(|value: &f64| *value >= 1.0)
+        .unwrap_or(1.0)
+}
+
+fn budget(base: Duration) -> Duration {
+    base.mul_f64(slack())
+}
+
+/// Whether the absolute wall-clock gates should assert.
+///
+/// A debug build is several times slower than the one the budgets were set
+/// against, so asserting there would fail for a reason that is not a
+/// regression. Reported rather than silently skipped.
+fn absolute_gates_apply() -> bool {
+    if cfg!(debug_assertions) {
+        eprintln!(
+            "note: absolute budget gates skipped in a debug build; \
+             run `cargo test --release --test budgets` to enforce them"
+        );
+        false
+    } else {
+        true
+    }
+}
+
+/// Best of `n`, which measures what the code can do rather than what the
+/// machine happened to be doing at the time.
+fn best_of(n: usize, mut measure: impl FnMut() -> Duration) -> Duration {
+    (0..n)
+        .map(|_| measure())
+        .min()
+        .expect("at least one measurement")
+}
+
+fn time(mut work: impl FnMut()) -> Duration {
+    let start = Instant::now();
+    work();
+    start.elapsed()
+}
+
+fn changes_of(worktree: &Worktree) -> Vec<FileChange> {
+    worktree
+        .changes()
+        .expect("enumerate")
+        .map(|c| c.expect("change"))
+        .collect()
+}
+
+/// Frames discarded before sampling begins.
+///
+/// I9 is a claim about *steady state*, so the cold path is out of scope by
+/// definition: the first frames after a fixture is built pay for a cold page
+/// cache and first-touch of every code path. Measured here, the cold frames run
+/// to roughly 40ms against a warm p99 of 3ms.
+const WARMUP_FRAMES: usize = 50;
+
+/// Frames actually sampled.
+///
+/// A percentile needs enough samples to be one. At 30, nearest-rank p99 *is*
+/// the maximum, so the gate would report the worst frame and call it a tail.
+const SAMPLED_FRAMES: usize = 250;
+
+/// Files in the small fixture, which differs from the large one only in count.
+const FEW_FILES: usize = 4;
+
+/// The path present in both fixtures, so the content compared is identical.
+const SHARED_PATH: &str = "src/mod_0.rs";
+
+#[test]
+fn diffing_one_file_costs_the_same_however_much_else_changed() {
+    // Comparing one call against the sum of all calls would prove nothing: if
+    // `diff` inflated uniformly, the sum would inflate with it and the ratio
+    // would hold. The claim only has teeth across two fixtures whose per-file
+    // content is identical and whose file counts are not.
+    let few = Scratch::large_diff("budget-scale-few", FEW_FILES, LINES);
+    let many = Scratch::large_diff("budget-scale-many", FILES, LINES);
+
+    let few_worktree = few.worktree();
+    let many_worktree = many.worktree();
+    let few_changes = changes_of(&few_worktree);
+    let many_changes = changes_of(&many_worktree);
+    assert_eq!(few_changes.len(), FEW_FILES);
+    assert_eq!(many_changes.len(), FILES);
+
+    let pick = |changes: &[FileChange]| {
+        changes
+            .iter()
+            .find(|c| c.path == SHARED_PATH)
+            .unwrap_or_else(|| panic!("{SHARED_PATH} missing from fixture"))
+            .clone()
+    };
+    let in_few = pick(&few_changes);
+    let in_many = pick(&many_changes);
+
+    let few_diff = few_worktree.diff(&in_few).expect("diff");
+    let many_diff = many_worktree.diff(&in_many).expect("diff");
+
+    // Exact, and the strongest form of the claim: identical content has to cost
+    // identical bytes whether three other files changed or ninety-nine did.
+    assert_eq!(
+        few_diff.bytes, many_diff.bytes,
+        "diffing {SHARED_PATH} compared {} bytes among {FEW_FILES} changes but {} among {FILES}, \
+         so the frame path is reading files it was not asked about",
+        few_diff.bytes, many_diff.bytes
+    );
+
+    // And bounded by the file itself, which catches inflation that happens to
+    // be uniform across both fixtures.
+    let on_disk = std::fs::metadata(many.path_of(SHARED_PATH))
+        .expect("stat the fixture file")
+        .len();
+    assert!(
+        many_diff.bytes <= on_disk * 4,
+        "diffing a {on_disk}-byte file compared {} bytes",
+        many_diff.bytes
+    );
+
+    // The same claim in time. Loose, because timing on a shared machine is
+    // noisy, but a frame path that walked every change would be 25x here.
+    let few_time = best_of(7, || {
+        time(|| {
+            few_worktree.diff(&in_few).expect("diff");
+        })
+    });
+    let many_time = best_of(7, || {
+        time(|| {
+            many_worktree.diff(&in_many).expect("diff");
+        })
+    });
+    assert!(
+        many_time <= few_time * 4,
+        "diffing {SHARED_PATH} took {few_time:?} among {FEW_FILES} changes but {many_time:?} \
+         among {FILES}"
+    );
+}
+
+#[test]
+fn absolute_budgets_hold_on_a_100k_line_diff() {
+    let scratch = Scratch::large_diff("budget-absolute", FILES, LINES);
+    let worktree = scratch.worktree();
+    let changes = changes_of(&worktree);
+
+    // Guard the fixture itself. If it silently shrank, every gate below would
+    // pass while measuring nothing like what the budgets describe.
+    let lines: u32 = changes
+        .iter()
+        .map(|c| {
+            let diff = worktree.diff(c).expect("diff");
+            diff.added + diff.removed
+        })
+        .sum();
+    assert!(
+        lines >= 100_000,
+        "fixture is only {lines} changed lines, so it does not exercise the I4 budget"
+    );
+
+    if !absolute_gates_apply() {
+        return;
+    }
+
+    // I4: the first change has to be available long before the walk finishes.
+    let first_change = best_of(5, || {
+        time(|| {
+            let mut stream = worktree.changes().expect("enumerate");
+            stream.next().expect("a change").expect("change");
+        })
+    });
+    assert!(
+        first_change <= budget(I4_FIRST_PAINT),
+        "I4: first change took {first_change:?}, over the {:?} budget",
+        budget(I4_FIRST_PAINT)
+    );
+
+    // I7: open the repository, find the first change, and diff it. Process
+    // spawn and dynamic loading are outside a test's reach, so this gates the
+    // part the code controls; the harness reports the number including them.
+    let root = scratch.path_of(".");
+    let first_paint = best_of(5, || {
+        time(|| {
+            let worktree = Worktree::discover(&root).expect("discover");
+            let change = worktree
+                .changes()
+                .expect("enumerate")
+                .next()
+                .expect("a change")
+                .expect("change");
+            worktree.diff(&change).expect("diff");
+        })
+    });
+    assert!(
+        first_paint <= budget(I7_STARTUP),
+        "I7: open plus first paint took {first_paint:?}, over the {:?} budget",
+        budget(I7_STARTUP)
+    );
+
+    // I9: a steady-state frame is one enumeration plus the file that changed.
+    // p99 rather than a mean, because the budget is a tail claim.
+    let frame = || {
+        time(|| {
+            let change = worktree
+                .changes()
+                .expect("enumerate")
+                .next()
+                .expect("a change")
+                .expect("change");
+            worktree.diff(&change).expect("diff");
+        })
+    };
+    for _ in 0..WARMUP_FRAMES {
+        frame();
+    }
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(frame());
+    }
+    let p99 = frames.percentile(0.99).expect("samples");
+    assert!(
+        p99 <= budget(I9_FRAME),
+        "I9: frame p99 was {p99:?}, over the {:?} budget (p50 {:?}, max {:?})",
+        budget(I9_FRAME),
+        frames.percentile(0.50).expect("samples"),
+        frames.max().expect("samples")
+    );
+}
+
+/// Print the whole frame-time distribution instead of asserting on it.
+///
+/// Ignored by default because it is a diagnostic rather than a gate. It exists
+/// because the I9 gate above was once wrong in two ways at once, sampling too
+/// few frames to have a p99 and sampling them cold, and a single failing number
+/// could not distinguish that from a real regression. Run it before believing
+/// the gate is what is broken:
+///
+/// ```text
+/// cargo test --release --test budgets -- --ignored --nocapture distribution
+/// ```
+#[test]
+#[ignore = "diagnostic, not a gate"]
+fn frame_time_distribution() {
+    let scratch = Scratch::large_diff("budget-distribution", FILES, LINES);
+    let worktree = scratch.worktree();
+
+    let mut warm = Samples::new(SAMPLED_FRAMES);
+    let mut over_budget = 0usize;
+    for i in 0..(WARMUP_FRAMES + SAMPLED_FRAMES) {
+        let elapsed = time(|| {
+            let change = worktree
+                .changes()
+                .expect("enumerate")
+                .next()
+                .expect("a change")
+                .expect("change");
+            worktree.diff(&change).expect("diff");
+        });
+        if i >= WARMUP_FRAMES {
+            warm.push(elapsed);
+            if elapsed > I9_FRAME {
+                over_budget += 1;
+            }
+        }
+    }
+
+    for quantile in [0.50, 0.90, 0.99, 0.999] {
+        println!(
+            "p{:<6} {:?}",
+            quantile * 100.0,
+            warm.percentile(quantile).expect("samples")
+        );
+    }
+    println!("max     {:?}", warm.max().expect("samples"));
+    println!("over {I9_FRAME:?}: {over_budget}/{SAMPLED_FRAMES} warm frames");
+}

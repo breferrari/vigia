@@ -28,6 +28,11 @@ gix = { version = "0.86", default-features = false, features = [
 notify = { version = "8.2", default-features = false, features = [
     "macos_fsevent",
 ] }
+# Named by SPEC.md section 7 for I4, I7 and I9. Trimmed: plotters and rayon
+# only produce nicer local reports and cost CI compile time.
+criterion = { version = "0.8", default-features = false, features = [
+    "cargo_bench_support",
+] }
 
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.

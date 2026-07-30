@@ -48,6 +48,23 @@ impl Scratch {
         scratch
     }
 
+    /// A repository whose working tree differs from its index by every line of
+    /// every file: `2 * files * lines` changed lines in total.
+    ///
+    /// Used to size fixtures against the budgets, which are written in lines of
+    /// diff rather than in files.
+    pub fn large_diff(name: &str, files: usize, lines: usize) -> Self {
+        let scratch = Self::new(name);
+        for f in 0..files {
+            scratch.write(&format!("src/mod_{f}.rs"), generated(lines, "before"));
+        }
+        scratch.commit_all("baseline");
+        for f in 0..files {
+            scratch.write(&format!("src/mod_{f}.rs"), generated(lines, "after"));
+        }
+        scratch
+    }
+
     /// Absolute path of something inside the repository.
     pub fn path_of(&self, rela: &str) -> PathBuf {
         self.path.join(rela)
@@ -103,6 +120,13 @@ impl Scratch {
             .map(parse_hunk_header)
             .collect()
     }
+}
+
+/// Plausible source lines, distinct on both sides so every line differs.
+fn generated(lines: usize, tag: &str) -> String {
+    (1..=lines)
+        .map(|n| format!("fn {tag}_{n}() {{ let value = {}; }}\n", n * 7))
+        .collect()
 }
 
 /// Parse `@@ -a,b +c,d @@`, where `,b` is omitted when the count is 1.
