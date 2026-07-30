@@ -68,7 +68,7 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | The `ratatui` + `crossterm` shell | [#9](https://github.com/breferrari/vigia/issues/9) |
+| ✅ | The `ratatui` + `crossterm` shell | [#9](https://github.com/breferrari/vigia/issues/9) |
 | ⬜ | I5 correct with zero interaction | [#6](https://github.com/breferrari/vigia/issues/6) |
 | ⬜ | I6 legible at 40 columns | [#7](https://github.com/breferrari/vigia/issues/7) |
 | ⬜ | I8 terminal restored exactly on exit | [#8](https://github.com/breferrari/vigia/issues/8) |
@@ -76,11 +76,22 @@ Milestone: [Phase 2](https://github.com/breferrari/vigia/milestone/2)
 | ⬜ | I2b re-highlight only changed hunks (`syntect`) | [#4](https://github.com/breferrari/vigia/issues/4) |
 | ⬜ | I3 flat resources over days (soak) | [#5](https://github.com/breferrari/vigia/issues/5) |
 
-**Start with [#9](https://github.com/breferrari/vigia/issues/9), the shell.** The
-other rows render what it draws, so they cannot be tested before it exists. I8 is
-the exception and can go first if preferred: terminal restoration on exit is
-provable against a bare alternate-screen harness, and #13's abort is already
-covered by it.
+**The shell is in, so the rest of this phase has something to render into.** It
+draws the working-tree diff, follows the watch engine's ticks, scrolls by keyboard
+and wheel, and holds its own half of I4: one screenful reads only the files it
+draws, gated across two fixtures in `crates/vigia/tests/reads.rs`.
+
+**Take [#8](https://github.com/breferrari/vigia/issues/8) next.** The restoration
+it proves is already implemented, in `crates/vigia/src/terminal.rs`, and it is the
+one module in the shell with no test at all: raw mode, the alternate screen, mouse
+capture and the panic hook are all outside a `TestBackend`, which is what the rest
+of the suite is built on. It is also the only thing standing between the shell
+being usable and being safe to leave running, and #13's abort is covered by it.
+
+[#7](https://github.com/breferrari/vigia/issues/7) then has a baseline to argue
+with: there are 40- and 80-column snapshots already, and what I6 still needs is
+the assertions that make it an invariant rather than a screenshot. A diff line
+does lose its tail at 40 columns today.
 
 ## Phase 3 — glanceability
 
@@ -144,6 +155,7 @@ list against the shelf says whether the plan was too ambitious or too cautious.
 | Item | Moved | Why |
 |---|---|---|
 | `notify` named as a dependency in `SPEC.md` §6 | Into Phase 1 | I1 requires filesystem events rather than a timer, so the choice could not wait for the shell. Cross-platform C-toolchain-free status verified on all three tier-1 targets at the same time |
+| Terminal restoration implemented with the shell, ahead of I8 | Into [#9](https://github.com/breferrari/vigia/issues/9) | Not scope creep and not I8 done early. A shell that takes the alternate screen without giving it back is not shippable at any stage, and `panic = "abort"` means a `Drop` alone cannot, so the panic hook had to land with the code that takes the screen. What [#8](https://github.com/breferrari/vigia/issues/8) still owns is the whole of its proof, which is also the whole of the invariant |
 | I2 split into I2a and I2b | During Phase 1 | The original I2 conflated incremental re-diffing with incremental re-highlighting. Different dependencies, different phases, and Phase 1 could not close while one number meant two things |
 
 ---
