@@ -273,6 +273,7 @@ fn no_row_ever_occupies_more_columns_than_the_screen() {
     // The overflow half of I6, and the half that would corrupt the screen rather
     // than merely read badly: a row wider than the pane wraps in the terminal,
     // which pushes every row below it down and makes the shape meaningless.
+    let mut widest_seen = 0usize;
     for (name, view, chrome) in cases() {
         for width in WIDTHS {
             for height in [3u16, 6, 24] {
@@ -282,10 +283,19 @@ fn no_row_ever_occupies_more_columns_than_the_screen() {
                         columns <= usize::from(width),
                         "{name}: row {y} at {width}x{height} occupies {columns} columns"
                     );
+                    widest_seen = widest_seen.max(columns);
                 }
             }
         }
     }
+    // Non-vacuity: `columns <= width` is satisfied by drawing nothing at all, so
+    // a renderer that returned early everywhere would pass this without a single
+    // assertion firing.
+    assert!(
+        widest_seen > 40,
+        "the widest row anywhere in the sweep was {widest_seen} columns, so the \
+         renderer drew almost nothing and this proves nothing"
+    );
 }
 
 #[test]
@@ -442,16 +452,29 @@ fn a_notice_never_moves_the_diff() {
     // This is also what lets `Shell::draw` sample the chrome before the collect
     // that may raise the notice, so it is load bearing rather than cosmetic.
     let view = every_row_kind();
+    let mut saw_two_line_footer = false;
     for width in WIDTHS {
         for height in [5u16, 24] {
             let area = Rect::new(0, 0, width, height);
+            let quiet = body_height(area, &following(), view.files);
             assert_eq!(
-                body_height(area, &following(), view.files),
+                quiet,
                 body_height(area, &with_notice(), view.files),
                 "a notice changed the body height at {width}x{height}"
             );
+            if quiet == usize::from(height) - 3 {
+                saw_two_line_footer = true;
+            }
         }
     }
+    // Non-vacuity: two heights are trivially equal if the footer never takes a
+    // second line anywhere in the sweep, which is the only state a notice could
+    // have moved it into.
+    assert!(
+        saw_two_line_footer,
+        "no width in the sweep produced a two-line footer, so nothing here could \
+         have been moved by a notice"
+    );
 }
 
 #[test]
