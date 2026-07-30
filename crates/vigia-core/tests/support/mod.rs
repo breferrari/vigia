@@ -13,9 +13,63 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use vigia_core::Worktree;
+use vigia_core::{Frame, FrameStats, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Idle frames allowed while a fixture's writes settle.
+///
+/// Generous because a spare frame costs milliseconds, and because the assertion
+/// [`settle`] ends with is what gives the number teeth.
+const SETTLE_FRAMES: usize = 8;
+
+/// Advance one frame and fetch every diff in it.
+///
+/// Fetching *all* of them is the point. A frame path that lazily diffs nothing
+/// satisfies I2a vacuously, so a test asks for everything and counts what that
+/// cost.
+pub fn materialise(frame: &mut Frame) {
+    frame.advance().expect("advance");
+    for i in 0..frame.files().len() {
+        frame.diff(i).expect("diff");
+    }
+}
+
+/// Drive the frame until it stops re-reading, then prove that it stopped.
+///
+/// A file written microseconds ago cannot yet be *proved* unchanged: its
+/// modification time is not strictly older than the read that fingerprinted it,
+/// which is the racily-clean rule doing its job. Fixtures are written
+/// immediately before a test runs, so the first frames legitimately re-read
+/// them. I2a is a claim about the frame after an edit has landed, not the frame
+/// racing the write, so measurement starts here.
+///
+/// This cannot wait out a broken cache. A frame path that never reuses anything
+/// never settles, and the panic below is what it gets.
+pub fn settle(frame: &mut Frame) {
+    for _ in 0..SETTLE_FRAMES {
+        let before = frame.stats().computed;
+        materialise(frame);
+        if frame.stats().computed == before {
+            return;
+        }
+    }
+    panic!(
+        "the frame was still re-reading after {SETTLE_FRAMES} idle frames, \
+         so nothing is ever being reused"
+    );
+}
+
+/// What one frame cost, as the difference between two cumulative readings.
+pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
+    FrameStats {
+        computed: after.computed - before.computed,
+        reused: after.reused - before.reused,
+        bytes: after.bytes - before.bytes,
+        probes: after.probes - before.probes,
+        evicted: after.evicted - before.evicted,
+    }
+}
 
 /// A temporary git repository, removed on drop.
 pub struct Scratch {
@@ -97,6 +151,72 @@ impl Scratch {
     /// Delete a file.
     pub fn remove(&self, rela: &str) {
         std::fs::remove_file(self.path.join(rela)).expect("remove fixture file");
+    }
+
+    /// Replace one line of a file, leaving every other byte alone.
+    ///
+    /// The edit I2a is written against: one line, in one file, of many.
+    pub fn edit_line(&self, rela: &str, line: usize, text: &str) {
+        self.rewrite(rela, |lines| {
+            lines[line] = text.to_owned();
+        });
+    }
+
+    /// Change one character of a line, keeping the file's length identical.
+    ///
+    /// A same-length edit is the half of an in-place write that a `stat` cannot
+    /// see, so it is what the frame path's staleness rule has to survive.
+    pub fn scribble_line(&self, rela: &str, line: usize, marker: char) {
+        assert!(
+            marker.is_ascii(),
+            "a same-length edit needs an ASCII marker"
+        );
+        self.rewrite(rela, |lines| {
+            let target = &mut lines[line];
+            let last = target
+                .char_indices()
+                .next_back()
+                .expect("fixture lines are never empty")
+                .0;
+            target.replace_range(last.., &marker.to_string());
+        });
+    }
+
+    /// Read a file as lines, hand them to `edit`, and write them back.
+    ///
+    /// Fixture files always end in a newline, so rejoining restores the file
+    /// byte for byte apart from what `edit` changed.
+    fn rewrite(&self, rela: &str, edit: impl FnOnce(&mut Vec<String>)) {
+        let full = self.path.join(rela);
+        let content = std::fs::read_to_string(&full).expect("read fixture file");
+        assert!(
+            content.ends_with('\n'),
+            "{rela} does not end in a newline, so rewriting it would change its shape"
+        );
+        let mut lines: Vec<String> = content.lines().map(str::to_owned).collect();
+        edit(&mut lines);
+        let mut joined = lines.join("\n");
+        joined.push('\n');
+        std::fs::write(&full, joined).expect("write fixture file");
+    }
+
+    /// Write `content` into the object database and return its blob id.
+    ///
+    /// The file it is hashed from is removed again, so the working tree ends up
+    /// exactly as it started. Useful for producing a blob that is deliberately
+    /// unlike anything the fixture contains: every generated file holds the
+    /// same bytes, so their committed blobs are all the *same* object, and
+    /// reaching for one of those to stand in for "some other content" quietly
+    /// tests nothing.
+    pub fn hash_object(&self, content: &str) -> String {
+        let rela = ".vigia-hash-object";
+        self.write(rela, content);
+        let id = self
+            .git(&["hash-object", "-w", "--", rela])
+            .trim()
+            .to_owned();
+        self.remove(rela);
+        id
     }
 
     /// Stage everything and commit.

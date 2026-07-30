@@ -19,8 +19,8 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use support::Scratch;
-use vigia_core::{FileChange, Samples, Worktree};
+use support::{Scratch, delta, materialise, settle};
+use vigia_core::{FileChange, FrameStats, Samples, Worktree};
 
 /// I4: first paint on a 100k-line diff.
 const I4_FIRST_PAINT: Duration = Duration::from_millis(100);
@@ -112,6 +112,114 @@ const FEW_FILES: usize = 4;
 
 /// The path present in both fixtures, so the content compared is identical.
 const SHARED_PATH: &str = "src/mod_0.rs";
+
+/// The one-line edit, identical in both fixtures so the bytes are comparable.
+const EDITED_LINE: &str = "fn edited() { let value = 0; }";
+
+/// Settle a frame over `scratch`, edit one line, and report what the next frame
+/// cost.
+fn cost_of_a_one_line_edit(scratch: &Scratch, files: usize) -> FrameStats {
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    // Guard the fixture. Every assertion below is about a frame over `files`
+    // changed files, and would measure nothing if it were not one.
+    assert_eq!(
+        frame.files().len(),
+        files,
+        "fixture reported {} changed files, not {files}",
+        frame.files().len()
+    );
+    assert_eq!(
+        frame.tracked(),
+        files,
+        "settled frame holds {} diffs for {files} changed files",
+        frame.tracked()
+    );
+
+    scratch.edit_line(SHARED_PATH, 0, EDITED_LINE);
+
+    let before = frame.stats();
+    materialise(&mut frame);
+    delta(before, frame.stats())
+}
+
+#[test]
+fn a_frame_recomputes_only_what_changed() {
+    // I2a, and the counts are exact rather than ratios, so this gate is
+    // hardware-independent and takes no slack.
+    //
+    // Measured across two fixtures whose per-file content is identical and
+    // whose file counts differ 25-fold, because the tempting form of this gate
+    // compares one file against the sum of all files, and that form passes
+    // against the exact regression it is written to catch: when every call
+    // inflates by N the sum inflates by N too, and the ratio never moves.
+    let few = Scratch::large_diff("i2a-few", FEW_FILES, LINES);
+    let many = Scratch::large_diff("i2a-many", FILES, LINES);
+
+    let few_cost = cost_of_a_one_line_edit(&few, FEW_FILES);
+    let many_cost = cost_of_a_one_line_edit(&many, FILES);
+
+    for (label, files, cost) in [("few", FEW_FILES, few_cost), ("many", FILES, many_cost)] {
+        assert_eq!(
+            cost.computed, 1,
+            "{label}: one line changed in one file, and the frame recomputed \
+             {} diffs",
+            cost.computed
+        );
+        assert_eq!(
+            cost.reused,
+            (files - 1) as u64,
+            "{label}: the frame reused {} of the {} diffs it was asked for, so \
+             it did not visit every file",
+            cost.reused,
+            files - 1
+        );
+    }
+
+    // The claim itself: identical content, edited identically, has to cost
+    // identical bytes whether three other files changed or ninety-nine did.
+    // There is no shared term here for a uniform inflation to cancel against.
+    assert_eq!(
+        few_cost.bytes, many_cost.bytes,
+        "recomputing {SHARED_PATH} read {} bytes among {FEW_FILES} changed files \
+         and {} among {FILES}, so the frame path reads files it was not asked \
+         about",
+        few_cost.bytes, many_cost.bytes
+    );
+
+    // Non-vacuity: a frame that read nothing would satisfy the line above.
+    let on_disk = std::fs::metadata(many.path_of(SHARED_PATH))
+        .expect("stat the fixture file")
+        .len();
+    assert!(
+        many_cost.bytes >= on_disk,
+        "the frame reported {} bytes for a {on_disk}-byte file, so it is not \
+         measuring the read at all",
+        many_cost.bytes
+    );
+    assert!(
+        many_cost.bytes <= on_disk * 4,
+        "recomputing one {on_disk}-byte file compared {} bytes",
+        many_cost.bytes
+    );
+
+    // What a reuse costs. One `stat` per file visited, and no read: this is the
+    // trade the whole design rests on, so it is asserted rather than assumed.
+    assert_eq!(
+        many_cost.probes,
+        (FILES + 1) as u64,
+        "visiting {FILES} files took {} stat calls; expected one each plus one \
+         to re-fingerprint the file that changed",
+        many_cost.probes
+    );
+    assert_eq!(
+        many_cost.evicted, 0,
+        "editing a file evicted {} cached diffs",
+        many_cost.evicted
+    );
+}
 
 #[test]
 fn diffing_one_file_costs_the_same_however_much_else_changed() {
