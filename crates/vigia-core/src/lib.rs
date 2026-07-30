@@ -15,6 +15,12 @@
 //! filesystem event must not, so it drives a [`Frame`] instead: the same two
 //! calls with the previous frame's answers kept and revalidated, which is I2a.
 //!
+//! A `Frame` keeps the per-file laziness that I4 needs and gives up the
+//! streaming *file list*, because it walks status to completion before reporting
+//! one. That is a deliberate trade rather than an oversight: rename tracking is
+//! on by default and cannot stream either, so today it costs nothing, and a
+//! scrollbar needs the file count anyway. `SPEC.md` §10 tracks it.
+//!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let worktree = vigia_core::Worktree::discover(".")?;

@@ -62,7 +62,7 @@ fn engine(c: &mut Criterion) {
     });
 
     // What a frame would cost without incrementality. The gap between this and
-    // the line above is the whole of I2's justification.
+    // the line above is the whole of I2a's justification.
     group.bench_function("diff_every_file", |b| {
         b.iter(|| {
             for change in &changes {

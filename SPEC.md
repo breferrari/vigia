@@ -45,7 +45,7 @@ relative to any other tool.
 | # | Invariant | Budget | How it is proven |
 |---|---|---|---|
 | **I1** | Redraw is **event-driven**, never a fixed timer. No filesystem event and no git index change means no work. | **0 wakeups** while idle | CPU sampled over a 60s idle window; assert no render calls |
-| **I2a** | **Re-diffing is incremental** — the frame path never re-diffs a file that did not change. | re-diff cost ∝ what changed, **not** worktree size | Assert the re-diff count and byte count for a single-line edit in a large worktree |
+| **I2a** | **Re-diffing is incremental** — the frame path never re-diffs a file that did not change. | re-diff cost ∝ what changed, **not** worktree size | Assert the re-diff count and byte count for a single-line edit, across **two** fixtures differing only in changed-file count. One fixture cannot prove it: see §7 |
 | **I2b** | **Re-highlighting is incremental** — only changed hunks are re-parsed. | re-parse ∝ edit size, **not** file size | Assert the re-parse count and byte count for a single-line edit in a large file |
 | **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak test: 24h of synthetic edits, RSS sampled every 5 min |
 | **I4** | **Streams, never buffers.** First paint is independent of total diff size. | **first paint < 100ms** on a 100k-line diff | `criterion`, gated in CI |
@@ -53,7 +53,7 @@ relative to any other tool.
 | **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns |
 | **I7** | Startup to first paint is imperceptible. | **< 50ms** | Timed, gated in CI |
 | **I8** | Terminal restored exactly on exit — including `SIGINT` and panic. | — | Alternate-screen assertions; panic hook test |
-| **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | `criterion` under a synthetic edit storm |
+| **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | Gated over the **frame path**, not the primitives: a settled frame, one line rewritten before each frame, every file materialised. `criterion` tracks the same shape |
 
 A regression past any budget **fails the build.**
 
@@ -102,8 +102,8 @@ Cargo workspace, two crates:
 
 - **`vigia-core`** — library. Git (`gix`), diff modelling, incremental
   highlighting (`syntect`), filesystem events (`notify`), the watch and coalesce
-  engine. **No terminal I/O, no ratatui.** Every invariant except I6 and I8 is
-  testable here, headlessly.
+  engine, the frame path. **No terminal I/O, no ratatui.** Every invariant except
+  I6 and I8 is testable here, headlessly.
 - **`vigia`** — binary. `ratatui` + `crossterm` shell: input, layout, theming.
   Thin by design, so the TUI stays swappable and the engine stays provable.
 
@@ -163,6 +163,23 @@ the assumption git's own index makes.
     were set against optimised code, and with a slack multiplier
     (`VIGIA_BUDGET_SLACK`, default 1) so a shared runner's variance does not
     read as a code regression.
+- **An invariant whose two failure modes are not symmetrical gets a gate for
+  each.** I2a is the case that made this a rule. Reusing too *little* is slow and
+  loud, and the budget gate catches it. Reusing too *much* is fast, passes every
+  budget, and shows a diff that no longer exists, so
+  `crates/vigia-core/tests/frame.rs` compares every reused frame against one
+  computed with no memory at all. A budget gate alone would have called the
+  second failure a success.
+- **A rule covering a window too small to race is extracted as a pure function
+  and tested directly.** The racily-clean guard in §6 cannot be reached on demand
+  from a filesystem: dropping it leaves the whole integration suite green and only
+  a unit test over the decision function goes red. Where a correctness rule has no
+  reachable integration path, the pure-function test *is* the gate, and that is
+  worth stating rather than discovering.
+- **Gates are mutation tested before they are trusted.** Break the code
+  deliberately, confirm the gate goes red, restore. Two of the flaws found this
+  way were invisible to reading: a structural gate comparing one call against the
+  sum of its own calls, and a p99 over too few cold samples.
 - **Steady-state budgets are sampled after a warmup**, and over enough frames
   for a percentile to be one. I9 is a claim about steady state, so the cold path
   is outside its scope by definition; measured cold frames run ~40ms against a
@@ -183,7 +200,7 @@ shape; that file is the state. Work is taken one task at a time via
 **Phase 1 — core engine.** `vigia-core` plus a `main` that prints frame timings.
 Prove `gix` gives working-tree-vs-index diffs at the fidelity and speed needed —
 it is the least-precedented dependency in the stack and everything sits on it.
-Land **I1, I2a, I4, I9**, each gated. No TUI.
+Land **I1, I2a, I4, I7, I9**, each gated. No TUI.
 
 **Phase 2 — minimum monitor.** ratatui + crossterm shell. Follow mode (I5),
 scroll, mouse, exit safety (I8), 40-column layout (I6). Plus **I2b** (needs
@@ -232,11 +249,21 @@ tap, prebuilt binaries on GitHub releases.
       2026-07-30:** I2a is enforced. The frame path revalidates from the index
       blob, the change kind and a `stat`, so a single-line edit in a 100-file
       worktree recomputes exactly one diff and reads exactly that file.
+      Measured over the same 100-file, 100k-line fixture, release build:
+      a **real frame under continuous edits is 6.97ms p99** against the 16ms I9
+      budget, revalidating 99 files and recomputing the one that moved. Pure
+      revalidation with nothing edited is 3.93ms and reads **0 bytes**. A cold
+      frame with nothing to reuse is 18.28ms and reads 3.6 MiB, which agrees with
+      the 18.58ms the spike measured over the primitives and is the cost I2a
+      removes. Every number in this bullet is a frame-path measurement; the
+      18.58ms above is the spike's, over `Worktree::diff` called per file.
 - [ ] The frame path walks status to completion before it reports a file list,
-      so it does not stream the way the raw change iterator does. Today that
-      costs nothing, because rename tracking cannot stream either and is on by
-      default. If renames ever move off the first frame, this becomes the thing
-      that forfeits streaming and it has to be revisited with them.
+      so it does not stream the way the raw change iterator does. Two reasons it
+      costs nothing today: rename tracking cannot stream either and is on by
+      default, and a scrollbar needs the file count regardless of how few files
+      are drawn. What is open is whether both hold at ten thousand changed files,
+      where the walk itself could exceed I4. Revisit together with rename
+      tracking above, since they stand or fall together.
 - [ ] Is `syntect` fast enough incrementally to hold I2b, or does it force
       tree-sitter — and with it a C toolchain — back in?
 - [ ] Default view: unstaged only, or working-tree-vs-HEAD? Unstaged is the

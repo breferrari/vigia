@@ -8,7 +8,8 @@
 //! frame the wrong shape. Measured on a 100k-line diff, re-diffing every changed
 //! file costs 18.58ms p99 against a 16ms I9 budget, so the naive frame path
 //! breaks the frame budget on its own rather than merely wasting work. A
-//! [`Frame`] is that same call with the previous answer kept.
+//! [`Frame`] is that same call with the previous answer kept, and it brings a
+//! real frame under continuous edits to 6.97ms p99.
 //!
 //! Everything here reduces to one question: when may a diff be reused? Three
 //! things can invalidate one, and deciding costs no file read.
@@ -24,10 +25,10 @@
 //! granule are indistinguishable by `stat`, and an in-place one-character edit
 //! repeated quickly is precisely that shape. So a fingerprint counts as proof
 //! only when its modification time is **strictly older than the moment the
-//! content was read** — after which any write at all must move the time
-//! forward, so an unchanged time means unchanged bytes. Everything else is
-//! re-diffed. That costs a redundant diff of a file being actively written,
-//! which is a file that changed anyway, and buys never showing a stale one.
+//! content was read**. After that, any write at all must move the time forward,
+//! so an unchanged time means unchanged bytes. Everything else is re-diffed.
+//! That costs a redundant diff of a file being actively written, which is a file
+//! that changed anyway, and buys never showing a stale one.
 //!
 //! Content is never hashed to make this decision. Hashing is the read I2a
 //! exists to avoid.
@@ -59,7 +60,9 @@ pub struct FrameStats {
     pub bytes: u64,
     /// `stat` calls made, either to record a fingerprint or to check one.
     ///
-    /// This is what a reuse costs: one `stat`, never a read.
+    /// One per file visited, and one more for each diff recomputed, which has to
+    /// be re-fingerprinted afterwards. The shape is the point: a reuse costs a
+    /// `stat`, never a read.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     ///
@@ -177,9 +180,14 @@ impl<'w> Frame<'w> {
 
     /// Re-read which files changed, keeping every diff still known to be valid.
     ///
-    /// Diffs nothing. A monitor draws the top of a long list without having
-    /// looked at the bottom (I4), so content is fetched by [`Frame::diff`] when
-    /// a caller asks for it.
+    /// Diffs nothing, so a monitor draws the top of a long diff without having
+    /// read the bottom (I4). Content is fetched by [`Frame::diff`] when a caller
+    /// asks for it.
+    ///
+    /// The *file list* is a different matter: this walks status to completion,
+    /// because a monitor cannot draw a scrollbar without knowing how many files
+    /// there are. That costs nothing today, since rename tracking is on by
+    /// default and cannot stream either. See `SPEC.md` section 10.
     ///
     /// A frame starts empty, so this has to be called once before
     /// [`Frame::files`] reports anything. That makes the first frame the same

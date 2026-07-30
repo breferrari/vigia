@@ -33,7 +33,7 @@ use vigia_core::{ChangeOptions, Error, Frame, FrameStats, Samples, Worktree};
 /// Sweeps taken after the cold one, for a steady-state percentile.
 const WARM_SWEEPS: usize = 20;
 
-/// Frames allowed for a working tree's recent writes to fall settled.
+/// Frames allowed for a working tree's recent writes to settle.
 ///
 /// A file written moments ago cannot be *proved* unchanged, so a frame taken
 /// right after a save re-reads it by design. This is not a retry loop: it stops
@@ -256,6 +256,11 @@ struct FrameCosts {
 }
 
 /// Advance one frame and fetch every diff in it.
+///
+/// This, `delta` and the settle loop below also exist in
+/// `crates/vigia-core/tests/support/mod.rs`. The duplication is forced rather
+/// than careless: a test-support module is not a published item, so a binary
+/// cannot depend on one. Keep them in step by hand.
 fn materialise(frame: &mut Frame) -> Result<(), Error> {
     frame.advance()?;
     for i in 0..frame.files().len() {
@@ -264,6 +269,7 @@ fn materialise(frame: &mut Frame) -> Result<(), Error> {
     Ok(())
 }
 
+/// What one frame cost, as the difference between two cumulative readings.
 fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
     FrameStats {
         computed: after.computed - before.computed,

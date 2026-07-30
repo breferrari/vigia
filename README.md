@@ -43,7 +43,8 @@ and a regression past any of them fails the build.
 | | |
 |---|---|
 | 🔔 **Event driven** | Zero wakeups while idle. No filesystem event, no work. Never a polling timer |
-| ♻️ **Incremental** | Re-parse cost scales with the size of your edit, not the size of the file |
+| ♻️ **Incremental diff** | Re-diff cost scales with what changed, not with the size of your worktree |
+| 🖍️ **Incremental highlight** | Re-parse cost scales with the size of your edit, not the size of the file |
 | 🪶 **Flat over days** | Under 5% memory drift across 24 hours. No retained temp files |
 | 🌊 **Streaming** | First paint under 100ms, even on a 100,000 line diff |
 | 🚀 **Instant start** | Under 50ms to first paint |
@@ -58,6 +59,7 @@ and a regression past any of them fails the build.
 |---|---|
 | [ratatui](https://github.com/ratatui/ratatui) + [crossterm](https://github.com/crossterm-rs/crossterm) | The TUI. `crossterm` for cross platform mouse and Windows support |
 | [gix](https://github.com/GitoxideLabs/gitoxide) | Pure Rust git. Diffs computed in process, no subprocess per change |
+| [notify](https://github.com/notify-rs/notify) | Native filesystem events per platform, which is what "no polling timer" requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
 
 Everything is pure Rust on purpose: a genuinely static Linux binary needs no
@@ -67,14 +69,15 @@ cross toolchain, and macOS and Windows are plain tier 1 targets.
 
 | | Phase | |
 |---|---|---|
-| 🚧 | **1. Core engine** | Watch, coalesce, diff, incremental highlight. No UI |
+| ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI |
 | ⬜ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
 | ⬜ | **3. Glanceability** | Sparklines, heat bars, live counters, theming |
 | ⬜ | **4. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 
 Being built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth
 and it is written before the code, so it is the honest place to see where this is
-going and to argue with it.
+going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue
+linked: the table above is the shape, that file is what is actually done.
 
 ## 🏷️ The name
 
