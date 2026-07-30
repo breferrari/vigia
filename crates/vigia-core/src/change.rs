@@ -51,4 +51,15 @@ impl FileChange {
     pub fn is_diffable(&self) -> bool {
         !matches!(self.kind, ChangeKind::Conflict | ChangeKind::TypeChange)
     }
+
+    /// Whether computing this change's diff has to read the working tree.
+    ///
+    /// One definition, two callers: the diff itself, and the frame path
+    /// deciding whether there is a working-tree side to fingerprint. Two copies
+    /// of this rule would let them drift into disagreeing about whether a
+    /// cached diff can go stale, and the failure would be a stale frame rather
+    /// than a compile error.
+    pub(crate) fn reads_worktree(&self) -> bool {
+        self.is_diffable() && !matches!(self.kind, ChangeKind::Removed)
+    }
 }

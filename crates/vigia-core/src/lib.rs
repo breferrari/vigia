@@ -10,6 +10,11 @@
 //! and content is fetched per file rather than up front because a monitor must
 //! be able to draw the top of a large diff without having read the bottom.
 //!
+//! [`Worktree::changes`] and [`Worktree::diff`] below are the primitives, and
+//! they recompute everything they are asked for. A monitor redrawing on every
+//! filesystem event must not, so it drives a [`Frame`] instead: the same two
+//! calls with the previous frame's answers kept and revalidated, which is I2a.
+//!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let worktree = vigia_core::Worktree::discover(".")?;
@@ -27,6 +32,7 @@
 
 mod change;
 mod error;
+mod frame;
 mod hunk;
 mod timing;
 mod watch;
@@ -34,6 +40,7 @@ mod worktree;
 
 pub use change::{ChangeKind, FileChange};
 pub use error::{Error, Result};
+pub use frame::{Frame, FrameStats};
 pub use hunk::{CONTEXT, FileDiff, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};

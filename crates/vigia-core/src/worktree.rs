@@ -5,6 +5,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 
 use crate::change::{ChangeKind, FileChange};
 use crate::error::{Error, Result};
+use crate::frame::Frame;
 use crate::hunk::{self, FileDiff};
 use crate::watch::{WatchOptions, Watcher};
 
@@ -84,7 +85,19 @@ impl Worktree {
         Watcher::new(&self.repo, &self.workdir, options)
     }
 
+    /// Start a frame over this working tree.
+    ///
+    /// The frame is what holds diffs between redraws, so it is what I2a is
+    /// about. It starts empty; [`Frame::advance`] gives it its first contents.
+    pub fn frame(&self) -> Frame<'_> {
+        Frame::new(self)
+    }
+
     /// Compute the line-level diff for one change.
+    ///
+    /// Reads both sides every time. A monitor calls this through a
+    /// [`Frame`], which is what stops a redraw paying for files that did not
+    /// change (I2a).
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
         if !change.is_diffable() {
             return Ok(FileDiff {
@@ -101,9 +114,10 @@ impl Worktree {
             Some(id) => self.blob(id, &change.path)?,
             None => Vec::new(),
         };
-        let after = match change.kind {
-            ChangeKind::Removed => Vec::new(),
-            _ => self.read_worktree(&change.path)?,
+        let after = if change.reads_worktree() {
+            self.read_worktree(&change.path)?
+        } else {
+            Vec::new()
         };
 
         Ok(hunk::compute(change.path.clone(), &before, &after))
