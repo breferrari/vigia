@@ -544,10 +544,22 @@ mod tests {
         let real = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
 
+        // Counted per thread, not per process. The hook is global for as long as
+        // this test holds it, so a *different* test failing in that window would
+        // run this restore too and report a second failure here, pointing at code
+        // that is fine. The harness gives each test its own thread and a hook runs
+        // on the thread that panicked, so this is exact rather than a narrowed
+        // race.
+        let me = std::thread::current().id();
+
         let once = Once::new();
         for _ in 0..2 {
             let restores = Arc::clone(&restores);
-            install_hook_in(&once, move || *restores.lock().expect("count") += 1);
+            install_hook_in(&once, move || {
+                if std::thread::current().id() == me {
+                    *restores.lock().expect("count") += 1;
+                }
+            });
         }
 
         let panicked = std::panic::catch_unwind(|| panic!("on purpose")).is_err();
