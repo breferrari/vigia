@@ -34,7 +34,7 @@ use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
 use crate::theme::Theme;
-use crate::view::{Row, View};
+use crate::view::{HEAT_BUCKETS, HeatBucket, Row, View};
 
 /// Columns a tab advances to the next multiple of.
 ///
@@ -124,6 +124,28 @@ const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
 /// the last hint standing: it is the one signal on the row that cannot be
 /// recovered from anything else on screen, and one column is what it costs.
 const PULSE_RUNGS: [&str; 3] = ["● just changed", "●", ""];
+
+/// One slice of a file, whatever it holds.
+///
+/// A solid block, not a ramp. The sparkline two columns away already encodes
+/// magnitude as height, and a second magnitude encoding beside it would be a
+/// second dialect for one fact. Here the block is a position and the **colour**
+/// is the meaning, which is exactly what `assets/preview.svg` draws: twelve
+/// rects of equal height differing only in fill.
+const HEAT_BLOCK: char = '█';
+
+/// How many slices the heat strip may show, widest rung first.
+///
+/// **A projection re-projects; it does not drop items**, and that is the third
+/// case of `SPEC.md` §11.1's rule rather than an instance of the first. The hint
+/// bar and the sparkline are lists, so dropping an item shows less. A heat strip
+/// that dropped its last six buckets would show the first half of the file
+/// *drawn as the whole of it*, and a reader would read an untouched tail. So a
+/// narrower rung sums adjacent buckets and classifies the sums: less resolution,
+/// still the whole file.
+///
+/// Halves, so the sum is exact and every drawn bucket covers the same span.
+const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
 
 /// Columns a path keeps before any glance element is allowed to exist.
 ///
@@ -228,6 +250,7 @@ struct Heading<'r> {
     churn: Option<(u32, u32)>,
     spark: &'r [u16; HISTORY_BUCKETS],
     recency: Recency,
+    heat: &'r [HeatBucket; HEAT_BUCKETS],
 }
 
 /// Columns something of `width` costs on the right-hand side of a row.
@@ -239,6 +262,82 @@ struct Heading<'r> {
 /// three is a row that overwrites its own path at one width in twenty.
 fn reserved(width: usize) -> usize {
     if width == 0 { 0 } else { width + 1 }
+}
+
+/// What one drawn slice of the heat strip means.
+///
+/// Public because [`Theme::heat`] resolves it, the same way [`Theme::class`]
+/// resolves a syntax class: the shell decides which distinctions are worth a
+/// colour here and the theme decides which colour each gets, so
+/// [#11](https://github.com/breferrari/vigia/issues/11) can repaint all of this
+/// without touching the projection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Heat {
+    /// Nothing changed in this slice. Drawn as the track rather than skipped,
+    /// because a gap would make the strip's own length ambiguous.
+    Cool,
+    /// Additions only.
+    Added {
+        /// At least half as busy as the busiest slice of this file.
+        heavy: bool,
+    },
+    /// Removals only.
+    Removed {
+        /// At least half as busy as the busiest slice of this file.
+        heavy: bool,
+    },
+    /// Both, which `SPEC.md` §5.1 left unruled and §11.1 now rules.
+    Mixed {
+        /// At least half as busy as the busiest slice of this file.
+        heavy: bool,
+    },
+}
+
+/// Re-project a heat map onto `width` slices and classify each one.
+///
+/// `width` is a rung of [`HEAT_RUNGS`], so it divides [`HEAT_BUCKETS`] exactly
+/// and each drawn slice is the **sum** of the same number of source slices. That
+/// is what makes the narrower rung a lower resolution of the whole file rather
+/// than a prefix of it.
+///
+/// `heavy` is measured against the busiest slice **of this file**, and the
+/// asymmetry with the sparkline is deliberate. A sparkline is compared *down* a
+/// file list, so it shares one scale across the screen; a heat strip is read
+/// *across* one row to find where in that file the work is, so its own busiest
+/// slice is the only meaningful denominator. `SPEC.md` §11.1 carries both.
+///
+/// Empty when `width` is zero, and when nothing changed anywhere: a strip of
+/// pure track says "this file is in the diff and I cannot tell you where", which
+/// is worse than saying nothing and costs twelve columns to say it.
+fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
+    if width == 0 || buckets.iter().all(|bucket| bucket.total() == 0) {
+        return Vec::new();
+    }
+
+    let group = HEAT_BUCKETS / width;
+    let summed: Vec<HeatBucket> = buckets
+        .chunks(group)
+        .map(|chunk| HeatBucket {
+            added: chunk.iter().map(|b| b.added).sum(),
+            removed: chunk.iter().map(|b| b.removed).sum(),
+        })
+        .collect();
+
+    let busiest = summed.iter().map(|b| b.total()).max().unwrap_or(0);
+    summed
+        .iter()
+        .map(|bucket| {
+            // Half of the busiest, compared without dividing, so an odd busiest
+            // does not round a genuinely heavy slice down.
+            let heavy = bucket.total() * 2 >= busiest;
+            match (bucket.added > 0, bucket.removed > 0) {
+                (false, false) => Heat::Cool,
+                (true, false) => Heat::Added { heavy },
+                (false, true) => Heat::Removed { heavy },
+                (true, true) => Heat::Mixed { heavy },
+            }
+        })
+        .collect()
 }
 
 /// A path's buckets as glyphs, or `None` when it has no churn to draw.
@@ -644,6 +743,7 @@ impl Painter<'_> {
                     churn,
                     spark,
                     recency,
+                    heat,
                 } => self.file_row(
                     Rect { y, ..area },
                     &Heading {
@@ -653,6 +753,7 @@ impl Painter<'_> {
                         churn: *churn,
                         spark,
                         recency: *recency,
+                        heat,
                     },
                     view.peak,
                 ),
@@ -721,6 +822,19 @@ impl Painter<'_> {
         };
         budget = budget.saturating_sub(reserved(width_of(pulse)));
 
+        // The heat strip outranks the sparkline for what is left. Both are
+        // glance elements and only one of them is about the diff on screen: the
+        // strip says where in *this* file the change the reader is looking at
+        // sits, and the sparkline says how busy the file was before any of it
+        // was drawn.
+        let heat = HEAT_RUNGS
+            .iter()
+            .copied()
+            .find(|&rung| reserved(rung) <= budget)
+            .map(|rung| heat_at(heading.heat, rung))
+            .unwrap_or_default();
+        budget = budget.saturating_sub(reserved(heat.len()));
+
         // Drawn right to left, so each block knows where the one outside it
         // ended. The strip drawn is the **tail** of the window: dropping buckets
         // means dropping the oldest, and the oldest are on the left.
@@ -735,6 +849,21 @@ impl Painter<'_> {
                 let taken = self.put_right(right, &tail, self.theme.spark);
                 right.width = right.width.saturating_sub(taken as u16);
             }
+        }
+        if !heat.is_empty() {
+            // Cell by cell rather than as one string: every slice is the same
+            // glyph and only the style differs, which is the whole design.
+            let x = right.x + right.width - heat.len() as u16;
+            for (offset, slice) in heat.iter().enumerate() {
+                self.buf.set_stringn(
+                    x + offset as u16,
+                    right.y,
+                    HEAT_BLOCK.to_string(),
+                    1,
+                    self.theme.heat(*slice),
+                );
+            }
+            right.width = right.width.saturating_sub(reserved(heat.len()) as u16);
         }
         if !pulse.is_empty() {
             let taken = self.put_right(right, pulse, self.theme.pulse);

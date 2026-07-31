@@ -22,7 +22,7 @@ mod support;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
-use vigia::{App, Position, Row, body_height};
+use vigia::{App, HEAT_BUCKETS, HeatBucket, Position, Row, body_height};
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
 use support::{Scratch, delta, materialise, settle};
@@ -649,5 +649,67 @@ fn a_full_history_costs_the_frame_no_read_and_no_probe() {
         pulsing > 0,
         "no drawn heading took its recency from the store, so this gate compared \
          two frames that never consulted one"
+    );
+}
+
+#[test]
+fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
+    // The whole of #39's risk, as one assertion. Locating change *within* a file
+    // needs that file's total line count, and `SPEC.md` §5.2 records that as a
+    // whole-file read: measured per frame it puts back exactly what I2a took
+    // out.
+    //
+    // It is free instead, because `hunk::compute` interns both sides to diff
+    // them at all and the count falls out of that. So it rides the cached
+    // `FileDiff` and a revalidated frame still reads zero bytes.
+    //
+    // The byte assertion alone is satisfied by drawing no strip at all, so the
+    // non-vacuity half below is what makes this a gate rather than a hope.
+    let scratch = Scratch::large_diff("shell-reads-heat", FEW_FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    let before = frame.stats();
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body())
+        .expect("view");
+    let cost = delta(before, frame.stats());
+
+    assert_eq!(
+        cost.bytes, 0,
+        "drawing a heat strip over a settled frame read {} bytes, so the line \
+         count is being measured rather than carried",
+        cost.bytes
+    );
+    assert_eq!(
+        cost.computed, 0,
+        "the frame recomputed a diff it could reuse"
+    );
+
+    // And the strip has to have something in it. A renderer that handed back an
+    // all-cool strip would pass every line above while showing a reader nothing.
+    let headings: Vec<&[HeatBucket; HEAT_BUCKETS]> = view
+        .rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::File { heat, .. } => Some(heat),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !headings.is_empty(),
+        "the screen drew no file heading at all"
+    );
+    assert!(
+        headings
+            .iter()
+            .any(|heat| heat.iter().any(|bucket| bucket.total() > 0)),
+        "every drawn heading has an empty heat strip, so the projection ran on a \
+         reused diff and found nothing to place"
     );
 }

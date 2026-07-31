@@ -106,6 +106,11 @@ impl Worktree {
                 hunks: Vec::new(),
                 added: 0,
                 removed: 0,
+                // A conflict and a type change are states rather than diffs, and
+                // this method deliberately reads nothing for them. Reporting a
+                // length would mean opening the file to find one, which is the
+                // read the early return exists to avoid.
+                lines: 0,
                 bytes: 0,
             });
         }

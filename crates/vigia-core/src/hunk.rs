@@ -62,6 +62,26 @@ pub struct FileDiff {
     pub added: u32,
     /// Total removed lines.
     pub removed: u32,
+    /// Lines on the **working-tree** side, which is the whole file rather than
+    /// the diff.
+    ///
+    /// Locating a change *within* a file needs the file's length, and
+    /// `SPEC.md` §5.2 records that as the heat strip's cost: measured on its own
+    /// it is a whole-file read, which is exactly what I2a removed from the frame
+    /// path.
+    ///
+    /// **It costs nothing here.** [`compute`] interns both sides to diff them at
+    /// all, so the line count is a by-product of a read already being made, and
+    /// it is cached and invalidated with the rest of this struct. §5.2 predicted
+    /// a separate cache keyed on `(path, blob id)`; none is needed, and the
+    /// diff's own validity rule is the stricter key anyway, because a blob id
+    /// alone cannot notice a working-tree edit.
+    ///
+    /// The working-tree side rather than the index side, because it is the file
+    /// the reader is looking at and it is what [`Hunk::new_start`] is measured
+    /// against. Zero when there is no working-tree side to measure: a removal, a
+    /// binary file, a conflict, a type change.
+    pub lines: u32,
     /// Bytes compared: index-side content plus worktree-side content.
     ///
     /// Recorded because I2a is a claim about work being proportional to what
@@ -104,6 +124,12 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
             hunks: Vec::new(),
             added: 0,
             removed: 0,
+            // Not "unknown" and not counted. A newline in a binary file is a
+            // byte that happens to be 0x0A, so counting them would produce a
+            // confident number describing nothing, and the heat strip would
+            // then locate changes inside a file that has no lines to locate
+            // them in.
+            lines: 0,
             bytes,
         };
     }
@@ -203,6 +229,97 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
         hunks,
         added,
         removed,
+        // Already computed above to bound the last hunk's context, so this is
+        // the by-product `FileDiff::lines` documents rather than a second pass
+        // over the file.
+        lines: after_len,
         bytes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! What [`FileDiff::lines`] counts, tested where the count is made.
+    //!
+    //! `tests/fidelity.rs` checks it against a real worktree and git as the
+    //! oracle. These check the two cases a repository fixture reaches awkwardly
+    //! or not at all: which *side* is counted, and what a binary file reports.
+
+    use super::*;
+
+    /// The working-tree side, not the index side, and not their sum.
+    ///
+    /// A file that shrank is the case that separates all three: an index side of
+    /// five lines against a worktree side of two gives 5, 2 and 7, and only one
+    /// of them describes the file a reader is looking at.
+    #[test]
+    fn the_line_count_is_the_working_tree_side_not_the_index_side() {
+        let before = b"a\nb\nc\nd\ne\n";
+        let after = b"a\nb\n";
+        let diff = compute("src/lib.rs".to_owned(), before, after);
+
+        assert_eq!(diff.lines, 2, "counted something other than the worktree");
+        assert_eq!(diff.removed, 3, "the fixture did not actually shrink");
+    }
+
+    /// And the other direction, so a version that counted `before` cannot pass
+    /// both this and the test above by accident.
+    #[test]
+    fn a_file_that_grew_reports_the_longer_side() {
+        let diff = compute("src/lib.rs".to_owned(), b"a\n", b"a\nb\nc\n");
+
+        assert_eq!(diff.lines, 3);
+        assert_eq!(diff.added, 2, "the fixture did not actually grow");
+    }
+
+    /// A new file has no index side at all, which is the commonest change an
+    /// agent makes (`SPEC.md` §11.1) and the one where the two sides differ most.
+    #[test]
+    fn an_addition_counts_the_whole_new_file() {
+        let diff = compute("src/new.rs".to_owned(), b"", b"one\ntwo\nthree\n");
+
+        assert_eq!(diff.lines, 3);
+    }
+
+    /// A removal has no working-tree side, so there is nothing to locate a
+    /// change within and the count is zero rather than the index's length.
+    #[test]
+    fn a_removal_reports_no_lines_because_there_is_no_file_left() {
+        let diff = compute("src/gone.rs".to_owned(), b"a\nb\nc\n", b"");
+
+        assert_eq!(diff.lines, 0);
+        assert_eq!(diff.removed, 3);
+    }
+
+    /// A newline in a binary file is a byte that happens to be `0x0A`. Counting
+    /// them would hand the heat strip a confident number describing nothing.
+    #[test]
+    fn a_binary_file_reports_no_line_count() {
+        let binary = b"\x00\x01\n\x02\n\x03";
+        let diff = compute("assets/banner.jpg".to_owned(), b"", binary);
+
+        assert!(diff.binary, "the fixture did not sniff as binary");
+        assert_eq!(diff.lines, 0);
+    }
+
+    /// A file with no trailing newline still counts its last line.
+    ///
+    /// The interner tokenises on line boundaries, so `"a\nb"` is two lines and
+    /// not one-and-a-bit. Worth pinning: an implementation that counted `\n`
+    /// bytes would report one here and be wrong about every file an editor
+    /// saved without a final newline.
+    #[test]
+    fn a_file_with_no_trailing_newline_counts_its_last_line() {
+        let diff = compute("src/lib.rs".to_owned(), b"", b"a\nb");
+
+        assert_eq!(diff.lines, 2);
+    }
+
+    /// An empty working-tree file is zero lines rather than one empty line.
+    #[test]
+    fn an_empty_file_has_no_lines() {
+        let diff = compute("src/empty.rs".to_owned(), b"a\n", b"");
+
+        assert_eq!(diff.lines, 0);
     }
 }

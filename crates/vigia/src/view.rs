@@ -57,6 +57,16 @@ pub enum Row {
         /// How recently this file changed, which is what dims a settled row and
         /// what puts the pulse on one that just moved.
         recency: Recency,
+        /// Where in this file the change is, as counts per slice of its length.
+        ///
+        /// The finest resolution the strip is ever drawn at. A renderer with
+        /// fewer columns sums adjacent buckets and classifies the sums, which is
+        /// exact; it never draws a prefix of this array, because half a strip
+        /// drawn as a whole one says the file's tail is unchanged.
+        ///
+        /// All zeroes when there is nothing to place: a binary file, a removal,
+        /// a conflict.
+        heat: [HeatBucket; HEAT_BUCKETS],
     },
     /// A hunk boundary, drawn as git's `@@ -a,b +c,d @@`.
     Hunk {
@@ -88,6 +98,101 @@ pub enum Row {
     },
     /// Why a file has no lines under it.
     Note(&'static str),
+}
+
+/// Slices a file's length is divided into for the heat strip.
+///
+/// Twelve, which is not a taste call: `assets/preview.svg` draws exactly twelve
+/// and `SPEC.md` §5.1 rules that a published artifact answering an open question
+/// **is** the answer. The picture also draws an empty slice as a dark track
+/// rather than as a gap, which is why [`Row::File::heat`] is always this long and
+/// why the renderer draws a block for every bucket.
+pub const HEAT_BUCKETS: usize = 12;
+
+/// Changed lines falling in one slice of a file's length.
+///
+/// Counts rather than a verdict, because the verdict depends on how many columns
+/// the renderer has room for: at a narrower width adjacent buckets are **summed**
+/// and classified again, which is exact, where classifying here and merging the
+/// answers afterwards would not be.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HeatBucket {
+    /// Lines added inside this slice.
+    pub added: u16,
+    /// Lines removed from inside this slice.
+    pub removed: u16,
+}
+
+impl HeatBucket {
+    /// Changed lines of either kind.
+    pub fn total(self) -> u32 {
+        u32::from(self.added) + u32::from(self.removed)
+    }
+}
+
+/// Where a working-tree line sits, as a bucket index.
+///
+/// `line` is 1-based, the way [`vigia_core::Hunk::new_start`] is. Out of range
+/// is clamped rather than dropped: a removal at the very end of a file is
+/// numbered one past the last line that still exists, and it happened *in* the
+/// file rather than after it.
+fn bucket_of(line: u32, lines: u32) -> Option<usize> {
+    if lines == 0 {
+        return None;
+    }
+    let zero_based = u64::from(line.saturating_sub(1));
+    let index = (zero_based * HEAT_BUCKETS as u64) / u64::from(lines);
+    Some((index as usize).min(HEAT_BUCKETS - 1))
+}
+
+/// Project a file's changed lines onto [`HEAT_BUCKETS`] slices of its length.
+///
+/// This is the heat strip, and it is the one element of `SPEC.md` §5 that needs
+/// a whole-file property rather than a diff. [`vigia_core::FileDiff::lines`]
+/// supplies it for free; see that field for why §5.2's predicted cache is not
+/// needed.
+///
+/// **A removed line is placed where it used to be**, which is the working-tree
+/// line number the walk has reached. It exists nowhere on the new side by
+/// definition, and the alternative to placing it is not placing it, which would
+/// draw a file whose only change was a deletion as a file with no changes.
+///
+/// Pure, and separated from [`View::take_file`] for the reason `SPEC.md` §7
+/// gives about rules worth testing directly: every interesting case here is an
+/// off-by-one at a boundary, and reaching those through a repository fixture
+/// would mean building a file of an exact length for each one.
+fn heat_of(diff: &FileDiff) -> [HeatBucket; HEAT_BUCKETS] {
+    let mut buckets = [HeatBucket::default(); HEAT_BUCKETS];
+    if diff.lines == 0 {
+        return buckets;
+    }
+
+    for hunk in &diff.hunks {
+        // The same walk `take_file` does below, and it has to be the same one:
+        // both sides advance per line kind, and a copy that drifted would put
+        // the strip's marks somewhere the gutter disagrees with.
+        let mut new = hunk.new_start.max(1);
+        for line in &hunk.lines {
+            match line.kind {
+                LineKind::Context => new += 1,
+                LineKind::Added => {
+                    if let Some(at) = bucket_of(new, diff.lines) {
+                        buckets[at].added = buckets[at].added.saturating_add(1);
+                    }
+                    new += 1;
+                }
+                // Deliberately does **not** advance `new`: a removed line
+                // occupies no working-tree row, so the next line after it sits
+                // at the same position.
+                LineKind::Removed => {
+                    if let Some(at) = bucket_of(new, diff.lines) {
+                        buckets[at].removed = buckets[at].removed.saturating_add(1);
+                    }
+                }
+            }
+        }
+    }
+    buckets
 }
 
 /// Where the top of the viewport sits.
@@ -351,6 +456,7 @@ impl View {
                 // window costs two hash lookups it would never have drawn.
                 spark: history.churn(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
                 recency: history.recency(&diff.path),
+                heat: heat_of(diff),
             });
         }
         n += 1;
@@ -423,5 +529,210 @@ impl View {
                 n += 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The heat projection, tested as the arithmetic it is.
+    //!
+    //! Every case here is a boundary: the first line of a file, the last, a
+    //! removal past the end, a file shorter than the bucket count. Reaching any
+    //! of them through a repository fixture would mean building a file of an
+    //! exact length for each, and `vigia_core::FileChange` cannot be constructed
+    //! outside its crate anyway, so a `FileDiff` built by hand is the only
+    //! version of one these can reach. `SPEC.md` §7 names this shape.
+
+    use vigia_core::{Hunk, Line};
+
+    use super::*;
+
+    fn line(kind: LineKind) -> Line {
+        Line {
+            kind,
+            text: String::new(),
+        }
+    }
+
+    /// A diff of `lines` total, carrying `hunks`.
+    fn diff(lines: u32, hunks: Vec<Hunk>) -> FileDiff {
+        FileDiff {
+            path: "src/lib.rs".to_owned(),
+            binary: false,
+            hunks,
+            added: 0,
+            removed: 0,
+            lines,
+            bytes: 0,
+        }
+    }
+
+    /// A hunk starting at working-tree line `new_start` with these line kinds.
+    fn hunk(new_start: u32, kinds: &[LineKind]) -> Hunk {
+        Hunk {
+            old_start: 1,
+            old_lines: kinds.len() as u32,
+            new_start,
+            new_lines: kinds.len() as u32,
+            lines: kinds.iter().copied().map(line).collect(),
+        }
+    }
+
+    fn touched(buckets: &[HeatBucket; HEAT_BUCKETS]) -> Vec<usize> {
+        buckets
+            .iter()
+            .enumerate()
+            .filter(|(_, bucket)| bucket.total() > 0)
+            .map(|(at, _)| at)
+            .collect()
+    }
+
+    /// A hundred and twenty lines over twelve buckets is ten lines each, so a
+    /// change at line 1 is bucket 0 and a change at line 61 is bucket 6.
+    #[test]
+    fn a_hunk_lands_in_the_buckets_its_lines_fall_in() {
+        let map = heat_of(&diff(
+            120,
+            vec![
+                hunk(1, &[LineKind::Added]),
+                hunk(61, &[LineKind::Added, LineKind::Added]),
+            ],
+        ));
+
+        assert_eq!(touched(&map), vec![0, 6]);
+        assert_eq!(map[0].added, 1);
+        assert_eq!(map[6].added, 2);
+    }
+
+    /// The last line of the file is the last bucket and never one past it.
+    ///
+    /// The index arithmetic is `(line - 1) * BUCKETS / lines`, which for the
+    /// final line is exactly `BUCKETS - 1` only because of the `- 1`. Without it
+    /// the division reaches `BUCKETS` and the clamp is doing the work silently.
+    #[test]
+    fn a_hunk_at_the_end_of_the_file_lands_in_the_last_bucket_and_not_past_it() {
+        let map = heat_of(&diff(120, vec![hunk(120, &[LineKind::Added])]));
+
+        assert_eq!(touched(&map), vec![HEAT_BUCKETS - 1]);
+    }
+
+    /// A removal at the very end is numbered one past the last line that still
+    /// exists. It happened in the file rather than after it, so it is clamped
+    /// into the last bucket rather than dropped.
+    #[test]
+    fn a_removal_past_the_last_line_is_clamped_into_the_file() {
+        let map = heat_of(&diff(10, vec![hunk(11, &[LineKind::Removed])]));
+
+        assert_eq!(touched(&map), vec![HEAT_BUCKETS - 1]);
+        assert_eq!(map[HEAT_BUCKETS - 1].removed, 1);
+    }
+
+    /// Both kinds in one slice, which is the case `SPEC.md` §5.1 left unruled
+    /// and which the renderer draws as [`crate::Heat::Mixed`].
+    ///
+    /// A hundred and twenty lines, so a slice is ten lines wide and two adjacent
+    /// changes really do share one. At twelve lines a slice is a single line and
+    /// no two changes can ever be mixed, which is a fixture that tests the
+    /// arithmetic rather than the case.
+    #[test]
+    fn a_bucket_holding_both_kinds_records_both() {
+        let map = heat_of(&diff(
+            120,
+            vec![hunk(1, &[LineKind::Added, LineKind::Removed])],
+        ));
+
+        assert_eq!(
+            touched(&map),
+            vec![0],
+            "the two changes did not share a slice"
+        );
+        assert_eq!(map[0].added, 1);
+        assert_eq!(map[0].removed, 1);
+    }
+
+    /// A removed line occupies no working-tree row, so the line drawn after it
+    /// sits at the same number. Advancing on a removal would drift every mark
+    /// after the first deletion in the file.
+    #[test]
+    fn a_removal_does_not_advance_the_working_tree_position() {
+        // Twelve lines, twelve buckets: one line each, so a drift of one row is
+        // a drift of one bucket and is visible.
+        let map = heat_of(&diff(
+            12,
+            vec![hunk(
+                1,
+                &[LineKind::Removed, LineKind::Removed, LineKind::Added],
+            )],
+        ));
+
+        assert_eq!(
+            touched(&map),
+            vec![0],
+            "the addition drifted away from the removals above it"
+        );
+        assert_eq!(map[0].removed, 2);
+        assert_eq!(map[0].added, 1);
+    }
+
+    /// Fewer lines than buckets. Every bucket still has to be reachable, or a
+    /// short file would draw all its change at the left edge.
+    #[test]
+    fn a_file_shorter_than_the_bucket_count_still_projects() {
+        let map = heat_of(&diff(
+            3,
+            vec![
+                hunk(1, &[LineKind::Added]),
+                hunk(2, &[LineKind::Added]),
+                hunk(3, &[LineKind::Added]),
+            ],
+        ));
+
+        assert_eq!(touched(&map), vec![0, 4, 8]);
+    }
+
+    /// A file with no working-tree side has nowhere to place anything. That is a
+    /// removal, a binary file and a conflict, and it must be empty rather than
+    /// collapsed into bucket zero.
+    #[test]
+    fn a_file_with_no_lines_is_all_cool() {
+        let map = heat_of(&diff(0, vec![hunk(1, &[LineKind::Removed])]));
+
+        assert!(touched(&map).is_empty());
+    }
+
+    #[test]
+    fn a_file_with_no_hunks_is_all_cool() {
+        assert!(touched(&heat_of(&diff(100, Vec::new()))).is_empty());
+    }
+
+    /// Context lines advance the position and are not change. A hunk is mostly
+    /// context, so counting it would paint every strip solid.
+    #[test]
+    fn context_moves_the_position_without_marking_anything() {
+        let map = heat_of(&diff(
+            120,
+            vec![hunk(
+                1,
+                &[
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Context,
+                    LineKind::Added,
+                ],
+            )],
+        ));
+
+        assert_eq!(
+            touched(&map),
+            vec![1],
+            "the addition is on line 11, which is the second bucket of 120/12"
+        );
     }
 }

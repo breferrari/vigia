@@ -26,7 +26,7 @@
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use vigia::{Chrome, Position, Row, Theme, View, body_height, render};
+use vigia::{Chrome, HEAT_BUCKETS, HeatBucket, Position, Row, Theme, View, body_height, render};
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
 /// The mark the renderer writes where a row runs past its edge.
@@ -146,6 +146,7 @@ fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
         churn: Some((added, removed)),
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
+        heat: [HeatBucket::default(); HEAT_BUCKETS],
     }
 }
 
@@ -233,6 +234,7 @@ fn a_file_with_no_line_diff_says_why() {
                 churn: None,
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
             Row::Note("binary"),
             Row::File {
@@ -242,6 +244,7 @@ fn a_file_with_no_line_diff_says_why() {
                 churn: None,
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
             Row::Note("unresolved conflict"),
             Row::File {
@@ -251,6 +254,7 @@ fn a_file_with_no_line_diff_says_why() {
                 churn: Some((0, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
         ],
         files: 3,
@@ -747,6 +751,10 @@ fn glancing() -> View {
                 churn: Some((42, 7)),
                 spark: [0, 0, 1, 3, 8, 5, 9, 12],
                 recency: Recency::Pulse,
+                // Additions at the head, a mixed slice in the middle, removals
+                // at the tail. One row carrying all three kinds plus the track,
+                // which is what the colour gate below reads.
+                heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
             },
             Row::File {
                 path: "src/render/frame.rs".to_owned(),
@@ -755,6 +763,7 @@ fn glancing() -> View {
                 churn: Some((11, 3)),
                 spark: [0, 0, 0, 2, 1, 0, 0, 0],
                 recency: Recency::Live,
+                heat: heat(&[(3, 2, 1)]),
             },
             Row::File {
                 path: "Cargo.toml".to_owned(),
@@ -763,6 +772,7 @@ fn glancing() -> View {
                 churn: Some((2, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
         ],
         files: 3,
@@ -770,6 +780,22 @@ fn glancing() -> View {
         read: 3,
         peak: 12,
     }
+}
+
+/// Block glyphs on row `y` drawn in `colour`, in column order.
+///
+/// **The colour is the discriminator, not decoration.** A sparkline's top rung
+/// and every heat slice are both `█`, so a symbol-only scan of a heading counts
+/// one strip as part of the other. Two tests here were written before the heat
+/// strip existed and started reading thirteen blocks the moment it landed.
+fn blocks_of(backend: &TestBackend, y: u16, colour: ratatui::style::Color) -> Vec<char> {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .map(|x| &buffer[(x, y)])
+        .filter(|cell| cell.style().fg == Some(colour))
+        .filter_map(|cell| cell.symbol().chars().next())
+        .filter(|glyph| "▁▂▃▄▅▆▇█".contains(*glyph))
+        .collect()
 }
 
 /// Everything on row `y`, as the reader sees it.
@@ -849,31 +875,138 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     // would top out at the full block and the eye would read two files of very
     // different activity as equally busy. Scaled against the screen, only the
     // busiest one reaches the top.
+    //
+    // Read by colour rather than by glyph. The heat strip beside it draws the
+    // same full block, so a scan of the row's text counts a heat slice as a
+    // sparkline bucket; this test passed on symbols alone until that strip
+    // landed. See [`blocks_of`].
+    let spark = Theme::default()
+        .spark
+        .fg
+        .expect("the sparkline has a colour");
     let backend = screen(80, 5, &glancing(), &chrome());
-    let busiest = row_text(&backend, 1);
-    let quieter = row_text(&backend, 2);
+    let busiest = blocks_of(&backend, 1, spark);
+    let quieter = blocks_of(&backend, 2, spark);
 
     assert!(
-        busiest.contains('█'),
+        busiest.contains(&'█'),
         "the busiest file's tallest bucket is not the top of the ramp: \
          {busiest:?}"
     );
     assert!(
-        !quieter.contains('█'),
+        !quieter.contains(&'█'),
         "a file whose busiest bucket is 2 against a screen peak of 12 reached \
          the top of the ramp, so each row is being scaled against itself: \
          {quieter:?}"
     );
     assert!(
-        quieter.contains('▁'),
+        quieter.contains(&'▁'),
         "the quieter file drew no bucket at all, so a bucket with something in \
          it is rounding down to nothing: {quieter:?}"
     );
     // A file nothing has written since startup has no strip, rather than an
     // empty one taking columns from its own path.
-    let cold = row_text(&backend, 3);
     assert!(
-        !cold.contains('▁') && !cold.contains('█'),
-        "a file with no churn drew a sparkline: {cold:?}"
+        blocks_of(&backend, 3, spark).is_empty(),
+        "a file with no churn drew a sparkline"
     );
 }
+
+/// A heat map from `(slice, added, removed)` triples, everything else track.
+fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
+    let mut map = [HeatBucket::default(); HEAT_BUCKETS];
+    for &(at, added, removed) in slices {
+        map[at] = HeatBucket { added, removed };
+    }
+    map
+}
+
+#[test]
+fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
+    // Invisible to every snapshot in this file, and more so than the palette
+    // test above: a heat strip draws the *same glyph* for all four kinds, so a
+    // picture of one is twelve identical blocks. The colour is the entire
+    // signal, which makes this the only place the strip is really tested.
+    let theme = Theme::default();
+    let backend = screen(120, 5, &glancing(), &chrome());
+    let buffer = backend.buffer();
+
+    // By colour as well as by glyph: the sparkline's top rung on the same row is
+    // also a full block. See [`blocks_of`].
+    let palette: Vec<_> = [
+        theme.heat_track,
+        theme.heat_added,
+        theme.heat_added_heavy,
+        theme.heat_removed,
+        theme.heat_removed_heavy,
+        theme.heat_mixed,
+        theme.heat_mixed_heavy,
+    ]
+    .iter()
+    .filter_map(|style| style.fg)
+    .collect();
+    let strip: Vec<_> = (0..120)
+        .map(|x| &buffer[(x, 1)])
+        .filter(|cell| cell.symbol() == "█")
+        .filter_map(|cell| cell.style().fg)
+        .filter(|fg| palette.contains(fg))
+        .collect();
+    assert_eq!(
+        strip.len(),
+        HEAT_BUCKETS,
+        "the heading drew {} slices rather than a whole strip",
+        strip.len()
+    );
+
+    // The busiest slice of this file holds nine changed lines, so anything from
+    // five up is heavy and slice 1's two lines are not. That covers all four
+    // kinds and both intensities in one row.
+    let want = |style: ratatui::style::Style| style.fg.expect("the theme sets a colour");
+    assert_eq!(
+        strip[0],
+        want(theme.heat_added_heavy),
+        "slice 0: 9 additions"
+    );
+    assert_eq!(
+        strip[1],
+        want(theme.heat_added),
+        "slice 1: 2 additions, light"
+    );
+    assert_eq!(strip[5], want(theme.heat_mixed_heavy), "slice 5: 3 and 4");
+    assert_eq!(
+        strip[11],
+        want(theme.heat_removed_heavy),
+        "slice 11: 6 removals"
+    );
+    assert_eq!(strip[8], want(theme.heat_track), "slice 8 is untouched");
+
+    // Both intensities of one kind have to differ, or `heavy` is computed and
+    // then thrown away.
+    assert_ne!(
+        strip[0], strip[1],
+        "a heavy slice and a light one of the same kind are drawn identically"
+    );
+
+    // And the four have to be four. A theme that resolved them to one colour
+    // would satisfy a strip drawn entirely correctly and say nothing to a
+    // reader, which is the failure this whole element exists to avoid.
+    let four = [strip[0], strip[5], strip[11], strip[8]];
+    let distinct = four
+        .iter()
+        .enumerate()
+        .filter(|(at, colour)| !four[..*at].contains(colour))
+        .count();
+    assert_eq!(
+        distinct, 4,
+        "the four heat kinds resolved to {distinct} colours: {four:?}"
+    );
+}
+
+// The plan for #39 asked for heat-strip snapshots at 80 and 40 columns. They
+// exist, and they are `the_glance_elements_at_*` above: the shared fixture now
+// carries heat, so those two pictures *are* the heat-strip pictures. A third one
+// was written and came out byte-identical to the 80-column glance snapshot,
+// which is a second copy of one assertion rather than a second assertion, so it
+// was deleted rather than stored. What a symbol snapshot cannot see at all is
+// the colour, and that is
+// `the_four_heat_kinds_reach_the_cells_and_are_distinct` above.

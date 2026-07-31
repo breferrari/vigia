@@ -432,6 +432,7 @@ mod tests {
                 hunks: Vec::new(),
                 added: 0,
                 removed: 0,
+                lines: 0,
                 bytes: 0,
             },
         }

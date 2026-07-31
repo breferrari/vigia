@@ -84,7 +84,27 @@ fn assert_same(reused: &[FileDiff], fresh: &[FileDiff], what: &str) {
 }
 
 /// Where two diffs of one file first disagree, in one line.
+///
+/// **Every scalar field is checked before the lines are**, and that is not
+/// belt-and-braces. `assert_same` compares whole structs, so a field this
+/// function does not know about still fails the assertion, and the message would
+/// then read "no line differs" and send a reader looking in the wrong place. It
+/// happened to `lines` the moment that field was added.
 fn first_difference(left: &FileDiff, right: &FileDiff) -> String {
+    for (field, a, b) in [
+        ("binary", u32::from(left.binary), u32::from(right.binary)),
+        ("added", left.added, right.added),
+        ("removed", left.removed, right.removed),
+        ("lines", left.lines, right.lines),
+    ] {
+        if a != b {
+            return format!("{field}: frame {a}, fresh {b}");
+        }
+    }
+    if left.bytes != right.bytes {
+        return format!("bytes: frame {}, fresh {}", left.bytes, right.bytes);
+    }
+
     let lines = |diff: &FileDiff| -> Vec<String> {
         diff.hunks
             .iter()
@@ -492,5 +512,65 @@ fn a_failed_advance_leaves_the_frame_intact() {
     assert!(
         message.contains("status") || message.contains("index"),
         "unhelpful error for a corrupt index: {message}"
+    );
+}
+
+/// The cache-key gate for `FileDiff::lines`.
+///
+/// #39 asked for a line count cached per `(path, blob id)`. It is cached with
+/// the **diff** instead, which is the stricter key: a blob id names the index
+/// side, and a working-tree edit does not touch it. This is the case that
+/// separates the two, and it is the case a byte-length check cannot see.
+///
+/// The file keeps its length in bytes and changes its length in lines. A
+/// fingerprint is `(len, mtime)`, so the length half says nothing here and the
+/// whole question is whether the diff was invalidated at all. If it was not, the
+/// heat strip would go on projecting hunk positions across a file length that
+/// stopped being true.
+#[test]
+fn a_same_length_edit_that_changes_the_line_count_is_not_reused() {
+    let scratch = Scratch::large_diff("frame-line-count", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let before = diffs(&mut frame);
+    let path = scratch.path_of(FIRST);
+    let original = std::fs::read(&path).expect("read the fixture");
+
+    // Every newline becomes a space, so the bytes are identical and the file is
+    // one line long. Nothing else can produce that pair.
+    let flattened: Vec<u8> = original
+        .iter()
+        .map(|&byte| if byte == b'\n' { b' ' } else { byte })
+        .collect();
+    assert_eq!(
+        flattened.len(),
+        original.len(),
+        "the rewrite changed the byte length, so this tests the length check \
+         rather than the line count"
+    );
+    scratch.write(FIRST, &flattened);
+
+    let after = diffs(&mut frame);
+    assert_same(&after, &fresh(&worktree), "after a same-length reflow");
+
+    let edited = |diffs: &[FileDiff]| -> u32 {
+        diffs
+            .iter()
+            .find(|diff| diff.path == FIRST)
+            .expect("the edited file is in the diff")
+            .lines
+    };
+    assert!(
+        edited(&before) > 1,
+        "the fixture started at {} lines, so flattening it changes nothing",
+        edited(&before)
+    );
+    assert_eq!(
+        edited(&after),
+        1,
+        "the frame still reports {} lines for a file that is now one line long",
+        edited(&after)
     );
 }
