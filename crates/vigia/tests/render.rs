@@ -200,27 +200,6 @@ fn one_file() -> View {
     }
 }
 
-/// Three file headings and nothing else, carrying the mockup's own counters.
-///
-/// The numbers are `assets/preview.svg`'s: `+42 −7`, `+11 −3` and `+2 −0`. They
-/// sum to `+55 −10`, which is the number a header total would have to draw and
-/// which [`the_header_carries_no_changed_line_total`] asserts is nowhere on the
-/// top row. Headings only, so every counter on the screen belongs to a row and
-/// the aggregate is the one thing that could not have come from one.
-fn three_files() -> View {
-    View {
-        rows: vec![
-            file('M', "crates/vigia-core/src/frame.rs", 42, 7),
-            file('M', "crates/vigia/src/render.rs", 11, 3),
-            file('M', "Cargo.toml", 2, 0),
-        ],
-        files: 3,
-        top: Position::default(),
-        read: 3,
-        peak: 0,
-    }
-}
-
 #[test]
 fn a_screenful_of_diff() {
     let view = one_file();
@@ -322,37 +301,57 @@ fn the_header_carries_no_changed_line_total() {
     // changed-file count. A total computed behind the frame on a handle of its
     // own would never touch those stats. So the assertion here is over the drawn
     // row, which is the level the ruling was made at.
-    let view = three_files();
-    let backend = screen(80, 6, &view, &chrome());
+    //
+    // `glancing()` is the fixture rather than a plainer one on purpose: its rows
+    // carry the pulse label, the heat strips and the sparklines, so the header is
+    // asserted silent against the busiest row set the shell can draw rather than
+    // against the emptiest. Its counters are the mockup's own.
+    let backend = screen(80, 5, &glancing(), &chrome());
     let header = row_text(&backend, 0);
 
-    // Non-vacuity first, and it is what makes the rest worth asserting. The
-    // counters have to really be on this screen, or a header with no numbers in
-    // it would pass against a fixture that had none to draw and the test would
-    // be checking that nothing is nothing.
-    let body: String = (1..6).map(|y| row_text(&backend, y)).collect();
+    // What a header total would have to draw, in **either** form: the counters'
+    // own sigils, or the bare sum if it dropped them. `+42 −7`, `+11 −3` and
+    // `+2 −0` sum to `+55 −10`, so all four are things only an aggregate could
+    // put on the top row.
+    const TOTALS: [&str; 4] = ["+", "-", "55", "10"];
+
+    // Guard the fixture, the way [`highlighted`] guards its spans. The assertion
+    // below reads the **whole** row rather than recomputing where the right-hand
+    // side begins, and that is only sound while the left-hand side contains none
+    // of these itself. A worktree named `my-repo` would make it lie, silently and
+    // in the passing direction.
+    let worktree = chrome().worktree;
+    for needle in TOTALS {
+        assert!(
+            !worktree.contains(needle),
+            "the fixture's worktree name {worktree:?} contains {needle:?}, so the \
+             assertion below would read its own left-hand side as a total"
+        );
+    }
+
+    // Non-vacuity, and it is what makes the rest worth asserting. The counters
+    // have to really be on this screen, or a header with no numbers in it would
+    // pass against a fixture that had none to draw and the test would be
+    // checking that nothing is nothing.
+    let height = backend.buffer().area.height;
+    let body: String = (1..height).map(|y| row_text(&backend, y)).collect();
     assert!(
         body.contains("+42 -7"),
         "no per-file counter was drawn, so the header's silence proves nothing: \
          {body:?}"
     );
 
+    // And the header is populated, so its silence is about the total rather than
+    // about the row being empty.
     assert!(header.contains("watching · 3 files"), "header: {header:?}");
 
-    // The fixture's worktree name is `vigia`, which carries neither sigil, so the
-    // whole row can be read rather than recomputing where the right-hand side
-    // begins. A name with a hyphen in it would make this assertion lie.
-    assert!(
-        !header.contains('+') && !header.contains('-'),
-        "the header drew a counter sigil: {header:?}"
-    );
-
-    // And a total drawn without sigils fails too, which is the form the §10
-    // bullet's own proposal would most likely have taken.
-    assert!(
-        !header.contains("55") && !header.contains("10"),
-        "the header drew the aggregate of its rows: {header:?}"
-    );
+    for needle in TOTALS {
+        assert!(
+            !header.contains(needle),
+            "the header drew {needle:?}, which is a changed-line total or half of \
+             one: {header:?}"
+        );
+    }
 }
 
 #[test]
