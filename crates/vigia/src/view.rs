@@ -386,41 +386,128 @@ impl View {
         let mut skip = position.row;
         let mut placed = false;
 
-        while index < files && view.rows.len() < height {
-            view.read += 1;
-            let (change, diff) = frame.diff(index)?;
-            // Both halves of the tuple are immutable borrows of the same frame,
-            // so the kind needs no clone to be read alongside the diff.
-            let span = span_of(&change.kind, diff);
+        // Restarted at most once, and only from [`Self::last_screenful`] below.
+        // The walk cannot resolve that case in place: `change` and `diff` borrow
+        // the frame until `take_file` has used them, so there is nowhere inside
+        // the loop to ask it about a file further back.
+        loop {
+            let mut overshot = false;
 
-            if !placed {
-                if skip >= span {
-                    if index + 1 < files {
-                        // Wholly above the window. Carrying the remainder into
-                        // the next file rather than clamping is what makes
-                        // scrolling off the end of a short file continue into the
-                        // one below instead of stopping there.
-                        skip -= span;
-                        index += 1;
-                        continue;
+            while index < files && view.rows.len() < height {
+                view.read += 1;
+                let (change, diff) = frame.diff(index)?;
+                // Both halves of the tuple are immutable borrows of the same
+                // frame, so the kind needs no clone to be read alongside the
+                // diff.
+                let span = span_of(&change.kind, diff);
+
+                if !placed {
+                    if skip >= span {
+                        if index + 1 < files {
+                            // Wholly above the window. Carrying the remainder
+                            // into the next file rather than clamping is what
+                            // makes scrolling off the end of a short file
+                            // continue into the one below instead of stopping
+                            // there.
+                            skip -= span;
+                            index += 1;
+                            continue;
+                        }
+                        // **Past the end of the last file, which lands the
+                        // reader on the last screenful and not on the last
+                        // row.** Those are not the same place, and taking the
+                        // second for the first is what
+                        // [#57](https://github.com/breferrari/vigia/issues/57)
+                        // was: resting the diff's final row at the *top* of the
+                        // viewport draws one line of content and blanks every
+                        // row under it, while the header goes on truthfully
+                        // saying how many files changed. A pager rests that row
+                        // at the bottom.
+                        //
+                        // Reachable two ways and only one of them is scrolling.
+                        // The other is the diff **shrinking** under a position
+                        // that was reasonable when it was taken: an agent in the
+                        // other pane running `git reset --hard`, switching
+                        // branch, or reverting its own work. That is an ordinary
+                        // event on the pane this tool exists for, and it is
+                        // exactly when someone looks over.
+                        if span >= height {
+                            skip = span - height;
+                        } else {
+                            // The last file cannot fill the screen by itself, so
+                            // the top is in a file further back and this walk
+                            // has no way to reach it. Resolved after the borrow
+                            // ends.
+                            overshot = true;
+                            break;
+                        }
                     }
-                    // Past the end of the last file. Rest on its final row, so
-                    // the bottom of the diff is content rather than blank.
-                    skip = span - 1;
+                    view.top = Position {
+                        file: index,
+                        row: skip,
+                    };
+                    placed = true;
                 }
-                view.top = Position {
-                    file: index,
-                    row: skip,
-                };
-                placed = true;
+
+                view.take_file(&change.kind, diff, &mut highlighter, history, skip, height);
+                skip = 0;
+                index += 1;
             }
 
-            view.take_file(&change.kind, diff, &mut highlighter, history, skip, height);
-            skip = 0;
-            index += 1;
+            if !overshot {
+                break;
+            }
+            // Nothing has been drawn yet: `placed` is still false, and
+            // `take_file` runs only after placing. So restarting is a restart
+            // rather than a second helping.
+            view.top = Self::last_screenful(frame, files, height, &mut view.read)?;
+            index = view.top.file;
+            skip = view.top.row;
+            placed = true;
         }
 
         Ok(view)
+    }
+
+    /// Where the viewport starts so the diff's **last row rests at the bottom**.
+    ///
+    /// Walks back from the final file until it has `height` rows behind it. That
+    /// reads only the files the screen is about to draw, so I4 is untouched: it
+    /// is bounded by the window exactly like everything else here, and the
+    /// `frame.diff` calls it makes are the same ones the walk above is about to
+    /// make, which under I2a are cache hits rather than reads.
+    ///
+    /// **Not what `Action::Bottom` does**, and the difference is the whole
+    /// reason this is affordable. `G` goes to the last *file* from its top,
+    /// because finding the diff's last row from the *start* would mean adding up
+    /// every file's height, which is the read I4 forbids. Backing off from an
+    /// end already in hand costs a screenful.
+    ///
+    /// A diff shorter than the screen resolves to the top, which is the honest
+    /// answer: the blank rows under it are the ones the diff does not have.
+    fn last_screenful(
+        frame: &mut Frame,
+        files: usize,
+        height: usize,
+        read: &mut usize,
+    ) -> Result<Position> {
+        let mut index = files - 1;
+        let mut have = 0usize;
+        loop {
+            *read += 1;
+            let (change, diff) = frame.diff(index)?;
+            have += span_of(&change.kind, diff);
+            if have >= height {
+                return Ok(Position {
+                    file: index,
+                    row: have - height,
+                });
+            }
+            if index == 0 {
+                return Ok(Position::default());
+            }
+            index -= 1;
+        }
     }
 
     /// Append this file's rows that fall inside the window.

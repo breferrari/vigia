@@ -196,57 +196,22 @@ fn drift(rss: &[u64]) -> Option<Drift> {
 /// Resident set size of this process, or `None` where the platform has no way
 /// to say.
 ///
-/// Test-only by construction, which is why it can shell out: `SPEC.md` §5.1
-/// keeps a live RSS readout off the screen precisely because reading one is a
-/// syscall on some platforms, and I3 samples it 288 times rather than 60 times
-/// a second. No dependency is added for it, which is the other half of the
-/// reason: `windows-sys` for `GetProcessMemoryInfo` would be a spec change.
-#[cfg(target_os = "linux")]
+/// **The shipped reader, not a second one.** This file carried its own three
+/// `#[cfg]` bodies until [#41](https://github.com/breferrari/vigia/issues/41)
+/// put a memory cell on the status bar, and then there were two answers to one
+/// question about one process. `vigia::memory` is the only one now, and that is
+/// what makes the number on screen and the number in this report comparable:
+/// `tasklist` and `GetProcessMemoryInfo` disagree by a few percent on the same
+/// process because they sample at different instants, so a series mixing sources
+/// reads as drift.
+///
+/// The subprocess readers went with them. They were right for a soak and wrong
+/// for a frame — 288 samples across an hour against sixty a second — and what
+/// changed is that the cheap answer turned out to exist on every tier-1 target
+/// through a crate `gix` already puts in the graph. `crates/vigia/src/memory.rs`
+/// carries the measurement that decided it.
 fn rss_bytes() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
-    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-    Some(kib * 1024)
-}
-
-#[cfg(target_os = "macos")]
-fn rss_bytes() -> Option<u64> {
-    let out = Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-    Some(kib * 1024)
-}
-
-#[cfg(windows)]
-fn rss_bytes() -> Option<u64> {
-    // `tasklist` rather than PowerShell because it starts in milliseconds
-    // rather than hundreds of them, and the parse is the only awkward part:
-    // the memory field is quoted and its thousands separator is whatever the
-    // machine's locale uses. So the line is split on the quote rather than the
-    // comma, and every non-digit is dropped. The unit is always K.
-    let out = Command::new("tasklist")
-        .args([
-            "/FI",
-            &format!("PID eq {}", std::process::id()),
-            "/NH",
-            "/FO",
-            "CSV",
-        ])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().find(|line| line.ends_with('"'))?;
-    let field = line.rsplit('"').nth(1)?;
-    let digits: String = field.chars().filter(char::is_ascii_digit).collect();
-    let kib: u64 = digits.parse().ok()?;
-    Some(kib * 1024)
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn rss_bytes() -> Option<u64> {
-    None
+    vigia::memory::resident()
 }
 
 /// Descriptors this process holds open, where that is free to ask.
@@ -777,6 +742,18 @@ fn drive(
             buffer = Buffer::empty(area);
         }
 
+        // Both status readouts, in the order `vigia::run` performs them, and
+        // they belong in a soak for a different reason than they belong in a
+        // budget gate. I9 asks what one frame costs; I3 asks what a **week** of
+        // them retains, and these are the two newest things on the frame path
+        // that allocate: a syscall's buffer and a hundred and twenty-eight
+        // durations that a percentile copies and sorts every frame. A soak that
+        // drove a screen without them would report drift for a process nobody
+        // runs.
+        //
+        // `record_frame` is at the bottom of the loop, where the frame ends.
+        let frame_began = Instant::now();
+        app.sample_memory();
         let chrome = app.chrome(NAME, None);
         body = body_height(area, &chrome, frame.files().len());
         match app.view(&mut frame, &mut highlighter, &history, body) {
@@ -816,6 +793,7 @@ fn drive(
         // shell that holds a buffer, and a soak that stopped short of it would
         // leave the one allocation per frame nobody measured.
         render(&mut buffer, area, &view, &theme, &chrome);
+        app.record_frame(frame_began.elapsed());
         if view.rows.len() == body {
             full_frames += 1;
         }

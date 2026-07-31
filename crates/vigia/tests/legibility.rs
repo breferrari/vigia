@@ -206,14 +206,14 @@ fn chrome() -> Chrome {
 /// The status bar with both readouts on it, which is every frame after the first.
 ///
 /// The values are chosen to be the *widest* each cell can be rather than typical,
-/// which is what makes this fixture worth sweeping: `999ms` and `9999MiB` are
-/// five and seven columns, the maximum either can occupy, so a width where this
+/// which is what makes this fixture worth sweeping: `999ms` and `999MiB` are
+/// five and six columns, the maximum either can occupy, so a width where this
 /// fits is a width where any value fits. A fixture at `0.8ms` and `19MiB` would
 /// pass at widths the real thing overflows.
 fn diagnostics() -> Chrome {
     Chrome {
         frame: Some(Duration::from_millis(999)),
-        memory: Some(9999 * 1024 * 1024),
+        memory: Some(999 * 1024 * 1024),
         ..following()
     }
 }
@@ -438,6 +438,33 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         // the assertions they can break.
         ("glance elements, idle", glancing(), chrome()),
         ("glance elements, following", glancing(), following()),
+        // Same reasoning again, one row down. The status readouts add seventeen
+        // columns to the footer's right-hand side, which is more than the state
+        // and the hints put together at some widths, so "no row over-occupies"
+        // is the assertion most likely to catch a mistake in the arithmetic that
+        // decides whether they fit. Both cases, because the notice one is where
+        // the fit is measured against something other than what is drawn.
+        ("readouts, following", every_row_kind(), diagnostics()),
+        (
+            "readouts and a notice",
+            every_row_kind(),
+            Chrome {
+                notice: Some("src/lib.rs vanished between being named and being read".to_owned()),
+                ..diagnostics()
+            },
+        ),
+        // A hundred files widens the position to `100/100`, and the readouts
+        // widen the row again on top of that, so this is the widest right-hand
+        // side the footer can be asked to lay out anywhere in the suite.
+        (
+            "readouts at a hundred files",
+            View {
+                files: 100,
+                top: Position { file: 41, row: 0 },
+                ..every_row_kind()
+            },
+            diagnostics(),
+        ),
     ]
 }
 
@@ -870,6 +897,103 @@ fn a_notice_never_moves_the_diff() {
         saw_two_line_footer,
         "no width in the sweep produced a two-line footer, so nothing here could \
          have been moved by a notice"
+    );
+}
+
+#[test]
+fn the_status_readouts_never_move_the_diff() {
+    // [`a_notice_never_moves_the_diff`]'s rule, and the readouts need it for two
+    // reasons a notice does not have.
+    //
+    // **The frame cell does not exist on the first paint.** No frame has
+    // completed, so there is no p99 of anything, and it appears on the second.
+    // If it could grow the footer, every session would jog its diff down a row
+    // the first time a file changed, which is the worst possible moment: the
+    // reader is looking at exactly that.
+    //
+    // **The memory cell does not exist on a platform with no cheap read.** That
+    // would make the body height platform-dependent, so a snapshot taken on one
+    // tier-1 target would be a row out on another.
+    let view = every_row_kind();
+    let mut saw_two_line_footer = false;
+    for width in WIDTHS {
+        for height in [5u16, 24] {
+            let area = Rect::new(0, 0, width, height);
+            let bare = body_height(area, &following(), view.files);
+            assert_eq!(
+                bare,
+                body_height(area, &diagnostics(), view.files),
+                "the status readouts changed the body height at {width}x{height}"
+            );
+            if bare == usize::from(height) - 3 {
+                saw_two_line_footer = true;
+            }
+        }
+    }
+    // Non-vacuity, for the reason the notice sweep gives: two heights are
+    // trivially equal if the footer never takes a second line anywhere.
+    assert!(
+        saw_two_line_footer,
+        "no width in the sweep produced a two-line footer, so nothing here could \
+         have been moved by a readout"
+    );
+}
+
+#[test]
+fn the_status_readouts_go_before_the_hints_and_the_state_do() {
+    // `SPEC.md` §11.1's drop order, and the direction it is asserted in matters.
+    // The hints are how a reader operates the tool and the state is what the
+    // tree is doing; these two describe `vigia` itself, so a narrowing pane owes
+    // them last. A ladder that dropped a hint to keep a frame time would be
+    // legal by every other gate in this file, and wrong.
+    //
+    // Swept rather than checked at a chosen width, because the claim is about
+    // every width and the interesting ones are wherever a rung changes.
+    let view = every_row_kind();
+    let mut saw_readouts = false;
+    let mut saw_them_dropped = false;
+
+    for width in WIDTHS {
+        let rows = rows_at(width, 24, &view, &diagnostics());
+        let footer = rows[23].clone();
+        let upper = rows[22].clone();
+        // Either row may hold them: at narrow widths the footer takes a second
+        // line and the readouts ride with the state on the upper one.
+        let drawn = footer.contains("frame") || upper.contains("frame");
+
+        if drawn {
+            saw_readouts = true;
+        } else {
+            saw_them_dropped = true;
+            // The bare state at its narrowest is `follow ▶`, and a hint bar at
+            // its narrowest is `f follow`. Below the width that holds either,
+            // both are gone for reasons of their own and there is nothing left
+            // for this to compare against.
+            let bare = rows_at(width, 24, &view, &following());
+            let bare_footer = format!("{}{}", bare[22], bare[23]);
+            let with = format!("{upper}{footer}");
+            assert!(
+                bare_footer.contains(FOLLOW_MARK) <= with.contains(FOLLOW_MARK),
+                "the readouts cost the follow marker at {width} columns: \
+                 {with:?} against {bare_footer:?}"
+            );
+            assert!(
+                bare_footer.contains("quit") <= with.contains("quit"),
+                "the readouts cost a hint at {width} columns: \
+                 {with:?} against {bare_footer:?}"
+            );
+        }
+    }
+
+    // Both directions, because a ladder that never draws them and one that never
+    // drops them each satisfy half of this and neither is the rule.
+    assert!(
+        saw_readouts,
+        "no width in the sweep drew the readouts at all"
+    );
+    assert!(
+        saw_them_dropped,
+        "no width in the sweep dropped the readouts, so nothing was compared"
     );
 }
 

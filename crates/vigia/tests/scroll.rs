@@ -20,7 +20,7 @@ use ratatui::layout::Rect;
 use vigia::{Action, App, Position, Row, body_height};
 use vigia_core::{Frame, Highlighter, History};
 
-use support::{Scratch, materialise};
+use support::{Scratch, generated, materialise};
 
 /// Files in the scrolling fixture.
 const FILES: usize = 40;
@@ -220,47 +220,73 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
 
 #[test]
 fn the_bottom_of_the_diff_is_content_rather_than_blank() {
-    // Scrolling past the end must rest on the last row, not past it. Past it
-    // draws an empty pane, which in a monitor is indistinguishable from a broken
-    // one.
+    // Scrolling past the end must rest on the last **screenful**, not on the
+    // last row. Past it draws an empty pane, which in a monitor is
+    // indistinguishable from a broken one.
+    //
+    // > [!warning] This gate used to assert the defect it was named against
+    // >
+    // > Until [#57](https://github.com/breferrari/vigia/issues/57) the body of
+    // > this test read `assert_eq!(view.rows.len(), 1)`, under this name and
+    // > under the comment above it. Both describe the right rule; the assertion
+    // > pinned the wrong behaviour in place, and it is the strongest kind of
+    // > wrong a test can be, because a defect with a green gate over it is one
+    // > nobody goes looking for. It survived being read every time this file was
+    // > touched.
+    // >
+    // > The tell, and it generalises: **an exact small count where the rule is
+    // > about a bound.** "Rests on content rather than blank" is a claim about
+    // > the screen being full; `== 1` is a claim about it being nearly empty.
+    // > `SPEC.md` §7 carries it now.
     let scratch = fixture("shell-scroll-bottom");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
-    let history = History::new();
 
-    let landed = after(
-        &mut app,
-        &mut frame,
-        &mut highlighter,
-        &history,
+    app.apply(
         Action::Scroll((SPAN * FILES * 4) as isize),
-    );
-    assert_eq!(
-        landed,
-        Position {
-            file: FILES - 1,
-            row: SPAN - 1
-        },
-        "scrolling far past the end did not rest on the last row"
-    );
+        &mut frame,
+        body(),
+    )
+    .expect("scroll");
+    let (rows, top) = drawn(&mut app, &mut frame);
 
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, body())
-        .expect("view");
     assert_eq!(
-        view.rows.len(),
-        1,
-        "the last row of the diff drew {} rows",
-        view.rows.len()
+        rows,
+        body(),
+        "scrolling far past the end drew {rows} rows of a {} row body, leaving \
+         {} blank under a diff with {} rows to spare",
+        body(),
+        body() - rows,
+        FILES * SPAN
+    );
+    // The bottom of the diff and nowhere else. Asserted through the position as
+    // well as the count, because a screen full of the *wrong* rows satisfies the
+    // count on its own.
+    assert_eq!(
+        top.file * SPAN + top.row + body(),
+        FILES * SPAN,
+        "the screen is full but ends somewhere other than the end of the diff: {top:?}"
     );
     assert!(
-        matches!(view.rows[0], Row::Line { .. }),
-        "the bottom row is {:?} rather than content",
-        view.rows[0]
+        matches!(
+            view_last_row(&mut app, &mut frame),
+            Row::Line { .. } | Row::Note { .. }
+        ),
+        "the bottom row is not content"
     );
+}
+
+/// The last row a frame drew, for the one assertion that is about content rather
+/// than about how much of it there is.
+fn view_last_row(app: &mut App, frame: &mut Frame) -> Row {
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let view = app
+        .view(frame, &mut highlighter, &history, body())
+        .expect("view");
+    view.rows.last().expect("a drawn row").clone()
 }
 
 #[test]
@@ -522,4 +548,142 @@ fn only_the_action_that_reads_the_height_is_given_one() {
             );
         }
     }
+}
+
+/// Drive the view once and hand back how much it drew and where it started.
+///
+/// The four gates below are all assertions that a **full** screen came back, so
+/// what they compare against is [`body`] itself. `rows == body()` reads as
+/// arithmetic where what it means is "no blank rows under content that exists".
+fn drawn(app: &mut App, frame: &mut Frame) -> (usize, Position) {
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let view = app
+        .view(frame, &mut highlighter, &history, body())
+        .expect("view");
+    (view.rows.len(), view.top)
+}
+
+#[test]
+fn a_diff_that_shrank_under_the_viewport_still_fills_the_screen() {
+    // **The half that was reported**, and the one no fixture in this suite could
+    // have produced: every other gate here holds the file list still and moves
+    // the window. This moves the file list.
+    //
+    // The sequence is the one that found it, run literally. A worktree of forty
+    // changed files, scrolled deep into, then `git reset --hard` with two
+    // untracked files left behind — an agent in the other pane reverting its own
+    // work, which is an ordinary event on the pane this tool exists for and
+    // exactly when someone looks over. The retained position was reasonable when
+    // it was taken and names a row the new diff does not have.
+    //
+    // What made it monitor-class rather than cosmetic: the header went on
+    // truthfully saying `watching · 2 files` over a blank body, so one thing on
+    // screen contradicted the other two. `SPEC.md` §11.1 ruled the empty state
+    // into existence to stop "nothing changed" and "this has stopped working"
+    // looking alike, and this reintroduced that ambiguity by another route.
+    let scratch = fixture("shell-scroll-shrunk");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    // Deep into the old diff, and disengaged from follow the way a reader's own
+    // scroll disengages it. A following viewport is dragged back by I5 on the
+    // next tick and would never see this.
+    app.apply(
+        Action::Scroll((FILES * SPAN) as isize - 2),
+        &mut frame,
+        body(),
+    )
+    .expect("scroll");
+    let (_, before) = drawn(&mut app, &mut frame);
+    assert!(
+        before.file > 1,
+        "the fixture did not scroll deep enough to be shrunk out from under: {before:?}"
+    );
+
+    // Twenty-five lines, so the surviving file is taller than the screen on its
+    // own. That is the common shape and the one that needs no walk backwards,
+    // which is the shape that was reported.
+    scratch.git(&["reset", "--hard"]);
+    scratch.write("kept_one.md", generated(25, "kept-one"));
+    scratch.write("kept_two.md", generated(25, "kept-two"));
+    materialise(&mut frame);
+    assert_eq!(frame.files().len(), 2, "the fixture is not two files");
+
+    let (rows, top) = drawn(&mut app, &mut frame);
+    assert_eq!(
+        rows,
+        body(),
+        "the diff shrank under the viewport and the screen came back with {rows} \
+         of {} rows drawn, so {} were blank while the header said two files had \
+         changed. Top: {top:?}",
+        body(),
+        body() - rows
+    );
+}
+
+#[test]
+fn a_last_file_shorter_than_the_screen_is_filled_from_the_ones_above_it() {
+    // The case a subtraction inside the last file cannot reach, and the reason
+    // `last_screenful` walks. When the final file has fewer rows than the body,
+    // backing off within it still leaves the screen short: the top has to land
+    // in an earlier file, which is a question the forward walk has no way to
+    // ask, because its borrow of the current file is live until that file is
+    // drawn.
+    //
+    // Four-row files against a twenty-two row body means six of them fill it, so
+    // this exercises a real walk rather than the degenerate one.
+    let scratch = fixture("shell-scroll-short-tail");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    app.apply(Action::Scroll(10_000), &mut frame, body())
+        .expect("scroll");
+    let (rows, top) = drawn(&mut app, &mut frame);
+
+    assert!(
+        top.file < FILES - 1,
+        "the top stayed in the last file, which is {SPAN} rows and cannot fill a \
+         {} row body on its own: {top:?}",
+        body()
+    );
+    assert_eq!(rows, body(), "the walk back left the screen short");
+}
+
+#[test]
+fn a_diff_shorter_than_the_screen_starts_at_the_top() {
+    // The other end of the same rule, and the one that must **not** be "fill the
+    // screen": a diff with fewer rows than the body has nothing to fill it with,
+    // so the honest picture is every row it has, from the first.
+    //
+    // Without a floor, `last_screenful` walking back until it has a screenful is
+    // a loop that runs off the front of the file list, and the obvious
+    // off-by-one puts the top in a file that does not exist —
+    // `vigia_core::Frame::diff` **panics** on an index past the end, which this
+    // file's own header warns about.
+    let scratch = Scratch::large_diff("shell-scroll-short-diff", 2, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    app.apply(Action::Scroll(10_000), &mut frame, body())
+        .expect("scroll");
+    let (rows, top) = drawn(&mut app, &mut frame);
+
+    assert_eq!(
+        top,
+        Position::default(),
+        "a diff shorter than the screen did not start at the top"
+    );
+    assert_eq!(
+        rows,
+        2 * SPAN,
+        "a two file diff drew {rows} rows rather than the {} it has",
+        2 * SPAN
+    );
 }

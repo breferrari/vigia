@@ -584,6 +584,172 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
 }
 
 #[test]
+fn the_status_bar_carries_what_a_frame_cost() {
+    // `SPEC.md` §5.1's two readouts, in the picture that shows where they sit
+    // relative to everything else on the row. The legibility sweep can prove the
+    // layout is legal at every width; only this shows it is good at one.
+    let view = one_file();
+    insta::assert_snapshot!(screen(80, 6, &view, &diagnostics_chrome()));
+}
+
+/// Durations that sit either side of every boundary [`frame_cell`]'s three
+/// branches have, plus the two ends of the range.
+///
+/// The interesting ones are `9_949` and `9_950`. Formatting to one decimal
+/// carries at 9.95, so `{:.1}` of the second would be `10.0ms` and six columns
+/// wide: the branch has to end below where rounding carries rather than at a
+/// round number, and this pair is what says so. `999_499` and `999_500` are the
+/// same story one branch over.
+const FRAME_TIMES: [Duration; 10] = [
+    Duration::ZERO,
+    Duration::from_micros(1),
+    Duration::from_micros(9_949),
+    Duration::from_micros(9_950),
+    Duration::from_millis(12),
+    Duration::from_micros(999_499),
+    Duration::from_micros(999_500),
+    Duration::from_secs(1),
+    Duration::from_secs(3600),
+    Duration::MAX,
+];
+
+/// Byte counts either side of the memory cell's one boundary, plus both ends.
+///
+/// `999` and `1000` mebibytes are the pair that matters: below it the cell draws
+/// a four-digit number that would not fit, above it a sigil that does. The two
+/// on the end are the degenerate cases a `u64` allows even though this process
+/// cannot reach them.
+const MEMORY_SIZES: [u64; 6] = [
+    0,
+    1024 * 1024,
+    19 * 1024 * 1024,
+    999 * 1024 * 1024,
+    1000 * 1024 * 1024,
+    u64::MAX,
+];
+
+#[test]
+fn the_frame_cell_never_shifts_what_is_beside_it() {
+    // **The one property that makes a per-frame readout safe to draw.** The value
+    // changes on every frame by construction, so a cell sized to its own text
+    // would be eleven columns one frame and ten the next, and `follow ▶` would
+    // slide sideways under a reader who is trying to read it. Nothing else on
+    // this screen changes width without the diff changing.
+    //
+    // Observed by rendering rather than by measuring the formatter's output,
+    // which would be the same arithmetic checking itself. What is asserted is
+    // where the *neighbouring* element lands, because that is the thing a reader
+    // would see move.
+    let view = one_file();
+    let columns: Vec<u16> = FRAME_TIMES
+        .iter()
+        .map(|cost| {
+            let chrome = Chrome {
+                frame: Some(*cost),
+                ..diagnostics_chrome()
+            };
+            column_of(&screen(80, 6, &view, &chrome), 5, "▶")
+        })
+        .collect();
+
+    assert!(
+        columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "the follow marker moved as the frame time changed: {columns:?} for {FRAME_TIMES:?}"
+    );
+}
+
+#[test]
+fn the_memory_cell_never_shifts_what_is_beside_it() {
+    // [`the_frame_cell_never_shifts_what_is_beside_it`]'s property, one cell
+    // over. This one is the less obvious of the two: RSS looks like a number
+    // that barely moves, and it is, right up to the frame where it crosses from
+    // `999MiB` to `1024MiB` and takes a column with it.
+    let view = one_file();
+    let columns: Vec<u16> = MEMORY_SIZES
+        .iter()
+        .map(|bytes| {
+            let chrome = Chrome {
+                memory: Some(*bytes),
+                ..diagnostics_chrome()
+            };
+            column_of(&screen(80, 6, &view, &chrome), 5, "▶")
+        })
+        .collect();
+
+    assert!(
+        columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "the follow marker moved as memory changed: {columns:?} for {MEMORY_SIZES:?}"
+    );
+}
+
+#[test]
+fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
+    // **A content gate, and it is the kind `reads.rs` structurally cannot be.**
+    // `reads.rs` counts bytes read from the worktree, so a readout that shelled
+    // out to `tasklist` on every frame, or read `/proc` on every frame, would
+    // leave every one of its eleven gates green. The gap between a cost gate and
+    // a content gate is where a rejected design hides, so what is asserted here
+    // is what reaches the screen.
+    //
+    // Both directions, and neither is vacuous. On a tier-1 target the cell is
+    // present, which is what `SPEC.md` §5.1 rules. On a platform `crate::memory`
+    // has no cheap answer for, `Chrome::memory` is `None` and nothing is drawn,
+    // which is the branch that must not silently start drawing `0MiB`.
+    let view = one_file();
+    let footer = |chrome: &Chrome| {
+        let backend = screen(80, 6, &view, chrome);
+        (0..80)
+            .map(|x| backend.buffer()[(x, 5)].symbol().to_owned())
+            .collect::<String>()
+    };
+
+    assert!(
+        footer(&diagnostics_chrome()).contains("19MiB"),
+        "a chrome carrying a memory reading drew none of it: {:?}",
+        footer(&diagnostics_chrome())
+    );
+
+    let unavailable = Chrome {
+        memory: None,
+        ..diagnostics_chrome()
+    };
+    assert!(
+        !footer(&unavailable).contains("MiB"),
+        "a platform with no memory reading drew one anyway: {:?}",
+        footer(&unavailable)
+    );
+}
+
+#[test]
+fn the_first_paint_draws_no_readouts_at_all() {
+    // The state a reader actually starts in, and it is not reachable by
+    // narrowing: no frame has completed, so there is no p99 of anything, and
+    // `App::chrome` reports `None`. Worth its own gate because the obvious
+    // implementation draws `0.0ms frame` there, which is a measurement of
+    // nothing presented as a measurement.
+    //
+    // Memory is deliberately `Some` here. It is readable on the first paint, and
+    // this asserts that the pair still draws nothing: a lone memory cell on an
+    // otherwise bare status bar would read as the important one, and it is the
+    // cell the ladder drops *first* everywhere else.
+    let view = one_file();
+    let first = Chrome {
+        frame: None,
+        memory: Some(19 * 1024 * 1024),
+        ..following_chrome()
+    };
+    let backend = screen(80, 6, &view, &first);
+    let footer: String = (0..80)
+        .map(|x| backend.buffer()[(x, 5)].symbol().to_owned())
+        .collect();
+
+    assert!(
+        !footer.contains("MiB") && !footer.contains("frame"),
+        "the first paint drew a readout it has no value for: {footer:?}"
+    );
+}
+
+#[test]
 fn the_footer_takes_two_lines_when_forty_columns_cannot_hold_it() {
     // The hardest screen the footer has to lay out, and the **default** one: at
     // forty columns with follow engaged, the hints and the state cannot share a

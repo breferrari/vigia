@@ -208,11 +208,19 @@ const FRAME_CELL: usize = FRAME_NUMBER + FRAME_LABEL.len();
 
 /// Columns the memory readout gets, whatever it says.
 ///
-/// Seven, for [`FRAME_NUMBER`]'s reason: `19MiB` and `1024MiB` are different
-/// widths and the same fact, and only one of them is allowed to decide where the
-/// cell to its left ends. The unit rides inside the field rather than beside it,
+/// Six, for [`FRAME_NUMBER`]'s reason: `19MiB` and `999MiB` are different widths
+/// and the same fact, and only one of them is allowed to decide where the cell
+/// to its left ends. The unit rides inside the field rather than beside it,
 /// unlike the frame time, because `MiB` already says what the number is.
-const MEMORY_CELL: usize = 7;
+///
+/// **Six rather than seven, and the column saved is the point.** Four digits
+/// would fit `1024MiB`, and a process that reached a gibibyte has breached I3's
+/// budget by more than an order of magnitude, at which point the exact figure
+/// tells a reader nothing that `>1GiB` does not. Sized to the range the readout
+/// is actually for — I3 measures this process at 19 to 27 MiB — the field spends
+/// its columns on the numbers that occur, and a column is worth arguing about on
+/// a footer I6 has to fit into forty of them.
+const MEMORY_CELL: usize = 6;
 
 /// What separates two facts drawn beside each other on the status bar.
 ///
@@ -458,11 +466,13 @@ fn frame_cell(cost: Duration) -> String {
 fn memory_cell(bytes: u64) -> String {
     const MIB: u64 = 1024 * 1024;
     let mib = bytes / MIB;
-    // Ten gibibytes is far past anything this process can reach, so the sigil is
-    // an assertion that something is very wrong rather than a display mode.
-    // Drawn rather than clamped, because a clamped number looks exact.
-    let token = if mib > 9999 {
-        ">9GiB".to_owned()
+    // A gibibyte is more than forty times what I3 measures this process at, so
+    // past it the sigil says the only thing worth saying: something is very
+    // wrong, and the figure is not the interesting part. Drawn rather than
+    // clamped, because a clamped number looks exact. Symmetric with the frame
+    // cell's `>1s`, which gives up on precision at its own useless magnitude.
+    let token = if mib > 999 {
+        ">1GiB".to_owned()
     } else {
         format!("{mib}MiB")
     };
