@@ -193,6 +193,61 @@ fn the_resolved_position_is_stable_once_it_reaches_the_bottom() {
 }
 
 #[test]
+fn a_backed_up_body_holds_the_rows_its_own_position_names() {
+    // **A full body can still be the wrong body**, and a count cannot see it. The
+    // restart throws away the partial screen it built before backing up; leave
+    // those rows in place and the walk simply tops them up to `height`, so every
+    // gate above stays green while the pane shows a stale prefix followed by rows
+    // from somewhere else entirely. A mutation proved that, by deleting the clear
+    // and surviving.
+    //
+    // The oracle is the position the view reports. Collecting from it again, with
+    // no back-up allowed, has to produce the same rows: the resolved position is
+    // what the next frame starts from, so if it does not describe what is on
+    // screen then the screen and the scroll state have already disagreed.
+    let scratch = fixture("viewport-content");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let height = body();
+
+    // **Resolved after every step, not once at the end**, and that is the whole
+    // difference. Scrolling seventy times without drawing leaves the position far
+    // past the end, which is the *overshoot* path, and that one throws nothing
+    // away because `take_file` has not run yet. The short path is only reachable
+    // by letting each frame store its resolved position back, which is what the
+    // shell does and what this therefore has to do. The first version of this gate
+    // scrolled in a bare loop and passed against the mutation it was written for.
+    for step in 0..FILES * SPAN + height {
+        app.apply(Action::Scroll(1), &mut frame, height)
+            .expect("apply");
+        let drawn = app
+            .view(&mut frame, &mut highlighter, &history, height)
+            .expect("view");
+
+        let from_position = View::collect(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            drawn.top,
+            height,
+            false,
+        )
+        .expect("collect");
+
+        assert_eq!(
+            drawn.rows, from_position.rows,
+            "step {step}: the body does not match the position it reports, {:?}",
+            drawn.top
+        );
+    }
+}
+
+#[test]
 fn the_last_row_of_the_diff_is_always_on_screen_at_the_bottom() {
     // What "rests at the bottom" means, asserted as content rather than as a row
     // count. A body that is full of the *wrong* rows satisfies every gate above.
