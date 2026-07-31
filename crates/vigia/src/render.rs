@@ -847,6 +847,14 @@ impl<'a> Footer<'a> {
         // the cells always sit beside something, either the state on its own row
         // or the hints on a shared one. Where both happen to be empty it costs
         // two columns at widths the cells do not fit in anyway.
+        //
+        // `taken` rather than `reserved`, which spends one column more than a
+        // two-line footer strictly needs: `taken` carries the gap that keeps the
+        // state off the hints, and on a grown footer the hints are on the other
+        // row. Tightening it was tried and **reverted**, because the one column
+        // it buys is not observable by any fixture in `tests/legibility.rs` and
+        // this repo does not ship behaviour no test can see. It is the same
+        // meanness `reserved` already accepts two rungs up, for the same reason.
         let occupied = taken + CELL_GAP.len() + if grows { 0 } else { width_of(hints) };
         let diagnostics = widest_fitting(
             &diagnostic_rungs(chrome.frame, chrome.memory),

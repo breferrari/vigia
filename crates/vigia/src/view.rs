@@ -485,6 +485,15 @@ impl View {
     ///
     /// A diff shorter than the screen resolves to the top, which is the honest
     /// answer: the blank rows under it are the ones the diff does not have.
+    ///
+    /// **It counts its own reads, so an overshoot frame reports roughly twice
+    /// the files it draws**, and that is accurate rather than sloppy:
+    /// [`View::read`] is "files this viewport asked the frame for", and this asks
+    /// for the same files the walk above is about to ask for again. Under I2a
+    /// the second ask is a cache hit that reads no bytes, so it is a count that
+    /// doubles and not work that does. It lasts one frame either way, because
+    /// the caller stores the resolved position back and the next frame starts on
+    /// the file it draws.
     fn last_screenful(
         frame: &mut Frame,
         files: usize,

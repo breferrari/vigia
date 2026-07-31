@@ -940,6 +940,54 @@ fn the_status_readouts_never_move_the_diff() {
 }
 
 #[test]
+fn the_readouts_take_every_width_that_can_hold_them() {
+    // The ladder's other direction, and the one no other gate here asserts.
+    // Every sweep in this file checks that nothing **overflows**; a footer that
+    // drew no readouts at any width would satisfy all of them. This checks the
+    // ladder is not leaving a whole rung's worth of room unspent.
+    //
+    // Written against what is drawn rather than against the arithmetic that
+    // decides it, which would be the formula agreeing with itself. The rung
+    // widths are restated for the reason `RAMP` and `HEAT_BLOCK` are: a test
+    // sharing the renderer's own constants cannot disagree with it.
+    const PAIR: usize = 11 + 2 + 6;
+    const GAP: usize = 2;
+
+    let view = every_row_kind();
+    for width in WIDTHS {
+        let rows = rows_at(width, 24, &view, &diagnostics());
+        // Whichever row carries the state is the one the readouts share.
+        let carrying = if rows[22].contains(FOLLOW_MARK) {
+            22
+        } else if rows[23].contains(FOLLOW_MARK) {
+            23
+        } else {
+            continue;
+        };
+        if rows[carrying].contains("frame") {
+            continue;
+        }
+        // **The blank run inside the row, not the columns left at its end.**
+        // [`occupied`] counts every cell including spaces, so it always returns
+        // the full width and a gate written against it asserts nothing; that was
+        // this test's first form and two mutations walked straight through it.
+        // What the readouts would actually occupy is the gap between the hints
+        // and the right-aligned state, so that gap is what has to be measured.
+        let spare = rows[carrying]
+            .split(|c: char| c != ' ')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        assert!(
+            spare < PAIR + GAP,
+            "at {width} columns the footer drew no readouts with a {spare} column \
+             gap on row {carrying}, which is room for both of them: {:?}",
+            rows[carrying]
+        );
+    }
+}
+
+#[test]
 fn the_status_readouts_go_before_the_hints_and_the_state_do() {
     // `SPEC.md` §11.1's drop order, and the direction it is asserted in matters.
     // The hints are how a reader operates the tool and the state is what the
