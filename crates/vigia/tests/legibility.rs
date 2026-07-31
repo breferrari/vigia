@@ -24,8 +24,8 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Chrome, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Position, Row, Theme, View, body_height,
-    render,
+    Chrome, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme, View,
+    body_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -173,9 +173,21 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
     }
 }
 
+/// The base fixture, and its worktree name is load bearing.
+///
+/// `vigia` cannot end in any prefix of `watching` or of `not watching`, which is
+/// what lets [`the_header_ladder_keeps_the_mode_word_last`] tell a dropped rung
+/// from a cut one by looking at how the row ends. A name ending in `w`, `n` or
+/// `no` would make that sweep pass against a header that marked the word instead
+/// of dropping it.
 fn chrome() -> Chrome {
     Chrome {
         worktree: "vigia".to_owned(),
+        // Only the empty state names a branch, so every populated fixture leaves
+        // this `None`. That is not tidiness: it is what a real frame carries,
+        // because `branch_for` never reads HEAD for a frame with a diff in it.
+        branch: None,
+        mode: Mode::Watching,
         notice: None,
         following: false,
     }
@@ -184,6 +196,27 @@ fn chrome() -> Chrome {
 fn following() -> Chrome {
     Chrome {
         following: true,
+        ..chrome()
+    }
+}
+
+/// A watch that has stopped, which widens the mode word from 8 columns to 12.
+///
+/// Swept rather than snapshotted, because the extra four columns move every
+/// width at which the header's ladder changes rung. A matrix of one mode word
+/// exercises one column-width class and reads as though it covered them all,
+/// which is the same trap the hundred-file case exists for below.
+fn lost() -> Chrome {
+    Chrome {
+        mode: Mode::Lost,
+        ..chrome()
+    }
+}
+
+/// A worktree with nothing in it, on a branch.
+fn on_a_branch() -> Chrome {
+    Chrome {
+        branch: Some("main".to_owned()),
         ..chrome()
     }
 }
@@ -345,8 +378,33 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         ("every row kind, notice", every_row_kind(), with_notice()),
         ("a hundred files, following", many, following()),
         ("awkward content, following", awkward(), following()),
-        ("clean worktree, following", empty(), following()),
-        ("clean worktree, idle", empty(), chrome()),
+        (
+            "clean worktree on a branch, following",
+            empty(),
+            Chrome {
+                following: true,
+                ..on_a_branch()
+            },
+        ),
+        ("clean worktree on a branch, idle", empty(), on_a_branch()),
+        // A detached HEAD, which is the shorter empty-state line and therefore
+        // the one where a width-dependent bug hides. Kept beside the branch case
+        // rather than replacing it: the two differ by seven columns, which moves
+        // where the line is cut.
+        ("clean worktree, detached head", empty(), chrome()),
+        // A lost watch is four columns wider on the header than a live one, so
+        // it moves every width at which the ladder changes rung. Added to the
+        // shared list rather than given gates of its own, which is the point:
+        // every structural rule already swept here now covers the mode word too.
+        ("every row kind, watch lost", every_row_kind(), lost()),
+        (
+            "clean worktree, watch lost",
+            empty(),
+            Chrome {
+                mode: Mode::Lost,
+                ..on_a_branch()
+            },
+        ),
         // Added to the *shared* list rather than given gates of its own, which
         // is the point: every structural rule already swept here now covers the
         // glance elements too. A sparkline and a pulse are new things competing
@@ -513,6 +571,144 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
         saw_swallowable,
         "no width put a glyph against the final column, so the sweep never \
          reached the case this test is about"
+    );
+}
+
+#[test]
+fn the_header_never_takes_a_second_line() {
+    // The footer is allowed to grow and the header is not, so the difference has
+    // to be gated rather than assumed. `SPEC.md` §11.1: a worktree name is not a
+    // list and has nowhere to break, so a second line could not guarantee a fit
+    // and would spend a body row on a maybe. The right-hand side drops whole
+    // rungs instead, which is what makes one row always enough.
+    //
+    // Observed by finding the first body row rather than by asking the renderer
+    // where it put one, which would be its own arithmetic agreeing with itself.
+    //
+    // From eight columns for the reason `numbered` documents: below that the
+    // four-column marker is clipped to nothing and cannot be counted, so a
+    // narrower sweep would silently observe an empty screen and pass.
+    let mut saw_a_body = false;
+    for chrome in [chrome(), following(), lost(), with_notice()] {
+        for width in 8..=120u16 {
+            for height in [6u16, 24] {
+                let view = numbered(4, 3);
+                let rows = rows_at(width, height, &view, &chrome);
+                let Some(first) = rows.iter().position(|row| row.contains("R00")) else {
+                    continue;
+                };
+                saw_a_body = true;
+                assert_eq!(
+                    first, 1,
+                    "at {width}x{height} the body started on row {first}, so the \
+                     header took more than one"
+                );
+            }
+        }
+    }
+    assert!(
+        saw_a_body,
+        "no width drew a body row, so this proves nothing"
+    );
+}
+
+#[test]
+fn the_header_ladder_keeps_the_mode_word_last() {
+    // The header's own version of `the_state_outlives_the_hints_at_every_width`,
+    // and the same rule: the count summarises a body that is on screen and can
+    // be counted by looking, while whether the pane is still live is recoverable
+    // from nowhere at all.
+    //
+    // The two words are restated here rather than read from `Mode::word`. A test
+    // that imported them would agree with the renderer by construction, which is
+    // why the hint ladder is observed by rendering too.
+    for (word, chrome) in [("watching", chrome()), ("not watching", lost())] {
+        let view = every_row_kind();
+        let (mut saw_both, mut saw_word_only, mut saw_neither) = (false, false, false);
+
+        for width in WIDTHS {
+            let header = rows_at(width, 8, &view, &chrome)[0].clone();
+            let has_word = header.contains(word);
+            // The count itself, not the separator that happens to join it: a
+            // renderer that dropped the word and kept `· 3 files` would still
+            // match on the rung as a whole.
+            let has_count = header.contains("file");
+
+            if has_count {
+                assert!(
+                    has_word,
+                    "at {width} columns the count outlived {word:?}: {header:?}"
+                );
+                saw_both = true;
+            } else if has_word {
+                saw_word_only = true;
+            } else {
+                saw_neither = true;
+            }
+
+            // **Never cut**, which is stricter than the marking rule the rest of
+            // the header follows. A ladder drops whole rungs, so a fragment of
+            // the word reaching the screen means someone replaced it with a
+            // marked token, and `wat›` is a state nobody can read.
+            //
+            // Reading how the row *ends* is sound only because the fixture's
+            // worktree name cannot end in any prefix of either word. See
+            // `chrome`.
+            for cut in 1..word.chars().count() {
+                let fragment: String = word.chars().take(cut).collect();
+                assert!(
+                    !header.ends_with(&fragment),
+                    "at {width} columns the header ended in {fragment:?}, which is \
+                     {word:?} cut: {header:?}"
+                );
+            }
+        }
+
+        assert!(
+            saw_both && saw_word_only && saw_neither,
+            "{word}: the sweep saw both={saw_both} word-only={saw_word_only} \
+             neither={saw_neither}, so it did not cover the whole ladder"
+        );
+    }
+}
+
+#[test]
+fn the_empty_state_line_marks_its_edge() {
+    // One token, and `SPEC.md` §11.1 lists it by name among them: it cannot drop
+    // an item the way the hint bar can, and it has no identifying half the way a
+    // path does, so the honest thing is to fill the room and mark the cut.
+    //
+    // Both directions, because a rule that only ever fires one way is not a rule.
+    const LINE: &str = "no unstaged changes · main";
+    let view = empty();
+    let (mut fitted, mut cut) = (0usize, 0usize);
+
+    for width in WIDTHS {
+        let rows = rows_at(width, 6, &view, &on_a_branch());
+        let body = &rows[1];
+        assert!(
+            label_is_honest(body, LINE),
+            "the empty state was cut at {width} columns without saying so: {body:?}"
+        );
+
+        if Span::raw(LINE).width() <= usize::from(width) {
+            fitted += 1;
+            assert!(
+                body.starts_with(LINE),
+                "the empty state fits at {width} columns but was not drawn whole: {body:?}"
+            );
+            assert!(
+                !body.contains(CONTINUES),
+                "the empty state fits at {width} columns and was marked anyway: {body:?}"
+            );
+        } else if body.contains(CONTINUES) {
+            cut += 1;
+        }
+    }
+
+    assert!(
+        fitted > 0 && cut > 0,
+        "the sweep saw {fitted} empty states fit and {cut} cut"
     );
 }
 

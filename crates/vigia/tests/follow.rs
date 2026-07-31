@@ -48,7 +48,7 @@ fn body() -> usize {
     // row count here does not move when I6's two-line footer engages.
     body_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture"),
+        &App::new().chrome("fixture", None),
         FILES,
     )
 }
@@ -167,14 +167,14 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     }
 
     let area = Rect::new(0, 0, 64, 12);
-    let height = body_height(area, &app.chrome("fixture"), frame.files().len());
+    let height = body_height(area, &app.chrome("fixture", None), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
     assert_eq!(view.files, 3, "the fixture is not three changed files");
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture");
+    let chrome = app.chrome("fixture", None);
     let mut terminal = Terminal::new(TestBackend::new(64, 12)).expect("terminal");
     terminal
         .draw(|f| {

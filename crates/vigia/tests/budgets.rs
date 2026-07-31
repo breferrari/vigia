@@ -80,7 +80,7 @@ fn area() -> Rect {
 }
 
 fn body(app: &App, files: usize) -> usize {
-    body_height(area(), &app.chrome("fixture"), files)
+    body_height(area(), &app.chrome("fixture", None), files)
 }
 
 /// Whether the absolute wall-clock gate should assert.

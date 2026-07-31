@@ -2,7 +2,7 @@
 source: crates/vigia/tests/rows.rs
 expression: terminal.backend()
 ---
-"fixture                                                  2 files"
+"fixture                                       watching · 2 files"
 "A src/added.rs                                ████████████ +2 -0"
 "@@ -0,0 +1,2 @@                                                 "
 "1 +added line 1                                                 "

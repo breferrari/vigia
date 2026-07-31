@@ -43,7 +43,7 @@ const LINES: usize = 500;
 fn body() -> usize {
     body_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture"),
+        &App::new().chrome("fixture", None),
         FILES,
     )
 }

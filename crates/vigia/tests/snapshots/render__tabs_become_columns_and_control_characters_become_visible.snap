@@ -2,7 +2,7 @@
 source: crates/vigia/tests/render.rs
 expression: backend
 ---
-"vigia                                                 1 file"
+"vigia                                      watching · 1 file"
 "M Makefile                                             +1 -0"
 "1 +    cargo build a   b                                    "
 "2  bell·esc·[31mnul·                                        "

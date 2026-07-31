@@ -763,7 +763,7 @@ fn drive(
         }
 
         if let Some(action) = scripted(frames, body) {
-            let chrome = app.chrome(NAME);
+            let chrome = app.chrome(NAME, None);
             let height = body_height(area, &chrome, frame.files().len());
             if let Err(e) = app.apply(action, &mut frame, height) {
                 failed += 1;
@@ -777,7 +777,7 @@ fn drive(
             buffer = Buffer::empty(area);
         }
 
-        let chrome = app.chrome(NAME);
+        let chrome = app.chrome(NAME, None);
         body = body_height(area, &chrome, frame.files().len());
         match app.view(&mut frame, &mut highlighter, &history, body) {
             Ok(fresh) => {

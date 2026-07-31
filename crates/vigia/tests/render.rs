@@ -26,7 +26,9 @@
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use vigia::{Chrome, HEAT_BUCKETS, HeatBucket, Position, Row, Theme, View, body_height, render};
+use vigia::{
+    Chrome, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, body_height, render,
+};
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
 /// The mark the renderer writes where a row runs past its edge.
@@ -61,8 +63,21 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 fn chrome() -> Chrome {
     Chrome {
         worktree: "vigia".to_owned(),
+        // `None` because these views have a diff in them, and only the empty
+        // state names a branch. A populated frame never asks, which is I4 and
+        // which `lib.rs`'s `branch_for` gates.
+        branch: None,
+        mode: Mode::Watching,
         notice: None,
         following: false,
+    }
+}
+
+/// The chrome of a worktree with nothing in it, which is what B3 specifies.
+fn empty_chrome() -> Chrome {
+    Chrome {
+        branch: Some("main".to_owned()),
+        ..chrome()
     }
 }
 
@@ -209,18 +224,113 @@ fn the_same_screenful_at_a_hundred_and_twenty_columns() {
     insta::assert_snapshot!(screen(120, 14, &view, &chrome()));
 }
 
-#[test]
-fn a_clean_worktree_says_so_rather_than_showing_nothing() {
-    // A monitor is read by glancing at it, so "nothing has changed" and "I am
-    // broken" must not look identical. An empty pane says both.
-    let view = View {
+/// A worktree with nothing in it, which is the screen the tool sits on most.
+fn nothing_changed() -> View {
+    View {
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
         read: 0,
         peak: 0,
+    }
+}
+
+#[test]
+fn a_clean_worktree_says_so_rather_than_showing_nothing() {
+    // A monitor is read by glancing at it, so "nothing has changed" and "I am
+    // broken" must not look identical. An empty pane says both, which is B3, and
+    // this is the picture of the answer: the header carries which tree and that
+    // it is watching, the body carries which branch and what it did not find.
+    //
+    // Forty columns first, because it is the width I6 exists for and the one
+    // where the header has least room to keep the mode word.
+    insta::assert_snapshot!(screen(40, 6, &nothing_changed(), &empty_chrome()));
+}
+
+#[test]
+fn the_same_empty_state_at_eighty_columns() {
+    insta::assert_snapshot!(screen(80, 6, &nothing_changed(), &empty_chrome()));
+}
+
+#[test]
+fn the_same_empty_state_at_a_hundred_and_twenty_columns() {
+    // The third of the three widths §3 names. Nothing degrades here, which is
+    // what makes it worth keeping: it is the picture that says the ladder is
+    // absent when it is not needed.
+    insta::assert_snapshot!(screen(120, 6, &nothing_changed(), &empty_chrome()));
+}
+
+#[test]
+fn the_header_says_which_mode_it_is_in() {
+    // The mockup headers `watching · 3 files` and only the count ever shipped.
+    //
+    // Both directions in one test, because a word drawn unconditionally is not a
+    // mode: it has to say something different when something different is true.
+    let view = one_file();
+
+    let live = row_text(&screen(80, 6, &view, &chrome()), 0);
+    assert!(live.contains("watching · 1 file"), "live header: {live:?}");
+    assert!(!live.contains("not watching"), "live header: {live:?}");
+
+    let stopped = Chrome {
+        mode: Mode::Lost,
+        ..chrome()
     };
-    insta::assert_snapshot!(screen(40, 6, &view, &chrome()));
+    let lost = row_text(&screen(80, 6, &view, &stopped), 0);
+    assert!(
+        lost.contains("not watching · 1 file"),
+        "lost header: {lost:?}"
+    );
+}
+
+#[test]
+fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
+    // One event, two halves, and they are not the same half twice. The header
+    // carries what is durable, which is that the diff has stopped being live.
+    // The notice carries which failure did it, which is not durable at all.
+    //
+    // Before the split the durable half rode the notice alone and survived only
+    // because the tick that clears a notice can never arrive again once the
+    // watch is gone. Correct by coincidence is a bug waiting for the
+    // coincidence to change.
+    let view = one_file();
+    let stopped = Chrome {
+        mode: Mode::Lost,
+        notice: Some("the watch ended; this diff is no longer live".to_owned()),
+        ..chrome()
+    };
+    let backend = screen(80, 6, &view, &stopped);
+
+    let header = row_text(&backend, 0);
+    let footer = row_text(&backend, 5);
+    assert!(header.contains("not watching"), "header: {header:?}");
+    assert!(footer.contains("the watch ended"), "footer: {footer:?}");
+}
+
+#[test]
+fn the_empty_state_names_the_branch_and_what_it_did_not_find() {
+    // B3's four facts, two of which are the header's, so the body spends one row
+    // rather than four.
+    //
+    // Not `working tree clean`, which is what this said before and which was
+    // wrong rather than merely plain: that is git's phrase and git compares the
+    // index against HEAD as well, so a fully staged worktree draws nothing here
+    // and was being told it was clean while `git status` said the opposite.
+    let backend = screen(80, 6, &nothing_changed(), &empty_chrome());
+    assert_eq!(
+        row_text(&backend, 1).trim_end(),
+        "no unstaged changes · main"
+    );
+}
+
+#[test]
+fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
+    // Ordinary rather than exceptional: a rebase or a bisect leaves an agent
+    // here routinely. The line drops the branch instead of inventing one,
+    // because `HEAD@abc123` would put a commit id in a monitor that shows no
+    // commits.
+    let backend = screen(80, 6, &nothing_changed(), &chrome());
+    assert_eq!(row_text(&backend, 1).trim_end(), "no unstaged changes");
 }
 
 #[test]
@@ -321,9 +431,8 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
 fn a_notice_takes_the_footer_from_the_key_hints() {
     let view = one_file();
     let chrome = Chrome {
-        worktree: "vigia".to_owned(),
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
-        following: false,
+        ..chrome()
     };
     insta::assert_snapshot!(screen(80, 6, &view, &chrome));
 }

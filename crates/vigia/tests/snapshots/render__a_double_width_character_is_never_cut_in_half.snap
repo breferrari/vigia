@@ -2,7 +2,7 @@
 source: crates/vigia/tests/render.rs
 expression: "screen(40, 5, &view, &chrome())"
 ---
-"vigia                             1 file"
+"vigia                  watching · 1 file"
 "M docs/読み方.md                   +2 -0" Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " ")]
 "1 +見出し a 見出し b 見出し c           " Hidden by multi-width symbols: [(4, " "), (6, " "), (8, " "), (13, " "), (15, " "), (17, " "), (22, " "), (24, " "), (26, " ")]
 "2 +🙂🙂🙂 tail                          " Hidden by multi-width symbols: [(4, " "), (6, " "), (8, " ")]

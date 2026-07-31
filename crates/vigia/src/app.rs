@@ -8,7 +8,7 @@
 use vigia_core::{Frame, Highlighter, History, Result};
 
 use crate::input::Action;
-use crate::render::Chrome;
+use crate::render::{Chrome, Mode};
 use crate::view::{Position, View, rows_in};
 
 /// The shell's state.
@@ -27,6 +27,14 @@ pub struct App {
     /// `SPEC.md` §11.1 rules. One path, replaced per tick: bounded by one
     /// string rather than by the session, so I3 never sees it.
     newest: Option<String>,
+    /// Whether the watch is still live, which the header draws as a word.
+    ///
+    /// [`Mode::Watching`] is `Default`, and unlike `following` that is the right
+    /// answer rather than an accident: the shell arms a watch on every path that
+    /// reaches a screen, and a failure to arm arrives as its own wake and sets
+    /// this. See [`Mode::Watching`] for why there is no third value for the
+    /// microseconds before arming.
+    mode: Mode,
 }
 
 impl App {
@@ -59,6 +67,31 @@ impl App {
         self.notice.as_deref()
     }
 
+    /// Whether the watch is still live.
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// Record that the watch has stopped, so the header stops claiming otherwise.
+    ///
+    /// Separate from [`App::warn`], and called **with** it rather than instead of
+    /// it. The two carry different halves of one event: this one is durable state
+    /// and belongs on the header, the notice is which failure caused it and
+    /// belongs on the footer, which is `SPEC.md` §11.1's split between state and
+    /// advice applied one line up.
+    ///
+    /// Before they were split, the durable half rode the notice alone and
+    /// survived only because the tick that clears a notice can never arrive again
+    /// once the watch is gone. That is correct by coincidence rather than by
+    /// construction, which is a bug waiting for the coincidence to change.
+    ///
+    /// One direction only, deliberately. Nothing turns the watch back on: the one
+    /// handle that unblocks the watcher makes its `next_tick` return `None`
+    /// permanently, so a lost watch is a lost session.
+    pub fn watch_lost(&mut self) {
+        self.mode = Mode::Lost;
+    }
+
     /// Record that something went wrong without giving up the screen.
     ///
     /// A monitor beside an agent sees a repository mid-`git gc` and files that
@@ -78,9 +111,17 @@ impl App {
     }
 
     /// The chrome for this frame.
-    pub fn chrome(&self, worktree: &str) -> Chrome {
+    ///
+    /// `branch` is a parameter rather than a field because it is not this type's
+    /// state: it is read from the repository on the frames that draw it, and
+    /// holding it here would give [`App`] a second answer to "which branch"
+    /// that nothing keeps in step with `.git/HEAD`. The same reasoning keeps the
+    /// highlighter and the history out of here; see [`App::view`].
+    pub fn chrome(&self, worktree: &str, branch: Option<&str>) -> Chrome {
         Chrome {
             worktree: worktree.to_owned(),
+            branch: branch.map(str::to_owned),
+            mode: self.mode,
             notice: self.notice.clone(),
             following: self.following,
         }

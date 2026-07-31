@@ -388,7 +388,7 @@ fn a_real_repository_draws() {
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
-    let height = body_height(area, &app.chrome("fixture"), frame.files().len());
+    let height = body_height(area, &app.chrome("fixture", None), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
@@ -398,7 +398,7 @@ fn a_real_repository_draws() {
     assert!(view.rows.len() > 4, "only {} rows to draw", view.rows.len());
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture");
+    let chrome = app.chrome("fixture", None);
     terminal
         .draw(|f| {
             let area = f.area();
