@@ -43,7 +43,7 @@ use ratatui::layout::Rect;
 use vigia::{Action, App, Row, Theme, View, body_height, render};
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
-    WatchOptions, Worktree,
+    RETAINED_HUNKS, WatchOptions, Worktree,
 };
 
 use support::{Scratch, generated};
@@ -782,16 +782,26 @@ fn drive(
         match app.view(&mut frame, &mut highlighter, &history, body) {
             Ok(fresh) => {
                 view = fresh;
-                // Every hunk that put a line on this screen, which is exactly
-                // what the highlighter was asked for. One more than the headers
-                // drawn, because the top of the screen can sit inside a hunk
-                // whose header is above it, and never more: a hunk with no line
-                // on screen is never asked for at all.
-                let bound = 1 + view
-                    .rows
-                    .iter()
-                    .filter(|row| matches!(row, Row::Hunk { .. }))
-                    .count();
+                // Every hunk that put a line on this screen, which is what the
+                // highlighter was asked for, plus the ones it is allowed to keep
+                // for a reader who scrolls back. One more than the headers drawn,
+                // because the top of the screen can sit inside a hunk whose
+                // header is above it, and never more: a hunk with no line on
+                // screen is never asked for at all.
+                //
+                // `RETAINED_HUNKS` is a constant added to a per-frame number, not
+                // slack. It is the exact size of the retired queue (#45), so the
+                // bound still moves with the screen and still cannot be satisfied
+                // by a cache bounded by the session: deleting the sweep reports
+                // hunks in the hundreds against a bound in single figures, the
+                // same way it did before the queue existed.
+                let bound = 1
+                    + RETAINED_HUNKS
+                    + view
+                        .rows
+                        .iter()
+                        .filter(|row| matches!(row, Row::Hunk { .. }))
+                        .count();
                 let held = highlighter.tracked();
                 if closest_hunk_bound.is_none_or(|(worst, at)| held * at >= worst * bound) {
                     closest_hunk_bound = Some((held, bound));

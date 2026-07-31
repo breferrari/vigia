@@ -263,6 +263,55 @@ impl Scratch {
         scratch
     }
 
+    /// A repository of long lines mixing Japanese, emoji and Latin.
+    ///
+    /// The shape [#45](https://github.com/breferrari/vigia/issues/45) was
+    /// reported against, and the one every other fixture here is blind to:
+    /// [`generated`] writes 34-column ASCII lines, which fit inside any pane a
+    /// gate draws, so *"a drawn row costs its whole line"* and *"a drawn row
+    /// costs the pane"* are the same number over all of them.
+    ///
+    /// See [`wide_line`] for the shape and the arithmetic behind it. Written
+    /// line for line before and after exactly as [`Scratch::large_diff`] is, so
+    /// each file is a single hunk of `2 * lines` display rows and the two
+    /// fixtures differ in one term rather than several.
+    pub fn wide_lines(name: &str, files: usize, lines: usize) -> Self {
+        Self::wide_lines_as(name, files, lines, WIDE_EXT)
+    }
+
+    /// The same fixture under a different extension.
+    ///
+    /// Exists for one reason: [`WIDE_UNPARSED_EXT`] is an extension `syntect`
+    /// has no grammar for, so the same bytes can be drawn with the parse and
+    /// without it. That is what lets the parse be attributed by **subtraction**
+    /// rather than by argument, which is what
+    /// [#45](https://github.com/breferrari/vigia/issues/45) asks for: three
+    /// suspects, each with a number, rather than three ranked by how plausible
+    /// they sound.
+    pub fn wide_lines_as(name: &str, files: usize, lines: usize, ext: &str) -> Self {
+        let scratch = Self::new(name);
+        scratch.fill_wide_lines(files, lines, ext);
+        scratch
+    }
+
+    /// The body of [`Scratch::wide_lines_as`], split for the reason
+    /// [`Scratch::fill_large_diff`] is split.
+    pub fn fill_wide_lines(&self, files: usize, lines: usize, ext: &str) {
+        for f in 0..files {
+            self.write(
+                &format!("docs/note_{f}.{ext}"),
+                wide_generated(lines, "before"),
+            );
+        }
+        self.commit_all("baseline");
+        for f in 0..files {
+            self.write(
+                &format!("docs/note_{f}.{ext}"),
+                wide_generated(lines, "after"),
+            );
+        }
+    }
+
     /// Rewrite every file of a [`Scratch::large_diff`] fixture, line for line.
     ///
     /// A formatter, a branch switch and a multi-file agent edit all produce this
@@ -447,6 +496,85 @@ pub fn generated(lines: usize, tag: &str) -> String {
 fn generated_line(at: usize, tag: &str) -> String {
     let n = at + 1;
     format!("fn {tag}_{n}() {{ let value = {}; }}", n * 7)
+}
+
+/// Extension the wide fixture uses by default.
+///
+/// Markdown because that is what was reported: a Japanese README. It also puts
+/// the grammar under a case nothing else here reaches, since every other fixture
+/// is Rust.
+pub const WIDE_EXT: &str = "md";
+
+/// An extension `syntect` has no grammar for.
+///
+/// `syntax_for` returns `None` and the file draws exactly as it did before there
+/// was highlighting at all (`SPEC.md` §11.1), which is a zero-parse baseline over
+/// byte-identical content. Asserted rather than assumed: a gate using it checks
+/// that the run highlighted **no** lines, so the day `syntect` learns this
+/// extension the baseline fails instead of quietly becoming a second measurement
+/// of the same thing.
+pub const WIDE_UNPARSED_EXT: &str = "vigia";
+
+/// The repeating unit of a [`wide_line`], in source characters.
+///
+/// `日本語のテキストが続きます。` is 14, `🎉` is 1, and
+/// ` and then some latin words follow. ` is 35.
+pub const WIDE_UNIT_CHARS: usize = 50;
+
+/// The same unit in terminal columns: 28 + 2 + 35.
+///
+/// The gap between this and [`WIDE_UNIT_CHARS`] is the whole point of the
+/// fixture. A pane bounds **columns**, a walk over the line costs **characters**,
+/// and over ASCII the two are equal so nothing can tell a bound from its absence.
+pub const WIDE_UNIT_COLUMNS: usize = 65;
+
+/// Units per line.
+pub const WIDE_UNITS: usize = 8;
+
+/// Long lines of mixed Japanese, emoji and Latin, one per line, newline
+/// terminated.
+///
+/// Public for the same reason [`generated`] is: a caller has to be able to put a
+/// file **back** to what the index holds without reaching for `git`.
+pub fn wide_generated(lines: usize, tag: &str) -> String {
+    (0..lines)
+        .map(|at| {
+            let mut line = wide_line(at, tag);
+            line.push('\n');
+            line
+        })
+        .collect()
+}
+
+/// The one line [`wide_generated`] writes at `at`, with no line ending.
+///
+/// **The shape, stated rather than left to be counted**, because
+/// [#45](https://github.com/breferrari/vigia/issues/45)'s first acceptance
+/// criterion asks for it and because every number the gates report is relative to
+/// it. An `at` under 1000 gives a prefix of 10 or 11 characters, so a line is
+///
+/// | | characters | columns | bytes |
+/// |---|---|---|---|
+/// | prefix `NNN. after: ` | ~11 | ~11 | ~11 |
+/// | 8 x unit | 400 | 520 | 648 |
+/// | **line** | **~411** | **~531** | **~659** |
+///
+/// Against the 74-column text area of an 80-column pane that is **7.2x more line
+/// than pane**, which is the ratio a bound has to remove and the reason an ASCII
+/// fixture cannot see one.
+///
+/// The three scripts are not decoration. Latin is one column per character and
+/// takes the renderer's ASCII path; the Japanese is two columns and does not; and
+/// the emoji is two columns from a single non-ASCII character, which is the case
+/// where a bound written in characters rather than columns lands a glyph half
+/// over the pane's edge.
+fn wide_line(at: usize, tag: &str) -> String {
+    let n = at + 1;
+    let mut line = format!("{n}. {tag}: ");
+    for _ in 0..WIDE_UNITS {
+        line.push_str("日本語のテキストが続きます。🎉 and then some latin words follow. ");
+    }
+    line
 }
 
 /// Parse `@@ -a,b +c,d @@`, where `,b` is omitted when the count is 1.

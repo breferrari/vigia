@@ -60,6 +60,7 @@
 //! onto one of nine [`Class`]es and stops, because `SPEC.md` §6 puts no terminal
 //! in this crate and §11.1 leaves the palette to the shell.
 
+use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -183,6 +184,32 @@ const CLASSES: [(&str, Class); 16] = [
 /// long as the reader stays that deep in the hunk. Thirty-two keeps the tail
 /// near two screenfuls while a thousand-line hunk holds thirty-one positions.
 pub const CHECKPOINT_STRIDE: usize = 32;
+
+/// Hunks kept after they have left the screen.
+///
+/// [`CHECKPOINT_STRIDE`] bounds re-parsing a hunk the reader is *in*. This bounds
+/// re-parsing one they have come **back** to, which is the other half of the same
+/// cost and the one nothing covered until
+/// [#45](https://github.com/breferrari/vigia/issues/45).
+///
+/// The asymmetry is what makes it necessary. Scrolling down enters a hunk at its
+/// top, where a forward-only parse has nothing above it to pay for; scrolling up
+/// enters the same hunk at its **bottom** and pays the whole walk. Measured over
+/// 120-row hunks of Japanese and emoji, release: a frame entering one from below
+/// is **26.39ms** against the 16ms I9 budget, while the same frame with the parse
+/// still held is **90µs**. So a reader flicking the wheel back over what they
+/// just read dropped a frame per file, for an answer that had been in memory one
+/// frame earlier.
+///
+/// **Four, because the bound has to stay a bound.** This is a constant added to
+/// "what one screen can show", not a second cache that grows: a monitor is left
+/// open for days, and I3 is the invariant that would pay for getting this wrong.
+/// Four covers a wheel flick and its reversal, which is a screen or two of travel
+/// and one or two hunks each way, with room for the hunk half off each edge.
+/// Beyond that the parse is re-paid, and that is deliberate rather than
+/// unnoticed: the alternative is retention measured in frames, whose worst case
+/// is a reader holding page-down and accumulating a hunk per keypress.
+pub const RETAINED_HUNKS: usize = 4;
 
 /// Both sides of one hunk, each parsed as the file it describes.
 ///
@@ -473,6 +500,24 @@ pub struct Highlighter {
     /// linear scan is faster than hashing a key and is one less thing to get
     /// wrong.
     entries: Vec<Entry>,
+    /// Hunks that have left the screen, newest last, capped at
+    /// [`RETAINED_HUNKS`].
+    ///
+    /// **Why a monitor keeps anything it is not drawing.** Highlighting is
+    /// forward-only, so a hunk entered at its *bottom* costs the whole walk above
+    /// the visible row. Dropping a parse the moment it scrolls off means a reader
+    /// who scrolls back over ground they just read pays that walk again, and
+    /// measured over wide-character content that is **26.39ms** against a 16ms
+    /// budget, once per file, with the answer sitting in memory a frame earlier
+    /// ([#45](https://github.com/breferrari/vigia/issues/45)).
+    ///
+    /// This is a queue rather than a second `entries`, and the difference is the
+    /// bound. Eviction order *is* the queue's order, so nothing has to be sorted
+    /// or timestamped on the frame path, and the cache stays what one screen can
+    /// show plus a constant. I3 is a claim about a process left open for days:
+    /// a bigger constant is a higher plateau, which drift cannot see, and only an
+    /// unbounded one would be a leak.
+    retired: VecDeque<Entry>,
     stats: HighlightStats,
 }
 
@@ -490,6 +535,7 @@ impl Highlighter {
                 .filter_map(|(prefix, class)| Some((Scope::new(prefix).ok()?, *class)))
                 .collect(),
             entries: Vec::new(),
+            retired: VecDeque::with_capacity(RETAINED_HUNKS),
             stats: HighlightStats::default(),
         }
     }
@@ -515,14 +561,59 @@ impl Highlighter {
         Pass { highlighter: self }
     }
 
-    /// Drop every hunk the pass did not draw.
+    /// Retire every hunk the pass did not draw, and drop what will not fit.
+    ///
+    /// Two stages rather than one, and only the second is an eviction. A hunk
+    /// that leaves the screen goes to the back of [`Self::retired`]; a hunk
+    /// pushed out of *that* is gone and is what `evicted` counts. Keeping the
+    /// counter on the second stage is deliberate: it is the number `SPEC.md` §7's
+    /// "a bound is only evidence when something reached it" rule is asserted on,
+    /// and counting a retirement there would report the queue turning over as
+    /// though the cache were being emptied.
     fn sweep(&mut self) {
-        let before = self.entries.len();
-        self.entries.retain(|entry| entry.live);
-        self.stats.evicted += (before - self.entries.len()) as u64;
+        let mut at = 0;
+        while at < self.entries.len() {
+            if self.entries[at].live {
+                at += 1;
+            } else {
+                self.retired.push_back(self.entries.remove(at));
+            }
+        }
+        while self.retired.len() > RETAINED_HUNKS {
+            self.retired.pop_front();
+            self.stats.evicted += 1;
+        }
+    }
+
+    /// Take a retired hunk back, if this is one the reader has come back to.
+    ///
+    /// Linear over a queue of [`RETAINED_HUNKS`], for the reason [`Self::entries`]
+    /// is a `Vec`: the set is a handful and a scan beats a hash.
+    fn recover(&mut self, path: &str, ordinal: usize) -> Option<Entry> {
+        let at = self
+            .retired
+            .iter()
+            .position(|entry| entry.ordinal == ordinal && entry.path == path)?;
+        self.retired.remove(at)
     }
 
     fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
+        // A hunk the reader has scrolled back to comes out of the retired queue
+        // first, so everything below sees one cache rather than two. Whether its
+        // content is still current is then decided exactly as it is for an entry
+        // that never left: by digest, and by rewinding when it differs. Coming
+        // back to a hunk whose file has been rewritten meanwhile is therefore
+        // correct rather than merely fast.
+        let held = self
+            .entries
+            .iter()
+            .any(|entry| entry.ordinal == ordinal && entry.path == path);
+        if !held {
+            if let Some(entry) = self.recover(path, ordinal) {
+                self.entries.push(entry);
+            }
+        }
+
         // Destructured so the syntax set can be read while one entry and the
         // counters are written. Through `&mut self` alone the borrow checker
         // sees one whole thing.
@@ -531,6 +622,7 @@ impl Highlighter {
             table,
             entries,
             stats,
+            ..
         } = self;
 
         let found = entries
@@ -576,11 +668,16 @@ impl Highlighter {
 
     /// Hunks currently held between frames.
     ///
-    /// At most what one screen can show. I3 is a claim about a process that runs
-    /// for days, so this is the number that says the cache is bounded by the
-    /// viewport rather than by the session.
+    /// At most what one screen can show, plus [`RETAINED_HUNKS`]. I3 is a claim
+    /// about a process that runs for days, so this is the number that says the
+    /// cache is bounded by the viewport rather than by the session.
+    ///
+    /// The retired queue is counted here rather than reported separately, and
+    /// that is the honest direction: a caller asking what the cache holds is
+    /// asking what it costs, and a parse kept for a reader who might scroll back
+    /// occupies exactly as much memory as one being drawn.
     pub fn tracked(&self) -> usize {
-        self.entries.len()
+        self.entries.len() + self.retired.len()
     }
 }
 
