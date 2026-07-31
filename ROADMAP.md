@@ -127,7 +127,8 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
 | ✅ | Fast scrolling drops frames, and a drawn row costs its whole line | [#45](https://github.com/breferrari/vigia/issues/45) |
 | ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
-| ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
+| ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
+| ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
 **[#10](https://github.com/breferrari/vigia/issues/10) was split before anything here was taken**, which this file had blocked the phase on. Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carried four features that share no implementation.
@@ -171,6 +172,28 @@ That is the third time the expensive-looking property turned out to be a by-prod
 Two existing gates had to change for the same reason, and it is worth knowing before the next block-drawing element lands: a sparkline's top rung and every heat slice are both `█`, so counting glyphs stopped telling the two strips apart and one gate started reading eighteen buckets. Both match on colour now.
 
 **And a rule went into `SPEC.md` §7 that the soak found on its own.** A bound is only evidence when something reached it. The per-commit soak window touches about eighty paths against a cap of 256 and never turns the window over, so `tracked <= 256` is satisfied there by a store nothing filled. The gate now refuses to assert when the run reached neither eviction rule and prints why, exactly as the drift gate does, and the deterministic proof runs in every `cargo test` instead.
+
+**The status bar is in, on all three tier-1 targets, and the interesting part is that it nearly shipped on two.** [#41](https://github.com/breferrari/vigia/issues/41) filled §5.1's last two unspecified cells. Frame time is the p99 of the last 128 completed frames, where a frame is the whole turn of the loop rather than the diff; memory is one read per painted frame. Measured with both inside the timed frame: **p50 2.56ms, p99 3.00ms, 0 of 250 warm frames over the 16ms I9 budget**, and one memory read is **193ns**.
+
+**The number that decided the design was 42.8ms**, which is what `tasklist` costs to spawn on the reference machine: 2.7x the whole frame budget for the read alone. That is why `soak.rs` samples RSS 288 times an hour and not sixty times a second, and it was very nearly the reason Windows shipped without a memory cell at all. The in-process answer costs 193ns and comes from crates `gix` already puts in each target's graph, so it added **two edges and zero packages**. The mistake and its correction are in the pull-forward log under [#56](https://github.com/breferrari/vigia/issues/56).
+
+**A monitor readout has to be constant width or it moves what is beside it.** Both cells are, by construction: the number is right-aligned in a fixed field, so digits change and the unit does not move, and past a useless magnitude the value gives way to a sigil (`>1s`, `>1GiB`) rather than to a sixth column. Neither cell can change the footer's height either, which is §11.1's notice rule one element over and matters twice here: the frame cell does not exist on the first paint, and the memory cell would not exist on a platform with no cheap read.
+
+**And the pane went blank while the header said two files had changed.** [#57](https://github.com/breferrari/vigia/issues/57), reported mid-pass by using the tool: thousands of changed files, scrolled into, then `git reset --hard`. `View::collect` rested the diff's last row at the *top* of the viewport instead of the bottom, so it drew one row over twenty-two blank ones. Pulled into this phase rather than shelved, on [#45](https://github.com/breferrari/vigia/issues/45)'s precedent: found by using it, and a pane that goes blank has stopped being monitor-class.
+
+> [!warning] The gate that should have caught #57 asserted it instead
+> `the_bottom_of_the_diff_is_content_rather_than_blank` read
+> `assert_eq!(view.rows.len(), 1)` against a twenty-two row body, under that name
+> and under a comment saying an empty pane is indistinguishable from a broken
+> one. Every word around it was right and the one line that runs pinned the
+> defect in place for two phases.
+>
+> Then the *replacement* gate did the same thing one level down: it asserted the
+> right outcome about a situation that never reached the fixed code, because the
+> shared fixture's four-row files cannot hold a deep enough row offset to
+> overshoot. It passed against the unfixed code and only the mutation run found
+> it. **A gate can be wrong about its situation as well as about its assertion,
+> and reading cannot tell the two apart.** `SPEC.md` §7 carries the first half.
 
 ## Phase 4 — distribution
 

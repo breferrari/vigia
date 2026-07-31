@@ -48,15 +48,15 @@ vigia ~/code/some-repo
 
 It shows the working tree against the index, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and names the branch it found nothing on.
 
-**What is early about it.** There are no flags and no config file: one optional path and nothing else. Colour is the sixteen ANSI names, so the recency and heat ramps have fewer steps than the mockup below until theming lands. The status bar readouts in that picture are not built yet.
+**What is early about it.** There are no flags and no config file: one optional path and nothing else. Colour is the sixteen ANSI names, so the recency and heat ramps have fewer steps than the mockup below until theming lands.
 
 ## 🖼️ Where it is going
 
-Target layout. **This is a mockup, not a screenshot.** Most of it draws today: the header's `watching · 3 files`, the file rows, the counters, the change sparklines, the heat bars, the pulse on what just changed, and the highlighted diff under them. The status bar is still only in the picture, and the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started.
+Target layout. **This is a mockup, not a screenshot.** Most of it draws today: the header's `watching · 3 files`, the file rows, the counters, the change sparklines, the heat bars, the pulse on what just changed, and the highlighted diff under them. The status bar draws too, and the two departures from the picture are deliberate: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and memory is quoted in `MiB` because that is the unit the soak that budgets it uses.
 
 <img src="assets/preview.svg" alt="Mockup of the vigia interface: a file list with change sparklines above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
 
-The sparklines are change density over time. The bars locate change within each file. The frame time sits in the status bar because it is a promise, not a diagnostic.
+The sparklines are change density over time. The bars locate change within each file. The frame time sits in the status bar because it is a promise, not a diagnostic: it is the p99 of the last 128 frames, against the 16ms this is gated at. The memory beside it is read once a frame and costs 193ns to read.
 
 ## ⚡ Design commitments
 
