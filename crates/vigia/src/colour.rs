@@ -110,9 +110,12 @@ impl Depth {
     ///    wrong by everything below. `auto` falls through rather than meaning a
     ///    rung, which is what makes it possible to unset the override in a child
     ///    shell without unsetting the variable.
-    /// 2. **`NO_COLOR`**, non-empty, per the convention. Below the override so that
-    ///    `VIGIA_COLOR` can still ask for colour in one pane of a session that sets
-    ///    it globally.
+    /// 2. **`NO_COLOR`**, present at all. The convention's own wording is "present
+    ///    and not an empty string", and this is deliberately the looser reading:
+    ///    `NO_COLOR=` in an environment file is a reader asking for no colour, and
+    ///    honouring the letter over the intent hands them colour they went out of
+    ///    their way to switch off. Below the override so that `VIGIA_COLOR` can
+    ///    still ask for colour in one pane of a session that sets it globally.
     /// 3. **`TERM=dumb`**, which is a terminal saying it cannot do this.
     /// 4. **`COLORTERM`** of `truecolor` or `24bit`. The only positive signal for
     ///    24-bit that exists; there is no terminfo capability for it that is
@@ -141,7 +144,7 @@ impl Depth {
             }
         }
 
-        if lookup("NO_COLOR").is_some_and(|value| !value.is_empty()) {
+        if lookup("NO_COLOR").is_some() {
             return Ok(Self::None);
         }
 

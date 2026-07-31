@@ -63,10 +63,15 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             Depth::None,
         ),
         (
-            "an empty NO_COLOR is not set, per the convention",
+            // Present at all, whatever it holds. The no-color.org wording is
+            // "present and not an empty string", and this is deliberately the
+            // looser reading: `NO_COLOR=` in an env file is a reader asking for no
+            // colour, and honouring the letter over the intent would hand them
+            // colour they went out of their way to switch off.
+            "an empty NO_COLOR still means no colour",
             false,
             &[("NO_COLOR", ""), ("COLORTERM", "truecolor")],
-            Depth::Truecolor,
+            Depth::None,
         ),
         (
             "a dumb terminal outranks a COLORTERM it cannot honour",
