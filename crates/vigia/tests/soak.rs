@@ -110,6 +110,11 @@ const FD_HEADROOM: usize = 16;
 const WARMUP_FRACTION: f64 = 0.10;
 
 /// I3's budget: RSS drift over the window.
+///
+/// `VIGIA_BUDGET_SLACK` deliberately does not reach it. That multiplier exists
+/// because a hosted runner's *wall clock* is not a property of this code
+/// (`SPEC.md` §7), and this is a ratio of a process against itself: a slower
+/// machine takes fewer frames in the window, it does not leak more per frame.
 const DRIFT_BUDGET: f64 = 0.05;
 
 /// Samples each end of the comparison needs before there is a verdict at all.
@@ -340,6 +345,14 @@ impl Report {
             .unwrap_or(0)
     }
 
+    fn max_tracked_hunks(&self) -> usize {
+        self.samples
+            .iter()
+            .map(|s| s.tracked_hunks)
+            .max()
+            .unwrap_or(0)
+    }
+
     fn rss(&self) -> Vec<u64> {
         self.samples.iter().map(|s| s.rss).collect()
     }
@@ -378,11 +391,7 @@ impl Report {
              body {}, closest to its screen's own bound {:?}; paths ever changed {}",
             self.max_tracked_diffs(),
             self.samples.iter().map(|s| s.files).max().unwrap_or(0),
-            self.samples
-                .iter()
-                .map(|s| s.tracked_hunks)
-                .max()
-                .unwrap_or(0),
+            self.max_tracked_hunks(),
             self.samples.iter().map(|s| s.body).max().unwrap_or(0),
             self.closest_hunk_bound,
             self.paths()
@@ -402,11 +411,10 @@ impl Report {
             self.highlight.evicted,
             self.highlight.lines
         );
-        match self.samples.first().and_then(|s| s.fds) {
-            Some(_) => println!(
-                "soak: descriptors baseline {:?}, max {:?}",
-                self.samples.first().and_then(|s| s.fds),
-                self.samples.iter().filter_map(|s| s.fds).max()
+        match self.samples.first().and_then(|sample| sample.fds) {
+            Some(first) => println!(
+                "soak: descriptors {first} at the first sample, {} at the most",
+                self.samples.iter().filter_map(|s| s.fds).max().unwrap_or(0)
             ),
             None => println!("soak: descriptors unavailable on this platform"),
         }
@@ -844,12 +852,7 @@ impl Report {
         );
         // And the viewport bound has to have been holding more than one thing,
         // or "bounded by the screen" is indistinguishable from "holds one hunk".
-        let hunks = self
-            .samples
-            .iter()
-            .map(|s| s.tracked_hunks)
-            .max()
-            .unwrap_or(0);
+        let hunks = self.max_tracked_hunks();
         assert!(
             hunks > 1,
             "I3: the highlight cache never held more than {hunks} hunk parse, so \
