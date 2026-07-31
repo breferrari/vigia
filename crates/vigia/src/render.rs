@@ -170,16 +170,18 @@ const MIN_BODY: u16 = 2;
 /// what they are looking at is live.
 const FOLLOWING: &str = "follow ▶";
 
-/// What joins the mode word to the file count on the header.
+/// What joins two facts drawn on one line.
 ///
-/// The mockup's own character, and the same one the hint bar uses, because two
-/// separators would be two dialects for one idea.
+/// Twice on screen: the header's mode word and its file count, and the empty
+/// state's "nothing changed" and the branch it did not change on. The mockup's
+/// own character, and the same one the hint bar uses, because two separators
+/// would be two dialects for one idea.
 ///
 /// Deliberately **not** [`HINT_SEPARATOR`] itself, which is exported so
 /// `tests/legibility.rs` can split the *hint bar* on it. Sharing the constant
 /// would let a change to how hints are joined silently reshape the header, and
 /// these are two independent choices that happen to agree today.
-const HEADER_SEPARATOR: &str = " · ";
+const FACT_SEPARATOR: &str = " · ";
 
 /// What the body says when there is no diff at all.
 ///
@@ -361,7 +363,7 @@ fn header_rungs(mode: Mode, files: usize) -> Vec<String> {
     let mut rungs = Vec::with_capacity(3);
     let count = count_of(files);
     if !count.is_empty() {
-        rungs.push(format!("{word}{HEADER_SEPARATOR}{count}"));
+        rungs.push(format!("{word}{FACT_SEPARATOR}{count}"));
     }
     rungs.push(word.to_owned());
     rungs.push(String::new());
@@ -370,7 +372,8 @@ fn header_rungs(mode: Mode, files: usize) -> Vec<String> {
 
 /// The one body line a worktree with no changes gets.
 ///
-/// This is `SPEC.md` §11.2's B3, and it carries two of that ruling's four facts.
+/// This is B3, ruled into `SPEC.md` §11.1 with its number left behind in §11.2,
+/// and it carries two of that ruling's four facts.
 /// The other two are the header's: which repository, from the worktree name, and
 /// that it is watching, from the mode word. So the empty state costs one row
 /// rather than four, and the mode word is what makes the fourth fact sayable in
@@ -385,7 +388,7 @@ fn header_rungs(mode: Mode, files: usize) -> Vec<String> {
 /// commit id in a monitor that shows no commits.
 fn empty_state(branch: Option<&str>) -> String {
     match branch {
-        Some(branch) => format!("{NOTHING_CHANGED}{HEADER_SEPARATOR}{branch}"),
+        Some(branch) => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{branch}"),
         None => NOTHING_CHANGED.to_owned(),
     }
 }

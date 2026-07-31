@@ -67,11 +67,6 @@ impl App {
         self.notice.as_deref()
     }
 
-    /// Whether the watch is still live.
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
-
     /// Record that the watch has stopped, so the header stops claiming otherwise.
     ///
     /// Separate from [`App::warn`], and called **with** it rather than instead of
@@ -324,12 +319,13 @@ mod tests {
 
     #[test]
     fn a_shell_starts_watching_and_a_lost_watch_is_one_way() {
+        // Asserted through `chrome`, which is the only way the mode leaves this
+        // type and therefore the only path that can be wrong. A bare accessor
+        // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
-        assert_eq!(app.mode(), Mode::Watching);
         assert_eq!(app.chrome("fixture", None).mode, Mode::Watching);
 
         app.watch_lost();
-        assert_eq!(app.mode(), Mode::Lost);
         assert_eq!(app.chrome("fixture", None).mode, Mode::Lost);
 
         // One way, and asserted rather than left implied by the absence of a
