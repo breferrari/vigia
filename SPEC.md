@@ -124,7 +124,7 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 
 | Element in the mockup | What it needs |
 |---|---|
-| Header: `watching · 3 files` | A **mode word**, so there is a set of modes. `watching` implies at least a settling state and an idle one. Changed-file count is the §10 header question. **(unspecified: the mode set)** |
+| Header: `watching · 3 files` | A **mode word**, so there is a set of modes. Changed-file count is the §10 header question. **Ruled 2026-07-31 and implemented: the set is two**, `watching` and `not watching`. This cell used to say that `watching` "implies at least a settling state and an idle one", and it implies neither: both are durations, and a duration cannot be drawn honestly by a shell that only wakes when a file changes. That is the same wall the pulse hit one row below, and the two words left are the only two states the shell can actually tell apart. The header also draws the **worktree** name on the left where the picture draws `vigia`, which is the one deliberate departure from the mockup in the whole layout. See §11.1 for both |
 | Per-file **sparkline** | A **retained time series per file** — samples of churn over a window, bucketed. This is the only unbounded state in the design and it is the one I3 forbids growing: the window and the sample rate are part of the invariant, not a rendering detail. **Ruled 2026-07-31 and implemented: a 120-second window in 8 buckets of 15 seconds, capped at 256 paths, evicted by window and by least-recently-changed.** That is I10, which now has a row above rather than a warning below. One sample per path per coalesced tick, and heights are scaled against the **busiest bucket on screen** rather than per row, because the question a reader asks down a file list is which file is busiest |
 | Per-file **heat strip** | Hunk line-ranges projected onto a fixed number of buckets across the file's length, so it needs the file's **total line count**, not only its diff. Colour rule when one bucket holds both additions and deletions. **Ruled 2026-07-31 and implemented.** Bucket count is **12**, from the picture, which draws exactly twelve; the picture also draws an empty bucket as a **dark track** rather than as a gap, so the strip is always its full width and a reader can see how much of the file is untouched. A mixed bucket is **yellow**: every alternative paints it as pure, and separating addition from removal by position is the strip's whole job. Intensity is two steps rather than the picture's three, for the reason the recency ramp is three rather than a fade. The line count it needs is **free**: see §5.2 |
 | Per-file `+42 −7` | Covered. Per-file counters are free — a file must be diffed to be drawn (§10). |
@@ -356,7 +356,51 @@ The **hint bar is a list**, so when the footer cannot hold both halves on one li
 
 Below the width where even a full line holds the bar, it drops **whole hints** and never part of one: `jk scroll` first, then `q quit`, leaving `f follow` last. `q` and `jk` are pager reflexes and four keys reach quit, while `f` is the one nobody would guess and the only one that restores a state a reader can lose without noticing. The state has its own ladder, `follow ▶  N/M` then `follow ▶` alone, because the header already carries the file count. **State outlives advice at every width**, which is what keeps the mode visible when the pane is at its worst.
 
-The **header never grows**. A worktree name is not a list and has nowhere to break, so it marks its edge like every other single token.
+The **header never grows**. A worktree name is not a list and has nowhere to break, so it marks its edge like every other single token, and a second line could not guarantee a fit anyway: it would spend a body row on a maybe.
+
+**The left-hand side is the worktree, not the program**, and this is the one place the layout departs from `assets/preview.svg` on purpose. The picture puts `vigia` there. A title bar spends six of forty columns telling the reader which program they started, which is the one thing they already know, and what they do not know from looking is *which tree* — the question that decides whether two panes side by side mean anything. Written here 2026-07-31 rather than left in a code comment, because §5.1's own rule is that a published artifact answering a question is the answer, so a deliberate departure from one is exactly the thing that has to be argued in the open or it reads as drift.
+
+And it is the worktree's own name **even when the path it was given does not contain one**. `vigia .` hands `gix` a workdir of `.`, which has no final component, so the header drew `.` — the single thing it exists to say, and the one thing it could not. The path is resolved for **display** before its last component is taken. Display only: the value the watch compares event paths against is left alone, because resolving it there would introduce `\\?\C:\` on Windows and `/private/var` on macOS, and [#30](https://github.com/breferrari/vigia/issues/30) is the record of what a root that matches no event path costs.
+
+**The mode word, and the set it implies.** It sits on the right with the count, which is where the mockup draws it.
+
+| Mode | What it means |
+|---|---|
+| `watching` | the watch is live, so the screen follows the tree |
+| `not watching` | the watch never armed, or it ended, so this is a still picture |
+
+**Two, and I1 is the reason rather than minimalism.** §5.1 read `watching` as implying at least a settling state and an idle one. It implies neither, because both are *durations* and this shell wakes only when something changes. `Watcher::next_tick` blocks until a burst has settled, so the shell is never awake **during** settling and could not draw it without a redraw nothing schedules; and "idle" needs a wake that says nothing happened, which is the timer I1 forbids. Either word could come into existence and then never leave, which is precisely the frozen clock the recency ladder above rejected for the pulse. A header that lies about the present until the next file is written is worse than one with fewer words in it.
+
+**The word starts at `watching`, before the watch is armed.** Arming happens after first paint on purpose, so the watch does not observe the shell's own setup reads. A third word for those microseconds would flicker on every single launch to describe a state that always resolves the same way within one wake, and when arming genuinely fails the failure arrives as its own wake and corrects the word.
+
+**`not watching`, not `stalled` and not `still`.** It is the mockup's word negated, so a reader who has learned one has learned both. `stalled` reads as temporary when this is not, and `still` means both "motionless" and "continuing".
+
+**The mode is state, so the reason for it is not.** A watch that ends puts `not watching` on the header **and** its error on the footer as a notice. The header carries what is durable — this diff has stopped being live — and the notice carries which failure did it, which is not. Before this the durable half rode the notice alone, and survived only because the tick that clears a notice can never arrive again once the watch is gone.
+
+**The right-hand side is a ladder and the mode word is its last rung standing.** `watching · 3 files`, then the word alone, then nothing. The count goes first because it summarises the body, which is on screen and can be counted by looking; whether the pane is still live is recoverable from nowhere. That is the footer's own rule one line up, and it matters most at exactly the widths where the body has nothing in it to count.
+
+**The count is nothing at all when it is zero**, the same way a position is nothing when there is no diff to be positioned within. `0 files` spends columns restating what the empty state says below in words.
+
+**And the mode word is never cut.** It is drawn whole or dropped, which is stricter than the marking rule the rest of the header follows: `wat›` is a state a reader cannot read, and unlike a path it has no half that identifies it. The ladder is what delivers that without the header ever taking a second line.
+
+**The empty state**, which is B3. This is the screen the tool sits on most of the time, and the first thing anyone sees when they open it beside an agent that has not written yet, where a blank pane and a hang look identical.
+
+Four facts, two of which the header already carries, so the body spends one line rather than four:
+
+| Fact | Where it is drawn |
+|---|---|
+| which repository | the header's left-hand side |
+| that it is watching | the header's mode word |
+| which branch | the body line |
+| that there is nothing to show | the body line |
+
+The line reads `no unstaged changes · main`, and `no unstaged changes` alone when HEAD names no branch.
+
+**It no longer reads `working tree clean`, and that phrase was wrong rather than merely plain.** It is git's, and git means index-against-HEAD as well as tree-against-index. This diff is the working tree against the index, so a worktree with every change staged draws zero files and was being told it was clean while `git status` said the opposite. `no unstaged changes` is exactly what zero files means here, untracked files included, since an untracked file is unstaged too.
+
+**The branch is orientation, not the comparison.** Nothing about it changes what is diffed, and it is named anyway because two agents on two worktrees of one repository are otherwise identical on screen, which is the multi-worktree case §4 defers rather than rejects. A detached HEAD names no branch and the line drops it rather than inventing one: `HEAD@abc123` would put a commit id in a monitor that shows no commits.
+
+**It costs one `.git/HEAD` read, taken only on frames that draw no diff.** I4 holds because the thing read is the thing drawn, and the frame that draws it is the cheapest one there is: nothing to diff, and nothing else to read.
 
 And a token that had to lose characters says so, in the direction it lost them. `…` on the **left** means the beginning is gone, and only a file path uses it, because the end of a path is what names the file. `›` on the **right** means it continues past the edge: the worktree name, a notice, a hunk header, a note, the empty-state line. A hunk header silently cut to `@@ -258,7 +25` reads as a different line number, which is the failure this closes.
 
@@ -396,7 +440,9 @@ So **a projection re-projects rather than dropping items**: a narrower rung sums
 
 **And no glance element may take a heading below twelve columns of path.** The counters, the pulse and the strip are all placed from the right, in that order of priority, against a floor the path keeps. A row reduced to `M …` would have stopped naming its own file, which is the truncated-to-useless shape I6 forbids, arrived at by decoration rather than by narrowing.
 
-**CLI.** One optional positional path, defaulting to the working directory. No flags today.
+**CLI.** One optional positional path, defaulting to the working directory. No flags today, and an argument beginning with `-` is refused with one line naming that fact rather than being taken as a path, so `vigia --help` is told there are no options instead of being told `--help` is not a repository. That is not `--help` implemented; B6 still holds the question of whether it should be.
+
+**A path that is not a repository exits before the screen is taken.** That is the first half of B5, and it shipped with the shell rather than being ruled first: `Worktree::discover` and the opening walk both run ahead of `Session::enter`, so the failure reaches a terminal the reader can still read. An error painted inside a TUI that then hands the terminal back is an error nobody sees. Recorded 2026-07-31, when [#40](https://github.com/breferrari/vigia/issues/40) found §11.2 still calling it proposed, which is this section's warning box in miniature.
 
 ### 11.2 Undecided
 
@@ -419,17 +465,21 @@ Each carries a recommendation marked **(proposed)**. None is settled until ruled
 
 What ruling it exposed, and what §11.1 now records: "last in the batch" is only affordable because the filesystem event names the path. Deriving it instead would mean `stat`-ing every changed file, which is [#19](https://github.com/breferrari/vigia/issues/19)'s breach, so the cheap answer and the correct one happened to coincide here rather than by design.
 
-**B3 — The empty state.** Zero changes is not an edge case; it is the state the tool sits in most of the time, and it is the **first** thing anyone sees when they open it beside an agent that has not written yet. A blank pane is indistinguishable from a hang.
+**B3 — The empty state. Ruled 2026-07-31: the proposal stands, with its wording corrected. See §11.1.** Zero changes is not an edge case; it is the state the tool sits in most of the time, and it is the **first** thing anyone sees when they open it beside an agent that has not written yet. A blank pane is indistinguishable from a hang.
 
-*(proposed)* Name it: repository, branch, "no changes", and an explicit statement that it is watching. This screen is the product's first impression and currently has no specification at all.
+Rationale, kept because it is the part a later reader will want to argue with: name it, with the repository, the branch, "no changes", and an explicit statement that it is watching. All four are drawn and two of them are the **header's**, which is why this and the mode word were ruled in one pass rather than separately: the mode word is what makes "and it is watching" sayable in zero extra rows, and the empty state is the screen that makes the mode word worth having.
+
+What was corrected is the wording. The proposal said "no changes" and the shell said `working tree clean`, and both are looser than the diff underneath them: this one compares the working tree against the **index**, so a fully staged worktree has no changes here and plenty for git.
 
 **B4 — Is the file list navigable?** The README mockup shows a file list above the diff. Selectable, with the diff jumping to the selection, or a map rather than a menu?
 
 *(proposed)* **Not navigable in v1** — one continuous scroll, list as map. Rationale: selection implies focus, focus implies a second mode, and modes are reviewer-class (§2). The pane is 40 columns beside an agent, not a full-screen client.
 
-**B5 — Not a git repository, and submodules.** Neither appears anywhere in this spec.
+**B5 — Not a git repository, and submodules.** Neither appeared anywhere in this spec. **Half ruled 2026-07-31**, and the halves are separated here rather than one number being retired for the sake of tidiness, because only one of them is decided.
 
-*(proposed)* Not a repository: exit non-zero with one line, **before** entering the alternate screen — an error painted inside a TUI that then restores the terminal is an error nobody reads. Submodules: out of v1, shown as an opaque directory and said so, because recursing into them costs the incremental guarantees in I2a.
+**Not a repository: ruled, and it had already shipped. See §11.1.** Exit non-zero with one line, **before** entering the alternate screen — an error painted inside a TUI that then restores the terminal is an error nobody reads. The proposal stands unchanged; what is worth recording is that `run` has ordered `Worktree::discover` ahead of `Session::enter` since the shell was built, so this sat here marked `(proposed)` for two phases while the code did it. Found by [#40](https://github.com/breferrari/vigia/issues/40) while ruling B3, which is exactly the drift §11's warning box describes and which `take-next`'s pre-flight cannot see, since it compares invariant tokens rather than behaviour.
+
+**Submodules: still open.** *(proposed)* Out of v1, shown as an opaque directory and said so, because recursing into them costs the incremental guarantees in I2a.
 
 **B6 — CLI surface and configuration.** No flags exist; §5 theming arrives in Phase 3 with nowhere to configure it.
 
