@@ -281,6 +281,17 @@ impl Shell {
         // costs nothing worse than a row budget that was one out for a collect
         // which failed anyway: the renderer plans and draws from the same
         // `view.files`, so what reaches the screen is self-consistent either way.
+        //
+        // The **branch** has that shape too, and one direction of it is visible
+        // rather than merely inconsistent. It was decided from the *frame's*
+        // count above, while the empty state is drawn from `view.files`, so a
+        // collect that fails on the way from a clean tree to a dirty one draws
+        // last frame's empty state with no branch on it. One line loses four
+        // words for one frame, on a path that has already reported a failure to
+        // the footer, and the alternative is deciding it twice from two counts
+        // that can disagree. Reading the branch from the stale view instead
+        // would mean holding a name across frames, which is the confident lie
+        // `branch_for` refuses.
         let chrome = self.app.chrome(&self.name, self.branch.as_deref());
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
