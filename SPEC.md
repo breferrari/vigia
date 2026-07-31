@@ -44,6 +44,7 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 | **I7** | Startup to first paint is imperceptible. | **< 50ms** | Timed, gated in CI |
 | **I8** | Terminal restored on **every exit the process controls**: the quit key (Ctrl-C included), an error return, and a panic under `panic = "abort"`. An externally delivered signal is not covered — see [#24](https://github.com/breferrari/vigia/issues/24). | — | Takeover order and its exact inverse; the partial-failure unwinding; a panic-hook test; escape sequences against DEC's own numbers |
 | **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | Gated over the **frame path**, not the primitives: a settled frame, one line rewritten before each frame, every file materialised. `criterion` tracks the same shape |
+| **I10** | **Glanceability history is bounded.** Churn history is bounded by a fixed window and a fixed cap on tracked paths, independent of how many files the session changed. A path that ages out of the window is dropped entirely. | **≤ 256 paths**, **≤ 120s**, whatever the session changed | Structural, in `crates/vigia-core/tests/history.rs`: a fixture recording **10,000** distinct paths asserts the store sits *at* the cap and that eviction actually ran, and a window of silence empties it. The soak asserts the same over the real process, and **refuses to assert** in a window that reached neither rule. Not in `tests/budgets.rs`: every gate there is a ratio or a duration, and this is a count |
 
 A regression past any budget **fails the build.**
 
@@ -124,11 +125,11 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 | Element in the mockup | What it needs |
 |---|---|
 | Header: `watching · 3 files` | A **mode word**, so there is a set of modes. `watching` implies at least a settling state and an idle one. Changed-file count is the §10 header question. **(unspecified: the mode set)** |
-| Per-file **sparkline** | A **retained time series per file** — samples of churn over a window, bucketed. This is the only unbounded state in the design and it is the one I3 forbids growing: the window and the sample rate are part of the invariant, not a rendering detail. **(unspecified: window, bucket width, eviction)** |
+| Per-file **sparkline** | A **retained time series per file** — samples of churn over a window, bucketed. This is the only unbounded state in the design and it is the one I3 forbids growing: the window and the sample rate are part of the invariant, not a rendering detail. **Ruled 2026-07-31 and implemented: a 120-second window in 8 buckets of 15 seconds, capped at 256 paths, evicted by window and by least-recently-changed.** That is I10, which now has a row above rather than a warning below. One sample per path per coalesced tick, and heights are scaled against the **busiest bucket on screen** rather than per row, because the question a reader asks down a file list is which file is busiest |
 | Per-file **heat strip** | Hunk line-ranges projected onto a fixed number of buckets across the file's length, so it needs the file's **total line count**, not only its diff. Colour rule when one bucket holds both additions and deletions. **(unspecified: bucket count, mixed-bucket colour)** |
 | Per-file `+42 −7` | Covered. Per-file counters are free — a file must be diffed to be drawn (§10). |
-| A **dimmed row** (`Cargo.toml` in the mockup renders fainter than the rows above it) | A **recency gradient**: rows fade as their last change ages. **(unspecified entirely — and it is doing real work in the picture, since it is how the eye finds what moved without reading)** |
-| `● just changed` on the diff header | The pulse, but drawn as a **persisting label with a dot**, not a flash. So it has a **decay**. **(unspecified: how long it persists, and whether it fades or cuts)** |
+| A **dimmed row** (`Cargo.toml` in the mockup renders fainter than the rows above it) | A **recency gradient**: rows fade as their last change ages. **Ruled 2026-07-31 and implemented as three rungs of one ladder** — pulse, live, cold — read from I10's store; see §11.1. Sixteen foreground-only colours have three intensities to spend, so the gradient is a ramp of three rather than a fade, and the real one is [#11](https://github.com/breferrari/vigia/issues/11)'s |
+| `● just changed` on the diff header | The pulse, but drawn as a **persisting label with a dot**, not a flash. So it has a **decay**. **Ruled 2026-07-31 and implemented: it persists for exactly one tick and cuts rather than fades.** It is the top rung of the recency ladder above, not a second mechanism, and the rung is deliberately *not* a duration: see §11.1 for why a wall-clock decay cannot be drawn without the timer I1 forbids. It marks **every** path in the newest tick, which is what §11.2 B2 said the pulse was for |
 | Diff body: **syntax highlighted content**, five classes deep (`kw`, `fnn`, `typ`, `var`, `con`) over a default foreground | I2b, and a **class set** rather than a palette: what the picture commits to is which distinctions are worth a colour, not which colour each one gets. Ruled 2026-07-30 and implemented; the engine emits meanings and the shell colours them, which is what leaves the palette to #11. See §11.1 |
 | A **tinted row** with a coloured left bar on every added and removed line | A per-row **background**. It is what separates a changed line from a context line in the picture, because the text itself is highlighted identically on both, and it is doing the same work the dimmed row above does: it is how the eye finds what moved without reading. Not drawable at sixteen foreground-only colours, where an ANSI background is a solid block rather than a tint, so it belongs with [#11](https://github.com/breferrari/vigia/issues/11). **(unspecified entirely, and the reason I2b's ruling costs something: see §11.1)** |
 | Status bar `0.8ms frame` | Instrumenting the render path and drawing the result. Self-referential: measuring and painting the number costs frame time that I9 gates. **(unspecified: sampled or per-frame, and which statistic)** |
@@ -149,25 +150,30 @@ Two of these are corrections rather than gaps:
 
 **The sparkline needs precisely what eviction throws away.** `FrameStats.evicted` exists so the cached-diff map stays "bounded by the current diff rather than by everything ever edited" — that is how I3 is argued today. A churn sparkline is change density *over time*, so it has to survive a file settling: one that empties the moment a file stops changing shows nothing worth glancing at, and *"what was hot thirty seconds ago"* is the entire question it answers. Glanceability history therefore cannot live in the evicting map — and must not be unbounded either.
 
-> [!warning] Proposed I10 — bounded history
-> Deliberately **not** in the §3 table, because that table is for invariants with
-> a failing test and this has none. By this document's own rule it is a wish, and
-> writing it into the table would make the table lie.
+> [!note] I10 earned its row on 2026-07-31
+> It was written here as a **proposal**, deliberately kept out of the §3 table,
+> because that table is for invariants with a failing test and this had none. It
+> now has a budget (256 paths, 120 seconds), a fixture that drives ten thousand
+> paths through it, and a soak assertion over the real process, so it has moved
+> up. [#38](https://github.com/breferrari/vigia/issues/38).
 >
-> *Glanceability history is bounded by a fixed time window and a fixed cap on
-> tracked paths, independent of how many files have changed in the session.* A
-> bulk operation touching ten thousand files must not grow it past the cap, and a
-> path that ages out of the window is dropped entirely.
+> Two things it cost that this section did not predict. The store had to be fed
+> from the **watch** rather than from the frame path, so `Tick` now carries every
+> file a burst wrote instead of only the last, capped at the same 256 so a bulk
+> operation cannot make a tick expensive before the store gets a chance to bound
+> it. And the decay the mockup asks for turned out to be an I1 question rather
+> than a rendering one: see §11.1.
 >
-> It needs a budget and a soak assertion before it earns a row. Until then every
-> sparkline task is blocked on it, because **the data structure is the decision**
-> and the drawing is the easy part.
+> What it got right is the sentence everything else followed from. **The data
+> structure was the decision and the drawing was the easy part.**
 
 **The heat strip needs a whole-file property.** Locating change within a file requires that file's **total line count**, and the frame path is built to avoid exactly that: pure revalidation reads **0 bytes** (§10), the number I2a is written against. Measured naively — every changed file, every frame — it reintroduces the read I2a removed. It is cacheable per `(path, blob id)`, since a file's length cannot change without its content changing, so it is payable once per version rather than once per frame. **That caching is not an optimisation; without it the heat strip breaks I2a.**
 
 **Two status readouts measure the thing they run inside.** `0.8ms frame` means instrumenting the render path and drawing the result — a readout whose own cost falls inside the budget it reports, gated by I9 at 16ms p99. `11MB` is a live RSS number, and I3 samples RSS in a **soak test** precisely because reading it is a syscall on some platforms rather than free per frame. Both are honest to show; neither is free to show; the spec said nothing about either.
 
 **Consequence for sequencing:** Phase 3 is not a rendering phase. Its two headline elements each need a core-side change with an invariant attached, so they belong in the same conversation as I2a and I3 rather than strictly after them.
+
+**Confirmed by building the first one.** [#38](https://github.com/breferrari/vigia/issues/38) landed the sparkline, the recency gradient and the pulse, and the diff was mostly `vigia-core`: a new bounded store, a change to what a `Tick` carries, a new invariant with its own budget, and a soak assertion. The drawing was a bucket ladder and a three-step ramp. This section predicted that split and it was right, which is worth recording because the alternative reading — that Phase 3 is where the shell gets prettier — was the one both §5 and [#10](https://github.com/breferrari/vigia/issues/10) originally invited.
 
 ## 6. Architecture
 
@@ -212,6 +218,7 @@ The rule that closes it has to account for **flooring**. A filesystem stamps a m
 - **The soak drives the whole pipeline, not the engine.** I3 is a claim about the process a reader leaves open, so measuring `vigia-core` alone would prove it about a program nobody runs. The harness is `vigia::run` with the terminal removed: a real `notify` watch thread, real coalescing, `Frame::advance` per tick, follow and scroll through `App`, `View::collect` driving the `Highlighter`, and `render` into a `ratatui` buffer. What it leaves out is named rather than discovered later: the terminal takeover, which needs a tty and is I8's; the input thread; and index writes, because the loop reaches the same mass-eviction state by reverting files and keeping `git` out of the measured window is what makes the temp-file gate exact.
 - **The soak is two tiers, like every other budget here.** *Structural* gates — the retained caches bounded by the current diff and by the viewport, eviction actually happening, and **zero temp files retained** — are counters and directory entries, so they are hardware-independent, take no slack, and run in every `cargo test`. The *absolute* gate is RSS drift, and it is the one that has to be scheduled.
 - **A drift gate over a window shorter than its own warmup is measuring warmup.** RSS climbs to an allocator plateau in the first minutes of any process and only then goes flat, so a short window reads that climb as a leak and a generous threshold would then wave a real leak through. The gate therefore discards a warmup prefix, compares the median of the first quarter of what remains against the median of the last quarter, and **refuses to assert at all** below a window where that leaves two ends worth comparing. Refusing is the point: a gate that cannot say "no drift" has not been tested, and one that says it from four samples is worse than absent.
+- **A bound is only evidence when something reached it, so a gate over one asserts that eviction happened as well as that the bound held.** I10 is the case that made this a rule and the numbers say why: the per-commit soak window touches about eighty distinct paths against a cap of 256 and never turns the 120-second window over once, so the per-sample bound `tracked <= 256` is satisfied there the way an empty room satisfies a fire code. The soak therefore **refuses to assert** when the run reached neither eviction rule and prints why, exactly as the drift gate does; the deterministic proof is a fixture that drives ten thousand paths in every `cargo test`. Verified by running the soak at 300 files, where it reports 256 tracked at the cap with 207 evicted, so the gate can say yes and not only "not applicable".
 - **`proptest`** over diff parsing and hunk-boundary logic.
 
 ## 8. Phases
@@ -342,6 +349,24 @@ Three things follow, and each is a constraint rather than a preference.
 **The diff signal degrades to the sigil column, and that is a loss rather than a simplification.** What separates an added line from a context line in the mockup is the row tint and the left bar of §5.1, and sixteen foreground-only colours can draw neither. So until #11 lands a background, `+` and `−` carry it alone. Recorded out loud because §5 makes shape and colour the whole differentiator, and this is the one place where following the picture spends some of it. The alternative considered and rejected was to keep unclassified text green on an added line and red on a removed one: it preserves the wash, it contradicts the picture, and it would have made the shell's colours mean two different things at once.
 
 **A file type nothing recognises is not an error.** The syntax is resolved from the path, by extension and then by whole file name, and anything unresolved draws exactly as it did before there was highlighting at all. A monitor that refused a file because it could not colour it would have inverted its own job.
+
+**How recency is drawn**, which is I10 and which §5.1 asked for as two separate things. It is **one ladder with three rungs**, read from one store through one lookup, and each rung is an intensity on the file's own heading:
+
+| Rung | What it means | How it draws |
+|---|---|---|
+| **pulse** | named by the **most recent tick** | brightest, plus `● just changed` |
+| **live** | has a sample inside the 120-second window | plain |
+| **cold** | nothing in the window, so nothing is tracked for it | faintest |
+
+Two rulings are inside that table and neither is cosmetic.
+
+**The top rung is not a duration, and I1 is the reason.** §5.1 reads the mockup's persisting label as a decay, and a decay measured against a wall clock has to be *seen* decaying, which needs a redraw nothing schedules. Inventing a timer to get one is exactly what I1 forbids, and it is the same wall §10's highlight-tail bullet already hit. So the window stays real time and the **sampling** is event-driven: the store advances once per coalesced tick, on the wake that was already going to redraw. Nothing on screen changes without something changing on disk, which is what a monitor is for. Defining the pulse as *newest tick* rather than *last three seconds* is what stops that from being a lie: a tree that has gone quiet keeps the label on the file that really is the newest change, indefinitely and correctly, instead of freezing a clock mid-count.
+
+**Cold is not a fourth rule.** A path with nothing left in the window is dropped from the store entirely, per I10, so "cold" and "untracked" are the same state. That is also what the **first** frame of a session looks like: a worktree that was already dirty draws every row cold, because a monitor has no way to know what happened before it was looking and inventing a recency for it would light up rows nothing has touched.
+
+**The sparkline is a thing made of items**, so under the layout rule above it **breaks**: it drops whole buckets, oldest first, and never draws a partial one or a squeezed strip. Its heights are scaled against the busiest bucket **on screen** rather than against each row's own maximum, because scaling per row draws every file at full height the moment it is the busiest thing it has ever been, which answers a question nobody asked while destroying the one comparison a file list is for. A file with no churn draws no strip at all rather than an empty one, so it spends none of its row.
+
+**And no glance element may take a heading below twelve columns of path.** The counters, the pulse and the strip are all placed from the right, in that order of priority, against a floor the path keeps. A row reduced to `M …` would have stopped naming its own file, which is the truncated-to-useless shape I6 forbids, arrived at by decoration rather than by narrowing.
 
 **CLI.** One optional positional path, defaulting to the working directory. No flags today.
 
