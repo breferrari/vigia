@@ -1,0 +1,153 @@
+name: flake rate
+
+# A measuring instrument, not a gate. It answers "how often does this test
+# fail on this runner" with a number, which is the first thing any flake
+# report needs and the thing a re-run can never provide.
+#
+# It deliberately does NOT fail when the test fails. A probe that goes red is
+# a probe nobody reads the output of, and the output is the entire point.
+# Read the run summary.
+#
+# Sample count is `jobs * iterations`. Prefer iterations over jobs: the
+# compile is paid once per job and the runner pool is small on macOS, so
+# 4 x 25 gets a hundred samples far sooner than 25 x 4 does.
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Runner to measure on
+        type: choice
+        default: macos-latest
+        options: [macos-latest, ubuntu-latest, windows-latest]
+      test:
+        description: Test name filter, passed to cargo test
+        type: string
+        default: the_frame_budget_holds_through_a_bulk_rewrite
+      target:
+        description: Integration test target (--test)
+        type: string
+        default: budgets
+      jobs:
+        description: Parallel replicas
+        type: string
+        default: "4"
+      iterations:
+        description: Runs per replica
+        type: string
+        default: "25"
+      slack:
+        description: VIGIA_BUDGET_SLACK for the run
+        type: string
+        default: "3"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+# Never share a group with `ci`. A probe that cancels a real run, or is
+# cancelled by one, produces a partial sample and reports it as a whole one.
+concurrency:
+  group: flake-rate-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan replicas
+    runs-on: ubuntu-latest
+    outputs:
+      replicas: ${{ steps.build.outputs.replicas }}
+    steps:
+      - id: build
+        shell: bash
+        run: |
+          n='${{ inputs.jobs }}'
+          case "$n" in ''|*[!0-9]*) echo "jobs must be a positive integer, got '$n'" >&2; exit 1;; esac
+          [ "$n" -ge 1 ] || { echo "jobs must be >= 1" >&2; exit 1; }
+          echo "replicas=$(seq 1 "$n" | jq -Rsc 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: replica ${{ matrix.replica }}
+    needs: plan
+    runs-on: ${{ inputs.os }}
+    strategy:
+      # One replica stalling says nothing about the others, and killing them
+      # would throw away samples already paid for.
+      fail-fast: false
+      matrix:
+        replica: ${{ fromJSON(needs.plan.outputs.replicas) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Build once. The loop below must measure the test, not rustc.
+      - name: build
+        run: cargo build --release --tests
+
+      - name: measure
+        id: measure
+        shell: bash
+        env:
+          VIGIA_BUDGET_SLACK: ${{ inputs.slack }}
+        run: |
+          set -u
+          iterations='${{ inputs.iterations }}'
+          case "$iterations" in ''|*[!0-9]*) echo "iterations must be a positive integer" >&2; exit 1;; esac
+          [ "$iterations" -ge 1 ] || { echo "iterations must be >= 1" >&2; exit 1; }
+
+          fail=0
+          mkdir -p failures
+          for i in $(seq 1 "$iterations"); do
+            if cargo test --release --test '${{ inputs.target }}' \
+                 '${{ inputs.test }}' -- --exact --nocapture > "failures/run-$i.log" 2>&1; then
+              printf 'run %3d/%s  pass\n' "$i" "$iterations"
+              rm -f "failures/run-$i.log"
+            else
+              fail=$((fail + 1))
+              printf 'run %3d/%s  FAIL\n' "$i" "$iterations"
+              # The breach line is the measurement. Surface it inline so the
+              # log reads as a record rather than as a pointer to an artifact.
+              grep -E 'was .* over the .* budget|p50|panicked' "failures/run-$i.log" | head -5 || true
+            fi
+          done
+
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+          echo "total=$iterations" >> "$GITHUB_OUTPUT"
+          {
+            echo "### replica ${{ matrix.replica }} on ${{ inputs.os }}"
+            echo
+            echo "\`${{ inputs.test }}\` — **$fail failed of $iterations** (slack ${{ inputs.slack }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Exit 0 on a failing test, on purpose: see the header. A replica
+          # that could not run at all is a different thing and does fail,
+          # because `set -u` and the guards above have already exited.
+
+      - name: upload failing runs
+        if: steps.measure.outputs.fail != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failures-${{ inputs.os }}-replica-${{ matrix.replica }}
+          path: failures/
+          if-no-files-found: ignore
+
+  rate:
+    name: rate
+    needs: [plan, measure]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          {
+            echo "## flake rate"
+            echo
+            echo "Target: \`${{ inputs.test }}\` on \`${{ inputs.os }}\`, slack ${{ inputs.slack }}."
+            echo "Sample: ${{ inputs.jobs }} replicas x ${{ inputs.iterations }} iterations."
+            echo
+            echo "Per-replica tallies are above. Sum them for the rate."
+            echo
+            echo "> A rate from one dispatch is a rate on one day's runner pool."
+            echo "> Contention is the thing being measured, so it moves."
+          } >> "$GITHUB_STEP_SUMMARY"
