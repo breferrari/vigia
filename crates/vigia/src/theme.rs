@@ -507,12 +507,27 @@ impl Theme {
             // background this palette does not control.
             added_row: Style::new().bg(Color::Rgb(0x1b, 0x3d, 0x29)),
             removed_row: Style::new().bg(Color::Rgb(0x45, 0x22, 0x2a)),
-            added_bar: Style::new()
-                .fg(Color::Rgb(0x1b, 0x3d, 0x29))
-                .bg(Color::Rgb(0x3f, 0xb9, 0x50)),
-            removed_bar: Style::new()
-                .fg(Color::Rgb(0x45, 0x22, 0x2a))
-                .bg(Color::Rgb(0xf8, 0x51, 0x49)),
+            // **Unset, and that is a ruling reversed rather than a gap.** These
+            // used to invert the sigil cell: diff hue behind, the row's wash in
+            // front, on the argument that the sigil is the one cell that already
+            // means "this line changed" and so could carry §5.1's left bar without
+            // spending a column.
+            //
+            // It reads as a solid block. Inverting the sigil takes the one glyph
+            // that carries the diff signal and turns it into a background, and at
+            // terminal sizes the `+` stops being a character. Reported from a real
+            // screen, which is the only place this was ever going to show.
+            //
+            // So the sigil keeps its own colour on the wash, which is what every
+            // diff tool does and what the mockup itself draws: its bar is a
+            // separate 3px sliver *beside* a green `+`, not a recolouring of it.
+            // The wash carries the band; the sigil carries the sign. The bar has
+            // no terminal equivalent that does not spend a column I6 forbids, and
+            // that is now recorded as a refusal instead of paid for by the sigil.
+            //
+            // The keys stay, so a theme file can still ask for one.
+            added_bar: Style::new(),
+            removed_bar: Style::new(),
             note: rgb(0xd2, 0xa8, 0xff),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
@@ -566,12 +581,9 @@ impl Theme {
             // lighter, for the reason every ramp in this palette is reversed.
             added_row: Style::new().bg(Color::Rgb(0xc0, 0xf0, 0xcd)),
             removed_row: Style::new().bg(Color::Rgb(0xff, 0xd4, 0xd1)),
-            added_bar: Style::new()
-                .fg(Color::Rgb(0xc0, 0xf0, 0xcd))
-                .bg(Color::Rgb(0x1a, 0x7f, 0x37)),
-            removed_bar: Style::new()
-                .fg(Color::Rgb(0xff, 0xd4, 0xd1))
-                .bg(Color::Rgb(0xcf, 0x22, 0x2e)),
+            // Unset, for the reason `dark` gives at length.
+            added_bar: Style::new(),
+            removed_bar: Style::new(),
             note: rgb(0x82, 0x50, 0xdf),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),
             keyword: rgb(0xcf, 0x22, 0x2e),

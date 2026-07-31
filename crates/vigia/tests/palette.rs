@@ -178,30 +178,48 @@ fn a_changed_row_is_washed_to_the_pane_edge() {
 }
 
 #[test]
-fn the_sigil_cell_carries_the_bar() {
-    // `SPEC.md` §5.1's left bar, which is the sigil cell inverted: the diff hue
-    // behind, the row's own wash in front. Found by looking for the one cell whose
-    // background is not the wash rather than by recomputing the gutter's width,
-    // which would be a second implementation of the layout agreeing with itself.
+fn the_sigil_keeps_its_own_colour_on_the_wash() {
+    // **The sigil is not the bar**, which is a ruling this branch made and then
+    // reversed on seeing it. Inverting the sigil cell (diff hue behind, wash in
+    // front) reads as a solid block: it takes the one glyph carrying the diff
+    // signal and turns it into a background. The mockup draws its bar as a sliver
+    // *beside* a green `+`, not as a recolouring of it.
+    //
+    // So the sigil keeps the diff colour and sits on the row's wash like every
+    // other cell in the row.
     let dark = Theme::dark().resolve(Depth::Truecolor);
-    let backend = draw(60, 8, &three_kinds(), dark);
+    let backend = draw(60, 12, &three_kinds(), dark);
     let buffer = backend.buffer();
 
     for (row, added, sigil) in [(ADDED, true, "+"), (REMOVED, false, "-")] {
         let wash = wash_of(dark, added);
-        let bar = if added {
-            dark.added_bar
-        } else {
-            dark.removed_bar
-        };
+        let want = if added { dark.added } else { dark.removed };
         let at = (0..60)
             .find(|x| buffer[(*x, row)].symbol() == sigil)
             .unwrap_or_else(|| panic!("no {sigil:?} on row {row}"));
 
         let cell = buffer[(at, row)].style();
-        assert_eq!(cell.bg, bar.bg, "the bar's hue is missing on row {row}");
-        assert_eq!(cell.fg, bar.fg, "the sigil is not drawn in the wash");
-        assert_ne!(cell.bg, Some(wash), "the bar is not distinct from the wash");
+        assert_eq!(
+            cell.fg, want.fg,
+            "the sigil lost its diff colour on row {row}"
+        );
+        assert_eq!(
+            cell.bg,
+            Some(wash),
+            "the sigil cell is not on the row's wash on row {row}"
+        );
+    }
+}
+
+#[test]
+fn a_palette_that_declines_a_bar_leaves_the_sigil_alone() {
+    // The `_bar` keys still exist so a theme file can ask for one. What must hold
+    // is that leaving them unset changes nothing: patching an empty style over the
+    // diff style has to be the identity, or every built-in silently loses its
+    // sigil colour.
+    for theme in [Theme::ansi(), Theme::dark(), Theme::light()] {
+        assert_eq!(theme.added_bar, ratatui::style::Style::new());
+        assert_eq!(theme.removed_bar, ratatui::style::Style::new());
     }
 }
 

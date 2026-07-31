@@ -1331,7 +1331,25 @@ impl Painter<'_> {
                     text,
                     spans,
                 } => {
-                    self.line_row(Rect { y, ..area }, *kind, *number, text, spans);
+                    // **One row tall, explicitly.** `..area` inherits the body's
+                    // whole height, which every other row drawer got away with
+                    // because they only ever read `x`, `y` and `width`. This is
+                    // the first row that paints a *region*, and an inherited
+                    // height made the wash a rectangle running from the line down
+                    // to the bottom of the pane: the context rows under it, the
+                    // blank rows under those, and the footer. Measured at 200x60,
+                    // that was 366,000 cells a frame where 12,000 will do.
+                    self.line_row(
+                        Rect {
+                            y,
+                            height: 1,
+                            ..area
+                        },
+                        *kind,
+                        *number,
+                        text,
+                        spans,
+                    );
                 }
             }
         }

@@ -489,7 +489,17 @@ impl View {
             //
             // The two are indistinguishable from a `Position` alone, which is why
             // this is a parameter rather than something inferable here.
-            let short = anchored && view.rows.len() < height;
+            // **And not already at the top**, which is the difference between a
+            // back-up and a treadmill. When the whole diff is shorter than the
+            // pane, `last_screenful` resolves to `Position::default()`, the next
+            // frame is short again from the same place, and it restarts on every
+            // paint forever: measured at three walks and six `frame.diff` calls a
+            // frame against two. `Frame::diff` re-reads any file written in the
+            // last two seconds, so the file being edited was diffed three times
+            // per frame, which is exactly what this function's one-pass design
+            // exists to prevent. It also breached I3's bound on the highlight
+            // cache, which is what turned it red on Windows CI rather than here.
+            let short = anchored && view.rows.len() < height && view.top != Position::default();
             if restarted || !(overshot || short) {
                 break;
             }
