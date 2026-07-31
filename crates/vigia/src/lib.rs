@@ -254,7 +254,7 @@ impl Shell {
         // Before the chrome, because the chrome carries it, and from the frame's
         // own file count so the read happens on exactly the frames that draw the
         // answer. That is the whole of I4 for this read.
-        self.branch = branch_for(frame.files().len(), || worktree.branch());
+        self.branch = branch_for(frame, || worktree.branch());
 
         // The chrome is built before the height, not after, because the footer
         // takes a second line at narrow widths and `body_height` has to know
@@ -367,11 +367,29 @@ fn spawn_input(tx: Sender<Wake>) {
 /// Reaching the same assurance through a real repository would mean observing a
 /// read the frame path does not account for, which no counter here can see.
 ///
+/// **It takes the frame rather than its file count, and that is what makes the
+/// rule gateable at all.** With a count, the expression deciding it lived at the
+/// call site inside [`Shell::draw`], which owns a terminal and which no test can
+/// drive: hardcoding that argument to `0` and to `1` both passed the **entire
+/// suite**, in both directions, while every unit test of this function stayed
+/// green. The mutations killed the consumer and never touched the producer.
+/// Moving the count inside the boundary leaves nothing outside it to get wrong,
+/// and lets `tests/reads.rs` drive this with a real [`vigia_core::Frame`], so
+/// what is asserted is what production computes rather than a number someone
+/// typed.
+///
+/// Public for the reason [`rows_in`] and [`body_height`] are: `SPEC.md` §7 makes
+/// the test suite the proof, and a rule reachable only from inside the crate is
+/// one the suite cannot hold against a real repository.
+///
 /// The read is not cached across frames on purpose: an agent in the other pane
 /// can check out a branch, and a name held from startup would be a confident lie
 /// on exactly the screen that exists to orient the reader.
-fn branch_for(files: usize, read: impl FnOnce() -> Option<String>) -> Option<String> {
-    if files > 0 {
+pub fn branch_for(
+    frame: &vigia_core::Frame,
+    read: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if !frame.files().is_empty() {
         return None;
     }
     read()
@@ -458,36 +476,5 @@ mod tests {
             .into_owned();
 
         assert_eq!(short_name(&here), expected);
-    }
-
-    #[test]
-    fn the_branch_is_read_only_when_the_empty_state_will_draw_it() {
-        // I4 for the one read this shell added: never touch a file the frame
-        // does not draw. Only the empty state names a branch, so a frame with a
-        // diff in it must not go near `.git/HEAD`.
-        //
-        // Counted rather than asserted on the result, because the failure this
-        // guards is invisible in the output: returning `None` after reading and
-        // returning `None` without reading are the same answer and a different
-        // frame cost.
-        use std::cell::Cell;
-
-        let reads = Cell::new(0usize);
-        let count = || {
-            reads.set(reads.get() + 1);
-            Some("main".to_owned())
-        };
-
-        assert_eq!(branch_for(0, count), Some("main".to_owned()));
-        assert_eq!(reads.get(), 1, "the empty state did not ask for a branch");
-
-        for files in [1usize, 2, 100] {
-            assert_eq!(branch_for(files, count), None);
-            assert_eq!(
-                reads.get(),
-                1,
-                "a frame drawing {files} files read HEAD for a line it will not draw"
-            );
-        }
     }
 }
