@@ -649,15 +649,22 @@ fn the_header_ladder_keeps_the_mode_word_last() {
             // **Never cut**, which is stricter than the marking rule the rest of
             // the header follows. A ladder drops whole rungs, so a fragment of
             // the word reaching the screen means someone replaced it with a
-            // marked token, and `wat›` is a state nobody can read.
+            // token that truncates, and `wat›` is a state nobody can read.
+            //
+            // Both spellings of cut, because they fail differently and only one
+            // of them looks broken. Silently truncated ends in the fragment;
+            // marked ends in the fragment and the continuation mark. A check for
+            // the bare fragment alone passes against `wat›`, which is the very
+            // shape this rule exists to forbid.
             //
             // Reading how the row *ends* is sound only because the fixture's
-            // worktree name cannot end in any prefix of either word. See
-            // `chrome`.
+            // worktree name cannot end in any prefix of either word, so anything
+            // matching here came from the mode word. See `chrome`.
             for cut in 1..word.chars().count() {
                 let fragment: String = word.chars().take(cut).collect();
+                let marked = format!("{fragment}{CONTINUES}");
                 assert!(
-                    !header.ends_with(&fragment),
+                    !header.ends_with(&fragment) && !header.ends_with(&marked),
                     "at {width} columns the header ended in {fragment:?}, which is \
                      {word:?} cut: {header:?}"
                 );
