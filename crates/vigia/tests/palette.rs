@@ -693,6 +693,43 @@ fn a_comment_does_not_eat_a_hex_colour() {
 }
 
 #[test]
+fn a_modifier_only_value_keeps_the_colour_it_did_not_name() {
+    // `added = bold` reads as "make additions bold" and used to mean "make
+    // additions bold and colourless": the style was built from `Style::new()` and
+    // `set` replaces the whole field. That is the same invisible change
+    // `MissingValue` exists to prevent, reached from the other direction.
+    let theme = theme::parse("base = dark\nadded = bold\n").expect("parses");
+    assert_eq!(
+        theme.added.fg,
+        Theme::dark().added.fg,
+        "a modifier-only value cleared the colour"
+    );
+    assert!(
+        theme
+            .added
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+
+    // And a value that does name a colour still replaces it outright.
+    let named = theme::parse("base = dark\nadded = #ff0000\n").expect("parses");
+    assert_eq!(named.added.fg, Some(Color::Rgb(0xff, 0x00, 0x00)));
+}
+
+#[test]
+fn a_second_base_is_refused_rather_than_silently_winning() {
+    // `touched` is only set by an ordinary key, so two `base` lines never tripped
+    // the late-base guard and the second quietly discarded the first. Every other
+    // way of writing something this parser cannot honour is an error.
+    let err = theme::parse("base = dark\nbase = light\n").expect_err("refused");
+    assert_eq!(err, ThemeError::RepeatedBase { line: 2 });
+    assert!(err.to_string().starts_with("line 2"), "{err}");
+
+    // One is still fine, and so is one after a comment.
+    theme::parse("# a comment\nbase = dark\n").expect("parses");
+}
+
+#[test]
 fn a_theme_file_saved_by_notepad_still_parses() {
     // Notepad's default UTF-8 save writes a BOM, and `str::trim` will not strip
     // one: U+FEFF is `Cf`, not `White_Space`, so it survives every trim in the

@@ -83,6 +83,14 @@ macro_rules! palette {
                 }
             }
 
+            /// Read one key, so a value can be layered on what is already there.
+            fn get(&self, key: &str) -> Option<Style> {
+                match key {
+                    $(stringify!($field) => Some(self.$field)),*,
+                    _ => None,
+                }
+            }
+
             /// Every style through `f`, which is how a palette reaches a [`Depth`].
             fn map(self, f: impl Fn(Style) -> Style) -> Self {
                 Self { $($field: f(self.$field),)* }
@@ -652,6 +660,11 @@ pub enum ThemeError {
         /// What was written.
         name: String,
     },
+    /// A second `base` in one file.
+    RepeatedBase {
+        /// Where.
+        line: usize,
+    },
     /// A `base` after the first key it would have overwritten.
     LateBase {
         /// Where.
@@ -698,6 +711,10 @@ impl fmt::Display for ThemeError {
                 "line {line}: there is no built-in theme called {name:?}. There are \
                  three: {}",
                 Theme::NAMES.join(", ")
+            ),
+            Self::RepeatedBase { line } => write!(
+                f,
+                "line {line}: `base` is already set. One palette to start from, or                  the second silently discards the first"
             ),
             Self::LateBase { line } => write!(
                 f,
@@ -816,6 +833,7 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
 
     let mut theme = Theme::default();
     let mut touched = false;
+    let mut based = false;
 
     for (index, raw) in source.lines().enumerate() {
         let line = index + 1;
@@ -845,6 +863,13 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
             if touched {
                 return Err(ThemeError::LateBase { line });
             }
+            // A second `base` used to be accepted with the last one winning, which
+            // is the silent-discard this parser refuses everywhere else: `touched`
+            // is only set by an ordinary key, so two `base` lines never tripped it.
+            if based {
+                return Err(ThemeError::RepeatedBase { line });
+            }
+            based = true;
             // Through `words_of` like every other value, so the documented
             // comment idiom works on the one line every theme file starts with.
             // Reading the raw value made `base = dark # the picture` report that
@@ -857,7 +882,13 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
             continue;
         }
 
-        let style = style_of(value, line)?;
+        let Some(current) = theme.get(key) else {
+            return Err(ThemeError::UnknownKey {
+                line,
+                key: key.to_owned(),
+            });
+        };
+        let style = style_of(value, line, current)?;
         if !theme.set(key, style) {
             return Err(ThemeError::UnknownKey {
                 line,
@@ -915,8 +946,17 @@ fn is_hex(word: &str) -> bool {
 /// something a reader meant to finish, and accepting it would set the key to no
 /// colour at all, which is a theme file that changes something invisibly rather
 /// than not changing it.
-fn style_of(value: &str, line: usize) -> Result<Style, ThemeError> {
-    let mut style = Style::new();
+fn style_of(value: &str, line: usize, current: Style) -> Result<Style, ThemeError> {
+    // **Seeded from the key's current value, not from nothing.** `added = bold`
+    // reads as "make additions bold" and used to mean "make additions bold and
+    // colourless", because the style was built from `Style::new()` and `set`
+    // replaces the whole thing. That is the same invisible change
+    // [`ThemeError::MissingValue`] exists to prevent, reached from the other
+    // direction: a line that says one thing and silently does two.
+    //
+    // Only the fields the value names are overwritten, so a value that names a
+    // colour still replaces the colour.
+    let mut style = current;
     let tokens = words_of(value);
     if tokens.is_empty() {
         return Err(ThemeError::MissingValue { line });
