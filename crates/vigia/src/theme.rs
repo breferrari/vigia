@@ -328,7 +328,24 @@ impl Theme {
     pub fn ansi() -> Self {
         Self {
             chrome: fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            chrome_dim: fg(Color::DarkGray),
+            // **The reader's own foreground, dimmed, and never colour 8.**
+            //
+            // This was `DarkGray`, which is ANSI colour 8, and colour 8 is the one
+            // name in the sixteen that most schemes define *relative to the
+            // background* rather than as a colour: "bright black" is commonly a
+            // shade just above the pane. On such a scheme the hints, the counts,
+            // the readouts and the empty state all land a few points off the
+            // background and the whole chrome disappears. Reported from a real
+            // terminal ([#60](https://github.com/breferrari/vigia/issues/60)), and
+            // it is worse than it sounds: the hints are how a reader learns the
+            // tool has an `f` key.
+            //
+            // `Reset` plus `DIM` asks for the reader's *own* foreground at reduced
+            // intensity, which is the thing this palette exists to inherit. Its
+            // failure mode is the right way round too: a terminal that ignores
+            // `DIM` draws ordinary readable text, where an unlucky colour 8 draws
+            // nothing at all.
+            chrome_dim: fg(Color::Reset).add_modifier(Modifier::DIM),
             // Three rungs of one ramp: bright and bold, bright, then plain.
             // `Gray` rather than `DarkGray` for the coldest, deliberately. Every
             // file in an already-dirty worktree is cold until something writes to
@@ -343,9 +360,11 @@ impl Theme {
             // already means two rows below.
             pulse: fg(Color::Cyan),
             spark: fg(Color::Cyan),
-            // The strip is a map of the file, so an untouched slice has to be
-            // visible as untouched rather than absent. DarkGray is the dimmest
-            // thing every terminal still draws.
+            // **The one place colour 8 is the right answer**, and the exception
+            // proves the rule that sent everything else to `DIM`. A track is not
+            // text: it is a solid block that should sit just above the background,
+            // and "just above the background" is exactly what most schemes define
+            // colour 8 to be. What is fatal for a key hint is correct for this.
             heat_track: fg(Color::DarkGray),
             // Two stops of hue where the other palettes have three. Sixteen names
             // hold a normal and a bright of each colour and no third, so the middle
@@ -363,7 +382,9 @@ impl Theme {
             heat_mixed_hot: fg(Color::LightYellow),
             kind: fg(Color::Yellow),
             hunk: fg(Color::Blue),
-            gutter: fg(Color::DarkGray),
+            // Same rule as `chrome_dim`, and the same report. A line number a
+            // reader cannot see is a gutter that spends columns on nothing.
+            gutter: fg(Color::Reset).add_modifier(Modifier::DIM),
             added: fg(Color::Green),
             removed: fg(Color::Red),
             // Reset rather than a colour: context is most of the screen, and the
@@ -389,8 +410,9 @@ impl Theme {
             number: fg(Color::LightCyan),
             // The mockup draws comments no differently from its own dimmed text,
             // and a comment is the one thing on a diff line a reader routinely
-            // wants to skip.
-            comment: fg(Color::DarkGray),
+            // wants to skip. Dimmed rather than colour 8, for the reason
+            // `chrome_dim` gives: a comment should recede, not vanish.
+            comment: fg(Color::Reset).add_modifier(Modifier::DIM),
         }
     }
 
@@ -414,7 +436,7 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             chrome: rgb(0x39, 0xc5, 0xcf).add_modifier(Modifier::BOLD),
-            chrome_dim: rgb(0x6e, 0x76, 0x81),
+            chrome_dim: rgb(0x8b, 0x94, 0x9e),
             path: rgb(0xe6, 0xed, 0xf3).add_modifier(Modifier::BOLD),
             path_live: rgb(0xe6, 0xed, 0xf3),
             path_cold: rgb(0x7d, 0x85, 0x90),
@@ -436,20 +458,35 @@ impl Theme {
             heat_mixed_hot: rgb(0xf2, 0xcc, 0x60),
             kind: rgb(0xe3, 0xb3, 0x41),
             hunk: rgb(0x58, 0xa6, 0xff),
-            gutter: rgb(0x6e, 0x76, 0x81),
+            gutter: rgb(0x7d, 0x85, 0x90),
             added: rgb(0x3f, 0xb9, 0x50),
             removed: rgb(0xf8, 0x51, 0x49),
             context: rgb(0xe6, 0xed, 0xf3),
             // The two rects the picture draws behind changed lines, and the two
             // bars at their left edge. Backgrounds, so the depth ladder drops them
             // below 256 on its own.
-            added_row: Style::new().bg(Color::Rgb(0x0f, 0x2c, 0x1c)),
-            removed_row: Style::new().bg(Color::Rgb(0x2d, 0x14, 0x16)),
+            // **Stronger than the picture's, and that is a correction rather than
+            // a liberty.** `assets/preview.svg` washes with `#0f2c1c` and
+            // `#2d1416`, which it can, because it also paints its own background
+            // `#0d1117` and knows the contrast it is getting. A terminal is not a
+            // picture: a reader's pane is whatever they set it to, and every common
+            // dark scheme is *lighter* than the mockup's. A wash darker than the
+            // background reads as nothing at all, which is what it did on the first
+            // terminal it met.
+            //
+            // So these are lifted until they are green and red rather than
+            // marginally-darker, while staying dark enough to keep `#e6edf3` text
+            // and the syntax colours legible on top. What the picture specifies is
+            // *that the row is washed in the colour of the change*, and that is
+            // what survives; the exact triple was a value chosen against a
+            // background this palette does not control.
+            added_row: Style::new().bg(Color::Rgb(0x1b, 0x3d, 0x29)),
+            removed_row: Style::new().bg(Color::Rgb(0x45, 0x22, 0x2a)),
             added_bar: Style::new()
-                .fg(Color::Rgb(0x0f, 0x2c, 0x1c))
+                .fg(Color::Rgb(0x1b, 0x3d, 0x29))
                 .bg(Color::Rgb(0x3f, 0xb9, 0x50)),
             removed_bar: Style::new()
-                .fg(Color::Rgb(0x2d, 0x14, 0x16))
+                .fg(Color::Rgb(0x45, 0x22, 0x2a))
                 .bg(Color::Rgb(0xf8, 0x51, 0x49)),
             note: rgb(0xd2, 0xa8, 0xff),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
@@ -498,13 +535,17 @@ impl Theme {
             added: rgb(0x1a, 0x7f, 0x37),
             removed: rgb(0xcf, 0x22, 0x2e),
             context: rgb(0x1f, 0x23, 0x28),
-            added_row: Style::new().bg(Color::Rgb(0xda, 0xfb, 0xe1)),
-            removed_row: Style::new().bg(Color::Rgb(0xff, 0xeb, 0xe9)),
+            // The same correction one background over: a wash has to be *further*
+            // from the pane than the pane is from white, or a reader on an
+            // off-white terminal sees nothing. Darker here, where `dark` went
+            // lighter, for the reason every ramp in this palette is reversed.
+            added_row: Style::new().bg(Color::Rgb(0xc0, 0xf0, 0xcd)),
+            removed_row: Style::new().bg(Color::Rgb(0xff, 0xd4, 0xd1)),
             added_bar: Style::new()
-                .fg(Color::Rgb(0xda, 0xfb, 0xe1))
+                .fg(Color::Rgb(0xc0, 0xf0, 0xcd))
                 .bg(Color::Rgb(0x1a, 0x7f, 0x37)),
             removed_bar: Style::new()
-                .fg(Color::Rgb(0xff, 0xeb, 0xe9))
+                .fg(Color::Rgb(0xff, 0xd4, 0xd1))
                 .bg(Color::Rgb(0xcf, 0x22, 0x2e)),
             note: rgb(0x82, 0x50, 0xdf),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),

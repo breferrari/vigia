@@ -199,6 +199,57 @@ fn a_context_row_is_never_washed() {
 }
 
 #[test]
+fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
+    // **Colour 8 is not a colour, it is a relationship to the background.** Most
+    // schemes define "bright black" as a shade just above the pane, so text drawn
+    // in it can land a few points off the background and vanish. Reported from a
+    // real terminal, where the key hints, the readouts, the empty state and the
+    // line numbers were all invisible at once.
+    //
+    // The rule is about *text*, not about the colour. `heat_track` is deliberately
+    // still colour 8 and is exempt by name: a track is a solid block that should
+    // sit just above the background, which is exactly what the colour is for. The
+    // exemption is listed rather than inferred, so adding a field cannot join it by
+    // accident.
+    let ansi = Theme::ansi();
+    let readable: [(&str, ratatui::style::Style); 12] = [
+        ("chrome", ansi.chrome),
+        ("chrome_dim", ansi.chrome_dim),
+        ("path", ansi.path),
+        ("path_live", ansi.path_live),
+        ("path_cold", ansi.path_cold),
+        ("gutter", ansi.gutter),
+        ("kind", ansi.kind),
+        ("hunk", ansi.hunk),
+        ("note", ansi.note),
+        ("alert", ansi.alert),
+        ("context", ansi.context),
+        ("comment", ansi.comment),
+    ];
+
+    for (name, style) in readable {
+        assert_ne!(
+            style.fg,
+            Some(Color::DarkGray),
+            "{name} is drawn in colour 8, which some schemes put on the background"
+        );
+    }
+
+    // And the replacement has to actually be dim, or this trades an invisible
+    // chrome for one that shouts. `Reset` plus `DIM` is the reader's own
+    // foreground at reduced intensity, which is what this palette exists to
+    // inherit, and it degrades to ordinary readable text on a terminal that
+    // ignores the attribute.
+    for (name, style) in [("chrome_dim", ansi.chrome_dim), ("gutter", ansi.gutter)] {
+        assert_eq!(style.fg, Some(Color::Reset), "{name}");
+        assert!(
+            style.add_modifier.contains(ratatui::style::Modifier::DIM),
+            "{name} is not dimmed, so it reads as ordinary content"
+        );
+    }
+}
+
+#[test]
 fn the_ansi_palette_draws_no_wash_at_any_depth() {
     // The ruling that keeps palette and depth genuinely independent axes. A wash
     // has to assume a background; `ansi` resolves to the reader's own scheme and so
