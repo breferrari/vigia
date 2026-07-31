@@ -161,14 +161,24 @@ impl Depth {
             return Ok(Self::Ansi256);
         }
         if windows {
-            // `WT_SESSION` is set by Windows Terminal and by nothing else, so its
-            // absence is not evidence of conhost: it is also absent under every
-            // third-party host. 256 is the answer that is safe for both.
-            return Ok(if lookup("WT_SESSION").is_some() {
-                Self::Truecolor
-            } else {
-                Self::Ansi256
-            });
+            // **Truecolour, and this used to be 256.** The conservative answer was
+            // wrong in a way only a screen could show: the xterm cube's darkest
+            // axis levels are 0 and 95 with nothing between, so a *subtle* colour
+            // has nowhere to land. A row wash of `#1b3d29` quantises to `#005f00`,
+            // which is a saturated primary rather than a tint, and a reader looking
+            // at it asks whether the colour is right. It is not, and no better
+            // index exists.
+            //
+            // So 256 is not a safe default, it is a different wrong one, and the
+            // thing it was protecting against has aged out: §10's "legacy conhost
+            // degrades" is about consoles before Windows 10 1703, which has not
+            // been a supported target for years. Every Windows console that can run
+            // this draws 24-bit.
+            //
+            // A reader on something genuinely older says so with `VIGIA_COLOR`,
+            // which is one rung above this and exists for exactly the cases
+            // detection cannot see.
+            return Ok(Self::Truecolor);
         }
         Ok(Self::Ansi16)
     }
@@ -247,6 +257,22 @@ pub fn to_indexed(r: u8, g: u8, b: u8) -> u8 {
         (r, g, b),
         (CUBE[ri], CUBE[gi], CUBE[bi]),
     );
+
+    // **The ramp is only a candidate for something that is actually grey**, and
+    // leaving that out is a bug that reaches the screen. A row wash like `#1b3d29`
+    // is a desaturated green, so on raw distance the nearest grey beats the nearest
+    // cube entry: the cube's green axis jumps 0, 95, 135 while the ramp steps by
+    // ten, and a colour sitting between two cube levels is closer to a grey than to
+    // either. The wash then draws as a **neutral band**, which is a tint that has
+    // lost the only thing it was for.
+    //
+    // Same chroma threshold as [`to_ansi16`], and the same reasoning: below it
+    // there is no hue to preserve and the ramp is the better answer; above it, hue
+    // is the whole point and a grey cannot carry it however near it measures.
+    let chroma = r.max(g).max(b) - r.min(g).min(b);
+    if chroma >= 32 {
+        return cube as u8;
+    }
 
     // The ramp runs 8, 18, ... 238, which is `8 + 10 * i` for 24 steps.
     let level = (u32::from(r) + u32::from(g) + u32::from(b)) / 3;

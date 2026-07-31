@@ -235,16 +235,20 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         );
     }
 
-    // And the replacement has to actually be dim, or this trades an invisible
-    // chrome for one that shouts. `Reset` plus `DIM` is the reader's own
-    // foreground at reduced intensity, which is what this palette exists to
-    // inherit, and it degrades to ordinary readable text on a terminal that
-    // ignores the attribute.
-    for (name, style) in [("chrome_dim", ansi.chrome_dim), ("gutter", ansi.gutter)] {
-        assert_eq!(style.fg, Some(Color::Reset), "{name}");
+    // And it may not reach for `DIM` either, which was the first replacement and
+    // was invisible on the same terminal that colour 8 was: a terminal is free to
+    // reduce intensity as far as it likes. Both ways of saying "dim" in the
+    // sixteen-colour world have now failed in the field, so this palette says it
+    // in neither and takes colour 7, which is readable by construction.
+    for (name, style) in [
+        ("chrome_dim", ansi.chrome_dim),
+        ("gutter", ansi.gutter),
+        ("comment", ansi.comment),
+    ] {
+        assert_eq!(style.fg, Some(Color::Gray), "{name}");
         assert!(
-            style.add_modifier.contains(ratatui::style::Modifier::DIM),
-            "{name} is not dimmed, so it reads as ordinary content"
+            !style.add_modifier.contains(ratatui::style::Modifier::DIM),
+            "{name} leans on DIM, which a terminal may render as invisible"
         );
     }
 }

@@ -328,24 +328,33 @@ impl Theme {
     pub fn ansi() -> Self {
         Self {
             chrome: fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            // **The reader's own foreground, dimmed, and never colour 8.**
+            // **Readable, at the cost of not being dim, and that trade is the
+            // ruling.**
             //
-            // This was `DarkGray`, which is ANSI colour 8, and colour 8 is the one
-            // name in the sixteen that most schemes define *relative to the
-            // background* rather than as a colour: "bright black" is commonly a
-            // shade just above the pane. On such a scheme the hints, the counts,
-            // the readouts and the empty state all land a few points off the
-            // background and the whole chrome disappears. Reported from a real
-            // terminal ([#60](https://github.com/breferrari/vigia/issues/60)), and
-            // it is worse than it sounds: the hints are how a reader learns the
-            // tool has an `f` key.
+            // The sixteen-colour world offers exactly two ways to say "dim", and
+            // both were tried here and both were invisible on the same real
+            // terminal ([#60](https://github.com/breferrari/vigia/issues/60)).
             //
-            // `Reset` plus `DIM` asks for the reader's *own* foreground at reduced
-            // intensity, which is the thing this palette exists to inherit. Its
-            // failure mode is the right way round too: a terminal that ignores
-            // `DIM` draws ordinary readable text, where an unlucky colour 8 draws
-            // nothing at all.
-            chrome_dim: fg(Color::Reset).add_modifier(Modifier::DIM),
+            // `DarkGray` is ANSI colour 8, which most schemes define *relative to
+            // the background* rather than as a colour: "bright black" is commonly a
+            // shade just above the pane. `Reset` plus `DIM` is SGR 2, which asks
+            // for the reader's own foreground at reduced intensity, and terminals
+            // are free to reduce it as far as they like. One of them put the hints,
+            // the counts, the readouts, the empty state and every line number a few
+            // points off the background; the other did it again.
+            //
+            // So this palette stops trying. Colour 7 is the reader's ordinary
+            // foreground and is readable by construction, which is the property
+            // that actually matters: `SPEC.md` §5 makes colour half the
+            // differentiator, and §11.1 already argues that a monitor whose state
+            // cannot be read has failed twice. The hints are how a reader finds out
+            // the tool has an `f` key.
+            //
+            // What is given up is the visual hierarchy between chrome and content,
+            // and `dark` and `light` keep it, because a palette that knows its own
+            // background can pick a grey that is genuinely between the two. That is
+            // the cost of inheriting a scheme you cannot see.
+            chrome_dim: fg(Color::Gray),
             // Three rungs of one ramp: bright and bold, bright, then plain.
             // `Gray` rather than `DarkGray` for the coldest, deliberately. Every
             // file in an already-dirty worktree is cold until something writes to
@@ -382,9 +391,8 @@ impl Theme {
             heat_mixed_hot: fg(Color::LightYellow),
             kind: fg(Color::Yellow),
             hunk: fg(Color::Blue),
-            // Same rule as `chrome_dim`, and the same report. A line number a
-            // reader cannot see is a gutter that spends columns on nothing.
-            gutter: fg(Color::Reset).add_modifier(Modifier::DIM),
+            // Same rule as `chrome_dim`, and the same two reports.
+            gutter: fg(Color::Gray),
             added: fg(Color::Green),
             removed: fg(Color::Red),
             // Reset rather than a colour: context is most of the screen, and the
@@ -412,7 +420,7 @@ impl Theme {
             // and a comment is the one thing on a diff line a reader routinely
             // wants to skip. Dimmed rather than colour 8, for the reason
             // `chrome_dim` gives: a comment should recede, not vanish.
-            comment: fg(Color::Reset).add_modifier(Modifier::DIM),
+            comment: fg(Color::Gray),
         }
     }
 

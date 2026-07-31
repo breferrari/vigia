@@ -15,7 +15,7 @@
 //! land on the same cell colour however few colours are left.
 
 use ratatui::style::{Color, Modifier, Style};
-use vigia::{DEPTH_VAR, Depth};
+use vigia::{DEPTH_VAR, Depth, Theme};
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
 ///
@@ -98,10 +98,15 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             Depth::Truecolor,
         ),
         (
-            "Windows otherwise, which is section 10's legacy conhost",
+            // Not 256, which this was and which is a different wrong answer rather
+            // than a safe one: the xterm cube's darkest axis levels are 0 and 95
+            // with nothing between, so a subtle wash quantises to a saturated
+            // primary. What 256 was protecting against is consoles older than
+            // Windows 10 1703, which is not a supported target.
+            "Windows draws 24-bit, and has since 1703",
             true,
             &[],
-            Depth::Ansi256,
+            Depth::Truecolor,
         ),
         (
             // `TERM` only ever promotes. On Windows it is usually unset, and where
@@ -113,7 +118,7 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             "a Windows TERM that does not claim 256 does not demote below Windows",
             true,
             &[("TERM", "xterm")],
-            Depth::Ansi256,
+            Depth::Truecolor,
         ),
         ("nothing at all, anywhere else", false, &[], Depth::Ansi16),
     ];
@@ -371,6 +376,35 @@ fn a_green_stays_green_and_a_red_stays_red_at_sixteen() {
         "{:?}",
         yellow.fg
     );
+}
+
+#[test]
+fn a_tint_keeps_its_hue_at_256_rather_than_landing_on_the_grey_ramp() {
+    // **This reached a screen.** A row wash is a desaturated colour by design, and
+    // on raw distance the nearest grey beats the nearest cube entry for one: the
+    // cube's axes jump 0, 95, 135 while the ramp steps by ten, so anything sitting
+    // between two cube levels measures closer to a grey than to either. The wash
+    // then draws as a neutral band, which is a tint that has lost the only thing it
+    // was for, and a reader reports that the background colour "does not happen".
+    //
+    // Every background the built-in palettes carry, at the rung a Windows console
+    // gets by default.
+    for (name, style) in [
+        ("dark added", Theme::dark().added_row),
+        ("dark removed", Theme::dark().removed_row),
+        ("light added", Theme::light().added_row),
+        ("light removed", Theme::light().removed_row),
+    ] {
+        let want = style.bg.expect("a wash");
+        let got = Depth::Ansi256.resolve(style).bg.expect("a wash");
+        let Color::Indexed(i) = got else {
+            panic!("{name} did not quantise: {got:?}")
+        };
+        assert!(
+            (16..232).contains(&i),
+            "{name} {want:?} landed on index {i}, which is the grey ramp"
+        );
+    }
 }
 
 #[test]
