@@ -120,19 +120,27 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Sparklines, heat strips, counters, pulse | [#10](https://github.com/breferrari/vigia/issues/10) |
+| ✅ | I10 bounded history, and the sparkline, gradient and pulse drawn from it | [#38](https://github.com/breferrari/vigia/issues/38) |
+| ⬜ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
+| ⬜ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
+| ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
-**This phase is mis-scoped and [#10](https://github.com/breferrari/vigia/issues/10) must split before anything here is taken.** Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carries four features that share no implementation. `take-next` step 4 is explicit: *if the issue is genuinely two things, split the issue first.*
+**[#10](https://github.com/breferrari/vigia/issues/10) was split before anything here was taken**, which this file had blocked the phase on. Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carried four features that share no implementation.
 
-The correction that matters is not the count. **It is that this is not a rendering phase** (`SPEC.md` §5.2). Two of its headline elements need retained state in `vigia-core`, so they move invariants rather than sit on top of them:
+The correction that mattered was not the count. **It is that this is not a rendering phase** (`SPEC.md` §5.2), and building the first child confirmed it: the diff was mostly `vigia-core`. The split follows what each element needs rather than what it looks like: history-backed (#38), whole-file-backed (#39), chrome (#40), self-measuring (#41).
 
-- the **sparkline** needs history that survives a file settling — which is exactly what `FrameStats.evicted` throws away to keep I3 provable. Blocked on **proposed I10 (bounded history)**: the data structure is the decision, the drawing is the easy part.
-- the **heat strip** needs each file's total line count, a whole-file read the frame path exists to avoid. Cacheable per `(path, blob id)`; without that cache it breaks I2a.
+**One of #10's four bullets had already shipped.** Per-file `+42 −7` counters are built in `view.rs` and drawn by `render.rs`, and §5.1 has said "Covered" for them since the mockup was specified: a file has to be diffed to be drawn, so they cost nothing and landed early and quietly. No issue was filed. This file also claimed the **key-hint bar** was "untracked entirely" when [#7](https://github.com/breferrari/vigia/issues/7) landed it with I6, and `follow ▶` alongside it under [#6](https://github.com/breferrari/vigia/issues/6). Both corrected here.
 
-Split #10 along the seams of what each element actually needs, not along what they look like: history-backed (sparkline, recency gradient, `just changed` decay — one clock, not three), whole-file-backed (heat strip), and free (per-file counters, which cost nothing because a file must be diffed to be drawn).
+**I10 is in, and the thing it was blocked on turned out to be the thing it produced.** [#38](https://github.com/breferrari/vigia/issues/38) promoted proposed I10 into `SPEC.md` §3 with a budget of **256 paths and 120 seconds**: a bounded store in `vigia-core`, fed one coalesced tick at a time, evicted by window and by least-recently-changed. Ten thousand distinct paths leave it sitting exactly at the cap, and the soak says the same about the real process, reporting 256 tracked with 207 evicted over 359 paths at a 300-file fixture.
 
-Untracked entirely, and all visible in the mockup: the header **mode word** (`watching`, implying a mode set), the **status bar** (`0.8ms frame`, `11MB` — one measuring inside I9's budget, the other a syscall I3 only samples in soak), and the **key-hint bar**, which constrains I6 because roughly thirty columns of it has to degrade at forty.
+**The store had to be fed from the watch, not from the frame path.** A burst that saves twelve files has to record twelve, and `Tick` named only the last one because that is all follow mode needed. It now carries the whole set, capped at the same 256 so a bulk operation cannot make a tick expensive before the store has a chance to bound it, and `Tick::newest` became a method over that list rather than a second field holding the same fact.
+
+**The decay the mockup asks for was an I1 question, not a rendering one.** §5.1 draws the pulse as a label that persists and fades, and a fade against a wall clock has to be *seen* fading, which needs a redraw nothing schedules and which I1 forbids inventing a timer to get. So the window stayed real time and the sampling became event-driven, and the top rung of the ladder is *named by the newest tick* rather than *within N seconds*. That is what keeps it honest on a quiet tree: the label sits on the file that really is the newest change instead of freezing a clock mid-count. The dimmed row and the label are the same ladder read once, which §5.1 demanded and which two clocks would have broken.
+
+**What it cost the reader, again: the gradient is three steps rather than a fade.** Sixteen foreground-only colours have bold, plain and dim to spend, so recency is a ramp of three. That is the same loss §11.1 already records for the diff signal narrowing to the sigil column, and the same issue fixes both: [#11](https://github.com/breferrari/vigia/issues/11).
+
+**And a rule went into `SPEC.md` §7 that the soak found on its own.** A bound is only evidence when something reached it. The per-commit soak window touches about eighty paths against a cap of 256 and never turns the window over, so `tracked <= 256` is satisfied there by a store nothing filled. The gate now refuses to assert when the run reached neither eviction rule and prints why, exactly as the drift gate does, and the deterministic proof runs in every `cargo test` instead.
 
 ## Phase 4 — distribution
 
