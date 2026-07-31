@@ -100,6 +100,17 @@ fn body(app: &App, files: usize) -> usize {
 /// a `branch_for` (which reads nothing on a populated frame, by I4) and a
 /// terminal size query, so what is timed here is the shipped frame with the tty
 /// removed — which is the same carve-out `soak.rs` already names.
+///
+/// **The two status readouts are inside it, in the order `vigia::run` puts
+/// them**, and that is the third thing along the same axis rather than a detail.
+/// `SPEC.md` §7's rule is that a stage left outside a gate is a stage nothing
+/// can regress you on, and the readouts are the easiest possible instance:
+/// `App::sample_memory` performs a syscall and `App::chrome` computes a
+/// percentile, so a helper that skipped them would gate a screen the product
+/// does not draw while reading as though it gated everything. Sampling before
+/// the paint and recording after is what makes each one land inside the frame it
+/// reports. `the_timed_frame_draws_the_readouts_it_is_timing` asserts it rather
+/// than this comment claiming it.
 fn shell_frame(
     frame: &mut Frame,
     app: &mut App,
@@ -109,10 +120,17 @@ fn shell_frame(
     theme: &Theme,
     height: usize,
 ) {
+    let began = Instant::now();
     frame.advance().expect("advance");
+    app.sample_memory();
     let chrome = app.chrome("fixture", None);
     let view = app.view(frame, highlighter, history, height).expect("view");
     render(buf, area(), &view, theme, &chrome);
+    // Recorded from an inner clock rather than handed the caller's, because
+    // every caller times this differently: some wrap it in `time`, some in
+    // `timed`, and the scroll gates wrap a whole motion. What the ring needs is
+    // one frame's cost, and this is the only place that knows where one starts.
+    app.record_frame(began.elapsed());
 }
 
 /// Whether the absolute wall-clock gate should assert.
@@ -146,6 +164,119 @@ fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
 #[test]
 fn a_real_frame_with_highlighting_holds_the_frame_budget() {
     frame_budget_at_depth("shell-i9", 0);
+}
+
+#[test]
+fn the_timed_frame_draws_the_readouts_it_is_timing() {
+    // **A gate over the gates, and this repo has paid twice for not having
+    // one.** `SPEC.md` §7 records both: `render` sat outside every budget on
+    // both crates for two phases, so a row costing 7.2x its pane passed a 16ms
+    // assertion; and a gate that settled before measuring left the one window
+    // it was written about unmeasured. Both were invisible from inside the gate,
+    // which is exactly the property that makes a comment a bad instrument here.
+    //
+    // The status readouts are the same shape one more time. `sample_memory` is a
+    // syscall and `chrome` sorts a hundred and twenty-eight durations, and if
+    // `shell_frame` ever stops calling them, every wall-clock assertion in this
+    // file keeps passing while measuring a screen the product does not draw.
+    // Nothing else here can catch that, because what is left out gets *cheaper*.
+    //
+    // Two frames rather than one: the first has no completed frame behind it, so
+    // its chrome legitimately carries no frame time. The readout appearing on
+    // the second is the shipped behaviour, and asserting it at the first would
+    // be asserting the bug.
+    let scratch = Scratch::large_diff("readouts-in-the-gate", 4, 20);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let height = body(&app, 4);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+
+    for _ in 0..2 {
+        shell_frame(
+            &mut frame,
+            &mut app,
+            &mut highlighter,
+            &history,
+            &mut buf,
+            &theme,
+            height,
+        );
+    }
+
+    let chrome = app.chrome("fixture", None);
+    assert!(
+        chrome.frame.is_some(),
+        "the timed frame never recorded what it cost, so every wall-clock gate \
+         in this file is measuring a screen without the frame readout on it"
+    );
+    // Every tier-1 target has a cheap read, so this asserts unconditionally
+    // rather than behind a `cfg`. A platform outside those three would fail here
+    // and should: it means the readout silently stopped being covered, which is
+    // the thing this gate exists to notice. `SPEC.md` §5.1 names the three.
+    assert!(
+        chrome.memory.is_some(),
+        "the timed frame read no memory, so the syscall the status bar performs \
+         every frame is outside every budget in this file"
+    );
+}
+
+#[test]
+fn the_memory_read_costs_a_fraction_of_the_frame_it_sits_in() {
+    // The one *variable* cost the readouts add, and the reason the whole design
+    // turns on it: `SPEC.md` §5.1 ships this cell precisely because the read is
+    // a syscall on all three tier-1 targets rather than the process spawn
+    // `soak.rs` uses, which is **42.8ms median** on Windows against this 16ms
+    // budget. That is the claim, so it is gated rather than quoted.
+    //
+    // One percent, which is loose on purpose. The point is to catch a read that
+    // has quietly become a spawn or a whole-directory walk, a change of three
+    // orders of magnitude, not to track microseconds on a shared runner. A
+    // tighter bound here would fail on contention and teach everyone to ignore
+    // it.
+    if !absolute_gates_apply() {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    const RUNS: u32 = 1000;
+    let budget = I9_FRAME / 100;
+
+    // Warmed, because the first read faults in whatever the platform needs.
+    // `SPEC.md` §7's rule about steady state applies to a syscall as much as to
+    // a frame.
+    for _ in 0..100 {
+        vigia::memory::resident();
+    }
+
+    let taken = time(|| {
+        for _ in 0..RUNS {
+            std::hint::black_box(vigia::memory::resident());
+        }
+    });
+    let each = taken / RUNS;
+
+    // Non-vacuity, and it is the assertion that matters most on a platform
+    // nobody checked: a `resident()` that returned `None` immediately would post
+    // a superb number here and draw nothing at all.
+    assert!(
+        vigia::memory::resident().is_some(),
+        "this platform reads no memory, so the timing below measured an early \
+         return rather than a syscall"
+    );
+    assert!(
+        each < budget,
+        "one memory read costs {each:?}, over the {budget:?} this gate allows \
+         against I9's {I9_FRAME:?}. A read at that cost is a subprocess or a \
+         walk rather than a syscall, and SPEC.md §5.1 ships the readout on the \
+         strength of it being a syscall"
+    );
+    eprintln!("note: one memory read is {each:?} against a {I9_FRAME:?} frame");
 }
 
 #[test]

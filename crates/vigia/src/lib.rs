@@ -44,6 +44,12 @@
 
 mod app;
 mod input;
+/// Public where its five siblings are private, and for one reason: `soak.rs` is
+/// an integration test, so it can only reach what the crate exports, and I3's
+/// harness needs the same reader the shell uses. Two implementations of "read
+/// this process's RSS" that could disagree is exactly what one of them existing
+/// is meant to prevent.
+pub mod memory;
 mod render;
 mod terminal;
 mod theme;
@@ -146,6 +152,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let mut batch = Vec::with_capacity(DRAIN_CAP);
 
     'awake: while let Ok(wake) = rx.recv() {
+        // Started before the drain, not after it, because the drain is part of
+        // what a frame costs. `SPEC.md` §5.1 rules that the number on the status
+        // bar is the whole turn of this loop, and the batch that a flick of a
+        // trackpad produces is exactly the case where a narrower definition
+        // would flatter the readout: sixty-four wakes handled and one paint is
+        // one frame to a reader, whatever it is to the channel.
+        let began = Instant::now();
         drain(&mut batch, wake, &rx, DRAIN_CAP);
 
         for wake in batch.drain(..) {
@@ -230,10 +243,27 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             }
         }
 
+        // Before the paint, so the cell drawn below carries this frame's number
+        // rather than the previous one's, and inside the timed region, so the
+        // read's own cost lands in the frame time it sits beside. A readout
+        // measured outside the thing it reports is the omission `SPEC.md` §7
+        // names, and this one had the opportunity to make it twice.
+        shell.app.sample_memory();
+
         // **Once per batch, not once per wake.** That is the whole of the
         // coalescing: every wake above was handled, in arrival order, and only
         // the paint is shared. See `drain`.
         shell.draw(&mut frame, &worktree)?;
+
+        // After the paint, because the paint is the last third of what a frame
+        // costs. The consequence is that the p99 drawn above is always the
+        // *previous* frames' and never this one's, which is the only thing a
+        // frame can honestly say about itself.
+        //
+        // Not reached on the quit path, which breaks out above without drawing:
+        // a frame nobody saw is not a frame, and recording it would put a
+        // half-frame into the window a later session never uses anyway.
+        shell.app.record_frame(began.elapsed());
     }
 
     Ok(())

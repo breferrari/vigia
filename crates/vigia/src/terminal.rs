@@ -771,11 +771,12 @@ mod tests {
         // reader back in raw mode with no message and nothing to report.
         //
         // `main` returns an `ExitCode` for exactly this reason.
-        const SOURCES: [(&str, &str); 8] = [
+        const SOURCES: [(&str, &str); 9] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
             ("app.rs", include_str!("app.rs")),
             ("input.rs", include_str!("input.rs")),
+            ("memory.rs", include_str!("memory.rs")),
             ("render.rs", include_str!("render.rs")),
             ("terminal.rs", include_str!("terminal.rs")),
             ("theme.rs", include_str!("theme.rs")),

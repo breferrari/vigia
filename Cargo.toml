@@ -66,6 +66,33 @@ ratatui = { version = "0.30", default-features = false, features = [
 # every pin above: the one default is coloured diffs, and a diff is the entire
 # output of a failing snapshot test.
 insta = "1.48"
+# The status bar's memory readout, SPEC.md section 5.1. Both are FFI
+# declarations against facilities the OS already ships, both are pinned to the
+# version already resolved for that target, and neither adds a crate to any
+# graph: gix pulls libc into the Apple graph through gix-hash and cpufeatures,
+# and windows-sys 0.61 into the Windows graph through gix-sec. Confirmed with
+# `cargo tree -i`, not from memory, which is the mistake SPEC.md section 6
+# records.
+#
+# Named at the workspace root beside the rest even though only `vigia` takes
+# them, so the whole dependency surface is readable in one file.
+#
+# Defaults kept, which is the opposite of every other pin here and is a
+# judgement rather than an oversight. libc's only default is `std`, which is
+# already in the graph, so turning it off buys nothing measurable; what it
+# risks is a build break on the one tier-1 target that cannot be compiled on
+# the reference machine, discovered in CI instead of here. A trim with no
+# benefit is not worth paying for with a target you cannot test.
+libc = "0.2"
+# Two features, the smallest set that answers. ProcessStatus is
+# GetProcessMemoryInfo and PROCESS_MEMORY_COUNTERS; Threading is
+# GetCurrentProcess, whose pseudo-handle could be written as `-1` instead but
+# would then be a magic number nobody could check against a header.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
 
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.

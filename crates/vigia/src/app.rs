@@ -5,14 +5,36 @@
 //! optional message. A monitor with more state than that has started becoming a
 //! reviewer.
 
-use vigia_core::{Frame, Highlighter, History, Result};
+use std::time::Duration;
+
+use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
 use crate::input::Action;
+use crate::memory;
 use crate::render::{Chrome, Mode};
 use crate::view::{Position, View, rows_in};
 
+/// Completed frames the status bar's frame time is taken over.
+///
+/// **A hundred and twenty-eight, and the number is the statistic.** `SPEC.md`
+/// §5.1 draws a p99 because I9 *is* a p99, and §7 records why a small buffer
+/// cannot carry one: at 30 samples a nearest-rank p99 is just the maximum, so
+/// the readout would report the worst frame in the window and never anything
+/// else. At 128 the p99 is rank 127, which excludes exactly one outlier.
+///
+/// That is the behaviour a monitor wants rather than an arbitrary cutoff. §10
+/// measures a first-touch parse at **60.97ms** against a 16ms budget, once, on a
+/// path §7 puts outside I9 by definition. A window that let one such frame sit
+/// on the readout would spend the next two minutes reporting a breach that
+/// happened once and is not coming back; two of them in 128 frames is a real
+/// problem and still shows.
+///
+/// Bounded on purpose, which is I3's business: at 128 durations this is two
+/// kilobytes allocated once per session and never grown.
+const FRAME_SAMPLES: usize = 128;
+
 /// The shell's state.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct App {
     /// Top of the viewport.
     position: Position,
@@ -35,6 +57,43 @@ pub struct App {
     /// this. See [`Mode::Watching`] for why there is no third value for the
     /// microseconds before arming.
     mode: Mode,
+    /// What recent frames cost, which the status bar draws the p99 of.
+    ///
+    /// Here rather than in [`crate::run`]'s loop, and that placement is the
+    /// whole reason the readout is gated. `SPEC.md` §7's rule is that a stage
+    /// left outside a gate is a stage nothing can regress you on, and this repo
+    /// learned it by leaving `render` outside every budget for two phases. Every
+    /// caller that builds a [`Chrome`] gets the readout for free by holding it
+    /// here, so `tests/budgets.rs` and `tests/soak.rs` measure the shipped
+    /// screen rather than a screen with the readout taken out.
+    frames: Samples,
+    /// Resident set size as of the last frame that sampled it.
+    ///
+    /// A stored value rather than a read inside [`App::chrome`], because chrome
+    /// is built more than once per frame and on some input paths that draw
+    /// nothing. One read per painted frame is the claim `SPEC.md` §5.1 makes and
+    /// this is what makes it true.
+    memory: Option<u64>,
+}
+
+impl Default for App {
+    /// Hand-written for one field, and only that field.
+    ///
+    /// [`Samples`] has no `Default` because a zero-capacity ring is a panic
+    /// waiting to happen, so it takes its capacity at construction. Everything
+    /// else here is genuinely the derived answer, and the one decision that is
+    /// *not* a default stays in [`App::new`] where the comment can argue for it.
+    fn default() -> Self {
+        Self {
+            position: Position::default(),
+            notice: None,
+            following: false,
+            newest: None,
+            mode: Mode::default(),
+            frames: Samples::new(FRAME_SAMPLES),
+            memory: None,
+        }
+    }
 }
 
 impl App {
@@ -50,6 +109,37 @@ impl App {
             following: true,
             ..Self::default()
         }
+    }
+
+    /// Record what one whole frame cost, once it is on screen.
+    ///
+    /// **The whole turn of the loop**, which `SPEC.md` §5.1 rules and which is
+    /// wider than it first looks: the wake, the drain, every
+    /// [`vigia_core::Frame::advance`] in the batch, the collect, and the paint.
+    /// A number that timed only the diff would be reporting the cheapest third
+    /// of the work while sitting on a status bar that says `frame`.
+    ///
+    /// Called *after* the paint, so what it records is complete. The consequence
+    /// is that the drawn p99 is always the **previous** frames' and never this
+    /// one's, which is not a rounding error but the only thing a frame can
+    /// honestly say about itself: it cannot include its own paint in what that
+    /// paint draws.
+    pub fn record_frame(&mut self, cost: Duration) {
+        self.frames.push(cost);
+    }
+
+    /// Read this process's resident set size for the frame about to be drawn.
+    ///
+    /// Called *before* the paint and inside the timed region, which is both
+    /// halves of the seam this readout has: the drawn number is current rather
+    /// than one frame old, and the read's own cost lands in the frame time that
+    /// [`App::record_frame`] measures and the budget gates assert on. A readout
+    /// measured outside the thing it reports is the failure `SPEC.md` §7 names.
+    ///
+    /// `None` on a platform with no cheap answer, which draws nothing. See
+    /// [`crate::memory`] for what "cheap" cost to establish.
+    pub fn sample_memory(&mut self) {
+        self.memory = memory::resident();
     }
 
     /// Where the viewport currently starts.
@@ -119,6 +209,12 @@ impl App {
             mode: self.mode,
             notice: self.notice.clone(),
             following: self.following,
+            // `None` until a frame has completed, which is the honest first
+            // paint: there is no p99 of nothing. The status bar simply has no
+            // frame cell on the very first screen, and `Footer::plan` is written
+            // so that its arrival cannot move a row underneath the reader.
+            frame: self.frames.percentile(0.99),
+            memory: self.memory,
         }
     }
 

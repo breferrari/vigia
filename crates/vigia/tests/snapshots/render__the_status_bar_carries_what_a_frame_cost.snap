@@ -1,0 +1,10 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(80, 6, &view, &diagnostics_chrome())"
+---
+"vigia                                                          watching · 1 file"
+"M crates/vigia-core/src/frame.rs                                           +3 -1"
+"@@ -258,7 +258,9 @@                                                             "
+"258      pub fn advance(&mut self) {                                            "
+"259          let mut files = Vec::new();                                        "
+"q quit · f follow · jk scroll                 0.8ms frame   19MiB  follow ▶  1/1"
