@@ -89,14 +89,20 @@ pub struct Theme {
 impl Theme {
     /// The style a file heading is drawn in at `recency`.
     ///
-    /// **Three steps, not a fade, and that is a loss rather than a design.**
-    /// `SPEC.md` §5.1 asks for a recency *gradient*, and sixteen foreground-only
-    /// colours have exactly three intensities to spend: bold, plain and dim.
-    /// A real gradient needs the truecolour ramp that
-    /// [#11](https://github.com/breferrari/vigia/issues/11) brings, and this is
-    /// the seam it attaches to. Recorded out loud for the same reason §11.1
-    /// records the diff signal narrowing to the sigil column: §5 makes shape and
-    /// colour the whole differentiator, so spending some of it is worth saying.
+    /// **Three steps, not a fade, and the palette is not what decides that.**
+    /// This docstring used to say a real gradient needed the truecolour ramp
+    /// [#11](https://github.com/breferrari/vigia/issues/11) brings. It does not,
+    /// and `SPEC.md` §11.1 now carries the correction: the number of rungs
+    /// belongs to [`Recency`], which has three variants because the store can
+    /// answer exactly three questions about a path, and whose `Cold` means
+    /// *untracked* rather than *old*. A wider palette draws the same three rungs
+    /// in better colours. A fourth would have to mean *how far through the
+    /// window*, which nothing computes and which cannot be drawn honestly on a
+    /// shell that only wakes when a file changes.
+    ///
+    /// What #11 did buy here is real: bold, plain and dim were three intensities
+    /// borrowed from the modifier set, and the ramp is now three chosen
+    /// luminances wherever the depth can express them.
     pub fn recency(&self, recency: Recency) -> Style {
         match recency {
             Recency::Pulse => self.path,
