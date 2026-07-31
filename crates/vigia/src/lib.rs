@@ -41,10 +41,10 @@ mod view;
 
 pub use app::App;
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Chrome, HINT_SEPARATOR, body_height, render};
+pub use render::{Chrome, HINT_SEPARATOR, Heat, body_height, render};
 pub use terminal::{Screen, Session};
 pub use theme::Theme;
-pub use view::{Position, Row, View, rows_in};
+pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};

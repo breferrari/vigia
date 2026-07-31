@@ -23,7 +23,10 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use vigia::{Chrome, HINT_SEPARATOR, Position, Row, Theme, View, body_height, render};
+use vigia::{
+    Chrome, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Position, Row, Theme, View, body_height,
+    render,
+};
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
 /// The mark meaning "this continues past the right edge".
@@ -110,6 +113,57 @@ fn occupied(width: u16, height: u16, view: &View, chrome: &Chrome, y: u16) -> us
     total
 }
 
+/// The eighth-blocks a sparkline is drawn from, restated rather than imported.
+///
+/// A test sharing the renderer's own table would agree with it by construction.
+const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// The block one heat slice is drawn as, restated for the same reason as
+/// [`RAMP`].
+const HEAT_BLOCK: char = '█';
+
+/// Cells on row `y` whose foreground is one of `colours`, in column order.
+///
+/// **Symbol and colour together, because neither alone separates the two strips
+/// any more.** The sparkline's top rung is `█` and so is every heat slice, so a
+/// symbol-only match counts one as the other; the heat track is the same dim
+/// grey as the `+42 -7` counters, so a colour-only match counts those. Both
+/// gates below were symbol-only and one of them silently started counting
+/// eighteen buckets the moment the heat strip landed.
+fn cells_coloured(
+    backend: &TestBackend,
+    y: u16,
+    colours: &[ratatui::style::Color],
+    symbols: &[char],
+) -> Vec<ratatui::style::Style> {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .map(|x| &buffer[(x, y)])
+        .filter(|cell| {
+            let symbol = cell.symbol();
+            symbols.iter().any(|glyph| symbol == glyph.to_string())
+                && cell.style().fg.is_some_and(|fg| colours.contains(&fg))
+        })
+        .map(|cell| cell.style())
+        .collect()
+}
+
+/// Every foreground the heat strip can draw a slice in.
+fn heat_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
+    [
+        theme.heat_track,
+        theme.heat_added,
+        theme.heat_added_heavy,
+        theme.heat_removed,
+        theme.heat_removed_heavy,
+        theme.heat_mixed,
+        theme.heat_mixed_heavy,
+    ]
+    .iter()
+    .filter_map(|style| style.fg)
+    .collect()
+}
+
 fn line(kind: LineKind, number: u32, text: &str) -> Row {
     Row::Line {
         kind,
@@ -152,6 +206,7 @@ fn every_row_kind() -> View {
                 churn: Some((3, 1)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
             Row::Hunk {
                 old_start: 258,
@@ -173,6 +228,7 @@ fn every_row_kind() -> View {
                 churn: None,
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
             Row::Note("binary"),
             Row::File {
@@ -182,6 +238,7 @@ fn every_row_kind() -> View {
                 churn: Some((0, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
         ],
         files: 3,
@@ -203,6 +260,7 @@ fn awkward() -> View {
                 churn: Some((12, 3)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
             line(LineKind::Added, 2, "🙂🙂🙂 tail"),
@@ -300,12 +358,46 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     ]
 }
 
-/// A file heading at each rung of the recency ladder, with churn behind it.
+/// A file changed at both ends and untouched through the middle.
+///
+/// The one shape that separates a re-projection from a truncation. Any strip
+/// showing a prefix of this still colours its **first** bucket, so only the last
+/// one can catch it, and only if the file's tail really did change.
+///
+/// Additions at the head and removals at the tail, so the two ends are also
+/// distinguishable by colour rather than only by position.
+const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
+    let mut heat = [HeatBucket {
+        added: 0,
+        removed: 0,
+    }; HEAT_BUCKETS];
+    heat[0] = HeatBucket {
+        added: 9,
+        removed: 0,
+    };
+    heat[1] = HeatBucket {
+        added: 3,
+        removed: 0,
+    };
+    heat[HEAT_BUCKETS - 1] = HeatBucket {
+        added: 0,
+        removed: 6,
+    };
+    heat
+};
+
+/// A file heading at each rung of the recency ladder, with churn and heat behind
+/// it.
 ///
 /// **Every bucket is non-zero on purpose.** An empty bucket draws as a space, so
 /// a fixture with gaps in it makes the strip's *width* unobservable from the
 /// rendered row, and the ladder gate below could not tell four buckets from
 /// eight. The counts still differ, so the shared scale is exercised as well.
+///
+/// The heat strips are the mirror image: **the two ends of the file are changed
+/// and the middle is not**, which is the only shape that can tell a
+/// re-projection from a truncation. A strip that dropped its tail would still
+/// colour its first bucket and would leave its last one cool.
 fn glancing() -> View {
     View {
         rows: vec![
@@ -316,6 +408,7 @@ fn glancing() -> View {
                 churn: Some((42, 7)),
                 spark: [1, 2, 4, 6, 8, 9, 11, 12],
                 recency: Recency::Pulse,
+                heat: ENDS_CHANGED,
             },
             Row::File {
                 path: "crates/vigia/src/render.rs".to_owned(),
@@ -324,6 +417,7 @@ fn glancing() -> View {
                 churn: Some((11, 3)),
                 spark: [1, 1, 2, 2, 1, 3, 2, 1],
                 recency: Recency::Live,
+                heat: ENDS_CHANGED,
             },
             Row::File {
                 path: "Cargo.toml".to_owned(),
@@ -332,6 +426,7 @@ fn glancing() -> View {
                 churn: Some((2, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                heat: [HeatBucket::default(); HEAT_BUCKETS],
             },
         ],
         files: 3,
@@ -886,13 +981,20 @@ fn a_clipped_content_line_says_it_continues() {
 /// at every width, which is the failure the hint-bar gate already documents.
 #[test]
 fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
-    let ramp = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    // Counted by **colour** as well as by glyph. Until the heat strip landed a
+    // sparkline was the only thing on a heading drawn from blocks, and this gate
+    // counted glyphs; a heat slice is the same full block, so the count became
+    // eighteen and the gate started failing for a reason that was not a
+    // regression. `cells_coloured` says why the pair is needed.
+    let spark = theme().spark.fg.expect("the sparkline has a colour");
     let mut seen = std::collections::BTreeSet::new();
 
     for (name, view, chrome) in cases() {
         for width in WIDTHS {
-            for row in rows_at(width, 6, &view, &chrome) {
-                let buckets = row.chars().filter(|c| ramp.contains(c)).count();
+            for y in 0..6u16 {
+                let backend = drawn(width, 6, &view, &chrome);
+                let buckets = cells_coloured(&backend, y, &[spark], &RAMP).len();
+                let row = rows_at(width, 6, &view, &chrome)[usize::from(y)].clone();
                 assert!(
                     buckets <= 8,
                     "{name}: {buckets} buckets at {width} columns, over the eight \
@@ -954,5 +1056,78 @@ fn the_pulse_label_never_pushes_a_path_off_its_own_row() {
         narrowest_named <= 24,
         "the heading only named its file from {narrowest_named} columns up, so a \
          glance element is eating the path well before the pane gets small"
+    );
+}
+
+/// The third case of `SPEC.md` §11.1's layout rule, and the one that is a
+/// correctness claim rather than a tidiness one.
+///
+/// > A thing made of items breaks, a thing made of characters marks its edge,
+/// > and content is neither.
+///
+/// A heat strip is made of items and is **not** a list. Dropping its tail would
+/// draw the first half of a file as though it were the whole file, and a reader
+/// would conclude the end of the file is untouched. So a narrower rung sums
+/// adjacent slices and classifies the sums: less resolution, still the whole
+/// file.
+///
+/// **Read from cell styles, not symbols.** Every slice draws the same block and
+/// only the colour differs, so a symbol-based check cannot tell a cool slice
+/// from a hot one and would pass against a strip of pure track.
+#[test]
+fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
+    let theme = theme();
+    let view = glancing();
+    let mut widths_seen = std::collections::BTreeSet::new();
+
+    for width in WIDTHS {
+        let backend = drawn(width, 6, &view, &following());
+
+        // Row 1 is the first file heading; the header is row 0.
+        let strip = cells_coloured(&backend, 1, &heat_colours(&theme), &[HEAT_BLOCK]);
+
+        if strip.is_empty() {
+            continue;
+        }
+        widths_seen.insert(strip.len());
+
+        // Whole rungs only. Anything between them is a strip that was squeezed
+        // rather than re-projected.
+        assert!(
+            strip.len() == HEAT_BUCKETS || strip.len() == HEAT_BUCKETS / 2,
+            "at {width} columns the strip is {} slices wide, which is neither \
+             whole rung",
+            strip.len()
+        );
+
+        // The claim truncation fails. The fixture changes both ends of the file,
+        // so at every rung the first and last slice have to be hot. A strip
+        // showing a prefix would leave the last one on the track colour.
+        assert_ne!(
+            strip.last().map(|style| style.fg),
+            Some(theme.heat_track.fg),
+            "at {width} columns the strip's last slice is track, but the \
+             fixture changes the end of the file, so the tail was dropped \
+             rather than merged"
+        );
+        assert_ne!(
+            strip.first().map(|style| style.fg),
+            Some(theme.heat_track.fg),
+            "at {width} columns the strip's first slice is track"
+        );
+        // And the middle is still visibly untouched, or the merge smeared the
+        // ends across the whole file and the strip stopped locating anything.
+        assert!(
+            strip.iter().any(|style| style.fg == theme.heat_track.fg),
+            "at {width} columns every slice is hot, so a file changed only at \
+             its ends is being drawn as one changed throughout"
+        );
+    }
+
+    assert_eq!(
+        widths_seen,
+        [HEAT_BUCKETS / 2, HEAT_BUCKETS].into_iter().collect(),
+        "the strip was drawn at slice counts {widths_seen:?}; both rungs have to \
+         be reachable or the ladder has a rung no width can produce"
     );
 }

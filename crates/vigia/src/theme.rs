@@ -8,6 +8,7 @@
 //! [#11](https://github.com/breferrari/vigia/issues/11); this type is the seam
 //! that work attaches to, not an attempt at it.
 
+use crate::render::Heat;
 use ratatui::style::{Color, Modifier, Style};
 use vigia_core::{Class, Recency};
 
@@ -32,6 +33,24 @@ pub struct Theme {
     pub pulse: Style,
     /// A churn sparkline's blocks.
     pub spark: Style,
+    /// A heat-strip slice nothing changed in.
+    ///
+    /// A track rather than a gap, which is what `assets/preview.svg` draws: an
+    /// empty slice is dark, not absent, so the strip's own length stays legible
+    /// and a reader can see *how much* of the file is untouched.
+    pub heat_track: Style,
+    /// A heat-strip slice holding additions.
+    pub heat_added: Style,
+    /// The same, in this file's busiest half.
+    pub heat_added_heavy: Style,
+    /// A heat-strip slice holding removals.
+    pub heat_removed: Style,
+    /// The same, in this file's busiest half.
+    pub heat_removed_heavy: Style,
+    /// A heat-strip slice holding both.
+    pub heat_mixed: Style,
+    /// The same, in this file's busiest half.
+    pub heat_mixed_heavy: Style,
     /// The letter naming what happened to a file.
     pub kind: Style,
     /// A hunk's `@@` header.
@@ -86,6 +105,34 @@ impl Theme {
         }
     }
 
+    /// The style one slice of a heat strip is drawn in.
+    ///
+    /// **Mixed is yellow, and that is a ruling rather than a leftover colour.**
+    /// `SPEC.md` §5.1 left the mixed case open because the mockup happens not to
+    /// contain one. Every alternative lies: drawing the slice as whichever kind
+    /// dominates, or as the rarer one, paints a mixed slice as pure, and telling
+    /// addition from removal by position is the strip's entire job. Yellow is
+    /// also what a reader already reads as "both" from every diff tool they have
+    /// used.
+    ///
+    /// **Two intensities rather than the picture's three.** The SVG ramps
+    /// additions across `#3fb950`, `#56d364` and `#7ee787`; sixteen
+    /// foreground-only colours have a normal and a bright of each hue and no
+    /// third stop. The same loss §11.1 already records for the diff signal and
+    /// the recency ramp, and the same issue closes it:
+    /// [#11](https://github.com/breferrari/vigia/issues/11).
+    pub fn heat(&self, heat: Heat) -> Style {
+        match heat {
+            Heat::Cool => self.heat_track,
+            Heat::Added { heavy: false } => self.heat_added,
+            Heat::Added { heavy: true } => self.heat_added_heavy,
+            Heat::Removed { heavy: false } => self.heat_removed,
+            Heat::Removed { heavy: true } => self.heat_removed_heavy,
+            Heat::Mixed { heavy: false } => self.heat_mixed,
+            Heat::Mixed { heavy: true } => self.heat_mixed_heavy,
+        }
+    }
+
     /// The style a run of `class` is drawn in.
     ///
     /// [`Class::Plain`] takes [`Theme::context`] whatever line it lands on, and
@@ -130,6 +177,16 @@ impl Default for Theme {
             // already means two rows below.
             pulse: Style::new().fg(Color::Cyan),
             spark: Style::new().fg(Color::Cyan),
+            // The strip is a map of the file, so an untouched slice has to be
+            // visible as untouched rather than absent. DarkGray is the dimmest
+            // thing every terminal still draws.
+            heat_track: Style::new().fg(Color::DarkGray),
+            heat_added: Style::new().fg(Color::Green),
+            heat_added_heavy: Style::new().fg(Color::LightGreen),
+            heat_removed: Style::new().fg(Color::Red),
+            heat_removed_heavy: Style::new().fg(Color::LightRed),
+            heat_mixed: Style::new().fg(Color::Yellow),
+            heat_mixed_heavy: Style::new().fg(Color::LightYellow),
             kind: Style::new().fg(Color::Yellow),
             hunk: Style::new().fg(Color::Blue),
             gutter: Style::new().fg(Color::DarkGray),

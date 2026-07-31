@@ -336,3 +336,82 @@ fn one_unreadable_path_does_not_end_the_stream() {
             .unwrap_or_else(|e| panic!("diffing {} after deletion failed: {e}", change.path));
     }
 }
+
+/// The line count, against the file on disk rather than against the arithmetic
+/// restated.
+///
+/// `FileDiff::lines` is what the heat strip projects hunk positions across, so
+/// getting it wrong misplaces every mark on the strip rather than failing
+/// loudly. The oracle is the bytes the fixture wrote: a file's line count is
+/// something a test can know independently, which is the whole reason to check
+/// it here rather than only beside `compute`.
+///
+/// Three kinds in one test on purpose. A modification, an addition and a
+/// deletion are the three shapes of working-tree side there are, and the wrong
+/// implementations (count the index side, count both, count the hunks) each
+/// pass for at least one of them alone.
+#[test]
+fn the_line_count_matches_the_file_on_disk() {
+    let scratch = Scratch::new("line-count");
+    scratch.write("modified.txt", numbered_lines(40));
+    scratch.write("removed.txt", numbered_lines(9));
+    scratch.commit_all("initial");
+
+    // Shorter than it was, so counting the index side gives 40 and counting
+    // both gives 52.
+    let shrunk = numbered_lines(12);
+    scratch.write("modified.txt", &shrunk);
+    let created = "alpha\nbeta\ngamma\n";
+    scratch.write("added.txt", created);
+    std::fs::remove_file(scratch.path_of("removed.txt")).expect("delete the fixture file");
+
+    let worktree = scratch.worktree();
+    let counted = |text: &str| text.lines().count() as u32;
+
+    for change in changes_of(&worktree) {
+        let diff = worktree.diff(&change).expect("diff");
+        let expected = match diff.path.as_str() {
+            "modified.txt" => counted(&shrunk),
+            "added.txt" => counted(created),
+            // No working-tree side left to locate anything within.
+            "removed.txt" => 0,
+            other => panic!("unexpected path {other}"),
+        };
+        assert_eq!(
+            diff.lines, expected,
+            "{} reported {} lines against {expected} on disk",
+            diff.path, diff.lines
+        );
+    }
+}
+
+/// A file whose length in *bytes* did not change but whose length in *lines*
+/// did.
+///
+/// The pair that separates a line count from a byte count, and the fixture the
+/// frame path's cache-key gate uses for the same reason. Nine bytes either way;
+/// three lines against one.
+#[test]
+fn a_line_count_is_not_a_byte_count() {
+    let scratch = Scratch::new("line-count-bytes");
+    scratch.write("f.txt", "ab\ncd\nef\n");
+    scratch.commit_all("initial");
+    scratch.write("f.txt", "abcdefgh\n");
+
+    let worktree = scratch.worktree();
+    let change = changes_of(&worktree)
+        .into_iter()
+        .find(|c| c.path == "f.txt")
+        .expect("the rewritten file is changed");
+    let diff = worktree.diff(&change).expect("diff");
+
+    assert_eq!(
+        std::fs::metadata(scratch.path_of("f.txt"))
+            .expect("stat")
+            .len(),
+        9,
+        "the fixture no longer holds the byte length constant, so it is not \
+         testing what it says"
+    );
+    assert_eq!(diff.lines, 1);
+}

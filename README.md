@@ -4,7 +4,7 @@
 
 *Portuguese: a watchman, the one who keeps watch.*
 
-`🚧 Early development. No release yet, nothing to install.`
+`🚧 Early development. It runs, and it installs from source. No packaged release yet.`
 
 </div>
 
@@ -20,9 +20,39 @@ It is closer to `btop` than to a git client: something you glance at, read from 
 
 **A monitor, not a reviewer.** A reviewer is something you launch per changeset to step through, annotate, and decide on. `vigia` is already open. It should be correct when nobody has touched it for an hour, and still cheap when nobody has closed it for a week.
 
+## 📦 Try it
+
+There is **no crates.io release and no prebuilt binary yet**. Both are Phase 4, and publishing a name to crates.io is permanent, so it happens when there is a version worth keeping forever. What exists today is a binary that builds from source in one command.
+
+```sh
+cargo install --git https://github.com/breferrari/vigia vigia
+```
+
+Rust 1.85 or newer is the only requirement. Every dependency is pure Rust, so there is no C toolchain and no system library to install first.
+
+Then, from the worktree you want to watch:
+
+```sh
+vigia                  # the current directory
+vigia ~/code/some-repo
+```
+
+| Keys | |
+|---|---|
+| `q` `Esc` `Ctrl+C` `Ctrl+D` | quit |
+| `j` `k` `↑` `↓` | scroll a row |
+| `Space` `PgDn` `PgUp` | page |
+| `g` `Home` / `G` `End` | first / last changed file |
+| `f` | follow the newest change, or stop following |
+| wheel | scroll |
+
+It shows the working tree against the index, untracked files included, and it follows whatever changed last until you scroll away.
+
+**What is early about it.** There are no flags and no config file: one optional path and nothing else. Colour is the sixteen ANSI names, so the recency and heat ramps have fewer steps than the mockup below until theming lands. The header's mode word and the status bar readouts in that picture are not built yet.
+
 ## 🖼️ Where it is going
 
-Target layout. **This is a mockup, not a screenshot.** Nothing renders yet.
+Target layout. **This is a mockup, not a screenshot.** Most of it draws today: the file rows, the counters, the change sparklines, the heat bars, the pulse on what just changed, and the highlighted diff under them. The header's mode word and the status bar are still only in the picture.
 
 <img src="assets/preview.svg" alt="Mockup of the vigia interface: a file list with change sparklines above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
 
@@ -61,8 +91,8 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | | Phase | |
 |---|---|---|
 | ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI |
-| ⬜ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
-| ⬜ | **3. Glanceability** | Sparklines, heat bars, live counters, theming |
+| ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
+| 🔨 | **3. Glanceability** | Sparklines, heat bars, live counters, then theming |
 | ⬜ | **4. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 
 Being built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and it is written before the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked: the table above is the shape, that file is what is actually done.
