@@ -284,6 +284,41 @@ fn the_header_says_which_mode_it_is_in() {
 }
 
 #[test]
+fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
+    // A state nobody can see at a glance has not been reported. Drawn in the
+    // same dim grey as the count, `not watching` is a word a reader has to go
+    // looking for, and a monitor whose failure looks exactly like its working
+    // state has failed twice.
+    //
+    // Invisible to the snapshots by construction: `TestBackend`'s `Display`
+    // writes symbols and drops styles, so this has to read cells. Both
+    // directions, because a header painted alert unconditionally would pass a
+    // one-sided check while shouting at a healthy tree forever.
+    let view = one_file();
+    let theme = Theme::default();
+
+    let style_of = |chrome: &Chrome| {
+        let backend = screen(80, 6, &view, chrome);
+        let x = column_of(&backend, 0, "w");
+        backend.buffer()[(x, 0)].style()
+    };
+
+    let live = style_of(&chrome());
+    let lost = style_of(&Chrome {
+        mode: Mode::Lost,
+        ..chrome()
+    });
+
+    assert_eq!(live.fg, theme.chrome_dim.fg, "a live watch shouted");
+    assert_eq!(lost.fg, theme.alert.fg, "a lost watch was drawn quietly");
+    assert_ne!(
+        live.fg, lost.fg,
+        "the two modes are the same colour, so the header says nothing a glance \
+         can catch"
+    );
+}
+
+#[test]
 fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
     // One event, two halves, and they are not the same half twice. The header
     // carries what is durable, which is that the diff has stopped being live.

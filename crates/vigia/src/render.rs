@@ -812,9 +812,16 @@ impl Painter<'_> {
     /// on the left loses characters to it rather than the other way round: the
     /// number is what changes, and what changes is what a glance is for. Written
     /// twice, one of them eventually stops doing that.
-    fn status_line(&mut self, area: Rect, left: &str, style: Style, right: &str) {
+    fn status_line(
+        &mut self,
+        area: Rect,
+        left: &str,
+        style: Style,
+        right: &str,
+        right_style: Style,
+    ) {
         self.buf.set_style(area, self.theme.chrome_dim);
-        let taken = self.put_right(area, right, self.theme.chrome_dim);
+        let taken = self.put_right(area, right, right_style);
         let room = usize::from(area.width).saturating_sub(taken);
         self.put_marked(area.x, area.y, left, room, style);
     }
@@ -835,7 +842,28 @@ impl Painter<'_> {
         // side breaks instead, by dropping whole rungs.
         let rungs = header_rungs(chrome.mode, view.files);
         let right = widest_fitting(&rungs, usize::from(area.width));
-        self.status_line(area, &chrome.worktree, self.theme.chrome, right);
+        // **A dead watch has to be visible, not merely present.** Drawn in the
+        // same dim grey as the count, `not watching` is a word a reader has to
+        // go looking for, and a monitor whose failure state looks exactly like
+        // its working one has failed twice. `SPEC.md` §5 makes colour half the
+        // differentiator, so the abnormal state is loud and the normal one stays
+        // quiet.
+        //
+        // The **footer's own** alert rather than a colour of its own: the notice
+        // carrying which failure already uses it, and the two halves of one
+        // event should not arrive in two different reds. A reuse of an existing
+        // style rather than a palette decision, which stays #11's.
+        let right_style = match chrome.mode {
+            Mode::Watching => self.theme.chrome_dim,
+            Mode::Lost => self.theme.alert,
+        };
+        self.status_line(
+            area,
+            &chrome.worktree,
+            self.theme.chrome,
+            right,
+            right_style,
+        );
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -870,10 +898,16 @@ impl Painter<'_> {
                 y: bottom.y - 1,
                 ..bottom
             };
-            self.status_line(upper, "", self.theme.chrome_dim, state);
-            self.status_line(bottom, footer.left, style, "");
+            self.status_line(
+                upper,
+                "",
+                self.theme.chrome_dim,
+                state,
+                self.theme.chrome_dim,
+            );
+            self.status_line(bottom, footer.left, style, "", self.theme.chrome_dim);
         } else {
-            self.status_line(bottom, footer.left, style, state);
+            self.status_line(bottom, footer.left, style, state, self.theme.chrome_dim);
         }
     }
 
