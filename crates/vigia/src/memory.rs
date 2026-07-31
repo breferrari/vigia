@@ -155,3 +155,70 @@ fn read() -> Option<u64> {
 fn read() -> Option<u64> {
     None
 }
+
+#[cfg(test)]
+mod tests {
+    //! Beside the code rather than in `tests/`, the way `app.rs` and `view.rs`
+    //! keep theirs: this needs no repository, no terminal and no fixture.
+    //!
+    //! **It is also the only thing that executes two of the three readers.** The
+    //! reference machine is Windows, so the `unsafe` `proc_pidinfo` block and
+    //! the Linux `/proc` read are compiled here and run only in CI. A gate that
+    //! asserts a *number* rather than a return code is what makes that
+    //! difference safe: an FFI call that fills nothing still returns, and the
+    //! struct it did not fill reads as whatever was on the stack.
+
+    use super::*;
+
+    #[test]
+    fn a_process_reads_its_own_resident_set_size() {
+        let bytes = resident().expect(
+            "no reader for this platform. Every tier-1 target has one; if this \
+             fires on Linux, macOS or Windows the readout has silently stopped \
+             being drawn rather than being drawn wrongly",
+        );
+        // A floor and a ceiling rather than an exact number, because the value is
+        // a real measurement of a real process and nothing here can predict it.
+        // What they catch is the failure that matters: a struct the call never
+        // filled reads as stack garbage, which lands outside these by orders of
+        // magnitude far more often than it lands inside them.
+        assert!(
+            (1 << 20..1 << 36).contains(&bytes),
+            "resident set size is {bytes} bytes, which is not a number a test \
+             process has. An uninitialised read looks exactly like this"
+        );
+    }
+
+    #[test]
+    fn the_number_follows_the_process_rather_than_standing_still() {
+        // **The half a range check cannot do**, and the reason it is worth its
+        // own test: a reader hard-wired to a plausible constant passes the gate
+        // above forever. The vault's note on reading RSS makes the same point
+        // about the `tasklist` parse, which was trusted only once an injected
+        // leak produced a monotonic ramp rather than a flat line.
+        //
+        // Touched page by page, not merely allocated. Every one of these
+        // platforms hands out address space lazily, so a `Vec` that is never
+        // written to costs no resident pages and this would measure nothing.
+        const GROWTH: usize = 64 << 20;
+        let before = resident().expect("a reader");
+
+        let mut ballast = vec![0u8; GROWTH];
+        for page in ballast.chunks_mut(4096) {
+            page[0] = 1;
+        }
+        let after = resident().expect("a reader");
+
+        // A quarter of what was touched, which is deliberately loose. The point
+        // is to separate "tracks reality" from "is a constant", and a tight
+        // bound would instead be measuring the allocator on three platforms.
+        assert!(
+            after > before + (GROWTH / 4) as u64,
+            "touching {GROWTH} bytes moved the reading from {before} to {after}, \
+             which is not enough to say the number follows the process"
+        );
+        // Kept alive across the second read, or the optimiser is free to drop it
+        // before the measurement it exists for.
+        std::hint::black_box(&ballast);
+    }
+}
