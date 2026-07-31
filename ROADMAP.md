@@ -130,7 +130,7 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
 | ✅ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
-| ✅ | The chrome is drawn but too dim to read on a real terminal | [#59](https://github.com/breferrari/vigia/issues/59) |
+| ✅ | Scrolling into the tail of a diff leaves the pane half empty | [#59](https://github.com/breferrari/vigia/issues/59) |
 
 **[#10](https://github.com/breferrari/vigia/issues/10) was split before anything here was taken**, which this file had blocked the phase on. Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carried four features that share no implementation.
 
@@ -195,6 +195,34 @@ Two existing gates had to change for the same reason, and it is worth knowing be
 > overshoot. It passed against the unfixed code and only the mutation run found
 > it. **A gate can be wrong about its situation as well as about its assertion,
 > and reading cannot tell the two apart.** `SPEC.md` §7 carries the first half.
+
+**Theming is in, and the shape of it is two axes rather than one ladder.** [#11](https://github.com/breferrari/vigia/issues/11) closed the phase. A **palette** decides what may be drawn and a **depth** decides how finely it can be expressed, and both have to allow an element before it appears. That is what makes a 256-colour degradation path a mechanism instead of a second hand-written palette: `dark` is authored once, in the colours `assets/preview.svg` actually uses, and every rung below is derived from it. The two disagree in a way worth knowing about: `ansi` refuses a row wash at *every* depth, because a wash has to assume a background and that palette's whole contract is that it assumes none.
+
+**`ansi` stays the default, and the cost of that is real.** It is the only palette correct on a terminal whose background nothing has detected, and detecting one needs a tty round-trip this shell does not make. So the row tint the mockup promises is invisible until a reader names a theme, and §11.1's recorded loss stands on the default. `VIGIA_THEME=dark` is what draws the picture in the README, which the caption now says.
+
+**The part that took three attempts was mapping 24-bit onto sixteen names.** A nearest-neighbour search is the obvious implementation and it sends the mockup's `#3fb950` addition green to **cyan**: the palette's green is `#008000` with no blue at all, the input has 80 of it, and cyan's 128 is nearer to 80 than zero is. Reweighting did not fix it, because the metric was never the problem. The sixteen entries are dark saturated primaries and modern palettes are light desaturated ones, so lightness decides before hue does, every time. A reader glancing at a diff reads hue. It picks hue first from three bits against the input's own chroma range, and lightness second.
+
+**What #11 did not bring is the fourth recency rung**, which this file and `SPEC.md` §5.1 both promised it would. The rung count belongs to `Recency`, which has three variants because the store can answer three questions about a path, and whose `cold` means *untracked* rather than *old*. A wider palette draws the same three rungs in better colours. That correction landed in its own commit ahead of the implementation, and §11.1 now carries the general shape: **a limit blamed on the rendering layer was a limit of the data behind it.** §5.2 caught the mirror image of that a phase ago.
+
+**And the phase closed on a defect found by using the tool, for the third time.** [#59](https://github.com/breferrari/vigia/issues/59) was reported from a screen recording: scroll into the tail of a diff and the pane goes half empty. [#57](https://github.com/breferrari/vigia/issues/57) fixed one route to that screen and reads as though it covers both. Its restart fires on `overshot`, which needs the position past the end of the **last** file, and scrolling never does that: `skip` stays inside whichever file the top is in, the walk simply runs out of files, and the rest of the pane stays blank. One row short at first, another with every keystroke.
+
+The fix must not apply to a jump, and two `follow.rs` tests are what said so. Following a file puts it on the top row and so does `G`; backing up to fill a short tail moves it off and makes a reader hunt for what the jump was for. A `Position` cannot tell a scroll from a jump, so `App` carries it.
+
+> [!warning] The issue was filed on a diagnosis that was wrong
+> #59 claimed the rendered area exceeded the window in both dimensions, on four
+> symptoms read off video. A probe disproved the mechanism outright, and **two of
+> the four were mis-cropped frames**: the pane runs to y≈1265 and the crop stopped
+> at y=912, so the middle of the pane was being read as its bottom. A live
+> screenshot then showed the header readout and the whole footer present.
+>
+> What the probe did find was worth the trip. The terminal size **changes** when
+> the alternate screen is entered under Warp, 195x77 before and 199x75 after, and
+> `Shell::area` was reading it with its own syscall while `Terminal::draw` read it
+> again. A resize between the two sized the collect for a screen the paint no
+> longer had, on the first frame, which a monitor may sit on for minutes.
+>
+> The rule this leaves: **measure the artifact, not a picture of it.** Four
+> symptoms, one probe, and only one of them survived contact with a number.
 
 ## Phase 4 — distribution
 
