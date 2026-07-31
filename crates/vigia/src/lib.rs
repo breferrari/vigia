@@ -369,7 +369,7 @@ fn spawn_input(tx: Sender<Wake>) {
 ///
 /// **It takes the frame rather than its file count, and that is what makes the
 /// rule gateable at all.** With a count, the expression deciding it lived at the
-/// call site inside [`Shell::draw`], which owns a terminal and which no test can
+/// call site inside `Shell::draw`, which owns a terminal and which no test can
 /// drive: hardcoding that argument to `0` and to `1` both passed the **entire
 /// suite**, in both directions, while every unit test of this function stayed
 /// green. The mutations killed the consumer and never touched the producer.
@@ -429,11 +429,18 @@ fn short_name(workdir: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! The two rules in this file that are arithmetic rather than plumbing.
+    //! The one rule in this file that is arithmetic rather than plumbing.
     //!
-    //! Both are unreachable from an integration test: `run` owns a terminal, and
-    //! neither of these is exported. `terminal.rs` already keeps its unit tests
-    //! beside the code for the same reason.
+    //! [`short_name`] is private and `run` owns a terminal, so nothing outside
+    //! can reach it. `terminal.rs` already keeps its unit tests beside the code
+    //! for the same reason.
+    //!
+    //! [`branch_for`] used to be tested here too and deliberately is not any
+    //! more. Its rule is about a **frame**, and driving it from a number typed
+    //! into a unit test proved only that the function reads its own argument:
+    //! the call site producing that argument was untestable, and mutating it
+    //! passed the whole suite. It is exported and gated against real frames in
+    //! `tests/reads.rs` instead.
 
     use super::*;
 

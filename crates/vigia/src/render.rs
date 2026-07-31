@@ -259,7 +259,7 @@ pub struct Chrome {
     /// frame that has a diff to show and therefore never asked. The second is
     /// what keeps I4 true. Reading `.git/HEAD` on a frame that will not draw the
     /// answer is exactly the shape I4 forbids, so the shell asks only when the
-    /// diff is empty. See `crate::branch_for`.
+    /// diff is empty. See [`crate::branch_for`].
     pub branch: Option<String>,
     /// Whether the watch is still live.
     ///
