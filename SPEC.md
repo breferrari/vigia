@@ -398,9 +398,18 @@ So **a projection re-projects rather than dropping items**: a narrower rung sums
 
 **CLI.** One optional positional path, defaulting to the working directory. No flags today.
 
-### 11.2 Undecided — these gate Phase 2
+### 11.2 Undecided
 
 Each carries a recommendation marked **(proposed)**. None is settled until ruled on, and none may contradict §3 — if one does, §3 wins and the recommendation is wrong. A ruled item moves to §11.1 and leaves its number behind here, because the numbers are cited elsewhere and renumbering would silently repoint those citations.
+
+> [!note] This heading used to read "these gate Phase 2"
+> It stopped being true the moment Phase 2 closed with B3 through B6 still open,
+> and it stayed on the page for a whole phase after that, because a heading
+> naming a phase goes stale on a date nobody is watching. Which phase a decision
+> blocks belongs in `ROADMAP.md`, the file whose job is phases; what belongs here
+> is only whether a thing is decided. Corrected 2026-07-31 by
+> [#40](https://github.com/breferrari/vigia/issues/40), which found it while
+> ruling B3.
 
 **B1 — What happens to follow mode when the reader scrolls. Ruled 2026-07-30: the proposal stands. See §11.1.** `less +F` semantics, on at startup, disengaged by any manual scroll, re-engaged by `f`. Rationale, kept because it is the part a later reader will want to argue with: disengage-on-scroll is the only rule that never fights a reader mid-read, and a dedicated toggle beats overloading `G`/`End`, because "jump to the last file" and "resume following" are different intents that would otherwise be the same key.
 
