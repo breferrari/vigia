@@ -276,7 +276,7 @@ fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
     heat[0] = HeatBucket { added: 12, removed: 0 };
-    heat[1] = HeatBucket { added: 8, removed: 0 };
+    heat[1] = HeatBucket { added: 7, removed: 0 };
     heat[2] = HeatBucket { added: 4, removed: 0 };
     heat[3] = HeatBucket { added: 1, removed: 0 };
     View {
@@ -318,6 +318,65 @@ fn heat_stops(theme: Theme) -> Vec<Color> {
         seen.push(fg);
     }
     seen
+}
+
+/// The strip's slice colours in order, track included, so a band can be asserted
+/// by position rather than by counting.
+fn heat_sequence(theme: Theme) -> Vec<Color> {
+    let backend = draw(120, 4, &graded_heat(), theme);
+    let buffer = backend.buffer();
+    (0..120)
+        .filter(|x| buffer[(*x, HEADING)].symbol() == "█")
+        .filter_map(|x| buffer[(x, HEADING)].style().fg)
+        .collect()
+}
+
+#[test]
+fn each_slice_lands_in_the_band_its_share_puts_it_in() {
+    // **Counting distinct colours cannot test the thresholds**, and this gate
+    // exists because a mutation proved it. Moving the hot cut from two thirds to
+    // one half leaves the fixture with three distinct colours either way, so the
+    // count is satisfied while every slice is in the wrong band. Only asserting
+    // *which* band a given share falls into can tell the two apart.
+    //
+    // The fixture's busiest slice is 12, so the shares are 12, 7, 4 and 1 against
+    // it. Seven is the one that decides it: above half and below two thirds, so it
+    // is warm under the rule and hot under the mutation.
+    let theme = Theme::dark().resolve(Depth::Truecolor);
+    let got = heat_sequence(theme);
+
+    assert_eq!(got[0], theme.heat_added_hot.fg.unwrap(), "12 of 12 is hot");
+    assert_eq!(
+        got[1],
+        theme.heat_added_warm.fg.unwrap(),
+        "7 of 12 is above half and below two thirds, so it is warm"
+    );
+    assert_eq!(got[2], theme.heat_added_warm.fg.unwrap(), "4 of 12 is warm");
+    assert_eq!(got[3], theme.heat_added.fg.unwrap(), "1 of 12 is low");
+    assert_eq!(got[4], theme.heat_track.fg.unwrap(), "an empty slice");
+}
+
+#[test]
+fn a_ramp_that_survives_sixteen_colours_is_still_a_ramp() {
+    // `dark` is authored in 24-bit and quantised down, unlike `ansi`, so what its
+    // ramp becomes at sixteen colours is decided by the bright-variant threshold in
+    // `to_ansi16` and by nothing else. At a lower threshold all three greens land
+    // on the same name and the strip stops saying anything about where the work is.
+    //
+    // Two rather than three, because sixteen names hold a normal and a bright of
+    // each hue. Collapsing to one is the failure.
+    let flat = Theme::dark().resolve(Depth::Ansi16);
+    let mut seen: Vec<Color> = Vec::new();
+    for colour in [flat.heat_added, flat.heat_added_warm, flat.heat_added_hot] {
+        let fg = colour.fg.expect("a colour");
+        if !seen.contains(&fg) {
+            seen.push(fg);
+        }
+    }
+    assert!(
+        seen.len() >= 2,
+        "the added ramp collapsed to {seen:?} at sixteen colours"
+    );
 }
 
 #[test]

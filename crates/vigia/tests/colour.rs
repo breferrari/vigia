@@ -374,6 +374,40 @@ fn a_green_stays_green_and_a_red_stays_red_at_sixteen() {
 }
 
 #[test]
+fn a_channel_between_two_levels_takes_the_nearer_one() {
+    // **The cube corners cannot test this**, and a mutation proved it: replacing the
+    // axis picker's `abs_diff` with a `saturating_sub` still maps every corner to
+    // itself, because at a corner the distance is zero either way. It is only wrong
+    // in between, where `saturating_sub` reads every level above the value as an
+    // equally good zero and picks the last one instead of the nearest.
+    //
+    // The levels are 0, 95, 135, 175, 215, 255, so the first gap is the wide one and
+    // the place to sit in.
+    let index = |r: u8, g: u8, b: u8| match Depth::Ansi256
+        .resolve(Style::new().fg(Color::Rgb(r, g, b)))
+        .fg
+    {
+        Some(Color::Indexed(i)) => i,
+        other => panic!("expected an index, got {other:?}"),
+    };
+
+    // **Saturated on purpose.** A dark near-neutral like `(40, 0, 0)` is genuinely
+    // nearer a dark grey than it is to black, so the grey ramp wins it and the cube
+    // arithmetic never runs. Pinning one channel at full keeps every case in the
+    // cube, where the axis picker is the only thing deciding.
+    //
+    // The cube is `16 + 36*r + 6*g + b` over level indices, so one channel moves
+    // the answer by a known stride and the arithmetic stays legible in the result.
+    assert_eq!(index(40, 255, 0), 16 + 30, "40 is nearer 0 than 95");
+    assert_eq!(index(60, 255, 0), 16 + 36 + 30, "60 is nearer 95 than 0");
+    assert_eq!(index(255, 40, 0), 16 + 180, "the same, one axis over");
+    assert_eq!(index(255, 0, 40), 16 + 180, "and again");
+
+    // 47 is just below the midpoint of the widest gap and resolves downwards.
+    assert_eq!(index(47, 255, 0), 16 + 30, "the midpoint of 0 and 95");
+}
+
+#[test]
 fn the_mockups_own_hues_keep_their_hue_at_sixteen() {
     // Every colour `assets/preview.svg` draws, through the rung that has the least
     // to work with. This is what justifies the two constants in `to_ansi16` that a
