@@ -19,6 +19,8 @@
 //! ever fires one way is not a rule, and a gate that only checks the firing
 //! direction passes against code that marks everything unconditionally.
 
+use std::time::Duration;
+
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
@@ -190,6 +192,29 @@ fn chrome() -> Chrome {
         mode: Mode::Watching,
         notice: None,
         following: false,
+        // Absent in the base fixture, so every sweep that inherits it keeps
+        // measuring the chrome it measured before the status readouts existed.
+        // [`diagnostics`] is the fixture that carries them, and it is added to
+        // [`cases`] rather than replacing anything: a reader on the first paint
+        // has no frame time, so both shapes are real screens and both need the
+        // width sweep.
+        frame: None,
+        memory: None,
+    }
+}
+
+/// The status bar with both readouts on it, which is every frame after the first.
+///
+/// The values are chosen to be the *widest* each cell can be rather than typical,
+/// which is what makes this fixture worth sweeping: `999ms` and `9999MiB` are
+/// five and seven columns, the maximum either can occupy, so a width where this
+/// fits is a width where any value fits. A fixture at `0.8ms` and `19MiB` would
+/// pass at widths the real thing overflows.
+fn diagnostics() -> Chrome {
+    Chrome {
+        frame: Some(Duration::from_millis(999)),
+        memory: Some(9999 * 1024 * 1024),
+        ..following()
     }
 }
 

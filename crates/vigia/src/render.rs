@@ -27,6 +27,8 @@
 //! lost: [`ELIDED`] on the left for a file path, whose tail names the file, and
 //! [`CONTINUES`] on the right for everything else, content included.
 
+use std::time::Duration;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -181,6 +183,47 @@ const MIN_PATH_WIDTH: usize = 12;
 /// legibility with the content it exists to make legible.
 const MIN_BODY: u16 = 2;
 
+/// Columns the frame time's number gets, whatever it says.
+///
+/// **A fixed field, and it is the whole of why the readout is safe to draw.**
+/// The value changes every frame by construction, so a cell sized to its own
+/// text would be eleven columns one frame and ten the next, and everything to
+/// its left would shuffle sideways while a reader was reading it. Right-aligned
+/// into a constant width, the digits change and nothing moves.
+///
+/// Five, because that is the widest any branch of [`frame_cell`] produces, and
+/// the branches are chosen to make it so rather than the other way round.
+const FRAME_NUMBER: usize = 5;
+
+/// What follows the number, so a bare duration is not left saying what it timed.
+///
+/// The mockup's own word. Dropped as a whole with the cell rather than shortened
+/// to `f`: `SPEC.md` §11.1's rule is that a thing made of characters marks its
+/// edge and a thing made of items breaks, and one word is neither, so it goes
+/// entire or not at all. Same treatment the header's mode word gets.
+const FRAME_LABEL: &str = " frame";
+
+/// What a frame time occupies once it is drawn at all.
+const FRAME_CELL: usize = FRAME_NUMBER + FRAME_LABEL.len();
+
+/// Columns the memory readout gets, whatever it says.
+///
+/// Seven, for [`FRAME_NUMBER`]'s reason: `19MiB` and `1024MiB` are different
+/// widths and the same fact, and only one of them is allowed to decide where the
+/// cell to its left ends. The unit rides inside the field rather than beside it,
+/// unlike the frame time, because `MiB` already says what the number is.
+const MEMORY_CELL: usize = 7;
+
+/// What separates two facts drawn beside each other on the status bar.
+///
+/// Two spaces rather than [`FACT_SEPARATOR`]'s middle dot, and that is a
+/// distinction rather than an inconsistency: `watching · 3 files` joins two
+/// facts about **one** subject, and these are separate readouts that happen to
+/// share a line. The mockup draws the dot; the shipped footer already used two
+/// spaces for `follow ▶  N/M` before this existed, and one status bar with two
+/// join styles on it would be the second dialect §11.1 keeps rejecting.
+const CELL_GAP: &str = "  ";
+
 /// Shown on the footer while the viewport is moving itself.
 ///
 /// The mockup's own words. It sits with the position rather than with the
@@ -303,6 +346,26 @@ pub struct Chrome {
     /// was switched off look identical, and the reader's next action differs
     /// completely between them.
     pub following: bool,
+    /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
+    ///
+    /// `None` on the very first paint, when no frame has completed to have a
+    /// percentile of. That is a real state rather than a placeholder, and
+    /// [`Footer::plan`] is written so its arrival on the second paint cannot
+    /// move a row: see [`Footer::diagnostics`].
+    pub frame: Option<Duration>,
+    /// Resident set size in bytes, as of the last change.
+    ///
+    /// **As of the last change, not as of now**, and that is ruled rather than
+    /// tolerated. This shell wakes only on a filesystem event, so a pane left
+    /// open on an idle tree keeps showing whatever was true when the last write
+    /// landed; refreshing it needs a wake I1 forbids inventing. It is the same
+    /// contract the diff beside it already has. `SPEC.md` §5.1 carries the
+    /// argument, including why the pulse's escape from that wall does not
+    /// transfer here.
+    ///
+    /// `None` where reading it is not cheap enough to do per frame, which is no
+    /// tier-1 target today. See [`crate::memory`].
+    pub memory: Option<u64>,
 }
 
 /// `N/M`, or nothing at all when there is no diff to be positioned within.
@@ -342,6 +405,112 @@ fn state_rungs(following: bool, position: &str) -> Vec<String> {
         (true, true) => rungs.push(FOLLOWING.to_owned()),
         (false, false) => rungs.push(position.to_owned()),
         (false, true) => {}
+    }
+    rungs.push(String::new());
+    rungs
+}
+
+/// What a frame cost, in [`FRAME_CELL`] columns exactly.
+///
+/// Three branches, and the boundaries between them are chosen so the number can
+/// never exceed [`FRAME_NUMBER`]. Rounding is what makes that non-obvious:
+/// `{:.1}` of 9.96ms is `10.0ms`, which is six columns, so the one-decimal
+/// branch has to end *below* where rounding would carry rather than at a round
+/// number.
+///
+/// Past a second the value gives way to a sigil rather than to more digits.
+/// `>1s` is the honest thing to draw there: a frame at that magnitude has
+/// already failed every budget in `SPEC.md` §3, and knowing whether it was 1.4
+/// or 1.9 seconds tells a reader nothing the sigil does not, while a sixth
+/// column would move the footer under their eye.
+fn frame_cell(cost: Duration) -> String {
+    let micros = cost.as_micros();
+    let number = if micros < 9_950 {
+        format!("{:.1}ms", micros as f64 / 1000.0)
+    } else if micros < 999_500 {
+        format!("{}ms", (micros as f64 / 1000.0).round() as u64)
+    } else {
+        ">1s".to_owned()
+    };
+    let cell = format!("{number:>FRAME_NUMBER$}{FRAME_LABEL}");
+    // Belt to the gates' braces, and not a substitute for them: `tests/render.rs`
+    // proves the width by *rendering* across the boundary durations, which is the
+    // only proof that covers what a reader sees. This catches the same mistake
+    // one layer earlier and on every debug run, which is most of them, and it
+    // gives the constant somewhere to be wrong out loud rather than only in a
+    // doc comment.
+    debug_assert_eq!(width_of(&cell), FRAME_CELL, "the frame cell is fixed width");
+    cell
+}
+
+/// Resident set size, in [`MEMORY_CELL`] columns exactly.
+///
+/// **Mebibytes, where `assets/preview.svg` drew `11MB`**, and the departure is
+/// deliberate enough to be argued in `SPEC.md` §5.1 and corrected in the
+/// picture. I3's soak is the only other place this quantity is ever quoted and
+/// it is MiB throughout, so drawing `MB` here would put two units on one number
+/// and leave a reader comparing the screen against a soak report reading the
+/// 4.9% difference as drift.
+///
+/// Whole mebibytes, no decimal. A tenth of a mebibyte is below what a glance can
+/// use and below what the number is stable to between two reads of the same
+/// idle process.
+fn memory_cell(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    let mib = bytes / MIB;
+    // Ten gibibytes is far past anything this process can reach, so the sigil is
+    // an assertion that something is very wrong rather than a display mode.
+    // Drawn rather than clamped, because a clamped number looks exact.
+    let token = if mib > 9999 {
+        ">9GiB".to_owned()
+    } else {
+        format!("{mib}MiB")
+    };
+    let cell = format!("{token:>MEMORY_CELL$}");
+    // See [`frame_cell`] for why this is here as well as in the gate.
+    debug_assert_eq!(
+        width_of(&cell),
+        MEMORY_CELL,
+        "the memory cell is fixed width"
+    );
+    cell
+}
+
+/// The diagnostics ladder, widest rung first.
+///
+/// `0.8ms frame  19MiB`, then the frame time alone, then nothing. These are the
+/// two cells that describe **`vigia` itself** rather than the worktree, which is
+/// what puts them below both the hints and the state in `SPEC.md` §11.1's drop
+/// order: the hints are how a reader operates the tool and the state is what the
+/// tree is doing, and a narrow pane owes a reader those before it owes them
+/// instrumentation.
+///
+/// Memory drops before frame time for the same kind of reason one rung down. The
+/// frame cell reports a budget a reader can act on when it moves; the memory
+/// cell reports a claim that barely moves at all, and when it does the answer is
+/// a soak rather than a glance.
+///
+/// Either cell may be absent before any narrowing happens: the frame time has
+/// nothing to report on the first paint, and the memory readout has nothing to
+/// report on a platform with no cheap read. Both cases fall out of the same
+/// ladder rather than needing a branch, which is why this takes `Option`s.
+///
+/// Always ends in an empty rung, which is what makes [`widest_fitting`] total.
+fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(3);
+    match (frame.map(frame_cell), memory.map(memory_cell)) {
+        (Some(frame), Some(memory)) => {
+            rungs.push(format!("{frame}{CELL_GAP}{memory}"));
+            rungs.push(frame);
+        }
+        (Some(frame), None) => rungs.push(frame),
+        // Memory without a frame time is the first paint on every platform, and
+        // it draws nothing rather than the memory cell alone. A lone readout on
+        // an otherwise bare status bar reads as the important one, and this is
+        // the cell the ladder drops *first* everywhere else on screen; saying
+        // two opposite things about the same number at two moments is worse than
+        // waiting one frame for the pair.
+        (None, _) => {}
     }
     rungs.push(String::new());
     rungs
@@ -563,6 +732,13 @@ struct Footer<'a> {
     left: &'a str,
     /// Whether `left` is a notice, which is what decides its colour.
     alert: bool,
+    /// The frame-time and memory cells, already narrowed to what is left after
+    /// the hints and the state have taken theirs.
+    ///
+    /// Owned where its three siblings are borrowed or copied, because these are
+    /// formatted numbers with nowhere to live in the [`Chrome`]. Bounded by
+    /// [`FRAME_CELL`] plus [`MEMORY_CELL`] plus a gap, so I3 never sees it.
+    diagnostics: String,
 }
 
 impl<'a> Footer<'a> {
@@ -582,6 +758,7 @@ impl<'a> Footer<'a> {
                 reserved: 0,
                 left: "",
                 alert: false,
+                diagnostics: String::new(),
             };
         }
 
@@ -621,16 +798,49 @@ impl<'a> Footer<'a> {
         };
         // A notice is one token: it takes whatever room the line gives it and
         // marks the cut. The hints are a list, so they drop whole rungs instead.
+        let hints = widest_fitting(&HINT_RUNGS, room);
         let (left, alert) = match &chrome.notice {
             Some(notice) => (notice.as_str(), true),
-            None => (widest_fitting(&HINT_RUNGS, room), false),
+            None => (hints, false),
         };
+
+        // **Last, and out of what is left over, which is the whole design.**
+        // Every number above was computed exactly as it was before the readouts
+        // existed, so `rows` is still a function of width, follow state and file
+        // count alone. Two things would otherwise move a row under a reader for
+        // no reason they could see: the frame cell does not exist on the first
+        // paint, and the memory cell does not exist on a platform with no cheap
+        // read. Both would be a footer that grew once, at startup or per
+        // platform, which is the jog `SPEC.md` §11.1 already forbids a notice
+        // from causing.
+        //
+        // Measured against the **hints** even when a notice is showing, for that
+        // same rule's sake: a notice is transient and its length varies, so
+        // letting it decide would make the readouts blink. A notice long enough
+        // to collide simply marks its own cut, which is what `put_marked`
+        // already does for it.
+        //
+        // `grows` means the hints are on the row below, so only the state is
+        // beside the diagnostics; otherwise both are, and the hints take theirs
+        // first because advice outranks instrumentation at every width.
+        let beside = taken + if grows { 0 } else { width_of(hints) };
+        let room_for_diagnostics = width.saturating_sub(beside);
+        let diagnostics = widest_fitting(
+            &diagnostic_rungs(chrome.frame, chrome.memory),
+            // The gap is owed to whatever the cells sit beside, and there is
+            // always something: the state on its own row, or the hints on a
+            // shared one. Where both are empty the subtraction costs two columns
+            // the cells could have had, at widths where they do not fit anyway.
+            room_for_diagnostics.saturating_sub(CELL_GAP.len()),
+        )
+        .to_owned();
 
         Self {
             rows,
             reserved,
             left,
             alert,
+            diagnostics,
         }
     }
 }
@@ -960,6 +1170,16 @@ impl Painter<'_> {
         // would draw over them.
         let rungs = state_rungs(chrome.following, &position);
         let state = widest_fitting(&rungs, footer.reserved);
+        // One string rather than two placements, because `status_line` puts a
+        // single right-hand token and lets the left lose characters to it. The
+        // gap is owed only where both halves exist: `follow ▶` on a clean
+        // worktree has no position after it and no trailing spaces either, and
+        // the same has to hold when the diagnostics are the only thing there.
+        let right = match (footer.diagnostics.as_str(), state) {
+            ("", state) => state.to_owned(),
+            (diagnostics, "") => diagnostics.to_owned(),
+            (diagnostics, state) => format!("{diagnostics}{CELL_GAP}{state}"),
+        };
 
         let style = if footer.alert {
             self.theme.alert
@@ -984,12 +1204,12 @@ impl Painter<'_> {
                 upper,
                 "",
                 self.theme.chrome_dim,
-                state,
+                &right,
                 self.theme.chrome_dim,
             );
             self.status_line(bottom, footer.left, style, "", self.theme.chrome_dim);
         } else {
-            self.status_line(bottom, footer.left, style, state, self.theme.chrome_dim);
+            self.status_line(bottom, footer.left, style, &right, self.theme.chrome_dim);
         }
     }
 

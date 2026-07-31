@@ -24,6 +24,8 @@
 //! into these rows is `reads.rs` and `scroll.rs`; whether these rows become the
 //! right cells is here.
 
+use std::time::Duration;
+
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use vigia::{
@@ -70,6 +72,21 @@ fn chrome() -> Chrome {
         mode: Mode::Watching,
         notice: None,
         following: false,
+        // The first paint's chrome: no frame has completed, so there is no p99
+        // to draw. Every snapshot below inherits it, which keeps them comparing
+        // the same screen they compared before the readouts existed, and
+        // [`diagnostics_chrome`] is what covers the other shape.
+        frame: None,
+        memory: None,
+    }
+}
+
+/// The chrome of every frame after the first, on a platform that reads memory.
+fn diagnostics_chrome() -> Chrome {
+    Chrome {
+        frame: Some(Duration::from_micros(800)),
+        memory: Some(19 * 1024 * 1024),
+        ..following_chrome()
     }
 }
 
