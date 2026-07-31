@@ -872,6 +872,16 @@ fn hold_the_scroll_budget(run: &Scrolled, what: &str) {
         run.cold.len()
     );
 
+    // Highlighting has to have actually happened, which is the direction this
+    // whole file exists for and the one the partition above cannot see: a run
+    // over a file type nothing recognises has warm frames, cold frames and
+    // boundaries, and is the core's frame path with the syntax parser missing.
+    assert!(
+        run.lines > 0,
+        "no lines were highlighted across the sampled frames, so this gate is \
+         timing a collect with the parser idle"
+    );
+
     // The lines have to be wider than the pane, or this is `large_diff` with a
     // different name on it and it cannot tell a bounded paint from an unbounded
     // one.
