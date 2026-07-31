@@ -61,7 +61,7 @@ pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{Action, WHEEL_ROWS, action_for};
 pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
 pub use terminal::{Screen, Session};
-pub use theme::Theme;
+pub use theme::{THEME_VAR, Theme, ThemeError};
 pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
 
 use std::path::{Path, PathBuf};
@@ -114,6 +114,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // reports on a terminal the reader can still see.
     frame.advance()?;
 
+    // Same rule, same reason, one input over: a `VIGIA_THEME` that names nothing
+    // or a file that does not parse has to be said on a terminal the reader can
+    // still read. `SPEC.md` §11.1 states it for a path that is not a repository,
+    // and an error painted inside a TUI that then hands the terminal back is an
+    // error nobody sees.
+    //
+    // Resolved to the depth here as well, so the palette the renderer holds is
+    // already in colours this terminal can show and the frame path never
+    // quantises. I9 therefore sees none of it.
+    let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
+
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
@@ -133,7 +144,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // monitor has no way to know what happened before it was looking, and
         // inventing a recency for it would light up rows nothing has touched.
         history: History::new(),
-        theme: Theme::default(),
+        theme,
         name: short_name(worktree.workdir()),
         branch: None,
         screen: View::default(),
