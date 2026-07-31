@@ -373,9 +373,29 @@ struct Shell {
 
 impl Shell {
     /// The drawable area of the terminal right now.
+    ///
+    /// **Taken from the terminal's own resized state rather than from a second
+    /// size syscall**, so the area a frame is *planned* for is the area it is
+    /// *painted* into. This used to call `Backend::size` directly, which meant two
+    /// independent reads per frame: this one, deciding how many rows
+    /// [`View::collect`] was asked for, and the one `Terminal::draw` makes inside
+    /// its own `autoresize`. A resize landing between them left the collect sized
+    /// for a screen the paint no longer had.
+    ///
+    /// That is not hypothetical on Windows. Entering the alternate screen under
+    /// Warp changes the reported size (measured: 195x77 before, 199x75 after), so
+    /// the two reads genuinely disagree, and they disagree on the very first frame
+    /// where a monitor may then sit idle for minutes before anything wakes it.
+    ///
+    /// `autoresize` is the same call `draw` makes, so doing it here does not add a
+    /// read: it moves the one that decides the layout to before the decision
+    /// instead of after it, and `draw`'s own call then finds nothing to change.
+    /// A resize that lands in the remaining window is repainted by the `Resize`
+    /// event, which `input.rs` maps to [`Action::Redraw`].
     fn area(&mut self) -> Result<Rect, Failure> {
-        let size = self.session.screen().size()?;
-        Ok(Rect::new(0, 0, size.width, size.height))
+        let screen = self.session.screen();
+        screen.autoresize()?;
+        Ok(screen.get_frame().area())
     }
 
     /// Collect a screenful and paint it.
