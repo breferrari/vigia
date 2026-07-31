@@ -278,7 +278,7 @@ fn graded_heat() -> View {
     heat[0] = HeatBucket { added: 12, removed: 0 };
     heat[1] = HeatBucket { added: 7, removed: 0 };
     heat[2] = HeatBucket { added: 4, removed: 0 };
-    heat[3] = HeatBucket { added: 1, removed: 0 };
+    heat[3] = HeatBucket { added: 3, removed: 0 };
     View {
         rows: vec![Row::File {
             path: "src/a.rs".to_owned(),
@@ -339,9 +339,11 @@ fn each_slice_lands_in_the_band_its_share_puts_it_in() {
     // count is satisfied while every slice is in the wrong band. Only asserting
     // *which* band a given share falls into can tell the two apart.
     //
-    // The fixture's busiest slice is 12, so the shares are 12, 7, 4 and 1 against
-    // it. Seven is the one that decides it: above half and below two thirds, so it
-    // is warm under the rule and hot under the mutation.
+    // The fixture's busiest slice is 12, so the shares are 12, 7, 4 and 3 against
+    // it, and two of those exist only to pin a threshold. Seven is above half and
+    // below two thirds, so it is warm under the rule and hot if the hot cut slips.
+    // Three is just under a third, so it is low under the rule and warm if the warm
+    // cut slips. Without both, moving either constant leaves every gate green.
     let theme = Theme::dark().resolve(Depth::Truecolor);
     let got = heat_sequence(theme);
 
@@ -352,7 +354,7 @@ fn each_slice_lands_in_the_band_its_share_puts_it_in() {
         "7 of 12 is above half and below two thirds, so it is warm"
     );
     assert_eq!(got[2], theme.heat_added_warm.fg.unwrap(), "4 of 12 is warm");
-    assert_eq!(got[3], theme.heat_added.fg.unwrap(), "1 of 12 is low");
+    assert_eq!(got[3], theme.heat_added.fg.unwrap(), "3 of 12 is low");
     assert_eq!(got[4], theme.heat_track.fg.unwrap(), "an empty slice");
 }
 
