@@ -499,7 +499,13 @@ So **a projection re-projects rather than dropping items**: a narrower rung sums
 
 **CLI.** One optional positional path, defaulting to the working directory. No flags today, and an argument beginning with `-` is refused with one line naming that fact rather than being taken as a path, so `vigia --help` is told there are no options instead of being told `--help` is not a repository. That is not `--help` implemented; B6 leaves the question of whether it should be, and rules everything else about this line.
 
-**Configuration is two environment variables and no file**, which is B6 ruled 2026-07-31. `VIGIA_THEME` names a built-in palette or points at a file holding one; `VIGIA_COLOR` overrides how many colours the terminal is assumed to have. `NO_COLOR` is honoured. Nothing else is configurable, and the CLI gains nothing.
+**Configuration is a theme file and one environment variable**, which is B6 ruled 2026-07-31 and amended the same day. The CLI gains nothing either way.
+
+**A palette is a preference, so it lives in a file.** `~/.config/vigia/theme` is read when nothing overrides it, resolved from `HOME` or `USERPROFILE`, which is **one** rule rather than one per platform: no XDG matrix, no `%APPDATA%` special case, no discovery crate. `VIGIA_THEME` still names a built-in or points at a file, and still wins, because a variable is how you say "not this time" without editing anything.
+
+**A colour depth is not a preference, it is a property of the terminal you are in right now.** One machine, one user, one afternoon: this pane is truecolour, that one is an `ssh` into something ancient, the third is CI. A file gives all three the same answer and is wrong for two of them. So `VIGIA_COLOR` stays a variable, which is the same reasoning that makes `NO_COLOR` one.
+
+The amendment costs less than B6 assumed because **the format and the parser already existed**: `VIGIA_THEME` has always been able to point at a theme file. What was added is a place to look, not a surface. And it removes a step rather than adding one, since a preference set once now survives a new shell.
 
 ### How colour degrades
 
@@ -569,8 +575,12 @@ What was corrected is the wording. The proposal said "no changes" and the shell 
 
 **Submodules: still open.** *(proposed)* Out of v1, shown as an opaque directory and said so, because recursing into them costs the incremental guarantees in I2a.
 
-**B6 — CLI surface and configuration. Ruled 2026-07-31 with theming, which is what it said it was waiting for. See §11.1.** The CLI stays at one positional path and gains no flags. Configuration is **two environment variables and no file**.
+**B6 — CLI surface and configuration. Ruled 2026-07-31 with theming, which is what it said it was waiting for, and amended the same day. See §11.1.** The CLI stays at one positional path and gains no flags. Configuration is **a theme file and one environment variable**.
 
 The proposal above said configuration lands *with* theming, and its own rationale is what decided the shape: *a config file with one thing in it invites a second thing*. That argument does not stop at files. A monitor is launched from the shell rc that opens the pane and then left alone for days, so the natural home for a setting made once is the line that already starts it, not a dotfile the process has to find, parse, and decide whether to watch. A file also costs a discovery rule across three platforms and a TOML parser that `SPEC.md` does not name, for a surface with two settings in it.
 
-What is left open by ruling it this way, and is worth saying rather than discovering: there is now **nowhere to put a third setting** that is not another variable. That is the intended pressure. §2 makes the reference `btop`, where you never configure anything, and every option added here is a behaviour that owes this section a line.
+**Amended within the day, and the correction is worth more than the original.** The first ruling was *two environment variables and no file*, on the argument that a config file with one thing in it invites a second thing. Reading it back against a real reader: a variable has to be re-declared per shell, and the instruction for making that permanent is `$PROFILE` or `.bashrc` or `.zshrc`, so the *mechanism* is portable while the *instruction* is not. A file is set once.
+
+What the original ruling got right is that not everything belongs in one. The split is by **what the setting is about**, not by convenience: a palette is a preference about you, and a colour depth is a fact about the terminal in front of you. The second genuinely differs between two panes on one machine, which is what a variable is for.
+
+What is still left open, and is the intended pressure: there is nowhere to put a setting that is neither of those. §2 makes the reference `btop`, where you never configure anything, and every option added here is a behaviour that owes this section a line.
