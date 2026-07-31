@@ -629,6 +629,27 @@ const MEMORY_SIZES: [u64; 6] = [
 ];
 
 #[test]
+fn the_readouts_ride_the_second_footer_line_at_forty_columns() {
+    // The other half of the picture above, and the one that matters for I6.
+    // `tests/legibility.rs` proves the ladder is legal at every width from 1 to
+    // 120; a snapshot is the only artifact that shows the result is *good*, and
+    // forty columns is where the footer has least to spend.
+    //
+    // The answer is better than the drop order alone would predict, and it is
+    // worth a picture for exactly that reason. At forty columns the footer has
+    // **already** taken a second line, because I6 makes it break rather than
+    // shorten a hint, and the state it moves up there occupies thirteen of the
+    // forty columns. So the readouts cost nothing at the width where columns are
+    // scarcest: they fill a row that was bought for something else and was
+    // mostly blank.
+    //
+    // Where they *do* go is narrower still, and `tests/legibility.rs` sweeps for
+    // it rather than guessing at a number here.
+    let view = one_file();
+    insta::assert_snapshot!(screen(40, 6, &view, &diagnostics_chrome()));
+}
+
+#[test]
 fn the_frame_cell_never_shifts_what_is_beside_it() {
     // **The one property that makes a per-frame readout safe to draw.** The value
     // changes on every frame by construction, so a cell sized to its own text
