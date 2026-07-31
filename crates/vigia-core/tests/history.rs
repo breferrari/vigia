@@ -120,6 +120,50 @@ fn a_window_of_silence_empties_the_store() {
     assert_eq!(history.peak(), 0, "the shared scale outlived its samples");
 }
 
+/// The same claim, reached one bucket at a time.
+///
+/// **This is a different code path from the gate above and mutation testing is
+/// what found that.** A gap of a whole window or more is a special case: nothing
+/// tracked can have a sample left, so the store clears outright rather than
+/// shifting anything. Every gate here jumped a full window, so the ordinary path
+/// (shift the buckets, drop whatever came out empty) was never run, and breaking
+/// it left the whole suite green.
+///
+/// A monitor beside a working agent takes exactly this shape: ticks arrive
+/// steadily, each one a fraction of the window, and a path ages out through
+/// accumulated shifts rather than through one long silence.
+#[test]
+fn a_path_ages_out_through_ordinary_ticks_and_not_only_through_one_long_gap() {
+    let now = base();
+    let mut history = History::starting_at(now);
+    history.record(["src/lib.rs"], now);
+
+    // One bucket per tick, each naming a *different* file, so the store stays
+    // busy and only the first path is aging.
+    for step in 1..=HISTORY_BUCKETS as u32 {
+        history.record(["src/other.rs"], now + HISTORY_BUCKET * step);
+        assert!(
+            history.tracked() > 0,
+            "the store emptied at step {step}, so this walked off the end \
+             instead of aging one path out"
+        );
+    }
+
+    assert_eq!(
+        history.churn("src/lib.rs"),
+        None,
+        "the path still has buckets after the window slid past it a step at a \
+         time, so eviction only happens on the whole-window shortcut"
+    );
+    assert_eq!(history.recency("src/lib.rs"), Recency::Cold);
+    assert_eq!(
+        history.tracked(),
+        1,
+        "the aged-out path is still occupying a slot the cap counts"
+    );
+    assert!(history.stats().evicted_by_window > 0);
+}
+
 /// A path that ages out is **dropped**, not drawn empty.
 ///
 /// The distinction is the whole of I10's second sentence, and it is
