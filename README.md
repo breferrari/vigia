@@ -48,11 +48,31 @@ vigia ~/code/some-repo
 
 It shows the working tree against the index, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and names the branch it found nothing on.
 
-**What is early about it.** There are no flags and no config file: one optional path and nothing else. Colour is the sixteen ANSI names, so the recency and heat ramps have fewer steps than the mockup below until theming lands.
+**Colour.** `vigia` opens in the sixteen ANSI names, which resolve to whatever your terminal scheme says they are, so it matches the pane beside it instead of arguing with it. That is also the only palette that is right on a background nothing has detected, which is why it is the default rather than the one in the picture below. Two other palettes ship, and the screenshot is `dark`:
+
+```sh
+VIGIA_THEME=dark    # the mockup below, in 24-bit colour
+VIGIA_THEME=light   # the same design for a light terminal
+VIGIA_THEME=~/.config/vigia/mine.theme
+```
+
+A theme file is one `key = value` a line. `base` names the palette it starts from, and everything else overrides a single thing, so a three-line file is a normal size for one:
+
+```
+base       = dark
+added_row  = on #0f2c1c
+path       = #e6edf3 bold
+```
+
+A value is a colour, optionally `on` and a background colour, then any of `bold` `dim` `italic` `underline` `reverse`. A colour is `#rrggbb`, a palette index `0` to `255`, one of the sixteen names, or `default`. A key it does not recognise is an error naming the line, not a line quietly ignored.
+
+How many colours your terminal has is detected, and `VIGIA_COLOR` overrides that with `never`, `16`, `256`, `truecolor` or `auto`. `NO_COLOR` is honoured. Below 256 colours the row tint is dropped rather than approximated, because an ANSI background is a solid block and a block behind highlighted code destroys the colours on it.
+
+**What is early about it.** There are no flags and no config file: one optional path, and the two variables above.
 
 ## 🖼️ Where it is going
 
-Target layout. **This is a mockup, not a screenshot.** Most of it draws today: the header's `watching · 3 files`, the file rows, the counters, the change sparklines, the heat bars, the pulse on what just changed, and the highlighted diff under them. The status bar draws too, and the two departures from the picture are deliberate: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and memory is quoted in `MiB` because that is the unit the soak that budgets it uses.
+Target layout. **This is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header's `watching · 3 files`, the file rows, the counters, the change sparklines, the heat bars and their three-step ramp, the pulse on what just changed, the tinted rows and their left bars, and the highlighted diff under them. The status bar draws too, and the two departures from the picture are deliberate: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and memory is quoted in `MiB` because that is the unit the soak that budgets it uses.
 
 <img src="assets/preview.svg" alt="Mockup of the vigia interface: a file list with change sparklines above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
 
@@ -92,7 +112,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 |---|---|---|
 | ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI |
 | ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
-| 🔨 | **3. Glanceability** | Sparklines, heat bars, live counters, then theming |
+| ✅ | **3. Glanceability** | Sparklines, heat bars, live counters, the status bar, theming |
 | ⬜ | **4. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 
 Being built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and it is written before the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked: the table above is the shape, that file is what is actually done.

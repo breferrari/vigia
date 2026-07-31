@@ -129,7 +129,8 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
-| ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
+| ✅ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
+| ✅ | The chrome is drawn but too dim to read on a real terminal | [#59](https://github.com/breferrari/vigia/issues/59) |
 
 **[#10](https://github.com/breferrari/vigia/issues/10) was split before anything here was taken**, which this file had blocked the phase on. Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carried four features that share no implementation.
 
