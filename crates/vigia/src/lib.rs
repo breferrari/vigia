@@ -53,13 +53,18 @@ mod input;
 pub mod memory;
 mod render;
 mod terminal;
-mod theme;
+/// Public for the same reason [`memory`] is: a theme file is parsed by a pure
+/// function over a string, `tests/palette.rs` is an integration test and can only
+/// reach what the crate exports, and the alternative is re-exporting three free
+/// functions into the crate root under names invented to avoid colliding with
+/// [`colour`](Depth)'s.
+pub mod theme;
 mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
+pub use render::{Band, Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_VAR, Theme, ThemeError};
 pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};

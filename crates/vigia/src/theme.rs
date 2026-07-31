@@ -40,7 +40,7 @@ use ratatui::style::{Color, Modifier, Style};
 use vigia_core::{Class, Recency};
 
 use crate::colour::Depth;
-use crate::render::Heat;
+use crate::render::{Band, Heat};
 
 /// Environment variable naming a built-in palette, or a file holding one.
 pub const THEME_VAR: &str = "VIGIA_THEME";
@@ -251,12 +251,31 @@ impl Theme {
     pub fn heat(&self, heat: Heat) -> Style {
         match heat {
             Heat::Cool => self.heat_track,
-            Heat::Added { heavy: false } => self.heat_added,
-            Heat::Added { heavy: true } => self.heat_added_hot,
-            Heat::Removed { heavy: false } => self.heat_removed,
-            Heat::Removed { heavy: true } => self.heat_removed_hot,
-            Heat::Mixed { heavy: false } => self.heat_mixed,
-            Heat::Mixed { heavy: true } => self.heat_mixed_hot,
+            Heat::Added(band) => {
+                self.band(band, self.heat_added, self.heat_added_warm, self.heat_added_hot)
+            }
+            Heat::Removed(band) => self.band(
+                band,
+                self.heat_removed,
+                self.heat_removed_warm,
+                self.heat_removed_hot,
+            ),
+            Heat::Mixed(band) => {
+                self.band(band, self.heat_mixed, self.heat_mixed_warm, self.heat_mixed_hot)
+            }
+        }
+    }
+
+    /// One rung of a three-stop ramp.
+    ///
+    /// Written once and called three times rather than nine match arms, so a ramp
+    /// that ever draws its middle stop where its top belongs is one line to find
+    /// instead of three places to compare.
+    fn band(&self, band: Band, low: Style, warm: Style, hot: Style) -> Style {
+        match band {
+            Band::Low => low,
+            Band::Warm => warm,
+            Band::Hot => hot,
         }
     }
 
@@ -536,6 +555,11 @@ pub enum ThemeError {
         /// What was written.
         value: String,
     },
+    /// A key with nothing after its `=`.
+    MissingValue {
+        /// Where.
+        line: usize,
+    },
     /// A line with no `=` in it.
     MissingSeparator {
         /// Where.
@@ -582,6 +606,11 @@ impl fmt::Display for ThemeError {
                 f,
                 "line {line}: {value:?} is not a modifier. Write bold, dim, italic, \
                  underline or reverse"
+            ),
+            Self::MissingValue { line } => write!(
+                f,
+                "line {line}: this key has nothing after its `=`. Write a colour, \
+                 `on` and a colour, or a modifier"
             ),
             Self::MissingSeparator { line, text } => {
                 write!(f, "line {line}: {text:?} has no `=` in it")
@@ -688,7 +717,9 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
         // Comments are stripped from the *value* only, and only after the `=`, so
         // `added = #3fb950 # the picture's green` works and a bare `#` line is
         // still a comment.
-        let value = strip_comment(value.trim());
+        // Comments are handled token-wise inside the value rather than by cutting
+        // the line here: see `words_of` for the two rules that were wrong first.
+        let value = value.trim();
 
         if key == "base" {
             if touched {
@@ -714,26 +745,58 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
     Ok(theme)
 }
 
-/// Drop a trailing comment from a value, without eating a leading `#rrggbb`.
+/// The words of a value, stopping where a trailing comment starts.
 ///
-/// A value's first token may begin with `#`, so a naive split on `#` turns
-/// `#3fb950` into an empty value. The rule that works is: a `#` starts a comment
-/// only when it is **preceded by whitespace**, which is how every hex-colour
-/// configuration format resolves the same collision.
-fn strip_comment(value: &str) -> &str {
-    let bytes = value.as_bytes();
-    for (i, byte) in bytes.iter().enumerate() {
-        if *byte == b'#' && i > 0 && bytes[i - 1].is_ascii_whitespace() {
-            return value[..i].trim_end();
+/// Every configuration format that writes colours in hex has this collision: `#`
+/// starts a comment and also starts a value. **Two rules were tried before this
+/// one and both were wrong in a way that reading did not show.**
+///
+/// *"A `#` preceded by whitespace is a comment"* eats `added_row = on #0f2c1c`,
+/// where a background with no foreground puts a space before the only colour on
+/// the line.
+///
+/// *"A `#` followed by six hex digits is a colour, otherwise a comment"* fixes that
+/// and then does something worse: `added = #gg0000` is a **typo**, and this rule
+/// reads it as a comment, leaves the value empty, and parses successfully with the
+/// key silently set to nothing. A theme file that reports no error and changes
+/// nothing is the exact failure the refuse-unknown-keys rule exists to prevent,
+/// arrived at from the other direction.
+///
+/// The rule that holds is positional: a `#` token begins a comment only once
+/// **something real already precedes it** in the value. The first token of a value
+/// is therefore always an attempted colour and reaches [`colour_of`], which
+/// rejects it by name.
+fn words_of(value: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    for word in value.split_whitespace() {
+        if word.starts_with('#') && !out.is_empty() && !is_hex(word) {
+            break;
         }
+        out.push(word);
     }
-    value
+    out
+}
+
+/// `#rrggbb`, exactly.
+fn is_hex(word: &str) -> bool {
+    word.len() == 7
+        && word.starts_with('#')
+        && word.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
 }
 
 /// `[<colour>] [on <colour>] [<modifier>...]`.
+///
+/// **A value with nothing in it is an error, not an empty style.** `added =` is
+/// something a reader meant to finish, and accepting it would set the key to no
+/// colour at all, which is a theme file that changes something invisibly rather
+/// than not changing it.
 fn style_of(value: &str, line: usize) -> Result<Style, ThemeError> {
     let mut style = Style::new();
-    let mut words = value.split_whitespace().peekable();
+    let tokens = words_of(value);
+    if tokens.is_empty() {
+        return Err(ThemeError::MissingValue { line });
+    }
+    let mut words = tokens.into_iter().peekable();
 
     // A leading `on` means this value sets only a background, which is how a row
     // wash is written: `added_row = on #0f2c1c`.
