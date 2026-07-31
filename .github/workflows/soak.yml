@@ -1,0 +1,68 @@
+name: soak
+
+# I3: flat resources over days. Scheduled rather than per-commit, because the
+# gate it carries needs a window long enough to have something other than
+# warmup in it. The short structural half of the same test runs inside
+# `cargo test --workspace` in ci.yml and needs nothing here.
+on:
+  schedule:
+    # Linux daily, all three tier-1 targets weekly. A leak is usually not
+    # platform-specific, and four hours on three hosted runners every day is
+    # not a proportionate way to find out.
+    - cron: "41 3 * * *"
+    - cron: "41 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: >-
+          Soak window in seconds. A GitHub-hosted job is terminated at six
+          hours, so 86400 only works on a runner without that cap.
+        default: "14400"
+      files:
+        description: "Fixture files."
+        default: "100"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+# Never two soaks at once: they would share a runner's memory pressure and each
+# would be measuring the other.
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: soak (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Four hours plus the build, under the six-hour cap, so this timeout is the
+    # one that fires and says which run ran long rather than the platform's.
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        # A job-level `if` cannot see `matrix`, so the daily and weekly runs
+        # differ by building the matrix itself. Anything that is not the daily
+        # cron - the weekly one, and every manual dispatch - gets all three.
+        os: >-
+          ${{ fromJSON(github.event.schedule == '41 3 * * *'
+          && '["ubuntu-latest"]'
+          || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Release, because the budgets were set against optimised code and a
+      # debug build spends the window somewhere else entirely.
+      #
+      # `--nocapture` matters: the whole report, the RSS series included, is on
+      # the child's stdout, and a failing scheduled run nobody can read the
+      # numbers of is a failing run nobody will act on.
+      - name: soak
+        run: cargo test --release --test soak -- --nocapture
+        env:
+          VIGIA_SOAK_SECS: ${{ inputs.seconds || '14400' }}
+          VIGIA_SOAK_FILES: ${{ inputs.files || '100' }}
+          VIGIA_SOAK_LINES: "500"

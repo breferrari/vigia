@@ -9,7 +9,7 @@
 //! git wrote it, and a fixture written by the library under test cannot answer
 //! that.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -157,8 +157,18 @@ pub struct Scratch {
 impl Scratch {
     /// Create an initialised repository with deterministic config.
     pub fn new(name: &str) -> Self {
+        Self::in_dir(&std::env::temp_dir(), name)
+    }
+
+    /// The same thing, somewhere other than the temp directory.
+    ///
+    /// Which sounds like a convenience and is a requirement: the soak asserts
+    /// that its own temp directory is still **empty** when the run ends, so its
+    /// worktree is the one fixture that cannot live in one. Every other test is
+    /// happy in `temp_dir`, and [`Scratch::new`] keeps them there.
+    pub fn in_dir(parent: &Path, name: &str) -> Self {
         let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
+        let path = parent.join(format!(
             "vigia-test-{}-{}-{}",
             std::process::id(),
             unique,
@@ -187,14 +197,24 @@ impl Scratch {
     /// diff rather than in files.
     pub fn large_diff(name: &str, files: usize, lines: usize) -> Self {
         let scratch = Self::new(name);
-        for f in 0..files {
-            scratch.write(&format!("src/mod_{f}.rs"), generated(lines, "before"));
-        }
-        scratch.commit_all("baseline");
-        for f in 0..files {
-            scratch.write(&format!("src/mod_{f}.rs"), generated(lines, "after"));
-        }
+        scratch.fill_large_diff(files, lines);
         scratch
+    }
+
+    /// The body of [`Scratch::large_diff`], for a repository that already
+    /// exists because it had to be created somewhere specific.
+    ///
+    /// Split rather than duplicated: two spellings of one fixture would drift,
+    /// and the soak's numbers are only comparable to the budget gates' while
+    /// both are measuring the same repository.
+    pub fn fill_large_diff(&self, files: usize, lines: usize) {
+        for f in 0..files {
+            self.write(&format!("src/mod_{f}.rs"), generated(lines, "before"));
+        }
+        self.commit_all("baseline");
+        for f in 0..files {
+            self.write(&format!("src/mod_{f}.rs"), generated(lines, "after"));
+        }
     }
 
     /// A repository whose files differ from the index at every `every`th line,
@@ -271,6 +291,11 @@ impl Scratch {
                 generated(lines, &format!("bulk{round}")),
             );
         }
+    }
+
+    /// The worktree root.
+    pub fn root(&self) -> &Path {
+        &self.path
     }
 
     /// Absolute path of something inside the repository.
@@ -397,7 +422,13 @@ impl Scratch {
 }
 
 /// Plausible source lines, distinct on both sides so every line differs.
-fn generated(lines: usize, tag: &str) -> String {
+///
+/// Public because the soak has to put a file **back** to the bytes the index
+/// holds, which is how a path leaves the diff and is evicted. Reaching for
+/// `git checkout` instead would put `git` inside the measured window, and the
+/// temp-file gate is exact only while nothing but the libraries under test can
+/// reach the temp directory.
+pub fn generated(lines: usize, tag: &str) -> String {
     (0..lines)
         .map(|at| {
             let mut line = generated_line(at, tag);
