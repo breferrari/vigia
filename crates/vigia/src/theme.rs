@@ -45,6 +45,17 @@ use crate::render::{Band, Heat};
 /// Environment variable naming a built-in palette, or a file holding one.
 pub const THEME_VAR: &str = "VIGIA_THEME";
 
+/// Where a theme is read from when nothing overrides it, under the home
+/// directory.
+///
+/// **One rule rather than one per platform.** Resolved from `HOME` or
+/// `USERPROFILE`, which between them cover every target: no XDG matrix, no
+/// `%APPDATA%` special case, no discovery crate. `SPEC.md` §11.1 argues the trade;
+/// the short version is that a palette is a preference and should follow a reader
+/// into every shell, where a colour depth is a fact about one terminal and stays a
+/// variable.
+pub const THEME_FILE: &str = ".config/vigia/theme";
+
 /// Declare the palette once, and derive everything that has to agree with it.
 ///
 /// The struct, the key list a theme file is parsed against, the setter that list
@@ -695,18 +706,40 @@ pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> Result<Theme, ThemeError> {
-    let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) else {
-        return Ok(Theme::default().resolve(depth));
-    };
-    let named = named.trim();
-
-    // A built-in wins over a file of the same name. The three names are short,
-    // ordinary words and a file called `dark` in the working directory should not
-    // silently take over what `VIGIA_THEME=dark` has always meant.
-    if let Some(theme) = Theme::named(named) {
-        return Ok(theme.resolve(depth));
+    if let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) {
+        let named = named.trim();
+        // A built-in wins over a file of the same name. The three names are short,
+        // ordinary words and a file called `dark` in the working directory should
+        // not silently take over what `VIGIA_THEME=dark` has always meant.
+        if let Some(theme) = Theme::named(named) {
+            return Ok(theme.resolve(depth));
+        }
+        return load(Path::new(named)).map(|theme| theme.resolve(depth));
     }
-    load(Path::new(named)).map(|theme| theme.resolve(depth))
+
+    // Then the file, which is where a preference set once lives. **Absent is not
+    // an error and unreadable is**, which is the distinction that matters: nobody
+    // has to have one, but a reader who wrote one and got the default silently
+    // would have no way to find out why.
+    if let Some(path) = default_path(&lookup) {
+        if path.is_file() {
+            return load(&path).map(|theme| theme.resolve(depth));
+        }
+    }
+    Ok(Theme::default().resolve(depth))
+}
+
+/// [`THEME_FILE`] under the reader's home directory, if there is one.
+///
+/// `HOME` first, because it is set on every Unix and by Git Bash on Windows too,
+/// then `USERPROFILE`. Read through the same lookup the rest of this function
+/// uses, so a test can place a home directory without touching the process
+/// environment.
+fn default_path(lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let home = lookup("HOME")
+        .or_else(|| lookup("USERPROFILE"))
+        .filter(|home| !home.trim().is_empty())?;
+    Some(Path::new(home.trim()).join(THEME_FILE))
 }
 
 /// Read and parse a theme file.

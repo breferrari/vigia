@@ -48,27 +48,59 @@ vigia ~/code/some-repo
 
 It shows the working tree against the index, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and names the branch it found nothing on.
 
-**Colour.** `vigia` opens in the sixteen ANSI names, which resolve to whatever your terminal scheme says they are, so it matches the pane beside it instead of arguing with it. That is also the only palette that is right on a background nothing has detected, which is why it is the default rather than the one in the picture below. Two other palettes ship, and the screenshot is `dark`:
+## ⚙️ Configure it
 
-```sh
-VIGIA_THEME=dark    # the mockup below, in 24-bit colour
-VIGIA_THEME=light   # the same design for a light terminal
-VIGIA_THEME=~/.config/vigia/mine.theme
+There is one file and one variable, and which is which follows from what the setting is *about*. A palette is a preference about you, so it lives in a file and follows you into every shell. A colour depth is a fact about the terminal in front of you, and one machine can have a truecolour pane, an `ssh` into something ancient and a CI job at the same time, so it stays a variable.
+
+```
+~/.config/vigia/theme
 ```
 
-A theme file is one `key = value` a line. `base` names the palette it starts from, and everything else overrides a single thing, so a three-line file is a normal size for one:
+Read when it exists, on every platform, resolved from `HOME` or `USERPROFILE`. No file is the ordinary case and is not an error. A file that exists and does not parse **is**: `vigia` says which line and exits before it takes the screen, because an error painted inside a full-screen program that then hands the terminal back is an error nobody reads.
 
 ```
 base       = dark
 added_row  = on #0f2c1c
 path       = #e6edf3 bold
+comment    = 244
 ```
 
-A value is a colour, optionally `on` and a background colour, then any of `bold` `dim` `italic` `underline` `reverse`. A colour is `#rrggbb`, a palette index `0` to `255`, one of the sixteen names, or `default`. A key it does not recognise is an error naming the line, not a line quietly ignored.
+`base` names the palette to start from and everything else overrides one thing, so a three-line file is a normal size for one. A key it does not recognise is an error naming the line, never a line quietly ignored.
 
-How many colours your terminal has is detected, and `VIGIA_COLOR` overrides that with `never`, `16`, `256`, `truecolor` or `auto`. `NO_COLOR` is honoured. Below 256 colours the row tint is dropped rather than approximated, because an ANSI background is a solid block and a block behind highlighted code destroys the colours on it.
+A value is `[colour] [on colour] [modifiers]`:
 
-**What is early about it.** There are no flags and no config file: one optional path, and the two variables above.
+| Part | Written as |
+|---|---|
+| Colour | `#rrggbb`, a palette index `0` to `255`, one of the sixteen names, or `default` |
+| Names | `black` `red` `green` `yellow` `blue` `magenta` `cyan` `grey` `white`, each with a `bright-` twin |
+| Background | `on` followed by a colour |
+| Modifiers | `bold` `dim` `italic` `underline` `reverse`, any number of them |
+
+The keys, which are every colour the shell draws with:
+
+| Group | Keys |
+|---|---|
+| Chrome | `chrome` `chrome_dim` |
+| File rows | `path` `path_live` `path_cold` `pulse` `spark` `kind` |
+| Heat strip | `heat_track`, and `heat_added` `heat_removed` `heat_mixed` each with a `_warm` and `_hot` twin |
+| Diff | `hunk` `gutter` `added` `removed` `context` `note` `alert` |
+| Row wash | `added_row` `removed_row` `added_bar` `removed_bar` |
+| Syntax | `keyword` `type_name` `function` `variable` `constant` `string` `number` `comment` |
+
+Three palettes ship, and `VIGIA_THEME` overrides the file with one of them or with a path, which is how you say "not this time" without editing anything:
+
+```sh
+VIGIA_THEME=ansi    # the default: the sixteen names, inherited from your scheme
+VIGIA_THEME=dark    # the mockup below, in 24-bit colour
+VIGIA_THEME=light   # the same design for a light terminal
+VIGIA_THEME=~/themes/mine
+```
+
+**`ansi` is the default and draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. It is the only palette that is right on a background nothing has detected. The cost is the wash, and naming a theme buys it back.
+
+How many colours your terminal has is detected. `VIGIA_COLOR` overrides that with `never`, `16`, `256`, `truecolor` or `auto`, and `NO_COLOR` is honoured. Below 256 the row wash is dropped rather than approximated, because an ANSI background is a solid block and a block behind highlighted code destroys the colours on it.
+
+**What is early about it.** There are no flags: one optional path, and the configuration above.
 
 ## 🖼️ Where it is going
 

@@ -648,6 +648,108 @@ fn a_theme_is_resolved_to_the_depth_it_will_be_drawn_at() {
     );
 }
 
+/// A home directory holding a theme file, and an environment that points at it.
+///
+/// The lookup is injected rather than the process environment being touched,
+/// because `cargo test` runs these on threads of one process and `set_var` is both
+/// racy and, since Rust 2024, `unsafe`.
+fn home_with(name: &str, contents: Option<&str>) -> std::path::PathBuf {
+    let home = std::env::temp_dir().join(format!("vigia-theme-{name}"));
+    let dir = home.join(".config").join("vigia");
+    std::fs::create_dir_all(&dir).expect("home");
+    let file = dir.join("theme");
+    match contents {
+        Some(text) => std::fs::write(&file, text).expect("write"),
+        None => {
+            let _ = std::fs::remove_file(&file);
+        }
+    }
+    home
+}
+
+fn env_of(pairs: Vec<(String, String)>) -> impl Fn(&str) -> Option<String> {
+    move |key| {
+        pairs
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.to_owned())
+    }
+}
+
+#[test]
+fn a_theme_file_under_home_is_read_when_nothing_overrides_it() {
+    // The half of B6's amendment that makes a preference survive a new shell. A
+    // variable has to be re-declared per shell and the instruction for making that
+    // permanent differs per shell; a file is set once.
+    let home = home_with("default", Some("base = dark
+added = #ff0000
+"));
+    let env = env_of(vec![("HOME".to_owned(), home.display().to_string())]);
+
+    let theme = theme::from_env(Depth::Truecolor, env).expect("a theme");
+    assert_eq!(theme.added.fg, Some(Color::Rgb(0xff, 0x00, 0x00)));
+    assert_eq!(theme.keyword, Theme::dark().keyword, "the base was ignored");
+}
+
+#[test]
+fn the_variable_still_wins_over_the_file() {
+    // Which is what makes the variable worth keeping: it is how a reader says "not
+    // this time" without editing anything.
+    let home = home_with("override", Some("base = dark
+added = #ff0000
+"));
+    let env = env_of(vec![
+        ("HOME".to_owned(), home.display().to_string()),
+        ("VIGIA_THEME".to_owned(), "light".to_owned()),
+    ]);
+
+    let theme = theme::from_env(Depth::Truecolor, env).expect("a theme");
+    assert_eq!(theme, Theme::light().resolve(Depth::Truecolor));
+}
+
+#[test]
+fn no_file_is_not_an_error_but_an_unreadable_one_is() {
+    // The distinction that matters. Nobody has to have a theme file, so its absence
+    // is the ordinary case and falls back to the default. A reader who *wrote* one
+    // and silently got the default instead would have no way to find out why, so a
+    // file that exists and does not parse stops the shell before it takes the
+    // screen, which is the rule §11.1 already states for a path that is not a
+    // repository.
+    let absent = home_with("absent", None);
+    let env = env_of(vec![("HOME".to_owned(), absent.display().to_string())]);
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        Theme::ansi().resolve(Depth::Truecolor)
+    );
+
+    let broken = home_with("broken", Some("added = #gg0000
+"));
+    let env = env_of(vec![("HOME".to_owned(), broken.display().to_string())]);
+    let err = theme::from_env(Depth::Truecolor, env).expect_err("refused");
+    assert!(err.to_string().contains("line 1"), "{err}");
+}
+
+#[test]
+fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
+    // `HOME` first, because it is set on every Unix and by Git Bash on Windows too,
+    // then `USERPROFILE`. Two names, one rule, and no XDG matrix or discovery
+    // crate: the whole cost of the amendment is a place to look.
+    let home = home_with("windows", Some("base = light
+"));
+    let env = env_of(vec![("USERPROFILE".to_owned(), home.display().to_string())]);
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        Theme::light().resolve(Depth::Truecolor)
+    );
+
+    // And an empty one is no home at all, rather than a lookup rooted at `/`.
+    let env = env_of(vec![("HOME".to_owned(), "  ".to_owned())]);
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        Theme::ansi().resolve(Depth::Truecolor)
+    );
+}
+
 #[test]
 fn the_ramp_collapses_to_two_stops_where_it_must_and_says_so_in_the_palette() {
     // `ansi` writes its middle stop as the same name as its low one rather than
