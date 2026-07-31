@@ -43,6 +43,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod app;
+mod colour;
 mod input;
 /// Public where its five siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
@@ -56,6 +57,7 @@ mod theme;
 mod view;
 
 pub use app::App;
+pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{Action, WHEEL_ROWS, action_for};
 pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
 pub use terminal::{Screen, Session};
