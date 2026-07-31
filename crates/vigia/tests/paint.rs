@@ -36,7 +36,8 @@ use vigia::{Action, App, Chrome, PaintStats, Row, Theme, View, WHEEL_ROWS, body_
 use vigia_core::{Highlighter, History};
 
 use support::{
-    Scratch, WIDE_UNIT_CHARS, WIDE_UNIT_COLUMNS, WIDE_UNITS, WIDE_UNPARSED_EXT, wide_generated,
+    Scratch, WIDE_EXT, WIDE_UNIT_CHARS, WIDE_UNIT_COLUMNS, WIDE_UNITS, WIDE_UNPARSED_EXT,
+    wide_generated,
 };
 
 /// Files in the fixtures here. Small: these gates are about one row's cost, and
@@ -52,8 +53,21 @@ const LINES: usize = 60;
 /// agree with the renderer by construction.
 const CONTINUES: char = '›';
 
+/// One screenful, and everything a gate here asks about it.
+///
+/// A struct rather than a tuple because the fourth member is what lets the
+/// grammarless baseline use this helper at all: it needs the highlighter's
+/// counters, and restating the setup to reach them cost that test `painted`'s
+/// own two non-vacuity assertions.
+struct Painted {
+    stats: PaintStats,
+    highlight: vigia_core::HighlightStats,
+    buf: Buffer,
+    view: View,
+}
+
 /// Collect one screenful over a fixture and paint it, at `width` by `height`.
-fn painted(name: &str, ext: &str, width: u16, height: u16) -> (PaintStats, Buffer, View) {
+fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     let scratch = Scratch::wide_lines_as(name, FILES, LINES, ext);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -79,7 +93,12 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> (PaintStats, Buffe
 
     let mut buf = Buffer::empty(area);
     let stats = render(&mut buf, area, &view, &Theme::default(), &chrome);
-    (stats, buf, view)
+    Painted {
+        stats,
+        highlight: highlighter.stats(),
+        buf,
+        view,
+    }
 }
 
 /// The longest line of file content the view actually carries.
@@ -142,7 +161,8 @@ fn the_wide_fixture_is_the_shape_it_says_it_is() {
 #[test]
 fn a_drawn_row_costs_the_pane_rather_than_the_line() {
     let width = 80u16;
-    let (stats, _, view) = painted("paint-pane", "md", width, 24);
+    let painted = painted("paint-pane", WIDE_EXT, width, 24);
+    let (stats, view) = (painted.stats, &painted.view);
 
     // Non-vacuity first, because the bound below is trivially satisfied by a
     // screen with nothing on it, by a counter nobody increments, and by a
@@ -158,11 +178,11 @@ fn a_drawn_row_costs_the_pane_rather_than_the_line() {
         stats.rows
     );
     assert!(
-        longest_line(&view) > usize::from(width),
+        longest_line(view) > usize::from(width),
         "the longest drawn line is {} characters against an {width}-column \
          pane, so this fixture never exceeds the pane and the bound below \
          cannot fail",
-        longest_line(&view)
+        longest_line(view)
     );
 
     let bound = stats.rows * u64::from(width);
@@ -187,8 +207,8 @@ fn the_paint_narrows_with_the_pane() {
     // Forty is I6's floor and two hundred is a wide terminal, so the two are far
     // enough apart that the gutter and sigil, which differ between them by a
     // column or two, cannot account for the gap.
-    let (narrow, _, _) = painted("paint-narrow", "md", 40, 24);
-    let (wide, _, _) = painted("paint-wide", "md", 200, 24);
+    let narrow = painted("paint-narrow", WIDE_EXT, 40, 24).stats;
+    let wide = painted("paint-wide", WIDE_EXT, 200, 24).stats;
 
     // Per row, not in total. The two panes do not draw the same number of rows:
     // at forty columns the footer takes a second line (I6), so the body is one
@@ -227,7 +247,7 @@ fn a_clipped_wide_row_still_says_it_continues() {
     // Swept across widths rather than checked at one, because the case that
     // breaks is a two-column glyph landing on the last cell, and which width
     // does that depends on the gutter.
-    let (_, buf, _) = painted("paint-mark", "md", 80, 24);
+    let buf = painted("paint-mark", WIDE_EXT, 80, 24).buf;
     let area = *buf.area();
 
     let mut marked = 0usize;
@@ -242,6 +262,73 @@ fn a_clipped_wide_row_still_says_it_continues() {
         "not one of the {} body rows is marked as continuing, though every \
          drawn line is several times the pane's width",
         area.height.saturating_sub(2)
+    );
+}
+
+#[test]
+fn a_row_of_zero_width_characters_still_costs_the_pane() {
+    // The hole a column bound leaves on its own, and the reason `printable`
+    // carries a second one in characters.
+    //
+    // `unicode-width` measures a combining mark, a zero-width joiner, a
+    // variation selector and `U+200B` as **zero columns**. A run of them never
+    // advances `column`, so a bound written only in columns is satisfied
+    // forever and the walk runs to the end of the line: the exact unbounded
+    // shape the bound removes, still present for content that is ordinary
+    // rather than hostile. Decomposed Unicode, emoji built from joiners, and
+    // anything pasted out of a web page all reach it.
+    //
+    // Built by hand rather than from a fixture, for the reason the tab row
+    // below gives: `wide_line` has none of these, and a fixture that had them
+    // would be testing the fixture.
+    let area = Rect::new(0, 0, 80, 6);
+    let zero_width = "\u{200b}\u{200d}\u{fe0f}\u{0301}".repeat(500);
+    let chars = zero_width.chars().count();
+    assert_eq!(
+        ratatui::text::Span::raw(&zero_width).width(),
+        0,
+        "the fixture is not zero-width, so it cannot defeat a column bound"
+    );
+
+    let view = View {
+        rows: vec![Row::Line {
+            kind: vigia_core::LineKind::Context,
+            number: 1,
+            text: zero_width,
+            spans: Vec::new(),
+        }],
+        files: 1,
+        ..View::default()
+    };
+    let chrome = App::new().chrome("fixture", None);
+    let mut buf = Buffer::empty(area);
+    let stats = render(&mut buf, area, &view, &Theme::default(), &chrome);
+
+    // A looser bound than `a_drawn_row_costs_the_pane_rather_than_the_line`'s,
+    // deliberately, and the two are not in tension. That gate holds real text to
+    // one character a column and the wide fixture reaches 76% of it. Nothing can
+    // hold *this* row to that, because a zero-width character produces no column
+    // to be bounded by: what is claimed here is only that the walk stops at a
+    // constant multiple of the pane instead of running to the end of the line.
+    // Restated as a literal rather than imported, for the reason `CONTINUES` is:
+    // a test sharing the constant would agree with the renderer by construction.
+    const CHARS_PER_COLUMN: u64 = 4;
+    let bound = stats.rows * u64::from(area.width) * CHARS_PER_COLUMN;
+    assert!(
+        stats.examined <= bound,
+        "a row of {chars} zero-width characters examined {} of them against the \
+         {bound} a {}-column pane can be asked for: the column bound cannot see \
+         this row, so the walk is unbounded",
+        stats.examined,
+        area.width
+    );
+
+    // And it has to be pressed, or the assertion above passes for a row that
+    // simply ran out of characters rather than one the bound stopped.
+    assert!(
+        u64::try_from(chars).expect("a sane fixture") > bound,
+        "the fixture is {chars} characters against a bound of {bound}, so it \
+         never reaches it"
     );
 }
 
@@ -305,7 +392,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
     // the hunks a batched gesture never enters, so the travel has to cross them.
     const BURST_FILES: usize = 24;
     const BURST_LINES: usize = 6;
-    let scratch = Scratch::wide_lines_as("paint-burst", BURST_FILES, BURST_LINES, "md");
+    let scratch = Scratch::wide_lines_as("paint-burst", BURST_FILES, BURST_LINES, WIDE_EXT);
     let worktree = scratch.worktree();
     let area = Rect::new(0, 0, 80, 24);
     let notches = 100;
@@ -320,7 +407,6 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let rows = body_height(area, &chrome, BURST_FILES);
         let mut buf = Buffer::empty(area);
         let mut total = PaintStats::default();
-        let mut view = None;
         for at in 0..notches {
             app.apply(Action::Scroll(WHEEL_ROWS), &mut frame, rows)
                 .expect("scroll");
@@ -330,12 +416,12 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
             let fresh = app
                 .view(&mut frame, &mut highlighter, &history, rows)
                 .expect("view");
-            let painted = render(&mut buf, area, &fresh, &Theme::default(), &chrome);
-            total.rows += painted.rows;
-            total.examined += painted.examined;
-            view = Some(fresh);
+            total += render(&mut buf, area, &fresh, &Theme::default(), &chrome);
         }
-        (highlighter.stats().lines, total, view.expect("a view").top)
+        // `App::view` writes the resolved top back as the position, and both
+        // arms always draw on the last notch, so this is where the gesture ended
+        // without carrying a `View` out of the loop to ask it.
+        (highlighter.stats().lines, total, app.position())
     };
 
     let (each_lines, per_event, landed) = paint(false);
@@ -375,36 +461,24 @@ fn an_unparsed_extension_costs_no_parse() {
     // repo, so it is asserted rather than assumed: the day a grammar appears
     // this fails instead of quietly becoming a second measurement of the same
     // thing.
-    let scratch = Scratch::wide_lines_as("paint-unparsed", FILES, LINES, WIDE_UNPARSED_EXT);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    frame.advance().expect("advance");
-
-    let mut app = App::new();
-    let mut highlighter = Highlighter::new();
-    let history = History::new();
-    let area = Rect::new(0, 0, 80, 24);
-    let chrome = app.chrome("fixture", None);
-    let rows = body_height(area, &chrome, FILES);
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, rows)
-        .expect("view");
+    // Through the same helper as every gate above, so the baseline is the
+    // measurement they take minus one term rather than a second setup that
+    // happens to resemble it. It also inherits `painted`'s own two non-vacuity
+    // assertions, which a hand-rolled copy of it silently did without.
+    let plain = painted("paint-unparsed", WIDE_UNPARSED_EXT, 80, 24);
 
     assert_eq!(
-        highlighter.stats().lines,
-        0,
+        plain.highlight.lines, 0,
         "{} lines were highlighted over `.{WIDE_UNPARSED_EXT}`, so it is no \
          longer a zero-parse baseline and the attribution that subtracts it is \
          measuring a difference of two parses",
-        highlighter.stats().lines
+        plain.highlight.lines
     );
 
     // And it still draws, which is what makes it the *same* measurement minus
     // one term rather than a different one.
-    let mut buf = Buffer::empty(area);
-    let stats = render(&mut buf, area, &view, &Theme::default(), &chrome);
     assert!(
-        stats.rows > 0 && stats.examined > 0,
+        plain.stats.rows > 0 && plain.stats.examined > 0,
         "the unparsed fixture drew nothing, so it is not a baseline for \
          anything"
     );

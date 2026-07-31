@@ -923,3 +923,71 @@ fn frame_time_distribution() {
     println!("max     {:?}", warm.max().expect("samples"));
     println!("over {I9_FRAME:?}: {over_budget}/{SAMPLED_FRAMES} warm frames");
 }
+
+#[test]
+fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
+    // The other half of `a_hunk_scrolled_back_to_is_not_re_parsed`, and the one
+    // that decides whether retention is *correct* rather than merely fast.
+    //
+    // This is the monitor's whole workload: the agent in the other pane is
+    // writing while the reader scrolls. So a retained parse is a parse of
+    // content that may no longer exist, and handing it back unchecked would show
+    // colours for a version of the file nobody has. Reuse must lose to the
+    // digest, exactly as it does for a hunk that never left the screen.
+    //
+    // The failure this rules out is silent and permanent: nothing on screen says
+    // the colours are stale, and the entry stays wrong until it is evicted.
+    let scratch = Scratch::sparse_edits("i2b-scrollback-edit", 1, LARGE_FILE, HUNK_SPACING);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut highlighter = Highlighter::new();
+
+    // Read the top of the file, then move past it so it is retired rather than
+    // live. Off screen and still held is precisely the state under test.
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    for first in 1..=WINDOW_HUNKS {
+        highlight_window(
+            &mut frame,
+            &mut highlighter,
+            SHARED_PATH,
+            first,
+            WINDOW_HUNKS,
+        );
+    }
+    assert_eq!(
+        highlighter.tracked(),
+        WINDOW_HUNKS * 2,
+        "hunk 0 is not being held off screen, so this measures a cache that was \
+         never asked to give back something stale"
+    );
+
+    // The agent writes to the part the reader has scrolled away from.
+    scratch.edit_line(SHARED_PATH, HUNK_SPACING, EDITED_LINE);
+    frame.advance().expect("advance");
+
+    // And the reader scrolls back into it.
+    let before = highlighter.stats();
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    let cost = highlight_delta(before, highlighter.stats());
+
+    assert_eq!(
+        cost.parsed, 1,
+        "coming back to a window whose first hunk was rewritten while it was \
+         retired re-parsed {} hunks: 0 means a stale parse was handed back, and \
+         more than 1 means the hunks that did not change were thrown away with \
+         it",
+        cost.parsed
+    );
+    assert_eq!(
+        cost.reused,
+        (WINDOW_HUNKS - 1) as u64,
+        "the untouched hunks in the window were re-parsed rather than recovered",
+    );
+    assert!(
+        cost.lines > 0,
+        "the changed hunk was reported as parsed and cost no lines, so nothing \
+         was actually re-read"
+    );
+}

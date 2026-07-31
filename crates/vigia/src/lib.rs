@@ -2,9 +2,19 @@
 //!
 //! `SPEC.md` §6 asks this half of the workspace to be thin: the core produces
 //! frames, the shell renders them, and the TUI stays swappable because nothing
-//! it knows is load bearing. So there is no diff logic here, no caching, no
-//! filtering and no coalescing. What is here is a terminal, a key map, a scroll
-//! position, and one pure function from a screenful of rows to cells.
+//! it knows is load bearing. So there is no diff logic here, no caching and no
+//! filtering. What is here is a terminal, a key map, a scroll position, and one
+//! pure function from a screenful of rows to cells.
+//!
+//! **Coalescing is the one word in that list that needs two entries**, because
+//! there are two of them with different subjects and they belong in different
+//! crates. `vigia_core` coalesces **events**: which filesystem writes count as
+//! one change, which is I1's, and the policy stays there because that is where
+//! it is testable. `run` below coalesces **paints**: how many frames one burst
+//! of wakes is worth, which is I9's, and it can only live here because a paint
+//! is the shell's and because one of the two wake sources is the terminal. It
+//! decides nothing about which events are real, which is what the sentence
+//! above is protecting.
 //!
 //! It is a library with a five-line binary on top rather than a binary alone.
 //! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
@@ -153,12 +163,25 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         // reason nobody asked for.
                         continue;
                     };
-                    // The branch here is whatever the last draw settled on, which is
-                    // right rather than merely cheap: it feeds `body_height` alone,
-                    // and neither the branch nor the mode can change how many rows
-                    // the footer takes. See `Footer::plan`.
-                    let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
-                    let height = body_height(shell.area()?, &chrome, frame.files().len());
+                    // Asked for only by the one action that reads it, and that is
+                    // the drain's doing rather than tidiness. `Shell::area` is an
+                    // uncached terminal-size syscall and `chrome` allocates, and
+                    // both used to be amortised against the full repaint each
+                    // event caused. With sixty-four notches now arriving between
+                    // two paints, computing a height none of them but `Page` reads
+                    // would be sixty-four syscalls and several hundred discarded
+                    // allocations inside one batch.
+                    //
+                    // The branch it carries is whatever the last draw settled on,
+                    // which is right rather than merely cheap: it feeds
+                    // `body_height` alone, and neither the branch nor the mode can
+                    // change how many rows the footer takes. See `Footer::plan`.
+                    let height = if action.needs_height() {
+                        let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
+                        body_height(shell.area()?, &chrome, frame.files().len())
+                    } else {
+                        0
+                    };
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw

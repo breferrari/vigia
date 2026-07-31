@@ -207,8 +207,28 @@ pub const CHECKPOINT_STRIDE: usize = 32;
 /// Four covers a wheel flick and its reversal, which is a screen or two of travel
 /// and one or two hunks each way, with room for the hunk half off each edge.
 /// Beyond that the parse is re-paid, and that is deliberate rather than
-/// unnoticed: the alternative is retention measured in frames, whose worst case
-/// is a reader holding page-down and accumulating a hunk per keypress.
+/// unnoticed.
+///
+/// **It is a count, and a count does not bound memory.** An entry holds one
+/// `Vec<Span>` per line it has parsed and one checkpoint per stride, so four
+/// thousand-line hunks are a few hundred kilobytes while four screen-sized ones
+/// are a few tens. That is a *higher plateau* rather than growth, which is what
+/// lets I3 live with it: drift compares a window against itself and cannot see a
+/// level. It is also not a new shape, because a live entry already costs its
+/// deepest parse rather than its screenful, so a retained one is one more of the
+/// same rather than something worse. A bound in lines retained is the
+/// byte-honest form and it costs the `tracked() <= WINDOW + RETAINED` gates their
+/// exact form, which is a trade rather than an improvement.
+///
+/// **Why a queue and not a generation counter on the entry.** The counter looks
+/// cheaper, and `History` next door keys recency exactly that way. It was tried
+/// here and is worse for one reason: eviction needs a *total order over stale
+/// entries*, and insertion order gives the queue one for free. A counter has to
+/// rebuild it, because every hunk that leaves on the same frame shares a
+/// generation, so keeping "the four newest" becomes a rank selection plus a
+/// tie-break rule, and retaining by generation instead silently changes the
+/// bound from `live + 4` to `live + everything drawn in the last four
+/// generations`. More code, and a weaker bound.
 pub const RETAINED_HUNKS: usize = 4;
 
 /// Both sides of one hunk, each parsed as the file it describes.
@@ -383,6 +403,18 @@ impl Entry {
             lines: Vec::new(),
             buf: String::new(),
         }
+    }
+
+    /// Whether this entry is the parse of that hunk.
+    ///
+    /// The cache key, in one place. It is a **compound** key, and both halves are
+    /// load bearing: `ordinal` alone collides across files and `path` alone
+    /// collides across a file's hunks, either of which shows a reader the colours
+    /// of a hunk they are not looking at, which is the failure
+    /// [`Pass::spans`] warns about. Written out at each of its three call sites
+    /// it was three places to find the day the key gains a term.
+    fn is(&self, path: &str, ordinal: usize) -> bool {
+        self.ordinal == ordinal && self.path == path
     }
 
     /// Keep as much of this parse as `content` still agrees with, and report
@@ -571,48 +603,75 @@ impl Highlighter {
     /// and counting a retirement there would report the queue turning over as
     /// though the cache were being emptied.
     fn sweep(&mut self) {
+        // Destructured for the reason `spans` is: two fields of one struct are
+        // written at once, and through `&mut self` the borrow checker sees one
+        // whole thing.
+        let Self {
+            entries,
+            retired,
+            stats,
+            ..
+        } = self;
+
+        // An index walk rather than `Vec::extract_if`, which would say this in
+        // one line: that is stable since 1.87 and the workspace declares 1.85,
+        // and correcting the manifest is a toolchain decision rather than
+        // something to slip into a rendering fix. `Vec::remove` shifts the tail
+        // per retirement, which is quadratic in principle and a few thousand
+        // element moves at the very worst here, because `entries` is bounded by
+        // what one screen can show.
         let mut at = 0;
-        while at < self.entries.len() {
-            if self.entries[at].live {
+        while at < entries.len() {
+            if entries[at].live {
                 at += 1;
             } else {
-                self.retired.push_back(self.entries.remove(at));
+                retired.push_back(entries.remove(at));
             }
         }
-        while self.retired.len() > RETAINED_HUNKS {
-            self.retired.pop_front();
-            self.stats.evicted += 1;
+        while retired.len() > RETAINED_HUNKS {
+            retired.pop_front();
+            stats.evicted += 1;
         }
     }
 
     /// Take a retired hunk back, if this is one the reader has come back to.
     ///
     /// Linear over a queue of [`RETAINED_HUNKS`], for the reason [`Self::entries`]
-    /// is a `Vec`: the set is a handful and a scan beats a hash.
+    /// is a `Vec`: the set is a handful and a scan beats a hash. Called only on a
+    /// miss, so at most once per hunk per frame rather than once per row.
     fn recover(&mut self, path: &str, ordinal: usize) -> Option<Entry> {
         let at = self
             .retired
             .iter()
-            .position(|entry| entry.ordinal == ordinal && entry.path == path)?;
+            .position(|entry| entry.is(path, ordinal))?;
         self.retired.remove(at)
     }
 
     fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
-        // A hunk the reader has scrolled back to comes out of the retired queue
-        // first, so everything below sees one cache rather than two. Whether its
-        // content is still current is then decided exactly as it is for an entry
-        // that never left: by digest, and by rewinding when it differs. Coming
-        // back to a hunk whose file has been rewritten meanwhile is therefore
-        // correct rather than merely fast.
-        let held = self
+        // One scan, and the miss is where the retired queue is consulted, so a
+        // hunk the reader has scrolled back to lands in `entries` and everything
+        // below sees one cache rather than two. Whether its content is still
+        // current is then decided exactly as it is for an entry that never left:
+        // by digest, and by rewinding when it differs. Coming back to a hunk
+        // whose file has been rewritten meanwhile is therefore correct rather
+        // than merely fast.
+        //
+        // Written as one `position` rather than a `contains`-then-`position`
+        // pair. This runs **once per drawn row**, so a second scan of the cache
+        // here is a second scan per row per frame, on the path I9 gates, and it
+        // would be spent against the same `Vec` whose choice over a map is
+        // justified two doc comments up by there being only one scan.
+        let found = match self
             .entries
             .iter()
-            .any(|entry| entry.ordinal == ordinal && entry.path == path);
-        if !held {
-            if let Some(entry) = self.recover(path, ordinal) {
+            .position(|entry| entry.is(path, ordinal))
+        {
+            Some(slot) => Some(slot),
+            None => self.recover(path, ordinal).map(|entry| {
                 self.entries.push(entry);
-            }
-        }
+                self.entries.len() - 1
+            }),
+        };
 
         // Destructured so the syntax set can be read while one entry and the
         // counters are written. Through `&mut self` alone the borrow checker
@@ -625,9 +684,6 @@ impl Highlighter {
             ..
         } = self;
 
-        let found = entries
-            .iter()
-            .position(|entry| entry.ordinal == ordinal && entry.path == path);
         let slot = match found {
             // Already claimed this frame, so its content has been checked
             // already. This is what keeps the digest to once per hunk per frame

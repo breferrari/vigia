@@ -208,12 +208,36 @@ impl Scratch {
     /// and the soak's numbers are only comparable to the budget gates' while
     /// both are measuring the same repository.
     pub fn fill_large_diff(&self, files: usize, lines: usize) {
+        self.fill_pairs(
+            files,
+            |f| format!("src/mod_{f}.rs"),
+            |tag| generated(lines, tag),
+        );
+    }
+
+    /// Write `files` files, commit them, then rewrite every one line for line.
+    ///
+    /// The shape both fixture families are: a baseline commit and a working tree
+    /// differing from it at every line, so a file is exactly one hunk of
+    /// `2 * lines` display rows.
+    ///
+    /// Shared rather than spelled twice because the gates compare the two
+    /// families' numbers **against each other**, and that is only like for like
+    /// while they differ in the two terms named here and nowhere else.
+    /// `fill_large_diff`'s own doc already made that argument for one family;
+    /// this is what makes it true of both rather than asserted in prose.
+    fn fill_pairs(
+        &self,
+        files: usize,
+        path: impl Fn(usize) -> String,
+        content: impl Fn(&str) -> String,
+    ) {
         for f in 0..files {
-            self.write(&format!("src/mod_{f}.rs"), generated(lines, "before"));
+            self.write(&path(f), content("before"));
         }
         self.commit_all("baseline");
         for f in 0..files {
-            self.write(&format!("src/mod_{f}.rs"), generated(lines, "after"));
+            self.write(&path(f), content("after"));
         }
     }
 
@@ -271,45 +295,26 @@ impl Scratch {
     /// gate draws, so *"a drawn row costs its whole line"* and *"a drawn row
     /// costs the pane"* are the same number over all of them.
     ///
-    /// See [`wide_line`] for the shape and the arithmetic behind it. Written
-    /// line for line before and after exactly as [`Scratch::large_diff`] is, so
-    /// each file is a single hunk of `2 * lines` display rows and the two
-    /// fixtures differ in one term rather than several.
-    pub fn wide_lines(name: &str, files: usize, lines: usize) -> Self {
-        Self::wide_lines_as(name, files, lines, WIDE_EXT)
-    }
-
-    /// The same fixture under a different extension.
+    /// See [`wide_line`] for the shape and the arithmetic behind it. Built
+    /// through the same [`Scratch::fill_pairs`] as [`Scratch::large_diff`]
+    /// rather than a second spelling of it, so "the two fixtures differ in one
+    /// term" is a property of the code instead of a claim in a comment.
     ///
-    /// Exists for one reason: [`WIDE_UNPARSED_EXT`] is an extension `syntect`
-    /// has no grammar for, so the same bytes can be drawn with the parse and
-    /// without it. That is what lets the parse be attributed by **subtraction**
-    /// rather than by argument, which is what
+    /// `ext` is a parameter for one reason: [`WIDE_UNPARSED_EXT`] is an
+    /// extension `syntect` has no grammar for, so the same bytes can be drawn
+    /// with the parse and without it. That is what lets the parse be attributed
+    /// by **subtraction** rather than by argument, which is what
     /// [#45](https://github.com/breferrari/vigia/issues/45) asks for: three
     /// suspects, each with a number, rather than three ranked by how plausible
     /// they sound.
     pub fn wide_lines_as(name: &str, files: usize, lines: usize, ext: &str) -> Self {
         let scratch = Self::new(name);
-        scratch.fill_wide_lines(files, lines, ext);
+        scratch.fill_pairs(
+            files,
+            |f| format!("docs/note_{f}.{ext}"),
+            |tag| wide_generated(lines, tag),
+        );
         scratch
-    }
-
-    /// The body of [`Scratch::wide_lines_as`], split for the reason
-    /// [`Scratch::fill_large_diff`] is split.
-    pub fn fill_wide_lines(&self, files: usize, lines: usize, ext: &str) {
-        for f in 0..files {
-            self.write(
-                &format!("docs/note_{f}.{ext}"),
-                wide_generated(lines, "before"),
-            );
-        }
-        self.commit_all("baseline");
-        for f in 0..files {
-            self.write(
-                &format!("docs/note_{f}.{ext}"),
-                wide_generated(lines, "after"),
-            );
-        }
     }
 
     /// Rewrite every file of a [`Scratch::large_diff`] fixture, line for line.
@@ -478,11 +483,21 @@ impl Scratch {
 /// temp-file gate is exact only while nothing but the libraries under test can
 /// reach the temp directory.
 pub fn generated(lines: usize, tag: &str) -> String {
+    joined(lines, tag, generated_line)
+}
+
+/// `lines` lines from `line`, each newline terminated.
+///
+/// The termination is why this is shared rather than written once per generator.
+/// It is a fixture **policy** and not a detail: [`Scratch::rewrite`] asserts on
+/// it, so a generator that quietly stopped terminating would break `edit_line`
+/// and `scribble_line` for whichever fixture family forgot.
+fn joined(lines: usize, tag: &str, line: impl Fn(usize, &str) -> String) -> String {
     (0..lines)
         .map(|at| {
-            let mut line = generated_line(at, tag);
-            line.push('\n');
-            line
+            let mut one = line(at, tag);
+            one.push('\n');
+            one
         })
         .collect()
 }
@@ -537,13 +552,7 @@ pub const WIDE_UNITS: usize = 8;
 /// Public for the same reason [`generated`] is: a caller has to be able to put a
 /// file **back** to what the index holds without reaching for `git`.
 pub fn wide_generated(lines: usize, tag: &str) -> String {
-    (0..lines)
-        .map(|at| {
-            let mut line = wide_line(at, tag);
-            line.push('\n');
-            line
-        })
-        .collect()
+    joined(lines, tag, wide_line)
 }
 
 /// The one line [`wide_generated`] writes at `at`, with no line ending.

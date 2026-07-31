@@ -58,6 +58,29 @@ impl Action {
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
         }
     }
+
+    /// Whether applying this needs to know how tall the body is.
+    ///
+    /// Only [`Action::Page`] does: it is the one action measured in screens
+    /// rather than in rows. Everything else is given the height and ignores it.
+    ///
+    /// This exists because the answer is **expensive**, not because it is
+    /// interesting. Deriving the height costs an uncached terminal-size syscall
+    /// plus a `Chrome`, and since the shell began draining a whole gesture into
+    /// one paint there can be sixty-four actions between two frames. Paying it
+    /// per action would put the syscall back on the path the drain took it off.
+    ///
+    /// Exhaustive rather than a `matches!` list, for the reason
+    /// [`Action::is_manual_scroll`] gives: a new action stops this compiling and
+    /// asks, where a list would silently answer "no" and be wrong the one time
+    /// it mattered.
+    pub fn needs_height(self) -> bool {
+        match self {
+            Self::Page(_) => true,
+            Self::Scroll(_) | Self::Top | Self::Bottom => false,
+            Self::Quit | Self::Redraw | Self::ToggleFollow => false,
+        }
+    }
 }
 
 /// The intention behind one terminal event, or `None` if there was not one.

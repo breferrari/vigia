@@ -131,10 +131,9 @@ fn absolute_gates_apply() -> bool {
     }
 }
 
-fn time(mut work: impl FnMut()) -> Duration {
-    let start = Instant::now();
-    work();
-    start.elapsed()
+/// How long `work` took, for a stage whose result nothing downstream needs.
+fn time(work: impl FnOnce()) -> Duration {
+    timed(work).1
 }
 
 /// [`time`], for a stage that produces something the next stage needs.
@@ -565,6 +564,12 @@ struct Scrolled {
     boundaries: usize,
     widest: usize,
     body_rows: usize,
+    /// Rows the body had, carried from the run rather than re-derived.
+    ///
+    /// `hold_the_scroll_budget` writes two assertions in terms of it, and
+    /// rebuilding it there from a fresh `App` would be a second source of truth
+    /// for a number this run already has.
+    height: usize,
     painted: PaintStats,
 }
 
@@ -777,6 +782,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
         boundaries: 0,
         widest: 0,
         body_rows: 0,
+        height,
         painted: PaintStats::default(),
     };
     let mut at_file = usize::MAX;
@@ -791,9 +797,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
                 .expect("view")
         });
         let chrome = app.chrome("fixture", None);
-        let paint = time(|| {
-            run.painted = render(&mut buf, area(), &screen, &theme, &chrome);
-        });
+        let (painted, paint) = timed(|| render(&mut buf, area(), &screen, &theme, &chrome));
         let parsed = highlight_delta(before, highlighter.stats());
 
         if screen.top.file != at_file {
@@ -819,6 +823,11 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
 
         run.lines += parsed.lines;
         run.evicted += parsed.evicted;
+        // Accumulated, like the two above it and unlike the assignment this used
+        // to be. `Scrolled::report` prints all three in one sentence, so a field
+        // holding the last frame while its neighbours hold the run was a figure
+        // that read as a total and was not one.
+        run.painted += painted;
         run.collect.push(collect);
         run.paint.push(paint);
 
@@ -843,7 +852,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
 fn hold_the_scroll_budget(run: &Scrolled, what: &str) {
     run.report(what);
 
-    let height = body(&App::new(), WIDE_FILES);
+    let height = run.height;
 
     // Non-vacuity, in four directions.
     //
