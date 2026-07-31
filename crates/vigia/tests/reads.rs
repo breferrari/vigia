@@ -43,7 +43,7 @@ const LINES: usize = 500;
 fn body() -> usize {
     body_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture"),
+        &App::new().chrome("fixture", None),
         FILES,
     )
 }
@@ -711,5 +711,58 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
             .any(|heat| heat.iter().any(|bucket| bucket.total() > 0)),
         "every drawn heading has an empty heat strip, so the projection ran on a \
          reused diff and found nothing to place"
+    );
+}
+
+#[test]
+fn the_branch_is_read_only_on_a_frame_that_will_draw_it() {
+    // I4 for the one read the empty state added: never touch a file the frame
+    // does not draw. Only a worktree with nothing in it names a branch, so a
+    // frame with a diff must not go near `.git/HEAD`.
+    //
+    // **Driven by real frames rather than by a file count**, and that is the
+    // whole reason this lives here instead of beside the code. When
+    // `branch_for` took a count, the expression producing it sat at the call
+    // site inside `Shell::draw`, which owns a terminal and which no test can
+    // drive. Hardcoding that argument to `0` and to `1` both passed the entire
+    // suite while the unit tests of the rule itself stayed green: the mutations
+    // killed the consumer and never touched the producer. Taking the frame
+    // moves the count inside the boundary, so what is asserted here is what
+    // production computes.
+    //
+    // Counted rather than asserted on the result, because the failure is
+    // invisible in the answer: returning `None` after reading and returning
+    // `None` without reading are the same value at a different price.
+    let clean = Scratch::new("shell-branch-clean");
+    clean.write("a.txt", "one\n");
+    clean.commit_all("first");
+    let clean_tree = clean.worktree();
+    let mut empty = clean_tree.frame();
+    empty.advance().expect("advance");
+    assert!(
+        empty.files().is_empty(),
+        "the clean fixture has a diff in it, so this proves nothing"
+    );
+
+    let dirty = Scratch::large_diff("shell-branch-dirty", FEW_FILES, LINES);
+    let dirty_tree = dirty.worktree();
+    let mut populated = dirty_tree.frame();
+    populated.advance().expect("advance");
+    assert_eq!(populated.files().len(), FEW_FILES, "fixture is not dirty");
+
+    let reads = std::cell::Cell::new(0usize);
+    let count = || {
+        reads.set(reads.get() + 1);
+        Some("main".to_owned())
+    };
+
+    assert_eq!(vigia::branch_for(&empty, count), Some("main".to_owned()));
+    assert_eq!(reads.get(), 1, "the empty state did not ask for a branch");
+
+    assert_eq!(vigia::branch_for(&populated, count), None);
+    assert_eq!(
+        reads.get(),
+        1,
+        "a frame with a diff in it read HEAD for a line it will not draw"
     );
 }

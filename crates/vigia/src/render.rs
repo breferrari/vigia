@@ -170,6 +170,30 @@ const MIN_BODY: u16 = 2;
 /// what they are looking at is live.
 const FOLLOWING: &str = "follow ▶";
 
+/// What joins two facts drawn on one line.
+///
+/// Twice on screen: the header's mode word and its file count, and the empty
+/// state's "nothing changed" and the branch it did not change on. The mockup's
+/// own character, and the same one the hint bar uses, because two separators
+/// would be two dialects for one idea.
+///
+/// Deliberately **not** [`HINT_SEPARATOR`] itself, which is exported so
+/// `tests/legibility.rs` can split the *hint bar* on it. Sharing the constant
+/// would let a change to how hints are joined silently reshape the header, and
+/// these are two independent choices that happen to agree today.
+const FACT_SEPARATOR: &str = " · ";
+
+/// What the body says when there is no diff at all.
+///
+/// **Not `working tree clean`**, which is what this used to say and which is
+/// wrong rather than merely plain. That is git's phrase, and git means
+/// index-against-HEAD as well as tree-against-index; this diff is only the
+/// second, so a worktree with every change staged draws nothing here and was
+/// being told it was clean while `git status` said the opposite. `SPEC.md` §11.1
+/// rules the wording. Untracked files are included in the claim, since an
+/// untracked file is an unstaged one too.
+const NOTHING_CHANGED: &str = "no unstaged changes";
+
 /// The narrowest the text column may get before line numbers are dropped.
 ///
 /// Below this the gutter costs more than it explains, which is the shape of
@@ -178,11 +202,74 @@ const FOLLOWING: &str = "follow ▶";
 /// invariant is actually about.
 const MIN_TEXT_WIDTH: usize = 24;
 
+/// What the monitor is doing, which is the mockup's `watching` and the set that
+/// word implies.
+///
+/// **Two, and I1 is the reason rather than minimalism.** `SPEC.md` §5.1 read
+/// `watching` as implying at least a settling state and an idle one, and it
+/// implies neither: both are *durations*, and this shell wakes only when a file
+/// changes. [`vigia_core::Watcher::next_tick`] blocks until a burst has settled,
+/// so the shell is never awake **during** settling; "idle" would need a wake that
+/// says nothing happened, which is the timer I1 forbids. Either word could come
+/// into existence and then never leave, which is the frozen clock §11.1 already
+/// rejected for the pulse.
+///
+/// So what is left is the only distinction the shell can actually make: whether
+/// what is on screen is still following the tree.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Mode {
+    /// The watch is live, so the screen follows the working tree.
+    ///
+    /// The default, and that is a ruling rather than an accident of ordering.
+    /// The watch is armed *after* first paint, deliberately, so it does not
+    /// observe the shell's own setup reads. A third word for those microseconds
+    /// would flicker on every launch to describe a state that always resolves the
+    /// same way within one wake, and a genuine arming failure arrives as its own
+    /// wake and corrects this.
+    #[default]
+    Watching,
+    /// The watch never armed, or it ended, so this is a still picture.
+    Lost,
+}
+
+impl Mode {
+    /// The word the header draws.
+    ///
+    /// `not watching` rather than `stalled` or `still`: it is the mockup's own
+    /// word negated, so a reader who has learned one has learned both. `stalled`
+    /// reads as temporary when this is not, and `still` means both "motionless"
+    /// and "continuing".
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Watching => "watching",
+            Self::Lost => "not watching",
+        }
+    }
+}
+
 /// What the chrome says that the view itself does not know.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Chrome {
     /// Name of the working tree being watched.
     pub worktree: String,
+    /// The branch the empty state names, when there is one.
+    ///
+    /// `None` covers two different things on purpose, because the empty state
+    /// draws them identically: a detached HEAD, which names no branch, and a
+    /// frame that has a diff to show and therefore never asked. The second is
+    /// what keeps I4 true. Reading `.git/HEAD` on a frame that will not draw the
+    /// answer is exactly the shape I4 forbids, so the shell asks only when the
+    /// diff is empty. See [`crate::branch_for`].
+    pub branch: Option<String>,
+    /// Whether the watch is still live.
+    ///
+    /// Durable, which is why it is here rather than riding [`Chrome::notice`]. A
+    /// watch that ends puts the word on the header and its error on the footer:
+    /// the header says the diff has stopped being live, the notice says which
+    /// failure did it. Before they were split, the durable half rode the notice
+    /// alone and survived only because the tick that clears a notice can never
+    /// arrive again once the watch is gone.
+    pub mode: Mode,
     /// Something the reader should see instead of the key hints.
     ///
     /// A monitor survives a failed frame rather than exiting, so this is where a
@@ -239,6 +326,71 @@ fn state_rungs(following: bool, position: &str) -> Vec<String> {
     }
     rungs.push(String::new());
     rungs
+}
+
+/// `N files`, or nothing at all when there is no diff to count.
+///
+/// Zero is nothing rather than `0 files`, the same way [`position_of`] is nothing
+/// when there is no diff to be positioned within. `0 files` spends columns
+/// restating what the empty state below says in words.
+fn count_of(files: usize) -> String {
+    match files {
+        0 => String::new(),
+        1 => "1 file".to_owned(),
+        n => format!("{n} files"),
+    }
+}
+
+/// The header's right-hand side, widest rung first.
+///
+/// `watching · 3 files`, then the mode word alone, then nothing.
+///
+/// **The count goes first and the mode word is the last rung standing**, which is
+/// [`state_rungs`]' rule one line up. The count summarises the body, which is on
+/// screen and can be counted by looking; whether the pane is still live is
+/// recoverable from nowhere else at all. That ordering matters most at exactly
+/// the widths where the body has nothing in it to count, which is the empty state
+/// this word exists for.
+///
+/// **The mode word is therefore never cut**, which is stricter than the marking
+/// rule the rest of the header follows: a ladder drops whole rungs, so the word
+/// is drawn entire or not drawn. `wat›` is a state a reader cannot read, and
+/// unlike a path it has no half that identifies it.
+///
+/// Always ends in an empty rung, which is what makes [`widest_fitting`] total.
+fn header_rungs(mode: Mode, files: usize) -> Vec<String> {
+    let word = mode.word();
+    let mut rungs = Vec::with_capacity(3);
+    let count = count_of(files);
+    if !count.is_empty() {
+        rungs.push(format!("{word}{FACT_SEPARATOR}{count}"));
+    }
+    rungs.push(word.to_owned());
+    rungs.push(String::new());
+    rungs
+}
+
+/// The one body line a worktree with no changes gets.
+///
+/// This is B3, ruled into `SPEC.md` §11.1 with its number left behind in §11.2,
+/// and it carries two of that ruling's four facts.
+/// The other two are the header's: which repository, from the worktree name, and
+/// that it is watching, from the mode word. So the empty state costs one row
+/// rather than four, and the mode word is what makes the fourth fact sayable in
+/// none at all.
+///
+/// **The branch is orientation, not the comparison.** Nothing about it changes
+/// what is diffed. It is named because two agents on two worktrees of one
+/// repository are otherwise identical on screen, which is the multi-worktree case
+/// `SPEC.md` §4 defers rather than rejects.
+///
+/// A detached HEAD drops it rather than inventing one: `HEAD@abc123` would put a
+/// commit id in a monitor that shows no commits.
+fn empty_state(branch: Option<&str>) -> String {
+    match branch {
+        Some(branch) => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{branch}"),
+        None => NOTHING_CHANGED.to_owned(),
+    }
 }
 
 /// One file heading's parts, gathered so [`Painter::file_row`] takes a shape
@@ -518,6 +670,7 @@ pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: 
                 ..area
             },
             view,
+            chrome,
         );
     }
 }
@@ -659,26 +812,58 @@ impl Painter<'_> {
     /// on the left loses characters to it rather than the other way round: the
     /// number is what changes, and what changes is what a glance is for. Written
     /// twice, one of them eventually stops doing that.
-    fn status_line(&mut self, area: Rect, left: &str, style: Style, right: &str) {
+    fn status_line(
+        &mut self,
+        area: Rect,
+        left: &str,
+        style: Style,
+        right: &str,
+        right_style: Style,
+    ) {
         self.buf.set_style(area, self.theme.chrome_dim);
-        let taken = self.put_right(area, right, self.theme.chrome_dim);
+        let taken = self.put_right(area, right, right_style);
         let room = usize::from(area.width).saturating_sub(taken);
         self.put_marked(area.x, area.y, left, room, style);
     }
 
     fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
-        let files = match view.files {
-            1 => "1 file".to_owned(),
-            n => format!("{n} files"),
-        };
-        // The worktree name and nothing else on the left. A title bar reading
-        // `vigia` spends six of forty columns telling the reader which program
-        // they started, which is the one thing they already know.
+        // The worktree name and nothing else on the left, which is the one place
+        // the layout departs from `assets/preview.svg` on purpose: a title bar
+        // reading `vigia` spends six of forty columns telling the reader which
+        // program they started, and what they cannot tell by looking is which
+        // *tree*. `SPEC.md` §11.1 carries the argument, because §5.1's rule is
+        // that a published artifact answering a question is the answer, so a
+        // deliberate departure from one has to be written down or it reads as
+        // drift.
         //
         // The header never takes a second line the way the footer does. A name
         // is not a list and has nowhere to break, so a second line could not
-        // guarantee a fit and would spend a body row on a maybe.
-        self.status_line(area, &chrome.worktree, self.theme.chrome, &files);
+        // guarantee a fit and would spend a body row on a maybe. The right-hand
+        // side breaks instead, by dropping whole rungs.
+        let rungs = header_rungs(chrome.mode, view.files);
+        let right = widest_fitting(&rungs, usize::from(area.width));
+        // **A dead watch has to be visible, not merely present.** Drawn in the
+        // same dim grey as the count, `not watching` is a word a reader has to
+        // go looking for, and a monitor whose failure state looks exactly like
+        // its working one has failed twice. `SPEC.md` §5 makes colour half the
+        // differentiator, so the abnormal state is loud and the normal one stays
+        // quiet.
+        //
+        // The **footer's own** alert rather than a colour of its own: the notice
+        // carrying which failure already uses it, and the two halves of one
+        // event should not arrive in two different reds. A reuse of an existing
+        // style rather than a palette decision, which stays #11's.
+        let right_style = match chrome.mode {
+            Mode::Watching => self.theme.chrome_dim,
+            Mode::Lost => self.theme.alert,
+        };
+        self.status_line(
+            area,
+            &chrome.worktree,
+            self.theme.chrome,
+            right,
+            right_style,
+        );
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -713,19 +898,25 @@ impl Painter<'_> {
                 y: bottom.y - 1,
                 ..bottom
             };
-            self.status_line(upper, "", self.theme.chrome_dim, state);
-            self.status_line(bottom, footer.left, style, "");
+            self.status_line(
+                upper,
+                "",
+                self.theme.chrome_dim,
+                state,
+                self.theme.chrome_dim,
+            );
+            self.status_line(bottom, footer.left, style, "", self.theme.chrome_dim);
         } else {
-            self.status_line(bottom, footer.left, style, state);
+            self.status_line(bottom, footer.left, style, state, self.theme.chrome_dim);
         }
     }
 
-    fn body(&mut self, area: Rect, view: &View) {
+    fn body(&mut self, area: Rect, view: &View, chrome: &Chrome) {
         if view.files == 0 {
             self.put_marked(
                 area.x,
                 area.y,
-                "working tree clean",
+                &empty_state(chrome.branch.as_deref()),
                 usize::from(area.width),
                 self.theme.chrome_dim,
             );

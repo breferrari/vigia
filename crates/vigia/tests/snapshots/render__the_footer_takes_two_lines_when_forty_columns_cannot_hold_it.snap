@@ -1,9 +1,8 @@
 ---
 source: crates/vigia/tests/render.rs
-assertion_line: 285
 expression: "screen(40, 6, &view, &following_chrome())"
 ---
-"vigia                             1 file"
+"vigia                  watching · 1 file"
 "M crates/vigia-core/src/frame.rs   +3 -1"
 "@@ -258,7 +258,9 @@                     "
 "258      pub fn advance(&mut self) {    "

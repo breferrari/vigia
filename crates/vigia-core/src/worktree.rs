@@ -52,6 +52,37 @@ impl Worktree {
         &self.workdir
     }
 
+    /// The branch HEAD names, shortened, or `None` when HEAD is detached.
+    ///
+    /// This is orientation for the empty state and nothing else: `SPEC.md` §11.1
+    /// rules B3, and it is explicit that the branch does **not** describe the
+    /// comparison. The diff here is the working tree against the index, so HEAD
+    /// does not enter into it, and a reader who took the branch for the left-hand
+    /// side of the diff would be reading it wrong.
+    ///
+    /// Shortened, because `refs/heads/` is a prefix every branch carries and
+    /// therefore says nothing. A slash inside the name survives.
+    ///
+    /// `None` is ordinary rather than a failure. A detached HEAD is where a
+    /// rebase or a bisect leaves a tree, and the empty state drops the branch
+    /// instead of inventing one. An unreadable HEAD reaches the same answer for
+    /// the same reason a frame failure reaches the footer rather than the exit
+    /// code: a monitor that refuses to draw because it could not name a branch
+    /// has stopped doing its job over a decoration.
+    ///
+    /// An unborn branch still names itself, which is not a quirk to work around:
+    /// a repository with no commits is what an agent's first minute looks like,
+    /// and `main` is the honest answer there rather than nothing.
+    ///
+    /// Costs one `.git/HEAD` read, so the caller decides when to pay it. The
+    /// shell asks only on a frame that draws the empty state, which is a frame
+    /// with no diff to compute and nothing else to read, and that is what keeps
+    /// I4 true: the thing read is the thing drawn.
+    pub fn branch(&self) -> Option<String> {
+        let name = self.repo.head_name().ok()??;
+        Some(name.shorten().to_string())
+    }
+
     /// Stream the working-tree-vs-index changes with default options.
     ///
     /// An iterator rather than a `Vec` on purpose: I4 makes first paint a

@@ -124,7 +124,9 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 |---|---|---|
 | ✅ | I10 bounded history, and the sparkline, gradient and pulse drawn from it | [#38](https://github.com/breferrari/vigia/issues/38) |
 | ✅ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
-| ⬜ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
+| ✅ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
+| ⬜ | Fast scrolling drops frames, and a drawn row costs its whole line | [#45](https://github.com/breferrari/vigia/issues/45) |
+| ⬜ | The header carries no changed-line total, which §10 assigned to this phase | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
@@ -133,6 +135,10 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 The correction that mattered was not the count. **It is that this is not a rendering phase** (`SPEC.md` §5.2), and building the first child confirmed it: the diff was mostly `vigia-core`. The split follows what each element needs rather than what it looks like: history-backed (#38), whole-file-backed (#39), chrome (#40), self-measuring (#41).
 
 **One of #10's four bullets had already shipped.** Per-file `+42 −7` counters are built in `view.rs` and drawn by `render.rs`, and §5.1 has said "Covered" for them since the mockup was specified: a file has to be diffed to be drawn, so they cost nothing and landed early and quietly. No issue was filed. This file also claimed the **key-hint bar** was "untracked entirely" when [#7](https://github.com/breferrari/vigia/issues/7) landed it with I6, and `follow ▶` alongside it under [#6](https://github.com/breferrari/vigia/issues/6). Both corrected here.
+
+**The chrome child is in, and it repaid three debts rather than adding a feature.** [#40](https://github.com/breferrari/vigia/issues/40) ruled the mode set at **two**, `watching` and `not watching`, because settling and idle are both durations and a shell that wakes only when a file changes cannot draw one honestly. It ruled B3 and moved it to `SPEC.md` §11.1, which meant correcting `working tree clean`: that is git's phrase, git compares the index against HEAD as well, and a fully staged worktree was being told it was clean while `git status` said the opposite. And it wrote down two things the code had been deciding on its own, the header's deliberate departure from `assets/preview.svg` and B5's already-shipped half.
+
+**It also found that `vigia .` drew `.`.** The invocation the tool is named after headered the screen with the one thing a reader already knows, because `gix` returns the workdir as given and `Path::new(".")` has no final component. Every fixture in the suite discovered by an absolute path, so the case had never been drawn. Same shape as [#30](https://github.com/breferrari/vigia/issues/30), on the display side instead of the watch side, and found the same way: by running it.
 
 **I10 is in, and the thing it was blocked on turned out to be the thing it produced.** [#38](https://github.com/breferrari/vigia/issues/38) promoted proposed I10 into `SPEC.md` §3 with a budget of **256 paths and 120 seconds**: a bounded store in `vigia-core`, fed one coalesced tick at a time, evicted by window and by least-recently-changed. Ten thousand distinct paths leave it sitting exactly at the cap, and the soak says the same about the real process, reporting 256 tracked with 207 evicted over 359 paths at a 300-file fixture.
 
@@ -161,6 +167,8 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
+| ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
+| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
 
 ## Phase 5 — deferred findings
 
@@ -178,6 +186,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
 | ⬜ | `take-next`: the pre-flight cannot see an untracked spec prerequisite | [#34](https://github.com/breferrari/vigia/issues/34) |
 | ⬜ | The bulk-rewrite I9 gate is flaky on macOS hosted runners | [#36](https://github.com/breferrari/vigia/issues/36) |
+| ⬜ | Rename tracking and the non-streaming walk, at ten thousand files | [#48](https://github.com/breferrari/vigia/issues/48) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
@@ -211,6 +220,18 @@ What that does *not* mean is that #19 is now urgent. Nothing ships the core alon
 
 **Recorded as an open decision rather than settled by default**, which is the thing this section is for. What is not acceptable is the state it was in until 2026-07-31: filed under a blocker that had already dissolved, so nobody would revisit it, and no one had chosen either branch. Decide it when Phase 3 closes at the latest.
 
+### What the fifth pre-flight comparison found on its first run
+
+[#34](https://github.com/breferrari/vigia/issues/34) added a fifth direction to `take-next`'s pre-flight: an open `SPEC.md` §10 bullet that no issue names. It ran once and returned **five of eight bullets with nothing behind them**, which is the same failure that let the settle margin block [#5](https://github.com/breferrari/vigia/issues/5) by name for two phases. Four are now filed; the fifth is deliberately not, and that is recorded here rather than left as a silent drop.
+
+| §10 bullet | Filed as | Why there |
+|---|---|---|
+| The header counts changed files and not changed lines | [#49](https://github.com/breferrari/vigia/issues/49) | Phase 3. The bullet assigns itself to this phase in as many words, and this phase shipped three issues without it being taken or refused, because no query returns a sentence. It is the closest thing in the tracker to the shape #34 was filed about |
+| I3's window has never run | [#47](https://github.com/breferrari/vigia/issues/47) | Phase 4. A soak gate is an internal instrument; "flat resources over days" printed beside an installable binary is a public claim, and the longest run behind it is one hour. `491c9a0` corrected the tick to say so |
+| Default view: unstaged only, or vs HEAD | [#50](https://github.com/breferrari/vigia/issues/50) | Phase 4. The answer needs a week of real use, and real use needs a release, so the dependency is real rather than a deferral. It is also the most load-bearing open question in the spec: B3's `no unstaged changes` is worded the way it is *because* the comparison is index-relative |
+| Rename tracking, and the walk that runs to completion | [#48](https://github.com/breferrari/vigia/issues/48) | Phase 5. One issue rather than two, because §10 couples them itself: *"they stand or fall together."* A scale question, unmeasured at the ten thousand files where it would bite |
+| Windows: supported target or best-effort | not filed | The one bullet that is a **posture question with no action in it**. It carries no ordering language and names no work, so an issue would be a place to have an argument rather than a thing to do. It belongs in Phase 4's release notes, and if that turns out to be wrong the cost is one `gh issue create` |
+
 ## Pull-forward log
 
 Items that moved into an *earlier* phase than planned. Recorded for the same reason as deferrals: movement should be visible. Over time the balance of this list against the shelf says whether the plan was too ambitious or too cautious.
@@ -220,6 +241,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | `notify` named as a dependency in `SPEC.md` §6 | Into Phase 1 | I1 requires filesystem events rather than a timer, so the choice could not wait for the shell. Cross-platform C-toolchain-free status verified on all three tier-1 targets at the same time |
 | Terminal restoration implemented with the shell, ahead of I8 | Into [#9](https://github.com/breferrari/vigia/issues/9) | Not scope creep and not I8 done early. A shell that takes the alternate screen without giving it back is not shippable at any stage, and `panic = "abort"` means a `Drop` alone cannot, so the panic hook had to land with the code that takes the screen. What [#8](https://github.com/breferrari/vigia/issues/8) still owns is the whole of its proof, which is also the whole of the invariant |
 | I2 split into I2a and I2b | During Phase 1 | The original I2 conflated incremental re-diffing with incremental re-highlighting. Different dependencies, different phases, and Phase 1 could not close while one number meant two things |
+| Fast scrolling drops frames ([#45](https://github.com/breferrari/vigia/issues/45)) | Into Phase 3, not Phase 5 | Every sibling finding ([#15](https://github.com/breferrari/vigia/issues/15) to [#19](https://github.com/breferrari/vigia/issues/19)) went to the shelf, so this one going the other way is the movement worth recording. Those were found by auditing and this was found by **using it**: scrolling a large diff stutters, consistently on a file mixing Japanese, emoji and Latin. I9 measured over a synthetic Rust fixture is not the claim; the claim is that this is glanceable beside an agent, and a pane that stutters under the reader's own thumb has stopped being monitor-class. One mechanism is confirmed by reading, that a drawn row costs its whole line rather than the pane's width, and it is deliberately **not** the reason it is here: the first commit on it is a measurement, because [#32](https://github.com/breferrari/vigia/issues/32) already closed with "measure before narrowing it" and both halves of that intuition were wrong |
 
 ---
 

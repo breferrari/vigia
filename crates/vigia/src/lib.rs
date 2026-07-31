@@ -41,7 +41,7 @@ mod view;
 
 pub use app::App;
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Chrome, HINT_SEPARATOR, Heat, body_height, render};
+pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, body_height, render};
 pub use terminal::{Screen, Session};
 pub use theme::Theme;
 pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
@@ -117,9 +117,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         history: History::new(),
         theme: Theme::default(),
         name: short_name(worktree.workdir()),
+        branch: None,
         screen: View::default(),
     };
-    shell.draw(&mut frame)?;
+    shell.draw(&mut frame, &worktree)?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and
@@ -144,7 +145,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // reason nobody asked for.
                     continue;
                 };
-                let chrome = shell.app.chrome(&shell.name);
+                // The branch here is whatever the last draw settled on, which is
+                // right rather than merely cheap: it feeds `body_height` alone,
+                // and neither the branch nor the mode can change how many rows
+                // the footer takes. See `Footer::plan`.
+                let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
                 let height = body_height(shell.area()?, &chrome, frame.files().len());
                 match shell.app.apply(action, &mut frame, height) {
                     Ok(true) => {}
@@ -180,10 +185,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     Err(e) => shell.app.warn(e.to_string()),
                 }
             }
-            Wake::WatchLost(message) => shell.app.warn(message),
+            // Both halves, and they are not the same half twice. The mode is
+            // durable and goes to the header; the message says which failure it
+            // was and goes to the footer, where a notice belongs. See
+            // `App::watch_lost`.
+            Wake::WatchLost(message) => {
+                shell.app.watch_lost();
+                shell.app.warn(message);
+            }
         }
 
-        shell.draw(&mut frame)?;
+        shell.draw(&mut frame, &worktree)?;
     }
 
     Ok(())
@@ -211,6 +223,15 @@ struct Shell {
     theme: Theme,
     /// What the header calls the working tree.
     name: String,
+    /// What the empty state calls the branch, or `None` when it will not draw
+    /// one.
+    ///
+    /// Refreshed per draw rather than held for the session, because an agent in
+    /// the other pane can check out a branch and a name cached at startup would
+    /// then be a confident lie. `None` whenever the diff is not empty, so a
+    /// populated frame never carries a stale answer it would not have drawn
+    /// anyway. See [`branch_for`].
+    branch: Option<String>,
     /// The last view collected successfully.
     ///
     /// Painted again when collecting a new one fails, which is why it is kept at
@@ -229,13 +250,18 @@ impl Shell {
     }
 
     /// Collect a screenful and paint it.
-    fn draw(&mut self, frame: &mut vigia_core::Frame) -> Result<(), Failure> {
+    fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+        // Before the chrome, because the chrome carries it, and from the frame's
+        // own file count so the read happens on exactly the frames that draw the
+        // answer. That is the whole of I4 for this read.
+        self.branch = branch_for(frame, || worktree.branch());
+
         // The chrome is built before the height, not after, because the footer
         // takes a second line at narrow widths and `body_height` has to know
         // whether this frame is one of those. `frame.files().len()` is the same
         // number `View::collect` will report as `View::files`, which is what
         // keeps this row budget and the renderer's layout in agreement.
-        let chrome = self.app.chrome(&self.name);
+        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
         let height = body_height(self.area()?, &chrome, frame.files().len());
         match self
             .app
@@ -255,7 +281,18 @@ impl Shell {
         // costs nothing worse than a row budget that was one out for a collect
         // which failed anyway: the renderer plans and draws from the same
         // `view.files`, so what reaches the screen is self-consistent either way.
-        let chrome = self.app.chrome(&self.name);
+        //
+        // The **branch** has that shape too, and one direction of it is visible
+        // rather than merely inconsistent. It was decided from the *frame's*
+        // count above, while the empty state is drawn from `view.files`, so a
+        // collect that fails on the way from a clean tree to a dirty one draws
+        // last frame's empty state with no branch on it. One line loses four
+        // words for one frame, on a path that has already reported a failure to
+        // the footer, and the alternative is deciding it twice from two counts
+        // that can disagree. Reading the branch from the stale view instead
+        // would mean holding a name across frames, which is the confident lie
+        // `branch_for` refuses.
+        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
@@ -319,13 +356,132 @@ fn spawn_input(tx: Sender<Wake>) {
     });
 }
 
+/// The branch to draw, and whether to go and look for one at all.
+///
+/// **This is I4 for the empty state's branch**, expressed as a function so it can
+/// be gated rather than inspected. Only the empty state names a branch, so only a
+/// frame with nothing to diff may pay for reading `.git/HEAD`, and a populated
+/// frame must not read a file it is not going to draw.
+///
+/// `read` is a closure rather than a [`Worktree`] so a test can count the calls.
+/// Reaching the same assurance through a real repository would mean observing a
+/// read the frame path does not account for, which no counter here can see.
+///
+/// **It takes the frame rather than its file count, and that is what makes the
+/// rule gateable at all.** With a count, the expression deciding it lived at the
+/// call site inside `Shell::draw`, which owns a terminal and which no test can
+/// drive: hardcoding that argument to `0` and to `1` both passed the **entire
+/// suite**, in both directions, while every unit test of this function stayed
+/// green. The mutations killed the consumer and never touched the producer.
+/// Moving the count inside the boundary leaves nothing outside it to get wrong,
+/// and lets `tests/reads.rs` drive this with a real [`vigia_core::Frame`], so
+/// what is asserted is what production computes rather than a number someone
+/// typed.
+///
+/// Public for the reason [`rows_in`] and [`body_height`] are: `SPEC.md` §7 makes
+/// the test suite the proof, and a rule reachable only from inside the crate is
+/// one the suite cannot hold against a real repository.
+///
+/// The read is not cached across frames on purpose: an agent in the other pane
+/// can check out a branch, and a name held from startup would be a confident lie
+/// on exactly the screen that exists to orient the reader.
+pub fn branch_for(
+    frame: &vigia_core::Frame,
+    read: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if !frame.files().is_empty() {
+        return None;
+    }
+    read()
+}
+
 /// The last component of the worktree path, which is what a reader recognises.
 ///
-/// Falls back to the whole path. A worktree at a filesystem root has no last
-/// component, and showing the root is better than showing nothing.
+/// Three steps, and the order is the whole of it.
+///
+/// **The path as given comes first**, so the name a reader typed is the name they
+/// see. A worktree reached through a symlink keeps the link's name rather than
+/// its target's, and the common case costs no syscall at all.
+///
+/// **Then the resolved path**, because `.` and `..` have no final component and
+/// `vigia .` is the invocation this tool is named after. `gix` hands back the
+/// workdir exactly as it was given, so that spelling headered the screen `.` for
+/// a whole phase: the one thing the header exists to say was the one thing it
+/// could not. Resolving is for **display only** and the result is thrown away
+/// after its last component is taken. It must not reach anything that compares
+/// paths, because it is `\\?\C:\…` on Windows and `/private/var/…` on macOS, and
+/// [#30](https://github.com/breferrari/vigia/issues/30) is the record of what a
+/// root matching no event path costs.
+///
+/// **Then the path itself.** A worktree at a filesystem root has no last
+/// component by any route, and showing the root beats showing nothing.
 fn short_name(workdir: &Path) -> String {
-    workdir
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| workdir.display().to_string())
+    if let Some(name) = workdir.file_name() {
+        return name.to_string_lossy().into_owned();
+    }
+    if let Ok(resolved) = workdir.canonicalize()
+        && let Some(name) = resolved.file_name()
+    {
+        return name.to_string_lossy().into_owned();
+    }
+    workdir.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    //! The one rule in this file that is arithmetic rather than plumbing.
+    //!
+    //! [`short_name`] is private and `run` owns a terminal, so nothing outside
+    //! can reach it. `terminal.rs` already keeps its unit tests beside the code
+    //! for the same reason.
+    //!
+    //! [`branch_for`] used to be tested here too and deliberately is not any
+    //! more. Its rule is about a **frame**, and driving it from a number typed
+    //! into a unit test proved only that the function reads its own argument:
+    //! the call site producing that argument was untestable, and mutating it
+    //! passed the whole suite. It is exported and gated against real frames in
+    //! `tests/reads.rs` instead.
+
+    use super::*;
+
+    #[test]
+    fn a_relative_worktree_root_still_names_the_folder() {
+        // `vigia .` is the invocation the tool is named after, and it headered
+        // the screen `.` for a whole phase. `gix` hands back the workdir as it
+        // was given, `Path::new(".")` has no final component, and the fallback
+        // then printed the path itself. The header's whole job is saying which
+        // tree this is, and this was the one input where it could not.
+        //
+        // Both sides come from the process's own directory, so the assertion
+        // holds wherever the suite is run from.
+        let here = std::env::current_dir().expect("a current directory");
+        let expected = here
+            .file_name()
+            .expect("the current directory has a name")
+            .to_string_lossy()
+            .into_owned();
+
+        let drawn = short_name(Path::new("."));
+        assert_eq!(drawn, expected);
+        // Stated separately rather than left implied by the equality above. A
+        // `file_name` is never `"."`, so the two say the same thing today, and
+        // this one keeps saying it if the fixture ever changes.
+        assert_ne!(drawn, ".", "the header named the path instead of the tree");
+    }
+
+    #[test]
+    fn an_absolute_worktree_root_still_names_its_last_component() {
+        // The other direction, and the one the fix could quietly break: a
+        // resolved path must not start reporting a whole path, a drive prefix or
+        // a `\\?\` extended-length form. This root exists, so resolution
+        // succeeds and the answer has to come from the same place either way.
+        let here = std::env::current_dir().expect("a current directory");
+        let expected = here
+            .file_name()
+            .expect("the current directory has a name")
+            .to_string_lossy()
+            .into_owned();
+
+        assert_eq!(short_name(&here), expected);
+    }
 }
