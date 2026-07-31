@@ -126,7 +126,7 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
 | ✅ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
 | ✅ | Fast scrolling drops frames, and a drawn row costs its whole line | [#45](https://github.com/breferrari/vigia/issues/45) |
-| ⬜ | The header carries no changed-line total, which §10 assigned to this phase | [#49](https://github.com/breferrari/vigia/issues/49) |
+| ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 

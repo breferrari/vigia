@@ -284,6 +284,77 @@ fn the_header_says_which_mode_it_is_in() {
 }
 
 #[test]
+fn the_header_carries_no_changed_line_total() {
+    // #49, and the ruling `SPEC.md` §10 closed with. The header carries which
+    // tree, the mode word and the file count, and there is no fourth fact. A
+    // repository-wide `+`/`-` needs every changed file diffed, so it would make
+    // first paint follow the size of the diff, which is the one thing I4 exists
+    // to forbid. The only variant that dodges that is to compute it behind the
+    // frame and reveal it when it arrives, which is a wake no filesystem event
+    // caused and a number that is stale between the tick and the reveal: the
+    // frozen-clock failure §11.1 already rejected for the pulse.
+    //
+    // **Content rather than cost, which is the half `reads.rs` cannot see.**
+    // `one_screenful_costs_the_same_however_much_else_changed` already fails if a
+    // total is computed through the shell's `Frame`, because it compares the
+    // diffs one screenful computes across two fixtures differing only in
+    // changed-file count. A total computed behind the frame on a handle of its
+    // own would never touch those stats. So the assertion here is over the drawn
+    // row, which is the level the ruling was made at.
+    //
+    // `glancing()` is the fixture rather than a plainer one on purpose: its rows
+    // carry the pulse label, the heat strips and the sparklines, so the header is
+    // asserted silent against the busiest row set the shell can draw rather than
+    // against the emptiest. Its counters are the mockup's own.
+    let backend = screen(80, 5, &glancing(), &chrome());
+    let header = row_text(&backend, 0);
+
+    // What a header total would have to draw, in **either** form: the counters'
+    // own sigils, or the bare sum if it dropped them. `+42 −7`, `+11 −3` and
+    // `+2 −0` sum to `+55 −10`, so all four are things only an aggregate could
+    // put on the top row.
+    const TOTALS: [&str; 4] = ["+", "-", "55", "10"];
+
+    // Guard the fixture, the way [`highlighted`] guards its spans. The assertion
+    // below reads the **whole** row rather than recomputing where the right-hand
+    // side begins, and that is only sound while the left-hand side contains none
+    // of these itself. A worktree named `my-repo` would make it lie, silently and
+    // in the passing direction.
+    let worktree = chrome().worktree;
+    for needle in TOTALS {
+        assert!(
+            !worktree.contains(needle),
+            "the fixture's worktree name {worktree:?} contains {needle:?}, so the \
+             assertion below would read its own left-hand side as a total"
+        );
+    }
+
+    // Non-vacuity, and it is what makes the rest worth asserting. The counters
+    // have to really be on this screen, or a header with no numbers in it would
+    // pass against a fixture that had none to draw and the test would be
+    // checking that nothing is nothing.
+    let height = backend.buffer().area.height;
+    let body: String = (1..height).map(|y| row_text(&backend, y)).collect();
+    assert!(
+        body.contains("+42 -7"),
+        "no per-file counter was drawn, so the header's silence proves nothing: \
+         {body:?}"
+    );
+
+    // And the header is populated, so its silence is about the total rather than
+    // about the row being empty.
+    assert!(header.contains("watching · 3 files"), "header: {header:?}");
+
+    for needle in TOTALS {
+        assert!(
+            !header.contains(needle),
+            "the header drew {needle:?}, which is a changed-line total or half of \
+             one: {header:?}"
+        );
+    }
+}
+
+#[test]
 fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     // A state nobody can see at a glance has not been reported. Drawn in the
     // same dim grey as the count, `not watching` is a word a reader has to go
