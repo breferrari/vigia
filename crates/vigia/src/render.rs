@@ -44,6 +44,25 @@ use crate::view::{HEAT_BUCKETS, HeatBucket, Row, View};
 /// renders as nothing and silently misaligns everything after it.
 const TAB_STOP: usize = 4;
 
+/// Characters a column may cost before the walk gives up on the row.
+///
+/// The second half of [`printable`]'s bound, and it exists because the first
+/// half cannot hold on its own: a bound written in **columns** is defeated by a
+/// character that occupies none. Combining marks, zero-width joiners, variation
+/// selectors and `U+200B` all measure zero, so a run of them leaves `column`
+/// where it was and the walk runs to the end of the line however long it is.
+/// That is the unbounded shape the bound was added to remove, and it is ordinary
+/// content rather than an attack: decomposed Unicode, emoji built from joiners,
+/// and text pasted out of a web page all reach it.
+///
+/// Four, because a grapheme the pane can actually show is a base character plus
+/// a handful of marks, and `ratatui` measures a grapheme's width as its base's.
+/// Decomposed text at three characters a column still finishes on the column
+/// bound; past four the row is degenerate, and what the walk drops there is
+/// invisible anyway, since `Buffer::set_stringn` filters out zero-width symbols
+/// before writing a cell.
+const CHARS_PER_COLUMN: usize = 4;
+
 /// Stands in for a character that cannot be drawn.
 ///
 /// Chosen for reach rather than beauty: U+00B7 is in Latin-1 and in CP437, so it
@@ -631,14 +650,67 @@ pub fn body_height(area: Rect, chrome: &Chrome, files: usize) -> usize {
     usize::from(area.height).saturating_sub(1 + usize::from(footer.rows))
 }
 
+/// What one paint cost, in the term that decides whether it followed the pane.
+///
+/// The renderer's counterpart to [`vigia_core::FrameStats`] and
+/// [`vigia_core::HighlightStats`], and it exists for the reason those do: I4's
+/// shape is *"cost follows the window"*, and a claim about cost that nothing
+/// counts is a claim nothing can gate. `SPEC.md` §7's structural tier is exact
+/// counters rather than a wall clock precisely so a regression is caught on a
+/// hosted runner too.
+///
+/// The pair is deliberate. [`Self::examined`] alone says how much work a frame
+/// did and not whether that was a lot, and the bound it is checked against is
+/// [`Self::rows`] times the pane's width — derived from the run, because a
+/// constant would be a bound no input could approach.
+///
+/// **Per paint, where its two siblings are cumulative**, and the difference is
+/// forced rather than chosen: they hang off an object that lives across frames
+/// and this comes back from a free function with nothing to accumulate onto. So
+/// the comparable number over a run is a *sum*, and [`AddAssign`] is how a caller
+/// takes it: summing field by field is what silently drops the field added next.
+/// There is deliberately no `paint_delta` beside `support::delta` for the same
+/// reason inverted, since there are no two readings here to subtract.
+///
+/// [`AddAssign`]: std::ops::AddAssign
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PaintStats {
+    /// Rows of file content drawn. Headings, hunk headers and notes are not
+    /// content and are bounded by the screen on their own.
+    pub rows: u64,
+    /// Source characters examined to draw them.
+    ///
+    /// Counted where the walk happens rather than derived from what was
+    /// produced, and that is the whole instrument: the two are equal once the
+    /// walk is bounded, so a counter over the *output* would be true by
+    /// construction and could never fail.
+    pub examined: u64,
+}
+
+impl std::ops::AddAssign for PaintStats {
+    /// Sum two paints, so a run of frames is one figure rather than two
+    /// hand-summed ones.
+    fn add_assign(&mut self, other: Self) {
+        let Self { rows, examined } = other;
+        self.rows += rows;
+        self.examined += examined;
+    }
+}
+
 /// Draw a whole screen: one header line, the body, and one or two footer lines.
 ///
 /// Any area is legal, including one too short for a body and one column wide. A
 /// monitor that panics when a pane is dragged narrow is worse than one that
 /// draws something cramped.
-pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: &Chrome) {
+pub fn render(
+    buf: &mut Buffer,
+    area: Rect,
+    view: &View,
+    theme: &Theme,
+    chrome: &Chrome,
+) -> PaintStats {
     if area.width == 0 || area.height == 0 {
-        return;
+        return PaintStats::default();
     }
 
     // Planned from `view.files`, which on the path that matters is the same
@@ -653,6 +725,7 @@ pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: 
         buf,
         theme,
         gutter: 0,
+        paint: PaintStats::default(),
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -673,6 +746,8 @@ pub fn render(buf: &mut Buffer, area: Rect, view: &View, theme: &Theme, chrome: 
             chrome,
         );
     }
+
+    painter.paint
 }
 
 /// A buffer, a palette, and the one measurement the body rows share.
@@ -681,6 +756,8 @@ struct Painter<'a> {
     theme: &'a Theme,
     /// Digits reserved for line numbers, or zero when there is no room.
     gutter: usize,
+    /// What the content rows have cost so far, returned by [`render`].
+    paint: PaintStats,
 }
 
 impl Painter<'_> {
@@ -737,24 +814,29 @@ impl Painter<'_> {
     /// clipped line is drawn as one that simply ends. `tests/legibility.rs`
     /// sweeps every width for that.
     ///
-    /// `total` is the runs' width, which the caller already accumulated while
-    /// building them. Passed in rather than re-derived: measuring it here walks
-    /// every line a second time and undoes the ASCII fast path [`printable`]
-    /// exists for.
+    /// `clipped` says whether anything was left over, and it is **told** rather
+    /// than measured. It cannot be derived here: the runs stop at the pane's
+    /// edge, so their total width says nothing about whether the line ended
+    /// there or merely ran out of room, and the two have to draw differently.
+    /// The caller is the only party that saw the source.
+    ///
+    /// This used to take the runs' total width and compare it against `limit`,
+    /// which worked only because the runs held the *whole* line. Bounding the
+    /// walk removed that (#45), and the flag had to replace the width or every
+    /// clipped row would silently draw as one that simply ended.
     fn put_runs_marked(
         &mut self,
         x: u16,
         y: u16,
         runs: &[(String, Style)],
-        total: usize,
+        clipped: bool,
         limit: usize,
     ) {
         if limit == 0 {
             return;
         }
 
-        let overflows = total > limit;
-        let budget = if overflows { limit - 1 } else { limit };
+        let budget = if clipped { limit - 1 } else { limit };
 
         // The style the mark inherits: whichever run ran out of room, so a
         // clipped comment is marked in the comment's colour rather than in
@@ -777,7 +859,7 @@ impl Painter<'_> {
             at = self.put(at, y, text, usize::from(end - at), *style);
         }
 
-        if overflows {
+        if clipped {
             self.buf
                 .set_stringn(x + limit as u16 - 1, y, CONTINUES, 1, marked_in);
         }
@@ -1082,6 +1164,81 @@ impl Painter<'_> {
         );
     }
 
+    /// Walk a line into styled runs, stopping at the pane's edge, and say
+    /// whether anything was left over.
+    ///
+    /// Split out of [`Painter::line_row`] because the step it repeats has three
+    /// obligations that have to travel together: bound the walk, add what it
+    /// cost to [`PaintStats::examined`], and report that the row continues.
+    /// Written twice — once for the classified spans and once for the tail they
+    /// did not reach — either copy could quietly drop the counter, and
+    /// `tests/paint.rs` would still pass because the other copy still feeds it.
+    /// One `push_run` means each obligation is discharged in exactly one place.
+    fn content_runs(
+        &mut self,
+        runs: &mut Vec<(String, Style)>,
+        text: &str,
+        spans: &[Span],
+        content: usize,
+    ) -> bool {
+        let mut column = 0usize;
+        let mut at = 0usize;
+        for span in spans {
+            let end = (at + span.len).min(text.len());
+            let Some(piece) = text.get(at..end) else {
+                // A span boundary that is not a character boundary. It should not
+                // happen and it must not panic, because the alternative to one
+                // uncoloured line is a monitor that dies on a file. The rest of
+                // the line is drawn unclassified.
+                break;
+            };
+            at = end;
+            if piece.is_empty() {
+                continue;
+            }
+            if self.push_run(runs, piece, span.class, &mut column, content) {
+                return true;
+            }
+        }
+        if at < text.len() {
+            // Whatever the spans did not reach, which is the whole line when
+            // there are none: an unrecognised file type, or a row a test built
+            // by hand.
+            //
+            // Styled through `class` rather than reaching for `context`
+            // directly, so that "an empty span list and one `Plain` span reach
+            // the screen identically" stays one rule instead of two expressions
+            // that happen to agree. #11 gives the classes their own palette, and
+            // the first `Plain` that is not `context` would otherwise leave this
+            // path quietly on the old colour.
+            //
+            // Reached only when nothing above returned, so `at` is where the
+            // spans genuinely stopped rather than where the pane cut them off.
+            return self.push_run(runs, &text[at..], Class::Plain, &mut column, content);
+        }
+        false
+    }
+
+    /// Add one run to a row, and say whether the pane cut it short.
+    fn push_run(
+        &mut self,
+        runs: &mut Vec<(String, Style)>,
+        piece: &str,
+        class: Class,
+        column: &mut usize,
+        content: usize,
+    ) -> bool {
+        if *column >= content {
+            // Room ran out on an earlier run and this one has something to say,
+            // so the row continues and nothing more of it is walked.
+            return true;
+        }
+        let printed = printable(piece, column, content);
+        self.paint.examined += printed.examined;
+        runs.push((printed.text, self.theme.class(class)));
+        printed.clipped
+    }
+
     /// `  128 +    let value = 1;`
     ///
     /// **The sigil carries the diff, the text carries the syntax**, which is
@@ -1107,7 +1264,13 @@ impl Painter<'_> {
             room = room.saturating_sub(gutter + 1);
         }
 
-        let mut runs = Vec::with_capacity(spans.len() + 2);
+        // Capped by the pane as well as by the span count, because the walk now
+        // stops at the edge: a minified line of three hundred spans in an
+        // eighty-column pane pushes a handful of runs, and reserving for all
+        // three hundred is fourteen kilobytes a row of churn. A run that is
+        // pushed at all advances `column` by at least one, so the pane bounds the
+        // count too.
+        let mut runs = Vec::with_capacity((spans.len() + 2).min(room + 2));
         runs.push((sigil.to_string(), diff));
 
         // Tab stops are counted from the start of the line's own content, not
@@ -1117,47 +1280,25 @@ impl Painter<'_> {
         // an editor. The counter therefore runs **across** span boundaries: a tab
         // in the middle of a line advances to the next stop measured from the
         // line's own start, not from the start of whatever run it landed in.
-        let mut column = 0usize;
-        let mut at = 0usize;
-        for span in spans {
-            let end = (at + span.len).min(text.len());
-            let Some(piece) = text.get(at..end) else {
-                // A span boundary that is not a character boundary. It should not
-                // happen and it must not panic, because the alternative to one
-                // uncoloured line is a monitor that dies on a file. The rest of
-                // the line is drawn unclassified.
-                break;
-            };
-            if !piece.is_empty() {
-                runs.push((printable(piece, &mut column), self.theme.class(span.class)));
-            }
-            at = end;
-        }
-        if at < text.len() {
-            // Whatever the spans did not reach, which is the whole line when
-            // there are none: an unrecognised file type, or a row a test built
-            // by hand.
-            //
-            // Styled through `class` rather than reaching for `context`
-            // directly, so that "an empty span list and one `Plain` span reach
-            // the screen identically" stays one rule instead of two expressions
-            // that happen to agree. #11 gives the classes their own palette, and
-            // the first `Plain` that is not `context` would otherwise leave this
-            // path quietly on the old colour.
-            runs.push((
-                printable(&text[at..], &mut column),
-                self.theme.class(Class::Plain),
-            ));
-        }
+        // The sigil is one column and is pushed before the counter starts, so
+        // what is left for content is everything but it.
+        //
+        // **This is the bound, and it is what makes a row cost the pane rather
+        // than the line.** Every run below stops here, and the loop stops asking
+        // for runs once it is spent, so a 531-column line in a 74-column pane is
+        // walked 74 columns deep instead of 531. Measured before it existed: a
+        // 22-row body of Japanese examined 8231 characters to show 1600 columns,
+        // which is 5.1x, and `tests/paint.rs` is what fails if it comes back.
+        let content = room.saturating_sub(1);
+        let clipped = self.content_runs(&mut runs, text, spans, content);
+        self.paint.rows += 1;
 
         // Content is the one thing that can neither break nor elide: wrapping it
         // would move every line below it, and no part of a line is its
         // identifying part the way a path's tail is. So it says it continues and
         // nothing more. `SPEC.md` §11.1 rules that this is not what I6 means by
         // a truncated label.
-        // The sigil is one column and is pushed before the counter starts, so
-        // the runs' total width is the counter plus it.
-        self.put_runs_marked(x, area.y, &runs, column + 1, room);
+        self.put_runs_marked(x, area.y, &runs, clipped, room);
     }
 }
 
@@ -1243,6 +1384,19 @@ fn elide_head(text: &str, room: usize) -> String {
     kept
 }
 
+/// One run of a line, made safe for the screen and stopped at the pane's edge.
+struct Printed {
+    text: String,
+    /// Source characters examined to produce it, for [`PaintStats::examined`].
+    examined: u64,
+    /// Whether the source had more to give than the room allowed.
+    ///
+    /// Carried out rather than inferred from the text's width, because the two
+    /// differ exactly where it matters: a run that ends flush with the pane is
+    /// indistinguishable by width from one that was cut there.
+    clipped: bool,
+}
+
 /// Make one line of file content safe to write into terminal cells.
 ///
 /// Two hazards, both from content nobody wrote for a display. A tab occupies one
@@ -1257,9 +1411,46 @@ fn elide_head(text: &str, room: usize) -> String {
 /// syntax boundary and align a tab to the token before it rather than to the
 /// line, which is invisible until a file indents with tabs and then wrong on
 /// every row of it.
-fn printable(text: &str, column: &mut usize) -> String {
-    let mut out = String::with_capacity(text.len());
+///
+/// **It stops at `room`**, which is the same counter and therefore the same
+/// units: a pane bounds columns, and a bound written in characters would land a
+/// two-column glyph half over the edge. Stopping is not an optimisation of the
+/// drawing, since [`Buffer::set_stringn`] clips anyway; it is what stops the
+/// *walk*, which is the cost. A row of a 660-byte line used to walk all of it,
+/// and allocate all of it, to show 74 columns.
+///
+/// **And it stops at [`CHARS_PER_COLUMN`] characters as well, because a column
+/// bound alone is not a bound.** A zero-width character advances `column` by
+/// nothing, so a run made of them satisfies `column < room` forever and walks the
+/// whole line however long it is: exactly the cost this function exists to
+/// remove, reachable with a combining mark, a ZWJ, a variation selector or a
+/// zero-width space. Two counters are needed because the two hazards are in
+/// different units.
+fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
+    // Sized from what will be kept rather than from what was offered. Four bytes
+    // a column is the widest UTF-8 encoding, and a tab can expand past the end
+    // by at most one stop.
+    let mut out = String::with_capacity(
+        text.len()
+            .min(room.saturating_mul(4).saturating_add(TAB_STOP)),
+    );
+    // The character bound, in the same terms as the column one so the two can be
+    // read together.
+    let walk = room
+        .saturating_mul(CHARS_PER_COLUMN)
+        .saturating_add(TAB_STOP) as u64;
+    let mut examined = 0u64;
     for (i, c) in text.char_indices() {
+        if *column >= room || examined >= walk {
+            // Stopped with source left over, which is the caller's signal to
+            // mark the row and stop asking the rest of the spans for anything.
+            return Printed {
+                text: out,
+                examined,
+                clipped: true,
+            };
+        }
+        examined += 1;
         match c {
             '\t' => {
                 let stop = TAB_STOP - (*column % TAB_STOP);
@@ -1282,5 +1473,11 @@ fn printable(text: &str, column: &mut usize) -> String {
             }
         }
     }
-    out
+    Printed {
+        text: out,
+        // The source ran out rather than the room, so the only way this row
+        // still overflows is a two-column glyph that straddled the last cell.
+        clipped: *column > room,
+        examined,
+    }
 }

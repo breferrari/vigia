@@ -459,3 +459,67 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
         "dragging the pane short and back lost the reader's place"
     );
 }
+
+#[test]
+fn only_the_action_that_reads_the_height_is_given_one() {
+    // `Action::needs_height` exists so the shell can skip an uncached
+    // terminal-size syscall and a `Chrome` allocation on every action that does
+    // not read the answer, which matters because a drained trackpad flick is up
+    // to sixty-four actions between two paints.
+    //
+    // The exhaustive match in `needs_height` catches an action nobody
+    // classified. It cannot catch one classified **wrongly**, and that failure
+    // is silent: the action is handed a zero height and quietly moves the
+    // viewport by the wrong amount. So the claim is checked against `App::apply`
+    // itself, by driving each action twice with heights that could not both be
+    // right and asserting the answer did not depend on which.
+    let scratch = fixture("shell-scroll-height");
+    let worktree = scratch.worktree();
+
+    // Every action, so a new variant reaches this list by failing to be in it.
+    let actions = [
+        Action::Scroll(SPAN as isize * 3),
+        Action::Scroll(-(SPAN as isize)),
+        Action::Top,
+        Action::Bottom,
+        Action::Redraw,
+        Action::ToggleFollow,
+        Action::Page(1),
+        Action::Page(-1),
+    ];
+
+    for action in actions {
+        // Two heights far enough apart that any action reading one would land
+        // somewhere different. Started from the same place each time.
+        let landed: Vec<Position> = [0usize, body()]
+            .into_iter()
+            .map(|height| {
+                let mut frame = worktree.frame();
+                materialise(&mut frame);
+                let mut app = App::new();
+                let mut highlighter = Highlighter::new();
+                let history = History::new();
+                app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, body())
+                    .expect("seed");
+                app.apply(action, &mut frame, height).expect("apply");
+                app.view(&mut frame, &mut highlighter, &history, body())
+                    .expect("view")
+                    .top
+            })
+            .collect();
+
+        if action.needs_height() {
+            assert_ne!(
+                landed[0], landed[1],
+                "{action:?} says it needs the height and lands in the same place \
+                 without one, so either the claim or the action is wrong"
+            );
+        } else {
+            assert_eq!(
+                landed[0], landed[1],
+                "{action:?} says it does not need the height and moved when it \
+                 changed, so the shell is about to hand it a zero"
+            );
+        }
+    }
+}

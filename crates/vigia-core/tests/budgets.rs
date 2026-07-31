@@ -29,7 +29,8 @@ use std::time::{Duration, Instant};
 
 use support::{Scratch, budget, delta, highlight_delta, materialise, settle};
 use vigia_core::{
-    FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, Samples, Worktree,
+    FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
+    Worktree,
 };
 
 /// I4: first paint on a 100k-line diff.
@@ -773,23 +774,105 @@ fn the_highlight_cache_is_bounded_by_the_viewport() {
             first,
             WINDOW_HUNKS,
         );
+        // The window, plus the hunks a reader may scroll back to. The second
+        // term is a constant rather than a function of how far the loop has
+        // gone, which is what keeps this a claim about the screen: at step 29
+        // the reader has read thirty-two hunks and the cache holds seven.
         assert!(
-            highlighter.tracked() <= WINDOW_HUNKS,
+            highlighter.tracked() <= WINDOW_HUNKS + RETAINED_HUNKS,
             "after scrolling to hunk {first} the cache holds {} hunks for a \
-             window of {WINDOW_HUNKS}, so it grows with what has been read \
-             rather than with what is on screen",
+             window of {WINDOW_HUNKS} and a retired queue of {RETAINED_HUNKS}, \
+             so it grows with what has been read rather than with what is on \
+             screen",
             highlighter.tracked()
         );
     }
 
-    // Non-vacuity: a cache that never stored anything would satisfy the bound.
-    assert_eq!(highlighter.tracked(), WINDOW_HUNKS);
+    // Non-vacuity: a cache that never stored anything would satisfy the bound,
+    // and one that never *retired* anything would satisfy it for the wrong
+    // reason. Both ends are pinned to equality, so the gate is pressed rather
+    // than merely true.
+    assert_eq!(highlighter.tracked(), WINDOW_HUNKS + RETAINED_HUNKS);
+
+    // Each step retires the one hunk that left the window, and the queue holds
+    // the last `RETAINED_HUNKS` of them. Everything before that is gone.
     assert_eq!(
         highlighter.stats().evicted,
-        (STEPS - 1) as u64,
-        "scrolling {STEPS} hunks evicted {}, so hunks are being kept after \
-         they leave the screen",
+        (STEPS - 1 - RETAINED_HUNKS) as u64,
+        "scrolling {STEPS} hunks evicted {}, so hunks are being kept after they \
+         leave the screen and the retired queue is not turning over",
         highlighter.stats().evicted
+    );
+}
+
+#[test]
+fn a_hunk_scrolled_back_to_is_not_re_parsed() {
+    // The invariant `RETAINED_HUNKS` exists for, and the one the viewport bound
+    // above cannot express: it says the cache does not grow, and a cache of size
+    // zero satisfies that perfectly.
+    //
+    // Highlighting is forward-only, so a hunk re-entered from *below* is parsed
+    // from its first line down to the visible row. Sweeping on exit meant a
+    // reader who scrolled back over what they had just read paid that walk
+    // again, with the answer having been in memory one frame earlier: measured
+    // over 120-row hunks of Japanese, **26.39ms** against a 16ms budget, once
+    // per file ([#45](https://github.com/breferrari/vigia/issues/45)).
+    let scratch = Scratch::sparse_edits("i2b-scrollback", 1, LARGE_FILE, HUNK_SPACING);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut highlighter = Highlighter::new();
+
+    // Read forward over twice the window, so the hunks left behind are genuinely
+    // off screen rather than still half drawn.
+    for first in 0..=WINDOW_HUNKS {
+        highlight_window(
+            &mut frame,
+            &mut highlighter,
+            SHARED_PATH,
+            first,
+            WINDOW_HUNKS,
+        );
+    }
+
+    // The premise, checked before the return rather than inferred from it: the
+    // three hunks really did leave the screen. Held but not drawn is exactly
+    // what the queue is, and without that this would be measuring a window that
+    // never moved.
+    assert_eq!(
+        highlighter.tracked(),
+        WINDOW_HUNKS * 2,
+        "the cache holds {} hunks after reading {} windows of {WINDOW_HUNKS}, \
+         so the hunks about to be scrolled back to are not sitting in the \
+         retired queue and this proves nothing",
+        highlighter.tracked(),
+        WINDOW_HUNKS + 1
+    );
+
+    // Then back to where the reader started, which is the motion a wheel flick
+    // and its reversal produce.
+    let before = highlighter.stats();
+    let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    let cost = highlight_delta(before, highlighter.stats());
+
+    assert!(drawn > 0, "the window back at the top drew nothing");
+    assert_eq!(
+        cost.parsed, 0,
+        "scrolling back over {WINDOW_HUNKS} hunks already read re-parsed {} of \
+         them, so the retired queue is not being consulted",
+        cost.parsed
+    );
+    assert_eq!(
+        cost.lines, 0,
+        "scrolling back re-parsed {} lines, so a hunk came out of the queue and \
+         was rebuilt rather than reused",
+        cost.lines
+    );
+    assert_eq!(
+        cost.reused, WINDOW_HUNKS as u64,
+        "the window back at the top reused {} of {WINDOW_HUNKS} hunks",
+        cost.reused
     );
 }
 
@@ -839,4 +922,72 @@ fn frame_time_distribution() {
     }
     println!("max     {:?}", warm.max().expect("samples"));
     println!("over {I9_FRAME:?}: {over_budget}/{SAMPLED_FRAMES} warm frames");
+}
+
+#[test]
+fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
+    // The other half of `a_hunk_scrolled_back_to_is_not_re_parsed`, and the one
+    // that decides whether retention is *correct* rather than merely fast.
+    //
+    // This is the monitor's whole workload: the agent in the other pane is
+    // writing while the reader scrolls. So a retained parse is a parse of
+    // content that may no longer exist, and handing it back unchecked would show
+    // colours for a version of the file nobody has. Reuse must lose to the
+    // digest, exactly as it does for a hunk that never left the screen.
+    //
+    // The failure this rules out is silent and permanent: nothing on screen says
+    // the colours are stale, and the entry stays wrong until it is evicted.
+    let scratch = Scratch::sparse_edits("i2b-scrollback-edit", 1, LARGE_FILE, HUNK_SPACING);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut highlighter = Highlighter::new();
+
+    // Read the top of the file, then move past it so it is retired rather than
+    // live. Off screen and still held is precisely the state under test.
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    for first in 1..=WINDOW_HUNKS {
+        highlight_window(
+            &mut frame,
+            &mut highlighter,
+            SHARED_PATH,
+            first,
+            WINDOW_HUNKS,
+        );
+    }
+    assert_eq!(
+        highlighter.tracked(),
+        WINDOW_HUNKS * 2,
+        "hunk 0 is not being held off screen, so this measures a cache that was \
+         never asked to give back something stale"
+    );
+
+    // The agent writes to the part the reader has scrolled away from.
+    scratch.edit_line(SHARED_PATH, HUNK_SPACING, EDITED_LINE);
+    frame.advance().expect("advance");
+
+    // And the reader scrolls back into it.
+    let before = highlighter.stats();
+    highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    let cost = highlight_delta(before, highlighter.stats());
+
+    assert_eq!(
+        cost.parsed, 1,
+        "coming back to a window whose first hunk was rewritten while it was \
+         retired re-parsed {} hunks: 0 means a stale parse was handed back, and \
+         more than 1 means the hunks that did not change were thrown away with \
+         it",
+        cost.parsed
+    );
+    assert_eq!(
+        cost.reused,
+        (WINDOW_HUNKS - 1) as u64,
+        "the untouched hunks in the window were re-parsed rather than recovered",
+    );
+    assert!(
+        cost.lines > 0,
+        "the changed hunk was reported as parsed and cost no lines, so nothing \
+         was actually re-read"
+    );
 }

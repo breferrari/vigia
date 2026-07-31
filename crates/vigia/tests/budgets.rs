@@ -16,17 +16,28 @@
 //! What it costs, measured while it was written: one screenful of Rust is about
 //! 1.5ms of `syntect`, against a frame path that was 6.97ms p99 on the same
 //! fixture before highlighting existed.
+//!
+//! **Every gate here paints, and until [#45](https://github.com/breferrari/vigia/issues/45)
+//! none of them did.** A frame timed as `Frame::advance` plus `App::view` is the
+//! frame the shell has minus the half that writes cells, and that half is where a
+//! row's width is decided. A row carrying seven times more line than pane
+//! therefore passed a 16ms gate for two phases, because no gate on either tier
+//! could see it. `SPEC.md` §7 now says so as a rule; `tests/paint.rs` holds the
+//! structural half.
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
 use std::time::{Duration, Instant};
 
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, body_height};
+use vigia::{Action, App, PaintStats, Row, Theme, WHEEL_ROWS, body_height, render};
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
 
-use support::{Scratch, budget, delta, exclusively_timed, highlight_delta, settle};
+use support::{
+    Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, budget, delta, exclusively_timed, highlight_delta, settle,
+};
 
 /// I9: steady-state frame time.
 const I9_FRAME: Duration = Duration::from_millis(16);
@@ -83,6 +94,27 @@ fn body(app: &App, files: usize) -> usize {
     body_height(area(), &app.chrome("fixture", None), files)
 }
 
+/// One frame of the shell, timed whole: diff, collect, paint.
+///
+/// The paint is the half that was missing. `Shell::draw` does exactly this plus
+/// a `branch_for` (which reads nothing on a populated frame, by I4) and a
+/// terminal size query, so what is timed here is the shipped frame with the tty
+/// removed — which is the same carve-out `soak.rs` already names.
+fn shell_frame(
+    frame: &mut Frame,
+    app: &mut App,
+    highlighter: &mut Highlighter,
+    history: &History,
+    buf: &mut Buffer,
+    theme: &Theme,
+    height: usize,
+) {
+    frame.advance().expect("advance");
+    let chrome = app.chrome("fixture", None);
+    let view = app.view(frame, highlighter, history, height).expect("view");
+    render(buf, area(), &view, theme, &chrome);
+}
+
 /// Whether the absolute wall-clock gate should assert.
 ///
 /// A debug build is several times slower than the one the budgets were set
@@ -99,10 +131,16 @@ fn absolute_gates_apply() -> bool {
     }
 }
 
-fn time(mut work: impl FnMut()) -> Duration {
+/// How long `work` took, for a stage whose result nothing downstream needs.
+fn time(work: impl FnOnce()) -> Duration {
+    timed(work).1
+}
+
+/// [`time`], for a stage that produces something the next stage needs.
+fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
     let start = Instant::now();
-    work();
-    start.elapsed()
+    let value = work();
+    (value, start.elapsed())
 }
 
 #[test]
@@ -182,6 +220,8 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // the other pane and is deliberately outside the timed region.
     let mut edits = 0usize;
     let mut marker = String::new();
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
     let mut next_frame =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
             marker = format!("fn edited_{edits}() {{ let value = {edits}; }}");
@@ -194,8 +234,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
                 // does not have. It is what I10 costs per tick, measured where I9
                 // can see it.
                 history.record([EDITED_PATH], Instant::now());
-                frame.advance().expect("advance");
-                app.view(frame, highlighter, history, height).expect("view");
+                shell_frame(frame, app, highlighter, history, &mut buf, &theme, height);
             })
         };
 
@@ -335,12 +374,13 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
 
     let _timed = exclusively_timed();
 
-    let draw =
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+    let mut draw =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
             time(|| {
                 history.record([EDITED_PATH], Instant::now());
-                frame.advance().expect("advance");
-                app.view(frame, highlighter, history, height).expect("view");
+                shell_frame(frame, app, highlighter, history, &mut buf, &theme, height);
             })
         };
 
@@ -472,5 +512,422 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         cost.computed,
         cost.reused,
         cost.bytes
+    );
+}
+
+/// The wide fixture's shape, and why these two numbers.
+///
+/// Twenty files of sixty lines, rewritten line for line, so one file is a single
+/// hunk of **120 display rows**. Both numbers are chosen against the scroll
+/// rather than against the diff:
+///
+/// * a notch is [`WHEEL_ROWS`] rows, so a file boundary arrives every 40 frames
+///   and about **2.4%** of the samples enter a hunk nothing has parsed. At 250
+///   samples a nearest-rank p99 is the third-worst frame, so the partition below
+///   separates frames the percentile can actually reach rather than a tail
+///   nothing occupies;
+/// * twenty files is 2440 rows, comfortably more than the 900 a warmup and a
+///   sample walk together, so neither direction runs into an end and starts
+///   measuring a viewport that cannot move.
+const WIDE_FILES: usize = 20;
+const WIDE_LINES: usize = 60;
+
+/// Display rows one wide file contributes: every line removed and every line
+/// added.
+const WIDE_HUNK_ROWS: usize = WIDE_LINES * 2;
+
+/// Where the upward scroll starts, in rows from the top of the diff.
+///
+/// Far enough down that 300 frames of three rows never reach the top, since a
+/// viewport pinned at row zero stops crossing boundaries and the gate would
+/// quietly become a measurement of one file.
+const UP_FROM: usize = 1_000;
+
+/// Files that have to sit above the viewport before an upward scroll is one.
+const UP_FILES: usize = 4;
+
+/// What one scroll of a wide fixture cost, per stage and per partition.
+struct Scrolled {
+    /// Frames that reused every hunk they drew: the steady state I9 is about.
+    warm: Samples,
+    /// Frames that entered a hunk nothing had parsed: `SPEC.md` §7's cold path.
+    cold: Samples,
+    collect: Samples,
+    paint: Samples,
+    /// The worst single cold frame's parse, in lines.
+    cold_lines: u64,
+    /// Lines the whole run highlighted.
+    lines: u64,
+    /// Hunks the run swept out of the cache, which is the third suspect's own
+    /// number: an eviction is only a cost when the reader comes back to it.
+    evicted: u64,
+    boundaries: usize,
+    widest: usize,
+    body_rows: usize,
+    /// Rows the body had, carried from the run rather than re-derived.
+    ///
+    /// `hold_the_scroll_budget` writes two assertions in terms of it, and
+    /// rebuilding it there from a fresh `App` would be a second source of truth
+    /// for a number this run already has.
+    height: usize,
+    painted: PaintStats,
+}
+
+impl Scrolled {
+    fn report(&self, what: &str) {
+        eprintln!(
+            "{what}: {} warm frames p50 {:?} p99 {:?} max {:?} | \
+             {} cold frames p50 {:?} p99 {:?} max {:?} | \
+             collect p99 {:?} paint p99 {:?} | \
+             {} boundaries, {} lines highlighted, {} hunks evicted, \
+             worst cold parse {} lines, \
+             {} rows painted from {} characters, widest line {}",
+            self.warm.len(),
+            self.warm.percentile(0.50).unwrap_or_default(),
+            self.warm.percentile(0.99).unwrap_or_default(),
+            self.warm.max().unwrap_or_default(),
+            self.cold.len(),
+            self.cold.percentile(0.50).unwrap_or_default(),
+            self.cold.percentile(0.99).unwrap_or_default(),
+            self.cold.max().unwrap_or_default(),
+            self.collect.percentile(0.99).unwrap_or_default(),
+            self.paint.percentile(0.99).unwrap_or_default(),
+            self.boundaries,
+            self.lines,
+            self.evicted,
+            self.cold_lines,
+            self.painted.rows,
+            self.painted.examined,
+            self.widest,
+        );
+    }
+}
+
+/// Frames in one leg of [`Motion::Back`], chosen to cross two files each way.
+const LEG: usize = 80;
+
+/// How the reader is moving.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Motion {
+    Down,
+    /// From [`UP_FROM`] rows in, upwards, into hunks nothing has parsed.
+    Up,
+    /// Down a couple of files, then back up over the same ground, repeatedly.
+    ///
+    /// The third suspect's own workload. [`Up`](Self::Up) measures a *first*
+    /// entry, which no cache can make cheap; this measures a **second** one,
+    /// which is the case `Highlighter::sweep` decides. A reader scrolling back
+    /// to something they just passed is the ordinary motion, and if eviction on
+    /// hunk exit is a real cost it is here that it shows.
+    Back,
+}
+
+impl Motion {
+    fn step(self, at: usize) -> isize {
+        match self {
+            Motion::Down => WHEEL_ROWS,
+            Motion::Up => -WHEEL_ROWS,
+            Motion::Back if (at / LEG) % 2 == 0 => WHEEL_ROWS,
+            Motion::Back => -WHEEL_ROWS,
+        }
+    }
+}
+
+#[test]
+fn scrolling_down_wide_lines_holds_the_frame_budget() {
+    let Some(run) = scroll("wide-down", Motion::Down, WIDE_EXT) else {
+        return;
+    };
+    hold_the_scroll_budget(&run, "scroll down");
+}
+
+#[test]
+fn scrolling_up_wide_lines_holds_the_frame_budget() {
+    // The direction `SPEC.md` §10 names as the worst case and which nothing had
+    // ever run. Scrolling **down** enters a new hunk at its top, where the
+    // forward-only parse has nothing above it to pay for; scrolling up enters
+    // the same hunk at its **bottom**, so the first frame there parses the whole
+    // file in order to draw its last rows.
+    let Some(run) = scroll("wide-up", Motion::Up, WIDE_EXT) else {
+        return;
+    };
+    hold_the_scroll_budget(&run, "scroll up");
+}
+
+#[test]
+fn scrolling_back_over_ground_already_read_holds_the_frame_budget() {
+    let Some(run) = scroll("wide-back", Motion::Back, WIDE_EXT) else {
+        return;
+    };
+    hold_the_scroll_budget(&run, "scroll back");
+}
+
+#[test]
+fn the_parse_is_attributed_by_subtracting_a_grammarless_run() {
+    // The third suspect, given a number instead of a ranking. Two runs over
+    // byte-identical content, one under a grammar and one under an extension
+    // `syntect` has none for, so what separates them is the parse and nothing
+    // else. Reported rather than gated: a difference of two wall clocks is
+    // evidence, and `SPEC.md` §7 keeps the verdicts on named fixtures.
+    //
+    // What *is* asserted is the premise, because it is the half that can rot:
+    // the grammarless run must really parse nothing.
+    let Some(parsed) = scroll("wide-parse", Motion::Down, WIDE_EXT) else {
+        return;
+    };
+    let Some(plain) = scroll("wide-plain", Motion::Down, WIDE_UNPARSED_EXT) else {
+        return;
+    };
+    parsed.report("scroll down, with a grammar");
+    plain.report("scroll down, grammarless");
+
+    assert_eq!(
+        plain.lines, 0,
+        "the grammarless run highlighted {} lines, so `.{WIDE_UNPARSED_EXT}` is \
+         no longer grammarless and this subtraction is between two parses",
+        plain.lines
+    );
+    assert!(
+        parsed.lines > 0,
+        "the run under a grammar highlighted nothing, so there is no parse to \
+         attribute"
+    );
+
+    let with = parsed.collect.percentile(0.99).unwrap_or_default();
+    let without = plain.collect.percentile(0.99).unwrap_or_default();
+    eprintln!(
+        "the parse is {:?} of a scrolled frame's collect at p99 ({with:?} with a \
+         grammar against {without:?} without), over {} lines",
+        with.saturating_sub(without),
+        parsed.lines,
+    );
+}
+
+/// Scroll a wide-character fixture one notch a frame and measure it.
+///
+/// One function rather than several tests with a sign swapped, for the reason
+/// [`frame_budget_at_depth`] gives: two runs only mean anything against each
+/// other while every other term agrees.
+///
+/// **No edits, and no `Frame::advance`.** Every other gate in this file drives
+/// the frame path with a writer in the other pane, which is I9's own wording.
+/// This one drives it with the reader's own thumb, and that is a different frame:
+/// `vigia::run` advances the frame on a `Wake::Tick` and *not* on a key or a
+/// wheel event, so a scroll frame is collect plus paint. Timing an advance here
+/// would add 2.7ms of work the product does not do on a keystroke and bury the
+/// term being measured under it.
+///
+/// Returns `None` when the absolute tier does not apply, after the structural
+/// setup has run.
+fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
+    let scratch = Scratch::wide_lines_as(name, WIDE_FILES, WIDE_LINES, ext);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(
+        frame.files().len(),
+        WIDE_FILES,
+        "fixture is not {WIDE_FILES} files"
+    );
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let height = body(&app, WIDE_FILES);
+
+    if motion == Motion::Up {
+        app.apply(
+            Action::Scroll(isize::try_from(UP_FROM).expect("a sane depth")),
+            &mut frame,
+            height,
+        )
+        .expect("scroll");
+        // Resolved by the collect rather than by the scroll: `App` adds the rows
+        // to the current file's offset and lets `View::collect` carry the
+        // overrun into the files below, which is what keeps a scroll to one diff
+        // per file. So the position is asserted *after* a view, and in files
+        // rather than in rows.
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, height)
+            .expect("view");
+        assert!(
+            view.top.file >= UP_FILES,
+            "{UP_FROM} rows landed on file {} of {WIDE_FILES}, so there are \
+             fewer than {UP_FILES} files above the viewport and scrolling up \
+             will reach the top before it has crossed anything",
+            view.top.file
+        );
+    }
+
+    if !absolute_gates_apply() {
+        return None;
+    }
+
+    let _timed = exclusively_timed();
+
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+
+    // Split rather than timed whole, because "which of the three dominates" is
+    // what #45 asks and one total cannot answer it. Their sum is what the budget
+    // is held against, so nothing is counted twice.
+    let mut run = Scrolled {
+        warm: Samples::new(SAMPLED_FRAMES),
+        cold: Samples::new(SAMPLED_FRAMES),
+        collect: Samples::new(SAMPLED_FRAMES),
+        paint: Samples::new(SAMPLED_FRAMES),
+        cold_lines: 0,
+        lines: 0,
+        evicted: 0,
+        boundaries: 0,
+        widest: 0,
+        body_rows: 0,
+        height,
+        painted: PaintStats::default(),
+    };
+    let mut at_file = usize::MAX;
+
+    for at in 0..(WARMUP_FRAMES + SAMPLED_FRAMES) {
+        app.apply(Action::Scroll(motion.step(at)), &mut frame, height)
+            .expect("scroll");
+
+        let before = highlighter.stats();
+        let (screen, collect) = timed(|| {
+            app.view(&mut frame, &mut highlighter, &history, height)
+                .expect("view")
+        });
+        let chrome = app.chrome("fixture", None);
+        let (painted, paint) = timed(|| render(&mut buf, area(), &screen, &theme, &chrome));
+        let parsed = highlight_delta(before, highlighter.stats());
+
+        if screen.top.file != at_file {
+            at_file = screen.top.file;
+            run.boundaries += 1;
+        }
+        run.body_rows = screen.rows.len();
+        run.widest = run.widest.max(
+            screen
+                .rows
+                .iter()
+                .filter_map(|row| match row {
+                    Row::Line { text, .. } => Some(text.chars().count()),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0),
+        );
+
+        if at < WARMUP_FRAMES {
+            continue;
+        }
+
+        run.lines += parsed.lines;
+        run.evicted += parsed.evicted;
+        // Accumulated, like the two above it and unlike the assignment this used
+        // to be. `Scrolled::report` prints all three in one sentence, so a field
+        // holding the last frame while its neighbours hold the run was a figure
+        // that read as a total and was not one.
+        run.painted += painted;
+        run.collect.push(collect);
+        run.paint.push(paint);
+
+        // The partition, and it is `SPEC.md` §7's carve-out rather than a
+        // convenience: a frame that parses a hunk for the first time is on the
+        // cold path, which I9 excludes by definition. Diluting the steady state
+        // with those would let a regression hide behind them, and dropping them
+        // silently would hide the one number #45 exists to surface. So they are
+        // separated, both are reported, and only the steady half is asserted.
+        if parsed.parsed > 0 {
+            run.cold.push(collect + paint);
+            run.cold_lines = run.cold_lines.max(parsed.lines);
+        } else {
+            run.warm.push(collect + paint);
+        }
+    }
+
+    Some(run)
+}
+
+/// The assertions both directions share.
+fn hold_the_scroll_budget(run: &Scrolled, what: &str) {
+    run.report(what);
+
+    let height = run.height;
+
+    // Non-vacuity, in four directions.
+    //
+    // The screen has to have been full, or a frame that drew two rows is a cheap
+    // frame for a reason that is not the code.
+    assert_eq!(
+        run.body_rows, height,
+        "the last body drew {} of {height} rows, so these were not full screens",
+        run.body_rows
+    );
+
+    // Boundaries have to have been crossed, or this measured one file and the
+    // cold half of the partition is empty for a reason that is the fixture
+    // rather than the code.
+    assert!(
+        run.boundaries >= UP_FILES,
+        "the viewport crossed {} file boundaries in {} frames, so this run never \
+         entered a hunk it had not parsed",
+        run.boundaries,
+        WARMUP_FRAMES + SAMPLED_FRAMES
+    );
+    assert!(
+        !run.cold.is_empty() && !run.warm.is_empty(),
+        "the partition is one-sided: {} warm frames and {} cold",
+        run.warm.len(),
+        run.cold.len()
+    );
+
+    // Highlighting has to have actually happened, which is the direction this
+    // whole file exists for and the one the partition above cannot see: a run
+    // over a file type nothing recognises has warm frames, cold frames and
+    // boundaries, and is the core's frame path with the syntax parser missing.
+    assert!(
+        run.lines > 0,
+        "no lines were highlighted across the sampled frames, so this gate is \
+         timing a collect with the parser idle"
+    );
+
+    // The lines have to be wider than the pane, or this is `large_diff` with a
+    // different name on it and it cannot tell a bounded paint from an unbounded
+    // one.
+    assert!(
+        run.widest > usize::from(area().width),
+        "the widest drawn line is {} characters against an {}-column pane, so \
+         this fixture never exceeds the pane",
+        run.widest,
+        area().width
+    );
+
+    // And a cold frame has to be bounded by the hunk it entered, which is what
+    // says the rewind still holds at this width: one whole new hunk, plus a
+    // screenful of the neighbour beside it, plus the stride a changed hunk can
+    // rewind past.
+    let cold_bound = (WIDE_HUNK_ROWS + height + CHECKPOINT_STRIDE) as u64;
+    assert!(
+        run.cold_lines <= cold_bound,
+        "a frame entering a new hunk parsed {} lines, over the {cold_bound} that \
+         one hunk plus a screen can cost, so the parse is not bounded by what \
+         the frame entered",
+        run.cold_lines
+    );
+
+    let p99 = run.warm.percentile(0.99).expect("samples");
+    assert!(
+        p99 <= budget(I9_FRAME),
+        "I9: {what} through wide lines was {p99:?} p99 over {} steady frames, \
+         past the {:?} budget (p50 {:?}, max {:?}; collect p99 {:?}, paint p99 \
+         {:?}; {} cold frames at {:?} p99)",
+        run.warm.len(),
+        budget(I9_FRAME),
+        run.warm.percentile(0.50).expect("samples"),
+        run.warm.max().expect("samples"),
+        run.collect.percentile(0.99).unwrap_or_default(),
+        run.paint.percentile(0.99).unwrap_or_default(),
+        run.cold.len(),
+        run.cold.percentile(0.99).unwrap_or_default(),
     );
 }

@@ -2,9 +2,19 @@
 //!
 //! `SPEC.md` §6 asks this half of the workspace to be thin: the core produces
 //! frames, the shell renders them, and the TUI stays swappable because nothing
-//! it knows is load bearing. So there is no diff logic here, no caching, no
-//! filtering and no coalescing. What is here is a terminal, a key map, a scroll
-//! position, and one pure function from a screenful of rows to cells.
+//! it knows is load bearing. So there is no diff logic here, no caching and no
+//! filtering. What is here is a terminal, a key map, a scroll position, and one
+//! pure function from a screenful of rows to cells.
+//!
+//! **Coalescing is the one word in that list that needs two entries**, because
+//! there are two of them with different subjects and they belong in different
+//! crates. `vigia_core` coalesces **events**: which filesystem writes count as
+//! one change, which is I1's, and the policy stays there because that is where
+//! it is testable. `run` below coalesces **paints**: how many frames one burst
+//! of wakes is worth, which is I9's, and it can only live here because a paint
+//! is the shell's and because one of the two wake sources is the terminal. It
+//! decides nothing about which events are real, which is what the sentence
+//! above is protecting.
 //!
 //! It is a library with a five-line binary on top rather than a binary alone.
 //! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
@@ -41,13 +51,13 @@ mod view;
 
 pub use app::App;
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, body_height, render};
+pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
 pub use terminal::{Screen, Session};
 pub use theme::Theme;
 pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
 use ratatui::layout::Rect;
@@ -130,75 +140,146 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     spawn_watch(path.to_path_buf(), tx.clone());
     spawn_input(tx);
 
-    while let Ok(wake) = rx.recv() {
-        match wake {
-            // Returning rather than breaking, so the reason travels with the
-            // exit. `shell` drops on the way out, which puts the terminal back
-            // before `main` prints this where the reader will see it.
-            Wake::InputLost => {
-                return Err("terminal input ended, so there was no way left to quit".into());
-            }
-            Wake::Input(event) => {
-                let Some(action) = action_for(&event) else {
-                    // Not every event is a request. Redrawing for a key release
-                    // or a mouse move would make the idle cost non-zero for a
-                    // reason nobody asked for.
-                    continue;
-                };
-                // The branch here is whatever the last draw settled on, which is
-                // right rather than merely cheap: it feeds `body_height` alone,
-                // and neither the branch nor the mode can change how many rows
-                // the footer takes. See `Footer::plan`.
-                let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
-                let height = body_height(shell.area()?, &chrome, frame.files().len());
-                match shell.app.apply(action, &mut frame, height) {
-                    Ok(true) => {}
-                    Ok(false) => break,
-                    Err(e) => shell.app.warn(e.to_string()),
+    // Reused across iterations rather than allocated per wake. A monitor is left
+    // open for days and I3 is the invariant that notices, so the one buffer the
+    // loop needs is the one buffer it keeps.
+    let mut batch = Vec::with_capacity(DRAIN_CAP);
+
+    'awake: while let Ok(wake) = rx.recv() {
+        drain(&mut batch, wake, &rx, DRAIN_CAP);
+
+        for wake in batch.drain(..) {
+            match wake {
+                // Returning rather than breaking, so the reason travels with the
+                // exit. `shell` drops on the way out, which puts the terminal back
+                // before `main` prints this where the reader will see it.
+                Wake::InputLost => {
+                    return Err("terminal input ended, so there was no way left to quit".into());
                 }
-            }
-            Wake::Tick(paths) => {
-                shell.app.clear_notice();
-                // Sampled here and nowhere else, which is the whole of I10's
-                // relationship with I1: the window is real time, and the only
-                // thing that moves it is a wake the loop was already having.
-                // An empty burst still rolls the window and still leaves the
-                // pulse where it was, which is the staging case.
-                shell
-                    .history
-                    .record(paths.iter().map(String::as_str), Instant::now());
-                // The core leaves the frame exactly as it was on failure, so the
-                // previous diff is still valid to draw. Saying so on the footer
-                // beats blanking a pane for a reason the reader cannot see.
-                match frame.advance() {
-                    // Advance first, follow second, and the order is the
-                    // whole of it: the path is looked up in the file list,
-                    // and before the walk that list is the previous frame's.
-                    // Following into it would jump to wherever that file used
-                    // to sit, which is the shape of a bug that only appears
-                    // when the list changes length.
-                    Ok(()) => {
-                        if let Some(path) = paths.last() {
-                            shell.app.follow(path, &frame);
-                        }
+                Wake::Input(event) => {
+                    let Some(action) = action_for(&event) else {
+                        // Not every event is a request. Redrawing for a key release
+                        // or a mouse move would make the idle cost non-zero for a
+                        // reason nobody asked for.
+                        continue;
+                    };
+                    // Asked for only by the one action that reads it, and that is
+                    // the drain's doing rather than tidiness. `Shell::area` is an
+                    // uncached terminal-size syscall and `chrome` allocates, and
+                    // both used to be amortised against the full repaint each
+                    // event caused. With sixty-four notches now arriving between
+                    // two paints, computing a height none of them but `Page` reads
+                    // would be sixty-four syscalls and several hundred discarded
+                    // allocations inside one batch.
+                    //
+                    // The branch it carries is whatever the last draw settled on,
+                    // which is right rather than merely cheap: it feeds
+                    // `body_height` alone, and neither the branch nor the mode can
+                    // change how many rows the footer takes. See `Footer::plan`.
+                    let height = if action.needs_height() {
+                        let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
+                        body_height(shell.area()?, &chrome, frame.files().len())
+                    } else {
+                        0
+                    };
+                    match shell.app.apply(action, &mut frame, height) {
+                        Ok(true) => {}
+                        // Out of the batch *and* out of the loop, without the draw
+                        // below: the reader asked to leave, and painting one more
+                        // frame on the way out is a frame they did not ask for.
+                        Ok(false) => break 'awake,
+                        Err(e) => shell.app.warn(e.to_string()),
                     }
-                    Err(e) => shell.app.warn(e.to_string()),
                 }
-            }
-            // Both halves, and they are not the same half twice. The mode is
-            // durable and goes to the header; the message says which failure it
-            // was and goes to the footer, where a notice belongs. See
-            // `App::watch_lost`.
-            Wake::WatchLost(message) => {
-                shell.app.watch_lost();
-                shell.app.warn(message);
+                Wake::Tick(paths) => {
+                    shell.app.clear_notice();
+                    // Sampled here and nowhere else, which is the whole of I10's
+                    // relationship with I1: the window is real time, and the only
+                    // thing that moves it is a wake the loop was already having.
+                    // An empty burst still rolls the window and still leaves the
+                    // pulse where it was, which is the staging case.
+                    shell
+                        .history
+                        .record(paths.iter().map(String::as_str), Instant::now());
+                    // The core leaves the frame exactly as it was on failure, so the
+                    // previous diff is still valid to draw. Saying so on the footer
+                    // beats blanking a pane for a reason the reader cannot see.
+                    match frame.advance() {
+                        // Advance first, follow second, and the order is the
+                        // whole of it: the path is looked up in the file list,
+                        // and before the walk that list is the previous frame's.
+                        // Following into it would jump to wherever that file used
+                        // to sit, which is the shape of a bug that only appears
+                        // when the list changes length.
+                        Ok(()) => {
+                            if let Some(path) = paths.last() {
+                                shell.app.follow(path, &frame);
+                            }
+                        }
+                        Err(e) => shell.app.warn(e.to_string()),
+                    }
+                }
+                // Both halves, and they are not the same half twice. The mode is
+                // durable and goes to the header; the message says which failure it
+                // was and goes to the footer, where a notice belongs. See
+                // `App::watch_lost`.
+                Wake::WatchLost(message) => {
+                    shell.app.watch_lost();
+                    shell.app.warn(message);
+                }
             }
         }
 
+        // **Once per batch, not once per wake.** That is the whole of the
+        // coalescing: every wake above was handled, in arrival order, and only
+        // the paint is shared. See `drain`.
         shell.draw(&mut frame, &worktree)?;
     }
 
     Ok(())
+}
+
+/// Wakes taken in one go, so one gesture costs one paint.
+///
+/// **Sixty-four**, and the number matters in one direction only. A trackpad
+/// reports a flick as a stream of scroll events rather than as one, and every one
+/// of them used to be a full redraw: the pane then renders each notch in turn and
+/// falls behind the thumb, which is what *"if it gets too fast, it struggles"*
+/// describes. Draining removes that whole class, because the shell moves the
+/// viewport by the flick and draws where it ended up.
+///
+/// The cap is not tuning. It is the guard against an event source faster than the
+/// shell: without one, a stuck key or a build touching thousands of files could
+/// keep the queue non-empty forever and the screen would never be painted again.
+/// Sixty-four notches is far more than any one gesture and still a bounded amount
+/// of work between two frames.
+const DRAIN_CAP: usize = 64;
+
+/// Take the wake that woke the loop, plus everything already queued behind it.
+///
+/// A pure function over the channel rather than a loop inline in [`run`], for the
+/// reason `branch_for` is one: `run` owns a terminal and cannot be driven from a
+/// test, so a rule left inside it is a rule nothing can gate.
+///
+/// **Nothing is dropped.** Coalescing here is about the *paint*, not about the
+/// events: every wake is handed back and handled in arrival order, so a tick still
+/// records its paths for I10, a scroll still moves the viewport by its own rows,
+/// and `Quit` still arrives. A version that kept only the last wake would be
+/// shorter and would lose the history the glance strip is drawn from.
+///
+/// `batch` is passed in rather than returned so the caller can keep one buffer for
+/// the life of the process. `try_recv` fails on empty and on a hung-up sender
+/// alike, and both mean the same thing here: there is nothing more to take right
+/// now. A disconnect is then reported by the `recv` that follows.
+fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
+    batch.clear();
+    batch.push(first);
+    while batch.len() < cap {
+        match rx.try_recv() {
+            Ok(wake) => batch.push(wake),
+            Err(_) => break,
+        }
+    }
 }
 
 /// The terminal and everything drawn onto it that outlives one frame.
@@ -483,5 +564,118 @@ mod tests {
             .into_owned();
 
         assert_eq!(short_name(&here), expected);
+    }
+
+    /// A tick naming one path, which is the cheapest [`Wake`] to build.
+    fn tick(at: usize) -> Wake {
+        Wake::Tick(vec![format!("src/mod_{at}.rs")])
+    }
+
+    fn paths(batch: &[Wake]) -> Vec<String> {
+        batch
+            .iter()
+            .map(|wake| match wake {
+                Wake::Tick(paths) => paths.join(","),
+                _ => "other".to_owned(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_burst_of_wakes_arrives_as_one_batch() {
+        // The reported symptom, in the only form a test can hold it: a trackpad
+        // reports one flick as a stream of events, and every one of them used to
+        // be a full redraw. One batch is one paint.
+        let (tx, rx) = mpsc::channel();
+        for at in 1..=5 {
+            tx.send(tick(at)).expect("send");
+        }
+
+        let mut batch = Vec::new();
+        drain(&mut batch, tick(0), &rx, DRAIN_CAP);
+
+        assert_eq!(
+            batch.len(),
+            6,
+            "the batch took {} of the 6 wakes queued, so the rest are still \
+             waiting and will each cost their own frame",
+            batch.len()
+        );
+    }
+
+    #[test]
+    fn a_batch_preserves_arrival_order() {
+        // Coalescing is about the paint and not about the events. Follow mode
+        // moves to the path a tick names *last*, and the glance history is a
+        // window over when each one arrived, so a batch that reordered or
+        // dropped wakes would take the reader to the wrong file and draw a
+        // recency gradient for a sequence that never happened.
+        let (tx, rx) = mpsc::channel();
+        for at in 1..=3 {
+            tx.send(tick(at)).expect("send");
+        }
+
+        let mut batch = Vec::new();
+        drain(&mut batch, tick(0), &rx, DRAIN_CAP);
+
+        assert_eq!(
+            paths(&batch),
+            vec![
+                "src/mod_0.rs",
+                "src/mod_1.rs",
+                "src/mod_2.rs",
+                "src/mod_3.rs"
+            ],
+            "the wake that woke the loop has to come first and the queue has to \
+             follow it in order"
+        );
+    }
+
+    #[test]
+    fn a_batch_stops_at_the_cap_so_the_screen_cannot_be_starved() {
+        // The guard, and it is not a tuning knob. An event source faster than
+        // the shell would otherwise keep the queue non-empty forever and the
+        // screen would never be painted again: a stuck key, or a build touching
+        // thousands of files. The cap is what turns "drain the queue" into
+        // "drain a bounded amount of it".
+        let (tx, rx) = mpsc::channel();
+        for at in 0..50 {
+            tx.send(tick(at)).expect("send");
+        }
+
+        let mut batch = Vec::new();
+        drain(&mut batch, tick(999), &rx, 4);
+
+        assert_eq!(batch.len(), 4, "the cap did not bound the batch");
+        // And what it left behind is still there, rather than dropped on the
+        // floor: the next `recv` picks up exactly where this stopped.
+        assert!(rx.try_recv().is_ok(), "the remainder was discarded");
+    }
+
+    #[test]
+    fn a_batch_with_nothing_behind_it_is_the_wake_alone() {
+        // The ordinary case, and the one a cap could break by waiting for more.
+        // `try_recv` must not block: an idle monitor that woke for one keypress
+        // has to draw for that keypress and go back to sleep, which is I1.
+        let (_tx, rx) = mpsc::channel::<Wake>();
+        let mut batch = Vec::new();
+        drain(&mut batch, tick(0), &rx, DRAIN_CAP);
+        assert_eq!(batch.len(), 1);
+    }
+
+    #[test]
+    fn a_hung_up_sender_ends_the_batch_rather_than_the_process() {
+        // Both `try_recv` failures mean the same thing here, and conflating them
+        // deliberately is worth stating: empty means nothing more *yet*, and
+        // disconnected means nothing more *ever*, and either way this batch is
+        // complete. The disconnect is then reported by the `recv` that follows,
+        // which is the one place that can act on it.
+        let (tx, rx) = mpsc::channel();
+        tx.send(tick(1)).expect("send");
+        drop(tx);
+
+        let mut batch = Vec::new();
+        drain(&mut batch, tick(0), &rx, DRAIN_CAP);
+        assert_eq!(batch.len(), 2, "the queued wake was lost with the sender");
     }
 }
