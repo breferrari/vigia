@@ -121,7 +121,7 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | | Task | Issue |
 |---|---|---|
 | ✅ | I10 bounded history, and the sparkline, gradient and pulse drawn from it | [#38](https://github.com/breferrari/vigia/issues/38) |
-| ⬜ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
+| ✅ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
 | ⬜ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
 | ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
@@ -139,6 +139,16 @@ The correction that mattered was not the count. **It is that this is not a rende
 **The decay the mockup asks for was an I1 question, not a rendering one.** §5.1 draws the pulse as a label that persists and fades, and a fade against a wall clock has to be *seen* fading, which needs a redraw nothing schedules and which I1 forbids inventing a timer to get. So the window stayed real time and the sampling became event-driven, and the top rung of the ladder is *named by the newest tick* rather than *within N seconds*. That is what keeps it honest on a quiet tree: the label sits on the file that really is the newest change instead of freezing a clock mid-count. The dimmed row and the label are the same ladder read once, which §5.1 demanded and which two clocks would have broken.
 
 **What it cost the reader, again: the gradient is three steps rather than a fade.** Sixteen foreground-only colours have bold, plain and dim to spend, so recency is a ramp of three. That is the same loss §11.1 already records for the diff signal narrowing to the sigil column, and the same issue fixes both: [#11](https://github.com/breferrari/vigia/issues/11).
+
+**The heat strip is in, and the expensive part of it did not exist.** [#39](https://github.com/breferrari/vigia/issues/39) was the whole-file-backed child, and `SPEC.md` §5.2 had it as the element that pulls hardest against I2a: locating change *within* a file needs the file's length, and measuring that per frame puts back the read I2a removed. §5.2 predicted a cache keyed on `(path, blob id)`.
+
+**No cache was needed.** `hunk::compute` interns both sides to diff them at all, so the working-tree line count was already computed on every diff and thrown away. It is a field of `FileDiff` now, cached and invalidated with the diff itself, which is a *stricter* key than the one proposed: a blob id names the index side, and a working-tree edit does not touch it, so the predicted cache would have served a stale length for exactly the file a reader is watching being written. The byte counts in `reads.rs` did not move by one.
+
+That is the third time the expensive-looking property turned out to be a by-product of work already being done: I5's follow target and I10's burst paths were the other two, both already resolved by the gitignore filter. §5.2 now says to look for the by-product before designing the cache.
+
+**And the layout rule needed a third clause.** *A thing made of items breaks, a thing made of characters marks its edge, and content is neither* covers a list, a token and a line. A heat strip is made of items and is not a list: the set of its slices **is** the claim, so dropping the last six would draw half a file as though it were the whole of it and a reader would conclude the tail is untouched. A projection re-projects instead, summing adjacent slices, which at halves is exact. The gate reads cell **colours** over a file changed at both ends, because every slice draws the same block and that is the one shape where truncation and re-projection differ.
+
+Two existing gates had to change for the same reason, and it is worth knowing before the next block-drawing element lands: a sparkline's top rung and every heat slice are both `█`, so counting glyphs stopped telling the two strips apart and one gate started reading eighteen buckets. Both match on colour now.
 
 **And a rule went into `SPEC.md` §7 that the soak found on its own.** A bound is only evidence when something reached it. The per-commit soak window touches about eighty paths against a cap of 256 and never turns the window over, so `tracked <= 256` is satisfied there by a store nothing filled. The gate now refuses to assert when the run reached neither eviction rule and prints why, exactly as the drift gate does, and the deterministic proof runs in every `cargo test` instead.
 
