@@ -12,6 +12,18 @@ authors.workspace = true
 ratatui.workspace = true
 vigia-core = { path = "../vigia-core", version = "0.0.0" }
 
+# Here and not in `vigia-core`, because the memory readout is a drawn thing:
+# SPEC.md section 6 keeps the core free of anything the shell decides, and a
+# number that exists to be painted is the shell's. Linux is deliberately absent
+# from both blocks below, since `/proc/self/status` needs no crate and no
+# `unsafe`. So does every other target, which reports the readout unavailable
+# rather than guessing.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 # The tests reach `vigia-core/tests/support` by `#[path]`, the way
 # `vigia-core/benches/engine.rs` does, so a shell test and an engine gate cannot
 # drift into measuring different repositories. That module shells out to real

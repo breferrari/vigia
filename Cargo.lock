@@ -2479,8 +2479,10 @@ name = "vigia"
 version = "0.0.0"
 dependencies = [
  "insta",
+ "libc",
  "ratatui",
  "vigia-core",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
