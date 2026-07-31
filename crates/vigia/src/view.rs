@@ -348,6 +348,7 @@ impl View {
         history: &History,
         position: Position,
         height: usize,
+        anchored: bool,
     ) -> Result<Self> {
         // One pass, dropped at every exit including the `?`s below, which is
         // what keeps the highlight cache bounded by the viewport. The guard
@@ -385,6 +386,11 @@ impl View {
         let mut index = view.top.file;
         let mut skip = position.row;
         let mut placed = false;
+        // At most one restart, whichever of the two reasons below triggered it.
+        // `last_screenful` resolves to a position that can fill the body whenever
+        // the diff has the rows for it, so a second pass is never the answer to a
+        // third: without this the short-diff case would restart forever.
+        let mut restarted = false;
 
         // Restarted at most once, and only from [`Self::last_screenful`] below.
         // The walk cannot resolve that case in place: `change` and `diff` borrow
@@ -454,12 +460,47 @@ impl View {
                 index += 1;
             }
 
-            if !overshot {
+            // **Two ways to finish with a body that is not full, and until #59
+            // only one of them backed up.**
+            //
+            // `overshot` is the position landing past the end of the last file,
+            // which is what [#57](https://github.com/breferrari/vigia/issues/57)
+            // fixed. The other is quieter and is what a reader actually does:
+            // scroll down a row at a time until fewer than a screenful remain
+            // below the top. Then `skip` is still *inside* the current file, so
+            // nothing overshoots, the walk simply runs out of files, and the pane
+            // draws what is left over a growing block of blank rows. It starts one
+            // row short and loses another with every keystroke.
+            //
+            // Both want the same answer, which is the one a pager gives: rest the
+            // diff's last row on the bottom of the viewport.
+            //
+            // A diff genuinely shorter than the pane is **not** either case, and
+            // must not be turned into one. [`Self::last_screenful`] returns the top
+            // for it, so the blank rows underneath stay, which is honest: they are
+            // the rows the diff does not have.
+            // **Only when the reader scrolled here.** A position placed by a jump
+            // is a claim about what should be at the *top*: follow (I5) puts the
+            // file that just changed there, and `G` puts the last file there. If
+            // the tail is shorter than the pane, backing up to fill it would move
+            // that file off the top row and make the reader hunt for what the jump
+            // was for. Blank rows under a deliberately placed file are the honest
+            // answer; blank rows under a file the reader scrolled to are not.
+            //
+            // The two are indistinguishable from a `Position` alone, which is why
+            // this is a parameter rather than something inferable here.
+            let short = anchored && view.rows.len() < height;
+            if restarted || !(overshot || short) {
                 break;
             }
-            // Nothing has been drawn yet: `placed` is still false, and
-            // `take_file` runs only after placing. So restarting is a restart
-            // rather than a second helping.
+            restarted = true;
+
+            // Cleared, unlike the overshoot path, and this is the one line where
+            // the two differ. Overshooting is decided before anything is drawn,
+            // because `take_file` runs only after placing; running short is
+            // decided *after* a partial screen has already been built, so the
+            // restart has to throw it away or the second pass appends to it.
+            view.rows.clear();
             view.top = Self::last_screenful(frame, files, height, &mut view.read)?;
             index = view.top.file;
             skip = view.top.row;

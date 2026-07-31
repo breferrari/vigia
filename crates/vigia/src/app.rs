@@ -42,6 +42,20 @@ pub struct App {
     notice: Option<String>,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
+    /// Whether the current position was reached by **scrolling** rather than by a
+    /// jump, which is what decides whether the viewport may back up to fill the
+    /// pane.
+    ///
+    /// A jump is a claim about what belongs at the *top*: follow puts the file
+    /// that just changed there and `G` puts the last file there. Backing up to
+    /// fill a short tail would move that file off the top row and make a reader
+    /// hunt for what the jump was for. Scrolling makes no such claim, and running
+    /// off the end of the diff into a half-blank pane is what
+    /// [#59](https://github.com/breferrari/vigia/issues/59) reported.
+    ///
+    /// The two are indistinguishable from a [`Position`], so it is carried here
+    /// rather than inferred in [`View::collect`].
+    anchored: bool,
     /// The last path a tick named, whether or not it was followed.
     ///
     /// Kept while disengaged so `f` can jump to the newest change rather than
@@ -88,6 +102,10 @@ impl Default for App {
             position: Position::default(),
             notice: None,
             following: false,
+            // The opening position is the top of the diff, which is where a jump
+            // would have put it, so nothing is owed a back-up before the reader
+            // has moved.
+            anchored: false,
             newest: None,
             mode: Mode::default(),
             frames: Samples::new(FRAME_SAMPLES),
@@ -263,6 +281,7 @@ impl App {
         else {
             return false;
         };
+        self.anchored = false;
         self.position = Position { file, row: 0 };
         true
     }
@@ -299,10 +318,14 @@ impl App {
                     self.jump_to_newest(frame);
                 }
             }
-            Action::Scroll(rows) => self.scroll(rows, frame)?,
+            Action::Scroll(rows) => {
+                self.anchored = true;
+                self.scroll(rows, frame)?;
+            }
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
+                self.anchored = true;
                 let rows = height.saturating_sub(1).max(1);
                 // `as isize` would turn an absurd height into a negative step and
                 // send a page-down upwards. A terminal cannot be that tall, which
@@ -310,11 +333,15 @@ impl App {
                 let step = isize::try_from(rows).unwrap_or(isize::MAX);
                 self.scroll(pages.saturating_mul(step), frame)?;
             }
-            Action::Top => self.position = Position::default(),
+            Action::Top => {
+                self.anchored = false;
+                self.position = Position::default();
+            }
             // The last *file*, from its top, rather than the last row of the
             // whole diff. Finding that row would mean diffing every file to add
             // up their heights, which is the read I4 forbids.
             Action::Bottom => {
+                self.anchored = false;
                 self.position = Position {
                     file: frame.files().len().saturating_sub(1),
                     row: 0,
@@ -391,7 +418,14 @@ impl App {
         history: &History,
         height: usize,
     ) -> Result<View> {
-        let view = View::collect(frame, highlighter, history, self.position, height)?;
+        let view = View::collect(
+            frame,
+            highlighter,
+            history,
+            self.position,
+            height,
+            self.anchored,
+        )?;
         self.position = view.top;
         Ok(view)
     }
