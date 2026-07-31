@@ -35,6 +35,16 @@ fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
     }
 }
 
+/// One row of the precedence table: why, the platform, the environment, the rung.
+///
+/// Named because `clippy::type_complexity` is denied and a four-part tuple in a
+/// slice reaches it. The alias is also the better documentation: the table is read
+/// row-wise and the names say what each column is for.
+type Precedence<'a> = (&'a str, bool, &'a [(&'a str, &'a str)], Depth);
+
+/// One row of the hue table: what it is, the colour, and the names it may take.
+type Hue<'a> = (&'a str, (u8, u8, u8), &'a [Color]);
+
 fn depth(windows: bool, pairs: &[(&str, &str)]) -> Depth {
     Depth::from_env(windows, env(pairs)).expect("a depth")
 }
@@ -44,7 +54,7 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
     // Each row sets everything *below* its own rung to a value that would give a
     // different answer, so a rule consulted out of order fails here rather than
     // passing by coincidence. The bottom rows have nothing left to shadow.
-    let cases: &[(&str, bool, &[(&str, &str)], Depth)] = &[
+    let cases: &[Precedence<'_>] = &[
         (
             "the override outranks every signal under it",
             false,
@@ -478,7 +488,7 @@ fn the_mockups_own_hues_keep_their_hue_at_sixteen() {
     // reader would otherwise have to take on faith: the chroma cut at a third, and
     // the bright threshold at 0xc0. Both were chosen against this table and both
     // have a row here that moves if they change.
-    let cases: &[(&str, (u8, u8, u8), &[Color])] = &[
+    let cases: &[Hue<'_>] = &[
         (
             "addition",
             (0x3f, 0xb9, 0x50),
