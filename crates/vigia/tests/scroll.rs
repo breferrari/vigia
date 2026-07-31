@@ -582,25 +582,35 @@ fn a_diff_that_shrank_under_the_viewport_still_fills_the_screen() {
     // screen contradicted the other two. `SPEC.md` §11.1 ruled the empty state
     // into existence to stop "nothing changed" and "this has stopped working"
     // looking alike, and this reintroduced that ambiguity by another route.
-    let scratch = fixture("shell-scroll-shrunk");
+    // **Tall files, not the shared forty-by-four fixture, and this is the part
+    // that took a mutation run to get right.** What survives the shrink is the
+    // row *offset within a file*, because the file index is clamped to the new
+    // list and the offset is not. Over four-row files the deepest offset
+    // reachable is three, which is smaller than anything the surviving file
+    // holds, so the walk never reaches the overshoot branch at all and the gate
+    // passes against the unfixed code. Sixty-two row files give the offset
+    // somewhere to be large.
+    //
+    // Recorded rather than quietly corrected: this gate asserted the right
+    // outcome and reproduced the wrong situation, which is the same shape as the
+    // gate #57 was found under and would have been just as green.
+    let scratch = Scratch::large_diff("shell-scroll-shrunk", FILES, 30);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
 
-    // Deep into the old diff, and disengaged from follow the way a reader's own
-    // scroll disengages it. A following viewport is dragged back by I5 on the
-    // next tick and would never see this.
-    app.apply(
-        Action::Scroll((FILES * SPAN) as isize - 2),
-        &mut frame,
-        body(),
-    )
-    .expect("scroll");
+    // To the bottom of the old diff, and disengaged from follow the way a
+    // reader's own scroll disengages it. A following viewport is dragged back by
+    // I5 on the next tick and would never see this.
+    app.apply(Action::Scroll(10_000), &mut frame, body())
+        .expect("scroll");
     let (_, before) = drawn(&mut app, &mut frame);
     assert!(
-        before.file > 1,
-        "the fixture did not scroll deep enough to be shrunk out from under: {before:?}"
+        before.file > 1 && before.row > 25,
+        "the fixture did not leave a deep enough offset to be shrunk out from \
+         under: {before:?}. The offset is what survives, so a small one makes \
+         this gate pass against the defect it is written for"
     );
 
     // Twenty-five lines, so the surviving file is taller than the screen on its
