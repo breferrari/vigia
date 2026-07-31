@@ -935,7 +935,22 @@ impl Report {
     /// File handles, which I3 names alongside RSS.
     fn gate_descriptors(&self) {
         let counts: Vec<usize> = self.samples.iter().filter_map(|s| s.fds).collect();
-        if counts.len() != self.samples.len() {
+        let complete = counts.len() == self.samples.len();
+
+        // On the one platform that can answer, not answering is a broken reader
+        // rather than an absent feature, so it fails instead of printing. A
+        // passing CI run is otherwise indistinguishable from one where this
+        // metric quietly collected nothing, because the note below is invisible
+        // unless a test fails or `--nocapture` is on.
+        #[cfg(target_os = "linux")]
+        assert!(
+            complete,
+            "I3: {} of {} samples could not read /proc/self/fd",
+            counts.len(),
+            self.samples.len()
+        );
+
+        if !complete {
             println!(
                 "note: file handles are not gated on this platform; \
                  {} of {} samples could read a count",
