@@ -440,14 +440,30 @@ fn frame_cell(cost: Duration) -> String {
     } else {
         ">1s".to_owned()
     };
-    let cell = format!("{number:>FRAME_NUMBER$}{FRAME_LABEL}");
-    // Belt to the gates' braces, and not a substitute for them: `tests/render.rs`
-    // proves the width by *rendering* across the boundary durations, which is the
-    // only proof that covers what a reader sees. This catches the same mistake
-    // one layer earlier and on every debug run, which is most of them, and it
-    // gives the constant somewhere to be wrong out loud rather than only in a
-    // doc comment.
-    debug_assert_eq!(width_of(&cell), FRAME_CELL, "the frame cell is fixed width");
+    fixed_width(
+        format!("{number:>FRAME_NUMBER$}{FRAME_LABEL}"),
+        FRAME_CELL,
+        "frame",
+    )
+}
+
+/// Hand back a status-bar cell, having checked it is the width it claims.
+///
+/// **The rule both cells live by, named once rather than twice.** A cell whose
+/// width follows its value moves everything to its left as the value changes,
+/// which over a number that changes every frame is a status bar that will not
+/// hold still. The padding above is what makes it true; this is what says so.
+///
+/// Belt to the gates' braces, and not a substitute for them: `tests/render.rs`
+/// proves the width by *rendering* across each formatter's boundary values,
+/// which is the only proof that covers what a reader sees. This catches the same
+/// mistake one layer earlier and on every debug run, which is most of them.
+fn fixed_width(cell: String, columns: usize, what: &str) -> String {
+    debug_assert_eq!(
+        width_of(&cell),
+        columns,
+        "the {what} cell is fixed width, and {cell:?} is not {columns} columns"
+    );
     cell
 }
 
@@ -476,14 +492,7 @@ fn memory_cell(bytes: u64) -> String {
     } else {
         format!("{mib}MiB")
     };
-    let cell = format!("{token:>MEMORY_CELL$}");
-    // See [`frame_cell`] for why this is here as well as in the gate.
-    debug_assert_eq!(
-        width_of(&cell),
-        MEMORY_CELL,
-        "the memory cell is fixed width"
-    );
-    cell
+    fixed_width(format!("{token:>MEMORY_CELL$}"), MEMORY_CELL, "memory")
 }
 
 /// The diagnostics ladder, widest rung first.
@@ -833,15 +842,15 @@ impl<'a> Footer<'a> {
         // `grows` means the hints are on the row below, so only the state is
         // beside the diagnostics; otherwise both are, and the hints take theirs
         // first because advice outranks instrumentation at every width.
-        let beside = taken + if grows { 0 } else { width_of(hints) };
-        let room_for_diagnostics = width.saturating_sub(beside);
+        //
+        // The gap is part of what has to be cleared, not a second subtraction:
+        // the cells always sit beside something, either the state on its own row
+        // or the hints on a shared one. Where both happen to be empty it costs
+        // two columns at widths the cells do not fit in anyway.
+        let occupied = taken + CELL_GAP.len() + if grows { 0 } else { width_of(hints) };
         let diagnostics = widest_fitting(
             &diagnostic_rungs(chrome.frame, chrome.memory),
-            // The gap is owed to whatever the cells sit beside, and there is
-            // always something: the state on its own row, or the hints on a
-            // shared one. Where both are empty the subtraction costs two columns
-            // the cells could have had, at widths where they do not fit anyway.
-            room_for_diagnostics.saturating_sub(CELL_GAP.len()),
+            width.saturating_sub(occupied),
         )
         .to_owned();
 

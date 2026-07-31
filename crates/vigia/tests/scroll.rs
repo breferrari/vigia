@@ -17,7 +17,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Position, Row, body_height};
+use vigia::{Action, App, Position, Row, View, body_height};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, generated, materialise};
@@ -250,7 +250,8 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
         body(),
     )
     .expect("scroll");
-    let (rows, top) = drawn(&mut app, &mut frame);
+    let view = drawn(&mut app, &mut frame);
+    let (rows, top) = (view.rows.len(), view.top);
 
     assert_eq!(
         rows,
@@ -271,22 +272,12 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     );
     assert!(
         matches!(
-            view_last_row(&mut app, &mut frame),
+            view.rows.last().expect("a drawn row"),
             Row::Line { .. } | Row::Note { .. }
         ),
-        "the bottom row is not content"
+        "the bottom row is {:?} rather than content",
+        view.rows.last()
     );
-}
-
-/// The last row a frame drew, for the one assertion that is about content rather
-/// than about how much of it there is.
-fn view_last_row(app: &mut App, frame: &mut Frame) -> Row {
-    let mut highlighter = Highlighter::new();
-    let history = History::new();
-    let view = app
-        .view(frame, &mut highlighter, &history, body())
-        .expect("view");
-    view.rows.last().expect("a drawn row").clone()
 }
 
 #[test]
@@ -550,18 +541,22 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     }
 }
 
-/// Drive the view once and hand back how much it drew and where it started.
+/// Drive the view once and hand back the whole screenful.
 ///
 /// The four gates below are all assertions that a **full** screen came back, so
-/// what they compare against is [`body`] itself. `rows == body()` reads as
-/// arithmetic where what it means is "no blank rows under content that exists".
-fn drawn(app: &mut App, frame: &mut Frame) -> (usize, Position) {
+/// what they compare against is [`body`] itself. `view.rows.len() == body()`
+/// reads as arithmetic where what it means is "no blank rows under content that
+/// exists".
+///
+/// Returns the [`View`] rather than the two numbers most callers want, because
+/// one of them wants a third thing and a second helper to fetch it would drive
+/// the view twice: `App::view` writes its resolved position back, so a second
+/// call is a second resolution of a position the first one already moved.
+fn drawn(app: &mut App, frame: &mut Frame) -> View {
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    let view = app
-        .view(frame, &mut highlighter, &history, body())
-        .expect("view");
-    (view.rows.len(), view.top)
+    app.view(frame, &mut highlighter, &history, body())
+        .expect("view")
 }
 
 #[test]
@@ -605,7 +600,7 @@ fn a_diff_that_shrank_under_the_viewport_still_fills_the_screen() {
     // I5 on the next tick and would never see this.
     app.apply(Action::Scroll(10_000), &mut frame, body())
         .expect("scroll");
-    let (_, before) = drawn(&mut app, &mut frame);
+    let before = drawn(&mut app, &mut frame).top;
     assert!(
         before.file > 1 && before.row > 25,
         "the fixture did not leave a deep enough offset to be shrunk out from \
@@ -622,7 +617,8 @@ fn a_diff_that_shrank_under_the_viewport_still_fills_the_screen() {
     materialise(&mut frame);
     assert_eq!(frame.files().len(), 2, "the fixture is not two files");
 
-    let (rows, top) = drawn(&mut app, &mut frame);
+    let view = drawn(&mut app, &mut frame);
+    let (rows, top) = (view.rows.len(), view.top);
     assert_eq!(
         rows,
         body(),
@@ -653,7 +649,8 @@ fn a_last_file_shorter_than_the_screen_is_filled_from_the_ones_above_it() {
 
     app.apply(Action::Scroll(10_000), &mut frame, body())
         .expect("scroll");
-    let (rows, top) = drawn(&mut app, &mut frame);
+    let view = drawn(&mut app, &mut frame);
+    let (rows, top) = (view.rows.len(), view.top);
 
     assert!(
         top.file < FILES - 1,
@@ -683,7 +680,8 @@ fn a_diff_shorter_than_the_screen_starts_at_the_top() {
 
     app.apply(Action::Scroll(10_000), &mut frame, body())
         .expect("scroll");
-    let (rows, top) = drawn(&mut app, &mut frame);
+    let view = drawn(&mut app, &mut frame);
+    let (rows, top) = (view.rows.len(), view.top);
 
     assert_eq!(
         top,

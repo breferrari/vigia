@@ -649,6 +649,19 @@ fn the_readouts_ride_the_second_footer_line_at_forty_columns() {
     insta::assert_snapshot!(screen(40, 6, &view, &diagnostics_chrome()));
 }
 
+/// Where `follow ▶` starts on the footer, for each of `chromes`.
+///
+/// **The neighbouring element, not the cell itself**, because that is the thing
+/// a reader would see move. Observed by rendering rather than by measuring the
+/// formatter's output, which would be the same arithmetic checking itself.
+fn follow_marker_columns(chromes: impl IntoIterator<Item = Chrome>) -> Vec<u16> {
+    let view = one_file();
+    chromes
+        .into_iter()
+        .map(|chrome| column_of(&screen(80, 6, &view, &chrome), 5, "▶"))
+        .collect()
+}
+
 #[test]
 fn the_frame_cell_never_shifts_what_is_beside_it() {
     // **The one property that makes a per-frame readout safe to draw.** The value
@@ -656,22 +669,10 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
     // would be eleven columns one frame and ten the next, and `follow ▶` would
     // slide sideways under a reader who is trying to read it. Nothing else on
     // this screen changes width without the diff changing.
-    //
-    // Observed by rendering rather than by measuring the formatter's output,
-    // which would be the same arithmetic checking itself. What is asserted is
-    // where the *neighbouring* element lands, because that is the thing a reader
-    // would see move.
-    let view = one_file();
-    let columns: Vec<u16> = FRAME_TIMES
-        .iter()
-        .map(|cost| {
-            let chrome = Chrome {
-                frame: Some(*cost),
-                ..diagnostics_chrome()
-            };
-            column_of(&screen(80, 6, &view, &chrome), 5, "▶")
-        })
-        .collect();
+    let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
+        frame: Some(cost),
+        ..diagnostics_chrome()
+    }));
 
     assert!(
         columns.windows(2).all(|pair| pair[0] == pair[1]),
@@ -685,17 +686,10 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
     // over. This one is the less obvious of the two: RSS looks like a number
     // that barely moves, and it is, right up to the frame where it crosses from
     // `999MiB` to `1024MiB` and takes a column with it.
-    let view = one_file();
-    let columns: Vec<u16> = MEMORY_SIZES
-        .iter()
-        .map(|bytes| {
-            let chrome = Chrome {
-                memory: Some(*bytes),
-                ..diagnostics_chrome()
-            };
-            column_of(&screen(80, 6, &view, &chrome), 5, "▶")
-        })
-        .collect();
+    let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
+        memory: Some(bytes),
+        ..diagnostics_chrome()
+    }));
 
     assert!(
         columns.windows(2).all(|pair| pair[0] == pair[1]),
