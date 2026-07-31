@@ -724,27 +724,30 @@ pub fn from_env(
     depth: Depth,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> Result<Theme, ThemeError> {
-    if let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) {
+    // **Chosen here, resolved once on the way out.** `.resolve(depth)` used to be
+    // written on each of three exits, which is a rule spelled out three times: a
+    // fourth source returns a `Theme` either way so the compiler stays silent, and
+    // the omission is invisible at truecolour, where `resolve` is the identity. It
+    // would surface only on somebody else's sixteen-colour terminal.
+    let theme = if let Some(named) = lookup(THEME_VAR).filter(|value| !value.trim().is_empty()) {
         let named = named.trim();
         // A built-in wins over a file of the same name. The three names are short,
         // ordinary words and a file called `dark` in the working directory should
         // not silently take over what `VIGIA_THEME=dark` has always meant.
-        if let Some(theme) = Theme::named(named) {
-            return Ok(theme.resolve(depth));
+        match Theme::named(named) {
+            Some(built_in) => built_in,
+            None => load(Path::new(named))?,
         }
-        return load(Path::new(named)).map(|theme| theme.resolve(depth));
-    }
-
-    // Then the file, which is where a preference set once lives. **Absent is not
-    // an error and unreadable is**, which is the distinction that matters: nobody
-    // has to have one, but a reader who wrote one and got the default silently
-    // would have no way to find out why.
-    if let Some(path) = default_path(&lookup) {
-        if path.is_file() {
-            return load(&path).map(|theme| theme.resolve(depth));
-        }
-    }
-    Ok(Theme::default().resolve(depth))
+    } else if let Some(path) = default_path(&lookup).filter(|path| path.is_file()) {
+        // Then the file, which is where a preference set once lives. **Absent is
+        // not an error and unreadable is**, which is the distinction that matters:
+        // nobody has to have one, but a reader who wrote one and got the default
+        // silently would have no way to find out why.
+        load(&path)?
+    } else {
+        Theme::default()
+    };
+    Ok(theme.resolve(depth))
 }
 
 /// [`THEME_FILE`] under the reader's home directory, if there is one.
@@ -805,6 +808,12 @@ pub fn load(path: &Path) -> Result<Theme, ThemeError> {
 /// theme that does nothing, and "it was discarded" is the one explanation a reader
 /// cannot arrive at by looking at their screen.
 pub fn parse(source: &str) -> Result<Theme, ThemeError> {
+    // **A BOM is stripped, and `trim` will not do it.** U+FEFF is `Cf` rather
+    // than `White_Space`, so it survives every trim here and lands inside the
+    // first key: a theme file saved by Notepad, whose UTF-8 default writes one,
+    // stops the shell from starting with an error naming an invisible byte.
+    let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
+
     let mut theme = Theme::default();
     let mut touched = false;
 
@@ -836,9 +845,14 @@ pub fn parse(source: &str) -> Result<Theme, ThemeError> {
             if touched {
                 return Err(ThemeError::LateBase { line });
             }
-            theme = Theme::named(value).ok_or_else(|| ThemeError::UnknownBase {
+            // Through `words_of` like every other value, so the documented
+            // comment idiom works on the one line every theme file starts with.
+            // Reading the raw value made `base = dark # the picture` report that
+            // there is no theme called "dark # the picture".
+            let name = words_of(value).first().copied().unwrap_or_default();
+            theme = Theme::named(name).ok_or_else(|| ThemeError::UnknownBase {
                 line,
-                name: value.to_owned(),
+                name: name.to_owned(),
             })?;
             continue;
         }

@@ -693,6 +693,75 @@ fn a_comment_does_not_eat_a_hex_colour() {
 }
 
 #[test]
+fn a_theme_file_saved_by_notepad_still_parses() {
+    // Notepad's default UTF-8 save writes a BOM, and `str::trim` will not strip
+    // one: U+FEFF is `Cf`, not `White_Space`, so it survives every trim in the
+    // parser and lands inside the first key. That stopped the shell from starting
+    // with an error naming an invisible byte.
+    let with_bom = theme::parse("\u{FEFF}base = dark\nadded = #ff0000\n").expect("parses");
+    let without = theme::parse("base = dark\nadded = #ff0000\n").expect("parses");
+    assert_eq!(with_bom, without);
+}
+
+#[test]
+fn base_takes_a_trailing_comment_like_every_other_key() {
+    // `base` was the one key read straight from the raw value rather than through
+    // `words_of`, so the documented comment idiom failed on the line every theme
+    // file starts with: `base = dark # the picture` reported that there is no
+    // theme called "dark # the picture".
+    let theme = theme::parse("base = dark # the picture's palette\n").expect("parses");
+    assert_eq!(theme, Theme::dark());
+
+    // And a base that really is unknown still says so, with the three names.
+    let err = theme::parse("base = solarized # nope\n").expect_err("refused");
+    assert_eq!(
+        err,
+        ThemeError::UnknownBase {
+            line: 1,
+            name: "solarized".to_owned()
+        }
+    );
+}
+
+#[test]
+fn a_theme_reaches_the_renderer_resolved_whichever_source_it_came_from() {
+    // `.resolve(depth)` used to be written on each of three exits. Only the
+    // built-in arm was ever gated at a lossy depth, so deleting it from either of
+    // the other two left the whole suite green: at truecolour `resolve` is the
+    // identity, and every test reaching those arms ran there. This drives all
+    // three at a depth where the difference shows.
+    let home = home_with("resolved", Some("base = dark\n"));
+    let file = home
+        .join(".config")
+        .join("vigia")
+        .join("theme")
+        .display()
+        .to_string();
+    let cases: [(&str, Vec<(String, String)>); 3] = [
+        (
+            "a built-in named by the variable",
+            vec![("VIGIA_THEME".to_owned(), "dark".to_owned())],
+        ),
+        (
+            "a file named by the variable",
+            vec![("VIGIA_THEME".to_owned(), file)],
+        ),
+        (
+            "the file found under HOME",
+            vec![("HOME".to_owned(), home.display().to_string())],
+        ),
+    ];
+
+    for (why, pairs) in cases {
+        let theme = theme::from_env(Depth::Ansi16, env_of(pairs)).expect("a theme");
+        assert!(
+            !matches!(theme.added.fg, Some(Color::Rgb(..))),
+            "{why}: reached the renderer unresolved"
+        );
+    }
+}
+
+#[test]
 fn every_key_the_struct_has_is_a_key_a_file_can_set() {
     // True by construction, since one macro emits the struct and the key list from
     // the same declaration. Asserted anyway, because "by construction" is a claim

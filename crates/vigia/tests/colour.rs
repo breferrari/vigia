@@ -102,10 +102,23 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             Depth::Ansi256,
         ),
         (
-            "Windows Terminal names itself",
+            // **Above the `TERM` rung, and the row below is why.** As a bare
+            // `WT_SESSION` case this was vacuous: every Windows path returns
+            // truecolour, so it passed against an implementation that never read
+            // the variable. It has to be the case where the two rungs disagree.
+            "Windows Terminal outranks a TERM that only claims 256",
             true,
-            &[("WT_SESSION", "abc")],
+            &[("WT_SESSION", "abc"), ("TERM", "xterm-256color")],
             Depth::Truecolor,
+        ),
+        (
+            // Git Bash and MSYS export exactly this on Windows. Reading `TERM`
+            // first sent the most common shell for this repo to 256, where a
+            // subtle wash quantises to a saturated primary.
+            "a Windows shell reporting xterm-256color and nothing else",
+            true,
+            &[("TERM", "xterm-256color")],
+            Depth::Ansi256,
         ),
         (
             // Not 256, which this was and which is a different wrong answer rather

@@ -176,6 +176,16 @@ impl Depth {
         if colorterm == "truecolor" || colorterm == "24bit" {
             return Ok(Self::Truecolor);
         }
+        // **Above `TERM`, and that order is the fix rather than a tidy-up.** Git
+        // Bash and MSYS export `TERM=xterm-256color` on Windows, so reading `TERM`
+        // first sent the most common shell for this repo to 256, where a subtle
+        // wash has nowhere to land and quantises to a saturated primary. A
+        // terminal that names itself is better evidence than a variable describing
+        // a terminfo entry.
+        if windows && lookup("WT_SESSION").is_some() {
+            return Ok(Self::Truecolor);
+        }
+
         if term.contains("256color") {
             return Ok(Self::Ansi256);
         }
@@ -252,6 +262,20 @@ impl Depth {
 /// The six levels each axis of the xterm colour cube can take.
 const CUBE: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
+/// Below this chroma there is no hue worth preserving.
+///
+/// **One constant, because two functions claim to share it.** [`to_indexed`] uses
+/// it to veto the grey ramp and [`to_ansi16`] uses it to take a grey outright, and
+/// each one's doc says "the same threshold as" the other. Written as two bare
+/// literals with opposite comparisons, that agreement was a claim nothing held:
+/// change one and they diverge silently in the band between.
+const ACHROMATIC: u8 = 32;
+
+/// How far a colour is from grey.
+fn chroma(r: u8, g: u8, b: u8) -> u8 {
+    r.max(g).max(b) - r.min(g).min(b)
+}
+
 /// Nearest xterm palette index to a 24-bit colour.
 ///
 /// Two candidates, because the palette has two regions that can win: the 6x6x6
@@ -285,8 +309,7 @@ pub fn to_indexed(r: u8, g: u8, b: u8) -> u8 {
     // Same chroma threshold as [`to_ansi16`], and the same reasoning: below it
     // there is no hue to preserve and the ramp is the better answer; above it, hue
     // is the whole point and a grey cannot carry it however near it measures.
-    let chroma = r.max(g).max(b) - r.min(g).min(b);
-    if chroma >= 32 {
+    if chroma(r, g, b) >= ACHROMATIC {
         return cube as u8;
     }
 
@@ -354,12 +377,12 @@ fn from_indexed(i: u8) -> (u8, u8, u8) {
 pub fn to_ansi16(r: u8, g: u8, b: u8) -> Color {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let chroma = max - min;
+    let chroma = chroma(r, g, b);
     // Green carries most of perceived brightness, blue least. The 2/5/1 split is
     // the cheap integer form of that and only has to rank, never to be accurate.
     let luma = (2 * u32::from(r) + 5 * u32::from(g) + u32::from(b)) / 8;
 
-    if chroma < 32 {
+    if chroma < ACHROMATIC {
         return match luma {
             0..=0x2f => Color::Black,
             0x30..=0x7f => Color::DarkGray,
