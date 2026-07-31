@@ -748,6 +748,23 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
         theme::from_env(Depth::Truecolor, env).expect("a theme"),
         Theme::ansi().resolve(Depth::Truecolor)
     );
+
+    // **An empty `HOME` must not hide a good `USERPROFILE`**, which is the case the
+    // first version of this got wrong: filtering after the fallback means `Some("")`
+    // stops `or_else` from ever firing. Reachable on any Windows shell that exports
+    // an empty `HOME`, and invisible everywhere else, which is the worst shape a
+    // bug can have.
+    let home = home_with("empty-home", Some("base = light
+"));
+    let env = env_of(vec![
+        ("HOME".to_owned(), String::new()),
+        ("USERPROFILE".to_owned(), home.display().to_string()),
+    ]);
+    assert_eq!(
+        theme::from_env(Depth::Truecolor, env).expect("a theme"),
+        Theme::light().resolve(Depth::Truecolor),
+        "an empty HOME hid a good USERPROFILE"
+    );
 }
 
 #[test]

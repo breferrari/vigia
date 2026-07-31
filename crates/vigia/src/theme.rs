@@ -736,10 +736,21 @@ pub fn from_env(
 /// uses, so a test can place a home directory without touching the process
 /// environment.
 fn default_path(lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let home = lookup("HOME")
-        .or_else(|| lookup("USERPROFILE"))
-        .filter(|home| !home.trim().is_empty())?;
-    Some(Path::new(home.trim()).join(THEME_FILE))
+    // **Each candidate is emptied-checked before the next is tried**, which is the
+    // whole of this function and was wrong on the first write. Filtering after the
+    // fallback reads naturally and is a different rule: `HOME=""` is `Some("")`, so
+    // `or_else` never fires, and the filter then discards it having already skipped
+    // `USERPROFILE`. A reader with an empty `HOME` would get no theme file and no
+    // way to know why.
+    //
+    // The same empty-versus-unset trap `VIGIA_COLOR` had. Twice in one file is
+    // enough to say it out loud: an environment variable has three states, not
+    // two, and the third is the one that only shows up on somebody else's machine.
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(lookup)
+        .find(|home| !home.trim().is_empty())
+        .map(|home| Path::new(home.trim()).join(THEME_FILE))
 }
 
 /// Read and parse a theme file.
