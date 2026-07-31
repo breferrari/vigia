@@ -47,8 +47,8 @@ jobs:
         # cron - the weekly one, and every manual dispatch - gets all three.
         os: >-
           ${{ fromJSON(github.event.schedule == '41 3 * * *'
-              && '["ubuntu-latest"]'
-              || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+          && '["ubuntu-latest"]'
+          || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
