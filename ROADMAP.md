@@ -126,6 +126,7 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
 | ✅ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
 | ⬜ | Fast scrolling drops frames, and a drawn row costs its whole line | [#45](https://github.com/breferrari/vigia/issues/45) |
+| ⬜ | The header carries no changed-line total, which §10 assigned to this phase | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
@@ -166,6 +167,8 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
+| ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
+| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
 
 ## Phase 5 — deferred findings
 
@@ -183,6 +186,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
 | ⬜ | `take-next`: the pre-flight cannot see an untracked spec prerequisite | [#34](https://github.com/breferrari/vigia/issues/34) |
 | ⬜ | The bulk-rewrite I9 gate is flaky on macOS hosted runners | [#36](https://github.com/breferrari/vigia/issues/36) |
+| ⬜ | Rename tracking and the non-streaming walk, at ten thousand files | [#48](https://github.com/breferrari/vigia/issues/48) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
@@ -215,6 +219,18 @@ What that does *not* mean is that #19 is now urgent. Nothing ships the core alon
 - **For leaving it:** it is invisible in the shipped binary, Phase 3 is half done, and the shelf exists precisely so mid-phase discoveries do not derail the block they surfaced in.
 
 **Recorded as an open decision rather than settled by default**, which is the thing this section is for. What is not acceptable is the state it was in until 2026-07-31: filed under a blocker that had already dissolved, so nobody would revisit it, and no one had chosen either branch. Decide it when Phase 3 closes at the latest.
+
+### What the fifth pre-flight comparison found on its first run
+
+[#34](https://github.com/breferrari/vigia/issues/34) added a fifth direction to `take-next`'s pre-flight: an open `SPEC.md` §10 bullet that no issue names. It ran once and returned **five of eight bullets with nothing behind them**, which is the same failure that let the settle margin block [#5](https://github.com/breferrari/vigia/issues/5) by name for two phases. Four are now filed; the fifth is deliberately not, and that is recorded here rather than left as a silent drop.
+
+| §10 bullet | Filed as | Why there |
+|---|---|---|
+| The header counts changed files and not changed lines | [#49](https://github.com/breferrari/vigia/issues/49) | Phase 3. The bullet assigns itself to this phase in as many words, and this phase shipped three issues without it being taken or refused, because no query returns a sentence. It is the closest thing in the tracker to the shape #34 was filed about |
+| I3's window has never run | [#47](https://github.com/breferrari/vigia/issues/47) | Phase 4. A soak gate is an internal instrument; "flat resources over days" printed beside an installable binary is a public claim, and the longest run behind it is one hour. `491c9a0` corrected the tick to say so |
+| Default view: unstaged only, or vs HEAD | [#50](https://github.com/breferrari/vigia/issues/50) | Phase 4. The answer needs a week of real use, and real use needs a release, so the dependency is real rather than a deferral. It is also the most load-bearing open question in the spec: B3's `no unstaged changes` is worded the way it is *because* the comparison is index-relative |
+| Rename tracking, and the walk that runs to completion | [#48](https://github.com/breferrari/vigia/issues/48) | Phase 5. One issue rather than two, because §10 couples them itself: *"they stand or fall together."* A scale question, unmeasured at the ten thousand files where it would bite |
+| Windows: supported target or best-effort | not filed | The one bullet that is a **posture question with no action in it**. It carries no ordering language and names no work, so an issue would be a place to have an argument rather than a thing to do. It belongs in Phase 4's release notes, and if that turns out to be wrong the cost is one `gh issue create` |
 
 ## Pull-forward log
 
