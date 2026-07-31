@@ -272,10 +272,7 @@ pub fn to_indexed(r: u8, g: u8, b: u8) -> u8 {
     };
     let (ri, gi, bi) = (axis(r), axis(g), axis(b));
     let cube = 16 + 36 * ri + 6 * gi + bi;
-    let cube_err = distance(
-        (r, g, b),
-        (CUBE[ri], CUBE[gi], CUBE[bi]),
-    );
+    let cube_err = distance((r, g, b), (CUBE[ri], CUBE[gi], CUBE[bi]));
 
     // **The ramp is only a candidate for something that is actually grey**, and
     // leaving that out is a bug that reaches the screen. A row wash like `#1b3d29`

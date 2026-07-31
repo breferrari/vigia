@@ -14,9 +14,7 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
-use vigia::{
-    Chrome, Depth, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
-};
+use vigia::{Chrome, Depth, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render};
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
 fn chrome() -> Chrome {
@@ -109,7 +107,11 @@ fn backgrounds(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
 }
 
 fn wash_of(theme: Theme, added: bool) -> Color {
-    let style = if added { theme.added_row } else { theme.removed_row };
+    let style = if added {
+        theme.added_row
+    } else {
+        theme.removed_row
+    };
     style.bg.expect("this palette washes its rows")
 }
 
@@ -120,9 +122,7 @@ fn the_fixture_lands_where_these_say() {
     // with assertions about colour.
     let backend = draw(60, 8, &three_kinds(), Theme::ansi());
     let buffer = backend.buffer();
-    let row = |y: u16| -> String {
-        (0..60).map(|x| buffer[(x, y)].symbol()).collect::<String>()
-    };
+    let row = |y: u16| -> String { (0..60).map(|x| buffer[(x, y)].symbol()).collect::<String>() };
 
     assert!(row(HEADING).contains("src/a.rs"), "{:?}", row(HEADING));
     assert!(row(CONTEXT).contains("let a = 1;"), "{:?}", row(CONTEXT));
@@ -174,7 +174,11 @@ fn the_sigil_cell_carries_the_bar() {
 
     for (row, added, sigil) in [(ADDED, true, "+"), (REMOVED, false, "-")] {
         let wash = wash_of(dark, added);
-        let bar = if added { dark.added_bar } else { dark.removed_bar };
+        let bar = if added {
+            dark.added_bar
+        } else {
+            dark.removed_bar
+        };
         let at = (0..60)
             .find(|x| buffer[(*x, row)].symbol() == sigil)
             .unwrap_or_else(|| panic!("no {sigil:?} on row {row}"));
@@ -258,12 +262,7 @@ fn the_ansi_palette_draws_no_wash_at_any_depth() {
     // The ruling that keeps palette and depth genuinely independent axes. A wash
     // has to assume a background; `ansi` resolves to the reader's own scheme and so
     // assumes none, and it refuses at truecolour just as firmly as at sixteen.
-    for depth in [
-        Depth::Truecolor,
-        Depth::Ansi256,
-        Depth::Ansi16,
-        Depth::None,
-    ] {
+    for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let backend = draw(60, 8, &three_kinds(), Theme::ansi().resolve(depth));
         for row in [CONTEXT, ADDED, REMOVED] {
             assert!(
@@ -312,8 +311,18 @@ fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
     // Swept across widths rather than asserted at one, because a layout only breaks
     // at the width where something stops fitting.
     for width in [40, 60, 80, 120] {
-        let washed = draw(width, 8, &three_kinds(), Theme::dark().resolve(Depth::Truecolor));
-        let plain = draw(width, 8, &three_kinds(), Theme::ansi().resolve(Depth::Truecolor));
+        let washed = draw(
+            width,
+            8,
+            &three_kinds(),
+            Theme::dark().resolve(Depth::Truecolor),
+        );
+        let plain = draw(
+            width,
+            8,
+            &three_kinds(),
+            Theme::ansi().resolve(Depth::Truecolor),
+        );
         let (a, b) = (washed.buffer(), plain.buffer());
         for y in 0..8 {
             let left: Vec<_> = (0..width).map(|x| a[(x, y)].symbol()).collect();
@@ -330,10 +339,22 @@ fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
 /// is low, which puts one slice in every band by construction rather than by luck.
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
-    heat[0] = HeatBucket { added: 12, removed: 0 };
-    heat[1] = HeatBucket { added: 7, removed: 0 };
-    heat[2] = HeatBucket { added: 4, removed: 0 };
-    heat[3] = HeatBucket { added: 3, removed: 0 };
+    heat[0] = HeatBucket {
+        added: 12,
+        removed: 0,
+    };
+    heat[1] = HeatBucket {
+        added: 7,
+        removed: 0,
+    };
+    heat[2] = HeatBucket {
+        added: 4,
+        removed: 0,
+    };
+    heat[3] = HeatBucket {
+        added: 3,
+        removed: 0,
+    };
     View {
         rows: vec![Row::File {
             path: "src/a.rs".to_owned(),
@@ -581,7 +602,12 @@ fn a_value_carries_a_foreground_a_background_and_modifiers() {
     .expect("parses");
 
     assert_eq!(theme.path.fg, Some(Color::Rgb(0xe6, 0xed, 0xf3)));
-    assert!(theme.path.add_modifier.contains(ratatui::style::Modifier::BOLD));
+    assert!(
+        theme
+            .path
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
 
     // A background with no foreground, which is how a row wash is written and the
     // one shape a naive parser gets wrong by reading `on` as a colour.
@@ -681,9 +707,14 @@ fn a_theme_file_under_home_is_read_when_nothing_overrides_it() {
     // The half of B6's amendment that makes a preference survive a new shell. A
     // variable has to be re-declared per shell and the instruction for making that
     // permanent differs per shell; a file is set once.
-    let home = home_with("default", Some("base = dark
+    let home = home_with(
+        "default",
+        Some(
+            "base = dark
 added = #ff0000
-"));
+",
+        ),
+    );
     let env = env_of(vec![("HOME".to_owned(), home.display().to_string())]);
 
     let theme = theme::from_env(Depth::Truecolor, env).expect("a theme");
@@ -695,9 +726,14 @@ added = #ff0000
 fn the_variable_still_wins_over_the_file() {
     // Which is what makes the variable worth keeping: it is how a reader says "not
     // this time" without editing anything.
-    let home = home_with("override", Some("base = dark
+    let home = home_with(
+        "override",
+        Some(
+            "base = dark
 added = #ff0000
-"));
+",
+        ),
+    );
     let env = env_of(vec![
         ("HOME".to_owned(), home.display().to_string()),
         ("VIGIA_THEME".to_owned(), "light".to_owned()),
@@ -722,8 +758,13 @@ fn no_file_is_not_an_error_but_an_unreadable_one_is() {
         Theme::ansi().resolve(Depth::Truecolor)
     );
 
-    let broken = home_with("broken", Some("added = #gg0000
-"));
+    let broken = home_with(
+        "broken",
+        Some(
+            "added = #gg0000
+",
+        ),
+    );
     let env = env_of(vec![("HOME".to_owned(), broken.display().to_string())]);
     let err = theme::from_env(Depth::Truecolor, env).expect_err("refused");
     assert!(err.to_string().contains("line 1"), "{err}");
@@ -734,8 +775,13 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
     // `HOME` first, because it is set on every Unix and by Git Bash on Windows too,
     // then `USERPROFILE`. Two names, one rule, and no XDG matrix or discovery
     // crate: the whole cost of the amendment is a place to look.
-    let home = home_with("windows", Some("base = light
-"));
+    let home = home_with(
+        "windows",
+        Some(
+            "base = light
+",
+        ),
+    );
     let env = env_of(vec![("USERPROFILE".to_owned(), home.display().to_string())]);
     assert_eq!(
         theme::from_env(Depth::Truecolor, env).expect("a theme"),
@@ -754,8 +800,13 @@ fn the_home_directory_is_one_rule_rather_than_one_per_platform() {
     // stops `or_else` from ever firing. Reachable on any Windows shell that exports
     // an empty `HOME`, and invisible everywhere else, which is the worst shape a
     // bug can have.
-    let home = home_with("empty-home", Some("base = light
-"));
+    let home = home_with(
+        "empty-home",
+        Some(
+            "base = light
+",
+        ),
+    );
     let env = env_of(vec![
         ("HOME".to_owned(), String::new()),
         ("USERPROFILE".to_owned(), home.display().to_string()),

@@ -262,18 +262,24 @@ impl Theme {
     pub fn heat(&self, heat: Heat) -> Style {
         match heat {
             Heat::Cool => self.heat_track,
-            Heat::Added(band) => {
-                self.band(band, self.heat_added, self.heat_added_warm, self.heat_added_hot)
-            }
+            Heat::Added(band) => self.band(
+                band,
+                self.heat_added,
+                self.heat_added_warm,
+                self.heat_added_hot,
+            ),
             Heat::Removed(band) => self.band(
                 band,
                 self.heat_removed,
                 self.heat_removed_warm,
                 self.heat_removed_hot,
             ),
-            Heat::Mixed(band) => {
-                self.band(band, self.heat_mixed, self.heat_mixed_warm, self.heat_mixed_hot)
-            }
+            Heat::Mixed(band) => self.band(
+                band,
+                self.heat_mixed,
+                self.heat_mixed_warm,
+                self.heat_mixed_hot,
+            ),
         }
     }
 
@@ -931,10 +937,7 @@ fn style_of(value: &str, line: usize) -> Result<Style, ThemeError> {
 }
 
 fn is_modifier(word: &str) -> bool {
-    matches!(
-        word,
-        "bold" | "dim" | "italic" | "underline" | "reverse"
-    )
+    matches!(word, "bold" | "dim" | "italic" | "underline" | "reverse")
 }
 
 fn apply_modifier(style: Style, word: &str) -> Style {

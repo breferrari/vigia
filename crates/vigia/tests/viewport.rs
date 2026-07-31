@@ -53,8 +53,6 @@ fn fixture(name: &str) -> Scratch {
     Scratch::large_diff(name, FILES, 1)
 }
 
-
-
 #[test]
 fn scrolling_to_the_bottom_never_leaves_the_pane_half_empty() {
     // The gate #59 was filed for. Scroll a row at a time, all the way past the
@@ -83,7 +81,8 @@ fn scrolling_to_the_bottom_never_leaves_the_pane_half_empty() {
 
     // Well past the end, so the walk has to hold the bottom rather than run off it.
     for step in 0..total + height {
-        app.apply(Action::Scroll(1), &mut frame, height).expect("apply");
+        app.apply(Action::Scroll(1), &mut frame, height)
+            .expect("apply");
         let view = app
             .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
@@ -114,7 +113,8 @@ fn a_page_down_past_the_end_holds_the_last_screenful() {
     let height = body();
 
     for step in 0..6 {
-        app.apply(Action::Page(1), &mut frame, height).expect("apply");
+        app.apply(Action::Page(1), &mut frame, height)
+            .expect("apply");
         let view = app
             .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
@@ -145,7 +145,8 @@ fn a_diff_shorter_than_the_pane_draws_what_it_has_and_no_more() {
     let height = body();
 
     for _ in 0..10 {
-        app.apply(Action::Scroll(1), &mut frame, height).expect("apply");
+        app.apply(Action::Scroll(1), &mut frame, height)
+            .expect("apply");
     }
     let view = app
         .view(&mut frame, &mut highlighter, &history, height)
@@ -176,7 +177,8 @@ fn the_resolved_position_is_stable_once_it_reaches_the_bottom() {
     let height = body();
 
     for _ in 0..FILES * SPAN + height {
-        app.apply(Action::Scroll(1), &mut frame, height).expect("apply");
+        app.apply(Action::Scroll(1), &mut frame, height)
+            .expect("apply");
     }
     let settled = app
         .view(&mut frame, &mut highlighter, &history, height)
@@ -262,7 +264,8 @@ fn the_last_row_of_the_diff_is_always_on_screen_at_the_bottom() {
     let height = body();
 
     for _ in 0..FILES * SPAN + height {
-        app.apply(Action::Scroll(1), &mut frame, height).expect("apply");
+        app.apply(Action::Scroll(1), &mut frame, height)
+            .expect("apply");
     }
     let view: View = app
         .view(&mut frame, &mut highlighter, &history, height)

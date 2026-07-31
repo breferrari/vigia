@@ -1378,11 +1378,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     // five up is heavy and slice 1's two lines are not. That covers all four
     // kinds and both intensities in one row.
     let want = |style: ratatui::style::Style| style.fg.expect("the theme sets a colour");
-    assert_eq!(
-        strip[0],
-        want(theme.heat_added_hot),
-        "slice 0: 9 additions"
-    );
+    assert_eq!(strip[0], want(theme.heat_added_hot), "slice 0: 9 additions");
     assert_eq!(
         strip[1],
         want(theme.heat_added),

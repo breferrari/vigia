@@ -248,7 +248,9 @@ fn a_background_is_dropped_a_rung_above_a_foreground() {
     // `SPEC.md` §5.1: at sixteen colours an ANSI background is a solid block rather
     // than a tint, and a slab behind syntax-highlighted text is worse than no tint
     // at all. So the row tint stops one rung earlier than the text does.
-    let style = Style::new().fg(Color::Rgb(0x3f, 0xb9, 0x50)).bg(Color::Rgb(0x0f, 0x2c, 0x1c));
+    let style = Style::new()
+        .fg(Color::Rgb(0x3f, 0xb9, 0x50))
+        .bg(Color::Rgb(0x0f, 0x2c, 0x1c));
 
     assert!(Depth::Truecolor.resolve(style).bg.is_some());
     assert!(Depth::Ansi256.resolve(style).bg.is_some());
@@ -282,7 +284,9 @@ fn the_ramp_is_never_matched_against_the_sixteen_names() {
     // already expressible and must survive untouched.
     for i in 0..16u8 {
         assert_eq!(
-            Depth::Ansi256.resolve(Style::new().fg(Color::Indexed(i))).fg,
+            Depth::Ansi256
+                .resolve(Style::new().fg(Color::Indexed(i)))
+                .fg,
             Some(Color::Indexed(i))
         );
         assert_eq!(
@@ -362,9 +366,17 @@ fn degrading_never_collapses_a_hue_onto_its_opposite() {
 
     for rung in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
         let of = |c| rung.resolve(Style::new().fg(c)).fg;
-        assert_ne!(of(added), of(removed), "{rung:?} collapsed added onto removed");
+        assert_ne!(
+            of(added),
+            of(removed),
+            "{rung:?} collapsed added onto removed"
+        );
         assert_ne!(of(added), of(mixed), "{rung:?} collapsed added onto mixed");
-        assert_ne!(of(removed), of(mixed), "{rung:?} collapsed removed onto mixed");
+        assert_ne!(
+            of(removed),
+            of(mixed),
+            "{rung:?} collapsed removed onto mixed"
+        );
     }
 }
 
@@ -467,24 +479,60 @@ fn the_mockups_own_hues_keep_their_hue_at_sixteen() {
     // the bright threshold at 0xc0. Both were chosen against this table and both
     // have a row here that moves if they change.
     let cases: &[(&str, (u8, u8, u8), &[Color])] = &[
-        ("addition", (0x3f, 0xb9, 0x50), &[Color::Green, Color::LightGreen]),
-        ("removal", (0xf8, 0x51, 0x49), &[Color::Red, Color::LightRed]),
-        ("keyword salmon", (0xff, 0x7b, 0x72), &[Color::Red, Color::LightRed]),
+        (
+            "addition",
+            (0x3f, 0xb9, 0x50),
+            &[Color::Green, Color::LightGreen],
+        ),
+        (
+            "removal",
+            (0xf8, 0x51, 0x49),
+            &[Color::Red, Color::LightRed],
+        ),
+        (
+            "keyword salmon",
+            (0xff, 0x7b, 0x72),
+            &[Color::Red, Color::LightRed],
+        ),
         // The row that decided the cut. At `chroma / 2` this loses its red bit by a
         // single unit and draws blue, which is a purple keyword colour turning into
         // the variable colour sitting next to it on the same line.
-        ("function purple", (0xd2, 0xa8, 0xff), &[Color::Magenta, Color::LightMagenta]),
-        ("type orange", (0xff, 0xa6, 0x57), &[Color::Yellow, Color::LightYellow]),
-        ("constant gold", (0xe3, 0xb3, 0x41), &[Color::Yellow, Color::LightYellow]),
-        ("accent cyan", (0x39, 0xc5, 0xcf), &[Color::Cyan, Color::LightCyan]),
+        (
+            "function purple",
+            (0xd2, 0xa8, 0xff),
+            &[Color::Magenta, Color::LightMagenta],
+        ),
+        (
+            "type orange",
+            (0xff, 0xa6, 0x57),
+            &[Color::Yellow, Color::LightYellow],
+        ),
+        (
+            "constant gold",
+            (0xe3, 0xb3, 0x41),
+            &[Color::Yellow, Color::LightYellow],
+        ),
+        (
+            "accent cyan",
+            (0x39, 0xc5, 0xcf),
+            &[Color::Cyan, Color::LightCyan],
+        ),
         // The greys, which have no hue to keep and are ranked by luma instead. The
         // spread across three distinct greys is the assertion: chrome, faint text
         // and a heat track that all drew the same grey would be a strip a reader
         // cannot separate from the counters beside it.
         ("page background", (0x0d, 0x11, 0x17), &[Color::Black]),
-        ("heat track", (0x21, 0x26, 0x2d), &[Color::Black, Color::DarkGray]),
+        (
+            "heat track",
+            (0x21, 0x26, 0x2d),
+            &[Color::Black, Color::DarkGray],
+        ),
         ("dim chrome", (0x6e, 0x76, 0x81), &[Color::DarkGray]),
-        ("faint text", (0x7d, 0x85, 0x90), &[Color::Gray, Color::DarkGray]),
+        (
+            "faint text",
+            (0x7d, 0x85, 0x90),
+            &[Color::Gray, Color::DarkGray],
+        ),
         ("foreground", (0xe6, 0xed, 0xf3), &[Color::White]),
     ];
 
