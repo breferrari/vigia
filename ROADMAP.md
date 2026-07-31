@@ -124,7 +124,8 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 |---|---|---|
 | ✅ | I10 bounded history, and the sparkline, gradient and pulse drawn from it | [#38](https://github.com/breferrari/vigia/issues/38) |
 | ✅ | The heat strip, and the whole-file line count it needs | [#39](https://github.com/breferrari/vigia/issues/39) |
-| ⬜ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
+| ✅ | The header mode word, the mode set, and the empty state (B3) | [#40](https://github.com/breferrari/vigia/issues/40) |
+| ⬜ | Fast scrolling drops frames, and a drawn row costs its whole line | [#45](https://github.com/breferrari/vigia/issues/45) |
 | ⬜ | The status bar: frame time and RSS | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 
@@ -133,6 +134,10 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 The correction that mattered was not the count. **It is that this is not a rendering phase** (`SPEC.md` §5.2), and building the first child confirmed it: the diff was mostly `vigia-core`. The split follows what each element needs rather than what it looks like: history-backed (#38), whole-file-backed (#39), chrome (#40), self-measuring (#41).
 
 **One of #10's four bullets had already shipped.** Per-file `+42 −7` counters are built in `view.rs` and drawn by `render.rs`, and §5.1 has said "Covered" for them since the mockup was specified: a file has to be diffed to be drawn, so they cost nothing and landed early and quietly. No issue was filed. This file also claimed the **key-hint bar** was "untracked entirely" when [#7](https://github.com/breferrari/vigia/issues/7) landed it with I6, and `follow ▶` alongside it under [#6](https://github.com/breferrari/vigia/issues/6). Both corrected here.
+
+**The chrome child is in, and it repaid three debts rather than adding a feature.** [#40](https://github.com/breferrari/vigia/issues/40) ruled the mode set at **two**, `watching` and `not watching`, because settling and idle are both durations and a shell that wakes only when a file changes cannot draw one honestly. It ruled B3 and moved it to `SPEC.md` §11.1, which meant correcting `working tree clean`: that is git's phrase, git compares the index against HEAD as well, and a fully staged worktree was being told it was clean while `git status` said the opposite. And it wrote down two things the code had been deciding on its own, the header's deliberate departure from `assets/preview.svg` and B5's already-shipped half.
+
+**It also found that `vigia .` drew `.`.** The invocation the tool is named after headered the screen with the one thing a reader already knows, because `gix` returns the workdir as given and `Path::new(".")` has no final component. Every fixture in the suite discovered by an absolute path, so the case had never been drawn. Same shape as [#30](https://github.com/breferrari/vigia/issues/30), on the display side instead of the watch side, and found the same way: by running it.
 
 **I10 is in, and the thing it was blocked on turned out to be the thing it produced.** [#38](https://github.com/breferrari/vigia/issues/38) promoted proposed I10 into `SPEC.md` §3 with a budget of **256 paths and 120 seconds**: a bounded store in `vigia-core`, fed one coalesced tick at a time, evicted by window and by least-recently-changed. Ten thousand distinct paths leave it sitting exactly at the cap, and the soak says the same about the real process, reporting 256 tracked with 207 evicted over 359 paths at a 300-file fixture.
 

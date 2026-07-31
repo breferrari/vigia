@@ -305,3 +305,54 @@ impl App {
         Ok(view)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! What this type turns state into, which no rendering test can reach.
+    //!
+    //! `tests/render.rs` proves a chrome carrying [`Mode::Lost`] draws
+    //! `not watching`, and it builds that chrome **by hand**. So nothing there
+    //! says the shell ever produces one, and nothing there says these fields
+    //! survive the trip. Mutating [`App::watch_lost`] into an empty body left
+    //! the entire suite green, which is what this closes.
+    //!
+    //! Beside the code rather than in `tests/`, the way `terminal.rs` and
+    //! `view.rs` already keep theirs: this is arithmetic on state and needs no
+    //! repository, no terminal and no fixture.
+
+    use super::*;
+
+    #[test]
+    fn a_shell_starts_watching_and_a_lost_watch_is_one_way() {
+        let mut app = App::new();
+        assert_eq!(app.mode(), Mode::Watching);
+        assert_eq!(app.chrome("fixture", None).mode, Mode::Watching);
+
+        app.watch_lost();
+        assert_eq!(app.mode(), Mode::Lost);
+        assert_eq!(app.chrome("fixture", None).mode, Mode::Lost);
+
+        // One way, and asserted rather than left implied by the absence of a
+        // setter. Nothing can revive a watch: the one handle that unblocks the
+        // watcher makes `next_tick` return `None` permanently. A later
+        // convenience that reset this alongside a notice is exactly how a still
+        // picture would start claiming to be live again, and the two are next to
+        // each other precisely because they arrive from one event.
+        app.clear_notice();
+        app.warn("a file vanished between being named and being read");
+        assert_eq!(app.chrome("fixture", None).mode, Mode::Lost);
+    }
+
+    #[test]
+    fn the_chrome_carries_the_branch_it_was_handed() {
+        // The branch is deliberately not this type's state: it is read per frame
+        // and passed in, so the only thing here is that it travels unchanged and
+        // that nothing invents one when there is none.
+        let app = App::new();
+        assert_eq!(
+            app.chrome("fixture", Some("main")).branch.as_deref(),
+            Some("main")
+        );
+        assert_eq!(app.chrome("fixture", None).branch, None);
+    }
+}
