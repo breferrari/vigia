@@ -126,7 +126,7 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 |---|---|
 | Header: `watching · 3 files` | A **mode word**, so there is a set of modes. `watching` implies at least a settling state and an idle one. Changed-file count is the §10 header question. **(unspecified: the mode set)** |
 | Per-file **sparkline** | A **retained time series per file** — samples of churn over a window, bucketed. This is the only unbounded state in the design and it is the one I3 forbids growing: the window and the sample rate are part of the invariant, not a rendering detail. **Ruled 2026-07-31 and implemented: a 120-second window in 8 buckets of 15 seconds, capped at 256 paths, evicted by window and by least-recently-changed.** That is I10, which now has a row above rather than a warning below. One sample per path per coalesced tick, and heights are scaled against the **busiest bucket on screen** rather than per row, because the question a reader asks down a file list is which file is busiest |
-| Per-file **heat strip** | Hunk line-ranges projected onto a fixed number of buckets across the file's length, so it needs the file's **total line count**, not only its diff. Colour rule when one bucket holds both additions and deletions. **(unspecified: bucket count, mixed-bucket colour)** |
+| Per-file **heat strip** | Hunk line-ranges projected onto a fixed number of buckets across the file's length, so it needs the file's **total line count**, not only its diff. Colour rule when one bucket holds both additions and deletions. **Ruled 2026-07-31 and implemented.** Bucket count is **12**, from the picture, which draws exactly twelve; the picture also draws an empty bucket as a **dark track** rather than as a gap, so the strip is always its full width and a reader can see how much of the file is untouched. A mixed bucket is **yellow**: every alternative paints it as pure, and separating addition from removal by position is the strip's whole job. Intensity is two steps rather than the picture's three, for the reason the recency ramp is three rather than a fade. The line count it needs is **free**: see §5.2 |
 | Per-file `+42 −7` | Covered. Per-file counters are free — a file must be diffed to be drawn (§10). |
 | A **dimmed row** (`Cargo.toml` in the mockup renders fainter than the rows above it) | A **recency gradient**: rows fade as their last change ages. **Ruled 2026-07-31 and implemented as three rungs of one ladder** — pulse, live, cold — read from I10's store; see §11.1. Sixteen foreground-only colours have three intensities to spend, so the gradient is a ramp of three rather than a fade, and the real one is [#11](https://github.com/breferrari/vigia/issues/11)'s |
 | `● just changed` on the diff header | The pulse, but drawn as a **persisting label with a dot**, not a flash. So it has a **decay**. **Ruled 2026-07-31 and implemented: it persists for exactly one tick and cuts rather than fades.** It is the top rung of the recency ladder above, not a second mechanism, and the rung is deliberately *not* a duration: see §11.1 for why a wall-clock decay cannot be drawn without the timer I1 forbids. It marks **every** path in the newest tick, which is what §11.2 B2 said the pulse was for |
@@ -168,6 +168,27 @@ Two of these are corrections rather than gaps:
 > structure was the decision and the drawing was the easy part.**
 
 **The heat strip needs a whole-file property.** Locating change within a file requires that file's **total line count**, and the frame path is built to avoid exactly that: pure revalidation reads **0 bytes** (§10), the number I2a is written against. Measured naively — every changed file, every frame — it reintroduces the read I2a removed. It is cacheable per `(path, blob id)`, since a file's length cannot change without its content changing, so it is payable once per version rather than once per frame. **That caching is not an optimisation; without it the heat strip breaks I2a.**
+
+> [!note] The cache above was never needed, and the reason is worth more than the prediction
+> **Corrected 2026-07-31 by building it.** [#39](https://github.com/breferrari/vigia/issues/39).
+> The paragraph above is right that a whole-file read would break I2a and wrong
+> that a new cache is what avoids it. `hunk::compute` interns **both sides** to
+> diff them at all, so the working-tree side's line count is already computed on
+> every diff and was being thrown away. It is now a field of `FileDiff`, which
+> means it is cached and invalidated with the diff itself.
+>
+> That is **stricter** than the `(path, blob id)` key proposed here, not merely
+> cheaper: a blob id names the index side, and a working-tree edit does not touch
+> it, so a cache keyed that way would have served a stale length for exactly the
+> file a reader is watching being written. `tests/frame.rs` gates the difference
+> with an edit that keeps a file's byte length and changes its line count.
+>
+> The general shape, and it is the third time this project has hit it: **the
+> expensive-looking property was a by-product of work already being done.** I5
+> found the follow target already resolved by the gitignore filter; I10 found the
+> burst's paths already resolved by the same filter; this found the line count
+> already interned by the differ. Look for the by-product before designing the
+> cache.
 
 **Two status readouts measure the thing they run inside.** `0.8ms frame` means instrumenting the render path and drawing the result — a readout whose own cost falls inside the budget it reports, gated by I9 at 16ms p99. `11MB` is a live RSS number, and I3 samples RSS in a **soak test** precisely because reading it is a syscall on some platforms rather than free per frame. Both are honest to show; neither is free to show; the spec said nothing about either.
 
@@ -364,7 +385,13 @@ Two rulings are inside that table and neither is cosmetic.
 
 **Cold is not a fourth rule.** A path with nothing left in the window is dropped from the store entirely, per I10, so "cold" and "untracked" are the same state. That is also what the **first** frame of a session looks like: a worktree that was already dirty draws every row cold, because a monitor has no way to know what happened before it was looking and inventing a recency for it would light up rows nothing has touched.
 
-**The sparkline is a thing made of items**, so under the layout rule above it **breaks**: it drops whole buckets, oldest first, and never draws a partial one or a squeezed strip. Its heights are scaled against the busiest bucket **on screen** rather than against each row's own maximum, because scaling per row draws every file at full height the moment it is the busiest thing it has ever been, which answers a question nobody asked while destroying the one comparison a file list is for. A file with no churn draws no strip at all rather than an empty one, so it spends none of its row.
+**The sparkline is a thing made of items**, so under the layout rule above it **breaks**: it drops whole buckets, oldest first, and never draws a partial one or a squeezed strip.
+
+**The heat strip is a fourth kind of thing, and the rule needed a third clause to say so.** *A thing made of items breaks, a thing made of characters marks its edge, and content is neither* covers a list, a token and a line. A heat strip is made of items and is **not a list**: its items are slices of one file, in order, and the set of them *is* the claim. Dropping the last six would draw the first half of a file as though it were the whole of it, and a reader would conclude the tail is untouched. Less detail is honest; a prefix presented as a whole is not.
+
+So **a projection re-projects rather than dropping items**: a narrower rung sums adjacent slices and classifies the sums, which at halves is exact. Twelve slices, then six, then none. `crates/vigia/tests/legibility.rs` gates it with a file changed at both ends and quiet in the middle, which is the one shape where truncation and re-projection differ, and it reads **cell colours** rather than symbols because every slice draws the same block.
+
+**And the two strips scale against different things, deliberately.** A sparkline's height is measured against the busiest bucket **on screen**, because the question a reader asks down a file list is which file is busiest, and a row scaled against itself draws every file at full height the moment it is the busiest thing it has ever been. A heat slice's intensity is measured against the busiest slice **of its own file**, because the question is where in *this* file the work is, and the neighbouring rows have nothing to do with it. One is a comparison down the list, the other across a row. Its heights are scaled against the busiest bucket **on screen** rather than against each row's own maximum, because scaling per row draws every file at full height the moment it is the busiest thing it has ever been, which answers a question nobody asked while destroying the one comparison a file list is for. A file with no churn draws no strip at all rather than an empty one, so it spends none of its row.
 
 **And no glance element may take a heading below twelve columns of path.** The counters, the pulse and the strip are all placed from the right, in that order of priority, against a floor the path keeps. A row reduced to `M …` would have stopped naming its own file, which is the truncated-to-useless shape I6 forbids, arrived at by decoration rather than by narrowing.
 
