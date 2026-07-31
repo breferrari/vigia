@@ -1,0 +1,10 @@
+---
+source: crates/vigia/tests/render.rs
+assertion_line: 790
+expression: "screen(40, 5, &glancing(), &chrome())"
+---
+"vigia                            3 files"
+"M …engine/watch.rs ● just changed +42 -7"
+"M src/render/frame.rs       ▂▁    +11 -3"
+"M Cargo.toml                       +2 -0"
+"q quit · f follow · jk scroll        1/3"

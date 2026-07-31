@@ -22,7 +22,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use vigia::{App, Position, Row, Theme, View, body_height, render};
-use vigia_core::{Highlighter, LineKind};
+use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
 
@@ -83,8 +83,9 @@ fn every_line_number_names_the_line_it_is_on() {
     frame.advance().expect("advance");
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
         .expect("view");
 
     let mut counts = [0usize; 3];
@@ -162,8 +163,9 @@ fn a_file_is_its_heading_then_its_hunks() {
     frame.advance().expect("advance");
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
         .expect("view");
 
     let mut headings = 0usize;
@@ -230,8 +232,9 @@ fn each_kind_of_change_gets_its_own_letter() {
     frame.advance().expect("advance");
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
         .expect("view");
 
     let mut seen: Vec<(char, String, Option<String>)> = view
@@ -302,10 +305,12 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     let whole = View::collect(
         &mut frame,
         &mut highlighter,
+        &history,
         Position { file: 0, row: 0 },
         ALL_ROWS,
     )
@@ -326,6 +331,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         let window = View::collect(
             &mut frame,
             &mut highlighter,
+            &history,
             Position {
                 file: 0,
                 row: offset,
@@ -378,12 +384,13 @@ fn a_real_repository_draws() {
     frame.advance().expect("advance");
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
     let height = body_height(area, &app.chrome("fixture"), frame.files().len());
     let view = app
-        .view(&mut frame, &mut highlighter, height)
+        .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
     // Non-vacuity: the fixture has to have produced something to draw, or the
     // snapshot below is a picture of an empty pane.
@@ -415,8 +422,9 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     frame.advance().expect("advance");
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, ALL_ROWS)
+        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
         .expect("view");
 
     assert!(

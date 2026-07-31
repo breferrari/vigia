@@ -19,9 +19,11 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::time::Instant;
+
 use ratatui::layout::Rect;
-use vigia::{App, Position, body_height};
-use vigia_core::{FrameStats, HighlightStats, Highlighter};
+use vigia::{App, Position, Row, body_height};
+use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
 use support::{Scratch, delta, materialise, settle};
 
@@ -80,9 +82,10 @@ fn one_screen(name: &str, files: usize) -> Screen {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let before = frame.stats();
     let view = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
 
     Screen {
@@ -201,6 +204,7 @@ fn scrolling_for_a_long_time_does_not_grow_the_highlight_cache() {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let height = body();
 
     let mut most = 0usize;
@@ -208,7 +212,7 @@ fn scrolling_for_a_long_time_does_not_grow_the_highlight_cache() {
         app.apply(vigia::Action::Page(1), &mut frame, height)
             .expect("page down");
         let view = app
-            .view(&mut frame, &mut highlighter, height)
+            .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
 
         // Non-vacuity per screen: a scroll that ran off the end would draw a
@@ -291,9 +295,10 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let before = frame.stats();
     let view = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     let cost = delta(before, frame.stats());
 
@@ -378,6 +383,7 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let height = body();
 
     let before = frame.stats();
@@ -390,7 +396,7 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
         }
         frame.advance().expect("advance");
         let view = app
-            .view(&mut frame, &mut highlighter, height)
+            .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
         read = view.read;
         rows = view.rows.len();
@@ -489,6 +495,7 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     // Each file here is one rewritten line: a file row, a hunk row and two
     // content rows. Scrolling by forty files' worth of rows lands well inside the
     // list rather than at either end.
@@ -502,7 +509,7 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     .expect("scroll");
 
     let crossing = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     assert_eq!(
         crossing.top,
@@ -519,7 +526,7 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     // and it is still a file the frame had to be asked for.
     let drawn = body().div_ceil(span);
     let settled = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     assert_eq!(settled.top, crossing.top, "the position drifted while idle");
     assert_eq!(
@@ -542,10 +549,11 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
     let span = 4;
     for height in [span, span * 2, span * 5] {
         let view = app
-            .view(&mut frame, &mut highlighter, height)
+            .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
         assert_eq!(
             view.read,
@@ -555,4 +563,91 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
         );
         assert_eq!(view.rows.len(), height);
     }
+}
+
+#[test]
+fn a_full_history_costs_the_frame_no_read_and_no_probe() {
+    // I10 sits on the frame path now: every drawn heading asks the store what
+    // that file's churn and recency are. This is the assertion that the answer
+    // is free.
+    //
+    // It has to be free rather than cheap. I2a's whole claim is that a
+    // revalidated frame reads **zero** bytes, and I4's is that the shell touches
+    // only the files it draws. A store that answered by `stat`-ing, or by
+    // reading, would break both while looking like a rendering detail, and the
+    // failure would be invisible to every gate above: they all run with an empty
+    // history, where a lookup that costs something is never made.
+    //
+    // Compared against the same frame drawn with an empty store rather than
+    // against a literal, so the two runs differ in exactly one thing.
+    let scratch = Scratch::large_diff("shell-reads-history", FEW_FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+
+    let empty = History::new();
+    let before = frame.stats();
+    let cold = app
+        .view(&mut frame, &mut highlighter, &empty, body())
+        .expect("view");
+    let without = delta(before, frame.stats());
+
+    // Every path in the diff, recorded, so every drawn heading resolves to a
+    // real entry rather than falling out of the store as untracked. A history
+    // that answered `None` everywhere would be the cheap case, not the measured
+    // one.
+    let mut full = History::new();
+    let paths: Vec<String> = frame
+        .files()
+        .iter()
+        .map(|change| change.path.clone())
+        .collect();
+    full.record(paths.iter().map(String::as_str), Instant::now());
+    assert!(full.tracked() > 0, "the store recorded nothing");
+
+    let before = frame.stats();
+    let warm = app
+        .view(&mut frame, &mut highlighter, &full, body())
+        .expect("view");
+    let with = delta(before, frame.stats());
+
+    assert_eq!(cold.rows.len(), body(), "the screen did not fill");
+    assert_eq!(
+        warm.rows.len(),
+        cold.rows.len(),
+        "the two frames drew different screens, so their costs are not comparable"
+    );
+    assert_eq!(
+        (with.bytes, with.probes, with.computed),
+        (without.bytes, without.probes, without.computed),
+        "a populated history changed the frame's cost from {without:?} to \
+         {with:?}, so glance state is being answered from the filesystem"
+    );
+    assert_eq!(with.bytes, 0, "the frame read {} bytes", with.bytes);
+
+    // Non-vacuity: the store has to have actually been consulted, or this
+    // compares two identical empty lookups. The drawn headings carry the
+    // recency the store holds, and with every path just recorded that is the
+    // pulse.
+    let pulsing = warm
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row,
+                Row::File {
+                    recency: Recency::Pulse,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!(
+        pulsing > 0,
+        "no drawn heading took its recency from the store, so this gate compared \
+         two frames that never consulted one"
+    );
 }

@@ -14,6 +14,14 @@
 //! only in release, because the budgets were set against optimised code, and
 //! they accept a slack multiplier so a hosted runner's variance does not read
 //! as a code regression. A developer machine runs them with no slack at all.
+//!
+//! **I10 is the one budget that is not here**, and the pointer is worth a line
+//! so nobody concludes it is ungated. Every gate in this file is either a ratio
+//! between two fixtures or a duration; I10's budget is a **count** (256 paths,
+//! a 120s window) with neither shape, and the fixture that puts it under
+//! pressure is ten thousand paths rather than two worktrees. It lives in
+//! `tests/history.rs`, named for the invariant, and `SPEC.md` §3's proof column
+//! names that file the way I6's names `crates/vigia/tests/legibility.rs`.
 
 mod support;
 

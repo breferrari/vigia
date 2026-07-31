@@ -31,7 +31,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, LineKind, Span};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
 use crate::theme::Theme;
 use crate::view::{Row, View};
@@ -92,6 +92,46 @@ const HINT_RUNGS: [&str; 4] = [
 /// **not** exported for the same reason inverted: a test comparing the rung
 /// table against itself proves nothing, so the rungs are observed by rendering.
 pub const HINT_SEPARATOR: &str = " · ";
+
+/// A churn bucket's height, emptiest first.
+///
+/// The eighth-blocks every sparkline in every terminal is drawn from. They are
+/// outside CP437, like the `▶` the footer has carried since I5, so the legacy
+/// Windows console `SPEC.md` §10 leaves open degrades on both together rather
+/// than on this alone.
+const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// A bucket nothing happened in.
+///
+/// A space rather than the lowest block. `▁` would say "a little happened",
+/// which is a different claim from "nothing did", and over eight buckets the
+/// difference is what tells a settling file from a busy one.
+const SPARK_EMPTY: char = ' ';
+
+/// How many buckets a sparkline may show, widest rung first.
+///
+/// A sparkline is **a thing made of items**, so `SPEC.md` §11.1 makes it break
+/// rather than mark an edge: it drops whole buckets, oldest first, and never
+/// draws a partial one. Halving keeps the remaining strip readable as a shape,
+/// where shaving one bucket at a time would leave widths where the picture is
+/// neither the full window nor an obvious fraction of it.
+const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+
+/// The pulse, widest rung first.
+///
+/// `SPEC.md` §5.1 draws this as a persisting label with a dot rather than a
+/// flash. The mark survives narrowing on its own, for the reason `f follow` is
+/// the last hint standing: it is the one signal on the row that cannot be
+/// recovered from anything else on screen, and one column is what it costs.
+const PULSE_RUNGS: [&str; 3] = ["● just changed", "●", ""];
+
+/// Columns a path keeps before any glance element is allowed to exist.
+///
+/// A heading whose path has been elided past this is a row that has stopped
+/// naming its own file, which is exactly the "truncated to useless" shape I6
+/// forbids. Twelve leaves `…engine/watch.rs` legible at forty columns, where the
+/// counters and the pulse together already want twenty.
+const MIN_PATH_WIDTH: usize = 12;
 
 /// The smallest body a second footer line may leave behind.
 ///
@@ -177,6 +217,50 @@ fn state_rungs(following: bool, position: &str) -> Vec<String> {
     }
     rungs.push(String::new());
     rungs
+}
+
+/// One file heading's parts, gathered so [`Painter::file_row`] takes a shape
+/// rather than seven positional arguments that a caller could transpose.
+struct Heading<'r> {
+    kind: char,
+    path: &'r str,
+    from: Option<&'r str>,
+    churn: Option<(u32, u32)>,
+    spark: &'r [u16; HISTORY_BUCKETS],
+    recency: Recency,
+}
+
+/// Columns something of `width` costs on the right-hand side of a row.
+///
+/// One more than it measures, because [`Painter::put_right`] leaves a gap so the
+/// right-hand text never touches what is drawn from the left. Written once
+/// rather than as a `+ 1` at each call site: the two places that reserve space
+/// and the one that draws it have to agree, and a `+ 1` remembered in two of
+/// three is a row that overwrites its own path at one width in twenty.
+fn reserved(width: usize) -> usize {
+    if width == 0 { 0 } else { width + 1 }
+}
+
+/// A path's buckets as glyphs, or `None` when it has no churn to draw.
+///
+/// `peak` is the busiest bucket **anywhere on the screen**, so two rows drawn
+/// side by side can be compared by height. A bucket with anything in it is never
+/// blank: it takes the lowest block, because "one write" and "no writes" are the
+/// distinction the strip exists to make and rounding the first down to nothing
+/// would erase it.
+fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> Option<[char; HISTORY_BUCKETS]> {
+    if peak == 0 || buckets.iter().all(|&count| count == 0) {
+        return None;
+    }
+    let mut glyphs = [SPARK_EMPTY; HISTORY_BUCKETS];
+    for (glyph, &count) in glyphs.iter_mut().zip(buckets.iter()) {
+        if count == 0 {
+            continue;
+        }
+        let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
+        *glyph = SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1];
+    }
+    Some(glyphs)
 }
 
 /// The widest rung of `ladder` that fits in `room`.
@@ -558,7 +642,20 @@ impl Painter<'_> {
                     from,
                     kind,
                     churn,
-                } => self.file_row(Rect { y, ..area }, *kind, path, from.as_deref(), *churn),
+                    spark,
+                    recency,
+                } => self.file_row(
+                    Rect { y, ..area },
+                    &Heading {
+                        kind: *kind,
+                        path,
+                        from: from.as_deref(),
+                        churn: *churn,
+                        spark,
+                        recency: *recency,
+                    },
+                    view.peak,
+                ),
                 Row::Hunk {
                     old_start,
                     old_lines,
@@ -591,33 +688,78 @@ impl Painter<'_> {
         }
     }
 
-    /// `M src/frame.rs                             +12 -3`
-    fn file_row(
-        &mut self,
-        area: Rect,
-        kind: char,
-        path: &str,
-        from: Option<&str>,
-        churn: Option<(u32, u32)>,
-    ) {
-        let counts = churn
+    /// `M src/frame.rs        ● just changed  ▁▃█▅▂▁▁▁      +12 -3`
+    ///
+    /// Everything to the right of the path is placed right to left, and the
+    /// order it is *allocated* in is not the order it is drawn in. Allocation is
+    /// priority: the counters first because they are the row's content, then the
+    /// pulse, then the sparkline. The pulse outranks the strip for the same
+    /// reason `f follow` is the last hint standing, and because its narrow rung
+    /// costs one column against the strip's four.
+    ///
+    /// Nothing is allowed to take the path below [`MIN_PATH_WIDTH`]. A glance
+    /// element that cost a reader the name of the file would be spending the
+    /// content to decorate it.
+    fn file_row(&mut self, area: Rect, heading: &Heading<'_>, peak: u16) {
+        let mut right = area;
+
+        let counts = heading
+            .churn
             .map(|(added, removed)| format!("+{added} -{removed}"))
             .unwrap_or_default();
-        let taken = self.put_right(area, &counts, self.theme.chrome_dim);
-        let mut room = usize::from(area.width).saturating_sub(taken);
+        let taken = self.put_right(right, &counts, self.theme.chrome_dim);
+        right.width = right.width.saturating_sub(taken as u16);
 
-        let letter = format!("{kind} ");
+        // What is left after the kind letter and the path's floor. Saturating,
+        // so a row too narrow to hold both simply has no glance budget at all.
+        let mut budget = usize::from(right.width).saturating_sub(2 + MIN_PATH_WIDTH);
+
+        let pulse = if heading.recency == Recency::Pulse {
+            widest_fitting(&PULSE_RUNGS, budget)
+        } else {
+            ""
+        };
+        budget = budget.saturating_sub(reserved(width_of(pulse)));
+
+        // Drawn right to left, so each block knows where the one outside it
+        // ended. The strip drawn is the **tail** of the window: dropping buckets
+        // means dropping the oldest, and the oldest are on the left.
+        if let Some(strip) = spark_of(heading.spark, peak) {
+            let buckets = SPARK_RUNGS
+                .iter()
+                .copied()
+                .find(|&rung| reserved(rung) <= budget)
+                .unwrap_or(0);
+            if buckets > 0 {
+                let tail: String = strip[HISTORY_BUCKETS - buckets..].iter().collect();
+                let taken = self.put_right(right, &tail, self.theme.spark);
+                right.width = right.width.saturating_sub(taken as u16);
+            }
+        }
+        if !pulse.is_empty() {
+            let taken = self.put_right(right, pulse, self.theme.pulse);
+            right.width = right.width.saturating_sub(taken as u16);
+        }
+
+        let mut room = usize::from(right.width);
+        let letter = format!("{} ", heading.kind);
         let x = self.put(area.x, area.y, &letter, room, self.theme.kind);
         room = room.saturating_sub(usize::from(x - area.x));
 
-        let mut label = path.to_owned();
-        if let Some(from) = from {
+        let mut label = heading.path.to_owned();
+        if let Some(from) = heading.from {
             // Which file it *was* is the whole content of a rename, so it is
             // part of the label rather than something to reveal on a keypress.
             label.push_str(" ← ");
             label.push_str(from);
         }
-        self.put(x, area.y, &elide_head(&label, room), room, self.theme.path);
+        self.put(
+            x,
+            area.y,
+            &elide_head(&label, room),
+            room,
+            self.theme.recency(heading.recency),
+        );
     }
 
     /// `  128 +    let value = 1;`

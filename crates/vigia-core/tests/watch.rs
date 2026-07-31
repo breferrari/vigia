@@ -217,10 +217,10 @@ fn a_tick_names_the_file_whose_write_landed_last() {
 
         let tick = tick_within(&mut watcher, SETTLE).expect("a burst must produce a tick");
         assert_eq!(
-            tick.newest.as_deref(),
+            tick.newest(),
             Some(last),
             "wrote {first} then {last}, and the tick named {:?}",
-            tick.newest
+            tick.newest()
         );
     }
 }
@@ -253,10 +253,10 @@ fn a_rename_is_followed_to_where_the_file_now_is() {
 
     let tick = tick_within(&mut watcher, SETTLE).expect("a rename must produce a tick");
     assert_eq!(
-        tick.newest.as_deref(),
+        tick.newest(),
         Some("after.txt"),
         "a rename named {:?}, so the view moves to a path that no longer exists",
-        tick.newest
+        tick.newest()
     );
 }
 
