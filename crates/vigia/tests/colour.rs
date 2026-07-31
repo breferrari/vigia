@@ -150,6 +150,24 @@ fn an_override_is_read_loosely_but_refused_rather_than_ignored() {
         );
     }
 
+    // Set but empty is the same as unset, which is not obvious and is reachable
+    // without trying: `$env:X = ''` in PowerShell leaves the variable set and
+    // empty, and a child process sees an empty string rather than nothing.
+    // Without this, clearing a variable that way stops the shell from starting
+    // over a value nobody gave.
+    assert_eq!(
+        depth(false, &[(DEPTH_VAR, ""), ("COLORTERM", "truecolor")]),
+        Depth::Truecolor
+    );
+    assert_eq!(
+        depth(false, &[(DEPTH_VAR, "   "), ("COLORTERM", "truecolor")]),
+        Depth::Truecolor
+    );
+
+    // `NO_COLOR` reads the opposite way on purpose: it has no valid values, so
+    // presence is the whole signal and an empty one still means what it says.
+    assert_eq!(depth(false, &[("NO_COLOR", "")]), Depth::None);
+
     // The half that matters. A variable that was set and had no effect is the one
     // failure a reader cannot diagnose by looking at the screen.
     let refused = Depth::from_env(false, env(&[(DEPTH_VAR, "tru")])).expect_err("refused");

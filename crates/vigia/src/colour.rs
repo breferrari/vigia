@@ -132,7 +132,20 @@ impl Depth {
         windows: bool,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, DepthError> {
-        if let Some(raw) = lookup(DEPTH_VAR) {
+        // **Set-but-empty is the same as unset**, which `VIGIA_THEME` has always
+        // said and this did not. Without the filter, `VIGIA_COLOR=""` reaches the
+        // refusal arm below and stops the shell from starting, over a variable
+        // nobody gave a value to.
+        //
+        // Reachable without trying. `$env:X = ''` in PowerShell leaves the variable
+        // **set and empty**, and a child process sees it: verified on 7.6.3, where
+        // `GetEnvironmentVariable` returns an empty string rather than null. (The
+        // sibling spelling `$env:X = $null` does remove it there, which is worth
+        // knowing because the two look interchangeable and are not.) Every shell
+        // has some way to leave an empty value behind, and a reader who cleared a
+        // variable has said "decide for me", not "here is a value you will not
+        // recognise".
+        if let Some(raw) = lookup(DEPTH_VAR).filter(|value| !value.trim().is_empty()) {
             let value = raw.trim().to_ascii_lowercase();
             match value.as_str() {
                 "never" | "none" | "0" => return Ok(Self::None),
@@ -143,6 +156,12 @@ impl Depth {
                 _ => return Err(DepthError { value: raw }),
             }
         }
+
+        // `NO_COLOR` deliberately does **not** share that rule, and the asymmetry is
+        // the point rather than an oversight. It has no valid values at all, so
+        // presence is the whole signal and an empty one still means what it says.
+        // `VIGIA_COLOR` has nothing *but* values, so an empty one means nothing was
+        // chosen.
 
         if lookup("NO_COLOR").is_some() {
             return Ok(Self::None);
