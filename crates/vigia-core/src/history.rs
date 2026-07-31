@@ -250,6 +250,15 @@ impl History {
     /// diff drawn, but nothing on disk moved, so the file the reader is watching
     /// keeps its label.
     ///
+    /// That is also **why there is no separate `expire`**, which the plan for
+    /// [#38](https://github.com/breferrari/vigia/issues/38) named as a second
+    /// public method. Aging the window is not a thing a caller ever wants on its
+    /// own: it happens on a tick or it does not happen, because a tick is the
+    /// only clock this type has (see the module docs on I1). A public `expire`
+    /// would have been exactly `record` with no paths, and two entry points into
+    /// one rule are two things a caller can get out of step. `vigia::run` calls
+    /// this once per wake and nothing else, which is the whole contract.
+    ///
     /// Called once per tick and never on a timer. See the module docs: the
     /// window is real time and the sampling is event-driven, which is what keeps
     /// I1 intact.
