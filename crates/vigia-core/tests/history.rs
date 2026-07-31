@@ -1,0 +1,193 @@
+//! I10, as an invariant over the public store rather than over its arithmetic.
+//!
+//! > Churn history is bounded by a fixed window and a fixed cap on tracked
+//! > paths, independent of how many files the session changed. A path that ages
+//! > out of the window is dropped entirely.
+//!
+//! The unit tests inside `src/history.rs` cover the rules one step at a time:
+//! one path aging out, one eviction picking the right victim, one bucket
+//! rolling. This file covers the claim those rules add up to, and it covers it
+//! **at the scale I10 is written against**, which is the part no arithmetic test
+//! reaches. `SPEC.md` §5.2 names the case in as many words: *a bulk operation
+//! touching ten thousand files must not grow it past the cap.*
+//!
+//! Every gate here drives the clock by handing an [`Instant`] in rather than by
+//! sleeping. The window is two minutes long, so a suite that waited for real
+//! time could not assert the time rule at all, and one that shortened the window
+//! for testing would be gating a constant the product does not ship.
+//!
+//! Structural throughout: counts and bounds, hardware-independent, no slack.
+//! There is nothing to time here, because I10 is a claim about size.
+
+use std::time::Instant;
+
+use vigia_core::{
+    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, Recency,
+};
+
+/// Paths a bulk operation invents, well past the cap.
+///
+/// `SPEC.md` §5.2's own number. It matters that it is far above
+/// [`HISTORY_PATHS`] rather than just above: a fixture that only grazed the cap
+/// would pass against an off-by-one in the eviction rule.
+const BULK: usize = 10_000;
+
+/// A base far enough ahead that a gate can step forward through a whole window
+/// without leaving the monotonic clock's range.
+fn base() -> Instant {
+    Instant::now() + HISTORY_WINDOW * 4
+}
+
+fn bulk_paths() -> Vec<String> {
+    (0..BULK)
+        .map(|n| format!("src/generated/f{n}.rs"))
+        .collect()
+}
+
+/// The case `SPEC.md` §5.2 names, driven rather than approximated.
+///
+/// Both halves are asserted, and the second is the one that matters. A store
+/// nothing ever filled satisfies a cap the way an empty room satisfies a fire
+/// code, so the bound is only evidence when the eviction counter says the cap
+/// was doing the bounding.
+#[test]
+fn ten_thousand_distinct_paths_leave_the_store_at_the_cap() {
+    let now = base();
+    let mut history = History::starting_at(now);
+    let paths = bulk_paths();
+
+    history.record(paths.iter().map(String::as_str), now);
+
+    assert_eq!(
+        history.tracked(),
+        HISTORY_PATHS,
+        "{BULK} paths left {} tracked, so glance history is bounded by what the \
+         session touched rather than by anything fixed",
+        history.tracked()
+    );
+    assert_eq!(
+        history.stats().evicted_by_cap as usize,
+        BULK - HISTORY_PATHS,
+        "the cap held without evicting, so it was never what bounded the store"
+    );
+    assert_eq!(history.stats().recorded as usize, BULK);
+}
+
+/// The bound has to hold *throughout*, not only when the dust settles.
+///
+/// A store that collected everything and pruned at the end would pass the gate
+/// above while allocating for ten thousand paths, which is the cost I10 exists
+/// to prevent rather than to clean up after.
+#[test]
+fn the_store_never_grows_past_the_cap_at_any_point_during_the_bulk() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    for (n, path) in bulk_paths().iter().enumerate() {
+        history.record([path.as_str()], now);
+        assert!(
+            history.tracked() <= HISTORY_PATHS,
+            "after {n} paths the store held {}, over the cap of {HISTORY_PATHS}",
+            history.tracked()
+        );
+    }
+}
+
+/// The time rule, which is the half a cap cannot provide.
+///
+/// A worktree that goes quiet must empty the store rather than hold its last
+/// picture for ever: `SPEC.md` §5.2 asks for history that survives a file
+/// settling, and I10 is what stops "survives" from meaning "never leaves".
+#[test]
+fn a_window_of_silence_empties_the_store() {
+    let now = base();
+    let mut history = History::starting_at(now);
+    let paths = bulk_paths();
+    history.record(paths.iter().map(String::as_str), now);
+    assert_eq!(history.tracked(), HISTORY_PATHS);
+
+    // One tick, naming nothing, a whole window later. This is the staging case
+    // and the idle case at once: the wake that arrives after a quiet spell.
+    history.record(std::iter::empty(), now + HISTORY_WINDOW);
+
+    assert_eq!(
+        history.tracked(),
+        0,
+        "{} paths survived a whole window of silence",
+        history.tracked()
+    );
+    assert!(history.stats().evicted_by_window >= HISTORY_PATHS as u64);
+    assert_eq!(history.peak(), 0, "the shared scale outlived its samples");
+}
+
+/// A path that ages out is **dropped**, not drawn empty.
+///
+/// The distinction is the whole of I10's second sentence, and it is
+/// observable: a path drawn empty would still occupy a slot the cap counts, so
+/// a store that zeroed instead of removing would be bounded by paths-ever-seen
+/// rather than by the window.
+#[test]
+fn a_path_that_ages_out_is_dropped_rather_than_kept_empty() {
+    let now = base();
+    let mut history = History::starting_at(now);
+    history.record(["src/lib.rs"], now);
+    assert!(history.churn("src/lib.rs").is_some());
+
+    history.record(["src/other.rs"], now + HISTORY_WINDOW);
+
+    assert_eq!(history.churn("src/lib.rs"), None);
+    assert_eq!(history.recency("src/lib.rs"), Recency::Cold);
+    assert_eq!(
+        history.tracked(),
+        1,
+        "the aged-out path is still occupying a slot the cap counts"
+    );
+}
+
+/// Churn survives a file settling, which is the reason this store exists at all.
+///
+/// `SPEC.md` §5.2: the frame path's cache empties the moment a path stops being
+/// changed, and a sparkline built on that would show nothing worth glancing at.
+/// This is the property that had to be added rather than reused.
+#[test]
+fn a_path_keeps_its_churn_after_it_stops_changing() {
+    let now = base();
+    let mut history = History::starting_at(now);
+    history.record(["src/lib.rs"], now);
+
+    // Several ticks later, about other files entirely: the shape of an agent
+    // that moved on to something else.
+    for step in 1..=4 {
+        history.record(["src/other.rs"], now + HISTORY_BUCKET * step);
+    }
+
+    let buckets = history
+        .churn("src/lib.rs")
+        .expect("the settled file lost its history");
+    assert!(
+        buckets.iter().any(|&count| count > 0),
+        "the settled file is tracked but its window is empty"
+    );
+    assert_eq!(
+        history.recency("src/lib.rs"),
+        Recency::Live,
+        "a settled file inside the window is live, not cold and not pulsing"
+    );
+}
+
+/// The buckets have to tile the window exactly.
+///
+/// [`HISTORY_BUCKET`] is an integer division of [`HISTORY_WINDOW`], so a window
+/// that is not a multiple of the bucket count leaves a remainder no bucket
+/// covers: a sample could then fall outside every one of them, and the strip
+/// would silently describe a shorter span than the gradient's boundary uses.
+/// Cheap to check and impossible to notice by reading.
+#[test]
+fn the_window_is_exactly_the_buckets_it_is_divided_into() {
+    assert_eq!(
+        HISTORY_BUCKET * HISTORY_BUCKETS as u32,
+        HISTORY_WINDOW,
+        "the buckets do not tile the window, so a sample can fall outside every \
+         one of them"
+    );
+}

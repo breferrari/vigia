@@ -41,7 +41,10 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{Action, App, Row, Theme, View, body_height, render};
-use vigia_core::{FrameStats, HighlightStats, Highlighter, WatchOptions, Worktree};
+use vigia_core::{
+    FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
+    WatchOptions, Worktree,
+};
 
 use support::{Scratch, generated};
 
@@ -287,6 +290,8 @@ struct Sample {
     tracked_diffs: usize,
     /// Hunk parses [`vigia_core::Highlighter`] is holding between frames.
     tracked_hunks: usize,
+    /// Paths [`vigia_core::History`] is holding, which is I10's own number.
+    tracked_history: usize,
     /// Changed files in the whole worktree at that moment.
     files: usize,
     /// Body height of the last frame drawn, which is what bounds the hunk
@@ -324,6 +329,7 @@ struct Report {
     closest_hunk_bound: Option<(usize, usize)>,
     frame: FrameStats,
     highlight: HighlightStats,
+    history: HistoryStats,
 }
 
 impl Report {
@@ -349,6 +355,14 @@ impl Report {
         self.samples
             .iter()
             .map(|s| s.tracked_hunks)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn max_tracked_history(&self) -> usize {
+        self.samples
+            .iter()
+            .map(|s| s.tracked_history)
             .max()
             .unwrap_or(0)
     }
@@ -395,6 +409,15 @@ impl Report {
             self.samples.iter().map(|s| s.body).max().unwrap_or(0),
             self.closest_hunk_bound,
             self.paths()
+        );
+        println!(
+            "soak: tracked history max {} of cap {}; recorded {}, evicted {} by \
+             cap and {} by window",
+            self.max_tracked_history(),
+            HISTORY_PATHS,
+            self.history.recorded,
+            self.history.evicted_by_cap,
+            self.history.evicted_by_window
         );
         println!(
             "soak: frame computed {}, reused {}, evicted {}, probes {}, {:.1} MiB read",
@@ -624,7 +647,7 @@ const NAME: &str = "soak";
 
 /// Run the soak and report what it did.
 fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration) -> Report {
-    let (tx, rx) = mpsc::channel::<Option<String>>();
+    let (tx, rx) = mpsc::channel::<Vec<String>>();
     let root = scratch.root().to_path_buf();
 
     // The product's own shape: the watcher owns its repository on its own
@@ -637,7 +660,7 @@ fn soak(scratch: &Scratch, files: usize, lines: usize, window: Duration) -> Repo
             .watch(WatchOptions::default())
             .expect("arm the watch");
         while let Some(tick) = watcher.next_tick() {
-            if tx.send(tick.newest).is_err() {
+            if tx.send(tick.paths).is_err() {
                 return;
             }
         }
@@ -660,7 +683,7 @@ fn drive(
     scratch: &Scratch,
     fixture_files: usize,
     window: Duration,
-    rx: &mpsc::Receiver<Option<String>>,
+    rx: &mpsc::Receiver<Vec<String>>,
     rounds: &AtomicU64,
     created: &AtomicU64,
 ) -> Report {
@@ -670,6 +693,10 @@ fn drive(
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    // The third retained cache, and the one this run exists to bound now: it is
+    // the only one that deliberately outlives the diff, so a soak that left it
+    // out would be measuring I3 against two thirds of what the process keeps.
+    let mut history = History::new();
     let theme = Theme::default();
     let mut area = Rect::new(0, 0, AREAS[0].0, AREAS[0].1);
     let mut buffer = Buffer::empty(area);
@@ -695,6 +722,7 @@ fn drive(
                 fds: open_files(),
                 tracked_diffs: frame.tracked(),
                 tracked_hunks: highlighter.tracked(),
+                tracked_history: history.tracked(),
                 files: frame.files().len(),
                 body,
             });
@@ -710,15 +738,20 @@ fn drive(
                     "the watch thread ended after {frames} frames, so the rest of this window would measure a process with nothing to do"
                 )
             }
-            Ok(newest) => {
+            Ok(paths) => {
                 ticks += 1;
+                // Sampled on the wake, before the walk, exactly where
+                // `vigia::run` samples it. I10 is a claim about a store fed one
+                // tick at a time, so a soak feeding it any other way would bound
+                // something the product never builds.
+                history.record(paths.iter().map(String::as_str), Instant::now());
                 // Advance first, follow second: the path is looked up in the
                 // file list, and before the walk that list is the previous
                 // frame's. `vigia::run` says why.
                 match frame.advance() {
                     Ok(()) => {
-                        if let Some(path) = newest {
-                            app.follow(&path, &frame);
+                        if let Some(path) = paths.last() {
+                            app.follow(path, &frame);
                         }
                     }
                     Err(e) => {
@@ -746,7 +779,7 @@ fn drive(
 
         let chrome = app.chrome(NAME);
         body = body_height(area, &chrome, frame.files().len());
-        match app.view(&mut frame, &mut highlighter, body) {
+        match app.view(&mut frame, &mut highlighter, &history, body) {
             Ok(fresh) => {
                 view = fresh;
                 // Every hunk that put a line on this screen, which is exactly
@@ -793,6 +826,7 @@ fn drive(
         closest_hunk_bound,
         frame: frame.stats(),
         highlight: highlighter.stats(),
+        history: history.stats(),
     }
 }
 
@@ -882,9 +916,11 @@ impl Report {
             self.samples.len()
         );
 
-        // The two retained caches, each against the thing that is supposed to
+        // The three retained caches, each against the thing that is supposed to
         // bound it. `Frame` is bounded by the current diff; `Highlighter` is
-        // bounded by the screen, which is the stronger claim.
+        // bounded by the screen, which is the stronger claim; `History` is
+        // bounded by a fixed cap, which is I10 and is the only one of the three
+        // that has to keep holding a path *after* it has left the diff.
         for (at, sample) in self.samples.iter().enumerate() {
             assert!(
                 sample.tracked_diffs <= sample.files,
@@ -895,7 +931,17 @@ impl Report {
                 sample.tracked_diffs,
                 sample.files
             );
+            assert!(
+                sample.tracked_history <= HISTORY_PATHS,
+                "I10: sample {at} at {:?} tracked {} paths against a cap of \
+                 {HISTORY_PATHS}, so glance history is bounded by what the \
+                 session did rather than by anything fixed",
+                sample.at,
+                sample.tracked_history
+            );
         }
+
+        self.gate_history();
 
         let (held, bound) = self
             .closest_hunk_bound
@@ -968,6 +1014,55 @@ impl Report {
             "I3: descriptors went from {baseline} after warmup to {peak}, over \
              the {FD_HEADROOM} of headroom a transient open needs, so something \
              is holding handles open"
+        );
+    }
+
+    /// I10's eviction, which a short window cannot reach.
+    ///
+    /// The bound itself is asserted per sample in [`Report::gate`] and always
+    /// holds. **That assertion on its own is decorative**, and this is what
+    /// makes it mean something: a store nothing ever filled satisfies a cap the
+    /// way an empty room satisfies a fire code.
+    ///
+    /// Neither of I10's two eviction rules is reachable in a short run. The cap
+    /// is [`HISTORY_PATHS`] and the default window invents about eighty paths;
+    /// the time rule is [`vigia_core::HISTORY_WINDOW`] and the default window is
+    /// shorter than it. So this refuses to assert rather than passing on a
+    /// question it never asked, exactly as [`Report::gate_drift`] does and for
+    /// exactly the reason `SPEC.md` §7 gives about gates that cannot say no.
+    ///
+    /// The scheduled runs reach both comfortably: four hours at this rate is
+    /// tens of thousands of paths and a window turned over more than a hundred
+    /// times. And the *deterministic* proof of both rules is
+    /// `crates/vigia-core/tests/history.rs`, which drives ten thousand paths in
+    /// every `cargo test` rather than waiting for a long window to happen to
+    /// produce them. This gate is the one that says the same thing about the
+    /// real process.
+    fn gate_history(&self) {
+        let pressure = self.paths() > HISTORY_PATHS as u64;
+        let aged = self.window > HISTORY_WINDOW;
+        if !pressure && !aged {
+            println!(
+                "note: I10's eviction is not gated by a {:?} window: {} distinct \
+                 paths changed against a cap of {HISTORY_PATHS}, and the window \
+                 is under the {HISTORY_WINDOW:?} a path needs to age out. Run \
+                 with {SECS}={} to enforce it.",
+                self.window,
+                self.paths(),
+                HISTORY_WINDOW.as_secs() + 1
+            );
+            return;
+        }
+
+        assert!(
+            self.history.evicted_by_cap > 0 || self.history.evicted_by_window > 0,
+            "I10: {} path samples were recorded over {} distinct paths in a {:?} \
+             window and nothing was ever evicted, so the store grew with the \
+             session and the per-sample cap above held for a reason that is not \
+             the code",
+            self.history.recorded,
+            self.paths(),
+            self.window
         );
     }
 

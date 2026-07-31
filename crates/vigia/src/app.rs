@@ -5,7 +5,7 @@
 //! optional message. A monitor with more state than that has started becoming a
 //! reviewer.
 
-use vigia_core::{Frame, Highlighter, Result};
+use vigia_core::{Frame, Highlighter, History, Result};
 
 use crate::input::Action;
 use crate::render::Chrome;
@@ -246,13 +246,20 @@ impl App {
     /// to remember; a [`Highlighter`] owns seventy-five compiled grammars, and
     /// putting one behind a derived `Clone` leaves a two-megabyte copy one
     /// keystroke away from being made by accident.
+    ///
+    /// The history is passed in for the same reason and with the same force.
+    /// It is `vigia_core`'s, it is bounded by I10 rather than by anything here,
+    /// and a copy of it behind [`App`]'s derived `Clone` would be a second
+    /// answer to "what changed recently" that nothing keeps in step with the
+    /// first.
     pub fn view(
         &mut self,
         frame: &mut Frame,
         highlighter: &mut Highlighter,
+        history: &History,
         height: usize,
     ) -> Result<View> {
-        let view = View::collect(frame, highlighter, self.position, height)?;
+        let view = View::collect(frame, highlighter, history, self.position, height)?;
         self.position = view.top;
         Ok(view)
     }

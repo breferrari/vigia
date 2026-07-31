@@ -18,7 +18,7 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{Action, App, Position, Row, body_height};
-use vigia_core::{Frame, Highlighter};
+use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
 
@@ -49,10 +49,13 @@ fn after(
     app: &mut App,
     frame: &mut Frame,
     highlighter: &mut Highlighter,
+    history: &History,
     action: Action,
 ) -> Position {
     app.apply(action, frame, body()).expect("apply");
-    app.view(frame, highlighter, body()).expect("view").top
+    app.view(frame, highlighter, history, body())
+        .expect("view")
+        .top
 }
 
 #[test]
@@ -86,13 +89,20 @@ fn scrolling_down_and_back_up_returns_to_where_it_started() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     for rows in [1, 3, SPAN as isize, 17, (SPAN * 12) as isize] {
         let start = app
-            .view(&mut frame, &mut highlighter, body())
+            .view(&mut frame, &mut highlighter, &history, body())
             .expect("view")
             .top;
-        let moved = after(&mut app, &mut frame, &mut highlighter, Action::Scroll(rows));
+        let moved = after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::Scroll(rows),
+        );
         assert_ne!(
             moved, start,
             "scrolling {rows} rows from {start:?} moved nowhere"
@@ -101,6 +111,7 @@ fn scrolling_down_and_back_up_returns_to_where_it_started() {
             &mut app,
             &mut frame,
             &mut highlighter,
+            &history,
             Action::Scroll(-rows),
         );
         assert_eq!(
@@ -122,6 +133,7 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     let mut seen = Vec::new();
     for _ in 0..(SPAN * 3) {
@@ -129,6 +141,7 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
             &mut app,
             &mut frame,
             &mut highlighter,
+            &history,
             Action::Scroll(1),
         ));
     }
@@ -162,12 +175,14 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     let start = SPAN * 3;
     let landed = after(
         &mut app,
         &mut frame,
         &mut highlighter,
+        &history,
         Action::Scroll(start as isize),
     );
     assert_eq!(
@@ -182,6 +197,7 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
             &mut app,
             &mut frame,
             &mut highlighter,
+            &history,
             Action::Scroll(-1),
         ));
     }
@@ -213,11 +229,13 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     let landed = after(
         &mut app,
         &mut frame,
         &mut highlighter,
+        &history,
         Action::Scroll((SPAN * FILES * 4) as isize),
     );
     assert_eq!(
@@ -230,7 +248,7 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
     );
 
     let view = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     assert_eq!(
         view.rows.len(),
@@ -257,16 +275,29 @@ fn home_and_end_go_to_the_first_and_last_file() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     assert_eq!(
-        after(&mut app, &mut frame, &mut highlighter, Action::Bottom),
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::Bottom
+        ),
         Position {
             file: FILES - 1,
             row: 0
         }
     );
     assert_eq!(
-        after(&mut app, &mut frame, &mut highlighter, Action::Top),
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::Top
+        ),
         Position { file: 0, row: 0 }
     );
 }
@@ -282,9 +313,16 @@ fn a_page_keeps_one_row_of_overlap() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     let rows = body();
-    let landed = after(&mut app, &mut frame, &mut highlighter, Action::Page(1));
+    let landed = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Page(1),
+    );
     let absolute = landed.file * SPAN + landed.row;
     assert_eq!(
         absolute,
@@ -293,7 +331,13 @@ fn a_page_keeps_one_row_of_overlap() {
     );
 
     assert_eq!(
-        after(&mut app, &mut frame, &mut highlighter, Action::Page(-1)),
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::Page(-1)
+        ),
         Position { file: 0, row: 0 },
         "paging back did not return to the top"
     );
@@ -311,8 +355,15 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
-    let far = after(&mut app, &mut frame, &mut highlighter, Action::Bottom);
+    let far = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Bottom,
+    );
     assert_eq!(
         far.file,
         FILES - 1,
@@ -327,7 +378,7 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
 
     let view = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     assert_eq!(
         view.top.file,
@@ -345,7 +396,7 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     assert_eq!(frame.files().len(), 0, "the worktree is not clean");
 
     let view = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     assert_eq!(view.files, 0);
     assert_eq!(view.top, Position::default());
@@ -363,6 +414,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     materialise(&mut frame);
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let history = History::new();
 
     // Scroll somewhere first, or the assertion below cannot tell a preserved
     // position from a reset one: they are both (0, 0) at the top of the diff.
@@ -370,6 +422,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
         &mut app,
         &mut frame,
         &mut highlighter,
+        &history,
         Action::Scroll((SPAN * 7 + 2) as isize),
     );
     assert_eq!(
@@ -380,7 +433,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 
     for height in [0, 1] {
         let view = app
-            .view(&mut frame, &mut highlighter, height)
+            .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
         assert_eq!(view.rows.len(), height);
         assert_eq!(view.files, FILES);
@@ -398,7 +451,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     // And the position survives being dragged short and back, which is the whole
     // sequence a reader actually performs.
     let view = app
-        .view(&mut frame, &mut highlighter, body())
+        .view(&mut frame, &mut highlighter, &history, body())
         .expect("view");
     assert_eq!(view.rows.len(), body());
     assert_eq!(

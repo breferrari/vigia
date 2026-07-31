@@ -14,14 +14,22 @@
 //! saving twelve files produces twelve events for one logical change, so
 //! accepted events are coalesced into a single tick.
 //!
-//! A tick also **names the file whose write landed last in it**, which is what
-//! follow mode moves to (`SPEC.md` §11.1, I5). That is not extra work: the
-//! gitignore filter already resolves every event against the worktree root, so
-//! the path is a by-product of a decision this module was making anyway. The
-//! alternative was deriving recency by `stat`-ing every changed file, which is
-//! the cost [#19](https://github.com/breferrari/vigia/issues/19) records as
-//! breaching I9 at scale, for an answer the event was carrying all along.
+//! A tick also **names the files written in it**, which is what follow mode and
+//! the glance history both read (`SPEC.md` §11.1, I5 and I10). That is not extra
+//! work: the gitignore filter already resolves every event against the worktree
+//! root, so the paths are a by-product of a decision this module was making
+//! anyway. The alternative was deriving recency by `stat`-ing every changed
+//! file, which is the cost [#19](https://github.com/breferrari/vigia/issues/19)
+//! records as breaching I9 at scale, for an answer the event was carrying all
+//! along.
+//!
+//! The set a burst reports is **capped**, at the same [`HISTORY_PATHS`] that
+//! bounds the store it feeds. A bulk operation can put ten thousand writes
+//! inside one hundred-millisecond burst, and a tick that carried all of them
+//! would hand I10 a bound to enforce after the allocation had already happened.
+//! What the cap refuses is counted rather than dropped silently.
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,6 +40,7 @@ use std::time::{Duration, Instant};
 use notify::{EventKind, RecursiveMode, Watcher as _};
 
 use crate::error::{Error, Result};
+use crate::history::HISTORY_PATHS;
 
 /// How the watch loop folds a burst of events into one refresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,24 +70,97 @@ impl Default for WatchOptions {
 
 /// A coalesced signal that the working tree changed.
 ///
-/// Not `Copy`, because [`Tick::newest`] owns a path. One allocation per burst,
-/// on a path that only exists while something is being edited.
+/// Not `Copy`, because it owns the paths. One `Vec` per burst, holding paths
+/// that only exist while something is being edited, and never more than
+/// [`HISTORY_PATHS`] of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tick {
     /// Accepted events folded into this tick.
     pub events: u32,
     /// How long the tick was held back to coalesce.
     pub coalesced_for: Duration,
-    /// Repository-relative path of the write that landed **last** in this
-    /// tick, spelled the way [`crate::FileChange::path`] spells it.
+    /// The distinct files written in this tick, spelled the way
+    /// [`crate::FileChange::path`] spells them.
     ///
-    /// This is what I5 follows, and `SPEC.md` §11.1 is the rule it obeys.
+    /// **The write that landed last is the last element**, which is what
+    /// [`Tick::newest`] reads and what I5 follows. The order of everything
+    /// before it is unspecified: I10 bumps a bucket per path and does not care
+    /// which order they arrive in, so imposing one would be a promise with no
+    /// reader and a sort with no purpose.
     ///
-    /// `None` when the burst named no file the view could move to, which is an
-    /// ordinary outcome rather than a failure: a write to `.git/index` is a
-    /// real change and produces a real tick, because the index is the
-    /// left-hand side of every diff drawn, but it is not somewhere to scroll.
-    pub newest: Option<String>,
+    /// Empty when the burst wrote no file the view could move to, which is an
+    /// ordinary outcome rather than a failure: a write to `.git/index` is a real
+    /// change and produces a real tick, because the index is the left-hand side
+    /// of every diff drawn, but it is not somewhere to scroll.
+    pub paths: Vec<String>,
+    /// How many further paths this burst touched past [`HISTORY_PATHS`].
+    ///
+    /// Reported rather than dropped quietly. A bulk operation is exactly when a
+    /// reader most wants to know the picture is partial, and a cap that lied by
+    /// omission would make the sparkline understate the busiest moment a session
+    /// ever has.
+    pub dropped: u32,
+}
+
+impl Tick {
+    /// The write that landed **last** in this tick.
+    ///
+    /// This is what I5 follows, and `SPEC.md` §11.1 is the rule it obeys. It is
+    /// the last element of [`Tick::paths`] rather than a field of its own,
+    /// because two fields holding one fact are two things that can disagree, and
+    /// the one that would be wrong is the one the viewport jumps to.
+    ///
+    /// `None` for a tick that named no followable file. See [`Tick::paths`].
+    pub fn newest(&self) -> Option<&str> {
+        self.paths.last().map(String::as_str)
+    }
+}
+
+/// The paths accumulated while a burst is still being coalesced.
+///
+/// A set rather than a list, because the same file saved four times inside one
+/// burst is one change to the reader and I10 samples per tick. The write that
+/// landed last is tracked alongside it, and is the one path the cap may never
+/// refuse: it is where the viewport is about to move.
+#[derive(Debug, Default)]
+struct Burst {
+    seen: HashSet<String>,
+    newest: Option<String>,
+    dropped: u32,
+}
+
+impl Burst {
+    /// Record a followable path, which by construction is the newest so far.
+    fn push(&mut self, path: String) {
+        if !self.seen.contains(&path) {
+            if self.seen.len() >= HISTORY_PATHS {
+                // Displace something rather than refuse this one. Refusing
+                // would eventually refuse the newest path, and losing that is
+                // losing follow mode's answer at the exact moment it had one.
+                // Which path goes is arbitrary and says so: past the cap this
+                // is a bulk operation, where no individual membership is
+                // information a reader could act on.
+                let victim = self.seen.iter().next().cloned();
+                if let Some(victim) = victim {
+                    self.seen.remove(&victim);
+                }
+                self.dropped += 1;
+            }
+            self.seen.insert(path.clone());
+        }
+        self.newest = Some(path);
+    }
+
+    /// The paths, with the newest moved to the end.
+    fn finish(mut self) -> (Vec<String>, u32) {
+        let Some(newest) = self.newest else {
+            return (self.seen.into_iter().collect(), self.dropped);
+        };
+        self.seen.remove(&newest);
+        let mut paths: Vec<String> = self.seen.into_iter().collect();
+        paths.push(newest);
+        (paths, self.dropped)
+    }
 }
 
 /// What one accepted message meant.
@@ -248,7 +330,10 @@ impl<'repo> Watcher<'repo> {
             let hard_deadline = started + self.options.max_delay;
             let mut quiet_until = started + self.options.quiet;
             let mut events = 1;
-            let mut newest = accepted.newest;
+            let mut burst = Burst::default();
+            if let Some(path) = accepted.newest {
+                burst.push(path);
+            }
 
             // Inside a burst, and only inside it, waiting is bounded.
             loop {
@@ -267,14 +352,13 @@ impl<'repo> Watcher<'repo> {
                             None => break,
                             Some(accepted) if accepted.relevant => {
                                 events += 1;
-                                // Overwritten only by an event that named a
-                                // file. An agent that edits and then stages
-                                // ends its burst on an index write, and
-                                // letting that blank the target would lose
-                                // follow mode's answer at the exact moment it
-                                // had one.
-                                if accepted.newest.is_some() {
-                                    newest = accepted.newest;
+                                // Only an event that named a file adds one. An
+                                // agent that edits and then stages ends its
+                                // burst on an index write, and letting that
+                                // blank the target would lose follow mode's
+                                // answer at the exact moment it had one.
+                                if let Some(path) = accepted.newest {
+                                    burst.push(path);
                                 }
                                 quiet_until = Instant::now() + self.options.quiet;
                             }
@@ -287,10 +371,12 @@ impl<'repo> Watcher<'repo> {
             }
 
             self.stats.ticks += 1;
+            let (paths, dropped) = burst.finish();
             return Some(Tick {
                 events,
                 coalesced_for: started.elapsed(),
-                newest,
+                paths,
+                dropped,
             });
         }
     }
@@ -669,5 +755,90 @@ mod tests {
 
         assert!(!accepted.relevant);
         assert_eq!(accepted.newest, None);
+    }
+
+    /// The burst accumulator, tested directly for the reason `SPEC.md` §7
+    /// gives about the racily-clean guard: the cases that matter need ten
+    /// thousand writes inside one hundred-millisecond window, which no
+    /// integration test in this suite can arrange on demand.
+    mod burst {
+        use super::*;
+
+        fn collect(paths: &[&str]) -> (Vec<String>, u32) {
+            let mut burst = Burst::default();
+            for path in paths {
+                burst.push((*path).to_owned());
+            }
+            burst.finish()
+        }
+
+        #[test]
+        fn the_write_that_landed_last_is_last() {
+            let (paths, dropped) = collect(&["a", "b", "c"]);
+
+            assert_eq!(paths.last().map(String::as_str), Some("c"));
+            assert_eq!(paths.len(), 3);
+            assert_eq!(dropped, 0);
+        }
+
+        /// Four saves of one file inside one burst is one change to the reader,
+        /// and I10 samples per tick rather than per event.
+        #[test]
+        fn a_file_saved_repeatedly_inside_one_burst_appears_once() {
+            let (paths, _) = collect(&["a", "a", "a", "a"]);
+
+            assert_eq!(paths, vec!["a".to_owned()]);
+        }
+
+        /// Repeating an earlier path still moves the follow target, because the
+        /// last write is the last write however many times it has happened
+        /// before.
+        #[test]
+        fn a_repeat_of_an_earlier_path_still_becomes_the_newest() {
+            let (paths, _) = collect(&["a", "b", "a"]);
+
+            assert_eq!(paths.last().map(String::as_str), Some("a"));
+            assert_eq!(paths.len(), 2);
+        }
+
+        #[test]
+        fn a_burst_that_named_nothing_carries_nothing() {
+            let (paths, dropped) = collect(&[]);
+
+            assert!(paths.is_empty());
+            assert_eq!(dropped, 0);
+        }
+
+        /// I10's cap, enforced where the allocation would otherwise happen. A
+        /// tick that carried ten thousand paths would hand the store a bound to
+        /// apply after the cost had already been paid.
+        #[test]
+        fn a_bulk_burst_is_capped_and_says_how_much_it_refused() {
+            let owned: Vec<String> = (0..10_000).map(|n| format!("f{n}")).collect();
+            let mut burst = Burst::default();
+            for path in &owned {
+                burst.push(path.clone());
+            }
+            let (paths, dropped) = burst.finish();
+
+            assert_eq!(paths.len(), HISTORY_PATHS);
+            assert_eq!(dropped, 10_000 - HISTORY_PATHS as u32);
+        }
+
+        /// The one path the cap may never refuse. Losing it loses follow mode's
+        /// answer, and it would be lost precisely during a bulk operation, which
+        /// is when the viewport moving matters most.
+        #[test]
+        fn the_newest_path_survives_the_cap() {
+            let owned: Vec<String> = (0..10_000).map(|n| format!("f{n}")).collect();
+            let mut burst = Burst::default();
+            for path in &owned {
+                burst.push(path.clone());
+            }
+            let (paths, _) = burst.finish();
+
+            assert_eq!(paths.last().map(String::as_str), Some("f9999"));
+            assert_eq!(paths.len(), HISTORY_PATHS, "and it did not exceed the cap");
+        }
     }
 }

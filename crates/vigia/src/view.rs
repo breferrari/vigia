@@ -26,7 +26,10 @@
 //! [`vigia_core::FileChange`] cannot be constructed outside its crate, so a view
 //! assembled by hand is the only version of one a snapshot test can reach.
 
-use vigia_core::{ChangeKind, FileDiff, Frame, Highlighter, LineKind, Pass, Result, Span};
+use vigia_core::{
+    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, LineKind, Pass, Recency,
+    Result, Span,
+};
 
 /// What a row of the body is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +44,19 @@ pub enum Row {
         kind: char,
         /// Lines added and removed, or `None` when there is no line-level diff.
         churn: Option<(u32, u32)>,
+        /// This file's churn over the glance window, oldest bucket first.
+        ///
+        /// Raw counts rather than heights. Which glyph a count becomes is the
+        /// renderer's, the same way a [`Row::Line`] carries its spans as classes
+        /// and lets the renderer pick the colour: the scale is shared across the
+        /// screen and lives on [`View::peak`].
+        ///
+        /// All zeroes for a file `vigia` has not seen change, which is the
+        /// ordinary case for a worktree that was already dirty at startup.
+        spark: [u16; HISTORY_BUCKETS],
+        /// How recently this file changed, which is what dims a settled row and
+        /// what puts the pulse on one that just moved.
+        recency: Recency,
     },
     /// A hunk boundary, drawn as git's `@@ -a,b +c,d @@`.
     Hunk {
@@ -119,6 +135,17 @@ pub struct View {
     /// Reported so a test can hold the *shell* to I4, not just the core. One,
     /// once the position has settled and a single file fills the screen.
     pub read: usize,
+    /// The busiest bucket any tracked file holds, which every sparkline on this
+    /// screen is drawn against.
+    ///
+    /// One scale for the whole view rather than one per row. The question a
+    /// reader asks down a file list is which file is busiest, and a row scaled
+    /// against its own maximum draws every file at full height the moment it is
+    /// the busiest thing it has ever been, which answers a question nobody asked.
+    ///
+    /// Zero means nothing is tracked, and a renderer must read it as "draw no
+    /// sparkline" rather than dividing by it.
+    pub peak: u16,
 }
 
 /// The letter shown for a kind of change.
@@ -200,9 +227,20 @@ impl View {
     /// `position.file` is clamped rather than trusted, because
     /// [`vigia_core::Frame::diff`] panics on an index that has fallen off the
     /// end, and a scroll position is exactly the index that can.
+    ///
+    /// `history` is read per **drawn** row and never per changed file, so the
+    /// glance elements follow the viewport the way the reads already do. It
+    /// costs no file read, no `stat` and no diff: everything it answers was
+    /// recorded from the filesystem event that woke the loop. That is what
+    /// `tests/reads.rs` asserts by not moving.
+    ///
+    /// No clock is passed in and none is read here. `History` advances on ticks,
+    /// so recency is whatever the last event left it as, which is what keeps I1
+    /// intact and what makes every test over these rows deterministic.
     pub fn collect(
         frame: &mut Frame,
         highlighter: &mut Highlighter,
+        history: &History,
         position: Position,
         height: usize,
     ) -> Result<Self> {
@@ -228,6 +266,7 @@ impl View {
                 row: position.row,
             },
             read: 0,
+            peak: history.peak(),
         };
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.
@@ -271,7 +310,7 @@ impl View {
                 placed = true;
             }
 
-            view.take_file(&change.kind, diff, &mut highlighter, skip, height);
+            view.take_file(&change.kind, diff, &mut highlighter, history, skip, height);
             skip = 0;
             index += 1;
         }
@@ -295,6 +334,7 @@ impl View {
         kind: &ChangeKind,
         diff: &FileDiff,
         highlighter: &mut Pass<'_>,
+        history: &History,
         skip: usize,
         height: usize,
     ) {
@@ -306,6 +346,11 @@ impl View {
                 from: source_of(kind).map(str::to_owned),
                 kind: letter(kind),
                 churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
+                // Asked for only on a row actually pushed, the same rule the
+                // highlighter follows below. A heading scrolled past above the
+                // window costs two hash lookups it would never have drawn.
+                spark: history.churn(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
+                recency: history.recency(&diff.path),
             });
         }
         n += 1;

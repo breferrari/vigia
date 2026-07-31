@@ -9,7 +9,7 @@
 //! that work attaches to, not an attempt at it.
 
 use ratatui::style::{Color, Modifier, Style};
-use vigia_core::Class;
+use vigia_core::{Class, Recency};
 
 /// Every colour the shell draws with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,8 +18,20 @@ pub struct Theme {
     pub chrome: Style,
     /// Secondary text on those lines: key hints, counts.
     pub chrome_dim: Style,
-    /// A changed file's path.
+    /// A changed file's path, at the recency the reader should read it as.
+    ///
+    /// Three styles rather than one, because `SPEC.md` §5 makes intensity carry
+    /// recency: the mockup's dimmed `Cargo.toml` is how the eye finds what moved
+    /// without reading anything. Resolved through [`Theme::recency`].
     pub path: Style,
+    /// A path that changed inside the glance window but not in the last tick.
+    pub path_live: Style,
+    /// A path nothing has written since `vigia` started watching.
+    pub path_cold: Style,
+    /// The `● just changed` label on a file that moved in the last tick.
+    pub pulse: Style,
+    /// A churn sparkline's blocks.
+    pub spark: Style,
     /// The letter naming what happened to a file.
     pub kind: Style,
     /// A hunk's `@@` header.
@@ -56,6 +68,24 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// The style a file heading is drawn in at `recency`.
+    ///
+    /// **Three steps, not a fade, and that is a loss rather than a design.**
+    /// `SPEC.md` §5.1 asks for a recency *gradient*, and sixteen foreground-only
+    /// colours have exactly three intensities to spend: bold, plain and dim.
+    /// A real gradient needs the truecolour ramp that
+    /// [#11](https://github.com/breferrari/vigia/issues/11) brings, and this is
+    /// the seam it attaches to. Recorded out loud for the same reason §11.1
+    /// records the diff signal narrowing to the sigil column: §5 makes shape and
+    /// colour the whole differentiator, so spending some of it is worth saying.
+    pub fn recency(&self, recency: Recency) -> Style {
+        match recency {
+            Recency::Pulse => self.path,
+            Recency::Live => self.path_live,
+            Recency::Cold => self.path_cold,
+        }
+    }
+
     /// The style a run of `class` is drawn in.
     ///
     /// [`Class::Plain`] takes [`Theme::context`] whatever line it lands on, and
@@ -86,7 +116,20 @@ impl Default for Theme {
         Self {
             chrome: Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             chrome_dim: Style::new().fg(Color::DarkGray),
+            // Three rungs of one ramp: bright and bold, bright, then plain.
+            // `Gray` rather than `DarkGray` for the coldest, deliberately. Every
+            // file in an already-dirty worktree is cold until something writes
+            // to it, so this is what the **first** frame of a session looks
+            // like, and a path drawn in the same near-invisible grey as a
+            // comment would open the tool on a screen nobody can read.
             path: Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+            path_live: Style::new().fg(Color::White),
+            path_cold: Style::new().fg(Color::Gray),
+            // Cyan rather than a diff colour. The pulse says *when*, and green
+            // or red beside a path would read as *what*, which the sigil column
+            // already means two rows below.
+            pulse: Style::new().fg(Color::Cyan),
+            spark: Style::new().fg(Color::Cyan),
             kind: Style::new().fg(Color::Yellow),
             hunk: Style::new().fg(Color::Blue),
             gutter: Style::new().fg(Color::DarkGray),

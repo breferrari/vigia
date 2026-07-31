@@ -24,7 +24,7 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{Chrome, HINT_SEPARATOR, Position, Row, Theme, View, body_height, render};
-use vigia_core::LineKind;
+use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
 /// The mark meaning "this continues past the right edge".
 const CONTINUES: char = '›';
@@ -150,6 +150,8 @@ fn every_row_kind() -> View {
                 from: None,
                 kind: 'M',
                 churn: Some((3, 1)),
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
             Row::Hunk {
                 old_start: 258,
@@ -169,6 +171,8 @@ fn every_row_kind() -> View {
                 from: None,
                 kind: 'M',
                 churn: None,
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
             Row::Note("binary"),
             Row::File {
@@ -176,11 +180,14 @@ fn every_row_kind() -> View {
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
                 churn: Some((0, 0)),
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
         ],
         files: 3,
         top: Position::default(),
         read: 3,
+        peak: 0,
     }
 }
 
@@ -194,6 +201,8 @@ fn awkward() -> View {
                 from: None,
                 kind: 'M',
                 churn: Some((12, 3)),
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
             line(LineKind::Added, 2, "🙂🙂🙂 tail"),
@@ -201,6 +210,7 @@ fn awkward() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     }
 }
 
@@ -210,6 +220,7 @@ fn empty() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
+        peak: 0,
     }
 }
 
@@ -234,6 +245,7 @@ fn numbered(n: usize, files: usize) -> View {
         files,
         top: Position::default(),
         read: 1,
+        peak: 0,
     }
 }
 
@@ -277,7 +289,56 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         ("awkward content, following", awkward(), following()),
         ("clean worktree, following", empty(), following()),
         ("clean worktree, idle", empty(), chrome()),
+        // Added to the *shared* list rather than given gates of its own, which
+        // is the point: every structural rule already swept here now covers the
+        // glance elements too. A sparkline and a pulse are new things competing
+        // for the same row as the path and the counters, so "no row
+        // over-occupies" and "a label that lost characters says so" are exactly
+        // the assertions they can break.
+        ("glance elements, idle", glancing(), chrome()),
+        ("glance elements, following", glancing(), following()),
     ]
+}
+
+/// A file heading at each rung of the recency ladder, with churn behind it.
+///
+/// **Every bucket is non-zero on purpose.** An empty bucket draws as a space, so
+/// a fixture with gaps in it makes the strip's *width* unobservable from the
+/// rendered row, and the ladder gate below could not tell four buckets from
+/// eight. The counts still differ, so the shared scale is exercised as well.
+fn glancing() -> View {
+    View {
+        rows: vec![
+            Row::File {
+                path: "crates/vigia-core/src/watch.rs".to_owned(),
+                from: None,
+                kind: 'M',
+                churn: Some((42, 7)),
+                spark: [1, 2, 4, 6, 8, 9, 11, 12],
+                recency: Recency::Pulse,
+            },
+            Row::File {
+                path: "crates/vigia/src/render.rs".to_owned(),
+                from: None,
+                kind: 'M',
+                churn: Some((11, 3)),
+                spark: [1, 1, 2, 2, 1, 3, 2, 1],
+                recency: Recency::Live,
+            },
+            Row::File {
+                path: "Cargo.toml".to_owned(),
+                from: None,
+                kind: 'M',
+                churn: Some((2, 0)),
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
+            },
+        ],
+        files: 3,
+        top: Position::default(),
+        read: 3,
+        peak: 12,
+    }
 }
 
 #[test]
@@ -662,6 +723,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
     let long_name = Chrome {
         worktree: "a-worktree-with-a-very-long-name-indeed".to_owned(),
@@ -778,6 +840,7 @@ fn a_clipped_content_line_says_it_continues() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
 
     let mut saw_fit = false;
@@ -805,5 +868,91 @@ fn a_clipped_content_line_says_it_continues() {
     assert!(
         saw_fit && saw_cut,
         "the sweep did not cover both directions"
+    );
+}
+
+/// `SPEC.md` §11.1's rule, applied to the newest thing on the row.
+///
+/// > A thing made of items breaks, a thing made of characters marks its edge,
+/// > and content is neither.
+///
+/// A sparkline is made of items, so it drops **whole buckets** and never draws a
+/// partial one. Observable because [`glancing`]'s buckets are all non-zero: an
+/// empty bucket is a space, so a fixture with gaps would make the strip's width
+/// unreadable from the row and this gate would be asserting about nothing.
+///
+/// The rungs are read off the screen rather than imported. A test comparing the
+/// renderer's ladder against the renderer's own constant would agree with itself
+/// at every width, which is the failure the hint-bar gate already documents.
+#[test]
+fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
+    let ramp = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let mut seen = std::collections::BTreeSet::new();
+
+    for (name, view, chrome) in cases() {
+        for width in WIDTHS {
+            for row in rows_at(width, 6, &view, &chrome) {
+                let buckets = row.chars().filter(|c| ramp.contains(c)).count();
+                assert!(
+                    buckets <= 8,
+                    "{name}: {buckets} buckets at {width} columns, over the eight \
+                     the window holds: {row:?}"
+                );
+                if buckets > 0 {
+                    seen.insert(buckets);
+                }
+            }
+        }
+    }
+
+    // Whole rungs only. Any count between them is a strip that was squeezed
+    // rather than shortened, which is the shape the rule forbids.
+    assert_eq!(
+        seen,
+        [4usize, 8].into_iter().collect(),
+        "the sparkline was drawn at bucket counts {seen:?}; only whole rungs are \
+         legal, and both of them have to be reachable or the ladder has a rung \
+         no width can produce"
+    );
+}
+
+/// The pulse may take room from the path. It may not take the path.
+///
+/// `MIN_PATH_WIDTH` is the floor, and this is the assertion that makes it load
+/// bearing: at every width from one to a hundred and twenty, a heading either
+/// names its file or says which end it lost. A glance element that reduced a row
+/// to `M …` would have spent the content to decorate it.
+#[test]
+fn the_pulse_label_never_pushes_a_path_off_its_own_row() {
+    let view = glancing();
+    let mut narrowest_named = u16::MAX;
+
+    for width in WIDTHS {
+        let rows = rows_at(width, 6, &view, &following());
+        let heading = &rows[1];
+        // The pulse is whole or absent: it is a ladder, so it never appears cut.
+        let dotted = heading.contains('●');
+        assert!(
+            !dotted || heading.contains("● just changed") || !heading.contains("just"),
+            "at {width} columns the pulse is drawn part-way: {heading:?}"
+        );
+
+        // And the row still names its file, by tail or by mark.
+        let tail = "watch.rs";
+        if heading.contains(tail) {
+            narrowest_named = narrowest_named.min(width);
+        } else {
+            assert!(
+                width < 20,
+                "at {width} columns the heading no longer contains {tail:?}: \
+                 {heading:?}"
+            );
+        }
+    }
+
+    assert!(
+        narrowest_named <= 24,
+        "the heading only named its file from {narrowest_named} columns up, so a \
+         glance element is eating the path well before the pane gets small"
     );
 }

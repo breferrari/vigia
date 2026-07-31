@@ -27,7 +27,7 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use vigia::{Chrome, Position, Row, Theme, View, body_height, render};
-use vigia_core::{Class, LineKind, Span};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
 /// The mark the renderer writes where a row runs past its edge.
 ///
@@ -122,6 +122,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     }
 }
 
@@ -143,6 +144,8 @@ fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
         from: None,
         kind,
         churn: Some((added, removed)),
+        spark: [0; HISTORY_BUCKETS],
+        recency: Recency::Cold,
     }
 }
 
@@ -177,6 +180,7 @@ fn one_file() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     }
 }
 
@@ -213,6 +217,7 @@ fn a_clean_worktree_says_so_rather_than_showing_nothing() {
         files: 0,
         top: Position::default(),
         read: 0,
+        peak: 0,
     };
     insta::assert_snapshot!(screen(40, 6, &view, &chrome()));
 }
@@ -226,6 +231,8 @@ fn a_file_with_no_line_diff_says_why() {
                 from: None,
                 kind: 'M',
                 churn: None,
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
             Row::Note("binary"),
             Row::File {
@@ -233,6 +240,8 @@ fn a_file_with_no_line_diff_says_why() {
                 from: None,
                 kind: 'U',
                 churn: None,
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
             Row::Note("unresolved conflict"),
             Row::File {
@@ -240,11 +249,14 @@ fn a_file_with_no_line_diff_says_why() {
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
                 churn: Some((0, 0)),
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
             },
         ],
         files: 3,
         top: Position::default(),
         read: 3,
+        peak: 0,
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
 }
@@ -264,6 +276,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
 }
@@ -291,6 +304,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
     assert!(
@@ -362,6 +376,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
     let backend = screen(60, 5, &view, &chrome());
     let rendered = format!("{backend}");
@@ -389,6 +404,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
 
     for width in 6..48u16 {
@@ -433,6 +449,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         files: 1,
         top: Position::default(),
         read: 1,
+        peak: 0,
     };
 
     let wide = format!("{}", screen(40, 3, &view, &chrome()));
@@ -706,5 +723,157 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
          stop at four, and only a counter that restarted at the span boundary \
          would put it anywhere else",
         b - a
+    );
+}
+
+/// The three rungs of the recency ladder on one screen, with churn behind them.
+///
+/// Deliberately the mockup's own three files and counts: `assets/preview.svg`
+/// draws `watch.rs +42 −7` bright, `frame.rs +11 −3` below it and `Cargo.toml
+/// +2 −0` visibly fainter than either. `SPEC.md` §5.1 reads that dimmed row as a
+/// recency gradient, so a fixture that invented its own files would be checking
+/// the renderer against nothing in particular.
+///
+/// The buckets are chosen so the two live files disagree about their own peak
+/// and agree about the screen's, which is what makes the scale assertion below
+/// able to fail.
+fn glancing() -> View {
+    View {
+        rows: vec![
+            Row::File {
+                path: "src/engine/watch.rs".to_owned(),
+                from: None,
+                kind: 'M',
+                churn: Some((42, 7)),
+                spark: [0, 0, 1, 3, 8, 5, 9, 12],
+                recency: Recency::Pulse,
+            },
+            Row::File {
+                path: "src/render/frame.rs".to_owned(),
+                from: None,
+                kind: 'M',
+                churn: Some((11, 3)),
+                spark: [0, 0, 0, 2, 1, 0, 0, 0],
+                recency: Recency::Live,
+            },
+            Row::File {
+                path: "Cargo.toml".to_owned(),
+                from: None,
+                kind: 'M',
+                churn: Some((2, 0)),
+                spark: [0; HISTORY_BUCKETS],
+                recency: Recency::Cold,
+            },
+        ],
+        files: 3,
+        top: Position::default(),
+        read: 3,
+        peak: 12,
+    }
+}
+
+/// Everything on row `y`, as the reader sees it.
+fn row_text(backend: &TestBackend, y: u16) -> String {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .map(|x| buffer[(x, y)].symbol().to_owned())
+        .collect()
+}
+
+#[test]
+fn the_glance_elements_at_eighty_columns() {
+    insta::assert_snapshot!(screen(80, 5, &glancing(), &chrome()));
+}
+
+#[test]
+fn the_glance_elements_at_forty_columns() {
+    insta::assert_snapshot!(screen(40, 5, &glancing(), &chrome()));
+}
+
+#[test]
+fn a_file_that_just_changed_says_so_and_the_rest_dim() {
+    // Two claims, and the second is invisible to every snapshot in this file
+    // because `TestBackend`'s `Display` drops styles: the pulse label belongs to
+    // exactly one row, and the three rungs have to be three *different*
+    // intensities or the gradient `SPEC.md` §5.1 asks for is not being drawn.
+    let theme = Theme::default();
+    let backend = screen(80, 5, &glancing(), &chrome());
+
+    // Body rows start at y = 1; the header is y = 0.
+    let pulsing = row_text(&backend, 1);
+    assert!(
+        pulsing.contains("just changed"),
+        "the file named by the newest tick carries no pulse: {pulsing:?}"
+    );
+    for y in [2, 3] {
+        let row = row_text(&backend, y);
+        assert!(
+            !row.contains("just changed"),
+            "row {y} carries the pulse too, so it marks more than the newest \
+             tick: {row:?}"
+        );
+    }
+
+    // The path's own cell, past the kind letter and its space. Compared on
+    // foreground and modifiers rather than on the whole `Style`, because a cell
+    // carries the buffer's own defaults for everything the theme left alone.
+    let path_x = 2;
+    let drawn = |y: u16| {
+        let style = backend.buffer()[(path_x, y)].style();
+        (style.fg, style.add_modifier)
+    };
+    let want = |recency| {
+        let style = theme.recency(recency);
+        (style.fg, style.add_modifier)
+    };
+    let rungs = [Recency::Pulse, Recency::Live, Recency::Cold];
+    for (y, recency) in (1..=3).zip(rungs) {
+        assert_eq!(
+            drawn(y),
+            want(recency),
+            "row {y} is not drawn as {recency:?}"
+        );
+    }
+    // Three rungs have to be three *different* intensities, or the gradient
+    // `SPEC.md` §5.1 asks for is being claimed rather than drawn.
+    assert!(
+        drawn(1) != drawn(2) && drawn(2) != drawn(3) && drawn(1) != drawn(3),
+        "two rungs of the recency ladder are drawn identically: {:?}",
+        [drawn(1), drawn(2), drawn(3)]
+    );
+}
+
+#[test]
+fn a_sparkline_scales_against_the_busiest_file_not_itself() {
+    // The whole reason `View::peak` exists. Scaled per file, both rows below
+    // would top out at the full block and the eye would read two files of very
+    // different activity as equally busy. Scaled against the screen, only the
+    // busiest one reaches the top.
+    let backend = screen(80, 5, &glancing(), &chrome());
+    let busiest = row_text(&backend, 1);
+    let quieter = row_text(&backend, 2);
+
+    assert!(
+        busiest.contains('█'),
+        "the busiest file's tallest bucket is not the top of the ramp: \
+         {busiest:?}"
+    );
+    assert!(
+        !quieter.contains('█'),
+        "a file whose busiest bucket is 2 against a screen peak of 12 reached \
+         the top of the ramp, so each row is being scaled against itself: \
+         {quieter:?}"
+    );
+    assert!(
+        quieter.contains('▁'),
+        "the quieter file drew no bucket at all, so a bucket with something in \
+         it is rounding down to nothing: {quieter:?}"
+    );
+    // A file nothing has written since startup has no strip, rather than an
+    // empty one taking columns from its own path.
+    let cold = row_text(&backend, 3);
+    assert!(
+        !cold.contains('▁') && !cold.contains('█'),
+        "a file with no churn drew a sparkline: {cold:?}"
     );
 }

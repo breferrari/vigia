@@ -48,9 +48,10 @@ pub use view::{Position, Row, View, rows_in};
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
+use std::time::Instant;
 
 use ratatui::layout::Rect;
-use vigia_core::{Highlighter, WatchOptions, Worktree};
+use vigia_core::{Highlighter, History, WatchOptions, Worktree};
 
 /// Anything that stops the shell from starting or from drawing.
 ///
@@ -65,11 +66,11 @@ enum Wake {
     Input(ratatui::crossterm::event::Event),
     /// The working tree changed, coalesced into one signal by the core.
     ///
-    /// Carries the path of the write that landed last in the burst, when it
-    /// named one, which is what follow mode moves to. `None` is ordinary: a
-    /// staging write changes every diff's left-hand side and is nowhere to
-    /// scroll to.
-    Tick(Option<String>),
+    /// Carries every file the burst wrote, with the one that landed last at the
+    /// end. The tail is what follow mode moves to (I5) and the whole list is
+    /// what the glance history samples (I10). Empty is ordinary: a staging write
+    /// changes every diff's left-hand side and is nowhere to scroll to.
+    Tick(Vec<String>),
     /// The watch stopped, so the shell is a still picture.
     ///
     /// Reported rather than fatal. A diff nobody is watching for changes is
@@ -109,6 +110,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // ours by the time this runs. The placement is right and the reason was
         // wrong.
         highlighter: Highlighter::new(),
+        // Empty at startup, so every file in an already-dirty worktree draws
+        // cold until something writes to it. That is the honest first frame: a
+        // monitor has no way to know what happened before it was looking, and
+        // inventing a recency for it would light up rows nothing has touched.
+        history: History::new(),
         theme: Theme::default(),
         name: short_name(worktree.workdir()),
         screen: View::default(),
@@ -146,8 +152,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     Err(e) => shell.app.warn(e.to_string()),
                 }
             }
-            Wake::Tick(newest) => {
+            Wake::Tick(paths) => {
                 shell.app.clear_notice();
+                // Sampled here and nowhere else, which is the whole of I10's
+                // relationship with I1: the window is real time, and the only
+                // thing that moves it is a wake the loop was already having.
+                // An empty burst still rolls the window and still leaves the
+                // pulse where it was, which is the staging case.
+                shell
+                    .history
+                    .record(paths.iter().map(String::as_str), Instant::now());
                 // The core leaves the frame exactly as it was on failure, so the
                 // previous diff is still valid to draw. Saying so on the footer
                 // beats blanking a pane for a reason the reader cannot see.
@@ -159,8 +173,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // to sit, which is the shape of a bug that only appears
                     // when the list changes length.
                     Ok(()) => {
-                        if let Some(path) = newest {
-                            shell.app.follow(&path, &frame);
+                        if let Some(path) = paths.last() {
+                            shell.app.follow(path, &frame);
                         }
                     }
                     Err(e) => shell.app.warn(e.to_string()),
@@ -185,6 +199,15 @@ struct Shell {
     /// [`App::view`]. Bounded by the viewport rather than by the diff, so a day
     /// of scrolling leaves it the size of one screen.
     highlighter: Highlighter,
+    /// What changed recently: the source for the sparkline, the recency gradient
+    /// and the pulse.
+    ///
+    /// The one thing the shell keeps that deliberately outlives the diff. A file
+    /// that settles leaves [`vigia_core::Frame`]'s cache and must not leave this,
+    /// or the strip would empty exactly when a reader glances over to ask what
+    /// was busy. I10 bounds it instead, by a window and a path cap rather than by
+    /// the session.
+    history: History,
     theme: Theme,
     /// What the header calls the working tree.
     name: String,
@@ -214,7 +237,10 @@ impl Shell {
         // keeps this row budget and the renderer's layout in agreement.
         let chrome = self.app.chrome(&self.name);
         let height = body_height(self.area()?, &chrome, frame.files().len());
-        match self.app.view(frame, &mut self.highlighter, height) {
+        match self
+            .app
+            .view(frame, &mut self.highlighter, &self.history, height)
+        {
             Ok(view) => self.screen = view,
             Err(e) => self.app.warn(e.to_string()),
         }
@@ -265,7 +291,7 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>) {
         // the events missed. That is what makes a recursive watch's blind spot
         // over freshly created directories harmless here.
         while let Some(tick) = watcher.next_tick() {
-            if tx.send(Wake::Tick(tick.newest)).is_err() {
+            if tx.send(Wake::Tick(tick.paths)).is_err() {
                 return;
             }
         }

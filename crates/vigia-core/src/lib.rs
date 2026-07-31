@@ -21,6 +21,11 @@
 //! on by default and cannot stream either, so today it costs nothing, and a
 //! scrollbar needs the file count anyway. `SPEC.md` §10 tracks it.
 //!
+//! [`History`] is the one thing here that deliberately outlives the diff. A
+//! `Frame` forgets a path the moment it stops being changed, which is how I3 is
+//! argued; a churn sparkline is about what was hot a minute ago, so it must not.
+//! I10 is what keeps "must not forget" from becoming "never forgets".
+//!
 //! ```no_run
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let worktree = vigia_core::Worktree::discover(".")?;
@@ -40,6 +45,7 @@ mod change;
 mod error;
 mod frame;
 mod highlight;
+mod history;
 mod hunk;
 mod timing;
 mod watch;
@@ -49,6 +55,9 @@ pub use change::{ChangeKind, FileChange};
 pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
 pub use highlight::{CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, Span};
+pub use history::{
+    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, HistoryStats, Recency,
+};
 pub use hunk::{CONTEXT, FileDiff, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};

@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use vigia::{App, body_height};
-use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, LineKind, Samples};
+use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
 
 use support::{Scratch, budget, delta, exclusively_timed, highlight_delta, settle};
 
@@ -144,6 +144,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let mut history = History::new();
     let height = body(&app, FILES);
 
     if depth > 0 {
@@ -157,7 +158,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
         )
         .expect("scroll");
         let view = app
-            .view(&mut frame, &mut highlighter, height)
+            .view(&mut frame, &mut highlighter, &history, height)
             .expect("view");
         assert_eq!(
             view.top.row, depth,
@@ -181,24 +182,36 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // the other pane and is deliberately outside the timed region.
     let mut edits = 0usize;
     let mut marker = String::new();
-    let mut next_frame = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
-        marker = format!("fn edited_{edits}() {{ let value = {edits}; }}");
-        scratch.edit_line(EDITED_PATH, 0, &marker);
-        edits += 1;
-        time(|| {
-            frame.advance().expect("advance");
-            app.view(frame, highlighter, height).expect("view");
-        })
-    };
+    let mut next_frame =
+        |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
+            marker = format!("fn edited_{edits}() {{ let value = {edits}; }}");
+            scratch.edit_line(EDITED_PATH, 0, &marker);
+            edits += 1;
+            time(|| {
+                // Inside the timed region on purpose. `vigia::run` samples the
+                // history on the same wake that advances the frame, so a gate that
+                // recorded outside `time` would be timing a frame path the product
+                // does not have. It is what I10 costs per tick, measured where I9
+                // can see it.
+                history.record([EDITED_PATH], Instant::now());
+                frame.advance().expect("advance");
+                app.view(frame, highlighter, history, height).expect("view");
+            })
+        };
 
     for _ in 0..WARMUP_FRAMES {
-        next_frame(&mut frame, &mut app, &mut highlighter);
+        next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
     }
 
     let before = highlighter.stats();
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
-        frames.push(next_frame(&mut frame, &mut app, &mut highlighter));
+        frames.push(next_frame(
+            &mut frame,
+            &mut app,
+            &mut highlighter,
+            &mut history,
+        ));
     }
     let cost = highlight_delta(before, highlighter.stats());
 
@@ -215,7 +228,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // The screen has to have been full, or a frame that drew two rows would be
     // a cheap frame for a reason that is not the code.
     let view = app
-        .view(&mut frame, &mut highlighter, height)
+        .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
     assert_eq!(
         view.rows.len(),
@@ -313,6 +326,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+    let mut history = History::new();
     let height = body(&app, FILES);
 
     if !absolute_gates_apply() {
@@ -321,18 +335,20 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
 
     let _timed = exclusively_timed();
 
-    let draw = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
-        time(|| {
-            frame.advance().expect("advance");
-            app.view(frame, highlighter, height).expect("view");
-        })
-    };
+    let draw =
+        |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
+            time(|| {
+                history.record([EDITED_PATH], Instant::now());
+                frame.advance().expect("advance");
+                app.view(frame, highlighter, history, height).expect("view");
+            })
+        };
 
     // Warm up *before* the first rewrite, not after. Warming afterwards would
     // spend the margin this gate exists to measure and leave the samples in the
     // settled state every other gate here already covers.
     for _ in 0..WARMUP_FRAMES {
-        draw(&mut frame, &mut app, &mut highlighter);
+        draw(&mut frame, &mut app, &mut highlighter, &mut history);
     }
 
     // The event, re-established every `REWRITE_EVERY` frames, and the frame that
@@ -358,7 +374,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     for at in 0..SAMPLED_FRAMES {
         if at % REWRITE_EVERY == 0 {
             scratch.rewrite_all(FILES, LINES, at / REWRITE_EVERY + 1);
-            draw(&mut frame, &mut app, &mut highlighter);
+            draw(&mut frame, &mut app, &mut highlighter, &mut history);
         }
         // The drawn file, rewritten before each frame. One file rather than a
         // hundred, the idiom the two gates above already use, and the term that
@@ -368,7 +384,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
             0,
             &format!("fn bulk_edited_{at}() {{ let value = {at}; }}"),
         );
-        frames.push(draw(&mut frame, &mut app, &mut highlighter));
+        frames.push(draw(&mut frame, &mut app, &mut highlighter, &mut history));
     }
     let cost = delta(before, frame.stats());
     let parsed = highlight_delta(highlighted, highlighter.stats());
@@ -421,7 +437,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
 
     // And the screen has to have been full, for the reason the gate above gives.
     let view = app
-        .view(&mut frame, &mut highlighter, height)
+        .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
     assert_eq!(
         view.rows.len(),
