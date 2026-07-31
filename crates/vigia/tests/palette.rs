@@ -63,6 +63,14 @@ fn three_kinds() -> View {
             line(LineKind::Context, 1, "let a = 1;"),
             line(LineKind::Added, 2, "let b = 2;"),
             line(LineKind::Removed, 2, "let c = 3;"),
+            // **Below** the changed rows, and that placement is the whole reason
+            // it exists. A wash painted with an inherited height runs from its own
+            // row to the bottom of the pane, so it can only ever spill *downwards*
+            // and a context row above every changed row cannot witness it. The
+            // first version of this fixture had exactly one context line, first,
+            // and `a_context_row_is_never_washed` passed against a renderer that
+            // washed the footer.
+            line(LineKind::Context, 3, "let d = 4;"),
         ],
         files: 1,
         top: Position::default(),
@@ -80,6 +88,8 @@ const HEADING: u16 = 1;
 const CONTEXT: u16 = 3;
 const ADDED: u16 = 4;
 const REMOVED: u16 = 5;
+/// The context row **under** both changed rows. See [`three_kinds`].
+const CONTEXT_BELOW: u16 = 6;
 
 fn draw(width: u16, height: u16, view: &View, theme: Theme) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -128,6 +138,11 @@ fn the_fixture_lands_where_these_say() {
     assert!(row(CONTEXT).contains("let a = 1;"), "{:?}", row(CONTEXT));
     assert!(row(ADDED).contains("let b = 2;"), "{:?}", row(ADDED));
     assert!(row(REMOVED).contains("let c = 3;"), "{:?}", row(REMOVED));
+    assert!(
+        row(CONTEXT_BELOW).contains("let d = 4;"),
+        "{:?}",
+        row(CONTEXT_BELOW)
+    );
 }
 
 #[test]
@@ -194,12 +209,27 @@ fn the_sigil_cell_carries_the_bar() {
 fn a_context_row_is_never_washed() {
     // The wash *is* the diff signal once the sigil column stops being it, so a
     // context line carrying one would say a line changed that did not.
+    // Drawn taller than the fixture needs, so there are blank rows and a footer
+    // below the last changed line for a spill to land on.
     let dark = Theme::dark().resolve(Depth::Truecolor);
-    let backend = draw(60, 8, &three_kinds(), dark);
-    assert!(
-        backgrounds(&backend, CONTEXT).iter().all(Option::is_none),
-        "a context row was washed"
-    );
+    let backend = draw(60, 12, &three_kinds(), dark);
+
+    for row in [CONTEXT, CONTEXT_BELOW] {
+        assert!(
+            backgrounds(&backend, row).iter().all(Option::is_none),
+            "context row {row} was washed"
+        );
+    }
+
+    // And nothing below the diff either. A wash is a property of one row; a wash
+    // that reached the blank rows or the footer would be a rectangle, which is
+    // what an inherited `Rect` height produced before this gate could see it.
+    for row in CONTEXT_BELOW + 1..12 {
+        assert!(
+            backgrounds(&backend, row).iter().all(Option::is_none),
+            "row {row}, below the whole diff, was washed"
+        );
+    }
 }
 
 #[test]
