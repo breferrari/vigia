@@ -200,6 +200,27 @@ fn one_file() -> View {
     }
 }
 
+/// Three file headings and nothing else, carrying the mockup's own counters.
+///
+/// The numbers are `assets/preview.svg`'s: `+42 −7`, `+11 −3` and `+2 −0`. They
+/// sum to `+55 −10`, which is the number a header total would have to draw and
+/// which [`the_header_carries_no_changed_line_total`] asserts is nowhere on the
+/// top row. Headings only, so every counter on the screen belongs to a row and
+/// the aggregate is the one thing that could not have come from one.
+fn three_files() -> View {
+    View {
+        rows: vec![
+            file('M', "crates/vigia-core/src/frame.rs", 42, 7),
+            file('M', "crates/vigia/src/render.rs", 11, 3),
+            file('M', "Cargo.toml", 2, 0),
+        ],
+        files: 3,
+        top: Position::default(),
+        read: 3,
+        peak: 0,
+    }
+}
+
 #[test]
 fn a_screenful_of_diff() {
     let view = one_file();
@@ -280,6 +301,57 @@ fn the_header_says_which_mode_it_is_in() {
     assert!(
         lost.contains("not watching · 1 file"),
         "lost header: {lost:?}"
+    );
+}
+
+#[test]
+fn the_header_carries_no_changed_line_total() {
+    // #49, and the ruling `SPEC.md` §10 closed with. The header carries which
+    // tree, the mode word and the file count, and there is no fourth fact. A
+    // repository-wide `+`/`-` needs every changed file diffed, so it would make
+    // first paint follow the size of the diff, which is the one thing I4 exists
+    // to forbid. The only variant that dodges that is to compute it behind the
+    // frame and reveal it when it arrives, which is a wake no filesystem event
+    // caused and a number that is stale between the tick and the reveal: the
+    // frozen-clock failure §11.1 already rejected for the pulse.
+    //
+    // **Content rather than cost, which is the half `reads.rs` cannot see.**
+    // `one_screenful_costs_the_same_however_much_else_changed` already fails if a
+    // total is computed through the shell's `Frame`, because it compares the
+    // diffs one screenful computes across two fixtures differing only in
+    // changed-file count. A total computed behind the frame on a handle of its
+    // own would never touch those stats. So the assertion here is over the drawn
+    // row, which is the level the ruling was made at.
+    let view = three_files();
+    let backend = screen(80, 6, &view, &chrome());
+    let header = row_text(&backend, 0);
+
+    // Non-vacuity first, and it is what makes the rest worth asserting. The
+    // counters have to really be on this screen, or a header with no numbers in
+    // it would pass against a fixture that had none to draw and the test would
+    // be checking that nothing is nothing.
+    let body: String = (1..6).map(|y| row_text(&backend, y)).collect();
+    assert!(
+        body.contains("+42 -7"),
+        "no per-file counter was drawn, so the header's silence proves nothing: \
+         {body:?}"
+    );
+
+    assert!(header.contains("watching · 3 files"), "header: {header:?}");
+
+    // The fixture's worktree name is `vigia`, which carries neither sigil, so the
+    // whole row can be read rather than recomputing where the right-hand side
+    // begins. A name with a hyphen in it would make this assertion lie.
+    assert!(
+        !header.contains('+') && !header.contains('-'),
+        "the header drew a counter sigil: {header:?}"
+    );
+
+    // And a total drawn without sigils fails too, which is the form the §10
+    // bullet's own proposal would most likely have taken.
+    assert!(
+        !header.contains("55") && !header.contains("10"),
+        "the header drew the aggregate of its rows: {header:?}"
     );
 }
 
