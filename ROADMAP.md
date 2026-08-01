@@ -385,11 +385,15 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The `gix` status surface is load-bearing on every budget with no seam | [#74](https://github.com/breferrari/vigia/issues/74) |
 | ⬜ | A push to `main` was cancelled where the concurrency guard says it cannot be | [#75](https://github.com/breferrari/vigia/issues/75) |
 | ⬜ | `take-next`: a deferral reason is a dated claim and nothing re-reads one | [#76](https://github.com/breferrari/vigia/issues/76) |
-| ⬜ | The wheel ignores the pointer, and the thumb it draws cannot be grabbed | [#79](https://github.com/breferrari/vigia/issues/79) |
+| ✅ | The wheel ignores the pointer, and the thumb it draws cannot be grabbed | [#79](https://github.com/breferrari/vigia/issues/79) |
 | ⬜ | The hint bar names a key twice and never names the arrows | [#80](https://github.com/breferrari/vigia/issues/80) |
-| ⬜ | A washed row may be reaching the scrollbar column, or the terminal is | [#81](https://github.com/breferrari/vigia/issues/81) |
+| ✅ | A washed row may be reaching the scrollbar column, or the terminal is | [#81](https://github.com/breferrari/vigia/issues/81) |
 | ⬜ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
+
+**Two of the five findings closed on [#66](https://github.com/breferrari/vigia/issues/66)'s own branch rather than waiting for a phase**, which is the rule about fixing what the work surfaces rather than filing it away. [#79](https://github.com/breferrari/vigia/issues/79) is the pointer and the thumb, both of which are affordances that branch published; leaving a drawn thumb inert for a phase would have shipped the same aspirational-UX defect [#66](https://github.com/breferrari/vigia/issues/66) exists to remove. [#81](https://github.com/breferrari/vigia/issues/81) was filed undiagnosed and asked for a gate rather than a fix, so it cost one test: it is **green**, the wash stops where `with_bar` narrows the rect, and the mark in the report was the host terminal's own scrollbar.
+
+The other three stay. [#77](https://github.com/breferrari/vigia/issues/77) and [#78](https://github.com/breferrari/vigia/issues/78) are claims about the picture and belong with their siblings in Phase 4, and [#80](https://github.com/breferrari/vigia/issues/80) is a ruling nobody has made rather than a defect anybody can fix.
 
 ---
 
