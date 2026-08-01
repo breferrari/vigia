@@ -104,7 +104,15 @@ impl Filter {
     /// invisibly: the pane would go back to drawing whole-file rewrites with
     /// nothing anywhere saying why. A failure here reaches the footer as a
     /// notice, the way every other frame failure does (`SPEC.md` §11.1).
-    pub(crate) fn to_git(&mut self, rela_path: &str, content: Vec<u8>) -> Result<Vec<u8>> {
+    /// Named for what it converts. `to_git` would read as converting the
+    /// receiver, which is what `clippy::wrong_self_convention` says about a
+    /// `to_*` method on a non-`Copy` `&mut self`, and it converts its argument.
+    /// `convert_to_git` is also `gix`'s own name for this operation.
+    pub(crate) fn convert_to_git(
+        &mut self,
+        rela_path: &str,
+        content: Vec<u8>,
+    ) -> Result<Vec<u8>> {
         let path = Path::new(rela_path);
 
         // Destructured so the three fields borrow separately: the stack is

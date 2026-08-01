@@ -216,7 +216,7 @@ impl Worktree {
             Some(filter) => filter,
             None => filter.insert(Filter::new(&self.repo)?),
         };
-        filter.to_git(rela_path, raw)
+        filter.convert_to_git(rela_path, raw)
     }
 }
 
