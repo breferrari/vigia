@@ -124,7 +124,7 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 
 | Element in the mockup | What it needs |
 |---|---|
-| Header: `watching · 3 files` | A **mode word**, so there is a set of modes. The changed-**line** total is the §10 header question, and the file count drawn here is not it: a per-file count is free where a repository-wide one is not. **Ruled 2026-07-31: there is no line total** ([#49](https://github.com/breferrari/vigia/issues/49)), so this row is now fully specified rather than partly and the header's facts are exactly three. A repository-wide `+`/`-` is a reviewer's summary of a changeset rather than a monitor's account of what is happening, it puts first paint back in proportion to the size of the diff against I4, and the only way round that is the wake I1 forbids. §10 carries the argument. **Ruled 2026-07-31 and implemented: the set is two**, `watching` and `not watching`. This cell used to say that `watching` "implies at least a settling state and an idle one", and it implies neither: both are durations, and a duration cannot be drawn honestly by a shell that only wakes when a file changes. That is the same wall the pulse hit one row below, and the two words left are the only two states the shell can actually tell apart. The header also draws the **worktree** name on the left where the picture draws `vigia`, which is the one deliberate departure from the mockup in the whole layout. See §11.1 for both |
+| Header: `watching · 3 files` | A **mode word**, so there is a set of modes. The changed-**line** total is the §10 header question, and the file count drawn here is not it: a per-file count is free where a repository-wide one is not. **Ruled 2026-07-31: there is no line total** ([#49](https://github.com/breferrari/vigia/issues/49)), so this row is now fully specified rather than partly and the header's facts are exactly three. A repository-wide `+`/`-` is a reviewer's summary of a changeset rather than a monitor's account of what is happening, it puts first paint back in proportion to the size of the diff against I4, and the only way round that is the wake I1 forbids. §10 carries the argument. **Ruled 2026-07-31 and implemented: the set is two**, `watching` and `not watching`. This cell used to say that `watching` "implies at least a settling state and an idle one", and it implies neither: both are durations, and a duration cannot be drawn honestly by a shell that only wakes when a file changes. That is the same wall the pulse hit one row below, and the two words left are the only two states the shell can actually tell apart. The header also draws the **worktree** name on the left where the picture draws `vigia`, which is the one deliberate departure from the mockup in the whole layout. See §11.1 for both. **Reopened 2026-08-01 on the phrasing rather than the facts** ([#67](https://github.com/breferrari/vigia/issues/67)): the three facts are right and `watching · 3 files` reads as *"watching 3 files"*, a verb with an object, naming a curated set that does not exist and that B6's no-flags ruling puts out of scope. The ladder is the proof they were meant to be independent — the count drops first and the word survives alone — and at the full rung they fuse anyway. The count is also not about the watched thing: this watches the whole worktree, and `3` is what changed inside it |
 | Per-file **sparkline** | A **retained time series per file** — samples of churn over a window, bucketed. This is the only unbounded state in the design and it is the one I3 forbids growing: the window and the sample rate are part of the invariant, not a rendering detail. **Ruled 2026-07-31 and implemented: a 120-second window in 8 buckets of 15 seconds, capped at 256 paths, evicted by window and by least-recently-changed.** That is I10, which now has a row above rather than a warning below. One sample per path per coalesced tick, and heights are scaled against the **busiest bucket on screen** rather than per row, because the question a reader asks down a file list is which file is busiest |
 | Per-file **heat strip** | Hunk line-ranges projected onto a fixed number of buckets across the file's length, so it needs the file's **total line count**, not only its diff. Colour rule when one bucket holds both additions and deletions. **Ruled 2026-07-31 and implemented.** Bucket count is **12**, from the picture, which draws exactly twelve; the picture also draws an empty bucket as a **dark track** rather than as a gap, so the strip is always its full width and a reader can see how much of the file is untouched. A mixed bucket is **yellow**: every alternative paints it as pure, and separating addition from removal by position is the strip's whole job. **Intensity is three steps, matching the picture** ([#11](https://github.com/breferrari/vigia/issues/11)). This cell said two for a phase, because sixteen foreground-only colours hold a normal and a bright of each hue and no third stop, so the ramp was as wide as the palette could draw rather than as wide as the picture asked for. A wider palette closed it. At sixteen colours it is still two, and `ansi` spells that out in its own fields rather than leaving the depth ladder to collapse them by accident. The line count it needs is **free**: see §5.2 |
 | Per-file `+42 −7` | Covered. Per-file counters are free — a file must be diffed to be drawn (§10). |
@@ -574,6 +574,38 @@ What was corrected is the wording. The proposal said "no changes" and the shell 
 **B4 — Is the file list navigable?** The README mockup shows a file list above the diff. Selectable, with the diff jumping to the selection, or a map rather than a menu?
 
 *(proposed)* **Not navigable in v1** — one continuous scroll, list as map. Rationale: selection implies focus, focus implies a second mode, and modes are reviewer-class (§2). The pane is 40 columns beside an agent, not a full-screen client.
+
+> [!important] The question above is the smaller half, and the proposal settles the larger one silently
+> Filed 2026-08-01 as [#66](https://github.com/breferrari/vigia/issues/66). *Navigable* is
+> downstream of **whether the file list is a region of the screen at all**, and
+> "one continuous scroll" answers that second question without asking it.
+>
+> `assets/preview.svg` draws two regions: a summary block of every changed file,
+> pinned above a rule, with one file's diff beneath. The proof is in the picture
+> rather than in an intention — `src/engine/watch.rs` is drawn **twice**, once in
+> the block and once as the diff heading, which one stream never does. The shell
+> draws one stream: [`Row`](crates/vigia/src/view.rs) is a flat enum and
+> `Painter::body` is a single loop over `View::rows`, so the sparkline, the
+> counters and the heat strip ride a heading **inside** the scroll.
+>
+> Nothing there is a defect and every element is specified in §5.1, built and
+> gated. What has no ruling is the container they were drawn for, and the cost of
+> that is not cosmetic: three of §5's four glanceability elements are visible only
+> while their own heading is on screen, so **the glance surface disappears exactly
+> while the pane is being read**. Also note "list as map" presupposes a list to be
+> a map of; there is none, there are headings.
+>
+> Two constraints belong to §3 rather than to taste, and they are why this is not
+> a rendering choice. Ranking a pinned list by diff size needs every changed
+> file's diff, which is [#49](https://github.com/breferrari/vigia/issues/49)'s
+> argument against a repository-wide total arriving somewhere else; ranking it
+> from `History` costs nothing, since that store is already bounded and fed from
+> the watch. And a heat strip needs the whole-file line count on `FileDiff`, so a
+> pinned row for a file the frame did not diff cannot draw one without breaching
+> I4 the same way. Whichever way it is ruled, **§5.1's own rule applies to the
+> picture too**: a published artifact answering a question is the answer, so one
+> answering it differently from the code is a wrong specification and not a stale
+> asset.
 
 **B5 — Not a git repository, and submodules.** Neither appeared anywhere in this spec. **Half ruled 2026-07-31**, and the halves are separated here rather than one number being retired for the sake of tidiness, because only one of them is decided.
 

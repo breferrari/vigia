@@ -257,9 +257,17 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | The mockup pins a file list above the diff, and the shell draws one stream | [#66](https://github.com/breferrari/vigia/issues/66) |
+| ⬜ | The header's two facts compose into a claim the tool does not make | [#67](https://github.com/breferrari/vigia/issues/67) |
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
 | ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
 | ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
+
+**The first two rows come before the other three, and the order is not preference.** This phase is what gives `assets/preview.svg` an audience: a registry page and a README that people arrive at cold, having seen the picture before they have seen the tool. Both issues are places where the picture and the binary currently disagree, and a disagreement that ships is a support burden rather than a stale artifact.
+
+Both were found by a reader looking at the picture and asking what it promised — [#67](https://github.com/breferrari/vigia/issues/67) from *"what is `watching`, and how do I toggle it?"*, [#66](https://github.com/breferrari/vigia/issues/66) from noticing that `src/engine/watch.rs` is drawn **twice** in the mockup, once in the summary block and once as the diff heading, which a single scrolling stream never does. Neither is visible from inside the code, and neither was reachable by `take-next`'s pre-flight, which compares invariant tokens rather than pictures. That is the same blind spot [#40](https://github.com/breferrari/vigia/issues/40) hit when it found B5 shipped while still marked `(proposed)`.
+
+[#66](https://github.com/breferrari/vigia/issues/66) is **B4**, and taking it means re-reading the question. §11.2 asks whether the file list is *navigable* and proposes "one continuous scroll, list as map"; the load-bearing half is whether the list is a **region of the screen** at all, which that proposal settles silently. Its two options have different costs and only one of them is free: a pinned list ordered from `History` costs nothing to rank, and one ordered by diff size needs every changed file's diff, which is [#49](https://github.com/breferrari/vigia/issues/49)'s argument against a repository-wide total arriving in a second place.
 
 ## Phase 5 — deferred findings
 
