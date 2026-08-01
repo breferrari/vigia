@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use gix::bstr::{BString, ByteSlice};
@@ -5,6 +6,7 @@ use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 
 use crate::change::{ChangeKind, FileChange};
 use crate::error::{Error, Result};
+use crate::filter::Filter;
 use crate::frame::Frame;
 use crate::hunk::{self, FileDiff};
 use crate::watch::{WatchOptions, Watcher};
@@ -37,6 +39,24 @@ impl Default for ChangeOptions {
 pub struct Worktree {
     repo: gix::Repository,
     workdir: PathBuf,
+    /// The clean filter: built on the first working-tree read after each
+    /// [`Frame::advance`], and not before.
+    ///
+    /// Lazy because a monitor pointed at a clean tree draws the empty state and
+    /// diffs nothing, and assembling this costs an index load and an
+    /// attribute-globals read. Paying for those at [`Worktree::discover`] would
+    /// put them on the path I7 measures, to build something that session might
+    /// never consult.
+    ///
+    /// Dropped once per frame rather than held for the process, because the
+    /// rules it caches live in files the agent in the other pane can rewrite.
+    /// See [`Worktree::invalidate_filter`] for why that is a correctness rule
+    /// and not a refresh policy.
+    ///
+    /// `RefCell` costs nothing that was not already given up: `gix::Repository`
+    /// is `Send` and not `Sync`, so each thread already opens its own
+    /// `Worktree` rather than sharing one.
+    filter: RefCell<Option<Filter>>,
 }
 
 impl Worktree {
@@ -44,7 +64,11 @@ impl Worktree {
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let repo = gix::discover(path)?;
         let workdir = repo.workdir().ok_or(Error::Bare)?.to_path_buf();
-        Ok(Self { repo, workdir })
+        Ok(Self {
+            repo,
+            workdir,
+            filter: RefCell::new(None),
+        })
     }
 
     /// Absolute path of the working tree root.
@@ -166,18 +190,60 @@ impl Worktree {
         Ok(object.into_blob().take_data())
     }
 
+    /// Drop the cached clean filter, so the next read rebuilds it.
+    ///
+    /// Called once per [`Frame::advance`], which is what bounds how stale the
+    /// filter can be to a single frame. It has to be bounded by something: the
+    /// rules live in `.gitattributes` and `core.autocrlf`, and **the agent in
+    /// the other pane can write a `.gitattributes` at any moment.** Built once
+    /// per process, the pane then goes on drawing the old answer indefinitely
+    /// while a restart would draw a different one, which is I5 (correct with
+    /// zero interaction) failing silently in a process I3 expects to run for
+    /// days.
+    ///
+    /// Dropping rather than rebuilding keeps the laziness that made this cheap.
+    /// A frame whose diffs are all reused reads no file, so it rebuilds nothing;
+    /// only a frame that actually recomputes a diff pays, and that frame was
+    /// already reading from disk. `gix` rebuilds its own attributes stack on
+    /// every status walk for the same reason, so this matches the freshness of
+    /// the walk it is paired with rather than inventing a policy.
+    pub(crate) fn invalidate_filter(&self) {
+        *self.filter.borrow_mut() = None;
+    }
+
+    /// Read a working-tree file as git would store it.
+    ///
+    /// The normalisation is not a nicety. Git diffs the working-tree side
+    /// *through* its clean filter, so on a checkout with `core.autocrlf=true`
+    /// the bytes on disk are CRLF while the blob they are compared against is
+    /// LF. Skipping the filter makes every line of every such file differ from
+    /// its stored form: see `filter.rs` and
+    /// [#65](https://github.com/breferrari/vigia/issues/65).
     fn read_worktree(&self, rela_path: &str) -> Result<Vec<u8>> {
-        match std::fs::read(self.workdir.join(rela_path)) {
-            Ok(data) => Ok(data),
+        let raw = match std::fs::read(self.workdir.join(rela_path)) {
+            Ok(data) => data,
             // The agent in the other pane can delete a file between the moment
             // status named it and the moment we read it. That is ordinary, not
             // a failure: report it as empty and let the next frame correct us.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(source) => Err(Error::Read {
-                path: rela_path.to_owned(),
-                source,
-            }),
-        }
+            //
+            // Returned before the filter rather than through it, because there
+            // is nothing to normalise and priming the attributes stack for a
+            // file that no longer exists would be a read for no reader.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(Error::Read {
+                    path: rela_path.to_owned(),
+                    source,
+                });
+            }
+        };
+
+        let mut filter = self.filter.borrow_mut();
+        let filter = match filter.as_mut() {
+            Some(filter) => filter,
+            None => filter.insert(Filter::new(&self.repo)?),
+        };
+        filter.convert_to_git(rela_path, raw)
     }
 }
 

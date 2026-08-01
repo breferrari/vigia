@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
-use vigia_core::{CONTEXT, Frame, FrameStats, HighlightStats, Worktree};
+use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -84,6 +84,44 @@ pub fn exclusively_timed() -> MutexGuard<'static, ()> {
     TIMED
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// What git reports for one path, with binary distinguishable from unchanged.
+///
+/// See [`Scratch::git_numstat`] for why the third variant exists.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Numstat {
+    /// git reports no difference at all, and printed nothing.
+    Unchanged,
+    /// git considers the path binary and printed `-` for both counts.
+    Binary,
+    /// Lines added and removed.
+    Lines(u32, u32),
+}
+
+/// Every change, sorted by path so assertions do not depend on walk order.
+///
+/// Named for the sort rather than for the call, because that is the property
+/// tests here rely on and because `budgets.rs` keeps its own unsorted spelling
+/// on purpose: it measures the walk, so reordering what the walk reported would
+/// be measuring something else.
+pub fn changes_sorted(worktree: &Worktree) -> Vec<FileChange> {
+    let mut all: Vec<FileChange> = worktree
+        .changes()
+        .expect("enumerate changes")
+        .map(|c| c.expect("change"))
+        .collect();
+    all.sort_by(|a, b| a.path.cmp(&b.path));
+    all
+}
+
+/// `count` lines of `line N`, newline terminated.
+///
+/// The plainest fixture content there is, and deliberately not [`generated`]:
+/// these lines are short enough to reason about a hunk header by eye, which is
+/// what the fidelity suites do with them.
+pub fn numbered_lines(count: usize) -> String {
+    (1..=count).map(|i| format!("line {i}\n")).collect()
 }
 
 /// Advance one frame and fetch every diff in it.
@@ -188,6 +226,46 @@ impl Scratch {
         scratch.git(&["config", "user.name", "vigia tests"]);
         scratch.git(&["config", "commit.gpgsign", "false"]);
         scratch
+    }
+
+    /// A repository configured the way a Windows checkout is, so that git's
+    /// clean filter has something to do.
+    ///
+    /// **A sibling of [`Scratch::new`] rather than a replacement for it.** Every
+    /// other fixture here sets `core.autocrlf false` at creation, which puts the
+    /// whole fixture population on one point of git's configuration surface: LF
+    /// on both sides, so the filter never converts anything and the code path
+    /// that skips it produces byte-identical output to the code path that runs
+    /// it. That is why [#65](https://github.com/breferrari/vigia/issues/65) was
+    /// invisible to a green suite, and `SPEC.md` §7 now names the shape. The
+    /// answer is to **span** the axis, not to move to its other end, so the
+    /// default stays where it is and this stands beside it.
+    ///
+    /// `attributes` is the `.gitattributes` to write, or `None` for the plain
+    /// installed default. The two are different fixtures and not degrees of one:
+    /// with no attributes a checkout puts CRLF on disk against an LF blob, and
+    /// with `* text=auto eol=lf` it puts LF on disk and only an editor writing
+    /// CRLF creates the discrepancy.
+    pub fn crlf_worktree(name: &str, attributes: Option<&str>) -> Self {
+        let scratch = Self::new(name);
+        scratch.git(&["config", "core.autocrlf", "true"]);
+        if let Some(attributes) = attributes {
+            scratch.write(".gitattributes", attributes);
+        }
+        scratch
+    }
+
+    /// Write a file with CRLF terminators, the way an editor on Windows does.
+    ///
+    /// Takes LF text and converts, so a test states its content once in the
+    /// form it is reasoning about. Refuses text that already carries a `\r`,
+    /// which would silently produce `\r\r\n` and a fixture testing nothing.
+    pub fn write_crlf(&self, rela: &str, contents: &str) {
+        assert!(
+            !contents.contains('\r'),
+            "{rela} already carries a carriage return, so converting would double it"
+        );
+        self.write(rela, contents.replace('\n', "\r\n"));
     }
 
     /// A repository whose working tree differs from its index by every line of
@@ -461,6 +539,48 @@ impl Scratch {
     /// Open the working tree through the crate under test.
     pub fn worktree(&self) -> Worktree {
         Worktree::discover(&self.path).expect("discover scratch repository")
+    }
+
+    /// Put a file on disk the way `git checkout` would, rather than the way the
+    /// test wrote it.
+    ///
+    /// The difference is the whole fixture for the CRLF cases: under
+    /// `core.autocrlf=true` a checkout writes CRLF even though the test's own
+    /// source text is LF, so going through git is what produces the state a
+    /// Windows reader actually has. Writing those bytes by hand would test the
+    /// same content for a reason that could stop being true.
+    pub fn checkout(&self, rela: &str) {
+        std::fs::remove_file(self.path_of(rela)).expect("remove before checkout");
+        self.git(&["checkout", "--", rela]);
+    }
+
+    /// What `git diff --numstat` says about one path.
+    ///
+    /// Beside [`Scratch::git_hunk_headers`] because it is the same job: ask git
+    /// the question the engine just answered, and compare. `SPEC.md` §10 records
+    /// git as the oracle, so the accessors that reach it live together.
+    ///
+    /// Three answers rather than an `Option<(u32, u32)>`, and the third is why.
+    /// git prints `-` for both counts on a path it considers binary, so a parser
+    /// returning `None` for "no output" collapses **binary** and **unchanged**
+    /// onto one value. A test asserting `None` to mean "git sees no change"
+    /// would then keep passing if its fixture ever became binary, which is
+    /// `SPEC.md` §7's "gate that passes for the wrong reason" exactly.
+    pub fn git_numstat(&self, rela: &str) -> Numstat {
+        let out = self.git(&["diff", "--numstat", "--", rela]);
+        let Some(line) = out.lines().next() else {
+            return Numstat::Unchanged;
+        };
+        let mut fields = line.split('\t');
+        let added = fields.next().expect("numstat added field");
+        let removed = fields.next().expect("numstat removed field");
+        if added == "-" || removed == "-" {
+            return Numstat::Binary;
+        }
+        Numstat::Lines(
+            added.parse().expect("numstat added count"),
+            removed.parse().expect("numstat removed count"),
+        )
     }
 
     /// Hunk headers as real git reports them, for fidelity comparison.

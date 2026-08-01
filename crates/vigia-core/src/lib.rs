@@ -43,6 +43,7 @@
 
 mod change;
 mod error;
+mod filter;
 mod frame;
 mod highlight;
 mod history;
