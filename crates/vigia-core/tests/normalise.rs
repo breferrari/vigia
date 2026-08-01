@@ -17,7 +17,7 @@
 mod support;
 
 use support::{Numstat, Scratch, changes_sorted, numbered_lines};
-use vigia_core::Worktree;
+use vigia_core::{Error, Worktree};
 
 /// The reported case: a CRLF worktree file over an LF blob, and no real edit.
 ///
@@ -324,6 +324,50 @@ fn an_external_clean_driver_is_never_run() {
          per file per frame and is what §6 forbids",
         diff.added,
         diff.removed
+    );
+}
+
+/// A filter that cannot be assembled fails the diff rather than falling back.
+///
+/// The one claim in `filter.rs` that nothing else here reaches, and the reason
+/// it is a claim at all: falling back to the raw bytes on failure would put the
+/// pane straight back to drawing whole-file rewrites for every CRLF file, with
+/// nothing anywhere saying why. The defect this branch fixes would return, and
+/// return **invisibly**, which is strictly worse than the version that was
+/// reported, because that one at least looked wrong.
+///
+/// The index is corrupted *after* the walk, so the filter is still unbuilt and
+/// assembling it is the thing that fails. `frame.rs` already gates the other
+/// order, where the walk itself fails first and reports `Error::Status`.
+///
+/// Asserted on the variant rather than on the message, since the message is
+/// `gix`'s and may be reworded by a bump.
+#[test]
+fn a_filter_that_cannot_be_built_fails_the_diff() {
+    let scratch = Scratch::crlf_worktree("normalise-broken-index", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    scratch.write_crlf("a.txt", &numbered_lines(20).replace("line 3\n", "X\n"));
+
+    let worktree = scratch.worktree();
+    // Enumerated while the index is still good, so nothing has built a filter.
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "a.txt")
+        .expect("a.txt is changed")
+        .clone();
+
+    std::fs::write(scratch.path_of(".git/index"), vec![0xABu8; 128]).expect("corrupt the index");
+
+    let error = worktree
+        .diff(&change)
+        .expect_err("an unbuildable filter was reported as a successful diff");
+    assert!(
+        matches!(error, Error::FilterSetup(_)),
+        "reported {error:?}, so a filter that could not be built either fell back \
+         to the raw bytes or was mistaken for some other failure"
     );
 }
 

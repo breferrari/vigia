@@ -284,14 +284,16 @@ impl<'w> Frame<'w> {
             files.push(change?);
         }
 
-        // Nothing above this line touched `self`, which is what makes a failed
-        // walk leave the previous frame intact.
+        // Nothing above this line mutated anything, which is what makes a failed
+        // walk leave the previous frame intact. That covers the line below as
+        // well: a walk that returned early leaves the filter alone too, so a
+        // failed frame does not throw away work the next one would have reused.
 
-        // The clean filter is rebuilt with the next read rather than kept for
-        // the life of the process. `.gitattributes` and `core.autocrlf` decide
-        // what a diff normalises, and the agent in the other pane is free to
-        // write either at any moment; a filter built once would go on answering
-        // from rules that no longer exist. See `Worktree::invalidate_filter`.
+        // The clean filter is rebuilt by the next read rather than kept for the
+        // life of the process. `.gitattributes` and `core.autocrlf` decide what
+        // a diff normalises, and the agent in the other pane is free to write
+        // either at any moment; a filter built once would go on answering from
+        // rules that no longer exist. See `Worktree::invalidate_filter`.
         self.worktree.invalidate_filter();
 
         let mut previous = std::mem::take(&mut self.cached);

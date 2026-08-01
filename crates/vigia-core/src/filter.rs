@@ -34,6 +34,8 @@
 
 use std::path::Path;
 
+use gix::filter::plumbing::pipeline::convert::ToGitOutcome;
+
 use crate::error::{Error, Result};
 
 /// A to-git conversion pipeline that owns everything it needs.
@@ -104,6 +106,7 @@ impl Filter {
     /// invisibly: the pane would go back to drawing whole-file rewrites with
     /// nothing anywhere saying why. A failure here reaches the footer as a
     /// notice, the way every other frame failure does (`SPEC.md` §11.1).
+    ///
     /// Named for what it converts. `to_git` would read as converting the
     /// receiver, which is what `clippy::wrong_self_convention` says about a
     /// `to_*` method on a non-`Copy` `&mut self`, and it converts its argument.
@@ -151,7 +154,7 @@ impl Filter {
 
         match outcome {
             // Nothing applied, so the bytes already read are the answer.
-            gix::filter::plumbing::pipeline::convert::ToGitOutcome::Unchanged(_) => Ok(content),
+            ToGitOutcome::Unchanged(_) => Ok(content),
             other => {
                 use std::io::Read;
                 let mut converted = Vec::with_capacity(content.len());
