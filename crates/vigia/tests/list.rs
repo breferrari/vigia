@@ -27,7 +27,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, LIST_ROWS, Position, body_layout};
+use vigia::{Action, App, Body, LIST_ROWS, Position, View, Viewport, body_layout};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -480,5 +480,182 @@ fn the_window_survives_a_pane_too_short_to_show_it() {
         "dragging the pane through a height with no region moved the map from \
          {browsed} to {}",
         restored.list_top
+    );
+}
+
+#[test]
+fn the_two_regions_tile_the_body_exactly() {
+    // `Body::clamped_to` holds the layout's only subtraction and had no direct
+    // test: mutating its give-back term left the suite green, because no fixture
+    // reached a stale view. This is the property in full — the header, the list,
+    // the rule, the diff and the footer account for every row of the pane, at
+    // every height and for every number of entries a view might carry.
+    let mut checked = 0;
+    let mut saw_a_clamp = false;
+
+    for height in 1..=40u16 {
+        for width in [40u16, WIDE, 120] {
+            for files in [0usize, 1, 3, LIST_ROWS, LIST_ROWS + 1, 200] {
+                let area = Rect::new(0, 0, width, height);
+                let chrome = chrome(&App::new());
+                let full = body_layout(area, &chrome, files);
+
+                for have in 0..=LIST_ROWS + 2 {
+                    let body = full.clamped_to(have);
+                    if body.list != full.list {
+                        saw_a_clamp = true;
+                    }
+
+                    // The footer's own height is not exposed, so it is recovered
+                    // from the unclamped split rather than restated: whatever it
+                    // is, clamping must not change it.
+                    let footer = usize::from(height)
+                        .saturating_sub(1 + full.list + usize::from(full.rule) + full.diff);
+                    assert_eq!(
+                        1 + body.list + usize::from(body.rule) + body.diff + footer,
+                        usize::from(height),
+                        "at {width}x{height} over {files} files with {have} \
+                         entries, {body:?} plus a header and {footer} footer rows \
+                         does not tile the pane"
+                    );
+                    assert_eq!(
+                        body.rule,
+                        body.list > 0,
+                        "a rule and a list disagree about each other: {body:?}"
+                    );
+                    assert_eq!(
+                        body.clamped_to(have),
+                        body,
+                        "clamping twice is not clamping once: {body:?}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+
+    assert!(checked > 1000, "the sweep checked only {checked} shapes");
+    assert!(
+        saw_a_clamp,
+        "no shape in the sweep actually shortened the region, so the clamp is \
+         never exercised"
+    );
+}
+
+#[test]
+fn collect_resolves_every_degenerate_viewport() {
+    // `View::take_list` indexes the frame through `Frame::diff`, which **panics**
+    // by design on an index past the end of the file list. That it cannot be
+    // reached is currently proved only by a comment. This drives the public
+    // signature with the positions that comment is about.
+    //
+    // It also covers the pair `body_layout` never produces and `View::collect`'s
+    // own doc argues at length: no diff rows and a region anyway.
+    const FILES: usize = 12;
+
+    let scratch = Scratch::large_diff("list-degenerate", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    for list_top in [0usize, 1, FILES - 1, FILES, FILES + 9, usize::MAX] {
+        for list_rows in [0usize, 1, LIST_ROWS, FILES, FILES + 5, 10_000] {
+            for diff_rows in [0usize, 1, 22] {
+                for file in [0usize, FILES - 1, FILES, FILES + 3] {
+                    for list_follows in [true, false] {
+                        let view = View::collect(
+                            &mut frame,
+                            &mut highlighter,
+                            &history,
+                            Viewport {
+                                position: Position { file, row: 0 },
+                                anchored: false,
+                                diff_rows,
+                                list_top,
+                                list_rows,
+                                list_follows,
+                            },
+                        )
+                        .expect("collect");
+
+                        assert!(
+                            view.list.len() <= list_rows,
+                            "asked for {list_rows} list rows and got {}",
+                            view.list.len()
+                        );
+                        // **Only while there is a window.** A pane with no region
+                        // hands `list_top` back untouched, which is the whole
+                        // point of `the_window_survives_a_pane_too_short_to_show_it`
+                        // and is what the diff's own walk does with `top.row`. So
+                        // an out-of-range request survives a region-less frame and
+                        // is clamped by the next one that draws. What must always
+                        // hold is that a window which exists fits inside the file
+                        // list, because that is what keeps `Frame::diff` — which
+                        // panics on an out-of-range index by design — in range.
+                        if !view.list.is_empty() {
+                            assert!(
+                                view.list_top + view.list.len() <= FILES,
+                                "the window {}..{} runs past {FILES} files",
+                                view.list_top,
+                                view.list_top + view.list.len()
+                            );
+                        }
+                        assert!(
+                            view.rows.len() <= diff_rows,
+                            "asked for {diff_rows} diff rows and got {}",
+                            view.rows.len()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn browsing_back_up_returns_the_window_to_the_top() {
+    // `Action::ScrollList(-1)` end to end. `input.rs` gates the key mapping and
+    // the follow ruling, but nothing drove the negative delta through
+    // `App::apply` and `App::view`, so `saturating_add_signed`'s down-path and
+    // the browse-back-up journey were untested.
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-back-up", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    for _ in 0..15 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let out = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view")
+        .list_top;
+    assert!(out > 0, "the fixture never browsed away");
+
+    // Further back than it went, so the saturation is exercised rather than the
+    // arithmetic alone.
+    for _ in 0..40 {
+        app.apply(Action::ScrollList(-1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let back = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_eq!(back.list_top, 0, "browsing back up did not reach the top");
+    assert_eq!(
+        back.list.len(),
+        LIST_ROWS,
+        "the window lost rows on the way"
     );
 }

@@ -28,6 +28,7 @@ use std::time::Duration;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, diff_height,
     render,
@@ -1980,4 +1981,56 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         "no width drew a caret and a bar together, so the term this gate is \
          about is never exercised"
     );
+}
+
+#[test]
+fn render_never_writes_outside_its_area_over_a_degenerate_view() {
+    // `any_area_renders_including_the_ones_that_fit_nothing` sweeps pane sizes
+    // but only over `one_file()`, whose list is empty and whose `current_span` is
+    // zero — so the three fields this branch added are never degenerate in it.
+    // Writing past a `Buffer`'s area panics inside ratatui, which is how the
+    // region overdrawing the footer was found at 1x3, and that was caught by a
+    // different sweep by luck rather than by this one.
+    //
+    // The origin is non-zero as well, because every `Rect` the renderer builds
+    // inherits `..area` and an off-by-one in `x` or `y` is invisible at (0, 0).
+    let shapes: Vec<View> = vec![
+        a_list_of(0, 0, 0),
+        a_list_of(1, 1, 0),
+        a_list_of(6, 6, 0),
+        a_list_of(7, 6, 1),
+        a_list_of(10_000, 6, 9_994),
+        // A window past the end, which a short pane hands back untouched.
+        a_list_of(3, 3, 99),
+        // More entries than any pane affords.
+        a_list_of(40, 20, 0),
+        // Nothing to be inside, so the diff bar is told a whole of zero.
+        View {
+            current_span: 0,
+            ..a_list_of(9, 3, 0)
+        },
+        // A path of wide glyphs, at the caret and bar boundary.
+        View {
+            list: vec![entry("src/日本語/テスト.rs", 3, 1)],
+            ..a_list_of(9, 1, 0)
+        },
+    ];
+
+    for (shape, view) in shapes.iter().enumerate() {
+        for width in 0..=44u16 {
+            for height in 0..=14u16 {
+                for origin in [(0u16, 0u16), (3, 2)] {
+                    let area = Rect::new(origin.0, origin.1, width, height);
+                    let mut buf = ratatui::buffer::Buffer::empty(area);
+                    // Panics inside ratatui if anything writes out of range.
+                    render(&mut buf, area, view, &Theme::default(), &chrome());
+                    assert_eq!(
+                        *buf.area(),
+                        area,
+                        "shape {shape} at {width}x{height} resized its own buffer"
+                    );
+                }
+            }
+        }
+    }
 }
