@@ -172,6 +172,7 @@ At the end of the pass, diff the shipment against the plan and report the result
 ## 4. Ship it
 
 - **The unit is the issue.** One issue, one branch, one PR. Splitting one issue across several PRs fragments review and reads as progress theatre. If the issue is genuinely two things, say so and split the *issue* first.
+- **Open the PR as a draft, and open it early.** `gh pr create --draft` the moment there is a branch worth pushing, and carry the step 3 plan into the body. A draft is the cheap place to work: `ci.yml` skips every job while `draft == true`, so pushes cost nothing, and Copilot does not review one. Marking it ready is the expensive event and step 7 owns it. Iterating on a non-draft PR is how one branch here spent **nine CI runs** converging.
 - **Never defer a finding into a new issue to get the PR closed.** If work surfaces something inside the scope of the task, fix it here. A new issue is for something genuinely out of scope, and it needs **all three** of a milestone, a `ROADMAP.md` row, and a shelf entry giving the reason it moved. Miss the milestone and the issue is **invisible**, not deprioritised: the query in step 1 filters by milestone and will never return it. Seven accumulated that way before anyone noticed, so file it in one command rather than intending to come back:
 
   ```sh
@@ -228,7 +229,69 @@ Whichever runs, pass the docs carve-out into the invocation, because `/simplify`
 
 **"Foundational" is not a self-assessment you get to lower.** If the change touches the frame path, the watch engine, the diff oracle, or the budget gates, it is foundational — that is the whole system. Do not accept your own "not worth fixing" on a first pass either: that dismissal has a one-pushback half-life here, and three out of four have historically been wrong.
 
-## 7. Close the loop, all four places
+## 7. Mark it ready, and wait for both reviewers
+
+Everything until now happened inside a draft, where pushes are free. **Marking ready is the one expensive action in this skill, it is metered twice, and it should happen once.** `gh pr ready` fires `ready_for_review`, which wakes the full matrix on three platforms *and* Copilot's automatic review, and Copilot is quota-limited rather than merely slow.
+
+So do not mark ready to "see what CI says". Mark it ready when the work is finished, the suite is green locally, and step 6's plan diff is clean. Everything else belongs in the draft.
+
+> [!warning] A draft shows **no checks**, and no checks is not green
+> The jobs are skipped, so the PR page shows an empty check list rather than a
+> passing one. That is the exact shape `SPEC.md` §7 keeps finding — a gate that
+> proves nothing while looking settled — and here it is on the review surface
+> instead of in a test. Nothing in a draft has been verified by CI. The local
+> suite is your only evidence until the checks below have actually run.
+
+```sh
+gh pr ready <n>                              # the metered event: CI + Copilot
+gh pr checks <n> --watch --fail-fast         # blocks until the matrix settles
+```
+
+**Then wait for Copilot, which nothing watches for you.** It arrives as a review from `copilot-pull-request-reviewer[bot]`, usually in state `COMMENTED`, and the substance is in the **line comments** rather than the review body — reading the body alone is how you conclude it had nothing to say:
+
+```sh
+gh api repos/{owner}/{repo}/pulls/<n>/reviews \
+  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | .state'
+
+gh api repos/{owner}/{repo}/pulls/<n>/comments \
+  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")
+        | "\(.path):\(.line)\n\(.body)\n"'
+```
+
+**Do not request a review before checking whether one is coming.** Automatic review fires on `ready_for_review`; an explicit request on top of it spends a second unit of quota on a review already in flight. Poll first, and only request explicitly if nothing has arrived after the checks have settled.
+
+### Answering it
+
+Copilot is **not authoritative and not dismissible**, and the two failure modes are symmetric. Applying a wrong suggestion because a reviewer said it is how a considered decision gets undone by a machine that never read `SPEC.md`; waving comments away as noise is the self-authored triage this skill refuses in step 6, with the same one-pushback half-life.
+
+Every comment gets one of two outcomes, and both are visible:
+
+- **Fixed**, in the diff.
+- **Declined**, in a reply saying why — most usefully by naming the spec section or invariant the suggestion would violate, since that is the thing Copilot cannot see.
+
+Silence on a comment is neither, and it reads to the next person as agreement.
+
+### Iterating after ready is the expensive shape
+
+Every push to a ready PR re-runs the matrix. **Batch the fixes into one push.** If the review turns up something that needs real iteration rather than a couple of edits, go back to the cheap surface instead of converging in public:
+
+```sh
+gh pr ready <n> --undo     # back to draft; CI goes quiet again
+```
+
+Fix there, then mark ready once more. Two metered events beat six.
+
+### Merge
+
+When the checks are green and every Copilot comment is fixed or answered:
+
+```sh
+gh pr merge <n> --squash --delete-branch
+```
+
+Squash, because the history here is one commit per PR with the number in the subject. **Green means the run that CI actually performed** — check that the matrix ran on the ready revision rather than reading a check list that is empty because the PR was still a draft when you last looked.
+
+## 8. Close the loop, all four places
 
 Skipping any of these is how the next session loses time.
 
@@ -239,9 +302,11 @@ Skipping any of these is how the next session loses time.
    - `record_work` for what happened here: changes, decisions, what was learned, what is still open, how it was verified.
    - `remember` for anything that would help someone on a **different** project. A `gix` limitation that would bite any Rust project is a `remember`. "Landed the watch engine" is a `record_work`. Both, when both are true.
 
-## 8. Report
+## 9. Report
 
 What was taken, what shipped, the numbers, what moved on the roadmap, and what the next task is. Then stop. Do not start it.
+
+Name the **review outcome** too: whether Copilot commented, how many, and what happened to each. A review whose result nobody states is one nobody can tell you skipped — the same reason step 6's plan diff has to be said out loud.
 
 Include the **plan-fidelity result** explicitly — "every promise delivered", or the deviations and what was done about them. Silence here reads as clean, and a step whose absence is indistinguishable from success is a step that stops happening.
 
@@ -261,4 +326,10 @@ Say what the record gave you, too: which recorded decisions the work stood on, o
 - Filing a follow-up issue to avoid fixing something in scope
 - Running the full suite on a markdown diff, or skipping it on a manifest diff
 - Reporting green without naming what ran
+- Opening the PR ready, or marking it ready to see what CI says
+- Reading a draft's empty check list as a passing one
+- Requesting a Copilot review that automatic review was already sending
+- Converging on a ready PR one push at a time instead of returning it to draft
+- Ignoring a Copilot comment, or applying one that contradicts `SPEC.md` because a reviewer said it
+- Merging on checks that ran against an earlier revision
 - Finishing without `record_work`

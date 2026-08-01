@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `ready_for_review` is **not** a default type, and the jobs below skip
+    # drafts. Without it the two halves cancel out: a draft is skipped while it
+    # is a draft, and marking it ready fires no event, so a PR could reach
+    # mergeable having never been checked once. The other three are the
+    # defaults, restated because naming any type replaces the whole list.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 env:
@@ -19,9 +25,21 @@ concurrency:
   # like it was.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Every job below carries `if: github.event.pull_request.draft != true`, and it
+# is written five times rather than once because a workflow has no place to say
+# it once. What it buys: a branch iterates inside a draft for free, and the full
+# matrix runs when the work is claimed to be finished rather than on every push
+# toward finishing it. One PR spent nine runs converging here before this
+# existed. `github.event.pull_request` is null outside a pull request, so `push`
+# on main and `workflow_dispatch` are unaffected — `null != true` is true.
+#
+# It is a cost rule, not a correctness rule. Nothing merges without these having
+# run: the same jobs fire on `ready_for_review`, and branch protection reads the
+# result of that run rather than of a run that was skipped.
 jobs:
   lint:
     name: fmt and clippy
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -34,6 +52,7 @@ jobs:
 
   test:
     name: test and budgets (${{ matrix.os }})
+    if: github.event.pull_request.draft != true
     runs-on: ${{ matrix.os }}
     strategy:
       # Windows and macOS fail for different reasons than Linux does, and
@@ -62,6 +81,7 @@ jobs:
 
   benches:
     name: benches compile
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -73,6 +93,7 @@ jobs:
 
   pure-rust:
     name: no C toolchain
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -104,6 +125,7 @@ jobs:
 
   musl:
     name: static musl binary
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
