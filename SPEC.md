@@ -99,7 +99,7 @@ A regression past any budget **fails the build.**
 
 ## 4. Scope
 
-**In:** working-tree diff (unstaged by default), event-driven refresh, follow mode, scroll (keyboard + mouse wheel), syntax highlighting, per-file churn visualisation, responsive layout, theming.
+**In:** working-tree diff (unstaged by default), event-driven refresh, follow mode, scroll (keyboard + mouse wheel), syntax highlighting, per-file churn visualisation, a pinned file list above the diff (§11.1), responsive layout, theming.
 
 **Out of v1, deliberately:** staging, committing, rebasing, branch or commit browsing, annotations, comment threading, AI features, remote operations. Each is reviewer-class and each would cost an invariant.
 
@@ -137,10 +137,13 @@ Elements the four bullets above do **not** cover are marked **(unspecified)** �
 | Status bar `follow ▶` | A follow-state indicator, which presumes the mode exists. **Landed with I5**, on the footer rather than a third chrome line: see §11.1. I6 later gives it a line of its own, above the hints, at the widths where one line cannot hold both. |
 | Key hints `q quit · f follow · ↑↓ scroll` | A hint bar, and it **constrains I6**: roughly thirty columns of it must degrade legibly at forty. **Ruled 2026-07-30: it does not degrade by shortening.** The footer takes a second line instead, and only below the width where a whole line holds the bar does it drop hints, `jk scroll` first. See §11.1. |
 
-Two of these are corrections rather than gaps:
+Three of these are corrections rather than gaps:
 
 1. **`f` toggles follow.** The mockup shows a dedicated key and a state indicator. That is the answer to §11.2 B1, and it was published before the question was asked. Ruled and implemented 2026-07-30; `f` is in `input.rs` and the rule is §11.1.
 2. **The dimmed row and the `just changed` label are one mechanism**, not two: both are recency rendered as intensity. Specifying them separately would produce two decay clocks that disagree on screen.
+3. **The table above is a list of elements and was silent about the container**, which is what let B4 sit `(proposed)` for two phases while the picture and the code drew different screens. Ruled 2026-08-01 ([#66](https://github.com/breferrari/vigia/issues/66)): the file list is a **region**, pinned above the diff, and §11.1 carries it. Every row in this table is unchanged by that; what changed is where three of them are drawn and for how long they stay there.
+
+**And the picture's split of elements across the two regions is not kept**, which is the second deliberate departure from `assets/preview.svg` after the header's worktree name. It gives the summary rows no kind letter and the diff heading no counters, so each region draws a different subset. That is coherent only while the region shows every changed file, and an automatic unbounded changed set means it cannot: a file scrolled out of a capped region would take its counters with it and leave nowhere to read them. Both regions draw the same row through the same `Painter::file_row`, which also leaves one degradation ladder to gate rather than two.
 
 **A picture in a public README is a specification whether or not it is written down.** This one implied a retained time series, a recency gradient, two status readouts and a keybinding, none of which appeared in the spec, the roadmap, or any issue — while [#10](https://github.com/breferrari/vigia/issues/10) carried four of them in a single line. That is the same failure as §11: behaviour that exists somewhere real, with no line claiming it.
 
@@ -375,6 +378,26 @@ Most of this was back-filled from the implementation on 2026-07-30 rather than n
 
 **External filter drivers are not run, and that is §6 rather than an omission.** `gitattributes` can point the clean filter at an external program, and Git LFS is the common one: a repository using it sets `filter.lfs.clean` to a command. Running those would mean spawning a process per file per frame, which is precisely the shape §6 rules out when it takes an in-process diff over a `git diff` subprocess per tick. `eol`, `working-tree-encoding` and `ident` are pure Rust and do apply. What the ruling costs is recorded rather than hidden: under LFS the worktree holds real content while the blob holds a pointer, so an LFS-tracked *text* file diffs as a rewrite. That is not a regression, since it is what happened before any filter ran at all, and it is [#69](https://github.com/breferrari/vigia/issues/69). What decides that a file is **binary** is a separate question this file does not yet answer, and is [#68](https://github.com/breferrari/vigia/issues/68): the engine sniffs content for NUL bytes, which is git's fallback and not its rule, so a path the attributes declare `binary` is diffed as text anyway.
 
+**The body is two regions: a pinned file list, a rule, and the scrolling diff.** This is B4, ruled 2026-08-01 as a **layout** question rather than the navigation one it was written as ([#66](https://github.com/breferrari/vigia/issues/66)). The proposal that stood here for two phases — *"one continuous scroll, list as map"* — answered *navigable?* and settled *is it a region at all?* underneath it, in the direction the code happened to have taken. `assets/preview.svg` draws the other answer and has since before the question was asked: `src/engine/watch.rs` appears **twice** in it, once at `y=92` in a block of three summary rows and once at `y=202` as the diff heading, with a rule at `y=178` between them, which one stream never does. §5.1's rule that a published artifact answering an open question **is** the answer applies to layout exactly as it applied to `f`.
+
+**What it buys is the thing §5 calls the differentiator actually staying on screen.** Three of the four glance elements — sparkline, heat strip, counters — ride a `Row::File` heading, so in one stream they are visible only while that heading is, and scrolling two hundred lines into a file takes every file's glance signal off the screen at once. That is the inverse of what a monitor is for: §2 buys *readable at a glance*, and a glance surface that survives only at scroll position zero is a glance surface that is absent whenever anyone is actually reading.
+
+**The list stays not navigable, which is the half B4 proposed and which stands.** There is no selection, no focus and no second mode: `▸` marks the file the diff is inside and is not a cursor, and no key changes meaning depending on where anything is. B4's own rationale is the reason — *selection implies focus, focus implies a second mode, and modes are reviewer-class* — and it is honoured here rather than overridden. The region is a **map**, which is what "list as map" wanted and what a stream of headings could not supply, because §11.2's phrasing presupposed a list to be a map *of* and there was none, there were headings.
+
+**Its height is the changed-file count, capped, plus the rule.** Three changed files draws three rows, which is the picture exactly; a formatter touching two hundred draws the cap and scrolls. The height is a function of pane height and changed-file count **alone** — the same inputs `Footer::plan` already takes, and for the same reason: those change only when the diff does, so the region can never jog a reader's diff the way a notice or a resize would. It gives way on a short pane the way the footer gives up its second line, and the diff keeps `MIN_BODY` rows before the list gets any.
+
+**The list is ordered the way the stream is**, which is `Frame::files()`, which is status order. That is what makes it a map rather than a second opinion: the caret's place in the list and the thumb's place on the diff's scrollbar then describe the same position. Ordering by diff size was rejected on I4 — it needs every changed file's diff, which is [#49](https://github.com/breferrari/vigia/issues/49)'s argument against a repository-wide total arriving in a second place, landing here identically. Ordering by recency from `History` is genuinely free and was rejected for a different reason: it decouples the list from the stream, so the caret stops corresponding to the scroll position and the map stops being one.
+
+**A list row draws exactly what a heading in the stream draws**, through the same `Painter::file_row` and the same degradation ladder. This is the **second deliberate departure from `assets/preview.svg`**, beside the header's worktree name, and it is recorded rather than absorbed: the picture splits the elements across the two regions, giving the summary rows no kind letter and the diff heading no counters. That split stops being defensible the moment the list scrolls, because a file scrolled out of the region would lose its counters altogether and there would be nowhere left to read them.
+
+**A visible list row costs one `Frame::diff` and no more**, which is what keeps the region inside I4 rather than beside it. The bound is the region's own height, never the changed-file count, so the cost follows the window exactly as the body's does; under I2a a file that did not change is a `stat` and a cache hit that reads **zero bytes**. That is an I4 claim rather than a new invariant, and `crates/vigia/tests/reads.rs` is where it is gated, alongside the ones that already bound the body.
+
+**The list follows the diff, and `J`/`K` move it without moving anything else.** It slides on its own to keep the caret visible, so the region is correct untouched the way I5 requires of everything else; when a reader moves it themselves and the diff later lands on a file outside the window, the window snaps back to contain it. Shift is the modifier because `Ctrl-J` is LF and `Ctrl-C`/`Ctrl-D` already quit, Alt is intercepted by terminal emulators and by macOS Option, and `G` has already taught a reader that case is load bearing here. A plain letter also reaches terminals that never report a modified arrow, so neither binding is the only way in.
+
+**Scrolling the list does not disengage follow mode**, and that is a ruling rather than an omission. Follow is a claim about the **diff** viewport, and moving a window over a map expresses no intent about what the diff should show — the same reasoning that already exempts a terminal resize one paragraph down. Browsing the changed set while the diff goes on following what an agent is writing is the monitor behaviour, and the two would fight if one disengaged the other. `Action::is_manual_scroll` is an exhaustive match precisely so that a new action has to answer this rather than inheriting a default.
+
+**Both regions carry a scrollbar, and the diff's is honest about what it cannot know.** The list's is exact: its thumb spans the visible window over the changed-file count, both of which are free. The diff's is **file-granular, plus the fraction within the file the top is in** — `(top.file + top.row / rows in that file) / files` — which is also free, because the file at the top is diffed by definition. What it is deliberately **not** is row-exact over the whole diff: that needs the diff's total row count, which needs every file's height, which is the read I4 forbids and which the walk-back one section down already refuses for `G`. So it is coarse between files and smooth inside one, and this paragraph is the record that the coarseness is a ruling and not a bug.
+
 **Keys.**
 
 | Key | Action |
@@ -386,8 +409,10 @@ Most of this was back-filled from the implementation on 2026-07-30 rather than n
 | `PgUp` | page up |
 | `g`, `Home` | first changed file |
 | `G`, `End` | last changed file |
+| `J`, `Shift-↓` | scroll the file list down one row |
+| `K`, `Shift-↑` | scroll the file list up one row |
 | `f` | engage follow mode, or disengage it |
-| mouse wheel | scroll |
+| mouse wheel | scroll the diff |
 | terminal resize | redraw, no state change |
 
 **Scroll position is `(file, offset within that file)`, never a row index.** A frame that changes something above the viewport therefore does not teleport the view. This is a correctness property, not an implementation detail: with a row index, an agent writing to a file earlier in the list would yank the reader's position on every keystroke it makes.
@@ -582,9 +607,13 @@ Rationale, kept because it is the part a later reader will want to argue with: n
 
 What was corrected is the wording. The proposal said "no changes" and the shell said `working tree clean`, and both are looser than the diff underneath them: this one compares the working tree against the **index**, so a fully staged worktree has no changes here and plenty for git.
 
-**B4 — Is the file list navigable?** The README mockup shows a file list above the diff. Selectable, with the diff jumping to the selection, or a map rather than a menu?
+**B4 — Is the file list navigable, and is it a region? Ruled 2026-08-01: the list is a region, and it is not navigable. See §11.1.** ([#66](https://github.com/breferrari/vigia/issues/66).) Both halves, because the question as written only ever asked one of them.
 
-*(proposed)* **Not navigable in v1** — one continuous scroll, list as map. Rationale: selection implies focus, focus implies a second mode, and modes are reviewer-class (§2). The pane is 40 columns beside an agent, not a full-screen client.
+*The smaller half stands unchanged.* **Not navigable**: no selection, no focus, no second mode, for the rationale below, which is kept because it is the part a later reader will want to argue with.
+
+*The larger half is ruled the other way from the proposal.* **The file list is a region of the screen**, pinned above the diff with a rule between them, and it scrolls. What settled it is not taste: three of §5's four glance elements ride a file heading, so a single stream makes the differentiator visible only at scroll position zero, and the picture has drawn two regions since before the question existed. The list is ordered like the stream, costs one `Frame::diff` per **visible** row, tracks the diff on its own and takes `J`/`K` to move; §11.1 carries all of it, including why the diff's scrollbar is file-granular rather than row-exact.
+
+*(proposed, and this was the wording that hid the second half)* **Not navigable in v1** — one continuous scroll, list as map. Rationale: selection implies focus, focus implies a second mode, and modes are reviewer-class (§2). The pane is 40 columns beside an agent, not a full-screen client.
 
 > [!important] The question above is the smaller half, and the proposal settles the larger one silently
 > Filed 2026-08-01 as [#66](https://github.com/breferrari/vigia/issues/66). *Navigable* is
@@ -617,6 +646,13 @@ What was corrected is the wording. The proposal said "no changes" and the shell 
 > picture too**: a published artifact answering a question is the answer, so one
 > answering it differently from the code is a wrong specification and not a stale
 > asset.
+>
+> **Resolved 2026-08-01 towards the picture**, which is the direction that costs
+> something: the region is built rather than the mockup corrected away. What the
+> picture still got wrong is smaller and is corrected in it — it draws a summary
+> block of *every* changed file, and an automatic unbounded changed set cannot
+> have one, so the region caps and scrolls and says so with a bar. The two now
+> agree in both directions rather than one.
 
 **B5 — Not a git repository, and submodules.** Neither appeared anywhere in this spec. **Half ruled 2026-07-31**, and the halves are separated here rather than one number being retired for the sake of tidiness, because only one of them is decided.
 
