@@ -1641,3 +1641,71 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
          be reachable or the ladder has a rung no width can produce"
     );
 }
+
+#[test]
+fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
+    // The regression that adding `JK files` caused, and the reason
+    // `HINT_BASELINE` exists. The widest rung became forty columns, which is
+    // exactly the width I6 is named for, so the footer started taking a second
+    // line there and every reader lost a body row to advice, including the ones
+    // who never press `J`.
+    //
+    // The rule: the footer's height is decided by the baseline bar a reader is
+    // owed at forty columns. Rungs above it are drawn where there is room and are
+    // never worth a row.
+    let view = every_row_kind();
+    let tall = 24u16;
+    let rows = |width: u16, chrome: &Chrome| {
+        let split = body_layout(Rect::new(0, 0, width, tall), chrome, view.files);
+        usize::from(tall) - 1 - (split.list + usize::from(split.rule) + split.diff)
+    };
+
+    // The case that broke. Idle at forty columns, where the state is a bare
+    // position and the baseline bar fits beside it.
+    assert_eq!(
+        rows(40, &chrome()),
+        1,
+        "forty columns idle took a second footer line, so a bonus hint bought a \
+         body row at the width I6 is named for"
+    );
+
+    // Non-vacuity, and it is the half that would otherwise let this pass against
+    // a ladder that simply never draws the extra hint: somewhere wide enough, the
+    // bar really is wider than the baseline.
+    let baseline = rows_at(40, tall, &view, &chrome())
+        .last()
+        .expect("a footer")
+        .trim_end()
+        .to_owned();
+    let wide = rows_at(120, tall, &view, &chrome())
+        .last()
+        .expect("a footer")
+        .to_owned();
+    let hints = wide.split("  ").next().unwrap_or_default().trim_end();
+    assert!(
+        hints.len() > baseline.len(),
+        "the widest pane drew {hints:?}, no more than the forty-column bar \
+         {baseline:?}, so there is no bonus rung to protect"
+    );
+
+    // And the height never grows as a pane gets wider, which is the general
+    // shape the rule above is one instance of.
+    //
+    // **From eight columns**, because below that there is no state to move up to
+    // a second line and the footer therefore cannot grow at all: it is one row at
+    // width two and two rows at width three, which is not the ladder relaxing but
+    // the ladder never having engaged. Sweeping into that would be asserting
+    // monotonicity across a boundary the rule does not cross.
+    for chrome in [chrome(), following()] {
+        let mut previous = usize::MAX;
+        for width in 8..=*WIDTHS.end() {
+            let now = rows(width, &chrome);
+            assert!(
+                now <= previous,
+                "the footer grew from {previous} to {now} rows as the pane widened \
+                 to {width}"
+            );
+            previous = now;
+        }
+    }
+}

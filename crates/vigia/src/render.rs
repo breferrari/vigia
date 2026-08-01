@@ -91,18 +91,45 @@ const CONTINUES: &str = "›";
 /// has least to go on. `tests/legibility.rs` gates both properties over the
 /// rungs it observes by rendering, so this table cannot drift from what ships.
 ///
-/// The drop order is `SPEC.md` §11.1's ruling. `jk scroll` goes first and
-/// `f follow` is last standing: `q` and `jk` are pager reflexes and four keys
-/// reach quit, while `f` is the one nobody would guess and the only one that
-/// restores a state a reader can lose without noticing. It only fires below
-/// twenty-nine columns, because above that [`Footer`] gives the bar a line of
-/// its own rather than shortening it.
-const HINT_RUNGS: [&str; 4] = [
+/// The drop order is `SPEC.md` §11.1's ruling. `JK files` goes first, then
+/// `jk scroll`, and `f follow` is last standing: `q` and `jk` are pager reflexes
+/// and four keys reach quit, while `f` is the one nobody would guess and the
+/// only one that restores a state a reader can lose without noticing. It only
+/// fires below twenty-nine columns, because above that [`Footer`] gives the bar
+/// a line of its own rather than shortening it.
+///
+/// **`JK files` is here rather than left undiscoverable**, and it goes first
+/// rather than last for the reason `f` goes last: the pinned list is drawn on
+/// every screen wide and tall enough to have one, so a reader can see that the
+/// region exists without being told, and it slides on its own besides. `f`
+/// restores a state whose *absence* is invisible, which is a different and worse
+/// thing to have to guess.
+///
+/// It is a **bonus rung**, and [`HINT_BASELINE`] is what makes that true rather
+/// than a hope: adding it made the widest bar forty columns, which is exactly the
+/// width I6 is named for, and the footer immediately took a second line there
+/// against a gate that had asserted otherwise since I6 landed. One body row spent
+/// on advice at the pane's worst width, for every reader, including the ones who
+/// never press `J`.
+const HINT_RUNGS: [&str; 5] = [
+    "q quit · f follow · jk scroll · JK files",
     "q quit · f follow · jk scroll",
     "q quit · f follow",
     "f follow",
     "",
 ];
+
+/// The rung whose fit decides whether the footer takes a second line.
+///
+/// **Not rung zero, and that is the whole point of it being named.** The footer
+/// grows when the bar cannot sit beside the state on one line, and measuring that
+/// against the *widest* rung would let any hint added above this one change the
+/// footer's height at widths where the old bar fitted perfectly well. Rungs above
+/// this are drawn where there happens to be room and are never worth a row.
+///
+/// Everything from here down is what `SPEC.md` §11.1 rules a reader is owed at
+/// forty columns; above it is what a wider pane can afford.
+const HINT_BASELINE: usize = 1;
 
 /// What joins two hints.
 ///
@@ -941,8 +968,11 @@ impl<'a> Footer<'a> {
         // this height is a function of width, follow state and file count alone,
         // so a caller that sampled the chrome before a notice was raised still
         // gets the answer the renderer will use.
-        let grows =
-            width_of(HINT_RUNGS[0]) + taken > width && reserved > 0 && area.height >= 3 + MIN_BODY;
+        // Measured against [`HINT_BASELINE`] rather than the widest rung, so a
+        // hint added above it can never buy itself a row.
+        let grows = width_of(HINT_RUNGS[HINT_BASELINE]) + taken > width
+            && reserved > 0
+            && area.height >= 3 + MIN_BODY;
         let rows = if grows { 2 } else { 1 };
 
         let room = if grows {

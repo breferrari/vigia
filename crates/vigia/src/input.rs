@@ -21,6 +21,13 @@ pub enum Action {
     Quit,
     /// Move the viewport by this many rows, negative for up.
     Scroll(isize),
+    /// Move the **pinned file list's** window by this many rows, negative for up.
+    ///
+    /// Its own action rather than a mode on [`Action::Scroll`], because
+    /// `SPEC.md` §11.1 keeps the list not navigable: there is no focus to be in
+    /// and no selection to move, so a key means one thing whatever the screen is
+    /// showing. What moves is a window over a map; the diff does not move at all.
+    ScrollList(isize),
     /// Move the viewport by whole screens, negative for up.
     Page(isize),
     /// Go to the first changed file.
@@ -55,7 +62,15 @@ impl Action {
             // scroll would disengage follow mode for free. `ToggleFollow` is
             // the reader asking for the opposite of disengaging, and quitting
             // has nothing left to disengage from.
-            Self::Quit | Self::Redraw | Self::ToggleFollow => false,
+            //
+            // **`ScrollList` is a ruling rather than an oversight**, and this
+            // exhaustive match is what forced it to be made. Follow is a claim
+            // about the *diff* viewport; moving a window over the map of it
+            // expresses no intent about what the diff should show, exactly as a
+            // resize does not. Browsing the changed set while the diff goes on
+            // following what an agent is writing is the monitor behaviour, and
+            // the two would fight if one disengaged the other. `SPEC.md` §11.1.
+            Self::Quit | Self::Redraw | Self::ToggleFollow | Self::ScrollList(_) => false,
         }
     }
 
@@ -77,7 +92,7 @@ impl Action {
     pub fn needs_height(self) -> bool {
         match self {
             Self::Page(_) => true,
-            Self::Scroll(_) | Self::Top | Self::Bottom => false,
+            Self::Scroll(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => false,
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
         }
     }
@@ -124,10 +139,30 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         };
     }
 
+    // **Before the plain arrow arms, or `Shift-↓` falls through to a diff
+    // scroll.** The letters below would still work, so the defect would be one
+    // binding silently doing the other's job on terminals that report modifiers
+    // and nothing at all to see on terminals that do not.
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        if let KeyCode::Down | KeyCode::Up = key.code {
+            let rows = if key.code == KeyCode::Down { 1 } else { -1 };
+            return Some(Action::ScrollList(rows));
+        }
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::Scroll(1)),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Scroll(-1)),
+        // Shift is the modifier because the alternatives are all taken or
+        // unreliable: `Ctrl-J` is LF, `Ctrl-C` and `Ctrl-D` already quit, and
+        // Alt is intercepted by terminal emulators and by macOS Option. `G`
+        // below has already taught a reader that case is load bearing here.
+        //
+        // A plain letter as well as the arrow, because a terminal that never
+        // reports a modified arrow would otherwise have no way in at all.
+        KeyCode::Char('J') => Some(Action::ScrollList(1)),
+        KeyCode::Char('K') => Some(Action::ScrollList(-1)),
         KeyCode::PageDown | KeyCode::Char(' ') => Some(Action::Page(1)),
         KeyCode::PageUp => Some(Action::Page(-1)),
         KeyCode::Home | KeyCode::Char('g') => Some(Action::Top),

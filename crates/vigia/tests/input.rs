@@ -219,3 +219,79 @@ fn a_resize_redraws_without_moving_anything() {
     // the one event that has to cost a frame and must not cost a scroll.
     assert_eq!(action_for(&Event::Resize(40, 12)), Some(Action::Redraw));
 }
+
+#[test]
+fn shift_scrolls_the_list_by_letter_and_by_arrow() {
+    // Two bindings for one intention, and both are needed. A terminal that never
+    // reports a modified arrow would leave `Shift-↓` indistinguishable from `↓`,
+    // so the letters are the path that always works; a reader whose hands are on
+    // the arrows should not have to learn a letter to use the region.
+    //
+    // `SPEC.md` §11.1 rules Shift as the modifier: `Ctrl-J` is LF, `Ctrl-C` and
+    // `Ctrl-D` already quit, and Alt is intercepted by terminal emulators and by
+    // macOS Option.
+    for event in [
+        press(KeyCode::Char('J')),
+        with(KeyModifiers::SHIFT, KeyCode::Down),
+    ] {
+        assert_eq!(
+            action_for(&event),
+            Some(Action::ScrollList(1)),
+            "{event:?} did not scroll the list down"
+        );
+    }
+    for event in [
+        press(KeyCode::Char('K')),
+        with(KeyModifiers::SHIFT, KeyCode::Up),
+    ] {
+        assert_eq!(
+            action_for(&event),
+            Some(Action::ScrollList(-1)),
+            "{event:?} did not scroll the list up"
+        );
+    }
+}
+
+#[test]
+fn a_shifted_arrow_does_not_fall_through_to_the_diff() {
+    // The specific defect the ordering in `key_action` exists to prevent: the
+    // plain `Down` arm matches whatever the modifiers are, so a shifted arrow
+    // tested *after* it silently scrolls the diff instead of the list. Worth its
+    // own gate rather than trusting the test above, because that one would pass
+    // on a terminal shape where the letters carry it.
+    assert_ne!(
+        action_for(&with(KeyModifiers::SHIFT, KeyCode::Down)),
+        Some(Action::Scroll(1)),
+        "Shift-Down fell through to a diff scroll"
+    );
+    assert_ne!(
+        action_for(&with(KeyModifiers::SHIFT, KeyCode::Up)),
+        Some(Action::Scroll(-1)),
+        "Shift-Up fell through to a diff scroll"
+    );
+
+    // And the unshifted arrows still mean the diff, which is the direction a
+    // careless fix breaks.
+    assert_eq!(action_for(&press(KeyCode::Down)), Some(Action::Scroll(1)));
+    assert_eq!(action_for(&press(KeyCode::Up)), Some(Action::Scroll(-1)));
+}
+
+#[test]
+fn scrolling_the_list_is_not_a_manual_scroll() {
+    // `SPEC.md` §11.1's ruling, held where the code reads it. Follow is a claim
+    // about the diff viewport; moving a window over the map of it expresses no
+    // intent about what the diff should show, exactly as a resize does not.
+    //
+    // Asserted beside the actions that *do* disengage, because the value of this
+    // is the contrast: a gate saying only "list scrolling returns false" would
+    // pass against a predicate that returned false for everything.
+    assert!(!Action::ScrollList(1).is_manual_scroll());
+    assert!(!Action::ScrollList(-1).is_manual_scroll());
+    assert!(Action::Scroll(1).is_manual_scroll());
+    assert!(Action::Page(1).is_manual_scroll());
+    assert!(Action::Bottom.is_manual_scroll());
+
+    // And it is not measured in screens, so the loop never pays for a terminal
+    // size to apply one.
+    assert!(!Action::ScrollList(1).needs_height());
+}

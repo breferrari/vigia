@@ -279,3 +279,109 @@ fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
     assert_eq!(view.top, Position::default());
     assert_eq!(view.list_top, 0, "the window did not follow the jump home");
 }
+
+#[test]
+fn scrolling_the_list_leaves_the_diff_where_it_was() {
+    // The half of the ruling that is about state rather than about keys. `J`
+    // moves a window over the map; the diff does not move, and follow stays
+    // engaged, so an agent writing in the other pane goes on dragging the diff
+    // to what it just wrote while a reader browses the changed set.
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-browse", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    let before = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(app.following(), "the shell did not start following");
+
+    for _ in 0..10 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let after = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_eq!(
+        after.top, before.top,
+        "scrolling the list moved the diff from {:?} to {:?}",
+        before.top, after.top
+    );
+    assert!(app.following(), "scrolling the list disengaged follow mode");
+    assert!(
+        after.list_top > before.list_top,
+        "the window did not move: {} to {}",
+        before.list_top,
+        after.list_top
+    );
+    assert_eq!(
+        after.list.len(),
+        LIST_ROWS,
+        "the window shrank instead of sliding"
+    );
+
+    // The caret is gone from the region, because the diff is no longer inside
+    // any file the window is showing. That is honest rather than a gap: the map
+    // is deliberately looking somewhere else, and inventing a caret would say
+    // the diff had moved.
+    assert!(
+        after.current < after.list_top || after.current >= after.list_top + after.list.len(),
+        "the fixture did not browse past the current file, so this proves nothing"
+    );
+}
+
+#[test]
+fn the_window_is_overtaken_when_the_diff_leaves_it() {
+    // The other side of the rule above. Browsing sticks, right up until the
+    // thing the map is a map *of* moves somewhere the map cannot show, at which
+    // point the map has to follow. Without this, a reader who scrolled the list
+    // once would have a region that never agreed with the diff again.
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-overtaken", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    for _ in 0..20 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let browsed = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(browsed.list_top > 0, "the window never moved");
+
+    // Now take the diff somewhere the window cannot show.
+    app.apply(Action::Bottom, &mut frame, body.diff)
+        .expect("apply");
+    let caught = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_eq!(
+        caught.current,
+        FILES - 1,
+        "the jump did not land on the last file"
+    );
+    assert!(
+        caught.list_top <= caught.current && caught.current < caught.list_top + caught.list.len(),
+        "the window at {} does not contain file {}",
+        caught.list_top,
+        caught.current
+    );
+}

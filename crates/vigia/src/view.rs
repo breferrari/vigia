@@ -253,6 +253,18 @@ pub struct Viewport {
     /// Rows the pinned list has, from [`crate::render::Body::list`]. Zero on a
     /// pane too short for a region, which draws no list at all.
     pub list_rows: usize,
+    /// Whether the list's window should follow the diff, or stay where a reader
+    /// put it.
+    ///
+    /// **A flag rather than a rule this function can work out**, and the reason
+    /// is the same one [`Self::anchored`] gives one field up: the intent is not
+    /// recoverable from the numbers. A window sitting away from the current file
+    /// looks identical whether a reader browsed there with `J` or the diff moved
+    /// out from under it, and those want opposite answers. Snapping
+    /// unconditionally makes `J` useless, because the very next frame drags the
+    /// window back; never snapping leaves a map that stops agreeing with the diff
+    /// the moment anyone touches it.
+    pub list_follows: bool,
 }
 
 /// A screenful of rows, plus what the chrome needs to describe it.
@@ -446,6 +458,7 @@ impl View {
             diff_rows: height,
             list_top,
             list_rows,
+            list_follows,
         } = viewport;
         // One pass, dropped at every exit including the `?`s below, which is
         // what keeps the highlight cache bounded by the viewport. The guard
@@ -494,7 +507,7 @@ impl View {
             // map: `body_layout` never produces this pair, but `collect` is
             // public and a caller asking for one region without the other must
             // get the one it asked for rather than silently neither.
-            view.take_list(frame, history, list_rows)?;
+            view.take_list(frame, history, list_rows, list_follows)?;
             return Ok(view);
         }
 
@@ -665,7 +678,7 @@ impl View {
         // put it on a file the diff is not in on exactly the frames that moved,
         // which is every frame a monitor exists to show.
         view.current = view.top.file;
-        view.take_list(frame, history, list_rows)?;
+        view.take_list(frame, history, list_rows, list_follows)?;
 
         Ok(view)
     }
@@ -678,26 +691,38 @@ impl View {
     /// [`vigia_core::Frame::diff`], which under I2a is a `stat` and a cache hit
     /// reading **zero bytes** for a file that did not change.
     ///
-    /// Two clamps, and the order matters. The window is first pulled back so the
-    /// last file can rest on the bottom row rather than leaving blanks a reader
-    /// would read as "no more files". Then it is **snapped** so the current file
-    /// is inside it: a reader who browsed away with `J` keeps their place right
-    /// up until the diff lands somewhere the list cannot show, at which point the
-    /// map has to be a map of where the diff actually is.
+    /// Two clamps, and they answer different questions. The window is always
+    /// pulled back so the last file can rest on the bottom row rather than
+    /// leaving blanks a reader would read as "no more files"; that is validity
+    /// and holds however the window got there. It is **snapped** onto the current
+    /// file only when `follows` says the window is the diff's to move, which is
+    /// every frame except those a reader has browsed with `J` and not yet
+    /// overtaken. See [`Viewport::list_follows`] for why that cannot be worked
+    /// out from the numbers here.
     ///
     /// Its reads are counted into [`View::read`], which therefore double-counts
     /// the file the body also drew. That is accurate rather than sloppy, for the
     /// reason [`View::last_screenful`] gives about the same number: under I2a the
     /// second ask is a cache hit that reads no bytes, so it is a count that
     /// doubles and not work that does.
-    fn take_list(&mut self, frame: &mut Frame, history: &History, rows: usize) -> Result<()> {
+    fn take_list(
+        &mut self,
+        frame: &mut Frame,
+        history: &History,
+        rows: usize,
+        follows: bool,
+    ) -> Result<()> {
         if rows == 0 || self.files == 0 {
             self.list_top = 0;
             return Ok(());
         }
 
         let mut top = self.list_top.min(self.files.saturating_sub(rows));
-        if self.current < top {
+        if !follows {
+            // Left where the reader put it. The caret simply does not appear,
+            // which is honest: the map is deliberately looking somewhere the
+            // diff is not, and inventing one would say the diff had moved.
+        } else if self.current < top {
             top = self.current;
         } else if self.current >= top + rows {
             // One past the caret minus the window, so the current file lands on

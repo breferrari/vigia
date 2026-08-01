@@ -71,6 +71,19 @@ pub struct App {
     /// frames is the one thing that walk cannot know, which is that a reader
     /// moved it themselves with `J` and has not been overtaken yet.
     list_top: usize,
+    /// Whether the list's window is still the diff's to move.
+    ///
+    /// **The list's own `following`, and it exists for the same reason.** The
+    /// window tracks the diff by default, so the region is correct untouched the
+    /// way I5 requires; `J` takes it over, and anything that moves the *diff*
+    /// hands it back. Without the second half a reader who browsed once would
+    /// have a map that never agreed with the diff again; without the first, `J`
+    /// does nothing at all, because the next frame drags the window straight
+    /// back onto the current file.
+    ///
+    /// True at rest, which `Default` gives, and which is the right answer here
+    /// rather than an accident: a monitor's map follows what it is a map of.
+    list_follows: bool,
     /// Whether the watch is still live, which the header draws as a word.
     ///
     /// [`Mode::Watching`] is `Default`, and unlike `following` that is the right
@@ -115,6 +128,7 @@ impl Default for App {
             // has moved.
             anchored: false,
             list_top: 0,
+            list_follows: true,
             newest: None,
             mode: Mode::default(),
             frames: Samples::new(FRAME_SAMPLES),
@@ -292,6 +306,10 @@ impl App {
         };
         self.anchored = false;
         self.position = Position { file, row: 0 };
+        // A jump moves the diff, so the map goes back to following it. Follow
+        // mode dragging the view to a file the pinned list was not showing is
+        // exactly when a reader most needs the two to agree.
+        self.list_follows = true;
         true
     }
 
@@ -312,6 +330,13 @@ impl App {
         // silently: follow mode would simply keep dragging the reader back.
         if action.is_manual_scroll() {
             self.following = false;
+            // **And the map is handed back.** Every action that reaches here
+            // moves the diff, and a reader who moves the diff is asking to see
+            // where it went; a window left behind from an earlier `J` would be
+            // showing somewhere else with no caret to say so. This is the exact
+            // mirror of the line above it: manual scrolling takes the *diff*
+            // away from follow mode and gives the *list* back to it.
+            self.list_follows = true;
         }
 
         match action {
@@ -330,6 +355,22 @@ impl App {
             Action::Scroll(rows) => {
                 self.anchored = true;
                 self.scroll(rows, frame)?;
+            }
+            // **Moves the window and nothing else**, which is the whole of
+            // `SPEC.md` §11.1's ruling: the diff does not move, follow is not
+            // disengaged (see `Action::is_manual_scroll`), and `anchored` is
+            // untouched because that word is about how the *diff's* position was
+            // reached.
+            //
+            // Bounded here only against the file list's length, because the real
+            // clamp needs the region's height and `View::take_list` is where that
+            // is known. Same division of labour the diff's position already has:
+            // this moves a number, the collect resolves it, and the resolved
+            // answer comes back through `App::view`.
+            Action::ScrollList(rows) => {
+                let last = frame.files().len().saturating_sub(1);
+                self.list_top = self.list_top.saturating_add_signed(rows).min(last);
+                self.list_follows = false;
             }
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
@@ -439,6 +480,7 @@ impl App {
                 diff_rows: body.diff,
                 list_top: self.list_top,
                 list_rows: body.list,
+                list_follows: self.list_follows,
             },
         )?;
         self.position = view.top;
