@@ -29,8 +29,8 @@
 //!
 //! The consequence is recorded rather than hidden: under Git LFS the worktree
 //! holds real content while the blob holds a pointer, so such a file diffs as a
-//! rewrite. That is what happens today as well, so it is not a regression, and
-//! it is [#66](https://github.com/breferrari/vigia/issues/66).
+//! rewrite. That is what happened before any filter ran at all, so it is not a
+//! regression, and it is [#69](https://github.com/breferrari/vigia/issues/69).
 
 use std::path::Path;
 

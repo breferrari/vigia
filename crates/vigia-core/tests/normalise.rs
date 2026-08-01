@@ -201,7 +201,7 @@ fn a_normalised_diff_matches_git_hunk_for_hunk() {
 /// What this does **not** claim is that a `binary`-marked file is drawn the way
 /// git draws it. `git diff` reports `Binary files differ` and this still diffs it
 /// as text, because `binary` also implies `-diff` and nothing here honours that:
-/// [#66](https://github.com/breferrari/vigia/issues/66).
+/// [#68](https://github.com/breferrari/vigia/issues/68).
 #[test]
 fn the_binary_attribute_turns_normalisation_off() {
     let changed = |attributes: Option<&str>, name: &str| -> (u32, u32) {
