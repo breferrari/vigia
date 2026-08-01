@@ -2083,3 +2083,83 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         }
     }
 }
+
+/// A removed line's wash stops before the scrollbar's column.
+///
+/// [#81](https://github.com/breferrari/vigia/issues/81) was filed **undiagnosed
+/// on purpose**, from a real pane where the wash appeared to reach the far right
+/// and meet the bar. Two explanations fit that report and only one is ours: the
+/// row may be washing the columns `with_bar` took, or the host terminal may be
+/// drawing its own scrollbar over a correct full-bleed band.
+///
+/// This is the gate that tells them apart, and it is the thing the issue says
+/// does not exist. It reads the **background** of the bar's column on a row that
+/// is definitely washed, which is the property the snapshots structurally cannot
+/// see: `TestBackend`'s `Display` writes symbols and drops styles.
+#[test]
+fn a_wash_stops_before_the_scrollbar_column() {
+    /// The same draw as [`screen`], on the palette that actually tints a row.
+    ///
+    /// `Theme::default()` is the sixteen named colours, which draw **no row tint
+    /// at any depth** by the ruling in `theme.rs`. Rendering this gate through it
+    /// would assert that a wash which was never painted did not reach a column,
+    /// which is the shape §7 keeps finding: a gate that cannot fail.
+    fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        let theme = vigia::Theme::dark();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+            })
+            .expect("draw");
+        terminal.backend().clone()
+    }
+
+    let width = 64u16;
+    let view = View {
+        total_rows: 400,
+        rows_above: 40,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            line(LineKind::Removed, 38, "    let stale = self.pending.take();"),
+            line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+        ],
+        ..two_regions(1)
+    };
+    let backend = washed_screen(width, 18, &view, &chrome());
+    let buffer = backend.buffer();
+
+    // The washed row, found by its content rather than by a hardcoded y: the
+    // regions above it move when the list's height rule does.
+    let washed = (0..18u16)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn at all");
+
+    let wash = buffer[(1, washed)].bg;
+    let bar = buffer[(width - 1, washed)].bg;
+    assert_ne!(
+        wash,
+        ratatui::style::Color::Reset,
+        "the removed line was not washed at all, so this gate proves nothing"
+    );
+    assert_ne!(
+        bar, wash,
+        "the wash reached the scrollbar's own column at x={}",
+        width - 1
+    );
+
+    // And the gap beside it, which is what `BAR_WIDTH` reserves so the thumb does
+    // not sit flush against a count.
+    assert_ne!(
+        buffer[(width - 2, washed)].bg,
+        wash,
+        "the wash reached the column reserved beside the bar"
+    );
+}
