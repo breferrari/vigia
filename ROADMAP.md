@@ -129,6 +129,8 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
+| ⬜ | **On Windows every CRLF file reads as a full rewrite** | [#65](https://github.com/breferrari/vigia/issues/65) |
+| ✅ | I3: the restart left a second screenful of hunk parses in the pass | [#64](https://github.com/breferrari/vigia/issues/64) |
 | ✅ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 | ✅ | Scrolling into the tail of a diff leaves the pane half empty | [#59](https://github.com/breferrari/vigia/issues/59) |
 
@@ -223,6 +225,31 @@ The fix must not apply to a jump, and two `follow.rs` tests are what said so. Fo
 >
 > The rule this leaves: **measure the artifact, not a picture of it.** Four
 > symptoms, one probe, and only one of them survived contact with a number.
+
+> [!warning] Phase 3 is not closed, and [#65](https://github.com/breferrari/vigia/issues/65) is why
+> It re-opened the day theming landed. `vigia` drew a file as **+905 -885**, the
+> whole thing deleted and re-added, while `git diff` reported that same file as
+> **unchanged**. Default Windows configuration, `core.autocrlf=true`, in any
+> repository whose `.gitattributes` normalises line endings.
+>
+> The frame path compares raw worktree bytes against the index blob. Git runs the
+> worktree side through the clean filter first, so CRLF becomes LF before anything
+> is compared. Without that step every line of a CRLF file differs from its blob.
+> `gix-filter` is already in the graph; this is a call not being made.
+>
+> **It is first in the queue because of what it costs, not what it costs to fix.**
+> Every budget in this file is a claim about a tool that shows what changed, and on
+> one of three tier-1 targets it currently shows a thousand lines of noise over a
+> file nobody touched. The real edit is in there somewhere.
+>
+> Invisible to the whole suite: every fixture is built by `Scratch`, which shells
+> out to `git init` with no `.gitattributes` and no `autocrlf`, so both sides are
+> always LF and the filter is never exercised. That is §7's rule one axis over, a
+> fixture that cannot tell two things apart because in that fixture they are the
+> same thing. Fourth time.
+>
+> The half of that which is not about this repo is in the vault, since it would
+> bite any project whose fixtures are built by a tool that has configuration.
 
 ## Phase 4 — distribution
 
