@@ -1703,16 +1703,27 @@ fn the_diff_scrollbar_moves_within_a_file_and_not_only_between_them() {
 
     // And it still distinguishes files, which is the half that was never in
     // doubt but which a within-file-only bar would have lost.
+    //
+    // Through a fixture whose diff **fills** its region: a screen showing the
+    // whole diff draws no bar at all now, correctly, so the earlier fixture here
+    // had nothing to read.
+    let full = |current: usize| View {
+        current_span: 400,
+        top: Position {
+            file: current,
+            row: 0,
+        },
+        rows: (0..40)
+            .map(|i| line(LineKind::Context, i, "a line of context"))
+            .collect(),
+        ..a_list_of(3, 3, 0)
+    };
     let early = thumb_rows(
-        &screen(width, 18, &two_regions_at(0, 0), &chrome()),
+        &screen(width, 18, &full(0), &chrome()),
         width - 1,
         region.clone(),
     );
-    let late = thumb_rows(
-        &screen(width, 18, &two_regions_at(2, 0), &chrome()),
-        width - 1,
-        region,
-    );
+    let late = thumb_rows(&screen(width, 18, &full(2), &chrome()), width - 1, region);
     assert!(
         early[0] < late[0],
         "the thumb is in the same place for the first and last file: {early:?} \

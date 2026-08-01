@@ -3,7 +3,7 @@ source: crates/vigia/tests/render.rs
 expression: "screen(80, 5, &glancing(), &chrome())"
 ---
 "vigia                                                         watching · 3 files"
-"M src/engine/watch.rs                ● just changed ████████████   ▁▂▆▄▆█ +42 -7"
-"M src/render/frame.rs                               ████████████    ▂▁    +11 -3"
-"M Cargo.toml                                                               +2 -0"
+"M src/engine/watch.rs              ● just changed ████████████   ▁▂▆▄▆█ +42 -7 █"
+"M src/render/frame.rs                             ████████████    ▂▁    +11 -3 ▕"
+"M Cargo.toml                                                             +2 -0 ▕"
 "q quit · f follow · jk scroll · JK files                                     1/3"

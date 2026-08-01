@@ -1295,14 +1295,19 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
 
     let list_top = area.y + 1;
     let diff_top = list_top + body.list as u16 + u16::from(body.rule);
-    let shown = view.shown_files() as u64;
 
     // A bar column only where a bar is actually drawn, and only where it can
     // express more than one position: a one-row track is full at every window,
     // so it says nothing and would still swallow a click.
     let list_bar = wide && body.list > 1 && scrollable(body.list as u64, view.files as u64);
-    let diff_bar =
-        wide && body.diff > 1 && scrollable(shown * BAR_SCALE, view.files as u64 * BAR_SCALE);
+    let diff_bar = wide
+        && body.diff > 1
+        && !view.fits(body.diff)
+        && if view.files <= 1 {
+            scrollable(body.diff as u64, view.current_span as u64)
+        } else {
+            scrollable(BAR_SCALE, view.files as u64 * BAR_SCALE)
+        };
 
     Regions {
         list: (list_top, body.list as u16),
@@ -1413,20 +1418,39 @@ pub fn render(
         // total row count is unknowable without reading every file, so the bar
         // measures the changed set rather than the diff's rows. It is exact at
         // both ends and about the file count in between.
-        let shown = view.shown_files() as u64;
+        // **A position marker of constant size, not a viewport extent.** A
+        // scrollbar's thumb conventionally shows how much of the whole is on
+        // screen, and this bar cannot: its whole is the changed set, and "six
+        // files visible" means something completely different when they are six
+        // tiny files than when one of them is three thousand lines. Sizing the
+        // thumb that way made it swing between one row and six as a reader
+        // scrolled, which reads as broken because it is measuring a quantity
+        // nobody asked about.
+        //
+        // So the thumb is one file's worth of track, always, and only its
+        // position moves: through the file list, and through the current file
+        // inside its own slot. Its size changes only when the changed set does.
+        //
+        // **One file is the exception, and there the bar is exact.** With nothing
+        // to move between, the whole really is the current file's rows, and both
+        // that and the viewport's height are already in hand — so the single-file
+        // case gets the row-accurate bar the multi-file case cannot have.
         let span = view.current_span as u64;
-        let within = if span == 0 {
-            0
+        let (at, thumb, whole) = if view.files <= 1 {
+            (view.top.row as u64, u64::from(body.diff as u16), span)
         } else {
-            ((view.top.row as u64).min(span) * BAR_SCALE) / span
+            let within = if span == 0 {
+                0
+            } else {
+                ((view.top.row as u64).min(span) * BAR_SCALE) / span
+            };
+            (
+                view.top.file as u64 * BAR_SCALE + within,
+                BAR_SCALE,
+                view.files as u64 * BAR_SCALE,
+            )
         };
-        let region = painter.with_bar(
-            region,
-            bars,
-            view.top.file as u64 * BAR_SCALE + within,
-            shown * BAR_SCALE,
-            view.files as u64 * BAR_SCALE,
-        );
+        let region = painter.with_bar(region, bars && !view.fits(body.diff), at, thumb, whole);
         painter.body(region, view, chrome);
     }
 
