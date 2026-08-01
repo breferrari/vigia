@@ -313,6 +313,10 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         &history,
         Position { file: 0, row: 0 },
         ALL_ROWS,
+        // Unanchored, because this slides a window and compares it against slices
+        // of the whole. Letting the viewport back up to fill a short tail would be
+        // comparing a different window from the one the offset names.
+        false,
     )
     .expect("view");
     let hunks = whole
@@ -337,6 +341,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
                 row: offset,
             },
             height,
+            false,
         )
         .expect("view");
         let end = (offset + height).min(whole.rows.len());

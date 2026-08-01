@@ -1349,11 +1349,14 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     let palette: Vec<_> = [
         theme.heat_track,
         theme.heat_added,
-        theme.heat_added_heavy,
+        theme.heat_added_warm,
+        theme.heat_added_hot,
         theme.heat_removed,
-        theme.heat_removed_heavy,
+        theme.heat_removed_warm,
+        theme.heat_removed_hot,
         theme.heat_mixed,
-        theme.heat_mixed_heavy,
+        theme.heat_mixed_warm,
+        theme.heat_mixed_hot,
     ]
     .iter()
     .filter_map(|style| style.fg)
@@ -1375,20 +1378,16 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     // five up is heavy and slice 1's two lines are not. That covers all four
     // kinds and both intensities in one row.
     let want = |style: ratatui::style::Style| style.fg.expect("the theme sets a colour");
-    assert_eq!(
-        strip[0],
-        want(theme.heat_added_heavy),
-        "slice 0: 9 additions"
-    );
+    assert_eq!(strip[0], want(theme.heat_added_hot), "slice 0: 9 additions");
     assert_eq!(
         strip[1],
         want(theme.heat_added),
         "slice 1: 2 additions, light"
     );
-    assert_eq!(strip[5], want(theme.heat_mixed_heavy), "slice 5: 3 and 4");
+    assert_eq!(strip[5], want(theme.heat_mixed_hot), "slice 5: 3 and 4");
     assert_eq!(
         strip[11],
-        want(theme.heat_removed_heavy),
+        want(theme.heat_removed_hot),
         "slice 11: 6 removals"
     );
     assert_eq!(strip[8], want(theme.heat_track), "slice 8 is untouched");

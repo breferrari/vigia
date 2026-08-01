@@ -129,7 +129,10 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
-| ⬜ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
+| ⬜ | **On Windows every CRLF file reads as a full rewrite** | [#65](https://github.com/breferrari/vigia/issues/65) |
+| ✅ | I3: the restart left a second screenful of hunk parses in the pass | [#64](https://github.com/breferrari/vigia/issues/64) |
+| ✅ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
+| ✅ | Scrolling into the tail of a diff leaves the pane half empty | [#59](https://github.com/breferrari/vigia/issues/59) |
 
 **[#10](https://github.com/breferrari/vigia/issues/10) was split before anything here was taken**, which this file had blocked the phase on. Reading `assets/preview.svg` as the specification it already is (`SPEC.md` §5.1) turned up eight distinct pieces of work behind two rows, and #10 alone carried four features that share no implementation.
 
@@ -195,6 +198,59 @@ Two existing gates had to change for the same reason, and it is worth knowing be
 > it. **A gate can be wrong about its situation as well as about its assertion,
 > and reading cannot tell the two apart.** `SPEC.md` §7 carries the first half.
 
+**Theming is in, and the shape of it is two axes rather than one ladder.** [#11](https://github.com/breferrari/vigia/issues/11) closed the phase. A **palette** decides what may be drawn and a **depth** decides how finely it can be expressed, and both have to allow an element before it appears. That is what makes a 256-colour degradation path a mechanism instead of a second hand-written palette: `dark` is authored once, in the colours `assets/preview.svg` actually uses, and every rung below is derived from it. The two disagree in a way worth knowing about: `ansi` refuses a row wash at *every* depth, because a wash has to assume a background and that palette's whole contract is that it assumes none.
+
+**`ansi` stays the default, and the cost of that is real.** It is the only palette correct on a terminal whose background nothing has detected, and detecting one needs a tty round-trip this shell does not make. So the row tint the mockup promises is invisible until a reader names a theme, and §11.1's recorded loss stands on the default. `VIGIA_THEME=dark` is what draws the picture in the README, which the caption now says.
+
+**The part that took three attempts was mapping 24-bit onto sixteen names.** A nearest-neighbour search is the obvious implementation and it sends the mockup's `#3fb950` addition green to **cyan**: the palette's green is `#008000` with no blue at all, the input has 80 of it, and cyan's 128 is nearer to 80 than zero is. Reweighting did not fix it, because the metric was never the problem. The sixteen entries are dark saturated primaries and modern palettes are light desaturated ones, so lightness decides before hue does, every time. A reader glancing at a diff reads hue. It picks hue first from three bits against the input's own chroma range, and lightness second.
+
+**What #11 did not bring is the fourth recency rung**, which this file and `SPEC.md` §5.1 both promised it would. The rung count belongs to `Recency`, which has three variants because the store can answer three questions about a path, and whose `cold` means *untracked* rather than *old*. A wider palette draws the same three rungs in better colours. That correction landed in its own commit ahead of the implementation, and §11.1 now carries the general shape: **a limit blamed on the rendering layer was a limit of the data behind it.** §5.2 caught the mirror image of that a phase ago.
+
+**And the phase closed on a defect found by using the tool, for the third time.** [#59](https://github.com/breferrari/vigia/issues/59) was reported from a screen recording: scroll into the tail of a diff and the pane goes half empty. [#57](https://github.com/breferrari/vigia/issues/57) fixed one route to that screen and reads as though it covers both. Its restart fires on `overshot`, which needs the position past the end of the **last** file, and scrolling never does that: `skip` stays inside whichever file the top is in, the walk simply runs out of files, and the rest of the pane stays blank. One row short at first, another with every keystroke.
+
+The fix must not apply to a jump, and two `follow.rs` tests are what said so. Following a file puts it on the top row and so does `G`; backing up to fill a short tail moves it off and makes a reader hunt for what the jump was for. A `Position` cannot tell a scroll from a jump, so `App` carries it.
+
+> [!warning] The issue was filed on a diagnosis that was wrong
+> #59 claimed the rendered area exceeded the window in both dimensions, on four
+> symptoms read off video. A probe disproved the mechanism outright, and **two of
+> the four were mis-cropped frames**: the pane runs to y≈1265 and the crop stopped
+> at y=912, so the middle of the pane was being read as its bottom. A live
+> screenshot then showed the header readout and the whole footer present.
+>
+> What the probe did find was worth the trip. The terminal size **changes** when
+> the alternate screen is entered under Warp, 195x77 before and 199x75 after, and
+> `Shell::area` was reading it with its own syscall while `Terminal::draw` read it
+> again. A resize between the two sized the collect for a screen the paint no
+> longer had, on the first frame, which a monitor may sit on for minutes.
+>
+> The rule this leaves: **measure the artifact, not a picture of it.** Four
+> symptoms, one probe, and only one of them survived contact with a number.
+
+> [!warning] Phase 3 is not closed, and [#65](https://github.com/breferrari/vigia/issues/65) is why
+> It re-opened the day theming landed. `vigia` drew a file as **+905 -885**, the
+> whole thing deleted and re-added, while `git diff` reported that same file as
+> **unchanged**. Default Windows configuration, `core.autocrlf=true`, in any
+> repository whose `.gitattributes` normalises line endings.
+>
+> The frame path compares raw worktree bytes against the index blob. Git runs the
+> worktree side through the clean filter first, so CRLF becomes LF before anything
+> is compared. Without that step every line of a CRLF file differs from its blob.
+> `gix-filter` is already in the graph; this is a call not being made.
+>
+> **It is first in the queue because of what it costs, not what it costs to fix.**
+> Every budget in this file is a claim about a tool that shows what changed, and on
+> one of three tier-1 targets it currently shows a thousand lines of noise over a
+> file nobody touched. The real edit is in there somewhere.
+>
+> Invisible to the whole suite: every fixture is built by `Scratch`, which shells
+> out to `git init` with no `.gitattributes` and no `autocrlf`, so both sides are
+> always LF and the filter is never exercised. That is §7's rule one axis over, a
+> fixture that cannot tell two things apart because in that fixture they are the
+> same thing. Fourth time.
+>
+> The half of that which is not about this repo is in the vault, since it would
+> bite any project whose fixtures are built by a tool that has configuration.
+
 ## Phase 4 — distribution
 
 Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
@@ -224,6 +280,9 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | Rename tracking and the non-streaming walk, at ten thousand files | [#48](https://github.com/breferrari/vigia/issues/48) |
 | ⬜ | I7 is measured without the highlighter, and the first parse costs 98ms | [#51](https://github.com/breferrari/vigia/issues/51) |
 | ⬜ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
+| ⬜ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
+| ⬜ | `G` leaves the pane short, and the first scroll yanks it back a screenful | [#62](https://github.com/breferrari/vigia/issues/62) |
+| ⬜ | The row wash drops a column under every wide glyph | [#63](https://github.com/breferrari/vigia/issues/63) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
@@ -269,6 +328,9 @@ What that does *not* mean is that #19 is now urgent. Nothing ships the core alon
 | I3's window has never run | [#47](https://github.com/breferrari/vigia/issues/47) | Phase 4. A soak gate is an internal instrument; "flat resources over days" printed beside an installable binary is a public claim, and the longest run behind it is one hour. `491c9a0` corrected the tick to say so |
 | Default view: unstaged only, or vs HEAD | [#50](https://github.com/breferrari/vigia/issues/50) | Phase 4. The answer needs a week of real use, and real use needs a release, so the dependency is real rather than a deferral. It is also the most load-bearing open question in the spec: B3's `no unstaged changes` is worded the way it is *because* the comparison is index-relative |
 | Rename tracking, and the walk that runs to completion | [#48](https://github.com/breferrari/vigia/issues/48) | Phase 5. One issue rather than two, because §10 couples them itself: *"they stand or fall together."* A scale question, unmeasured at the ten thousand files where it would bite |
+| The chrome may be too dim to read | [#60](https://github.com/breferrari/vigia/issues/60) | Phase 5. Split out of [#59](https://github.com/breferrari/vigia/issues/59) after three of its four symptoms were disproved. Acted on twice already, on the strength of a screen rather than a measurement: `DarkGray` was invisible, `DIM` was invisible, and `ansi` now takes colour 7 and gives up being dim at all. What is still open is whether that was necessary, which needs a contrast ratio or a three-terminal reading rather than another opinion |
+| `G` leaves the pane short | [#62](https://github.com/breferrari/vigia/issues/62) | Phase 5. **The deferral reason is that it is a ruling, not a bug.** It was implemented in [#61](https://github.com/breferrari/vigia/pull/61) and reverted: it reverses §11.1's `G` ruling and turns two correct gates red, so it wants the spec amended first in its own commit. The cost argument that justified §11.1's version has dissolved, the same way [#19](https://github.com/breferrari/vigia/issues/19)'s did, and that is the thing to re-examine |
+| The row wash drops a column under every wide glyph | [#63](https://github.com/breferrari/vigia/issues/63) | Phase 5. Cosmetic, and **not established at any width a reader uses**: the gate aborted on the first width it tried and two live readings show a solid band. The first step is re-running the sweep without the early abort, because this may be a gate that is wrong about its situation rather than a defect |
 | Windows: supported target or best-effort | not filed | The one bullet that is a **posture question with no action in it**. It carries no ordering language and names no work, so an issue would be a place to have an argument rather than a thing to do. It belongs in Phase 4's release notes, and if that turns out to be wrong the cost is one `gh issue create` |
 
 ### And what it found on its second run: [#55](https://github.com/breferrari/vigia/issues/55)

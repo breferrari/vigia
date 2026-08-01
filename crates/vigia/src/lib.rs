@@ -43,6 +43,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod app;
+mod colour;
 mod input;
 /// Public where its five siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
@@ -52,14 +53,20 @@ mod input;
 pub mod memory;
 mod render;
 mod terminal;
-mod theme;
+/// Public for the same reason [`memory`] is: a theme file is parsed by a pure
+/// function over a string, `tests/palette.rs` is an integration test and can only
+/// reach what the crate exports, and the alternative is re-exporting three free
+/// functions into the crate root under names invented to avoid colliding with
+/// [`colour`](Depth)'s.
+pub mod theme;
 mod view;
 
 pub use app::App;
+pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
+pub use render::{Band, Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
 pub use terminal::{Screen, Session};
-pub use theme::Theme;
+pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
 
 use std::path::{Path, PathBuf};
@@ -112,6 +119,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // reports on a terminal the reader can still see.
     frame.advance()?;
 
+    // Same rule, same reason, one input over: a `VIGIA_THEME` that names nothing
+    // or a file that does not parse has to be said on a terminal the reader can
+    // still read. `SPEC.md` §11.1 states it for a path that is not a repository,
+    // and an error painted inside a TUI that then hands the terminal back is an
+    // error nobody sees.
+    //
+    // Resolved to the depth here as well, so the palette the renderer holds is
+    // already in colours this terminal can show and the frame path never
+    // quantises. I9 therefore sees none of it.
+    let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
+
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
@@ -131,7 +149,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // monitor has no way to know what happened before it was looking, and
         // inventing a recency for it would light up rows nothing has touched.
         history: History::new(),
-        theme: Theme::default(),
+        theme,
         name: short_name(worktree.workdir()),
         branch: None,
         screen: View::default(),
@@ -355,9 +373,29 @@ struct Shell {
 
 impl Shell {
     /// The drawable area of the terminal right now.
+    ///
+    /// **Taken from the terminal's own resized state rather than from a second
+    /// size syscall**, so the area a frame is *planned* for is the area it is
+    /// *painted* into. This used to call `Backend::size` directly, which meant two
+    /// independent reads per frame: this one, deciding how many rows
+    /// [`View::collect`] was asked for, and the one `Terminal::draw` makes inside
+    /// its own `autoresize`. A resize landing between them left the collect sized
+    /// for a screen the paint no longer had.
+    ///
+    /// That is not hypothetical on Windows. Entering the alternate screen under
+    /// Warp changes the reported size (measured: 195x77 before, 199x75 after), so
+    /// the two reads genuinely disagree, and they disagree on the very first frame
+    /// where a monitor may then sit idle for minutes before anything wakes it.
+    ///
+    /// `autoresize` is the same call `draw` makes, so doing it here does not add a
+    /// read: it moves the one that decides the layout to before the decision
+    /// instead of after it, and `draw`'s own call then finds nothing to change.
+    /// A resize that lands in the remaining window is repainted by the `Resize`
+    /// event, which `input.rs` maps to [`Action::Redraw`].
     fn area(&mut self) -> Result<Rect, Failure> {
-        let size = self.session.screen().size()?;
-        Ok(Rect::new(0, 0, size.width, size.height))
+        let screen = self.session.screen();
+        screen.autoresize()?;
+        Ok(screen.get_frame().area())
     }
 
     /// Collect a screenful and paint it.

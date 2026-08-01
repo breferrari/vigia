@@ -636,20 +636,54 @@ pub enum Heat {
     /// because a gap would make the strip's own length ambiguous.
     Cool,
     /// Additions only.
-    Added {
-        /// At least half as busy as the busiest slice of this file.
-        heavy: bool,
-    },
+    Added(Band),
     /// Removals only.
-    Removed {
-        /// At least half as busy as the busiest slice of this file.
-        heavy: bool,
-    },
+    Removed(Band),
     /// Both, which `SPEC.md` §5.1 left unruled and §11.1 now rules.
-    Mixed {
-        /// At least half as busy as the busiest slice of this file.
-        heavy: bool,
-    },
+    Mixed(Band),
+}
+
+/// How busy one slice is, against the busiest slice of **its own file**.
+///
+/// Three, because `assets/preview.svg` ramps its additions across three greens
+/// and the strip is the one element whose intensity the picture actually
+/// specifies. It used to be two: sixteen foreground-only colours hold a normal and
+/// a bright of each hue and no third stop, so the ramp was as wide as the palette
+/// could draw rather than as wide as the picture asked for.
+/// [#11](https://github.com/breferrari/vigia/issues/11) closed that, and the
+/// asymmetry it leaves is honest: at [`Depth::Ansi16`](crate::Depth::Ansi16) the
+/// `ansi` palette still spends two, and says so in its own fields rather than
+/// leaving the ladder to collapse them by accident.
+///
+/// Ordered, so a comparison reads the way the ramp does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Band {
+    /// Below a third of the busiest slice.
+    Low,
+    /// A third or more of it.
+    Warm,
+    /// Two thirds or more of it.
+    Hot,
+}
+
+impl Band {
+    /// Which band `total` falls in, against this file's `busiest` slice.
+    ///
+    /// Compared by cross-multiplication rather than by dividing, so an awkward
+    /// `busiest` cannot round a genuinely hot slice down. Widened to `u64` first
+    /// because the multiplication is what would overflow, not the counts: a slice
+    /// is a sum of `u16` pairs and a large file's busiest slice times three does
+    /// not fit the type the counts arrive in.
+    fn of(total: u32, busiest: u32) -> Self {
+        let (total, busiest) = (u64::from(total), u64::from(busiest));
+        if total * 3 >= busiest * 2 {
+            Self::Hot
+        } else if total * 3 >= busiest {
+            Self::Warm
+        } else {
+            Self::Low
+        }
+    }
 }
 
 /// Re-project a heat map onto `width` slices and classify each one.
@@ -686,14 +720,12 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
     summed
         .iter()
         .map(|bucket| {
-            // Half of the busiest, compared without dividing, so an odd busiest
-            // does not round a genuinely heavy slice down.
-            let heavy = bucket.total() * 2 >= busiest;
+            let band = Band::of(bucket.total(), busiest);
             match (bucket.added > 0, bucket.removed > 0) {
                 (false, false) => Heat::Cool,
-                (true, false) => Heat::Added { heavy },
-                (false, true) => Heat::Removed { heavy },
-                (true, true) => Heat::Mixed { heavy },
+                (true, false) => Heat::Added(band),
+                (false, true) => Heat::Removed(band),
+                (true, true) => Heat::Mixed(band),
             }
         })
         .collect()
@@ -1299,7 +1331,25 @@ impl Painter<'_> {
                     text,
                     spans,
                 } => {
-                    self.line_row(Rect { y, ..area }, *kind, *number, text, spans);
+                    // **One row tall, explicitly.** `..area` inherits the body's
+                    // whole height, which every other row drawer got away with
+                    // because they only ever read `x`, `y` and `width`. This is
+                    // the first row that paints a *region*, and an inherited
+                    // height made the wash a rectangle running from the line down
+                    // to the bottom of the pane: the context rows under it, the
+                    // blank rows under those, and the footer. Measured at 200x60,
+                    // that was 366,000 cells a frame where 12,000 will do.
+                    self.line_row(
+                        Rect {
+                            y,
+                            height: 1,
+                            ..area
+                        },
+                        *kind,
+                        *number,
+                        text,
+                        spans,
+                    );
                 }
             }
         }
@@ -1487,16 +1537,60 @@ impl Painter<'_> {
     /// **The sigil carries the diff, the text carries the syntax**, which is
     /// `SPEC.md` §11.1's ruling and the mockup's own layout: added, removed and
     /// context lines are highlighted identically, and only the `+` or `-` says
-    /// which is which. What the picture uses to make that legible is a row
-    /// background tint, and sixteen foreground-only colours cannot draw one, so
-    /// the signal here is thinner than in the picture until #11 lands a
-    /// truecolour path.
+    /// which is which.
+    ///
+    /// What the picture adds on top is a **row wash and a left bar**, and #11
+    /// landed both. The wash is painted first, across the whole row including the
+    /// gutter and every trailing blank, which is what makes it read as a band
+    /// rather than as a highlight behind some text. It survives everything written
+    /// over it because `ratatui`'s `Cell::set_style` only overwrites the fields a
+    /// style actually sets, and every run below sets a foreground and no
+    /// background. [`Painter::status_line`] has relied on the same behaviour since
+    /// the chrome was built.
+    ///
+    /// The bar is the **sigil cell**, inverted: the diff hue behind, the row's own
+    /// wash in front. The mockup draws it as three pixels of a nine-pixel cell, so
+    /// it is sub-cell and has no terminal equivalent that does not spend a whole
+    /// column, and I6 forbids spending one on decoration. The sigil cell is the one
+    /// cell on the row that already means *this line changed*, so it carries the
+    /// bar instead of a column being found for it.
+    ///
+    /// Both are absent on a palette that declines them and on a depth that cannot
+    /// express them, and then this draws exactly what it drew before #11: the sigil
+    /// alone, which is the loss §11.1 records.
     fn line_row(&mut self, area: Rect, kind: LineKind, number: u32, text: &str, spans: &[Span]) {
         let (diff, sigil) = match kind {
             LineKind::Added => (self.theme.added, '+'),
             LineKind::Removed => (self.theme.removed, '-'),
             LineKind::Context => (self.theme.context, ' '),
         };
+
+        // Patched onto the diff style rather than replacing it, so a palette whose
+        // bar is unset leaves the sigil exactly as it was. Writing the bar straight
+        // into the run would blank the sigil's own colour on every palette that
+        // declines to draw one, which is the default.
+        //
+        // **And the bar is only meaningful as a pair**, which is the part that had
+        // to be found by a gate rather than by reading. Its foreground is the row's
+        // own wash, chosen to sit legibly *on* the diff hue behind it. A depth that
+        // drops backgrounds keeps that foreground, so patching unconditionally
+        // paints the sigil in a near-black wash colour on no background at all, and
+        // the one thing still separating an addition from a context line at sixteen
+        // colours disappears. So the bar applies only where its background
+        // survived.
+        let (wash, bar) = match kind {
+            LineKind::Added => self.theme.row(true),
+            LineKind::Removed => self.theme.row(false),
+            LineKind::Context => (Style::new(), Style::new()),
+        };
+        let sigil_style = if bar.bg.is_some() {
+            diff.patch(bar)
+        } else {
+            diff
+        };
+        if wash.bg.is_some() {
+            self.buf.set_style(area, wash);
+        }
 
         let mut x = area.x;
         let mut room = usize::from(area.width);
@@ -1514,7 +1608,7 @@ impl Painter<'_> {
         // pushed at all advances `column` by at least one, so the pane bounds the
         // count too.
         let mut runs = Vec::with_capacity((spans.len() + 2).min(room + 2));
-        runs.push((sigil.to_string(), diff));
+        runs.push((sigil.to_string(), sigil_style));
 
         // Tab stops are counted from the start of the line's own content, not
         // from the left edge of the screen. The gutter and the sigil shift every

@@ -155,11 +155,14 @@ fn heat_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
     [
         theme.heat_track,
         theme.heat_added,
-        theme.heat_added_heavy,
+        theme.heat_added_warm,
+        theme.heat_added_hot,
         theme.heat_removed,
-        theme.heat_removed_heavy,
+        theme.heat_removed_warm,
+        theme.heat_removed_hot,
         theme.heat_mixed,
-        theme.heat_mixed_heavy,
+        theme.heat_mixed_warm,
+        theme.heat_mixed_hot,
     ]
     .iter()
     .filter_map(|style| style.fg)
