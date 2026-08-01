@@ -543,6 +543,10 @@ impl App {
                 list_top: self.list_top,
                 list_rows: body.list,
                 list_follows: self.list_follows,
+                // Asked for whenever a bar could be drawn, which is what
+                // `body_layout` already decided by giving the diff more than one
+                // row. A pane too short for a bar pays nothing.
+                measured: body.diff > 1,
             },
         )?;
         self.position = view.top;

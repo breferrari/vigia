@@ -42,27 +42,14 @@ pub struct FileChange {
     pub(crate) index_blob: Option<gix::ObjectId>,
 }
 
-impl ChangeKind {
-    /// Whether this kind of change can have hunks at all.
+impl FileChange {
+    /// Whether this change can have hunks at all.
     ///
     /// Conflicts and type changes are real changes with no meaningful
     /// line-level diff, and a monitor should show them as a state rather than
     /// pretend to diff them.
-    ///
-    /// On the kind rather than on [`FileChange`] because callers that hold only
-    /// a kind need it too, and the shell had grown a third copy of the `matches!`
-    /// deciding how many rows such a file occupies. One rule, three readers.
     pub fn is_diffable(&self) -> bool {
-        !matches!(self, ChangeKind::Conflict | ChangeKind::TypeChange)
-    }
-}
-
-impl FileChange {
-    /// Whether this change can have hunks at all.
-    ///
-    /// See [`ChangeKind::is_diffable`], which is where the rule lives.
-    pub fn is_diffable(&self) -> bool {
-        self.kind.is_diffable()
+        !matches!(self.kind, ChangeKind::Conflict | ChangeKind::TypeChange)
     }
 
     /// Whether computing this change's diff has to read the working tree.

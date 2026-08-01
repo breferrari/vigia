@@ -65,16 +65,7 @@ pub struct FrameStats {
     pub computed: u64,
     /// Diffs served unchanged from an earlier frame.
     pub reused: u64,
-    /// Bytes read by the counting pass.
-    ///
-    /// **Separate from [`Self::bytes`] for the reason [`Self::measured`] is
-    /// separate from [`Self::computed`]**, and it was worth splitting the moment
-    /// the two shared a field: three gates in `crates/vigia/tests/reads.rs` had
-    /// to loosen from exact equalities to ranges, because one counter carrying
-    /// two claims cannot say which of them moved. I4's two halves are separately
-    /// regressable again.
-    pub counted_bytes: u64,
-    /// Files counted by [`Frame::span`] without their text being built.
+    /// Files counted by [`Frame::height`] without their text being built.
     ///
     /// Its own counter rather than folded into [`Self::computed`], because the
     /// two bound different claims: `computed` is what I2a and I4 hold the
@@ -364,69 +355,74 @@ impl<'w> Frame<'w> {
         self.cached.len()
     }
 
-    /// Whether the diff held for `index` is still the file's.
+    /// How many rows the whole diff is, counting every changed file.
     ///
-    /// **The frame's one rule for reusing what it holds**, extracted so the
-    /// counting path below asks it rather than inventing a second one. Presence
-    /// in the cache is not the rule: a file the reader has not looked at since it
-    /// changed is still in there, holding the diff it had before. `reusable` plus
-    /// `fingerprint` is what separates the two, and `reusable` is documented as
-    /// pure so that every way a diff can go stale is one branch.
-    fn revalidate(&mut self, index: usize) -> bool {
-        let change = &self.files[index];
-        let Some(cached) = self.cached.get(&change.path) else {
-            return false;
-        };
-        let fresh = if change.reads_worktree() {
-            let path = self.worktree.workdir().join(&change.path);
-            self.stats.probes += 1;
-            fingerprint(&path)
-        } else {
-            None
-        };
-        reusable(cached, change, fresh)
+    /// **This is the one thing in the frame path that is not bounded by the
+    /// window**, and it is here rather than refused because a scrollbar that
+    /// cannot say where the end is says nothing. `SPEC.md` §3's I4 carries the
+    /// rewording that admits it and the measurement it was admitted on.
+    ///
+    /// Three things keep it affordable. It counts through
+    /// [`Worktree::measure`], which reads the same bytes a diff would and skips
+    /// the `String` per line that made the obvious version ten times slower than
+    /// `git diff --numstat`. It reuses a [`FileDiff`] the frame already holds
+    /// rather than re-reading, so a file on screen is free. And it is cached
+    /// until the next [`Frame::advance`], so scrolling never pays: only a change
+    /// to the tree does.
+    ///
+    /// `rows_of` maps a file's span to the rows a caller draws for it, because
+    /// what a conflict or a binary file occupies is the shell's ruling rather
+    /// than the engine's.
+    pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
+        let mut total = 0usize;
+        for index in 0..self.files.len() {
+            let change = &self.files[index];
+            if !self.spans.contains_key(&change.path) {
+                // A diff already in hand answers this for free, and re-reading
+                // to count what is already counted would be the waste this
+                // method exists to avoid.
+                let span = match self.cached.get(&change.path) {
+                    // Free: the diff is already in hand, and no byte is read
+                    // again, so nothing is added to the counters either.
+                    Some(cached) => FileSpan {
+                        hunks: cached.diff.hunks.len() as u32,
+                        lines: cached.diff.hunks.iter().map(|h| h.lines.len() as u32).sum(),
+                        binary: cached.diff.binary,
+                        bytes: 0,
+                    },
+                    None => {
+                        let span = self.worktree.measure(change)?;
+                        self.stats.measured += 1;
+                        self.stats.bytes += span.bytes;
+                        span
+                    }
+                };
+                self.spans.insert(change.path.clone(), span);
+            }
+            let change = &self.files[index];
+            total += rows_of(change, &self.spans[&change.path]);
+        }
+        Ok(total)
     }
 
-    /// How tall one file's diff is, counted rather than built.
+    /// How many rows one file occupies, from its span.
     ///
-    /// [`Frame::span`] is to [`Frame::diff`] as [`FileSpan`] is to [`FileDiff`],
-    /// and it hands back the pair for the same reason that one does: the borrow
-    /// is derived from `&mut self`, so a caller cannot ask [`Frame::files`] for
-    /// the change while it lives.
-    ///
-    /// **This is the one thing in the frame path not bounded by the window.**
-    /// `SPEC.md` §3's I4 carries the narrowing that admits it and the measurement
-    /// it rests on; the short version is that counting a height needs hunk
-    /// boundaries and none of the text, which took the reference fixture from
-    /// 442.71ms to 8.76ms.
-    ///
-    /// Three things keep it affordable. It counts through [`Worktree::measure`],
-    /// which reads the same bytes a diff would and skips the `String` per line.
-    /// It takes the answer from a diff the frame already holds **when that diff
-    /// is still valid**, through the same check [`Frame::diff`] uses, so a file on
-    /// screen is free and a file that changed off screen is recounted rather than
-    /// reported stale. And the answer is cached until the next
-    /// [`Frame::advance`], so scrolling never pays: only a change does.
-    ///
-    /// Summing these is the caller's, deliberately. What a conflict or a binary
-    /// file occupies is a rendering ruling, and `SPEC.md` §6 keeps it in the
-    /// shell; handing a closure down here so this could do the fold would be that
-    /// ruling reaching into the engine to run a loop the shell can run itself.
-    pub fn span(&mut self, index: usize) -> Result<(&FileChange, &FileSpan)> {
-        if !self.spans.contains_key(&self.files[index].path) {
-            let span = if self.revalidate(index) {
-                self.stats.reused += 1;
-                self.cached[&self.files[index].path].diff.span()
-            } else {
-                let span = self.worktree.measure(&self.files[index])?;
-                self.stats.measured += 1;
-                self.stats.counted_bytes += span.bytes;
-                span
-            };
-            self.spans.insert(self.files[index].path.clone(), span);
+    /// Uses the cache [`Frame::height`] fills, so a caller that has totalled the
+    /// diff can walk part of it again for free.
+    pub fn rows_of(
+        &mut self,
+        index: usize,
+        rows_of: impl Fn(&FileChange, &FileSpan) -> usize,
+    ) -> Result<usize> {
+        let change = &self.files[index];
+        if !self.spans.contains_key(&change.path) {
+            let span = self.worktree.measure(change)?;
+            self.stats.measured += 1;
+            self.stats.bytes += span.bytes;
+            self.spans.insert(change.path.clone(), span);
         }
         let change = &self.files[index];
-        Ok((change, &self.spans[&change.path]))
+        Ok(rows_of(change, &self.spans[&change.path]))
     }
 
     /// The change at `index` and its diff, computed now or reused from an

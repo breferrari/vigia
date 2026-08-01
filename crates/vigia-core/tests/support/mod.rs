@@ -182,7 +182,6 @@ pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         computed: after.computed - before.computed,
         reused: after.reused - before.reused,
         measured: after.measured - before.measured,
-        counted_bytes: after.counted_bytes - before.counted_bytes,
         bytes: after.bytes - before.bytes,
         probes: after.probes - before.probes,
         evicted: after.evicted - before.evicted,

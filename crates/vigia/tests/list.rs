@@ -580,6 +580,7 @@ fn collect_resolves_every_degenerate_viewport() {
                                 list_top,
                                 list_rows,
                                 list_follows,
+                                measured: true,
                             },
                         )
                         .expect("collect");
