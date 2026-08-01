@@ -29,7 +29,8 @@ use std::time::Duration;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use vigia::{
-    Chrome, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, body_height, render,
+    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, body_height,
+    render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -171,7 +172,7 @@ fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
 }
 
 fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
-    Row::File {
+    Row::File(FileEntry {
         path: path.to_owned(),
         from: None,
         kind,
@@ -179,7 +180,7 @@ fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
         heat: [HeatBucket::default(); HEAT_BUCKETS],
-    }
+    })
 }
 
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
@@ -460,7 +461,7 @@ fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -468,9 +469,9 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Note("binary"),
-            Row::File {
+            Row::File(FileEntry {
                 path: "src/merge.rs".to_owned(),
                 from: None,
                 kind: 'U',
@@ -478,9 +479,9 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Note("unresolved conflict"),
-            Row::File {
+            Row::File(FileEntry {
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -488,7 +489,7 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
         ],
         files: 3,
         top: Position::default(),
@@ -1157,7 +1158,7 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 fn glancing() -> View {
     View {
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "src/engine/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1168,8 +1169,8 @@ fn glancing() -> View {
                 // at the tail. One row carrying all three kinds plus the track,
                 // which is what the colour gate below reads.
                 heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
-            },
-            Row::File {
+            }),
+            Row::File(FileEntry {
                 path: "src/render/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1177,8 +1178,8 @@ fn glancing() -> View {
                 spark: [0, 0, 0, 2, 1, 0, 0, 0],
                 recency: Recency::Live,
                 heat: heat(&[(3, 2, 1)]),
-            },
-            Row::File {
+            }),
+            Row::File(FileEntry {
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1186,7 +1187,7 @@ fn glancing() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
         ],
         files: 3,
         top: Position::default(),

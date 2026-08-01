@@ -14,7 +14,9 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
-use vigia::{Chrome, Depth, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render};
+use vigia::{
+    Chrome, Depth, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
+};
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
 fn chrome() -> Chrome {
@@ -45,7 +47,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 fn three_kinds() -> View {
     View {
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "src/a.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -53,7 +55,7 @@ fn three_kinds() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Hunk {
                 old_start: 1,
                 old_lines: 2,
@@ -404,7 +406,7 @@ fn graded_heat() -> View {
         removed: 0,
     };
     View {
-        rows: vec![Row::File {
+        rows: vec![Row::File(FileEntry {
             path: "src/a.rs".to_owned(),
             from: None,
             kind: 'M',
@@ -412,7 +414,7 @@ fn graded_heat() -> View {
             spark: [0; HISTORY_BUCKETS],
             recency: Recency::Cold,
             heat,
-        }],
+        })],
         files: 1,
         top: Position::default(),
         read: 1,

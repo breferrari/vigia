@@ -21,7 +21,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{App, Position, Row, Theme, View, body_height, render};
+use vigia::{App, FileEntry, Position, Row, Theme, View, body_height, render};
 use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
@@ -171,7 +171,7 @@ fn a_file_is_its_heading_then_its_hunks() {
     let mut headings = 0usize;
     for (index, row) in view.rows.iter().enumerate() {
         match row {
-            Row::File { churn, .. } => {
+            Row::File(FileEntry { churn, .. }) => {
                 headings += 1;
                 assert!(
                     matches!(view.rows.get(index + 1), Some(Row::Hunk { .. })),
@@ -241,9 +241,9 @@ fn each_kind_of_change_gets_its_own_letter() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            Row::File {
+            Row::File(FileEntry {
                 kind, path, from, ..
-            } => Some((*kind, path.clone(), from.clone())),
+            }) => Some((*kind, path.clone(), from.clone())),
             _ => None,
         })
         .collect();
@@ -433,7 +433,10 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
         .expect("view");
 
     assert!(
-        matches!(view.rows.first(), Some(Row::File { churn: None, .. })),
+        matches!(
+            view.rows.first(),
+            Some(Row::File(FileEntry { churn: None, .. }))
+        ),
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()
     );

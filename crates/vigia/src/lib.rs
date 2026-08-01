@@ -67,7 +67,7 @@ pub use input::{Action, WHEEL_ROWS, action_for};
 pub use render::{Band, Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
-pub use view::{HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
+pub use view::{FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};

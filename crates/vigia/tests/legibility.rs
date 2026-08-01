@@ -26,7 +26,7 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Chrome, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme, View,
+    Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme, View,
     body_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
@@ -260,7 +260,7 @@ fn with_notice() -> Chrome {
 fn every_row_kind() -> View {
     View {
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "crates/vigia-core/src/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -268,7 +268,7 @@ fn every_row_kind() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Hunk {
                 old_start: 258,
                 old_lines: 7,
@@ -282,7 +282,7 @@ fn every_row_kind() -> View {
                 "        for change in self.changes() {",
             ),
             line(LineKind::Added, 260, "        for change in self.walk() {"),
-            Row::File {
+            Row::File(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -290,9 +290,9 @@ fn every_row_kind() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Note("binary"),
-            Row::File {
+            Row::File(FileEntry {
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -300,7 +300,7 @@ fn every_row_kind() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
         ],
         files: 3,
         top: Position::default(),
@@ -314,7 +314,7 @@ fn every_row_kind() -> View {
 fn awkward() -> View {
     View {
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "crates/vigia-core/src/very/deeply/nested/module/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -322,7 +322,7 @@ fn awkward() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
             line(LineKind::Added, 2, "🙂🙂🙂 tail"),
         ],
@@ -514,7 +514,7 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 fn glancing() -> View {
     View {
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "crates/vigia-core/src/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -522,8 +522,8 @@ fn glancing() -> View {
                 spark: [1, 2, 4, 6, 8, 9, 11, 12],
                 recency: Recency::Pulse,
                 heat: ENDS_CHANGED,
-            },
-            Row::File {
+            }),
+            Row::File(FileEntry {
                 path: "crates/vigia/src/render.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -531,8 +531,8 @@ fn glancing() -> View {
                 spark: [1, 1, 2, 2, 1, 3, 2, 1],
                 recency: Recency::Live,
                 heat: ENDS_CHANGED,
-            },
-            Row::File {
+            }),
+            Row::File(FileEntry {
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -540,7 +540,7 @@ fn glancing() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
         ],
         files: 3,
         top: Position::default(),

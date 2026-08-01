@@ -36,7 +36,7 @@ use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
 use crate::theme::Theme;
-use crate::view::{HEAT_BUCKETS, HeatBucket, Row, View};
+use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
 
 /// Columns a tab advances to the next multiple of.
 ///
@@ -602,6 +602,14 @@ fn empty_state(branch: Option<&str>) -> String {
 
 /// One file heading's parts, gathered so [`Painter::file_row`] takes a shape
 /// rather than seven positional arguments that a caller could transpose.
+///
+/// Borrowed from a [`FileEntry`], which both regions supply: the pinned list
+/// hands one per visible file and the stream hands one per [`Row::File`]. There
+/// is deliberately **no** field saying which region asked. The caret marking the
+/// file the diff is inside is a fact about the screen rather than about the
+/// file, so [`Painter::list`] draws it and insets the area it passes here; this
+/// type stays what a *file* looks like, and [`Painter::file_row`] stays one
+/// drawer with one degradation ladder to gate.
 struct Heading<'r> {
     kind: char,
     path: &'r str,
@@ -610,6 +618,21 @@ struct Heading<'r> {
     spark: &'r [u16; HISTORY_BUCKETS],
     recency: Recency,
     heat: &'r [HeatBucket; HEAT_BUCKETS],
+}
+
+impl<'r> Heading<'r> {
+    /// Borrow a heading from the entry either region holds.
+    fn of(entry: &'r FileEntry) -> Self {
+        Self {
+            kind: entry.kind,
+            path: &entry.path,
+            from: entry.from.as_deref(),
+            churn: entry.churn,
+            spark: &entry.spark,
+            recency: entry.recency,
+            heat: &entry.heat,
+        }
+    }
 }
 
 /// Columns something of `width` costs on the right-hand side of a row.
@@ -1284,27 +1307,9 @@ impl Painter<'_> {
         for (offset, row) in view.rows.iter().take(usize::from(area.height)).enumerate() {
             let y = area.y + offset as u16;
             match row {
-                Row::File {
-                    path,
-                    from,
-                    kind,
-                    churn,
-                    spark,
-                    recency,
-                    heat,
-                } => self.file_row(
-                    Rect { y, ..area },
-                    &Heading {
-                        kind: *kind,
-                        path,
-                        from: from.as_deref(),
-                        churn: *churn,
-                        spark,
-                        recency: *recency,
-                        heat,
-                    },
-                    view.peak,
-                ),
+                Row::File(entry) => {
+                    self.file_row(Rect { y, ..area }, &Heading::of(entry), view.peak)
+                }
                 Row::Hunk {
                     old_start,
                     old_lines,

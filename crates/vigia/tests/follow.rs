@@ -28,7 +28,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Position, Row, Theme, body_height, render};
+use vigia::{Action, App, FileEntry, Position, Row, Theme, body_height, render};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, delta};
@@ -80,7 +80,7 @@ fn top_file(
 ) -> String {
     let view = app.view(frame, highlighter, history, body()).expect("view");
     match view.rows.first() {
-        Some(Row::File { path, .. }) => path.clone(),
+        Some(Row::File(FileEntry { path, .. })) => path.clone(),
         other => panic!("the top row is {other:?}, not a file heading"),
     }
 }

@@ -31,43 +31,57 @@ use vigia_core::{
     Result, Span,
 };
 
+/// One changed file, as everything a row about it needs to be drawn.
+///
+/// **Its own type because it is drawn in two places.** `SPEC.md` §11.1 makes the
+/// body two regions, and the pinned file list and the heading inside the diff
+/// stream draw the same thing through the same [`crate::render`] path. Two
+/// structurally identical shapes would be two degradation ladders to keep in
+/// step and two sets of gates to write, and the picture's own split of the
+/// elements across the regions is the thing §5.1 records as *not* kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileEntry {
+    /// Repository-relative path.
+    pub path: String,
+    /// Where the content came from, for a rename or a copy.
+    pub from: Option<String>,
+    /// One letter naming what happened.
+    pub kind: char,
+    /// Lines added and removed, or `None` when there is no line-level diff.
+    pub churn: Option<(u32, u32)>,
+    /// This file's churn over the glance window, oldest bucket first.
+    ///
+    /// Raw counts rather than heights. Which glyph a count becomes is the
+    /// renderer's, the same way a [`Row::Line`] carries its spans as classes
+    /// and lets the renderer pick the colour: the scale is shared across the
+    /// screen and lives on [`View::peak`].
+    ///
+    /// All zeroes for a file `vigia` has not seen change, which is the
+    /// ordinary case for a worktree that was already dirty at startup.
+    pub spark: [u16; HISTORY_BUCKETS],
+    /// How recently this file changed, which is what dims a settled row and
+    /// what puts the pulse on one that just moved.
+    pub recency: Recency,
+    /// Where in this file the change is, as counts per slice of its length.
+    ///
+    /// The finest resolution the strip is ever drawn at. A renderer with
+    /// fewer columns sums adjacent buckets and classifies the sums, which is
+    /// exact; it never draws a prefix of this array, because half a strip
+    /// drawn as a whole one says the file's tail is unchanged.
+    ///
+    /// All zeroes when there is nothing to place: a binary file, a removal,
+    /// a conflict.
+    pub heat: [HeatBucket; HEAT_BUCKETS],
+}
+
 /// What a row of the body is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
-    /// A changed file's heading.
-    File {
-        /// Repository-relative path.
-        path: String,
-        /// Where the content came from, for a rename or a copy.
-        from: Option<String>,
-        /// One letter naming what happened.
-        kind: char,
-        /// Lines added and removed, or `None` when there is no line-level diff.
-        churn: Option<(u32, u32)>,
-        /// This file's churn over the glance window, oldest bucket first.
-        ///
-        /// Raw counts rather than heights. Which glyph a count becomes is the
-        /// renderer's, the same way a [`Row::Line`] carries its spans as classes
-        /// and lets the renderer pick the colour: the scale is shared across the
-        /// screen and lives on [`View::peak`].
-        ///
-        /// All zeroes for a file `vigia` has not seen change, which is the
-        /// ordinary case for a worktree that was already dirty at startup.
-        spark: [u16; HISTORY_BUCKETS],
-        /// How recently this file changed, which is what dims a settled row and
-        /// what puts the pulse on one that just moved.
-        recency: Recency,
-        /// Where in this file the change is, as counts per slice of its length.
-        ///
-        /// The finest resolution the strip is ever drawn at. A renderer with
-        /// fewer columns sums adjacent buckets and classifies the sums, which is
-        /// exact; it never draws a prefix of this array, because half a strip
-        /// drawn as a whole one says the file's tail is unchanged.
-        ///
-        /// All zeroes when there is nothing to place: a binary file, a removal,
-        /// a conflict.
-        heat: [HeatBucket; HEAT_BUCKETS],
-    },
+    /// A changed file's heading, inside the diff stream.
+    ///
+    /// The same [`FileEntry`] the pinned list draws, so the two regions cannot
+    /// drift apart in what they show or in how they degrade.
+    File(FileEntry),
     /// A hunk boundary, drawn as git's `@@ -a,b +c,d @@`.
     Hunk {
         /// First line covered on the index side.
@@ -105,7 +119,7 @@ pub enum Row {
 /// Twelve, which is not a taste call: `assets/preview.svg` draws exactly twelve
 /// and `SPEC.md` §5.1 rules that a published artifact answering an open question
 /// **is** the answer. The picture also draws an empty slice as a dark track
-/// rather than as a gap, which is why [`Row::File::heat`] is always this long and
+/// rather than as a gap, which is why [`FileEntry::heat`] is always this long and
 /// why the renderer draws a block for every bucket.
 pub const HEAT_BUCKETS: usize = 12;
 
@@ -299,6 +313,27 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
         .iter()
         .map(|hunk| 1 + hunk.lines.len())
         .sum::<usize>()
+}
+
+/// Everything a row about this file needs, for either region.
+///
+/// One function because `SPEC.md` §11.1 draws the pinned list and the stream's
+/// heading identically, and two constructors would be two chances for them to
+/// disagree about what a file looks like.
+///
+/// The two `history` lookups are hash probes against a store fed from the watch:
+/// no read, no `stat` and no diff, which is why the glance elements cost the
+/// frame nothing that `tests/reads.rs` can see.
+fn entry_of(kind: &ChangeKind, diff: &FileDiff, history: &History) -> FileEntry {
+    FileEntry {
+        path: diff.path.clone(),
+        from: source_of(kind).map(str::to_owned),
+        kind: letter(kind),
+        churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
+        spark: history.churn(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
+        recency: history.recency(&diff.path),
+        heat: heat_of(diff),
+    }
 }
 
 /// How many rows the file at `index` would occupy.
@@ -613,18 +648,10 @@ impl View {
         let mut n = 0usize;
 
         if n >= skip {
-            self.rows.push(Row::File {
-                path: diff.path.clone(),
-                from: source_of(kind).map(str::to_owned),
-                kind: letter(kind),
-                churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
-                // Asked for only on a row actually pushed, the same rule the
-                // highlighter follows below. A heading scrolled past above the
-                // window costs two hash lookups it would never have drawn.
-                spark: history.churn(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
-                recency: history.recency(&diff.path),
-                heat: heat_of(diff),
-            });
+            // Asked for only on a row actually pushed, the same rule the
+            // highlighter follows below. A heading scrolled past above the
+            // window costs two hash lookups it would never have drawn.
+            self.rows.push(Row::File(entry_of(kind, diff, history)));
         }
         n += 1;
 

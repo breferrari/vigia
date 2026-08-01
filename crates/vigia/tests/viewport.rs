@@ -24,7 +24,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Position, View, body_height};
+use vigia::{Action, App, FileEntry, Position, View, body_height};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -277,7 +277,7 @@ fn the_last_row_of_the_diff_is_always_on_screen_at_the_bottom() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            vigia::Row::File { path, .. } => Some(path.clone()),
+            vigia::Row::File(FileEntry { path, .. }) => Some(path.clone()),
             _ => None,
         })
         .next_back()
