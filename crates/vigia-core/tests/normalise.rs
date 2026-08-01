@@ -327,6 +327,108 @@ fn an_external_clean_driver_is_never_run() {
     );
 }
 
+/// `core.safecrlf` does not reach the diff, because it guards writing.
+///
+/// The setting makes `git add` refuse a file whose conversion would not
+/// round-trip, so history cannot be corrupted by it. `git diff` ignores it, and
+/// this fixture proves that rather than assuming it: the same file git **refuses
+/// to add** is one git reports as `Unchanged`.
+///
+/// `vigia` never writes, so inheriting the check meant failing a frame over a
+/// guard on an operation it does not perform. Every later frame failed too,
+/// because the file stays mixed, so one such file anywhere in the tree stopped
+/// the pane working. Found by the audit, after the branch was otherwise green.
+///
+/// The mixed terminator is the point: a lone LF inside an otherwise CRLF file is
+/// exactly what does not round-trip, and a uniformly-CRLF fixture cannot reach
+/// this at all.
+#[test]
+fn safecrlf_does_not_fail_a_frame() {
+    let scratch = Scratch::crlf_worktree("normalise-safecrlf", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    // After the baseline commit on purpose: under `safecrlf=true` even `git add`
+    // refuses this content, so the fixture cannot be built with it set earlier.
+    scratch.git(&["config", "core.safecrlf", "true"]);
+
+    let mixed = numbered_lines(20)
+        .replace('\n', "\r\n")
+        .replace("line 7\r\n", "line 7\n");
+    std::fs::write(scratch.path_of("a.txt"), mixed).expect("write the mixed fixture");
+
+    assert_eq!(
+        scratch.git_numstat("a.txt"),
+        Numstat::Unchanged,
+        "the fixture is wrong: git has to diff this file happily, or there is no \
+         disagreement to be had about whether we may refuse it"
+    );
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "a.txt")
+        .expect("a.txt is reported by status");
+
+    let diff = worktree
+        .diff(change)
+        .expect("a round-trip guard on writing must not fail a frame that reads");
+    assert_eq!(
+        (diff.added, diff.removed),
+        (0, 0),
+        "reported +{} −{} where git reports no change",
+        diff.added,
+        diff.removed
+    );
+}
+
+/// A path whose attributes name something unhonourable reports that path.
+///
+/// The other half of the error surface: [`Error::FilterSetup`] is one failure
+/// for the whole repository, and this is one file's. `working-tree-encoding`
+/// naming an encoding that does not exist is the reachable way in, and it is a
+/// misconfigured repository rather than a hostile one.
+///
+/// Failing here is right and is not the same call as [`safecrlf_does_not_fail_a_frame`]
+/// above. That guard governs writing, which this never does; this one says the
+/// bytes git would compare cannot be produced at all, and inventing an answer
+/// would be drawing a diff nobody could vouch for.
+///
+/// What it costs is bounded, and that is why it is an error rather than a
+/// refusal to start: `App::draw` turns a failed collect into a footer notice and
+/// keeps the previous screen, so the pane names the file and goes on working.
+#[test]
+fn an_unhonourable_attribute_names_the_file_it_came_from() {
+    let scratch = Scratch::crlf_worktree("normalise-bad-encoding", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.write(
+        ".gitattributes",
+        "a.txt working-tree-encoding=NOT-AN-ENCODING\n",
+    );
+    scratch.write_crlf("a.txt", &numbered_lines(20).replace("line 3\n", "X\n"));
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "a.txt")
+        .expect("a.txt is changed");
+
+    let error = worktree
+        .diff(change)
+        .expect_err("an encoding that does not exist produced a diff anyway");
+    match error {
+        Error::Filter { path, .. } => assert_eq!(
+            path, "a.txt",
+            "the failure has to name the file, since it is one path's and not \
+             the repository's"
+        ),
+        other => panic!("reported {other:?}, which is not one path's failure"),
+    }
+}
+
 /// A filter that cannot be assembled fails the diff rather than falling back.
 ///
 /// The one claim in `filter.rs` that nothing else here reaches, and the reason

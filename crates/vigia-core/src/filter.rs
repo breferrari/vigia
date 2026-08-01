@@ -31,6 +31,21 @@
 //! holds real content while the blob holds a pointer, so such a file diffs as a
 //! rewrite. That is what happened before any filter ran at all, so it is not a
 //! regression, and it is [#69](https://github.com/breferrari/vigia/issues/69).
+//!
+//! # `core.safecrlf` is not consulted either, and for a sharper reason
+//!
+//! That setting guards the **write** path: it makes `git add` refuse a file
+//! whose conversion would not round-trip, so that history cannot be corrupted.
+//! `git diff` ignores it completely, which is checkable and was checked: against
+//! a file with mixed terminators under `core.safecrlf=true`, `git diff` reports
+//! the file as **unchanged** while `git add` refuses it outright.
+//!
+//! `vigia` never writes, so the check guards an operation it does not perform.
+//! Inheriting it from config made a mixed-terminator file **fail the frame**,
+//! and fail it on every later frame too, since the file stays mixed: one such
+//! file anywhere in the tree and the pane stops working. So the check is set to
+//! [`Skip`](gix::filter::plumbing::pipeline::CrlfRoundTripCheck::Skip) rather
+//! than taken from `core.safecrlf`.
 
 use std::path::Path;
 
@@ -78,8 +93,9 @@ impl Filter {
             .detach();
 
         let mut options = gix::filter::Pipeline::options(repo).map_err(Error::filter_setup)?;
-        // See the module header. This is a ruling, not an oversight.
+        // See the module header. Both of these are rulings, not oversights.
         options.drivers = Vec::new();
+        options.crlf_roundtrip_check = gix::filter::plumbing::pipeline::CrlfRoundTripCheck::Skip;
 
         let pipeline = gix::filter::plumbing::Pipeline::new(
             repo.command_context().map_err(Error::filter_setup)?,
