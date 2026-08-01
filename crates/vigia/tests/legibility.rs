@@ -1711,7 +1711,7 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
 }
 
 #[test]
-fn a_scrollbar_costs_its_region_exactly_one_column_and_no_more() {
+fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // I6's floor, held against the newest thing that can take a column. A bar is
     // a glance element and `MIN_PATH_WIDTH` outranks every one of them, so the
     // question is not "is the path at least twelve columns" — the counters are
@@ -1720,10 +1720,15 @@ fn a_scrollbar_costs_its_region_exactly_one_column_and_no_more() {
     // whether it costs anything **beyond** the column it occupies.
     //
     // Asked by comparison rather than by arithmetic: the same list row drawn at
-    // `width` with a bar must read exactly as it does at `width - 1` without one.
-    // Anything else means the bar is squeezing the row rather than sitting beside
-    // it, and a gate that recomputed the expected path would be restating
-    // `Painter::file_row`'s own ladder.
+    // `width` with a bar must read exactly as it does at `width - BAR_COLUMNS`
+    // without one. Anything else means the bar is squeezing the row rather than
+    // sitting beside it, and a gate that recomputed the expected path would be
+    // restating `Painter::file_row`'s own ladder.
+    // The bar itself plus the gap before it, restated rather than imported for
+    // the reason `RAMP` and `HEAT_BLOCK` are: a test sharing the renderer's own
+    // constant would agree with it by construction.
+    const BAR_COLUMNS: u16 = 2;
+
     let entries = vec![
         entry("crates/vigia-core/src/frame.rs"),
         entry("src/engine/watch.rs"),
@@ -1747,9 +1752,9 @@ fn a_scrollbar_costs_its_region_exactly_one_column_and_no_more() {
     };
 
     let mut compared = 0;
-    for width in 9..=*WIDTHS.end() {
+    for width in 10..=*WIDTHS.end() {
         let barred = rows_at(width, 24, &with_bar, &chrome());
-        let bare = rows_at(width - 1, 24, &without_bar, &chrome());
+        let bare = rows_at(width - BAR_COLUMNS, 24, &without_bar, &chrome());
 
         // Row one is the first list row. Trailing blanks are already trimmed by
         // `rows_at`, and the bar's own column is the only thing that can follow

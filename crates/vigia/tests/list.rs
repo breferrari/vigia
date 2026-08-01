@@ -385,3 +385,55 @@ fn the_window_is_overtaken_when_the_diff_leaves_it() {
         caught.current
     );
 }
+
+/// A picture of the two regions at a scale the snapshots do not reach.
+///
+/// **Ignored, diagnostic, not a gate**, the way `vigia-core`'s
+/// `frame_time_distribution` is. Every assertion above is structural, and
+/// structure is exactly what cannot tell you whether a screen is *good*: the cap,
+/// the caret and both scrollbars are each proved by a number somewhere, and none
+/// of those numbers says what fifty changed files actually look like beside an
+/// agent. Run it with:
+///
+/// ```text
+/// cargo test --test list -- --ignored --nocapture the_region_at_fifty_files
+/// ```
+#[test]
+#[ignore = "diagnostic, not a gate"]
+fn the_region_at_fifty_files() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use vigia::{Theme, render};
+
+    const FILES: usize = 50;
+    let scratch = Scratch::large_diff("list-picture", FILES, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    for (label, top) in [("at the top", 0usize), ("scrolled in", 4 * 20)] {
+        for _ in 0..top {
+            app.apply(Action::Scroll(1), &mut frame, 1).expect("apply");
+        }
+        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        let body = body_layout(area, &app.chrome("vigia", None), FILES);
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        let theme = Theme::default();
+        let chrome = app.chrome("vigia", None);
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render(f.buffer_mut(), area, &view, &theme, &chrome);
+            })
+            .expect("draw");
+        println!("\n=== {FILES} files, {label} ===\n{}", terminal.backend());
+    }
+}

@@ -270,7 +270,15 @@ const CARET_WIDTH: usize = 2;
 const CARET_FLOOR: usize = CARET_WIDTH + CARET_WIDTH + MIN_PATH_WIDTH;
 
 /// Columns a scrollbar costs the region it is drawn beside.
-const BAR_WIDTH: usize = 1;
+///
+/// **Two, and the second one is the gap.** The bar itself is one column, drawn
+/// in the last. The column before it is left empty for the same reason
+/// [`reserved`] leaves one everywhere else on the right-hand side: a full-block
+/// thumb against a row that ends in `+6 -6` reads as `-6█`, and a reader
+/// checking a count should not have to decide whether the block is part of it.
+/// Seen by rendering fifty files rather than by reading the code, which is what
+/// `the_region_at_fifty_files` exists for.
+const BAR_WIDTH: usize = 2;
 
 /// The narrowest region that can afford a scrollbar.
 ///

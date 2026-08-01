@@ -257,12 +257,13 @@ fn a_clipped_wide_row_still_says_it_continues() {
     // would then be reading the bar and reporting every row as unmarked, which is
     // this gate failing for a reason that has nothing to do with what it asserts.
     //
-    // The last two columns rather than a computed one: which of them holds the
-    // mark depends on whether the bar is drawn, and recomputing that here would be
+    // The last three columns rather than a computed one: which of them holds the
+    // mark depends on whether the bar is drawn, and the bar reserves a gap before
+    // itself so the mark can be two columns in. Recomputing that here would be
     // restating the renderer's own rule instead of checking its output.
     let mut marked = 0usize;
     for y in 1..area.height.saturating_sub(1) {
-        let tail: Vec<String> = (1..=2)
+        let tail: Vec<String> = (1..=3)
             .filter(|back| area.width >= *back)
             .map(|back| buf[(area.width - back, y)].symbol().to_owned())
             .collect();
