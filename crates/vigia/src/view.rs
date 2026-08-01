@@ -755,7 +755,19 @@ impl View {
         follows: bool,
         drawn: &[(usize, FileEntry)],
     ) -> Result<()> {
-        if rows == 0 || self.files == 0 {
+        // **A pane with no region resolved nothing, so it says nothing.** The
+        // request is handed back unchanged, which is exactly what the diff's own
+        // walk does for `height == 0` one screen up and for the same reason: a
+        // reader who drags a pane edge below the region's floor and back has
+        // expressed no intent about where the map should look, and `SPEC.md`
+        // §11.1 rules a resize "no state change". Zeroing here threw the browsed
+        // window away, and since only a diff-moving action hands the map back,
+        // it never recovered.
+        if rows == 0 {
+            return Ok(());
+        }
+        // Nothing to point at, so nothing to preserve either.
+        if self.files == 0 {
             self.list_top = 0;
             return Ok(());
         }
@@ -769,9 +781,11 @@ impl View {
             // the diff's to move. A reader who browsed away with `J` keeps their
             // place until the diff lands somewhere the list cannot show; see
             // [`Viewport::list_follows`] for why that cannot be worked out from
-            // the numbers here. While they are browsing the caret simply does not
-            // appear, which is honest: the map is deliberately looking somewhere
-            // the diff is not, and inventing one would say the diff had moved.
+            // the numbers here. The caret is **not** suppressed while they
+            // browse: it says *the diff is in this file*, which stays true, so
+            // `Painter::list` marks the row whenever the window still shows the
+            // current file and simply has nothing to mark once the window has
+            // moved off it.
             //
             // The lower bound puts the current file on the **bottom** row rather
             // than the top, so a diff scrolling forwards reveals the next file
@@ -782,7 +796,14 @@ impl View {
 
         for index in top..(top + rows).min(self.files) {
             self.read += 1;
-            match drawn.iter().find(|(at, _)| *at == index) {
+            // **Searched from the back.** The walk's restart keeps `drawn` (see
+            // there for why that is right), and the second walk starts earlier,
+            // so an index both walks drew has two entries. `Frame::diff` re-reads
+            // a file written in the last two seconds, so the two are only
+            // certainly equal outside the settle margin — which is the one state
+            // the current file is never in. Taking the newest is what keeps the
+            // two regions from disagreeing about one file for one frame.
+            match drawn.iter().rev().find(|(at, _)| *at == index) {
                 Some((_, entry)) => self.list.push(entry.clone()),
                 None => {
                     let (change, diff) = frame.diff(index)?;

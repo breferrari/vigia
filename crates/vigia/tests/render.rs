@@ -1779,3 +1779,205 @@ fn the_scrollbars_degrade_once_and_never_flicker() {
         &drawn[first..]
     );
 }
+
+/// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
+fn a_list_of(files: usize, shown: usize, top: usize) -> View {
+    View {
+        list: (0..shown)
+            .map(|i| entry(&format!("src/f{i}.rs"), 1, 0))
+            .collect(),
+        list_top: top,
+        current_span: 400,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
+        ],
+        files,
+        top: Position::default(),
+        read: 2,
+        peak: 0,
+    }
+}
+
+#[test]
+fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
+    // **The invariant `Painter::scrollbar`'s own doc claims and neither region's
+    // gate stated**: the thumb's travel maps onto the track's travel, so the last
+    // position fills the bottom row exactly as the first fills the top.
+    //
+    // Swept over the file count rather than checked at one, because the defect
+    // this exists for hides at particular denominators: the previous gate used
+    // ten files in a three-row region, where the floor division truncates to zero
+    // and `.max(1)` makes the wrong formula accidentally right. That is the
+    // "measured at its cheapest position" shape §7 already records, one axis over.
+    let width = 64u16;
+    let shown = 6usize;
+    let region = 1u16..1 + shown as u16;
+
+    for files in (shown + 1)..=30 {
+        let last = files - shown;
+
+        let bottom = a_list_of(files, shown, last);
+        let backend = screen(width, 24, &bottom, &chrome());
+        let marks = thumb_rows(&backend, width - 1, region.clone());
+        assert!(
+            !marks.is_empty(),
+            "{files} files: the last window drew no thumb"
+        );
+        assert_eq!(
+            *marks.last().expect("a thumb"),
+            region.end - 1,
+            "{files} files: the last window's thumb ends at row {:?}, not the \
+             bottom of the track",
+            marks.last()
+        );
+
+        // And the first window fills the top, so the two ends are distinguishable.
+        let first = a_list_of(files, shown, 0);
+        let top_marks = thumb_rows(
+            &screen(width, 24, &first, &chrome()),
+            width - 1,
+            region.clone(),
+        );
+        assert_eq!(
+            top_marks.first().copied(),
+            Some(region.start),
+            "{files} files: the first window's thumb does not start at the top"
+        );
+        assert_ne!(
+            marks, top_marks,
+            "{files} files: the bar draws the same column at both ends, so it \
+             says nothing about where the window is"
+        );
+    }
+}
+
+#[test]
+fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
+    // The same invariant on the other region, where the units are rows rather
+    // than files. One file, the viewport resting on its last screenful.
+    let width = 64u16;
+    let height = 24u16;
+
+    for span in 20..=60usize {
+        let mut view = a_list_of(3, 3, 0);
+        view.files = 1;
+        view.current_span = span;
+        // The diff region starts under three list rows and the rule.
+        let region = 5u16..height - 1;
+        let rows = usize::from(region.end - region.start);
+        view.top = Position {
+            file: 0,
+            row: span.saturating_sub(rows),
+        };
+
+        let backend = screen(width, height, &view, &chrome());
+        let marks = thumb_rows(&backend, width - 1, region.clone());
+        if marks.is_empty() {
+            continue; // nothing to scroll at this span
+        }
+        assert_eq!(
+            *marks.last().expect("a thumb"),
+            region.end - 1,
+            "span {span}: the last screenful's thumb ends at {:?}, not the \
+             bottom of the track",
+            marks.last()
+        );
+    }
+}
+
+#[test]
+fn the_caret_does_not_vanish_because_another_file_changed() {
+    // Two ladders that collide. `Painter::list` decides the caret against the
+    // width it is handed, and `render` has already taken the bar's columns off
+    // that width — so whether the caret survives depends on whether the list is
+    // *scrollable*, which depends on the changed-file count. Both floors are
+    // sixteen, so at sixteen and seventeen columns a seventh changed file made
+    // the marker saying which file the diff is inside disappear with nothing
+    // about the pane having moved.
+    //
+    // That is precisely the reading `the_caret_degrades_once_and_never_flickers`
+    // exists to prevent, and it was blind to this because its fixture has
+    // `files == list.len()` and is never scrollable. The file count is the second
+    // axis.
+    const CARET: &str = "▸";
+
+    for width in 1..=60u16 {
+        let mut drawn = Vec::new();
+        for files in [3usize, 30] {
+            let view = a_list_of(files, 3, 0);
+            let backend = screen(width, 24, &view, &chrome());
+            let buffer = backend.buffer();
+            drawn.push(
+                (0..width)
+                    .map(|x| buffer[(x, 1)].symbol())
+                    .collect::<String>()
+                    .contains(CARET),
+            );
+        }
+        assert_eq!(
+            drawn[0],
+            drawn[1],
+            "at {width} columns the caret is {} with three changed files and {} \
+             with thirty, so a file appearing elsewhere moved the marker",
+            if drawn[0] { "drawn" } else { "absent" },
+            if drawn[1] { "drawn" } else { "absent" }
+        );
+    }
+}
+
+#[test]
+fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
+    // What `CARET_FLOOR`'s `BAR_WIDTH` term buys, which is not the same property
+    // as `the_caret_does_not_vanish_because_another_file_changed`. That one says
+    // the caret's presence depends on the pane alone; this one says the caret is
+    // never drawn on a row too narrow to still name its file afterwards, on a
+    // screen where the bar has already taken its columns.
+    //
+    // Found by mutation: dropping the `BAR_WIDTH` term left the consistency gate
+    // green, because both file counts then lost the caret at the same widths and
+    // agreed with each other while the row underneath was two columns short.
+    //
+    // Constants restated for the reason this file always restates them: sharing
+    // the renderer's own would make the assertion agree with the code by
+    // construction.
+    const ROW_FLOOR: usize = 2 + 12; // the kind letter and its gap, plus MIN_PATH_WIDTH
+    const BAR_COLUMNS: usize = 2;
+    const CARET_COLUMNS: usize = 2;
+    const CARET: &str = "▸";
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+
+    let mut saw_both = false;
+    for width in 1..=60u16 {
+        // Thirty files over three rows, so the list is scrollable and the bar is
+        // drawn wherever the pane can afford one.
+        let view = a_list_of(30, 3, 0);
+        let backend = screen(width, 24, &view, &chrome());
+        let buffer = backend.buffer();
+
+        let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
+        let caret = row.contains(CARET);
+        let bar = row.ends_with(TRACK) || row.ends_with(THUMB);
+
+        if !caret {
+            continue;
+        }
+        if bar {
+            saw_both = true;
+        }
+        let left = usize::from(width) - if bar { BAR_COLUMNS } else { 0 } - CARET_COLUMNS;
+        assert!(
+            left >= ROW_FLOOR,
+            "at {width} columns the row draws a caret{} leaving {left} columns, \
+             below the {ROW_FLOOR} it needs to name its file",
+            if bar { " and a bar," } else { "," }
+        );
+    }
+
+    assert!(
+        saw_both,
+        "no width drew a caret and a bar together, so the term this gate is \
+         about is never exercised"
+    );
+}

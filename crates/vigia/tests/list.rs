@@ -429,3 +429,56 @@ fn the_region_at_fifty_files() {
         println!("\n=== {FILES} files, {label} ===\n{}", terminal.backend());
     }
 }
+
+#[test]
+fn the_window_survives_a_pane_too_short_to_show_it() {
+    // **The asymmetry `View::collect` already argues against, one region up.**
+    // For the diff, a frame with no room to draw "resolved nothing, so it has
+    // nothing to say about where the reader is", and reporting a zero would drag
+    // them to the top for as long as the pane stayed short. The list did the
+    // opposite in exactly that situation: `take_list` zeroed `list_top`, `App`
+    // stored it back, and because nothing but a diff-moving action hands the map
+    // back, the window never recovered.
+    //
+    // Reachable by dragging a pane edge, which is a thing a reader does to a
+    // monitor beside an agent, and `SPEC.md` §11.1 rules a resize "no state
+    // change".
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-short-pane", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let tall = split(WIDE, 24, FILES);
+
+    for _ in 0..12 {
+        app.apply(Action::ScrollList(1), &mut frame, tall.diff)
+            .expect("apply");
+    }
+    let browsed = app
+        .view(&mut frame, &mut highlighter, &history, tall)
+        .expect("view")
+        .list_top;
+    assert!(browsed > 0, "the fixture never browsed anywhere");
+
+    // A pane too short for a region at all. Non-vacuity: the layout really must
+    // refuse the region here, or this is a redraw at the same size.
+    let short = split(WIDE, 5, FILES);
+    assert_eq!(short.list, 0, "the short pane still affords a region");
+    app.view(&mut frame, &mut highlighter, &history, short)
+        .expect("view");
+
+    let restored = app
+        .view(&mut frame, &mut highlighter, &history, tall)
+        .expect("view");
+    assert_eq!(
+        restored.list_top, browsed,
+        "dragging the pane through a height with no region moved the map from \
+         {browsed} to {}",
+        restored.list_top
+    );
+}

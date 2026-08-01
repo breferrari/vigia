@@ -175,7 +175,7 @@
     <!-- status bar -->
     <rect x="8" y="432" width="884" height="30" fill="#161b22"/>
     <line x1="8" y1="432" x2="892" y2="432" stroke="#21262d" stroke-width="1"/>
-    <text class="m faint" x="32" y="452" font-size="12.5">q quit  &#183;  f follow  &#183;  jk scroll</text>
+    <text class="m faint" x="32" y="452" font-size="12.5">q quit  &#183;  f follow  &#183;  jk scroll  &#183;  JK files</text>
     <text class="m" x="866" y="452" font-size="12.5" text-anchor="end"><tspan class="cyn">0.8ms</tspan><tspan class="dim"> frame</tspan><tspan class="dim">&#160;&#160;&#160;</tspan><tspan class="cyn">24MiB</tspan><tspan class="dim">&#160;&#160;</tspan><tspan class="dim">follow </tspan><tspan class="grn">&#9654;</tspan></text>
   </g>
 

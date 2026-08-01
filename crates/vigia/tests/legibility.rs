@@ -1753,6 +1753,18 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         let barred_row = barred[1].trim_end_matches(['▕', '█']).trim_end().to_owned();
         let bare_row = bare[1].trim_end().to_owned();
 
+        // **Skip the widths where the caret's own ladder differs between the two
+        // panes being compared.** The caret is decided against the pane width, so
+        // the wide side can have one where the narrow side does not, and a row
+        // indented by two columns is not the same row. That is the caret's
+        // ladder, gated by `the_caret_degrades_once_and_never_flickers` and
+        // `the_caret_does_not_vanish_because_another_file_changed`; this gate is
+        // about the bar and must not be measuring both at once.
+        let caret = |row: &str| row.trim_start().len() != row.len();
+        if caret(&barred[1]) != caret(&bare[1]) {
+            continue;
+        }
+
         // Only where a bar is actually drawn. Below the floor the two screens are
         // one column apart and genuinely draw different rows.
         if barred[1].ends_with('▕') || barred[1].ends_with('█') {

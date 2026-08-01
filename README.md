@@ -43,6 +43,7 @@ vigia ~/code/some-repo
 | `j` `k` `↑` `↓` | scroll a row |
 | `Space` `PgDn` `PgUp` | page |
 | `g` `Home` / `G` `End` | first / last changed file |
+| `J` `K` `Shift+↑` `Shift+↓` | scroll the pinned file list |
 | `f` | follow the newest change, or stop following |
 | wheel | scroll |
 
@@ -81,6 +82,7 @@ The keys, which are every colour the shell draws with:
 | Group | Keys |
 |---|---|
 | Chrome | `chrome` `chrome_dim` |
+| Scrollbars | `bar` `bar_track` |
 | File rows | `path` `path_live` `path_cold` `pulse` `spark` `kind` |
 | Heat strip | `heat_track`, and `heat_added` `heat_removed` `heat_mixed` each with a `_warm` and `_hot` twin |
 | Diff | `hunk` `gutter` `added` `removed` `context` `note` `alert` |
@@ -104,7 +106,7 @@ How many colours your terminal has is detected. `VIGIA_COLOR` overrides that wit
 
 ## 🖼️ Where it is going
 
-Target layout. **This is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header's `watching · 3 files`, the pinned list of changed files above the rule, the counters, the change sparklines, the heat bars and their three-step ramp, the caret on the file the diff is inside, the pulse on what just changed, the scrollbar down the diff, the tinted rows and their left bars, and the highlighted diff under them. The status bar draws too, and the two departures from the picture are deliberate: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and memory is quoted in `MiB` because that is the unit the soak that budgets it uses.
+Target layout. **This is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header's `watching · 3 files`, the pinned list of changed files above the rule, the counters, the change sparklines, the heat bars and their three-step ramp, the caret on the file the diff is inside, the pulse on what just changed, the scrollbar down the diff, the tinted rows and their left bars, and the highlighted diff under them. The status bar draws too, and the departures from the picture are deliberate and written down in `SPEC.md`: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and both regions draw a file the same way where the mockup splits the elements between them, because a file scrolled out of a capped list would otherwise take its counters with it.
 
 <img src="assets/preview.svg" alt="Mockup of the vigia interface: a pinned list of changed files with sparklines and heat bars above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
 

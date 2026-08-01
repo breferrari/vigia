@@ -280,13 +280,26 @@ pub const LIST_ROWS: usize = 6;
 /// drawer that knows nothing about which region called it.
 const CARET_WIDTH: usize = 2;
 
-/// The narrowest row that can afford the caret column.
+/// The narrowest **pane** that can afford the caret column.
 ///
 /// Below it the caret is dropped and the list draws full width. It is a glance
-/// element like any other, and [`MIN_PATH_WIDTH`] outranks every glance element:
-/// a row that spent the file's name on a marker pointing at it would be naming
-/// nothing.
-const CARET_FLOOR: usize = CARET_WIDTH + ROW_FLOOR;
+/// element like any other, and [`ROW_FLOOR`] outranks every glance element: a row
+/// that spent the file's name on a marker pointing at it would be naming nothing.
+///
+/// **It counts [`BAR_WIDTH`] even on a screen with no bar, and that is the
+/// ruling.** The two ladders otherwise collide: [`Painter::list`] measures the
+/// width it is handed, `render` has already taken the bar's columns off it, and
+/// whether a bar exists depends on whether the list is *scrollable* — which is a
+/// fact about the changed-file count, not about the pane. With both floors at
+/// sixteen, a seventh changed file made the caret vanish at sixteen and seventeen
+/// columns with nothing about the pane having moved, which is exactly the
+/// "reads as the current file changing" failure the ladder's own gate exists to
+/// prevent. Paying for the bar unconditionally is what makes the caret's presence
+/// a function of pane width alone.
+///
+/// The cost is the caret at two widths that would otherwise have room for it,
+/// both far below the forty columns I6 is named for.
+const CARET_FLOOR: usize = CARET_WIDTH + BAR_WIDTH + ROW_FLOOR;
 
 /// Columns a scrollbar costs the region it is drawn beside.
 ///
@@ -801,7 +814,9 @@ pub enum Heat {
     Added(Band),
     /// Removals only.
     Removed(Band),
-    /// Both, which `SPEC.md` §5.1 left unruled and §11.1 now rules.
+    /// Both, which `SPEC.md` §5.1 rules yellow: every alternative paints a
+    /// mixed slice as pure, and separating addition from removal by position is
+    /// the strip's whole job.
     Mixed(Band),
 }
 
@@ -1312,7 +1327,7 @@ pub fn render(
             body.list as u64,
             view.files as u64,
         );
-        painter.list(region, view);
+        painter.list(region, view, area.width);
         y += body.list as u16;
     }
 
@@ -1628,8 +1643,12 @@ impl Painter<'_> {
     /// shortened, or be backed up to rest the diff's last row on the bottom, and
     /// marking from it would name a file the diff is not in on exactly the frames
     /// that moved. `View::collect` resolves `top` before this ever runs.
-    fn list(&mut self, area: Rect, view: &View) {
-        let caret = usize::from(area.width) >= CARET_FLOOR;
+    fn list(&mut self, area: Rect, view: &View, pane: u16) {
+        // Against the **pane**, not the region: `area` has already lost the bar's
+        // columns when one is drawn, and deciding from it would make the caret's
+        // presence depend on whether the list happens to be scrollable. See
+        // [`CARET_FLOOR`].
+        let caret = usize::from(pane) >= CARET_FLOOR;
         let inset = if caret { CARET_WIDTH as u16 } else { 0 };
 
         for (offset, entry) in view.list.iter().take(usize::from(area.height)).enumerate() {
@@ -1700,7 +1719,19 @@ impl Painter<'_> {
         }
 
         let thumb = ((span * rows) / of).max(1).min(rows);
-        let start = ((at * rows) / of).min(rows - thumb);
+        // **The scroll's travel mapped onto the track's travel**, not the
+        // position mapped onto the whole track. Those differ by exactly the
+        // thumb's own length, and getting it wrong leaves the bar one row short
+        // at the last window on every input where the division does not divide:
+        // at seven files in a six-row region it drew the identical column at both
+        // ends, so the one readout that says *you are at the end of the changed
+        // set* never said it. A `.min(rows - thumb)` clamp hides the overshoot
+        // and cannot supply the missing row.
+        //
+        // `scrollable` guarantees `span < of`, so `travel` is at least one and
+        // this cannot divide by zero.
+        let travel = of - span;
+        let start = (at.min(travel) * (rows - thumb)) / travel;
         let x = area.x + area.width - 1;
 
         for row in 0..rows {
