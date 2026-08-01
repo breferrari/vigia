@@ -70,9 +70,7 @@ pub use render::{
 };
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
-pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, rows_in, rows_of,
-};
+pub use view::{FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, rows_in};
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};

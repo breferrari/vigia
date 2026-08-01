@@ -265,13 +265,6 @@ pub struct Viewport {
     /// window back; never snapping leaves a map that stops agreeing with the diff
     /// the moment anyone touches it.
     pub list_follows: bool,
-    /// Whether this frame needs the diff's total height.
-    ///
-    /// The scrollbar is the only thing that wants it, and it is the only thing in
-    /// the frame path not bounded by the window, so a caller says so rather than
-    /// paying for it by default. `SPEC.md` §3's I4 is written around that
-    /// distinction.
-    pub measured: bool,
 }
 
 /// A screenful of rows, plus what the chrome needs to describe it.
@@ -391,15 +384,13 @@ fn note_for(kind: &ChangeKind, diff: &FileDiff) -> Option<&'static str> {
 }
 
 /// Rows one file contributes: its heading, then either a note or its hunks.
+///
+/// An adapter over [`rows_of`], which is the same ruling against the counted
+/// representation. The two used to be separate bodies over `FileDiff` and
+/// `FileSpan`, with a doc saying they "have to agree exactly" and a gate
+/// asserting they did, which is the tell that it was one rule written twice.
 fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
-    if note_for(kind, diff).is_some() {
-        return 2;
-    }
-    1 + diff
-        .hunks
-        .iter()
-        .map(|hunk| 1 + hunk.lines.len())
-        .sum::<usize>()
+    rows_of(kind, &diff.span())
 }
 
 /// One changed file as the walk has it: what happened, what it diffs to, and
@@ -436,17 +427,17 @@ fn entry_of(kind: &ChangeKind, diff: &FileDiff, history: &History) -> FileEntry 
     }
 }
 
-/// How many rows a file occupies, from its span rather than from its diff.
+/// How many rows a file occupies, from its counted span.
 ///
-/// The counting twin of [`span_of`], and the two have to agree exactly: one is
-/// what the screen draws and the other is what the scrollbar is scaled against.
-/// It is passed to [`vigia_core::Frame::height`] because what a conflict or a
-/// binary file occupies is this crate's ruling rather than the engine's, and
-/// `SPEC.md` §6 keeps that decision here.
-pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> usize {
-    // A note is a heading and one line saying why, which is exactly what
-    // `note_for` produces for the same three cases.
-    if matches!(change.kind, ChangeKind::Conflict | ChangeKind::TypeChange) || span.binary {
+/// **The one place that ruling lives.** [`span_of`] is an adapter over it for
+/// callers holding a built diff, so what the screen draws and what the scrollbar
+/// is scaled against cannot disagree. It stays in this crate because what a
+/// conflict or a binary file occupies is a rendering decision, and `SPEC.md` §6
+/// keeps those out of the engine.
+fn rows_of(kind: &ChangeKind, span: &vigia_core::FileSpan) -> usize {
+    // A note is a heading and one line saying why, and these are exactly the
+    // three cases `note_for` produces one for.
+    if !kind.is_diffable() || span.binary {
         return 2;
     }
     1 + span.hunks as usize + span.lines as usize
@@ -468,46 +459,6 @@ pub fn rows_in(frame: &mut Frame, index: usize) -> Result<usize> {
 }
 
 impl View {
-    /// How many distinct files this screen's diff region draws.
-    ///
-    /// The span the diff's scrollbar thumb covers, and it is free: the walk
-    /// already produced the rows, so counting the headings among them costs
-    /// nothing and needs no file the frame did not draw.
-    ///
-    /// The top file is counted whether or not its heading is on screen, because a
-    /// viewport resting deep inside one file is still showing that file. Every
-    /// [`Row::File`] after it is another one, and a heading on the **first** row
-    /// is the top file's own rather than a second.
-    pub fn shown_files(&self) -> usize {
-        if self.rows.is_empty() {
-            return 0;
-        }
-        let headings = self
-            .rows
-            .iter()
-            .filter(|row| matches!(row, Row::File(_)))
-            .count();
-        if matches!(self.rows.first(), Some(Row::File(_))) {
-            headings.max(1)
-        } else {
-            headings + 1
-        }
-    }
-
-    /// Whether the whole diff is already on screen.
-    ///
-    /// True only when nothing has been scrolled past and the walk ran out of rows
-    /// before it ran out of room, which together mean there is nowhere to go. It
-    /// is what decides that the diff's scrollbar would be a column spent saying
-    /// there is nothing to scroll.
-    ///
-    /// Free, and deliberately not "did I draw every file": a screen can show
-    /// every changed file and still be scrolled, and a screen can show one file
-    /// and be complete.
-    pub fn fits(&self, rows: usize) -> bool {
-        self.top == Position::default() && self.rows.len() < rows
-    }
-
     /// Collect the rows visible from `position`, and no others.
     ///
     /// `height` is the body's height in rows. Zero is legal and gives an empty
@@ -546,7 +497,6 @@ impl View {
             list_top,
             list_rows,
             list_follows,
-            measured,
         } = viewport;
         // One pass, dropped at every exit including the `?`s below, which is
         // what keeps the highlight cache bounded by the viewport. The guard
@@ -790,7 +740,7 @@ impl View {
         // put it on a file the diff is not in on exactly the frames that moved,
         // which is every frame a monitor exists to show.
         view.take_list(frame, history, list_rows, list_follows, &drawn)?;
-        view.measure(frame, measured)?;
+        view.measure(frame, height)?;
 
         Ok(view)
     }
@@ -805,19 +755,32 @@ impl View {
     /// `rows_above` comes out of the same walk. Stopping at the current file and
     /// adding the offset into it is what makes the position exact rather than
     /// interpolated, which is the whole reason for doing this at all.
-    fn measure(&mut self, frame: &mut Frame, wanted: bool) -> Result<()> {
-        if !wanted || self.files == 0 {
+    fn measure(&mut self, frame: &mut Frame, diff_rows: usize) -> Result<()> {
+        // A one-row track cannot express a position, so a pane that narrow asks
+        // for no height and pays nothing. Derived from the rows in hand rather
+        // than carried as a flag: it is a fact about geometry the caller already
+        // has, unlike `anchored` and `list_follows`, which carry intent the
+        // numbers genuinely cannot.
+        if diff_rows <= 1 || self.files == 0 {
             return Ok(());
         }
-        self.total_rows = frame.height(crate::rows_of)?;
 
-        // Everything before the file the viewport is in, plus how far into it.
-        // `frame.height` has already filled the span cache, so this second walk
-        // reads nothing.
+        // **One walk.** The total and the position are a sum and its prefix, so
+        // asking the frame twice was asking it to re-tread ground it had just
+        // covered. `Frame::span` caches, so the second pass was cheap, but two
+        // code paths summing the same thing had to agree about how a file is
+        // counted and only one of them can be right.
+        let mut total = 0usize;
         let mut above = 0usize;
-        for index in 0..self.top.file.min(self.files) {
-            above += frame.rows_of(index, crate::rows_of)?;
+        for index in 0..self.files {
+            let (change, span) = frame.span(index)?;
+            let rows = rows_of(&change.kind, span);
+            if index < self.top.file {
+                above += rows;
+            }
+            total += rows;
         }
+        self.total_rows = total;
         self.rows_above = above + self.top.row.min(self.current_span);
         Ok(())
     }

@@ -159,36 +159,41 @@ fn one_screenful_costs_the_same_however_much_else_changed() {
         few.cost.computed, many.cost.computed
     );
 
-    // **And what it counts does not.** I4 was narrowed on 2026-08-01: the diff's
-    // height is totalled over every changed file, once per tick, without
-    // materialising any of it. So the byte counts genuinely differ, and asserting
-    // them equal would be asserting the feature away. What is asserted instead is
-    // that the difference is exactly the counting pass and nothing else: every
-    // file measured once, and no file measured that the screen also diffed.
-    // **Every changed file is either built or counted, exactly once.** A file the
-    // screen drew is already in hand, so the counting pass takes its height from
-    // the diff rather than reading again; every other file is counted and never
-    // built. That partition is the narrowing stated as arithmetic, and it fails
-    // in both directions: a counting pass that re-read what was drawn pushes the
-    // sum over, and one that skipped a file leaves it under.
+    // **Bytes built are equal, exactly.** They stopped being while the counting
+    // pass shared this counter, and three gates in this file had to loosen to
+    // ranges. Splitting `counted_bytes` off gave them back.
     assert_eq!(
-        few.cost.computed + few.cost.measured,
-        FEW_FILES as u64,
-        "{} built and {} counted over {FEW_FILES} changed files",
-        few.cost.computed,
+        few.cost.bytes, many.cost.bytes,
+        "one screen built {} bytes among {FEW_FILES} changed files and {} among \
+         {FILES}, so what a frame builds follows the worktree rather than the \
+         screen",
+        few.cost.bytes, many.cost.bytes
+    );
+
+    // **And bytes counted follow the changed set**, which is I4's narrowing.
+    // Every file is counted here rather than only the undrawn ones, and that is
+    // the fix rather than waste: these fixtures are inside the settle margin, so
+    // a file written moments ago cannot be *proved* unchanged and the counting
+    // pass will not take its height from a diff it cannot vouch for.
+    // `Frame::span` asks the frame's one reuse rule rather than trusting the
+    // cache's contents, which is what stops a file edited off screen reporting
+    // the height it had before.
+    assert_eq!(
+        few.cost.measured, FEW_FILES as u64,
+        "{} of {FEW_FILES} files counted inside the settle margin",
         few.cost.measured
     );
     assert_eq!(
-        many.cost.computed + many.cost.measured,
-        FILES as u64,
-        "{} built and {} counted over {FILES} changed files",
-        many.cost.computed,
+        many.cost.measured, FILES as u64,
+        "{} of {FILES} files counted inside the settle margin",
         many.cost.measured
     );
-    assert!(
-        many.cost.bytes > few.cost.bytes,
-        "the wide fixture read no more than the narrow one, so the counting pass \
-         is not running and none of this proves anything"
+    assert_eq!(
+        many.cost.counted_bytes / FILES as u64,
+        few.cost.counted_bytes / FEW_FILES as u64,
+        "counting cost {} bytes a file over {FILES} and {} a file over          {FEW_FILES}, so the counting pass is not linear in the changed set",
+        many.cost.counted_bytes / FILES as u64,
+        few.cost.counted_bytes / FEW_FILES as u64
     );
 }
 
@@ -352,12 +357,24 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
     let on_disk = std::fs::metadata(scratch.path_of("src/mod_0.rs"))
         .expect("stat")
         .len();
-    let whole = on_disk * FILES as u64;
+    // Bounded by the **window** again, now that the counting pass has its own
+    // counter to be bounded by the changed set in.
+    let drawn = many.read as u64;
     assert!(
-        many.cost.bytes >= whole && many.cost.bytes <= whole * 3,
-        "one screen read {} bytes against {FILES} files of {on_disk} bytes each, \
-         which is neither their two sides nor anything close to it",
+        many.cost.bytes >= on_disk && many.cost.bytes <= on_disk * 4 * drawn,
+        "one screen built {} bytes against {drawn} drawn files of {on_disk} \
+         bytes each, which is neither their two sides nor anything close to it",
         many.cost.bytes
+    );
+    assert!(
+        on_disk * 4 * drawn < on_disk * FILES as u64,
+        "the upper bound reaches the whole worktree, so this cannot fail"
+    );
+    assert!(
+        many.cost.counted_bytes >= on_disk * FILES as u64,
+        "the counting pass read {} bytes over {FILES} files, so it is not \
+         walking the changed set",
+        many.cost.counted_bytes
     );
     // And the diffing half is still the window's, which is the claim this gate is
     // named for and the one the narrowing did not touch: one file fills the diff
@@ -370,11 +387,13 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
         many.cost.computed,
         many.read
     );
+    // Inside the settle margin every file is counted, the drawn ones included:
+    // a file written moments ago cannot be proved unchanged, so `Frame::span`
+    // will not take its height from the diff the screen just built. That is the
+    // revalidation working, not waste.
     assert_eq!(
-        many.cost.computed + many.cost.measured,
-        FILES as u64,
-        "{} built and {} counted over {FILES} changed files",
-        many.cost.computed,
+        many.cost.measured, FILES as u64,
+        "{} of {FILES} files counted inside the settle margin",
         many.cost.measured
     );
 }
@@ -412,14 +431,14 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
         "an idle redraw recomputed {} diffs",
         cost.computed
     );
-    // One fewer reuse than ask, and the missing one is the file the pinned list
-    // took from the walk rather than from the frame. See
-    // `a_screen_a_single_file_fills_reads_that_single_file` for why that is a
-    // reuse worth not making: inside the settle margin the same ask is a full
-    // re-read, so the walk hands its entries to the list instead.
+    // Reuses come from both paths now, and the sum is exact rather than bounded.
+    // The screen's asks, less the one file the pinned list took from the walk
+    // instead of the frame, plus one per changed file for the counting pass:
+    // `Frame::span` revalidates through the same rule `Frame::diff` uses, so on a
+    // settled tree every span is a reuse rather than a read.
     assert_eq!(
         cost.reused,
-        view.read as u64 - 1,
+        view.read as u64 - 1 + FEW_FILES as u64,
         "the {} files the view asked for produced {} reuses, so some other path \
          is fetching content",
         view.read,
@@ -703,6 +722,13 @@ fn a_full_history_costs_the_frame_no_read_and_no_probe() {
     let mut highlighter = Highlighter::new();
 
     let empty = History::new();
+    // **One throwaway frame first**, so the span cache is warm for both readings.
+    // The counting pass revalidates each file the first time it is asked, and
+    // charging that to whichever frame happens to run first would make this gate
+    // report a difference in warmth as a difference in what the history costs.
+    app.view(&mut frame, &mut highlighter, &empty, layout())
+        .expect("view");
+
     let before = frame.stats();
     let cold = app
         .view(&mut frame, &mut highlighter, &empty, layout())
@@ -903,16 +929,20 @@ fn the_file_list_reads_only_the_rows_it_draws() {
          the list follows the worktree rather than its own height",
         small.read, large.read
     );
-    // Bytes are **not** equal any more and must not be asserted so: I4's
-    // narrowing means the height is counted for every changed file, and there are
-    // twice as many. What stays bounded by the region is the diffing, above, and
-    // the counting scales with the changed set exactly once.
+    // Bytes **built** are equal, because building follows the region. Bytes
+    // **counted** double, because counting follows the changed set. Two counters,
+    // two claims, both exact.
     assert_eq!(
-        large.cost.bytes,
-        small.cost.bytes * 2,
-        "counting four hundred files read {} bytes against {} for two hundred,          so the counting pass is not linear in the changed set and something          else is reading",
-        large.cost.bytes,
-        small.cost.bytes
+        small.cost.bytes, large.cost.bytes,
+        "one screen built {} bytes among 200 changed files and {} among 400",
+        small.cost.bytes, large.cost.bytes
+    );
+    assert_eq!(
+        large.cost.counted_bytes,
+        small.cost.counted_bytes * 2,
+        "counting four hundred files read {} bytes against {} for two hundred,          so the counting pass is not linear in the changed set",
+        large.cost.counted_bytes,
+        small.cost.counted_bytes
     );
 
     // And the number is the one the region actually asks for, not merely a
@@ -1175,13 +1205,18 @@ fn what_a_row_exact_scrollbar_would_cost() {
         // exactly as the shipped one has.
         let before = frame.stats();
         let began = Instant::now();
-        let counted = frame.height(vigia::rows_of).expect("height");
+        let mut counted = 0usize;
+        for index in 0..files {
+            counted += vigia::rows_in(&mut frame, index).expect("rows");
+        }
         let cold = began.elapsed();
         let cold_cost = delta(before, frame.stats());
 
         // Cached until the next advance, which is what makes scrolling free.
         let began = Instant::now();
-        frame.height(vigia::rows_of).expect("height");
+        for index in 0..files {
+            frame.span(index).expect("span");
+        }
         let warm = began.elapsed();
 
         assert_eq!(

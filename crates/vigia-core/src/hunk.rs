@@ -91,6 +91,28 @@ pub struct FileDiff {
     pub bytes: u64,
 }
 
+impl FileDiff {
+    /// This diff's height, as the span a counting pass would have produced.
+    ///
+    /// **The one bridge between the two representations**, so the reduction is
+    /// written once. It was open-coded in three places before: here, in
+    /// `Frame`'s reuse path, and in the shell's `span_of`, for a conversion the
+    /// counting path's whole claim is about.
+    ///
+    /// [`FileSpan::bytes`] is **zero**, not this diff's. The field means "bytes
+    /// read to reach this answer", and reaching it from a diff already in hand
+    /// reads nothing; charging them again would double-count the read that built
+    /// the diff.
+    pub fn span(&self) -> FileSpan {
+        FileSpan {
+            hunks: self.hunks.len() as u32,
+            lines: self.hunks.iter().map(|hunk| hunk.lines.len() as u32).sum(),
+            binary: self.binary,
+            bytes: 0,
+        }
+    }
+}
+
 /// Whether `data` should be treated as binary.
 pub(crate) fn is_binary(data: &[u8]) -> bool {
     data[..data.len().min(BINARY_SNIFF_LEN)].contains(&0)
@@ -110,17 +132,13 @@ fn text_of(token: &[u8]) -> String {
     String::from_utf8_lossy(strip_eol(token)).into_owned()
 }
 
-/// Compute the hunks between two blobs.
-///
-/// Buffers one file, not the whole diff: I4 requires first paint to be
-/// independent of *total* diff size, and callers reach this one file at a time.
 /// What one file contributes to the diff's height, with none of its text.
 ///
 /// **The whole point is what it does not carry.** A [`FileDiff`] owns a `String`
 /// per line, so totalling a worktree's rows through one materialises an
 /// allocation per changed line and per line of context: measured over a hundred
-/// files of five hundred rewritten lines, that is **460ms** where `git diff
-/// --numstat` does the same work in **46ms**. The ten times is the text, and a
+/// files of five hundred rewritten lines, that is **442.71ms** where `git diff
+/// --numstat` does the same work in **45.9ms**. The difference is the text, and a
 /// height needs none of it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FileSpan {
@@ -221,6 +239,10 @@ pub(crate) fn measure(before: &[u8], after: &[u8]) -> FileSpan {
     span
 }
 
+/// Compute the hunks between two blobs.
+///
+/// Buffers one file, not the whole diff: I4 requires first paint to be
+/// independent of *total* diff size, and callers reach this one file at a time.
 pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
     let bytes = (before.len() + after.len()) as u64;
 
