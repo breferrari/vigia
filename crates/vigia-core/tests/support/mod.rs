@@ -190,6 +190,46 @@ impl Scratch {
         scratch
     }
 
+    /// A repository configured the way a Windows checkout is, so that git's
+    /// clean filter has something to do.
+    ///
+    /// **A sibling of [`Scratch::new`] rather than a replacement for it.** Every
+    /// other fixture here sets `core.autocrlf false` at creation, which puts the
+    /// whole fixture population on one point of git's configuration surface: LF
+    /// on both sides, so the filter never converts anything and the code path
+    /// that skips it produces byte-identical output to the code path that runs
+    /// it. That is why [#65](https://github.com/breferrari/vigia/issues/65) was
+    /// invisible to a green suite, and `SPEC.md` §7 now names the shape. The
+    /// answer is to **span** the axis, not to move to its other end, so the
+    /// default stays where it is and this stands beside it.
+    ///
+    /// `attributes` is the `.gitattributes` to write, or `None` for the plain
+    /// installed default. The two are different fixtures and not degrees of one:
+    /// with no attributes a checkout puts CRLF on disk against an LF blob, and
+    /// with `* text=auto eol=lf` it puts LF on disk and only an editor writing
+    /// CRLF creates the discrepancy.
+    pub fn crlf_worktree(name: &str, attributes: Option<&str>) -> Self {
+        let scratch = Self::new(name);
+        scratch.git(&["config", "core.autocrlf", "true"]);
+        if let Some(attributes) = attributes {
+            scratch.write(".gitattributes", attributes);
+        }
+        scratch
+    }
+
+    /// Write a file with CRLF terminators, the way an editor on Windows does.
+    ///
+    /// Takes LF text and converts, so a test states its content once in the
+    /// form it is reasoning about. Refuses text that already carries a `\r`,
+    /// which would silently produce `\r\r\n` and a fixture testing nothing.
+    pub fn write_crlf(&self, rela: &str, contents: &str) {
+        assert!(
+            !contents.contains('\r'),
+            "{rela} already carries a carriage return, so converting would double it"
+        );
+        self.write(rela, contents.replace('\n', "\r\n"));
+    }
+
     /// A repository whose working tree differs from its index by every line of
     /// every file: `2 * files * lines` changed lines in total.
     ///
