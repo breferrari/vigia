@@ -108,11 +108,7 @@ impl Filter {
     /// receiver, which is what `clippy::wrong_self_convention` says about a
     /// `to_*` method on a non-`Copy` `&mut self`, and it converts its argument.
     /// `convert_to_git` is also `gix`'s own name for this operation.
-    pub(crate) fn convert_to_git(
-        &mut self,
-        rela_path: &str,
-        content: Vec<u8>,
-    ) -> Result<Vec<u8>> {
+    pub(crate) fn convert_to_git(&mut self, rela_path: &str, content: Vec<u8>) -> Result<Vec<u8>> {
         let path = Path::new(rela_path);
 
         // Destructured so the three fields borrow separately: the stack is

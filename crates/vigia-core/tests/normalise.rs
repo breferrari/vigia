@@ -126,7 +126,10 @@ fn a_one_line_edit_inside_a_crlf_file_diffs_as_one_line() {
     );
 
     // One line, edited in place, in the terminator the file already uses.
-    scratch.write_crlf("a.txt", &numbered_lines(20).replace("line 10\n", "CHANGED\n"));
+    scratch.write_crlf(
+        "a.txt",
+        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
+    );
 
     assert_eq!(
         git_numstat(&scratch, "a.txt"),
@@ -271,21 +274,29 @@ fn normalising_costs_no_extra_read_or_probe() {
         let worktree = scratch.worktree();
         let mut frame = worktree.frame();
         support::materialise(&mut frame);
-        assert_eq!(frame.files().len(), FILES, "the fixture is not {FILES} files");
+        assert_eq!(
+            frame.files().len(),
+            FILES,
+            "the fixture is not {FILES} files"
+        );
         frame.stats()
     };
 
     let lf = cost(&Scratch::new("normalise-cost-lf"), false);
     let crlf = cost(&Scratch::crlf_worktree("normalise-cost-crlf", None), true);
 
-    assert!(lf.bytes > 0, "a cold frame compared nothing, so nothing was measured");
+    assert!(
+        lf.bytes > 0,
+        "a cold frame compared nothing, so nothing was measured"
+    );
     assert_eq!(
         lf.computed, crlf.computed,
         "the two fixtures did not do the same work, so their costs are not \
          comparable"
     );
     assert_eq!(
-        crlf.bytes, lf.bytes,
+        crlf.bytes,
+        lf.bytes,
         "a CRLF worktree compared {} bytes against {} for its LF twin, a \
          difference of {}, so the working-tree side reached the diff unnormalised",
         crlf.bytes,

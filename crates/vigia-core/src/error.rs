@@ -85,10 +85,9 @@ impl fmt::Display for Error {
                 f,
                 "could not read the line-ending rules git would apply: {e}"
             ),
-            Error::Filter { path, source } => write!(
-                f,
-                "could not normalise {path} the way git would: {source}"
-            ),
+            Error::Filter { path, source } => {
+                write!(f, "could not normalise {path} the way git would: {source}")
+            }
         }
     }
 }
