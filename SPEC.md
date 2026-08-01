@@ -38,7 +38,7 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 | **I2a** | **Re-diffing is incremental** — the frame path never re-diffs a file that did not change. | re-diff cost ∝ what changed, **not** worktree size | Assert the re-diff count and byte count for a single-line edit, across **two** fixtures differing only in changed-file count. One fixture cannot prove it: see §7 |
 | **I2b** | **Re-highlighting is incremental** — only changed hunks are re-parsed. | re-parse ∝ edit size, **not** file size | Assert the re-parse count and byte count for a single-line edit, across **two** fixtures differing only in file size. One fixture cannot prove it, for the reason I2a's row gives: see §7 |
 | **I3** | **Flat resources over days.** No unbounded growth in RSS, file handles, or temp files. | **RSS drift < 5%** over 24h; **zero** temp files retained | Soak: synthetic edits driven through the whole pipeline, RSS sampled at a fixed count across the window. Scheduled rather than per-commit, and the scheduled window is shorter than 24h for a reason that is not ours: see the note below and §7 |
-| **I4** | **Streams, never buffers.** First paint is independent of total diff size. | **first paint < 100ms** on a 100k-line diff | `criterion`, gated in CI |
+| **I4** | **Streams, never buffers.** A frame **builds** only what it draws: diffs, highlighting and reads of file *content* follow the window, never the worktree. The one exception is the diff's **height**, which is counted for every changed file once per tick, without materialising any of it. | **first paint < 100ms** on a 100k-line diff; **counting the height < 16ms** on the same fixture | `criterion`, gated in CI; the counting bound in `crates/vigia/tests/reads.rs`, and `what_a_row_exact_scrollbar_would_cost` records what it was admitted on |
 | **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
 | **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns, plus structural gates in `crates/vigia/tests/legibility.rs` sweeping every width from 1 to 120: no row over-occupies, no hint is cut in half, and every label that lost characters says so |
 | **I7** | Startup to first paint is imperceptible. | **< 50ms** | Timed, gated in CI |
@@ -47,6 +47,38 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 | **I10** | **Glanceability history is bounded.** Churn history is bounded by a fixed window and a fixed cap on tracked paths, independent of how many files the session changed. A path that ages out of the window is dropped entirely. | **≤ 256 paths**, **≤ 120s**, whatever the session changed | Structural, in `crates/vigia-core/tests/history.rs`: a fixture recording **10,000** distinct paths asserts the store sits *at* the cap and that eviction actually ran, and a window of silence empties it. The soak asserts the same over the real process, and **refuses to assert** in a window that reached neither rule. Not in `tests/budgets.rs`: every gate there is a ratio or a duration, and this is a count |
 
 A regression past any budget **fails the build.**
+
+> [!note] I4 was narrowed on 2026-08-01, and the measurement is why
+> It read *"first paint is independent of total diff size"*, full stop, and
+> [#49](https://github.com/breferrari/vigia/issues/49) had already refused a
+> repository-wide `+`/`-` total on the strength of it. That ruling stands for a
+> **sum over content**. It was then applied a second time, to the diff's
+> **height**, and that was wrong: the two are not the same quantity, and the
+> difference is measurable.
+>
+> A height is hunk boundaries and line counts. A [`FileDiff`] is those *plus* an
+> owned `String` for every drawn line, so totalling a worktree through one
+> allocates once per changed line and once per line of context. Measured on the
+> reference machine, release, over a hundred files of five hundred rewritten
+> lines: totalling through full diffs is **442.71ms**, and counting the same
+> answer is **8.76ms**. `git diff --numstat` over the identical shape is 46ms, so
+> the counting path is not merely cheaper than our own mistake, it is in the
+> range the tool everyone compares against occupies.
+>
+> What the narrowing costs, stated rather than buried: a tick now reads every
+> changed file's bytes, where before it read only the window's. It is **once per
+> tick and not once per frame** — the count is cached until the next
+> `Frame::advance`, so scrolling pays nothing and a redraw still reads zero.
+> Diffs, highlighting and every allocation still follow the window, which is the
+> half of I4 that was doing the real work.
+>
+> Why it was worth it: a scrollbar that cannot say where the end is says nothing.
+> The version that avoided this walk had to approximate the whole from the
+> current file's height, and it vanished on a short file, ballooned on a long
+> one, and never reached the bottom. Reported from use rather than caught by a
+> gate, which is the fourth time. `what_a_row_exact_scrollbar_would_cost` is the
+> diagnostic that holds the numbers above, so the next person re-runs them
+> instead of re-arguing this.
 
 > [!note] Why I2 is two numbers
 > It was written as one, reading "re-highlighting is incremental", and that
@@ -406,7 +438,9 @@ The height is a function of **pane geometry, follow state and changed-file count
 
 **Scrolling the list does not disengage follow mode**, and that is a ruling rather than an omission. Follow is a claim about the **diff** viewport, and moving a window over a map expresses no intent about what the diff should show — the same reasoning that already exempts a terminal resize one paragraph down. Browsing the changed set while the diff goes on following what an agent is writing is the monitor behaviour, and the two would fight if one disengaged the other. `Action::is_manual_scroll` is an exhaustive match precisely so that a new action has to answer this rather than inheriting a default.
 
-**Both regions carry a scrollbar, and the diff's is honest about what it cannot know.** The list's is exact: its thumb spans the visible window over the changed-file count, both of which are free. The diff's is **file-granular, plus the fraction within the file the top is in** — `(top.file + top.row / rows in that file) / files` — which is also free, because the file at the top is diffed by definition. What it is deliberately **not** is row-exact over the whole diff: that needs the diff's total row count, which needs every file's height, which is the read I4 forbids and which the walk-back one section down already refuses for `G`. So it is coarse between files and smooth inside one, and this paragraph is the record that the coarseness is a ruling and not a bug.
+**Both regions carry a scrollbar, and both are exact.** The list's thumb spans the visible window over the changed-file count, both of which are free. The diff's spans the screen's rows over the diff's **total** rows and sits at the rows above it, which is what every other scrollbar means.
+
+**The diff's was ruled coarse first, and that ruling was wrong.** It read that a total needs every changed file diffed, which I4 forbids, so the bar approximated the whole from the current file's height. Reported from use within the hour: it vanished on a short file, ballooned on a long one, and never reached the bottom, because the trailing files are rarely the height of the one being read. The argument was right that *diffing* every file is unaffordable and wrong that a total needs it. A height is hunk boundaries and line counts; a `FileDiff` is those plus an owned `String` per drawn line. Counting instead of building took the reference fixture from **442.71ms to 8.76ms**, against `git diff --numstat`'s 46ms for the same work, and §3's I4 now carries the narrowing that admits the walk.
 
 **Keys.**
 

@@ -262,6 +262,8 @@ fn every_row_kind() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "crates/vigia-core/src/frame.rs".to_owned(),
@@ -319,6 +321,8 @@ fn awkward() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "crates/vigia-core/src/very/deeply/nested/module/frame.rs".to_owned(),
@@ -344,6 +348,8 @@ fn empty() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
@@ -380,6 +386,8 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
             .collect(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: (0..n)
             .map(|i| line(LineKind::Added, 1, &format!("R{i:02}")))
             .collect(),
@@ -437,6 +445,8 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         files: 100,
         top: Position { file: 41, row: 0 },
         ..every_row_kind()
@@ -577,6 +587,8 @@ fn glancing() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "crates/vigia-core/src/watch.rs".to_owned(),
@@ -1304,6 +1316,8 @@ fn a_label_cut_at_the_right_edge_says_so() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             Row::Hunk {
                 old_start: 258,
@@ -1432,6 +1446,8 @@ fn a_clipped_content_line_says_it_continues() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![line(LineKind::Removed, 260, text)],
         files: 1,
         top: Position::default(),

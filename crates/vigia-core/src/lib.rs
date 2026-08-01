@@ -61,7 +61,7 @@ pub use highlight::{
 pub use history::{
     HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, HistoryStats, Recency,
 };
-pub use hunk::{CONTEXT, FileDiff, Hunk, Line, LineKind};
+pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{ChangeOptions, Changes, Worktree};

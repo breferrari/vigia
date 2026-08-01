@@ -141,6 +141,8 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             file("src/a.rs", 1, 0),
             Row::Hunk {
@@ -204,6 +206,8 @@ fn one_file() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             file("crates/vigia-core/src/frame.rs", 3, 1),
             Row::Hunk {
@@ -266,6 +270,8 @@ fn nothing_changed() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
@@ -484,6 +490,8 @@ fn a_file_with_no_line_diff_says_why() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
@@ -532,6 +540,8 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![file(
             "crates/vigia-core/src/very/deeply/nested/module/frame.rs",
             12,
@@ -557,6 +567,8 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             file("VERSION", 1, 1),
             Row::Hunk {
@@ -818,6 +830,8 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             file("Makefile", 1, 0),
             line(LineKind::Added, 1, "\tcargo build\ta\tb"),
@@ -849,6 +863,8 @@ fn a_double_width_character_is_never_cut_in_half() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             file("docs/読み方.md", 2, 0),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
@@ -901,6 +917,8 @@ fn the_gutter_gives_way_before_the_text_does() {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![line(LineKind::Added, 1234, "let value = compute(input);")],
         files: 1,
         top: Position::default(),
@@ -1198,6 +1216,8 @@ fn glancing() -> View {
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "src/engine/watch.rs".to_owned(),
@@ -1481,6 +1501,8 @@ fn two_regions_at(current: usize, row: usize) -> View {
         // Tall enough that a scroll inside one file is several rows of bar, which
         // is what makes the within-a-file half of the ruling observable at all.
         current_span: 400,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
             file("src/engine/watch.rs", 42, 7),
             Row::Hunk {
@@ -1670,64 +1692,74 @@ fn the_list_scrollbar_spans_the_visible_window() {
 }
 
 #[test]
-fn the_diff_scrollbar_moves_within_a_file_and_not_only_between_them() {
-    // **The assertion that separates the ruled design from the one it could
-    // quietly collapse into.** `SPEC.md` §11.1 rules the diff's bar file-granular
-    // *plus the fraction within the file the top is in*, and the second half is
-    // the part that costs a field on the view. A bar built from `top.file` alone
-    // would pass every other test here and sit motionless while a reader scrolled
-    // four hundred rows through one file.
-    let width = 64u16;
-    let region = 5u16..17;
-
-    let mut firsts = Vec::new();
-    for row in [0usize, 100, 200, 399] {
-        let view = two_regions_at(1, row);
-        let backend = screen(width, 18, &view, &chrome());
-        let marks = thumb_rows(&backend, width - 1, region.clone());
-        assert!(
-            !marks.is_empty(),
-            "the diff bar drew no thumb at row {row} of the file"
-        );
-        firsts.push(marks[0]);
-    }
-
-    assert!(
-        firsts.first() < firsts.last(),
-        "the thumb never moved while the viewport crossed a whole file: {firsts:?}"
-    );
-    assert!(
-        firsts.windows(2).all(|pair| pair[0] <= pair[1]),
-        "the thumb moved backwards as the viewport went forwards: {firsts:?}"
-    );
-
-    // And it still distinguishes files, which is the half that was never in
-    // doubt but which a within-file-only bar would have lost.
+fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
+    // **What the bar means since I4 was narrowed**: the thumb is the screen's
+    // rows over the diff's rows, and it sits at the rows above the screen. That
+    // is what every other scrollbar means, and it is only sayable because
+    // counting a diff's height turned out to cost 8.76ms where building it cost
+    // 442.71ms.
     //
-    // Through a fixture whose diff **fills** its region: a screen showing the
-    // whole diff draws no bar at all now, correctly, so the earlier fixture here
-    // had nothing to read.
-    let full = |current: usize| View {
-        current_span: 400,
-        top: Position {
-            file: current,
-            row: 0,
-        },
-        rows: (0..40)
-            .map(|i| line(LineKind::Context, i, "a line of context"))
-            .collect(),
-        ..a_list_of(3, 3, 0)
-    };
-    let early = thumb_rows(
-        &screen(width, 18, &full(0), &chrome()),
-        width - 1,
-        region.clone(),
-    );
-    let late = thumb_rows(&screen(width, 18, &full(2), &chrome()), width - 1, region);
+    // Replaces a gate named for the approximation this shipped with first, which
+    // interpolated the whole from the current file's height. That bar vanished on
+    // a short file, ballooned on a long one and never reached the bottom, and no
+    // assertion about "moving within a file" can catch any of those.
+    let width = 64u16;
+    let height = 24u16;
+    let region = 5u16..height - 1;
+    let rows = usize::from(region.end - region.start);
+
+    // A thumb that halves when the diff doubles, which is the proportionality no
+    // file-counting scheme can express.
+    let mut lengths = Vec::new();
+    for total in [rows * 2, rows * 4, rows * 8] {
+        let view = View {
+            total_rows: total,
+            rows_above: 0,
+            ..a_list_of(3, 3, 0)
+        };
+        let marks = thumb_rows(
+            &screen(width, height, &view, &chrome()),
+            width - 1,
+            region.clone(),
+        );
+        assert!(!marks.is_empty(), "a diff of {total} rows drew no thumb");
+        lengths.push(marks.len());
+    }
     assert!(
-        early[0] < late[0],
-        "the thumb is in the same place for the first and last file: {early:?} \
-         against {late:?}"
+        lengths[0] > lengths[1] && lengths[1] > lengths[2],
+        "the thumb did not shrink as the diff grew: {lengths:?}"
+    );
+
+    // And it travels the whole track, ending exactly at the bottom.
+    let total = rows * 6;
+    let mut firsts = Vec::new();
+    for above in [0, total / 4, total / 2, total - rows] {
+        let view = View {
+            total_rows: total,
+            rows_above: above,
+            ..a_list_of(3, 3, 0)
+        };
+        let marks = thumb_rows(
+            &screen(width, height, &view, &chrome()),
+            width - 1,
+            region.clone(),
+        );
+        assert!(!marks.is_empty(), "{above} rows above drew no thumb");
+        firsts.push(marks[0]);
+        if above == 0 {
+            assert_eq!(marks[0], region.start, "the top of the diff is not the top");
+        }
+        if above == total - rows {
+            assert_eq!(
+                *marks.last().expect("a thumb"),
+                region.end - 1,
+                "the end of the diff is not the bottom"
+            );
+        }
+    }
+    assert!(
+        firsts.windows(2).all(|pair| pair[0] < pair[1]),
+        "the thumb did not descend as the viewport did: {firsts:?}"
     );
 }
 
@@ -1800,6 +1832,10 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
             .collect(),
         list_top: top,
         current_span: 400,
+        // A diff far taller than any pane, with the viewport at its top. Gates
+        // about where the thumb sits override these two.
+        total_rows: 400 * files.max(1),
+        rows_above: 0,
         rows: vec![
             file("src/engine/watch.rs", 42, 7),
             line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
@@ -2018,6 +2054,8 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         // Nothing to be inside, so the diff bar is told a whole of zero.
         View {
             current_span: 0,
+            total_rows: 0,
+            rows_above: 0,
             ..a_list_of(9, 3, 0)
         },
         // A path of wide glyphs, at the caret and bar boundary.

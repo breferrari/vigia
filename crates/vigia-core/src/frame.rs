@@ -51,7 +51,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::change::{ChangeKind, FileChange};
 use crate::error::Result;
-use crate::hunk::FileDiff;
+use crate::hunk::{FileDiff, FileSpan};
 use crate::worktree::Worktree;
 
 /// What a [`Frame`] has done since it was created.
@@ -65,6 +65,14 @@ pub struct FrameStats {
     pub computed: u64,
     /// Diffs served unchanged from an earlier frame.
     pub reused: u64,
+    /// Files counted by [`Frame::height`] without their text being built.
+    ///
+    /// Its own counter rather than folded into [`Self::computed`], because the
+    /// two bound different claims: `computed` is what I2a and I4 hold the
+    /// *window* to, and this is the one thing in the frame path that walks the
+    /// whole changed set. A gate that could not tell them apart could not say
+    /// which of the two had regressed.
+    pub measured: u64,
     /// Bytes compared by computed diffs.
     ///
     /// A reuse adds nothing here, which is the number I2a is written against:
@@ -247,6 +255,14 @@ pub struct Frame<'w> {
     worktree: &'w Worktree,
     files: Vec<FileChange>,
     cached: HashMap<String, Cached>,
+    /// How tall every changed file is, once something has asked.
+    ///
+    /// Separate from [`Self::cached`] because it answers a different question
+    /// and costs a different amount: a `FileSpan` is three numbers, where a
+    /// `FileDiff` owns a `String` per drawn line. Filled lazily and dropped
+    /// whole on [`Frame::advance`], so it can never describe a file list that
+    /// has moved on.
+    spans: HashMap<String, FileSpan>,
     stats: FrameStats,
 }
 
@@ -256,6 +272,7 @@ impl<'w> Frame<'w> {
             worktree,
             files: Vec::new(),
             cached: HashMap::new(),
+            spans: HashMap::new(),
             stats: FrameStats::default(),
         }
     }
@@ -296,6 +313,15 @@ impl<'w> Frame<'w> {
         // rules that no longer exist. See `Worktree::invalidate_filter`.
         self.worktree.invalidate_filter();
 
+        // **Dropped whole rather than carried forward.** A span is derived from
+        // content, and `advance` is exactly the moment content may have changed;
+        // keeping one whose file was rewritten would put a scrollbar's thumb
+        // somewhere the diff is not, silently and for as long as nothing else
+        // touched that file. The diffs below can be carried because each one is
+        // revalidated against a fingerprint, and a span has no such check of its
+        // own: it is rebuilt from whatever those diffs and reads produce.
+        self.spans.clear();
+
         let mut previous = std::mem::take(&mut self.cached);
         self.cached.reserve(files.len());
         for change in &files {
@@ -327,6 +353,76 @@ impl<'w> Frame<'w> {
     /// says the map is bounded by the diff rather than by the session.
     pub fn tracked(&self) -> usize {
         self.cached.len()
+    }
+
+    /// How many rows the whole diff is, counting every changed file.
+    ///
+    /// **This is the one thing in the frame path that is not bounded by the
+    /// window**, and it is here rather than refused because a scrollbar that
+    /// cannot say where the end is says nothing. `SPEC.md` §3's I4 carries the
+    /// rewording that admits it and the measurement it was admitted on.
+    ///
+    /// Three things keep it affordable. It counts through
+    /// [`Worktree::measure`], which reads the same bytes a diff would and skips
+    /// the `String` per line that made the obvious version ten times slower than
+    /// `git diff --numstat`. It reuses a [`FileDiff`] the frame already holds
+    /// rather than re-reading, so a file on screen is free. And it is cached
+    /// until the next [`Frame::advance`], so scrolling never pays: only a change
+    /// to the tree does.
+    ///
+    /// `rows_of` maps a file's span to the rows a caller draws for it, because
+    /// what a conflict or a binary file occupies is the shell's ruling rather
+    /// than the engine's.
+    pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
+        let mut total = 0usize;
+        for index in 0..self.files.len() {
+            let change = &self.files[index];
+            if !self.spans.contains_key(&change.path) {
+                // A diff already in hand answers this for free, and re-reading
+                // to count what is already counted would be the waste this
+                // method exists to avoid.
+                let span = match self.cached.get(&change.path) {
+                    // Free: the diff is already in hand, and no byte is read
+                    // again, so nothing is added to the counters either.
+                    Some(cached) => FileSpan {
+                        hunks: cached.diff.hunks.len() as u32,
+                        lines: cached.diff.hunks.iter().map(|h| h.lines.len() as u32).sum(),
+                        binary: cached.diff.binary,
+                        bytes: 0,
+                    },
+                    None => {
+                        let span = self.worktree.measure(change)?;
+                        self.stats.measured += 1;
+                        self.stats.bytes += span.bytes;
+                        span
+                    }
+                };
+                self.spans.insert(change.path.clone(), span);
+            }
+            let change = &self.files[index];
+            total += rows_of(change, &self.spans[&change.path]);
+        }
+        Ok(total)
+    }
+
+    /// How many rows one file occupies, from its span.
+    ///
+    /// Uses the cache [`Frame::height`] fills, so a caller that has totalled the
+    /// diff can walk part of it again for free.
+    pub fn rows_of(
+        &mut self,
+        index: usize,
+        rows_of: impl Fn(&FileChange, &FileSpan) -> usize,
+    ) -> Result<usize> {
+        let change = &self.files[index];
+        if !self.spans.contains_key(&change.path) {
+            let span = self.worktree.measure(change)?;
+            self.stats.measured += 1;
+            self.stats.bytes += span.bytes;
+            self.spans.insert(change.path.clone(), span);
+        }
+        let change = &self.files[index];
+        Ok(rows_of(change, &self.spans[&change.path]))
     }
 
     /// The change at `index` and its diff, computed now or reused from an

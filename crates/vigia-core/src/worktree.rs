@@ -183,6 +183,29 @@ impl Worktree {
         Ok(hunk::compute(change.path.clone(), &before, &after))
     }
 
+    /// How tall one change's diff is, without building any of it.
+    ///
+    /// Reads both sides exactly as [`Worktree::diff`] does, and then counts
+    /// instead of materialising. That is the whole saving: the reads are the same
+    /// bytes, and what it skips is a `String` per drawn line.
+    pub fn measure(&self, change: &FileChange) -> Result<hunk::FileSpan> {
+        if !change.is_diffable() {
+            return Ok(hunk::FileSpan::default());
+        }
+
+        let before = match change.index_blob {
+            Some(id) => self.blob(id, &change.path)?,
+            None => Vec::new(),
+        };
+        let after = if change.reads_worktree() {
+            self.read_worktree(&change.path)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(hunk::measure(&before, &after))
+    }
+
     fn blob(&self, id: gix::ObjectId, path: &str) -> Result<Vec<u8>> {
         let object = self.repo.find_object(id).map_err(|_| Error::MissingBlob {
             path: path.to_owned(),

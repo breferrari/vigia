@@ -302,18 +302,6 @@ const CARET_WIDTH: usize = 2;
 /// both far below the forty columns I6 is named for.
 const CARET_FLOOR: usize = CARET_WIDTH + BAR_WIDTH + ROW_FLOOR;
 
-/// Sub-file resolution for the diff's scrollbar.
-///
-/// The bar counts **files**, because that is the only whole I4 lets it know, and
-/// a file is a coarse unit to scroll through when one of them is three thousand
-/// lines. Each file's slot on the track is subdivided by this so the thumb also
-/// creeps as a reader moves *within* the file they are in, which is free:
-/// `top.row` and [`View::current_span`] are both already in hand.
-///
-/// A power of two well above any pane height, so the division loses nothing a
-/// row could show.
-const BAR_SCALE: u64 = 1 << 16;
-
 /// Columns a scrollbar costs the region it is drawn beside.
 ///
 /// **Two, and the second one is the gap.** The bar itself is one column, drawn
@@ -1300,14 +1288,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // express more than one position: a one-row track is full at every window,
     // so it says nothing and would still swallow a click.
     let list_bar = wide && body.list > 1 && scrollable(body.list as u64, view.files as u64);
-    let diff_bar = wide
-        && body.diff > 1
-        && !view.fits(body.diff)
-        && if view.files <= 1 {
-            scrollable(body.diff as u64, view.current_span as u64)
-        } else {
-            scrollable(BAR_SCALE, view.files as u64 * BAR_SCALE)
-        };
+    let diff_bar = wide && body.diff > 1 && scrollable(body.diff as u64, view.total_rows as u64);
 
     Regions {
         list: (list_top, body.list as u16),
@@ -1418,39 +1399,32 @@ pub fn render(
         // total row count is unknowable without reading every file, so the bar
         // measures the changed set rather than the diff's rows. It is exact at
         // both ends and about the file count in between.
-        // **A position marker of constant size, not a viewport extent.** A
-        // scrollbar's thumb conventionally shows how much of the whole is on
-        // screen, and this bar cannot: its whole is the changed set, and "six
-        // files visible" means something completely different when they are six
-        // tiny files than when one of them is three thousand lines. Sizing the
-        // thumb that way made it swing between one row and six as a reader
-        // scrolled, which reads as broken because it is measuring a quantity
-        // nobody asked about.
+        // **Rows, exactly, because counting them turned out to be affordable.**
+        // The thumb spans the screen's rows over the diff's total rows and sits
+        // at the rows above it, which is what every other scrollbar means and
+        // what a reader expects.
         //
-        // So the thumb is one file's worth of track, always, and only its
-        // position moves: through the file list, and through the current file
-        // inside its own slot. Its size changes only when the changed set does.
+        // It was ruled the other way first, on the argument that a total needs
+        // every changed file diffed and I4 forbids that. The argument was right
+        // about the cost of *diffing* and wrong that a total needs it: counting a
+        // file's height needs its hunk boundaries and none of its text, and a
+        // `FileDiff` allocates a `String` per drawn line. Measured over a hundred
+        // files of five hundred rewritten lines, totalling through full diffs is
+        // **442.71ms** and counting is **8.76ms**, against `git diff --numstat`'s
+        // 46ms for the same work. `SPEC.md` §3's I4 carries the rewording that
+        // admits the walk, and `what_a_row_exact_scrollbar_would_cost` is the
+        // measurement it rests on.
         //
-        // **One file is the exception, and there the bar is exact.** With nothing
-        // to move between, the whole really is the current file's rows, and both
-        // that and the viewport's height are already in hand — so the single-file
-        // case gets the row-accurate bar the multi-file case cannot have.
-        let span = view.current_span as u64;
-        let (at, thumb, whole) = if view.files <= 1 {
-            (view.top.row as u64, u64::from(body.diff as u16), span)
-        } else {
-            let within = if span == 0 {
-                0
-            } else {
-                ((view.top.row as u64).min(span) * BAR_SCALE) / span
-            };
-            (
-                view.top.file as u64 * BAR_SCALE + within,
-                BAR_SCALE,
-                view.files as u64 * BAR_SCALE,
-            )
-        };
-        let region = painter.with_bar(region, bars && !view.fits(body.diff), at, thumb, whole);
+        // Zero total means the caller did not ask for one, which is a pane too
+        // short for a bar, and `with_bar` draws nothing when told a whole of
+        // zero.
+        let region = painter.with_bar(
+            region,
+            bars,
+            view.rows_above as u64,
+            u64::from(body.diff as u16),
+            view.total_rows as u64,
+        );
         painter.body(region, view, chrome);
     }
 
