@@ -5,7 +5,7 @@
 //! module only decides what was asked for.
 
 use ratatui::crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
 /// Rows a wheel notch moves.
@@ -13,6 +13,53 @@ use ratatui::crossterm::event::{
 /// Three is what a terminal sends per physical notch when it reports lines
 /// rather than pixels, so matching it makes one notch feel like one notch.
 pub const WHEEL_ROWS: isize = 3;
+
+/// Where the screen's regions are, so a pointer can be told what it is over.
+///
+/// **The one thing this module knows about layout, and it is passed in rather
+/// than derived.** Everything else here is a pure function of a key code, which
+/// is what makes the whole map a table test; a mouse gesture cannot be, because
+/// "scroll the thing under the pointer" is a question about the screen. Handing
+/// it the three numbers keeps the decision here and the arithmetic testable.
+///
+/// Rows are absolute within the pane. `Default` is a screen with no region and
+/// no bars, which is what a caller that has not laid out yet should say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Regions {
+    /// First row of the pinned list, and how many rows it has. Zero rows means
+    /// there is no region and every gesture belongs to the diff.
+    pub list: (u16, u16),
+    /// First row of the diff region, and how many rows it has.
+    pub diff: (u16, u16),
+    /// The column both scrollbars are drawn in, when either is.
+    pub bar: Option<u16>,
+}
+
+impl Regions {
+    /// Whether `row` is inside the pinned list.
+    fn over_list(self, row: u16) -> bool {
+        let (top, rows) = self.list;
+        rows > 0 && row >= top && row < top + rows
+    }
+
+    /// How far down a region's track `row` sits, as a fraction over
+    /// [`TRACK_SCALE`], or `None` when it is not on that track.
+    fn along(self, row: u16, region: (u16, u16)) -> Option<u32> {
+        let (top, rows) = region;
+        if rows == 0 || row < top || row >= top + rows {
+            return None;
+        }
+        Some((u32::from(row - top) * TRACK_SCALE) / u32::from(rows))
+    }
+}
+
+/// Resolution a drag reports its position at.
+///
+/// A fraction rather than a row, because the caller converts it against a count
+/// this module does not have: how many files there are is the frame's business.
+/// Scaled rather than floating point, for the reason the rest of this crate is:
+/// the same input has to produce the same answer on every target.
+pub const TRACK_SCALE: u32 = 1 << 16;
 
 /// What the reader asked the shell to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +87,19 @@ pub enum Action {
     /// §11.1 makes re-engaging a jump as well as a state change: `f` moves to
     /// the newest change rather than waiting for the next one.
     ToggleFollow,
+    /// Put the pinned list's window at this fraction of the changed set.
+    ///
+    /// From dragging or clicking the list's own scrollbar. A fraction over
+    /// [`TRACK_SCALE`] rather than a file index, because the index needs the file
+    /// count and this module does not have one.
+    ListTo(u32),
+    /// Put the diff at this fraction of the changed set.
+    ///
+    /// From dragging or clicking the diff's scrollbar. **A file, once the caller
+    /// resolves it**, not a row: the diff's bar counts files because its total
+    /// row count is the read I4 forbids, so the gesture can only be as precise as
+    /// the readout it is performed on.
+    DiffTo(u32),
     /// Draw again with no state change, which is what a resize needs.
     Redraw,
 }
@@ -71,6 +131,11 @@ impl Action {
             // following what an agent is writing is the monitor behaviour, and
             // the two would fight if one disengaged the other. `SPEC.md` §11.1.
             Self::Quit | Self::Redraw | Self::ToggleFollow | Self::ScrollList(_) => false,
+            // Dragging the **list's** bar moves the map and not the diff, so it
+            // is `ScrollList` by another input device. Dragging the **diff's**
+            // moves the viewport and is a manual scroll like any other.
+            Self::ListTo(_) => false,
+            Self::DiffTo(_) => true,
         }
     }
 
@@ -93,6 +158,7 @@ impl Action {
         match self {
             Self::Page(_) => true,
             Self::Scroll(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => false,
+            Self::ListTo(_) | Self::DiffTo(_) => false,
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
         }
     }
@@ -104,10 +170,10 @@ impl Action {
 /// focus changes, pasted text. Returning `None` for them is not a gap, it is
 /// the point. A monitor that redrew on every event the terminal can produce
 /// would be a timer with extra steps.
-pub fn action_for(event: &Event) -> Option<Action> {
+pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
     match event {
         Event::Key(key) => key_action(key),
-        Event::Mouse(mouse) => mouse_action(mouse),
+        Event::Mouse(mouse) => mouse_action(mouse, regions),
         // A resize changes what fits, so the frame has to be rebuilt even
         // though no state moved.
         Event::Resize(_, _) => Some(Action::Redraw),
@@ -177,14 +243,41 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
     }
 }
 
-fn mouse_action(mouse: &MouseEvent) -> Option<Action> {
+fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
+    // **The bar is checked before the region it sits in.** A press on the
+    // scrollbar column is a gesture about position, and the same column is inside
+    // whichever region drew it, so testing the region first would turn every drag
+    // into a wheel.
+    let on_bar = regions.bar == Some(mouse.column);
+    if on_bar
+        && matches!(
+            mouse.kind,
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
+        )
+    {
+        if let Some(at) = regions.along(mouse.row, regions.list) {
+            return Some(Action::ListTo(at));
+        }
+        if let Some(at) = regions.along(mouse.row, regions.diff) {
+            return Some(Action::DiffTo(at));
+        }
+        return None;
+    }
+
     match mouse.kind {
+        // **The wheel scrolls whatever it is over**, which is the one place this
+        // shell reads a pointer's position rather than only its kind. A reader
+        // hovering the map and turning the wheel means the map; `SPEC.md` §2
+        // makes `btop` the reference and that is what `btop` does.
+        MouseEventKind::ScrollDown if regions.over_list(mouse.row) => Some(Action::ScrollList(1)),
+        MouseEventKind::ScrollUp if regions.over_list(mouse.row) => Some(Action::ScrollList(-1)),
         MouseEventKind::ScrollDown => Some(Action::Scroll(WHEEL_ROWS)),
         MouseEventKind::ScrollUp => Some(Action::Scroll(-WHEEL_ROWS)),
         // Everything else is deliberately inert. Horizontal wheels exist and
         // lines do not pan: the renderer clips instead, which is what I6 asks
-        // for. Clicks and drags do nothing because nothing is selectable in a
-        // monitor, and plain movement is not an event worth a frame.
+        // for. A click anywhere but the bar does nothing, because nothing is
+        // selectable in a monitor and §11.2 B4 keeps it that way, and plain
+        // movement is not an event worth a frame.
         _ => None,
     }
 }

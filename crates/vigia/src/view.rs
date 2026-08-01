@@ -428,6 +428,32 @@ pub fn rows_in(frame: &mut Frame, index: usize) -> Result<usize> {
 }
 
 impl View {
+    /// How many distinct files this screen's diff region draws.
+    ///
+    /// The span the diff's scrollbar thumb covers, and it is free: the walk
+    /// already produced the rows, so counting the headings among them costs
+    /// nothing and needs no file the frame did not draw.
+    ///
+    /// The top file is counted whether or not its heading is on screen, because a
+    /// viewport resting deep inside one file is still showing that file. Every
+    /// [`Row::File`] after it is another one, and a heading on the **first** row
+    /// is the top file's own rather than a second.
+    pub fn shown_files(&self) -> usize {
+        if self.rows.is_empty() {
+            return 0;
+        }
+        let headings = self
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::File(_)))
+            .count();
+        if matches!(self.rows.first(), Some(Row::File(_))) {
+            headings.max(1)
+        } else {
+            headings + 1
+        }
+    }
+
     /// Collect the rows visible from `position`, and no others.
     ///
     /// `height` is the body's height in rows. Zero is legal and gives an empty
@@ -766,11 +792,10 @@ impl View {
         if rows == 0 {
             return Ok(());
         }
-        // Nothing to point at, so nothing to preserve either.
-        if self.files == 0 {
-            self.list_top = 0;
-            return Ok(());
-        }
+        // No `files == 0` branch: `View::collect` returns before this on an
+        // empty worktree, and a second guard here was unreachable. Replacing its
+        // body with `unreachable!()` left the whole workspace green, which is the
+        // tell.
 
         // Always pulled back so the last file can rest on the bottom row rather
         // than leaving blanks a reader would read as "no more files". That is
@@ -787,10 +812,18 @@ impl View {
             // current file and simply has nothing to mark once the window has
             // moved off it.
             //
-            // The lower bound puts the current file on the **bottom** row rather
-            // than the top, so a diff scrolling forwards reveals the next file
-            // below instead of jumping the map a screenful.
-            top = top.clamp(self.top.file.saturating_sub(rows - 1), self.top.file);
+            // **The current file goes to the top of the window, not the bottom.**
+            // The diff draws that file and then whatever fits below it, so a
+            // window ending on it is a map of the rows a reader has already
+            // passed. Reported from use: scrolled to the last screenful of a
+            // seventeen-file tree, the diff showed the last six files and the
+            // list showed the six *before* them, with the caret pinned to its own
+            // bottom row. Starting there makes the region a map of the screen.
+            //
+            // Still pulled back by the first clamp when the tail is shorter than
+            // the window, so the last file can rest on the bottom row rather than
+            // leaving blanks under it.
+            top = self.top.file.min(self.files.saturating_sub(rows));
         }
         self.list_top = top;
 

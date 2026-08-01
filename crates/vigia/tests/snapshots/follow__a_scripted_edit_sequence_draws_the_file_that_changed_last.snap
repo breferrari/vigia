@@ -10,7 +10,7 @@ expression: terminal.backend()
 "M src/second.rs                             ████████████ +1 -1 ▕"
 "@@ -1 +1 @@                                                    ▕"
 "1 -fn second() {}                                              ▕"
-"1 +fn second() { let b = 2; }                                  █"
+"1 +fn second() { let b = 2; }                                  ▕"
 "                                                               █"
 "                                                               █"
 "q quit · f follow · jk scroll · JK files           follow ▶  3/3"

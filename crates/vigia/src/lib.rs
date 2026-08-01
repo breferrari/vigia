@@ -63,10 +63,10 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
-pub use input::{Action, WHEEL_ROWS, action_for};
+pub use input::{Action, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
-    diff_height, render,
+    diff_height, regions, render,
 };
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
@@ -156,6 +156,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         name: short_name(worktree.workdir()),
         branch: None,
         screen: View::default(),
+        regions: Regions::default(),
     };
     shell.draw(&mut frame, &worktree)?;
 
@@ -191,7 +192,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
                 Wake::Input(event) => {
-                    let Some(action) = action_for(&event) else {
+                    // **The regions the last paint actually drew.** A pointer is
+                    // told what it is over by asking the same function `render`
+                    // asks, against the view that is on screen, so the wheel can
+                    // never scroll the region beside the one under it. Free: no
+                    // syscall and no allocation, unlike the height below, and a
+                    // gesture that arrives before the first paint sees
+                    // `Regions::default()`, which is a screen with no region and
+                    // no bars.
+                    let regions = shell.regions();
+                    let Some(action) = action_for(&event, regions) else {
                         // Not every event is a request. Redrawing for a key release
                         // or a mouse move would make the idle cost non-zero for a
                         // reason nobody asked for.
@@ -372,6 +382,12 @@ struct Shell {
     /// makes about a failed [`vigia_core::Frame::advance`]. Bounded by the screen,
     /// not by the diff, so keeping it costs nothing I3 would notice.
     screen: View,
+    /// Where the last painted screen's regions and scrollbars were.
+    ///
+    /// Held so a mouse gesture can be told what it is over without a terminal
+    /// syscall per event, and so the answer describes the screen a reader is
+    /// actually pointing at rather than the one the next paint will make.
+    regions: Regions,
 }
 
 impl Shell {
@@ -399,6 +415,17 @@ impl Shell {
         let screen = self.session.screen();
         screen.autoresize()?;
         Ok(screen.get_frame().area())
+    }
+
+    /// Where the regions of the **last painted** screen were.
+    ///
+    /// Stored rather than recomputed, because recomputing needs the terminal's
+    /// size, and that is an uncached syscall the drain deliberately does not make
+    /// per event. It is also the honest answer: a pointer is over the screen a
+    /// reader can see, which is the one that was last drawn, not the one the next
+    /// paint will produce.
+    fn regions(&self) -> Regions {
+        self.regions
     }
 
     /// Collect a screenful and paint it.
@@ -450,10 +477,17 @@ impl Shell {
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
         let (theme, screen) = (&self.theme, &self.screen);
+        let mut painted = Regions::default();
         self.session.screen().draw(|f| {
             let area = f.area();
+            // Captured from inside the draw, because `Frame::area` is the size the
+            // paint actually used: `Shell::area` reads it again and a resize
+            // between the two would leave a pointer told about a screen nobody
+            // saw. Same seam #59 found on the other side.
+            painted = render::regions(area, &chrome, screen);
             render(f.buffer_mut(), area, screen, theme, &chrome);
         })?;
+        self.regions = painted;
         Ok(())
     }
 }

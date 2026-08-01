@@ -407,7 +407,11 @@ fn the_region_at_fifty_files() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
 
-    for (label, top) in [("at the top", 0usize), ("scrolled in", 4 * 20)] {
+    for (label, top) in [
+        ("at the top", 0usize),
+        ("scrolled in", 4 * 20),
+        ("past the end", 4 * 200),
+    ] {
         for _ in 0..top {
             app.apply(Action::Scroll(1), &mut frame, 1).expect("apply");
         }

@@ -33,6 +33,19 @@ use crate::view::{Position, View, Viewport, rows_in};
 /// kilobytes allocated once per session and never grown.
 const FRAME_SAMPLES: usize = 128;
 
+/// A track fraction resolved against a count.
+///
+/// [`crate::input::TRACK_SCALE`] is the denominator the input layer reports in,
+/// because it has no frame to ask how many files there are. Saturating at the
+/// last index rather than wrapping: a drag to the very bottom of a track is a
+/// request for the end, not for one past it.
+fn scaled(at: u32, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
+}
+
 /// The shell's state.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -84,6 +97,15 @@ pub struct App {
     /// True at rest, which `Default` gives, and which is the right answer here
     /// rather than an accident: a monitor's map follows what it is a map of.
     list_follows: bool,
+    /// Rows the pinned list had on the frame that was last drawn.
+    ///
+    /// Carried only so a list gesture can be clamped against the window's real
+    /// bound rather than against the file count. Without it, `J` at the last
+    /// window moves `list_top` past where `View::take_list` will put it, so a
+    /// keypress that changes nothing on screen still takes the map over. Zero
+    /// until the first frame, which is the honest answer before anything has
+    /// been laid out.
+    list_rows: usize,
     /// Whether the watch is still live, which the header draws as a word.
     ///
     /// [`Mode::Watching`] is `Default`, and unlike `following` that is the right
@@ -129,6 +151,7 @@ impl Default for App {
             anchored: false,
             list_top: 0,
             list_follows: true,
+            list_rows: 0,
             newest: None,
             mode: Mode::default(),
             frames: Samples::new(FRAME_SAMPLES),
@@ -367,10 +390,32 @@ impl App {
             // is known. Same division of labour the diff's position already has:
             // this moves a number, the collect resolves it, and the resolved
             // answer comes back through `App::view`.
+            // **Only a move that moves something takes the map over.** `K` at
+            // the top, or `J` at the last window, changes not one cell on screen,
+            // and detaching there leaves a reader with a map that has silently
+            // stopped following and no readout saying so: `following` has
+            // `follow ▶` in the footer and this has nothing.
             Action::ScrollList(rows) => {
-                let last = frame.files().len().saturating_sub(1);
-                self.list_top = self.list_top.saturating_add_signed(rows).min(last);
-                self.list_follows = false;
+                self.browse(self.list_top.saturating_add_signed(rows), frame);
+            }
+            // Dragging the list's own bar. The fraction is resolved against the
+            // changed-file count here rather than in `input`, which has no frame
+            // to ask.
+            Action::ListTo(at) => {
+                let files = frame.files().len();
+                self.browse(scaled(at, files), frame);
+            }
+            // Dragging the diff's bar, which counts **files**, so this lands on a
+            // file rather than on a row. `is_manual_scroll` already made it
+            // disengage follow and hand the map back, which is what any other
+            // deliberate move of the diff does.
+            Action::DiffTo(at) => {
+                let files = frame.files().len();
+                self.anchored = false;
+                self.position = Position {
+                    file: scaled(at, files).min(files.saturating_sub(1)),
+                    row: 0,
+                };
             }
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
@@ -399,6 +444,23 @@ impl App {
             }
         }
         Ok(true)
+    }
+
+    /// Move the list's window, and take the map over only if it moved.
+    ///
+    /// **Clamped against the window's real bound**, which is the file count less
+    /// the region's height, not less one. `View::take_list` clamps there anyway,
+    /// so a gesture past it changes nothing on screen — and detaching the map for
+    /// a keypress a reader cannot see is worse than ignoring it, because
+    /// `following` has `follow ▶` in the footer to say what it is doing and this
+    /// has nothing.
+    fn browse(&mut self, to: usize, frame: &Frame) {
+        let bound = frame.files().len().saturating_sub(self.list_rows.max(1));
+        let moved = to.min(bound);
+        if moved != self.list_top {
+            self.list_top = moved;
+            self.list_follows = false;
+        }
     }
 
     /// The two directions are deliberately not symmetrical, and the signatures
@@ -484,6 +546,7 @@ impl App {
             },
         )?;
         self.position = view.top;
+        self.list_rows = body.list;
         // Stored back for the reason the position is: resolution happens once,
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.

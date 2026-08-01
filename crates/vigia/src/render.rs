@@ -35,6 +35,7 @@ use ratatui::style::Style;
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
+use crate::input::Regions;
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
 
@@ -300,6 +301,18 @@ const CARET_WIDTH: usize = 2;
 /// The cost is the caret at two widths that would otherwise have room for it,
 /// both far below the forty columns I6 is named for.
 const CARET_FLOOR: usize = CARET_WIDTH + BAR_WIDTH + ROW_FLOOR;
+
+/// Sub-file resolution for the diff's scrollbar.
+///
+/// The bar counts **files**, because that is the only whole I4 lets it know, and
+/// a file is a coarse unit to scroll through when one of them is three thousand
+/// lines. Each file's slot on the track is subdivided by this so the thumb also
+/// creeps as a reader moves *within* the file they are in, which is free:
+/// `top.row` and [`View::current_span`] are both already in hand.
+///
+/// A power of two well above any pane height, so the division loses nothing a
+/// row could show.
+const BAR_SCALE: u64 = 1 << 16;
 
 /// Columns a scrollbar costs the region it is drawn beside.
 ///
@@ -1265,6 +1278,39 @@ impl std::ops::AddAssign for PaintStats {
     }
 }
 
+/// Where this screen's regions and scrollbars are, for a pointer to be told what
+/// it is over.
+///
+/// **The same arithmetic [`render`] uses, called by both**, rather than a second
+/// derivation the input path could drift from. A wheel that scrolled the region
+/// beside the one under the pointer is worse than a wheel that does nothing, and
+/// the only way to be sure is for one function to answer.
+pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
+    if area.width == 0 || area.height == 0 {
+        return Regions::default();
+    }
+    let footer = Footer::plan(area, chrome, view.files);
+    let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
+    let wide = usize::from(area.width) >= BAR_FLOOR;
+
+    let list_top = area.y + 1;
+    let diff_top = list_top + body.list as u16 + u16::from(body.rule);
+    let shown = view.shown_files() as u64;
+
+    // A bar column only where a bar is actually drawn, and only where it can
+    // express more than one position: a one-row track is full at every window,
+    // so it says nothing and would still swallow a click.
+    let list_bar = wide && body.list > 1 && scrollable(body.list as u64, view.files as u64);
+    let diff_bar =
+        wide && body.diff > 1 && scrollable(shown * BAR_SCALE, view.files as u64 * BAR_SCALE);
+
+    Regions {
+        list: (list_top, body.list as u16),
+        diff: (diff_top, body.diff as u16),
+        bar: (list_bar || diff_bar).then(|| area.x + area.width - 1),
+    }
+}
+
 /// Draw a whole screen: one header line, the body, and one or two footer lines.
 ///
 /// Any area is legal, including one too short for a body and one column wide. A
@@ -1346,23 +1392,40 @@ pub fn render(
             height: body.diff as u16,
             ..area
         };
-        // **Counted in rows, but only the current file's rows are known.**
-        // `current_span` is free because that file has been diffed to be drawn;
-        // every other file's height would have to be read, which is the walk
-        // §11.1 already refuses for `G` and which I4 forbids. So the whole is
-        // approximated as `files` files of the current one's height: exact as
-        // the viewport moves *within* a file, file-granular between them, and
-        // recorded as a ruling in §11.1 rather than left to be discovered.
+        // **Counted in files, with the current one's own progress inside its
+        // slot.** The whole is `view.files`, which is exact and free; the thumb
+        // spans the files this screen actually draws, which is also free; and the
+        // position interpolates through the current file using `top.row` against
+        // `current_span`, both of which are free because that file has been
+        // diffed to be drawn.
         //
-        // The empty state has no file to be inside and draws no bar, which
-        // `with_bar` handles by being told a whole of zero.
+        // **The earlier ruling made the *whole* depend on the current file**, as
+        // `files * current_span`, and it was wrong in three visible ways at once:
+        // the bar vanished when the current file was shorter than the pane (a
+        // binary file at the top of a seventeen-file tree drew none at all), it
+        // ballooned when the current file was long, and it never reached the
+        // bottom when the trailing files were smaller than the one being read —
+        // scrolling to the very last line of the very last file left the thumb at
+        // two thirds. Reported from use, which is the fourth time this repo has
+        // been corrected by someone running it rather than by a gate.
+        //
+        // The trade this keeps is the one §11.1 rules and I4 forces: the diff's
+        // total row count is unknowable without reading every file, so the bar
+        // measures the changed set rather than the diff's rows. It is exact at
+        // both ends and about the file count in between.
+        let shown = view.shown_files() as u64;
         let span = view.current_span as u64;
+        let within = if span == 0 {
+            0
+        } else {
+            ((view.top.row as u64).min(span) * BAR_SCALE) / span
+        };
         let region = painter.with_bar(
             region,
             bars,
-            view.top.file as u64 * span + (view.top.row as u64).min(span),
-            u64::from(body.diff as u16),
-            view.files as u64 * span,
+            view.top.file as u64 * BAR_SCALE + within,
+            shown * BAR_SCALE,
+            view.files as u64 * BAR_SCALE,
         );
         painter.body(region, view, chrome);
     }
@@ -1653,7 +1716,11 @@ impl Painter<'_> {
 
         for (offset, entry) in view.list.iter().take(usize::from(area.height)).enumerate() {
             let y = area.y + offset as u16;
-            if caret && view.list_top + offset == view.top.file {
+            // Saturating, because `list_top` is not bounded by the file count:
+            // a pane too short for a region hands the reader's request back
+            // untouched, so `View::collect` can legitimately report `usize::MAX`
+            // here. `position_of` guards the identical hazard one region up.
+            if caret && view.list_top.saturating_add(offset) == view.top.file {
                 self.put(area.x, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
             }
             self.file_row(
@@ -1682,7 +1749,13 @@ impl Painter<'_> {
     /// `wide` is whether the pane can afford a bar at all, which is one rule for
     /// the whole screen so a reader never sees half a pair.
     fn with_bar(&mut self, region: Rect, wide: bool, at: u64, span: u64, of: u64) -> Rect {
-        if !(wide && scrollable(span, of)) {
+        // **A one-row track is full at every position**, because `scrollable`
+        // guarantees `span < of` and therefore `(span * rows) / of < rows`, so the
+        // thumb equals the track exactly when `rows == 1`. Drawing it spends two
+        // of forty columns on a mark that cannot move, which is the same "column
+        // saying there is nothing to scroll" `scrollable` itself exists to
+        // refuse.
+        if !(wide && region.height > 1 && scrollable(span, of)) {
             return region;
         }
         self.scrollbar(region, at, span, of);
