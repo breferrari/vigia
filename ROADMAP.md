@@ -129,7 +129,7 @@ Milestone: [Phase 3](https://github.com/breferrari/vigia/milestone/3)
 | ✅ | The header carries no changed-line total, and §10 closed with the reason | [#49](https://github.com/breferrari/vigia/issues/49) |
 | ✅ | The status bar: frame time and RSS, on all three tier-1 targets | [#41](https://github.com/breferrari/vigia/issues/41) |
 | ✅ | A viewport past the end of the diff drew one row and blanked the screen | [#57](https://github.com/breferrari/vigia/issues/57) |
-| ⬜ | **On Windows every CRLF file reads as a full rewrite** | [#65](https://github.com/breferrari/vigia/issues/65) |
+| ✅ | On Windows every CRLF file read as a full rewrite | [#65](https://github.com/breferrari/vigia/issues/65) |
 | ✅ | I3: the restart left a second screenful of hunk parses in the pass | [#64](https://github.com/breferrari/vigia/issues/64) |
 | ✅ | Theming, with a 256-colour degradation path | [#11](https://github.com/breferrari/vigia/issues/11) |
 | ✅ | Scrolling into the tail of a diff leaves the pane half empty | [#59](https://github.com/breferrari/vigia/issues/59) |
@@ -226,30 +226,48 @@ The fix must not apply to a jump, and two `follow.rs` tests are what said so. Fo
 > The rule this leaves: **measure the artifact, not a picture of it.** Four
 > symptoms, one probe, and only one of them survived contact with a number.
 
-> [!warning] Phase 3 is not closed, and [#65](https://github.com/breferrari/vigia/issues/65) is why
+> [!note] Phase 3 re-opened for [#65](https://github.com/breferrari/vigia/issues/65) and is closed again
 > It re-opened the day theming landed. `vigia` drew a file as **+905 -885**, the
 > whole thing deleted and re-added, while `git diff` reported that same file as
 > **unchanged**. Default Windows configuration, `core.autocrlf=true`, in any
 > repository whose `.gitattributes` normalises line endings.
 >
-> The frame path compares raw worktree bytes against the index blob. Git runs the
+> The frame path compared raw worktree bytes against the index blob. Git runs the
 > worktree side through the clean filter first, so CRLF becomes LF before anything
 > is compared. Without that step every line of a CRLF file differs from its blob.
-> `gix-filter` is already in the graph; this is a call not being made.
+> `gix-filter` was already in the graph; it was a call not being made.
 >
-> **It is first in the queue because of what it costs, not what it costs to fix.**
-> Every budget in this file is a claim about a tool that shows what changed, and on
-> one of three tier-1 targets it currently shows a thousand lines of noise over a
-> file nobody touched. The real edit is in there somewhere.
+> **It went first because of what it cost, not what it cost to fix.** Every budget
+> in this file is a claim about a tool that shows what changed, and on one of three
+> tier-1 targets it was showing a thousand lines of noise over a file nobody
+> touched, with the real edit somewhere inside.
+>
+> **The reported shape was the smaller half.** With `* text=auto eol=lf` only an
+> editor writing CRLF creates the discrepancy. With no `.gitattributes` at all,
+> which is the plain installed default, the *checkout* creates it, so every edit to
+> every text file read as a full rewrite. That half was found while reproducing the
+> reported one and is fixed by the same change.
 >
 > Invisible to the whole suite: every fixture is built by `Scratch`, which shells
-> out to `git init` with no `.gitattributes` and no `autocrlf`, so both sides are
-> always LF and the filter is never exercised. That is §7's rule one axis over, a
+> out to `git init` with no `.gitattributes` and no `autocrlf`, so both sides were
+> always LF and the filter was never exercised. That is §7's rule one axis over, a
 > fixture that cannot tell two things apart because in that fixture they are the
-> same thing. Fourth time.
+> same thing. Fourth time, and `SPEC.md` §7 now carries it with the checkable tell:
+> delete a normalisation step and see whether anything reddens. It does now, all
+> five gates, which is how they were trusted.
+>
+> `Scratch::crlf_worktree` stands **beside** `Scratch::new` rather than replacing
+> it: the answer to a fixture population sitting on one point of a configuration
+> surface is to span the axis, not to move along it.
 >
 > The half of that which is not about this repo is in the vault, since it would
 > bite any project whose fixtures are built by a tool that has configuration.
+>
+> Cost, measured before and after on one 100-file, 100k-line CRLF fixture, three
+> runs each: I7, I4 and I2a are **unmoved**, and a single file's diff is unmoved at
+> 10.9ms p99. The conversion costs **0.089ms per 72 KiB file**, visible only in a
+> sweep of all hundred (p50 31.9ms to 40.8ms), which is not a frame any caller
+> performs because I4 already makes the shell read only what it draws.
 
 ## Phase 4 — distribution
 
@@ -283,6 +301,8 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
 | ⬜ | `G` leaves the pane short, and the first scroll yanks it back a screenful | [#62](https://github.com/breferrari/vigia/issues/62) |
 | ⬜ | The row wash drops a column under every wide glyph | [#63](https://github.com/breferrari/vigia/issues/63) |
+| ⬜ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
+| ⬜ | An LFS-tracked text file diffs its pointer against its content | [#69](https://github.com/breferrari/vigia/issues/69) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
@@ -305,6 +325,8 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | The bulk-rewrite I9 gate is flaky on macOS hosted runners ([#36](https://github.com/breferrari/vigia/issues/36)) | I3, 2026-07-31 | Phase 5 | Failed once at 79.22ms p99 against a 48ms budget and passed on a re-run of the same commit, in a PR that changes no file under `crates/*/src`. The p50 was 2.94ms, better than the reference machine's own 2.36ms, so a p99 27x it is the contention signature `exclusively_timed` already documents rather than a slower machine. It belongs to I9 and [#32](https://github.com/breferrari/vigia/issues/32)'s gate, not to I3, and the first thing it needs is a failure *rate* rather than a fix: one failure and two greens is not a number |
 | `take-next`'s pre-flight cannot see an untracked spec prerequisite ([#34](https://github.com/breferrari/vigia/issues/34)) | #32, 2026-07-31 | Phase 5 | The pre-flight's four comparisons are all keyed on `I<n>` tokens and issue metadata, so a prerequisite stated in `SPEC.md` prose with no issue behind it is invisible to every one of them. `SPEC.md` §10 blocked [#5](https://github.com/breferrari/vigia/issues/5) by name ("do this before the soak test") and nothing tracked the blocker, which is how it survived two phases. Tooling rather than an invariant, so it is out of scope for the issue that found it, and it is the same shape as [#20](https://github.com/breferrari/vigia/issues/20) |
 | The heat projection's cost follows the file ([#55](https://github.com/breferrari/vigia/issues/55)) | #41's pre-flight, 2026-07-31 | Phase 5 | Not deferred by a session that wanted to avoid it: **nothing had ever taken it**, because it is an open `SPEC.md` §10 bullet that no issue named, which is the exact hole [#34](https://github.com/breferrari/vigia/issues/34) added the fifth comparison for. `heat_of` walks every line of a drawn file's hunks to place a change, so it is the one drawn thing whose cost follows the file rather than the window. Left rather than taken because the bullet carries its own measurement and it is comfortable: the shell frame moved **7.66ms to 8.14ms p99** against 16ms, while the core path, which runs none of this code, moved 6.96ms to 7.29ms on the same runs, so most of the gap is run-to-run variation. It is filed anyway because the *shape* is the one I4 forbids, and [#45](https://github.com/breferrari/vigia/issues/45) is the precedent for what a known instance of a forbidden shape costs when it sits both unfixed and ungated |
+| A file the attributes declare binary is diffed as text ([#68](https://github.com/breferrari/vigia/issues/68)) | #65, 2026-08-01 | Phase 5 | Out of scope for #65 because it is a **different attribute doing a different thing**: that issue normalises bytes, this one suppresses a diff. `hunk::compute` decides binary by sniffing content for NUL bytes, which is git's *fallback* and not its rule, so a path marked `binary` (shorthand for `-diff -merge -text`) is diffed as text anyway, and the reverse direction fails too: `diff` set positively on content that sniffs as binary is refused. Cheap when taken, and cheaper than it was: `filter.rs` now holds a primed `gix::worktree::Stack`, so the attribute is one lookup away on a structure that already exists. `SPEC.md` §11.1 says nothing about what decides binary, so this wants a spec line before an implementation |
+| An LFS-tracked text file diffs its pointer against its content ([#69](https://github.com/breferrari/vigia/issues/69)) | #65, 2026-08-01 | Phase 5 | **Not a defect discovered but a consequence recorded**, and not a regression: it is what happened before any filter ran. #65 declines to run external clean drivers, because `filter.lfs.clean` is a command and running it would mean a process per file per frame, which is the shape `SPEC.md` §6 rules out when it takes an in-process diff. So under LFS the worktree holds content while the blob holds a pointer. Mostly invisible, since most LFS payloads sniff as binary first; the case that shows is an LFS-tracked *text* file. Filed rather than left implicit because a ruling with a cost nobody wrote down is a ruling the next session re-litigates, and because the cheapest fix (report undiffable when a driver we do not run is named) is the same attribute lookup [#68](https://github.com/breferrari/vigia/issues/68) needs |
 | I7 is measured without the highlighter ([#51](https://github.com/breferrari/vigia/issues/51)) | #45, 2026-07-31 | Phase 5 | The same blind spot as #45's, one invariant over: I7's 20.37ms comes from `crates/vigia-core/examples/timings.rs`, which is core-only and builds no `Highlighter`, while the shipped first paint parses whatever the first screenful shows. Measured at **97.85ms** on Rust and **373.94ms** on wide Markdown against a 50ms budget, once per process rather than per file. Out of scope for #45 because it is a different invariant and because it cannot be the reported symptom: a once-per-process cost is not a repeated stutter, and #45's gates warm past it exactly as §7 says a steady-state gate should. The fix is a design question rather than an implementation detail, since the honest options include drawing the first frame unhighlighted, which needs a wake I1 forbids inventing a timer for |
 
 ### A shelf entry whose reason has expired: [#19](https://github.com/breferrari/vigia/issues/19)
