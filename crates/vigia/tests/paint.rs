@@ -32,7 +32,7 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Chrome, PaintStats, Row, Theme, View, WHEEL_ROWS, body_height, render};
+use vigia::{Action, App, Chrome, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render};
 use vigia_core::{Highlighter, History};
 
 use support::{
@@ -79,9 +79,10 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     let history = History::new();
     let area = Rect::new(0, 0, width, height);
     let chrome = app.chrome("fixture", None);
-    let rows = body_height(area, &chrome, FILES);
+    let screen = body_layout(area, &chrome, FILES);
+    let rows = screen.diff;
     let view = app
-        .view(&mut frame, &mut highlighter, &history, rows)
+        .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
     assert_eq!(
         view.rows.len(),
@@ -404,7 +405,8 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let mut highlighter = Highlighter::new();
         let history = History::new();
         let chrome = app.chrome("fixture", None);
-        let rows = body_height(area, &chrome, BURST_FILES);
+        let screen = body_layout(area, &chrome, BURST_FILES);
+        let rows = screen.diff;
         let mut buf = Buffer::empty(area);
         let mut total = PaintStats::default();
         for at in 0..notches {
@@ -414,7 +416,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
                 continue;
             }
             let fresh = app
-                .view(&mut frame, &mut highlighter, &history, rows)
+                .view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view");
             total += render(&mut buf, area, &fresh, &Theme::default(), &chrome);
         }

@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Row, Theme, View, body_height, render};
+use vigia::{Action, App, Body, Row, Theme, View, body_height, body_layout, render};
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
     RETAINED_HUNKS, WatchOptions, Worktree,
@@ -674,7 +674,7 @@ fn drive(
     let mut samples = Vec::with_capacity(count);
     let (mut frames, mut full_frames, mut ticks, mut failed) = (0u64, 0u64, 0u64, 0u64);
     let mut last_error = None;
-    let mut body = 0usize;
+    let mut body = Body::default();
     let mut closest_hunk_bound = None;
 
     while samples.len() < count {
@@ -689,7 +689,7 @@ fn drive(
                 tracked_hunks: highlighter.tracked(),
                 tracked_history: history.tracked(),
                 files: frame.files().len(),
-                body,
+                body: body.diff,
             });
             continue;
         }
@@ -727,7 +727,7 @@ fn drive(
             }
         }
 
-        if let Some(action) = scripted(frames, body) {
+        if let Some(action) = scripted(frames, body.diff) {
             let chrome = app.chrome(NAME, None);
             let height = body_height(area, &chrome, frame.files().len());
             if let Err(e) = app.apply(action, &mut frame, height) {
@@ -755,7 +755,7 @@ fn drive(
         let frame_began = Instant::now();
         app.sample_memory();
         let chrome = app.chrome(NAME, None);
-        body = body_height(area, &chrome, frame.files().len());
+        body = body_layout(area, &chrome, frame.files().len());
         match app.view(&mut frame, &mut highlighter, &history, body) {
             Ok(fresh) => {
                 view = fresh;
@@ -794,7 +794,7 @@ fn drive(
         // leave the one allocation per frame nobody measured.
         render(&mut buffer, area, &view, &theme, &chrome);
         app.record_frame(frame_began.elapsed());
-        if view.rows.len() == body {
+        if view.rows.len() == body.diff {
             full_frames += 1;
         }
         frames += 1;

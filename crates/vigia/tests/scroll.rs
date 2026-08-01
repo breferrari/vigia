@@ -17,7 +17,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Position, Row, View, body_height};
+use vigia::{Action, App, Body, Position, Row, View, body_height};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, generated, materialise};
@@ -53,7 +53,7 @@ fn after(
     action: Action,
 ) -> Position {
     app.apply(action, frame, body()).expect("apply");
-    app.view(frame, highlighter, history, body())
+    app.view(frame, highlighter, history, Body::diff_only(body()))
         .expect("view")
         .top
 }
@@ -93,7 +93,12 @@ fn scrolling_down_and_back_up_returns_to_where_it_started() {
 
     for rows in [1, 3, SPAN as isize, 17, (SPAN * 12) as isize] {
         let start = app
-            .view(&mut frame, &mut highlighter, &history, body())
+            .view(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Body::diff_only(body()),
+            )
             .expect("view")
             .top;
         let moved = after(
@@ -395,7 +400,12 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
 
     let view = app
-        .view(&mut frame, &mut highlighter, &history, body())
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(body()),
+        )
         .expect("view");
     assert_eq!(
         view.top.file,
@@ -413,7 +423,12 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     assert_eq!(frame.files().len(), 0, "the worktree is not clean");
 
     let view = app
-        .view(&mut frame, &mut highlighter, &history, body())
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(body()),
+        )
         .expect("view");
     assert_eq!(view.files, 0);
     assert_eq!(view.top, Position::default());
@@ -450,7 +465,12 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 
     for height in [0, 1] {
         let view = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Body::diff_only(height),
+            )
             .expect("view");
         assert_eq!(view.rows.len(), height);
         assert_eq!(view.files, FILES);
@@ -468,7 +488,12 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     // And the position survives being dragged short and back, which is the whole
     // sequence a reader actually performs.
     let view = app
-        .view(&mut frame, &mut highlighter, &history, body())
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(body()),
+        )
         .expect("view");
     assert_eq!(view.rows.len(), body());
     assert_eq!(
@@ -519,9 +544,14 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                 app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, body())
                     .expect("seed");
                 app.apply(action, &mut frame, height).expect("apply");
-                app.view(&mut frame, &mut highlighter, &history, body())
-                    .expect("view")
-                    .top
+                app.view(
+                    &mut frame,
+                    &mut highlighter,
+                    &history,
+                    Body::diff_only(body()),
+                )
+                .expect("view")
+                .top
             })
             .collect();
 
@@ -555,7 +585,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
 fn drawn(app: &mut App, frame: &mut Frame) -> View {
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    app.view(frame, &mut highlighter, &history, body())
+    app.view(frame, &mut highlighter, &history, Body::diff_only(body()))
         .expect("view")
 }
 

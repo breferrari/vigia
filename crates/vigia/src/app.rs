@@ -11,8 +11,8 @@ use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
 use crate::input::Action;
 use crate::memory;
-use crate::render::{Chrome, Mode};
-use crate::view::{Position, View, rows_in};
+use crate::render::{Body, Chrome, Mode};
+use crate::view::{Position, View, Viewport, rows_in};
 
 /// Completed frames the status bar's frame time is taken over.
 ///
@@ -63,6 +63,14 @@ pub struct App {
     /// `SPEC.md` §11.1 rules. One path, replaced per tick: bounded by one
     /// string rather than by the session, so I3 never sees it.
     newest: Option<String>,
+    /// First file the pinned list shows.
+    ///
+    /// A second window onto one file list, and deliberately **not** derived from
+    /// [`Self::position`]. It tracks the diff on its own, so most of the time it
+    /// is whatever [`View::collect`] resolved it to; what it carries between
+    /// frames is the one thing that walk cannot know, which is that a reader
+    /// moved it themselves with `J` and has not been overtaken yet.
+    list_top: usize,
     /// Whether the watch is still live, which the header draws as a word.
     ///
     /// [`Mode::Watching`] is `Default`, and unlike `following` that is the right
@@ -106,6 +114,7 @@ impl Default for App {
             // would have put it, so nothing is owed a back-up before the reader
             // has moved.
             anchored: false,
+            list_top: 0,
             newest: None,
             mode: Mode::default(),
             frames: Samples::new(FRAME_SAMPLES),
@@ -411,22 +420,32 @@ impl App {
     /// and a copy of it behind [`App`]'s derived `Clone` would be a second
     /// answer to "what changed recently" that nothing keeps in step with the
     /// first.
+    /// `body` is [`crate::render::body_layout`]'s answer, so the two regions are
+    /// sized by one rule rather than by this method's idea of one.
     pub fn view(
         &mut self,
         frame: &mut Frame,
         highlighter: &mut Highlighter,
         history: &History,
-        height: usize,
+        body: Body,
     ) -> Result<View> {
         let view = View::collect(
             frame,
             highlighter,
             history,
-            self.position,
-            height,
-            self.anchored,
+            Viewport {
+                position: self.position,
+                anchored: self.anchored,
+                diff_rows: body.diff,
+                list_top: self.list_top,
+                list_rows: body.list,
+            },
         )?;
         self.position = view.top;
+        // Stored back for the reason the position is: resolution happens once,
+        // in the code that knows where the diff landed, and a caller that kept
+        // its own answer would be a second rule for the same fact.
+        self.list_top = view.list_top;
         Ok(view)
     }
 }

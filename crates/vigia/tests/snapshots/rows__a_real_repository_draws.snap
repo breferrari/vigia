@@ -3,6 +3,9 @@ source: crates/vigia/tests/rows.rs
 expression: terminal.backend()
 ---
 "fixture                                       watching · 2 files"
+"▸ A src/added.rs                              ████████████ +2 -0"
+"  M src/lib.rs                                ████████████ +1 -1"
+"────────────────────────────────────────────────────────────────"
 "A src/added.rs                                ████████████ +2 -0"
 "@@ -0,0 +1,2 @@                                                 "
 "1 +added line 1                                                 "
@@ -16,7 +19,4 @@ expression: terminal.backend()
 "6 +let changed = true;                                          "
 "7  line 7                                                       "
 "8  line 8                                                       "
-"9  line 9                                                       "
-"                                                                "
-"                                                                "
 "q quit · f follow · jk scroll                      follow ▶  1/2"

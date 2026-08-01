@@ -155,7 +155,23 @@ const PULSE_RUNGS: [&str; 3] = ["● just changed", "●", ""];
 /// rects of equal height differing only in fill.
 const HEAT_BLOCK: char = '█';
 
-/// How many slices the heat strip may show, widest rung first.
+/// What separates the pinned file list from the diff under it.
+///
+/// `assets/preview.svg` draws a one-pixel line at `y=178`, and a terminal's
+/// nearest honest equivalent is a row of box-drawing horizontals. A blank row
+/// was the alternative and is worse: it reads as the diff having nothing at the
+/// top rather than as two regions, which is the ambiguity the rule exists to
+/// remove.
+const RULE: char = '─';
+
+/// What marks the row for the file the diff is currently inside.
+///
+/// **Not a cursor**, and the glyph is chosen to say so. `SPEC.md` §11.2 B4 keeps
+/// the list not navigable, so nothing is selected and nothing moves on a
+/// keypress that is not a scroll; this points at where the diff already is. A
+/// filled block or an inverted row would read as a selection, which is the
+/// reviewer-class affordance the ruling refuses.
+const CARET: char = '▸';
 ///
 /// **A projection re-projects; it does not drop items**, and that is the third
 /// case of `SPEC.md` §11.1's rule rather than an instance of the first. The hint
@@ -182,6 +198,38 @@ const MIN_PATH_WIDTH: usize = 12;
 /// file heading and one line under it. Below that the footer would be buying
 /// legibility with the content it exists to make legible.
 const MIN_BODY: u16 = 2;
+
+/// Rows the pinned file list may take, before the rule under it.
+///
+/// **A cap rather than a height**, which is the difference between this and a
+/// fixed region: three changed files draw three rows, matching
+/// `assets/preview.svg` exactly, and a formatter touching two hundred draws six
+/// and scrolls. `SPEC.md` §11.1 rules the height a function of pane height and
+/// changed-file count alone, which is the same pair `Footer::plan` already takes
+/// and for the same reason: both change only when the diff does, so neither can
+/// jog a reader's diff.
+///
+/// Six, because it is the largest block that still reads as a glance rather than
+/// as a list to be searched, and because on the 24-row pane this tool is built
+/// for it leaves fourteen rows of diff after the header, the rule and a one-line
+/// footer.
+pub const LIST_ROWS: usize = 6;
+
+/// Columns the caret column costs the pinned list, gap included.
+///
+/// The list is **indented** by this rather than the caret being found a column
+/// somewhere: the two regions are separated by a rule and do not have to align
+/// glyph for glyph, and inseting here is what lets [`Painter::file_row`] stay one
+/// drawer that knows nothing about which region called it.
+const CARET_WIDTH: usize = 2;
+
+/// The narrowest row that can afford the caret column.
+///
+/// Below it the caret is dropped and the list draws full width. It is a glance
+/// element like any other, and [`MIN_PATH_WIDTH`] outranks every glance element:
+/// a row that spent the file's name on a marker pointing at it would be naming
+/// nothing.
+const CARET_FLOOR: usize = CARET_WIDTH + CARET_WIDTH + MIN_PATH_WIDTH;
 
 /// Columns the frame time's number gets, whatever it says.
 ///
@@ -923,19 +971,111 @@ impl<'a> Footer<'a> {
     }
 }
 
-/// Body height available for rows in this area, which is what a caller has to
-/// ask [`View::collect`] for.
+/// How the body divides between the two regions `SPEC.md` §11.1 rules.
+///
+/// The rows between the header and the footer are a pinned file list, a rule,
+/// and the scrolling diff. All three numbers come from one function because they
+/// have to agree: a caller that derived the diff's height by subtracting its own
+/// idea of the list's would be a second layout rule, and the two would disagree
+/// on exactly the pane heights where the region is giving way.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Body {
+    /// Rows the pinned file list takes, zero when there is no room for one.
+    pub list: usize,
+    /// Whether the rule under the list is drawn, which is exactly when there is
+    /// a list to put it under.
+    pub rule: bool,
+    /// Rows left for the diff, which is what [`View::collect`] is asked for.
+    pub diff: usize,
+}
+
+impl Body {
+    /// The layout of a pane with no room for a list: all diff, no rule.
+    ///
+    /// A real state rather than a test convenience. [`body_layout`] returns
+    /// exactly this shape on a pane too short for a region and on a worktree
+    /// with nothing changed, which are the two screens where the map has nothing
+    /// to be a map of or nowhere to be one.
+    ///
+    /// It is also what a test about the **diff walk** should ask for. A gate on
+    /// how `View::collect` crosses files is not a gate on the region above it,
+    /// and giving it one would couple its row arithmetic to a cap it is not
+    /// about. The gates that *are* about the shipped screen's cost take
+    /// [`body_layout`] instead, so the region is inside them.
+    pub fn diff_only(rows: usize) -> Self {
+        Self {
+            list: 0,
+            rule: false,
+            diff: rows,
+        }
+    }
+}
+
+/// Split this area's body between the file list and the diff.
 ///
 /// One line goes to the header and one or two to the footer, so this needs the
 /// same inputs the footer is planned from: `files` is
 /// [`vigia_core::Frame::files`]'s length, which a caller knows before collecting
 /// anything and which equals [`View::files`] afterwards.
 ///
+/// **The list is what gives way**, and the order of the three clamps is the
+/// ruling. It wants one row per changed file; it may not exceed [`LIST_ROWS`];
+/// and it may not take the diff below [`MIN_BODY`], counting the rule it costs.
+/// A monitor whose diff has been squeezed out by the map of the diff has stopped
+/// being one, which is the same argument `Footer::plan` makes one region down
+/// about its second line.
+///
+/// **Nothing here reads the notice**, deliberately. §11.1 forbids a transient
+/// thing from moving content, and a region that appeared and vanished as files
+/// were named and read would jog the reader's diff exactly the way a growing
+/// footer would. The inputs are pane height and changed-file count, both of
+/// which change only when the diff does.
+///
 /// Saturating rather than clamped so a one-row terminal asks for nothing instead
 /// of underflowing.
-pub fn body_height(area: Rect, chrome: &Chrome, files: usize) -> usize {
+pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
     let footer = Footer::plan(area, chrome, files);
-    usize::from(area.height).saturating_sub(1 + usize::from(footer.rows))
+    let body = usize::from(area.height).saturating_sub(1 + usize::from(footer.rows));
+
+    // No changed files is B3's empty state, which is one line of prose in the
+    // diff region and has no list to draw. A rule over nothing would be chrome
+    // announcing an absent region.
+    if files == 0 {
+        return Body {
+            list: 0,
+            rule: false,
+            diff: body,
+        };
+    }
+
+    // The rule costs a row too, so the diff needs `MIN_BODY + 1` before the list
+    // may have its first.
+    let affordable = body.saturating_sub(usize::from(MIN_BODY) + 1);
+    let list = files.min(LIST_ROWS).min(affordable);
+    if list == 0 {
+        return Body {
+            list: 0,
+            rule: false,
+            diff: body,
+        };
+    }
+    Body {
+        list,
+        rule: true,
+        diff: body - list - 1,
+    }
+}
+
+/// Rows the **diff** gets, which is what a caller has to ask [`View::collect`]
+/// for and what a page-down step is measured in.
+///
+/// This used to be the whole body, and every caller already wanted this half of
+/// it: the number is fed to `View::collect` and to `Action::Page`, neither of
+/// which has ever had anything to say about the file list. Kept as a name rather
+/// than folded into [`body_layout`] at the call sites because those two uses do
+/// not care about the region and should not have to mention it.
+pub fn body_height(area: Rect, chrome: &Chrome, files: usize) -> usize {
+    body_layout(area, chrome, files).diff
 }
 
 /// What one paint cost, in the term that decides whether it followed the pane.
@@ -1022,11 +1162,57 @@ pub fn render(
         painter.footer(area, view, chrome, &footer);
     }
 
-    let rows = area.height.saturating_sub(1 + footer.rows);
+    // **The lesser of what the pane affords and what the view carries**, and both
+    // halves are load bearing.
+    //
+    // `body_layout` is the ceiling because it is the only thing that knows the
+    // footer's height, and without it a view holding three entries drawn into a
+    // three-row pane writes over the footer and off the bottom of the buffer.
+    // Found by `tests/legibility.rs` sweeping a pinned list from one column up.
+    //
+    // The view's own length is the other bound because a stale view, redrawn
+    // after a failed collect, would otherwise get a region sized for files it
+    // does not hold: blank rows under a rule, announcing a list that is not
+    // there. Same rule `Footer::plan` follows one line up by reading
+    // `view.files`.
+    //
+    // On the shipped path they are equal by construction, since the caller sizes
+    // its request from this same function and `View::take_list` fills exactly
+    // that many rows whenever the files exist.
+    let list = view
+        .list
+        .len()
+        .min(body_layout(area, chrome, view.files).list);
+    let mut y = area.y + 1;
+
+    if list > 0 {
+        painter.list(
+            Rect {
+                y,
+                height: list as u16,
+                ..area
+            },
+            view,
+        );
+        y += list as u16;
+        // The rule exists exactly when there is a list to put it under, and it
+        // is only worth a row if something can still be drawn below it.
+        if y < area.y + area.height.saturating_sub(footer.rows) {
+            painter.rule(Rect {
+                y,
+                height: 1,
+                ..area
+            });
+            y += 1;
+        }
+    }
+
+    let drawn = y.saturating_sub(area.y);
+    let rows = area.height.saturating_sub(drawn + footer.rows);
     if rows > 0 {
         painter.body(
             Rect {
-                y: area.y + 1,
+                y,
                 height: rows,
                 ..area
             },
@@ -1289,6 +1475,60 @@ impl Painter<'_> {
         } else {
             self.status_line(bottom, footer.left, style, &right, self.theme.chrome_dim);
         }
+    }
+
+    /// Draw the pinned file list, `SPEC.md` §11.1's upper region.
+    ///
+    /// Every row goes through [`Painter::file_row`], which is the whole point:
+    /// one drawer, one degradation ladder, one set of gates, and no way for the
+    /// two regions to disagree about what a file looks like. What is different
+    /// here is the **caret column**, and it is applied by insetting the area
+    /// rather than by telling `file_row` which region it is in, so that function
+    /// stays ignorant of the layout above it.
+    ///
+    /// The caret is dropped below [`CARET_FLOOR`] rather than squeezing the
+    /// path, because [`MIN_PATH_WIDTH`] outranks every glance element and a
+    /// marker pointing at a row that no longer names its file points at nothing.
+    ///
+    /// **`view.list` is authoritative for what to draw and `view.current` for
+    /// what to mark**, and neither is recomputed here. A renderer that re-derived
+    /// the caret from a scroll position could mark a different row than the one
+    /// the walk actually landed on, which is the drift `View::current` exists to
+    /// make impossible.
+    fn list(&mut self, area: Rect, view: &View) {
+        let caret = usize::from(area.width) >= CARET_FLOOR;
+        let inset = if caret { CARET_WIDTH as u16 } else { 0 };
+
+        for (offset, entry) in view.list.iter().take(usize::from(area.height)).enumerate() {
+            let y = area.y + offset as u16;
+            if caret && view.list_top + offset == view.current {
+                self.put(area.x, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
+            }
+            self.file_row(
+                Rect {
+                    y,
+                    height: 1,
+                    x: area.x + inset,
+                    width: area.width.saturating_sub(inset),
+                },
+                &Heading::of(entry),
+                view.peak,
+            );
+        }
+    }
+
+    /// Draw the rule that separates the two regions.
+    ///
+    /// Full width, because a rule that stopped short would read as a box someone
+    /// forgot to close. It is chrome rather than content, so it takes the dim
+    /// style every other structural mark here takes.
+    fn rule(&mut self, area: Rect) {
+        let width = usize::from(area.width);
+        if width == 0 {
+            return;
+        }
+        let line: String = std::iter::repeat_n(RULE, width).collect();
+        self.put(area.x, area.y, &line, width, self.theme.chrome_dim);
     }
 
     fn body(&mut self, area: Rect, view: &View, chrome: &Chrome) {

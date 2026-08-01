@@ -64,10 +64,13 @@ mod view;
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{Action, WHEEL_ROWS, action_for};
-pub use render::{Band, Chrome, HINT_SEPARATOR, Heat, Mode, PaintStats, body_height, render};
+pub use render::{
+    Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_height,
+    body_layout, render,
+};
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
-pub use view::{FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, rows_in};
+pub use view::{FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, rows_in};
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -405,16 +408,17 @@ impl Shell {
         // answer. That is the whole of I4 for this read.
         self.branch = branch_for(frame, || worktree.branch());
 
-        // The chrome is built before the height, not after, because the footer
-        // takes a second line at narrow widths and `body_height` has to know
+        // The chrome is built before the layout, not after, because the footer
+        // takes a second line at narrow widths and `body_layout` has to know
         // whether this frame is one of those. `frame.files().len()` is the same
         // number `View::collect` will report as `View::files`, which is what
-        // keeps this row budget and the renderer's layout in agreement.
+        // keeps this row budget and the renderer's layout in agreement: `render`
+        // recomputes the same split from the same two inputs.
         let chrome = self.app.chrome(&self.name, self.branch.as_deref());
-        let height = body_height(self.area()?, &chrome, frame.files().len());
+        let body = body_layout(self.area()?, &chrome, frame.files().len());
         match self
             .app
-            .view(frame, &mut self.highlighter, &self.history, height)
+            .view(frame, &mut self.highlighter, &self.history, body)
         {
             Ok(view) => self.screen = view,
             Err(e) => self.app.warn(e.to_string()),

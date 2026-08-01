@@ -27,7 +27,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme, View,
-    body_height, render,
+    body_height, body_layout, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -259,6 +259,9 @@ fn with_notice() -> Chrome {
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "crates/vigia-core/src/frame.rs".to_owned(),
@@ -313,6 +316,9 @@ fn every_row_kind() -> View {
 /// longer than any pane.
 fn awkward() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "crates/vigia-core/src/very/deeply/nested/module/frame.rs".to_owned(),
@@ -335,6 +341,9 @@ fn awkward() -> View {
 
 fn empty() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
@@ -356,8 +365,21 @@ fn empty() -> View {
 /// once reported one or three files, and `1/1` and `3/3` are the same width, so
 /// a renderer that ignored the count entirely and assumed one file was
 /// indistinguishable from a correct one. Found by mutation.
-fn numbered(n: usize, files: usize) -> View {
+/// `n` numbered content rows, plus a pinned list of `listed` files.
+///
+/// **`listed` is not optional detail.** `SPEC.md` §11.1 makes the body two
+/// regions, and a view carrying files but no list is a screen `View::collect`
+/// cannot produce: it fills the list to exactly the height `body_layout` asked
+/// for. Handing the renderer one anyway would let a sweep assert against a
+/// layout that never ships, which is the vacuous-fixture shape §7 already
+/// records twice.
+fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
+        list: (0..listed)
+            .map(|i| entry(&format!("src/f{i}.rs")))
+            .collect(),
+        list_top: 0,
+        current: 0,
         rows: (0..n)
             .map(|i| line(LineKind::Added, 1, &format!("R{i:02}")))
             .collect(),
@@ -365,6 +387,22 @@ fn numbered(n: usize, files: usize) -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+    }
+}
+
+/// One list entry, with nothing on it but a path.
+///
+/// The glance elements are gated by their own tests; what these sweeps need is a
+/// row of the right *shape* at every width.
+fn entry(path: &str) -> FileEntry {
+    FileEntry {
+        path: path.to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((1, 0)),
+        spark: [0; HISTORY_BUCKETS],
+        recency: Recency::Cold,
+        heat: [HeatBucket::default(); HEAT_BUCKETS],
     }
 }
 
@@ -396,14 +434,35 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     // shape. A matrix of single-digit counts exercises one column-width class
     // and reads as though it covered them all.
     let many = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         files: 100,
         top: Position { file: 41, row: 0 },
+        ..every_row_kind()
+    };
+    // **The two-region screen, which is the one a reader actually gets.**
+    // `SPEC.md` §11.1 pins a file list above the diff, and its rows are drawn by
+    // the same `Painter::file_row` as a heading but through a *narrower* area,
+    // because the caret column is an inset. Every sweep in this file would
+    // otherwise measure the wide path only and report I6 as holding on a row
+    // shape that never ships alone.
+    let pinned = View {
+        list: vec![
+            entry("crates/vigia-core/src/frame.rs"),
+            entry("src/engine/watch.rs"),
+            entry("Cargo.toml"),
+        ],
+        list_top: 0,
+        current: 1,
         ..every_row_kind()
     };
     vec![
         ("every row kind, idle", every_row_kind(), chrome()),
         ("every row kind, following", every_row_kind(), following()),
         ("every row kind, notice", every_row_kind(), with_notice()),
+        ("a pinned list, following", pinned.clone(), following()),
+        ("a pinned list, notice", pinned, with_notice()),
         ("a hundred files, following", many, following()),
         ("awkward content, following", awkward(), following()),
         (
@@ -462,6 +521,9 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         (
             "readouts at a hundred files",
             View {
+                list: Vec::new(),
+                list_top: 0,
+                current: 0,
                 files: 100,
                 top: Position { file: 41, row: 0 },
                 ..every_row_kind()
@@ -513,6 +575,9 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// colour its first bucket and would leave its last one cool.
 fn glancing() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "crates/vigia-core/src/watch.rs".to_owned(),
@@ -643,21 +708,30 @@ fn the_header_never_takes_a_second_line() {
     // From eight columns for the reason `numbered` documents: below that the
     // four-column marker is clipped to nothing and cannot be counted, so a
     // narrower sweep would silently observe an empty screen and pass.
+    //
+    // **Both region shapes**, because the row under the header is a different
+    // one in each and a sweep over either alone would miss a header that grew on
+    // the other. `listed: 0` is the short pane, where `body_layout` gives the
+    // whole body to the diff; `listed: 3` is the pinned list of §11.1, where the
+    // first row under the header belongs to the map rather than to the diff.
     let mut saw_a_body = false;
     for chrome in [chrome(), following(), lost(), with_notice()] {
         for width in 8..=120u16 {
             for height in [6u16, 24] {
-                let view = numbered(4, 3);
-                let rows = rows_at(width, height, &view, &chrome);
-                let Some(first) = rows.iter().position(|row| row.contains("R00")) else {
-                    continue;
-                };
-                saw_a_body = true;
-                assert_eq!(
-                    first, 1,
-                    "at {width}x{height} the body started on row {first}, so the \
-                     header took more than one"
-                );
+                for listed in [0usize, 3] {
+                    let view = numbered(4, 3, listed);
+                    let marker = if listed > 0 { "src/f0.rs" } else { "R00" };
+                    let rows = rows_at(width, height, &view, &chrome);
+                    let Some(first) = rows.iter().position(|row| row.contains(marker)) else {
+                        continue;
+                    };
+                    saw_a_body = true;
+                    assert_eq!(
+                        first, 1,
+                        "at {width}x{height} with {listed} listed, the body \
+                         started on row {first}, so the header took more than one"
+                    );
+                }
             }
         }
     }
@@ -796,8 +870,15 @@ fn the_body_gets_exactly_the_rows_the_caller_was_promised() {
             for width in 8..=120u16 {
                 for height in [3u16, 5, 6, 24] {
                     let area = Rect::new(0, 0, width, height);
-                    let promised = body_height(area, &chrome, files);
-                    let view = numbered(promised + 3, files);
+                    // **The whole split, not just the diff half.** A view is
+                    // built the way `View::collect` builds one, with its list
+                    // filled to exactly the height the layout asked for. Handing
+                    // the renderer a view that carries files but no list would
+                    // make this compare a promise against a screen that never
+                    // ships, and it would pass while the two regions disagreed.
+                    let split = body_layout(area, &chrome, files);
+                    let promised = split.diff;
+                    let view = numbered(promised + 3, files, split.list);
                     let rows = rows_at(width, height, &view, &chrome);
                     let painted = rows.join("\n");
 
@@ -807,7 +888,9 @@ fn the_body_gets_exactly_the_rows_the_caller_was_promised() {
                     assert_eq!(
                         drawn, promised,
                         "at {width}x{height} over {files} files the caller was \
-                         promised {promised} body rows and the renderer drew {drawn}"
+                         promised {promised} diff rows and the renderer drew \
+                         {drawn}, with a {} row list",
+                        split.list
                     );
                     if promised > 0 {
                         saw_a_body = true;
@@ -830,25 +913,35 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
     let view = every_row_kind();
     let tall = 24u16;
 
-    let wide = body_height(Rect::new(0, 0, 80, tall), &following(), view.files);
+    // **The whole body, not the diff half.** This gate is about how many rows
+    // the *footer* takes, and since §11.1 split the body in two, `body_height`
+    // answers a narrower question: it is the diff's share, which also moves when
+    // the file list grows. Summing the split back up isolates the footer again,
+    // which is what this has always been measuring.
+    let body = |width: u16, chrome: &Chrome| {
+        let split = body_layout(Rect::new(0, 0, width, tall), chrome, view.files);
+        split.list + usize::from(split.rule) + split.diff
+    };
+
     assert_eq!(
-        wide,
+        body(80, &following()),
         usize::from(tall) - 2,
         "eighty columns hold the hints and the state on one line"
     );
-    let widest = body_height(Rect::new(0, 0, 120, tall), &following(), view.files);
-    assert_eq!(widest, usize::from(tall) - 2, "so do a hundred and twenty");
-
-    let narrow_idle = body_height(Rect::new(0, 0, 40, tall), &chrome(), view.files);
     assert_eq!(
-        narrow_idle,
+        body(120, &following()),
+        usize::from(tall) - 2,
+        "so do a hundred and twenty"
+    );
+
+    assert_eq!(
+        body(40, &chrome()),
         usize::from(tall) - 2,
         "forty columns hold them too once the follow marker is gone"
     );
 
-    let narrow = body_height(Rect::new(0, 0, 40, tall), &following(), view.files);
     assert_eq!(
-        narrow,
+        body(40, &following()),
         usize::from(tall) - 3,
         "forty columns following cannot, so the footer takes a second line"
     );
@@ -1209,6 +1302,9 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::Hunk {
                 old_start: 258,
@@ -1334,6 +1430,9 @@ fn a_clipped_content_line_says_it_continues() {
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![line(LineKind::Removed, 260, text)],
         files: 1,
         top: Position::default(),

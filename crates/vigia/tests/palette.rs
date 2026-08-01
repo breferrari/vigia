@@ -46,6 +46,9 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// header, then context, added, removed.
 fn three_kinds() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "src/a.rs".to_owned(),
@@ -406,6 +409,9 @@ fn graded_heat() -> View {
         removed: 0,
     };
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![Row::File(FileEntry {
             path: "src/a.rs".to_owned(),
             from: None,

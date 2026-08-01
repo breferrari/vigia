@@ -137,6 +137,9 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     );
 
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             file('M', "src/a.rs", 1, 0),
             Row::Hunk {
@@ -186,6 +189,9 @@ fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
 fn one_file() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             file('M', "crates/vigia-core/src/frame.rs", 3, 1),
             Row::Hunk {
@@ -245,6 +251,9 @@ fn the_same_screenful_at_a_hundred_and_twenty_columns() {
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
@@ -460,6 +469,9 @@ fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
 #[test]
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
@@ -505,6 +517,9 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     // nothing. This is the truncated-to-useless shape I6 forbids, and it is the
     // one part of I6 the renderer decides on its own rather than by layout.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![file(
             'M',
             "crates/vigia-core/src/very/deeply/nested/module/frame.rs",
@@ -528,6 +543,9 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     // file produces a single-line hunk. Found by mutation, which is also why it
     // has a test of its own rather than a comment.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             file('M', "VERSION", 1, 1),
             Row::Hunk {
@@ -786,6 +804,9 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     // screen rather than one row. Both arrive from ordinary files that nobody
     // wrote for a display.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             file('M', "Makefile", 1, 0),
             line(LineKind::Added, 1, "\tcargo build\ta\tb"),
@@ -814,6 +835,9 @@ fn a_double_width_character_is_never_cut_in_half() {
     // failure only happens when a character straddles the exact clip boundary,
     // so a single width tests one alignment out of two.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             file('M', "docs/読み方.md", 2, 0),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
@@ -863,6 +887,9 @@ fn the_gutter_gives_way_before_the_text_does() {
     // than a readable column. Both sides are asserted, because a rule that only
     // ever fires one way is not a rule.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![line(LineKind::Added, 1234, "let value = compute(input);")],
         files: 1,
         top: Position::default(),
@@ -1157,6 +1184,9 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 /// able to fail.
 fn glancing() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "src/engine/watch.rs".to_owned(),
@@ -1423,3 +1453,153 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 // was deleted rather than stored. What a symbol snapshot cannot see at all is
 // the colour, and that is
 // `the_four_heat_kinds_reach_the_cells_and_are_distinct` above.
+
+/// One entry for the pinned list, with the same fields a heading carries.
+fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
+    FileEntry {
+        path: path.to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((added, removed)),
+        spark: [0; HISTORY_BUCKETS],
+        recency: Recency::Cold,
+        heat: [HeatBucket::default(); HEAT_BUCKETS],
+    }
+}
+
+/// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
+///
+/// `current` is an index into the list as drawn, so the caret's row is chosen by
+/// the fixture rather than derived from it.
+fn two_regions(current: usize) -> View {
+    View {
+        list: vec![
+            entry("src/engine/change.rs", 8, 2),
+            entry("src/engine/watch.rs", 42, 7),
+            entry("src/render/frame.rs", 11, 3),
+        ],
+        list_top: 0,
+        current,
+        rows: vec![
+            file('M', "src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
+            line(LineKind::Added, 39, "    if self.pending.is_empty() {"),
+        ],
+        files: 3,
+        top: Position {
+            file: current,
+            row: 0,
+        },
+        read: 4,
+        peak: 0,
+    }
+}
+
+#[test]
+fn the_caret_marks_the_file_the_diff_is_inside() {
+    // The one thing on screen that says which of the listed files the diff below
+    // belongs to. Asserted by row rather than by presence: a caret drawn on every
+    // row, or on a fixed row, would satisfy "there is a caret somewhere" and say
+    // nothing.
+    //
+    // Both directions, per this file's own rule: the marked row has it and the
+    // others do not.
+    const CARET: &str = "▸";
+
+    for current in 0..3usize {
+        let view = two_regions(current);
+        let backend = screen(64, 18, &view, &chrome());
+        let buffer = backend.buffer();
+
+        for row in 0..3u16 {
+            // The list starts on row 1, immediately under the single header line.
+            let marked = buffer[(0, row + 1)].symbol() == CARET;
+            assert_eq!(
+                marked,
+                row as usize == current,
+                "with the diff in file {current}, row {row} of the list {} the \
+                 caret",
+                if marked { "carries" } else { "does not carry" }
+            );
+        }
+    }
+}
+
+#[test]
+fn the_rule_separates_the_regions_and_spans_the_pane() {
+    // The rule is what makes two regions read as two rather than as a list that
+    // ran out. It has to reach both edges: one that stopped short would read as a
+    // box someone forgot to close.
+    const RULE: char = '─';
+
+    for width in [40u16, 64, 120] {
+        let view = two_regions(1);
+        let backend = screen(width, 18, &view, &chrome());
+        let buffer = backend.buffer();
+
+        // Three list rows under the header, so the rule is row four.
+        let y = 4u16;
+        let drawn: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
+        assert_eq!(
+            drawn,
+            RULE.to_string().repeat(usize::from(width)),
+            "at {width} columns the rule is {drawn:?}"
+        );
+
+        // And nothing above or below it is one, so the row is the separator
+        // rather than a fill the renderer sprayed everywhere.
+        for other in [y - 1, y + 1] {
+            let row: String = (0..width).map(|x| buffer[(x, other)].symbol()).collect();
+            assert!(
+                !row.contains(RULE),
+                "row {other} also holds the rule: {row:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_caret_degrades_once_and_never_flickers() {
+    // I6's ladder applied to the newest glance element. The caret costs the list
+    // a column, so it is dropped on a pane too narrow to spare one, and the only
+    // thing that makes such a drop legible is that it happens **once**: a marker
+    // that came back at a narrower width would read as the current file changing
+    // while a reader dragged a pane edge.
+    //
+    // Monotonicity rather than a threshold, deliberately. The threshold is the
+    // renderer's own constant, and a test that restated it would agree with the
+    // code by construction instead of checking it. This asserts the shape of the
+    // ladder, which no constant can satisfy by accident.
+    const CARET: &str = "▸";
+
+    let drawn: Vec<bool> = (1..=60u16)
+        .map(|width| {
+            let view = two_regions(1);
+            let backend = screen(width, 18, &view, &chrome());
+            let buffer = backend.buffer();
+            (0..width)
+                .map(|x| buffer[(x, 2)].symbol())
+                .collect::<String>()
+                .contains(CARET)
+        })
+        .collect();
+
+    assert!(drawn.iter().any(|on| *on), "no width drew the caret");
+    assert!(
+        drawn.iter().any(|on| !*on),
+        "no width was narrow enough to drop it, so the ladder is never exercised"
+    );
+
+    let first = drawn.iter().position(|on| *on).expect("a width with it");
+    assert!(
+        drawn[first..].iter().all(|on| *on),
+        "the caret came back after being dropped: {:?}",
+        &drawn[first..]
+    );
+}

@@ -3,14 +3,14 @@ source: crates/vigia/tests/follow.rs
 expression: terminal.backend()
 ---
 "fixture                                       watching · 3 files"
+"  M README.md                                 ████████████ +1 -1"
+"  M src/first.rs                              ████████████ +1 -1"
+"▸ M src/second.rs                             ████████████ +1 -1"
+"────────────────────────────────────────────────────────────────"
 "M src/second.rs                               ████████████ +1 -1"
 "@@ -1 +1 @@                                                     "
 "1 -fn second() {}                                               "
 "1 +fn second() { let b = 2; }                                   "
-"                                                                "
-"                                                                "
-"                                                                "
-"                                                                "
 "                                                                "
 "                                                                "
 "q quit · f follow · jk scroll                      follow ▶  3/3"

@@ -231,11 +231,55 @@ pub struct Position {
     pub row: usize,
 }
 
+/// Everything [`View::collect`] needs to know about where the screen is looking.
+///
+/// A shape rather than five more parameters, and not only for the arity: the
+/// diff's position and the list's are two windows onto one file list, and a
+/// caller that could pass one without the other would be able to ask for a
+/// screen where the two disagree about which file exists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Viewport {
+    /// Where the diff's top row is, before resolving.
+    pub position: Position,
+    /// Whether [`Self::position`] was reached by scrolling rather than a jump.
+    ///
+    /// See [`View::collect`]; it is what decides whether a short tail may back
+    /// up to fill the pane.
+    pub anchored: bool,
+    /// Rows the diff region has, from [`crate::render::Body::diff`].
+    pub diff_rows: usize,
+    /// First file the pinned list shows, before resolving.
+    pub list_top: usize,
+    /// Rows the pinned list has, from [`crate::render::Body::list`]. Zero on a
+    /// pane too short for a region, which draws no list at all.
+    pub list_rows: usize,
+}
+
 /// A screenful of rows, plus what the chrome needs to describe it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
     /// The rows to draw, top to bottom.
     pub rows: Vec<Row>,
+    /// The pinned file list, top to bottom, at most `Viewport::list_rows` long.
+    ///
+    /// Bounded by the region and never by the changed set, which is the whole of
+    /// how `SPEC.md` §11.1 keeps the list inside I4: one `Frame::diff` per row
+    /// drawn, and under I2a a file that did not change is a `stat` and a cache
+    /// hit that reads no bytes. Empty when the pane is too short for a region.
+    pub list: Vec<FileEntry>,
+    /// Which file the pinned list starts at, once the request was resolved
+    /// against the files that exist and against where the diff is.
+    ///
+    /// A caller stores this back the way it stores [`View::top`] back, and for
+    /// the same reason: resolution belongs in one place, and the place is
+    /// whichever code knows where the diff actually landed.
+    pub list_top: usize,
+    /// Index of the file the diff is inside, which is what the caret marks.
+    ///
+    /// Always [`View::top`]'s file. Carried so the renderer does not re-derive a
+    /// fact the walk already established, and so a list drawn from a stale view
+    /// cannot mark a different row than the diff under it came from.
+    pub current: usize,
     /// Changed files in the whole worktree, not just the visible ones.
     ///
     /// Free: [`vigia_core::Frame::files`] knows it without reading anything.
@@ -381,10 +425,15 @@ impl View {
         frame: &mut Frame,
         highlighter: &mut Highlighter,
         history: &History,
-        position: Position,
-        height: usize,
-        anchored: bool,
+        viewport: Viewport,
     ) -> Result<Self> {
+        let Viewport {
+            position,
+            anchored,
+            diff_rows: height,
+            list_top,
+            list_rows,
+        } = viewport;
         // One pass, dropped at every exit including the `?`s below, which is
         // what keeps the highlight cache bounded by the viewport. The guard
         // rather than a pair of calls is `vigia_core::Highlighter::pass`'s
@@ -398,6 +447,12 @@ impl View {
             // Bounded by the screen, not by the diff. The cap keeps a caller
             // asking for an absurd height from allocating for it up front.
             rows: Vec::with_capacity(height.min(64)),
+            list: Vec::with_capacity(list_rows.min(64)),
+            // Resolved below, once the walk has said where the diff landed. Both
+            // start where they were asked to, so a frame with no room to draw
+            // reports the request back unchanged and a caller keeps its place.
+            list_top,
+            current: position.file.min(files.saturating_sub(1)),
             files,
             // Until the walk below runs, the request is passed through with only
             // its file clamped. That matters for `height == 0`: a frame with no
@@ -415,9 +470,17 @@ impl View {
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.
             view.top.row = 0;
+            view.list_top = 0;
+            view.current = 0;
             return Ok(view);
         }
         if height == 0 {
+            // **The list still resolves.** The two regions are independent, and
+            // a pane whose diff has been squeezed to nothing has not lost its
+            // map: `body_layout` never produces this pair, but `collect` is
+            // public and a caller asking for one region without the other must
+            // get the one it asked for rather than silently neither.
+            view.take_list(frame, history, list_rows)?;
             return Ok(view);
         }
 
@@ -572,7 +635,62 @@ impl View {
             placed = true;
         }
 
+        // **After the walk, because only the walk knows where the diff landed.**
+        // The position handed in may overshoot its file, point past a list the
+        // agent in the other pane has shortened, or have been backed up to rest
+        // the last row on the bottom. Marking the caret from the *request* would
+        // put it on a file the diff is not in on exactly the frames that moved,
+        // which is every frame a monitor exists to show.
+        view.current = view.top.file;
+        view.take_list(frame, history, list_rows)?;
+
         Ok(view)
+    }
+
+    /// Fill the pinned file list, and resolve where it starts.
+    ///
+    /// **Bounded by `rows` and never by the changed set**, which is the whole of
+    /// how `SPEC.md` §11.1 keeps this region inside I4: the cost follows the
+    /// window exactly as the body's does. Each row is one
+    /// [`vigia_core::Frame::diff`], which under I2a is a `stat` and a cache hit
+    /// reading **zero bytes** for a file that did not change.
+    ///
+    /// Two clamps, and the order matters. The window is first pulled back so the
+    /// last file can rest on the bottom row rather than leaving blanks a reader
+    /// would read as "no more files". Then it is **snapped** so the current file
+    /// is inside it: a reader who browsed away with `J` keeps their place right
+    /// up until the diff lands somewhere the list cannot show, at which point the
+    /// map has to be a map of where the diff actually is.
+    ///
+    /// Its reads are counted into [`View::read`], which therefore double-counts
+    /// the file the body also drew. That is accurate rather than sloppy, for the
+    /// reason [`View::last_screenful`] gives about the same number: under I2a the
+    /// second ask is a cache hit that reads no bytes, so it is a count that
+    /// doubles and not work that does.
+    fn take_list(&mut self, frame: &mut Frame, history: &History, rows: usize) -> Result<()> {
+        if rows == 0 || self.files == 0 {
+            self.list_top = 0;
+            return Ok(());
+        }
+
+        let mut top = self.list_top.min(self.files.saturating_sub(rows));
+        if self.current < top {
+            top = self.current;
+        } else if self.current >= top + rows {
+            // One past the caret minus the window, so the current file lands on
+            // the **bottom** row rather than the top: a diff scrolling forwards
+            // should reveal the next file below, not jump the map a screenful.
+            top = self.current + 1 - rows;
+        }
+        self.list_top = top;
+
+        for index in top..(top + rows).min(self.files) {
+            self.read += 1;
+            let (change, diff) = frame.diff(index)?;
+            let entry = entry_of(&change.kind, diff, history);
+            self.list.push(entry);
+        }
+        Ok(())
     }
 
     /// Where the viewport starts so the diff's **last row rests at the bottom**.
