@@ -354,7 +354,10 @@ impl View {
         // what keeps the highlight cache bounded by the viewport. The guard
         // rather than a pair of calls is `vigia_core::Highlighter::pass`'s
         // business and its doc says why.
-        let mut highlighter = highlighter.pass();
+        // Held by name as well as by guard, so the restart below can retire what
+        // an abandoned walk parsed. See there for why that matters.
+        let original = highlighter;
+        let mut highlighter = original.pass();
         let files = frame.files().len();
         let mut view = Self {
             // Bounded by the screen, not by the diff. The cap keeps a caller
@@ -511,6 +514,23 @@ impl View {
             // decided *after* a partial screen has already been built, so the
             // restart has to throw it away or the second pass appends to it.
             view.rows.clear();
+
+            // **And the parses go with them.** Clearing the rows discards what was
+            // drawn; it does not discard what drawing *cost*, because a hunk's
+            // parse lives in the pass rather than in the row. So a frame that
+            // built a screenful and threw it away left a screenful of parses
+            // behind, and the walk below added a second: I3 bounds the highlight
+            // cache by one viewport, and the soak caught six held on a screen that
+            // could ask for five.
+            //
+            // Taking a fresh pass is what makes the discard real.
+            // `Highlighter::pass` marks every entry dead on creation and sweeps on
+            // drop, so retaking it here retires exactly the hunks the abandoned
+            // walk touched and nothing the new one is about to. The borrow ends
+            // with the drop, which is why this can re-borrow at all.
+            drop(highlighter);
+            highlighter = original.pass();
+
             view.top = Self::last_screenful(frame, files, height, &mut view.read)?;
             index = view.top.file;
             skip = view.top.row;
