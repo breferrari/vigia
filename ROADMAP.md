@@ -275,7 +275,7 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | The mockup pins a file list above the diff, and the shell draws one stream | [#66](https://github.com/breferrari/vigia/issues/66) |
+| ✅ | B4 ruled as layout: the file list is a pinned, scrollable region | [#66](https://github.com/breferrari/vigia/issues/66) |
 | ⬜ | The header's two facts compose into a claim the tool does not make | [#67](https://github.com/breferrari/vigia/issues/67) |
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
 | ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
@@ -286,6 +286,14 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 Both were found by a reader looking at the picture and asking what it promised — [#67](https://github.com/breferrari/vigia/issues/67) from *"what is `watching`, and how do I toggle it?"*, [#66](https://github.com/breferrari/vigia/issues/66) from noticing that `src/engine/watch.rs` is drawn **twice** in the mockup, once in the summary block and once as the diff heading, which a single scrolling stream never does. Neither is visible from inside the code, and neither was reachable by `take-next`'s pre-flight, which compares invariant tokens rather than pictures. That is the same blind spot [#40](https://github.com/breferrari/vigia/issues/40) hit when it found B5 shipped while still marked `(proposed)`.
 
 [#66](https://github.com/breferrari/vigia/issues/66) is **B4**, and taking it means re-reading the question. §11.2 asks whether the file list is *navigable* and proposes "one continuous scroll, list as map"; the load-bearing half is whether the list is a **region of the screen** at all, which that proposal settles silently. Its two options have different costs and only one of them is free: a pinned list ordered from `History` costs nothing to rank, and one ordered by diff size needs every changed file's diff, which is [#49](https://github.com/breferrari/vigia/issues/49)'s argument against a repository-wide total arriving in a second place.
+
+**Ruled 2026-08-01 towards the region, which is the direction that costs something.** The body is two regions now: a pinned file list, a rule, and the scrolling diff. The list is one row per changed file up to a cap of six, ordered the way the stream is, tracking the diff on its own and taking `J`/`K` to browse; both regions carry a scrollbar. It stays **not navigable**, which is B4's own rationale honoured rather than overridden: no selection, no focus, no second mode.
+
+The ordering question this row worried about resolved the other way from both options it names. `History` is free to rank by and was still rejected, because ranking the list by anything the stream is not ordered by decouples the caret from the scroll position and the region stops being a *map*. Status order is free too, and it is the only order under which the two regions describe the same place.
+
+**And the read bound was not the problem this row expected.** A pinned row for an undiffed file cannot draw a heat strip, which reads as a reason to leave the region out; the answer is that the region is bounded by its own height, so diffing its six rows is cost following the window, which is I4's shape rather than a breach of it. Under I2a five of those six are a `stat` and a cache hit reading zero bytes.
+
+What it cost, measured on the reference machine against the same gates before and after: the steady-state frame p99 moved from **103.6µs to 246.3µs** scrolling up and from **744.1µs to 860µs** scrolling back, against I9's 16ms, while scrolling down improved slightly (**1.2848ms to 1.2356ms**) because the diff region draws fewer rows. `vigia-core` is untouched, so I4 and I7 are unmoved.
 
 ## Phase 5 — deferred findings
 

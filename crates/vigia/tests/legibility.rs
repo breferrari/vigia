@@ -1709,3 +1709,69 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
         }
     }
 }
+
+#[test]
+fn a_scrollbar_costs_its_region_exactly_one_column_and_no_more() {
+    // I6's floor, held against the newest thing that can take a column. A bar is
+    // a glance element and `MIN_PATH_WIDTH` outranks every one of them, so the
+    // question is not "is the path at least twelve columns" — the counters are
+    // placed before that floor is computed and can already reach past it, which
+    // predates this region entirely. The question the bar owes an answer to is
+    // whether it costs anything **beyond** the column it occupies.
+    //
+    // Asked by comparison rather than by arithmetic: the same list row drawn at
+    // `width` with a bar must read exactly as it does at `width - 1` without one.
+    // Anything else means the bar is squeezing the row rather than sitting beside
+    // it, and a gate that recomputed the expected path would be restating
+    // `Painter::file_row`'s own ladder.
+    let entries = vec![
+        entry("crates/vigia-core/src/frame.rs"),
+        entry("src/engine/watch.rs"),
+        entry("Cargo.toml"),
+    ];
+    // Ten files with three rows shown, so a bar is drawn; and three with three
+    // shown, so one is not.
+    let with_bar = View {
+        list: entries.clone(),
+        list_top: 0,
+        current: 1,
+        files: 10,
+        ..every_row_kind()
+    };
+    let without_bar = View {
+        list: entries,
+        list_top: 0,
+        current: 1,
+        files: 3,
+        ..every_row_kind()
+    };
+
+    let mut compared = 0;
+    for width in 9..=*WIDTHS.end() {
+        let barred = rows_at(width, 24, &with_bar, &chrome());
+        let bare = rows_at(width - 1, 24, &without_bar, &chrome());
+
+        // Row one is the first list row. Trailing blanks are already trimmed by
+        // `rows_at`, and the bar's own column is the only thing that can follow
+        // the row's content, so it is stripped before comparing.
+        let barred_row = barred[1].trim_end_matches(['▕', '█']).trim_end().to_owned();
+        let bare_row = bare[1].trim_end().to_owned();
+
+        // Only where a bar is actually drawn. Below the floor the two screens are
+        // one column apart and genuinely draw different rows.
+        if barred[1].ends_with('▕') || barred[1].ends_with('█') {
+            assert_eq!(
+                barred_row, bare_row,
+                "at {width} columns a list row with a bar reads {barred_row:?} \
+                 where the same row one column narrower without one reads \
+                 {bare_row:?}, so the bar costs more than its column"
+            );
+            compared += 1;
+        }
+    }
+
+    assert!(
+        compared > 10,
+        "only {compared} widths drew a bar, so this compared almost nothing"
+    );
+}
