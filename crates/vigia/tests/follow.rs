@@ -28,7 +28,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, FileEntry, Position, Row, Theme, body_height, body_layout, render};
+use vigia::{Action, App, Body, FileEntry, Position, Row, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, delta};
@@ -54,13 +54,7 @@ fn layout() -> Body {
 }
 
 fn body() -> usize {
-    // Eighty columns, where the footer is one line whatever the state, so the
-    // row count here does not move when I6's two-line footer engages.
-    body_height(
-        Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None),
-        FILES,
-    )
+    layout().diff
 }
 
 fn fixture(name: &str) -> Scratch {

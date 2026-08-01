@@ -48,7 +48,6 @@ fn three_kinds() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::File(FileEntry {
@@ -412,7 +411,6 @@ fn graded_heat() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![Row::File(FileEntry {
             path: "src/a.rs".to_owned(),

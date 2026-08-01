@@ -29,7 +29,7 @@ use std::time::Duration;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use vigia::{
-    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, body_height,
+    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, diff_height,
     render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
@@ -139,10 +139,9 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
-            file('M', "src/a.rs", 1, 0),
+            file("src/a.rs", 1, 0),
             Row::Hunk {
                 old_start: 5,
                 old_lines: 0,
@@ -175,16 +174,27 @@ fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
         .unwrap_or_else(|| panic!("no {needle:?} anywhere on row {y}"))
 }
 
-fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
-    Row::File(FileEntry {
+/// One changed file, as the pinned list carries it.
+fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
+    FileEntry {
         path: path.to_owned(),
         from: None,
-        kind,
+        kind: 'M',
         churn: Some((added, removed)),
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
         heat: [HeatBucket::default(); HEAT_BUCKETS],
-    })
+    }
+}
+
+/// The same file, as a heading in the diff stream.
+///
+/// One constructor behind both, because `SPEC.md` §11.1 draws the two regions
+/// from one `FileEntry` and a fixture that built them separately could drift in
+/// exactly the way the shared type exists to prevent. Two of the call sites
+/// below build the same file for both regions of one screen.
+fn file(path: &str, added: u32, removed: u32) -> Row {
+    Row::File(entry(path, added, removed))
 }
 
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
@@ -192,10 +202,9 @@ fn one_file() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
-            file('M', "crates/vigia-core/src/frame.rs", 3, 1),
+            file("crates/vigia-core/src/frame.rs", 3, 1),
             Row::Hunk {
                 old_start: 258,
                 old_lines: 7,
@@ -255,7 +264,6 @@ fn nothing_changed() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: Vec::new(),
         files: 0,
@@ -474,7 +482,6 @@ fn a_file_with_no_line_diff_says_why() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::File(FileEntry {
@@ -523,10 +530,8 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![file(
-            'M',
             "crates/vigia-core/src/very/deeply/nested/module/frame.rs",
             12,
             3,
@@ -550,10 +555,9 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
-            file('M', "VERSION", 1, 1),
+            file("VERSION", 1, 1),
             Row::Hunk {
                 old_start: 1,
                 old_lines: 1,
@@ -812,10 +816,9 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
-            file('M', "Makefile", 1, 0),
+            file("Makefile", 1, 0),
             line(LineKind::Added, 1, "\tcargo build\ta\tb"),
             line(LineKind::Context, 2, "bell\u{7}esc\u{1b}[31mnul\u{0}"),
         ],
@@ -844,10 +847,9 @@ fn a_double_width_character_is_never_cut_in_half() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
-            file('M', "docs/読み方.md", 2, 0),
+            file("docs/読み方.md", 2, 0),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
             line(LineKind::Added, 2, "🙂🙂🙂 tail"),
         ],
@@ -897,7 +899,6 @@ fn the_gutter_gives_way_before_the_text_does() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![line(LineKind::Added, 1234, "let value = compute(input);")],
         files: 1,
@@ -927,7 +928,7 @@ fn the_gutter_gives_way_before_the_text_does() {
 fn any_area_renders_including_the_ones_that_fit_nothing() {
     // A pane being dragged narrow steps through every one of these sizes. A
     // monitor that panics on the way is worse than one that draws something
-    // cramped, and `body_height` is what the caller uses to ask for rows, so it
+    // cramped, and `diff_height` is what the caller uses to ask for rows, so it
     // must never ask for more rows than the screen has after its chrome.
     //
     // That it asks for exactly the right number is a stronger claim and it is
@@ -938,8 +939,8 @@ fn any_area_renders_including_the_ones_that_fit_nothing() {
         let backend = screen(width, height, &view, &chrome());
         let area = ratatui::layout::Rect::new(0, 0, width, height);
         assert!(
-            body_height(area, &chrome(), view.files) < usize::from(height).max(1),
-            "body_height asked for more rows than {width}x{height} has"
+            diff_height(area, &chrome(), view.files) < usize::from(height).max(1),
+            "diff_height asked for more rows than {width}x{height} has"
         );
         // Non-vacuity: the loop must actually have produced a buffer of the size
         // asked for, or it proved only that nothing was drawn.
@@ -1195,7 +1196,6 @@ fn glancing() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::File(FileEntry {
@@ -1464,19 +1464,6 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 // the colour, and that is
 // `the_four_heat_kinds_reach_the_cells_and_are_distinct` above.
 
-/// One entry for the pinned list, with the same fields a heading carries.
-fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
-    FileEntry {
-        path: path.to_owned(),
-        from: None,
-        kind: 'M',
-        churn: Some((added, removed)),
-        spark: [0; HISTORY_BUCKETS],
-        recency: Recency::Cold,
-        heat: [HeatBucket::default(); HEAT_BUCKETS],
-    }
-}
-
 /// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
 ///
 /// `current` is an index into the list as drawn, so the caret's row is chosen by
@@ -1490,12 +1477,11 @@ fn two_regions_at(current: usize, row: usize) -> View {
             entry("src/render/frame.rs", 11, 3),
         ],
         list_top: 0,
-        current,
         // Tall enough that a scroll inside one file is several rows of bar, which
         // is what makes the within-a-file half of the ruling observable at all.
         current_span: 400,
         rows: vec![
-            file('M', "src/engine/watch.rs", 42, 7),
+            file("src/engine/watch.rs", 42, 7),
             Row::Hunk {
                 old_start: 38,
                 old_lines: 8,

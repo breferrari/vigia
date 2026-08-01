@@ -189,14 +189,10 @@ fn the_list_window_slides_to_keep_the_current_file_visible() {
             .view(&mut frame, &mut highlighter, &history, body)
             .expect("view");
 
-        assert_eq!(
-            view.current, view.top.file,
-            "step {step}: the caret names a different file from the diff's top"
-        );
         assert!(
-            view.list_top <= view.current && view.current < view.list_top + view.list.len(),
+            view.list_top <= view.top.file && view.top.file < view.list_top + view.list.len(),
             "step {step}: the diff is inside file {} and the list shows {}..{}",
-            view.current,
+            view.top.file,
             view.list_top,
             view.list_top + view.list.len()
         );
@@ -254,17 +250,13 @@ fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
         .expect("view");
 
     assert_ne!(
-        view.current,
+        view.top.file,
         FILES - 1,
         "the fixture resolved to the last file, so a caret taken from the \
          request would have been right by accident"
     );
-    assert_eq!(
-        view.current, view.top.file,
-        "the caret did not follow the resolved position"
-    );
     assert!(
-        view.list_top <= view.current && view.current < view.list_top + view.list.len(),
+        view.list_top <= view.top.file && view.top.file < view.list_top + view.list.len(),
         "the window does not contain the file the diff resolved into"
     );
 
@@ -275,7 +267,7 @@ fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
-    assert_eq!(view.current, 0);
+    assert_eq!(view.top.file, 0);
     assert_eq!(view.top, Position::default());
     assert_eq!(view.list_top, 0, "the window did not follow the jump home");
 }
@@ -334,7 +326,7 @@ fn scrolling_the_list_leaves_the_diff_where_it_was() {
     // is deliberately looking somewhere else, and inventing a caret would say
     // the diff had moved.
     assert!(
-        after.current < after.list_top || after.current >= after.list_top + after.list.len(),
+        after.top.file < after.list_top || after.top.file >= after.list_top + after.list.len(),
         "the fixture did not browse past the current file, so this proves nothing"
     );
 }
@@ -374,15 +366,15 @@ fn the_window_is_overtaken_when_the_diff_leaves_it() {
         .expect("view");
 
     assert_eq!(
-        caught.current,
+        caught.top.file,
         FILES - 1,
         "the jump did not land on the last file"
     );
     assert!(
-        caught.list_top <= caught.current && caught.current < caught.list_top + caught.list.len(),
+        caught.list_top <= caught.top.file && caught.top.file < caught.list_top + caught.list.len(),
         "the window at {} does not contain file {}",
         caught.list_top,
-        caught.current
+        caught.top.file
     );
 }
 

@@ -17,7 +17,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Position, Row, View, body_height};
+use vigia::{Action, App, Body, Position, Row, View, diff_height};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, generated, materialise};
@@ -32,11 +32,21 @@ const SPAN: usize = 4;
 fn body() -> usize {
     // Eighty columns, where the footer is one line whatever the state, so the
     // scroll arithmetic below is not entangled with I6's two-line footer.
-    body_height(
+    diff_height(
         Rect::new(0, 0, 80, 24),
         &App::new().chrome("fixture", None),
         FILES,
     )
+}
+
+/// The layout these gates ask for: the diff region alone.
+///
+/// List-free deliberately. Every gate here is about how `View::collect` crosses
+/// files, and a pinned region would couple their row arithmetic to a cap they
+/// are not about. `Body::diff_only` documents that this is a real short-pane
+/// state rather than a test convenience.
+fn split() -> Body {
+    Body::diff_only(body())
 }
 
 /// Many files, each a single rewritten line, so scrolling crosses them quickly.
@@ -53,7 +63,7 @@ fn after(
     action: Action,
 ) -> Position {
     app.apply(action, frame, body()).expect("apply");
-    app.view(frame, highlighter, history, Body::diff_only(body()))
+    app.view(frame, highlighter, history, split())
         .expect("view")
         .top
 }
@@ -93,12 +103,7 @@ fn scrolling_down_and_back_up_returns_to_where_it_started() {
 
     for rows in [1, 3, SPAN as isize, 17, (SPAN * 12) as isize] {
         let start = app
-            .view(
-                &mut frame,
-                &mut highlighter,
-                &history,
-                Body::diff_only(body()),
-            )
+            .view(&mut frame, &mut highlighter, &history, split())
             .expect("view")
             .top;
         let moved = after(
@@ -400,12 +405,7 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
 
     let view = app
-        .view(
-            &mut frame,
-            &mut highlighter,
-            &history,
-            Body::diff_only(body()),
-        )
+        .view(&mut frame, &mut highlighter, &history, split())
         .expect("view");
     assert_eq!(
         view.top.file,
@@ -423,12 +423,7 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     assert_eq!(frame.files().len(), 0, "the worktree is not clean");
 
     let view = app
-        .view(
-            &mut frame,
-            &mut highlighter,
-            &history,
-            Body::diff_only(body()),
-        )
+        .view(&mut frame, &mut highlighter, &history, split())
         .expect("view");
     assert_eq!(view.files, 0);
     assert_eq!(view.top, Position::default());
@@ -438,7 +433,7 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
 #[test]
 fn a_screen_with_no_room_for_a_body_still_resolves() {
     // A pane dragged down to two rows leaves the header and the footer and
-    // nothing between them. `body_height` returns zero there, and asking for zero
+    // nothing between them. `diff_height` returns zero there, and asking for zero
     // rows has to be an answer rather than a panic or an unclamped position.
     let scratch = fixture("shell-scroll-flat");
     let worktree = scratch.worktree();
@@ -488,12 +483,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     // And the position survives being dragged short and back, which is the whole
     // sequence a reader actually performs.
     let view = app
-        .view(
-            &mut frame,
-            &mut highlighter,
-            &history,
-            Body::diff_only(body()),
-        )
+        .view(&mut frame, &mut highlighter, &history, split())
         .expect("view");
     assert_eq!(view.rows.len(), body());
     assert_eq!(
@@ -544,14 +534,9 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                 app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, body())
                     .expect("seed");
                 app.apply(action, &mut frame, height).expect("apply");
-                app.view(
-                    &mut frame,
-                    &mut highlighter,
-                    &history,
-                    Body::diff_only(body()),
-                )
-                .expect("view")
-                .top
+                app.view(&mut frame, &mut highlighter, &history, split())
+                    .expect("view")
+                    .top
             })
             .collect();
 
@@ -585,7 +570,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
 fn drawn(app: &mut App, frame: &mut Frame) -> View {
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    app.view(frame, &mut highlighter, &history, Body::diff_only(body()))
+    app.view(frame, &mut highlighter, &history, split())
         .expect("view")
 }
 

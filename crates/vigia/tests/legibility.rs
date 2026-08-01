@@ -27,7 +27,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme, View,
-    body_height, body_layout, render,
+    body_layout, diff_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -261,7 +261,6 @@ fn every_row_kind() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::File(FileEntry {
@@ -319,7 +318,6 @@ fn awkward() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::File(FileEntry {
@@ -345,7 +343,6 @@ fn empty() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: Vec::new(),
         files: 0,
@@ -382,7 +379,6 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
             .map(|i| entry(&format!("src/f{i}.rs")))
             .collect(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: (0..n)
             .map(|i| line(LineKind::Added, 1, &format!("R{i:02}")))
@@ -440,7 +436,6 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     let many = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         files: 100,
         top: Position { file: 41, row: 0 },
@@ -459,7 +454,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             entry("Cargo.toml"),
         ],
         list_top: 0,
-        current: 1,
+        top: Position { file: 1, row: 0 },
         ..every_row_kind()
     };
     vec![
@@ -528,7 +523,6 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             View {
                 list: Vec::new(),
                 list_top: 0,
-                current: 0,
                 files: 100,
                 top: Position { file: 41, row: 0 },
                 ..every_row_kind()
@@ -582,7 +576,6 @@ fn glancing() -> View {
     View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::File(FileEntry {
@@ -856,7 +849,7 @@ fn the_empty_state_line_marks_its_edge() {
 
 #[test]
 fn the_body_gets_exactly_the_rows_the_caller_was_promised() {
-    // `body_height` is what a caller asks `View::collect` for, and the renderer
+    // `diff_height` is what a caller asks `View::collect` for, and the renderer
     // decides where the footer starts. Those are two computations of one number,
     // and this is what stops them drifting: before I6 the agreement was the
     // constant 2 written in two places, and now the footer's height varies with
@@ -920,7 +913,7 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
     let tall = 24u16;
 
     // **The whole body, not the diff half.** This gate is about how many rows
-    // the *footer* takes, and since §11.1 split the body in two, `body_height`
+    // the *footer* takes, and since §11.1 split the body in two, `diff_height`
     // answers a narrower question: it is the diff's share, which also moves when
     // the file list grows. Summing the split back up isolates the footer again,
     // which is what this has always been measuring.
@@ -981,10 +974,10 @@ fn a_notice_never_moves_the_diff() {
     for width in WIDTHS {
         for height in [5u16, 24] {
             let area = Rect::new(0, 0, width, height);
-            let quiet = body_height(area, &following(), view.files);
+            let quiet = diff_height(area, &following(), view.files);
             assert_eq!(
                 quiet,
-                body_height(area, &with_notice(), view.files),
+                diff_height(area, &with_notice(), view.files),
                 "a notice changed the body height at {width}x{height}"
             );
             if quiet == usize::from(height) - 3 {
@@ -1021,10 +1014,10 @@ fn the_status_readouts_never_move_the_diff() {
     for width in WIDTHS {
         for height in [5u16, 24] {
             let area = Rect::new(0, 0, width, height);
-            let bare = body_height(area, &following(), view.files);
+            let bare = diff_height(area, &following(), view.files);
             assert_eq!(
                 bare,
-                body_height(area, &diagnostics(), view.files),
+                diff_height(area, &diagnostics(), view.files),
                 "the status readouts changed the body height at {width}x{height}"
             );
             if bare == usize::from(height) - 3 {
@@ -1156,7 +1149,7 @@ fn a_short_screen_keeps_its_body_rather_than_growing_the_footer() {
     for height in [3u16, 4] {
         let area = Rect::new(0, 0, 40, height);
         assert_eq!(
-            body_height(area, &following(), view.files),
+            diff_height(area, &following(), view.files),
             usize::from(height) - 2,
             "the footer grew at 40x{height} and spent a body row it could not spare"
         );
@@ -1165,7 +1158,7 @@ fn a_short_screen_keeps_its_body_rather_than_growing_the_footer() {
     // it rather than the collision never happening at these widths.
     let area = Rect::new(0, 0, 40, 5);
     assert_eq!(
-        body_height(area, &following(), view.files),
+        diff_height(area, &following(), view.files),
         2,
         "at five rows the footer should take its second line"
     );
@@ -1310,7 +1303,6 @@ fn a_label_cut_at_the_right_edge_says_so() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![
             Row::Hunk {
@@ -1439,7 +1431,6 @@ fn a_clipped_content_line_says_it_continues() {
     let view = View {
         list: Vec::new(),
         list_top: 0,
-        current: 0,
         current_span: 0,
         rows: vec![line(LineKind::Removed, 260, text)],
         files: 1,
@@ -1739,14 +1730,14 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     let with_bar = View {
         list: entries.clone(),
         list_top: 0,
-        current: 1,
+        top: Position { file: 1, row: 0 },
         files: 10,
         ..every_row_kind()
     };
     let without_bar = View {
         list: entries,
         list_top: 0,
-        current: 1,
+        top: Position { file: 1, row: 0 },
         files: 3,
         ..every_row_kind()
     };
@@ -1778,5 +1769,71 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     assert!(
         compared > 10,
         "only {compared} widths drew a bar, so this compared almost nothing"
+    );
+}
+
+#[test]
+fn a_list_shorter_than_its_region_gives_the_rows_to_the_diff() {
+    // `Body::clamped_to`'s whole reason for existing, and nothing reached it
+    // until mutation said so: stopping it giving the rows back left every gate
+    // green.
+    //
+    // The case is a **stale view** — one redrawn after a failed collect, holding
+    // fewer entries than the pane would afford. The region has to shrink to what
+    // the view actually has, or it draws blank rows under a rule announcing files
+    // that are not there; and the rows it gives up have to reach the diff, or
+    // they are left unpainted between the rule and the content, which is the
+    // half-empty pane #59 was filed for wearing a different hat.
+    let tall = 24u16;
+    let width = 80u16;
+    let chrome = chrome();
+
+    // Ten changed files, so the layout affords a full six-row region, but a view
+    // carrying only two entries.
+    let afforded = body_layout(Rect::new(0, 0, width, tall), &chrome, 10);
+    assert!(
+        afforded.list > 2,
+        "the fixture does not under-fill the region: it affords {} rows",
+        afforded.list
+    );
+
+    let view = numbered(usize::from(tall) + 8, 10, 2);
+    assert_eq!(view.list.len(), 2, "the fixture is not a short list");
+
+    let rows = rows_at(width, tall, &view, &chrome);
+    let painted = rows.join("\n");
+
+    // Two list rows, then the rule, then content all the way to the footer. The
+    // count is derived from what the layout gave back rather than restated, so it
+    // follows a change to the cap.
+    let clamped = afforded.clamped_to(view.list.len());
+    assert_eq!(clamped.list, 2);
+    assert!(clamped.rule, "a two-row list still needs its rule");
+    assert_eq!(
+        clamped.diff,
+        afforded.diff + (afforded.list - 2),
+        "the rows the list gave up did not reach the diff"
+    );
+
+    let drawn = (0..usize::from(tall) + 8)
+        .filter(|i| painted.contains(&format!("R{i:02}")))
+        .count();
+    assert_eq!(
+        drawn, clamped.diff,
+        "the pane drew {drawn} content rows where the clamped split says \
+         {}, so rows the list gave up went unpainted",
+        clamped.diff
+    );
+
+    // And no blank row between the rule and the first content row.
+    let rule_at = rows
+        .iter()
+        .position(|row| row.starts_with('─'))
+        .expect("a rule");
+    assert!(
+        rows[rule_at + 1].contains("R00"),
+        "row {} under the rule is {:?}, not the first content row",
+        rule_at + 1,
+        rows[rule_at + 1]
     );
 }

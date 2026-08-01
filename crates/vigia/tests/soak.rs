@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Row, Theme, View, body_height, body_layout, render};
+use vigia::{Action, App, Body, Row, Theme, View, body_layout, diff_height, render};
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
     RETAINED_HUNKS, WatchOptions, Worktree,
@@ -729,7 +729,7 @@ fn drive(
 
         if let Some(action) = scripted(frames, body.diff) {
             let chrome = app.chrome(NAME, None);
-            let height = body_height(area, &chrome, frame.files().len());
+            let height = diff_height(area, &chrome, frame.files().len());
             if let Err(e) = app.apply(action, &mut frame, height) {
                 failed += 1;
                 last_error = Some(e.to_string());

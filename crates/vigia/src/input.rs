@@ -144,9 +144,10 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
     // binding silently doing the other's job on terminals that report modifiers
     // and nothing at all to see on terminals that do not.
     if key.modifiers.contains(KeyModifiers::SHIFT) {
-        if let KeyCode::Down | KeyCode::Up = key.code {
-            let rows = if key.code == KeyCode::Down { 1 } else { -1 };
-            return Some(Action::ScrollList(rows));
+        match key.code {
+            KeyCode::Down => return Some(Action::ScrollList(1)),
+            KeyCode::Up => return Some(Action::ScrollList(-1)),
+            _ => {}
         }
     }
 

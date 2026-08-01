@@ -286,13 +286,7 @@ pub struct View {
     /// the same reason: resolution belongs in one place, and the place is
     /// whichever code knows where the diff actually landed.
     pub list_top: usize,
-    /// Index of the file the diff is inside, which is what the caret marks.
-    ///
-    /// Always [`View::top`]'s file. Carried so the renderer does not re-derive a
-    /// fact the walk already established, and so a list drawn from a stale view
-    /// cannot mark a different row than the diff under it came from.
-    pub current: usize,
-    /// Rows the file at [`View::current`] contributes, heading included.
+    /// Rows the file the diff is inside contributes, heading included.
     ///
     /// **Free, and that is the whole reason the diff's scrollbar can move within
     /// a file at all.** The file the viewport is inside has been diffed by
@@ -382,6 +376,19 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
         .iter()
         .map(|hunk| 1 + hunk.lines.len())
         .sum::<usize>()
+}
+
+/// One changed file as the walk has it: what happened, what it diffs to, and
+/// where it sits in the frame's list.
+///
+/// Three things that always travel together — `Frame::diff` hands back the first
+/// two and the caller already holds the third — so they are one parameter rather
+/// than three. That also keeps [`View::take_file`] inside the argument count
+/// clippy is willing to read.
+struct Changed<'f> {
+    kind: &'f ChangeKind,
+    diff: &'f FileDiff,
+    index: usize,
 }
 
 /// Everything a row about this file needs, for either region.
@@ -478,7 +485,6 @@ impl View {
             // start where they were asked to, so a frame with no room to draw
             // reports the request back unchanged and a caller keeps its place.
             list_top,
-            current: position.file.min(files.saturating_sub(1)),
             current_span: 0,
             files,
             // Until the walk below runs, the request is passed through with only
@@ -498,7 +504,6 @@ impl View {
             // Nothing to point at, so nothing to preserve either.
             view.top.row = 0;
             view.list_top = 0;
-            view.current = 0;
             return Ok(view);
         }
         if height == 0 {
@@ -507,9 +512,13 @@ impl View {
             // map: `body_layout` never produces this pair, but `collect` is
             // public and a caller asking for one region without the other must
             // get the one it asked for rather than silently neither.
-            view.take_list(frame, history, list_rows, list_follows)?;
+            view.take_list(frame, history, list_rows, list_follows, &[])?;
             return Ok(view);
         }
+
+        // Entries the body built, so the list can reuse rather than re-diff.
+        // Bounded by the viewport: one per heading that fits on screen.
+        let mut drawn: Vec<(usize, FileEntry)> = Vec::new();
 
         let mut index = view.top.file;
         let mut skip = position.row;
@@ -592,7 +601,18 @@ impl View {
                     view.current_span = span;
                 }
 
-                view.take_file(&change.kind, diff, &mut highlighter, history, skip, height);
+                view.take_file(
+                    Changed {
+                        kind: &change.kind,
+                        diff,
+                        index,
+                    },
+                    &mut highlighter,
+                    history,
+                    skip,
+                    height,
+                    &mut drawn,
+                );
                 skip = 0;
                 index += 1;
             }
@@ -648,6 +668,15 @@ impl View {
             // decided *after* a partial screen has already been built, so the
             // restart has to throw it away or the second pass appends to it.
             view.rows.clear();
+            // **`drawn` is deliberately kept.** Clearing it looked like the tidy
+            // thing to do beside the rows and is wrong: an entry is a pure
+            // function of an index, this frame's cached diff, and a history that
+            // cannot move mid-collect, so an entry the abandoned walk built for
+            // file N is identical to the one the new walk would build. Throwing
+            // it away buys nothing and costs a `Frame::diff` for any file the
+            // second walk no longer draws but the list still shows. Mutation
+            // found it: removing the clear left every gate green, which is the
+            // tell that the line was doing nothing.
 
             // **And the parses go with them.** Clearing the rows discards what was
             // drawn; it does not discard what drawing *cost*, because a hunk's
@@ -677,8 +706,7 @@ impl View {
         // the last row on the bottom. Marking the caret from the *request* would
         // put it on a file the diff is not in on exactly the frames that moved,
         // which is every frame a monitor exists to show.
-        view.current = view.top.file;
-        view.take_list(frame, history, list_rows, list_follows)?;
+        view.take_list(frame, history, list_rows, list_follows, &drawn)?;
 
         Ok(view)
     }
@@ -700,43 +728,68 @@ impl View {
     /// overtaken. See [`Viewport::list_follows`] for why that cannot be worked
     /// out from the numbers here.
     ///
-    /// Its reads are counted into [`View::read`], which therefore double-counts
-    /// the file the body also drew. That is accurate rather than sloppy, for the
-    /// reason [`View::last_screenful`] gives about the same number: under I2a the
-    /// second ask is a cache hit that reads no bytes, so it is a count that
-    /// doubles and not work that does.
+    /// **Nothing here diffs a file the walk already diffed.** `drawn` carries the
+    /// entries the body built, and this consults it before asking the frame. That
+    /// is not an optimisation: [`View::collect`]'s whole one-pass design exists
+    /// because `Frame::diff` **re-reads** any file written in the last two
+    /// seconds, so the file an agent just wrote is not cached, is always the
+    /// current file, and is always inside this window while the list follows.
+    /// Asking for it again read and diffed it a second time on **every frame a
+    /// monitor exists for** — 258,790 bytes where 36,970 will do, measured at
+    /// twenty files of five hundred lines. It is the exact cost this module's own
+    /// docs say the one pass was written to avoid.
+    ///
+    /// It also spares a second `heat_of`, which walks every hunk line of the
+    /// file, for each entry the body already built.
+    ///
+    /// Reads are still counted into [`View::read`] per row, including the reused
+    /// ones. That is deliberate: the number is "files this viewport asked the
+    /// frame for", and a reader of `tests/reads.rs` comparing two fixtures wants
+    /// the region's full ask rather than a figure that moves with how much the
+    /// two regions happen to overlap.
     fn take_list(
         &mut self,
         frame: &mut Frame,
         history: &History,
         rows: usize,
         follows: bool,
+        drawn: &[(usize, FileEntry)],
     ) -> Result<()> {
         if rows == 0 || self.files == 0 {
             self.list_top = 0;
             return Ok(());
         }
 
+        // Always pulled back so the last file can rest on the bottom row rather
+        // than leaving blanks a reader would read as "no more files". That is
+        // validity, and holds however the window got there.
         let mut top = self.list_top.min(self.files.saturating_sub(rows));
-        if !follows {
-            // Left where the reader put it. The caret simply does not appear,
-            // which is honest: the map is deliberately looking somewhere the
-            // diff is not, and inventing one would say the diff had moved.
-        } else if self.current < top {
-            top = self.current;
-        } else if self.current >= top + rows {
-            // One past the caret minus the window, so the current file lands on
-            // the **bottom** row rather than the top: a diff scrolling forwards
-            // should reveal the next file below, not jump the map a screenful.
-            top = self.current + 1 - rows;
+        if follows {
+            // And snapped onto the current file, but **only** when the window is
+            // the diff's to move. A reader who browsed away with `J` keeps their
+            // place until the diff lands somewhere the list cannot show; see
+            // [`Viewport::list_follows`] for why that cannot be worked out from
+            // the numbers here. While they are browsing the caret simply does not
+            // appear, which is honest: the map is deliberately looking somewhere
+            // the diff is not, and inventing one would say the diff had moved.
+            //
+            // The lower bound puts the current file on the **bottom** row rather
+            // than the top, so a diff scrolling forwards reveals the next file
+            // below instead of jumping the map a screenful.
+            top = top.clamp(self.top.file.saturating_sub(rows - 1), self.top.file);
         }
         self.list_top = top;
 
         for index in top..(top + rows).min(self.files) {
             self.read += 1;
-            let (change, diff) = frame.diff(index)?;
-            let entry = entry_of(&change.kind, diff, history);
-            self.list.push(entry);
+            match drawn.iter().find(|(at, _)| *at == index) {
+                Some((_, entry)) => self.list.push(entry.clone()),
+                None => {
+                    let (change, diff) = frame.diff(index)?;
+                    let entry = entry_of(&change.kind, diff, history);
+                    self.list.push(entry);
+                }
+            }
         }
         Ok(())
     }
@@ -804,20 +857,27 @@ impl View {
     /// is paid once, because [`vigia_core::Highlighter`] keeps what it parsed.
     fn take_file(
         &mut self,
-        kind: &ChangeKind,
-        diff: &FileDiff,
+        file: Changed<'_>,
         highlighter: &mut Pass<'_>,
         history: &History,
         skip: usize,
         height: usize,
+        drawn: &mut Vec<(usize, FileEntry)>,
     ) {
+        let Changed { kind, diff, index } = file;
         let mut n = 0usize;
 
         if n >= skip {
             // Asked for only on a row actually pushed, the same rule the
             // highlighter follows below. A heading scrolled past above the
             // window costs two hash lookups it would never have drawn.
-            self.rows.push(Row::File(entry_of(kind, diff, history)));
+            //
+            // Recorded as well as pushed, so [`View::take_list`] can draw the
+            // same file without asking the frame for it a second time. Bounded
+            // by the viewport, because this only runs for a heading that fits.
+            let entry = entry_of(kind, diff, history);
+            drawn.push((index, entry.clone()));
+            self.rows.push(Row::File(entry));
         }
         n += 1;
 

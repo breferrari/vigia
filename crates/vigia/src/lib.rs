@@ -65,8 +65,8 @@ pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{Action, WHEEL_ROWS, action_for};
 pub use render::{
-    Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_height,
-    body_layout, render,
+    Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
+    diff_height, render,
 };
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
@@ -208,11 +208,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     //
                     // The branch it carries is whatever the last draw settled on,
                     // which is right rather than merely cheap: it feeds
-                    // `body_height` alone, and neither the branch nor the mode can
+                    // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
                     let height = if action.needs_height() {
                         let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
-                        body_height(shell.area()?, &chrome, frame.files().len())
+                        diff_height(shell.area()?, &chrome, frame.files().len())
                     } else {
                         0
                     };
@@ -531,7 +531,7 @@ fn spawn_input(tx: Sender<Wake>) {
 /// what is asserted is what production computes rather than a number someone
 /// typed.
 ///
-/// Public for the reason [`rows_in`] and [`body_height`] are: `SPEC.md` §7 makes
+/// Public for the reason [`rows_in`] and [`diff_height`] are: `SPEC.md` §7 makes
 /// the test suite the proof, and a rule reachable only from inside the crate is
 /// one the suite cannot hold against a real repository.
 ///

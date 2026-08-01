@@ -294,12 +294,23 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
         body(),
         listed()
     );
+    // **And one fewer diff than asks, because the two regions overlap by a
+    // file.** This is the gate for a defect that shipped and was caught by
+    // measurement: `take_list` used to call `Frame::diff` for every row,
+    // including rows the walk had already built. `Frame::diff` re-reads any file
+    // written in the last two seconds, and the file an agent just wrote is
+    // always the current file and always in the window, so the hottest file in
+    // the worktree was read and diffed **twice on every frame a monitor exists
+    // for**. The walk now hands its entries to the list.
+    //
+    // Written as a relation rather than a constant: it says "the overlap costs
+    // nothing", which stays true if the region's height changes.
     assert_eq!(
         many.cost.computed,
-        1 + listed() as u64,
-        "{} diffs were computed for one screen of one file plus {} list rows",
+        many.read as u64 - 1,
+        "{} diffs for {} asks, so the file both regions draw was computed twice",
         many.cost.computed,
-        listed()
+        many.read
     );
 
     // Bounded against the file on disk, so "the files this screen draws" means
@@ -362,11 +373,18 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
         "an idle redraw recomputed {} diffs",
         cost.computed
     );
+    // One fewer reuse than ask, and the missing one is the file the pinned list
+    // took from the walk rather than from the frame. See
+    // `a_screen_a_single_file_fills_reads_that_single_file` for why that is a
+    // reuse worth not making: inside the settle margin the same ask is a full
+    // re-read, so the walk hands its entries to the list instead.
     assert_eq!(
-        cost.reused, view.read as u64,
+        cost.reused,
+        view.read as u64 - 1,
         "the {} files the view asked for produced {} reuses, so some other path \
          is fetching content",
-        view.read, cost.reused
+        view.read,
+        cost.reused
     );
 }
 
