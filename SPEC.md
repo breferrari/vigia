@@ -48,7 +48,9 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 
 A regression past any budget **fails the build.**
 
-> [!note] Why I2 is two numbers
+> [!NOTE]
+> **Why I2 is two numbers**
+>
 > It was written as one, reading "re-highlighting is incremental", and that
 > conflated two invariants with **different dependencies and different phases**.
 > Incremental re-*diffing* needs only `gix` and is Phase 1. Incremental
@@ -60,7 +62,9 @@ A regression past any budget **fails the build.**
 > Issues [#2](https://github.com/breferrari/vigia/issues/2) and
 > [#4](https://github.com/breferrari/vigia/issues/4).
 
-> [!note] Why I8 no longer says `SIGINT`
+> [!NOTE]
+> **Why I8 no longer says `SIGINT`**
+>
 > It read "restored exactly on exit — including `SIGINT` and panic", and the
 > `SIGINT` half encoded an assumption the shell falsified. **Raw mode removes the
 > signal.** `enable_raw_mode` clears `ISIG` on Unix and `ENABLE_PROCESSED_INPUT`
@@ -79,7 +83,9 @@ A regression past any budget **fails the build.**
 > [#24](https://github.com/breferrari/vigia/issues/24) rather than assumed away,
 > and the invariant above now states its own limit instead of overselling it.
 
-> [!note] Why the scheduled soak is not twenty-four hours long
+> [!NOTE]
+> **Why the scheduled soak is not twenty-four hours long**
+>
 > The budget is a claim about a day and it stays one. What changed is the proof
 > column, because the number in it was unrunnable: a **GitHub-hosted job is
 > terminated at six hours** of execution time, where a self-hosted one gets five
@@ -150,7 +156,9 @@ Two of these are corrections rather than gaps:
 
 **The sparkline needs precisely what eviction throws away.** `FrameStats.evicted` exists so the cached-diff map stays "bounded by the current diff rather than by everything ever edited" — that is how I3 is argued today. A churn sparkline is change density *over time*, so it has to survive a file settling: one that empties the moment a file stops changing shows nothing worth glancing at, and *"what was hot thirty seconds ago"* is the entire question it answers. Glanceability history therefore cannot live in the evicting map — and must not be unbounded either.
 
-> [!note] I10 earned its row on 2026-07-31
+> [!NOTE]
+> **I10 earned its row on 2026-07-31**
+>
 > It was written here as a **proposal**, deliberately kept out of the §3 table,
 > because that table is for invariants with a failing test and this had none. It
 > now has a budget (256 paths, 120 seconds), a fixture that drives ten thousand
@@ -169,7 +177,9 @@ Two of these are corrections rather than gaps:
 
 **The heat strip needs a whole-file property.** Locating change within a file requires that file's **total line count**, and the frame path is built to avoid exactly that: pure revalidation reads **0 bytes** (§10), the number I2a is written against. Measured naively — every changed file, every frame — it reintroduces the read I2a removed. It is cacheable per `(path, blob id)`, since a file's length cannot change without its content changing, so it is payable once per version rather than once per frame. **That caching is not an optimisation; without it the heat strip breaks I2a.**
 
-> [!note] The cache above was never needed, and the reason is worth more than the prediction
+> [!NOTE]
+> **The cache above was never needed, and the reason is worth more than the prediction**
+>
 > **Corrected 2026-07-31 by building it.** [#39](https://github.com/breferrari/vigia/issues/39).
 > The paragraph above is right that a whole-file read would break I2a and wrong
 > that a new cache is what avoids it. `hunk::compute` interns **both sides** to
@@ -209,7 +219,9 @@ The split is a dependency decision, not a hedge: the TUI renders whatever the co
 
 **`libc` on macOS and `windows-sys` on Windows** are named here for §5.1's memory readout, and they are named rather than merely used because CLAUDE.md's rule is that a dependency reaches the spec before it reaches a manifest. Both are **target-conditional dependencies of `vigia` alone**, both are `unsafe` FFI declarations against facilities the OS already ships, and **neither adds a crate to any graph**: `gix` already puts `libc` into the Apple graph through `gix-hash` to `sha1-checked` to `cpufeatures`, and `windows-sys` 0.61 into the Windows graph through `gix-sec`. What each one buys is one syscall in place of a **subprocess**. `soak.rs` reached the same numbers by spawning `ps` and `tasklist`, which is affordable 288 times across an hour and not sixty times a second: `tasklist` alone is 42.8ms median on the reference machine against a 16ms frame. Linux needs neither, since `/proc/self/status` is a file read.
 
-> [!warning] Check the lock file, do not recall what a dependency costs
+> [!WARNING]
+> **Check the lock file, do not recall what a dependency costs**
+>
 > The paragraph above was nearly two platforms instead of three. `libc` was
 > confirmed already-present with `cargo tree` and `windows-sys` was assessed from
 > memory as *"a new crate in the graph"*, in the same hour, by reasoning that
@@ -327,7 +339,9 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
   Two things fell out of it that are worth more than the microseconds. **No gate in this repo had ever painted** (§7 now says so as a rule), and **no fixture had a line wider than a pane**, so neither tier could have caught this whatever it cost.
 - [x] ~~A trackpad reports one flick as a stream of scroll events. Is one redraw each affordable?~~ **Answered 2026-07-31: no, and it was the larger half of the report.** Each wheel event was its own full frame, so a fast gesture rendered every position it passed through, and over a large diff most of those positions enter a hunk nothing has parsed. The loop now drains what is already queued, handles every wake in arrival order, and paints **once** per batch, capped at 64 so a faster event source cannot starve the screen. Measured structurally: a hundred notches drawn one at a time highlight 4x more lines than the same travel drawn once, and the reader lands in the same place. It costs nothing to I1, because a drain is `try_recv` and never a wait.
 
-  > [!note] What is *not* open here, because it was a breach and is fixed
+  > [!NOTE]
+  > **What is *not* open here, because it was a breach and is fixed**
+  >
   > The **repeat** of that cost was, and it was found by auditing rather than by
   > using the tool. A hunk whose content changed used to throw its whole parse
   > away, so the walk above was paid on *every* frame for as long as the file
@@ -350,7 +364,9 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
 
 Two parts: what the shell already does, recorded because it was decided in code first, and what is still undecided.
 
-> [!warning] Behaviour decided in code without a line here is a defect
+> [!WARNING]
+> **Behaviour decided in code without a line here is a defect**
+>
 > The README says this file is the source of truth, written before the code. That
 > was **not true** for the whole interaction surface on 2026-07-30: the keymap and
 > the treatment of untracked files were both settled in implementation and appear
@@ -559,7 +575,9 @@ Detection is a precedence chain, first answer wins: `VIGIA_COLOR`, then `NO_COLO
 
 Each carries a recommendation marked **(proposed)**. None is settled until ruled on, and none may contradict §3 — if one does, §3 wins and the recommendation is wrong. A ruled item moves to §11.1 and leaves its number behind here, because the numbers are cited elsewhere and renumbering would silently repoint those citations.
 
-> [!note] This heading used to read "these gate Phase 2"
+> [!NOTE]
+> **This heading used to read "these gate Phase 2"**
+>
 > It stopped being true the moment Phase 2 closed with B3 through B6 still open,
 > and it stayed on the page for a whole phase after that, because a heading
 > naming a phase goes stale on a date nobody is watching. Which phase a decision
@@ -586,7 +604,9 @@ What was corrected is the wording. The proposal said "no changes" and the shell 
 
 *(proposed)* **Not navigable in v1** — one continuous scroll, list as map. Rationale: selection implies focus, focus implies a second mode, and modes are reviewer-class (§2). The pane is 40 columns beside an agent, not a full-screen client.
 
-> [!important] The question above is the smaller half, and the proposal settles the larger one silently
+> [!IMPORTANT]
+> **The question above is the smaller half, and the proposal settles the larger one silently**
+>
 > Filed 2026-08-01 as [#66](https://github.com/breferrari/vigia/issues/66). *Navigable* is
 > downstream of **whether the file list is a region of the screen at all**, and
 > "one continuous scroll" answers that second question without asking it.

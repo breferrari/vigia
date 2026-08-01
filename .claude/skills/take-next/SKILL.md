@@ -58,7 +58,9 @@ git show origin/main:SPEC.md \
   | grep -inE 'do (this|that|it) (before|first)|(before|after) the [a-z]+ (test|soak|work|pass)|must (happen|land|come|ship|be done)|blocked (by|on|until)|prerequisite|revisit (together|with)|stand or fall together|confirm against|until [^ ]+ (lands|ships|merges|closes)'
 ```
 
-> [!note] Why that pattern is phrase-shaped and not a word list
+> [!NOTE]
+> **Why that pattern is phrase-shaped and not a word list**
+>
 > The obvious version greps bare `before|first|until`, and on this spec it is
 > **80% false positives**: §10 is full of "first paint", "the first frame that
 > draws deep", "the lines before it". A check that nags four times for every
@@ -77,7 +79,9 @@ Then five comparisons. Any hit is a finding to fix **in this pass**, not a note:
 4. **Unfiled** — an *open* issue with **no milestone**. This looks least like drift and matters most: the query above filters *by* milestone, so an unmilestoned issue is not deprioritised, it is **invisible** and will never be returned however long it sits. Seven had accumulated before anyone noticed.
 5. **Untracked prerequisite** — an open `SPEC.md` §10 bullet that **no issue names**, and above all one whose text orders work: *before*, *first*, *until*, *blocked*, *prerequisite*. Unlike the four above this wants judgement rather than a token match, so read the five to ten bullets the commands print and say which have nothing behind them. **A §10 bullet that says another task must happen first is a blocker with no tracker entry, and the task it blocks will be taken anyway** — every check above will run clean, because prose carries no `I<n>` and no `#<n>`. That is strictly worse than the unfiled case: an unmilestoned issue is at least *in* the tracker. §10 said *"narrow the settle margin… do this before the soak test"* and nothing tracked it, so [#5](https://github.com/breferrari/vigia/issues/5) sat blocked by name for **two phases** and was only caught by a session happening to read §10 while loading context. File the blocker, then decide whether it is in scope for this pass or a prerequisite to take first — but decide it before planning, not after.
 
-> [!warning] Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree
+> [!WARNING]
+> **Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree**
+>
 > The first run of this check read the checkout, which had a feature branch
 > active, and compared branch state against the live tracker. It reported the
 > roadmap as ahead of an issue when on `main` the two agreed — and **#2 was closed
@@ -235,7 +239,9 @@ Everything until now happened inside a draft, where pushes are free. **Marking r
 
 So do not mark ready to "see what CI says". Mark it ready when the work is finished, the suite is green locally, and step 6's plan diff is clean. Everything else belongs in the draft.
 
-> [!warning] A draft shows **no checks**, and no checks is not green
+> [!WARNING]
+> **A draft shows no checks, and no checks is not green**
+>
 > The jobs are skipped, so the PR page shows an empty check list rather than a
 > passing one. That is the exact shape `SPEC.md` §7 keeps finding — a gate that
 > proves nothing while looking settled — and here it is on the review surface

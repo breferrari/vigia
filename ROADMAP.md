@@ -184,7 +184,9 @@ Two existing gates had to change for the same reason, and it is worth knowing be
 
 **And the pane went blank while the header said two files had changed.** [#57](https://github.com/breferrari/vigia/issues/57), reported mid-pass by using the tool: thousands of changed files, scrolled into, then `git reset --hard`. `View::collect` rested the diff's last row at the *top* of the viewport instead of the bottom, so it drew one row over twenty-two blank ones. Pulled into this phase rather than shelved, on [#45](https://github.com/breferrari/vigia/issues/45)'s precedent: found by using it, and a pane that goes blank has stopped being monitor-class.
 
-> [!warning] The gate that should have caught #57 asserted it instead
+> [!WARNING]
+> **The gate that should have caught #57 asserted it instead**
+>
 > `the_bottom_of_the_diff_is_content_rather_than_blank` read
 > `assert_eq!(view.rows.len(), 1)` against a twenty-two row body, under that name
 > and under a comment saying an empty pane is indistinguishable from a broken
@@ -210,7 +212,9 @@ Two existing gates had to change for the same reason, and it is worth knowing be
 
 The fix must not apply to a jump, and two `follow.rs` tests are what said so. Following a file puts it on the top row and so does `G`; backing up to fill a short tail moves it off and makes a reader hunt for what the jump was for. A `Position` cannot tell a scroll from a jump, so `App` carries it.
 
-> [!warning] The issue was filed on a diagnosis that was wrong
+> [!WARNING]
+> **The issue was filed on a diagnosis that was wrong**
+>
 > #59 claimed the rendered area exceeded the window in both dimensions, on four
 > symptoms read off video. A probe disproved the mechanism outright, and **two of
 > the four were mis-cropped frames**: the pane runs to y≈1265 and the crop stopped
@@ -226,7 +230,9 @@ The fix must not apply to a jump, and two `follow.rs` tests are what said so. Fo
 > The rule this leaves: **measure the artifact, not a picture of it.** Four
 > symptoms, one probe, and only one of them survived contact with a number.
 
-> [!note] Phase 3 re-opened for [#65](https://github.com/breferrari/vigia/issues/65) and is closed again
+> [!NOTE]
+> **Phase 3 re-opened for [#65](https://github.com/breferrari/vigia/issues/65) and is closed again**
+>
 > It re-opened the day theming landed. `vigia` drew a file as **+905 -885**, the
 > whole thing deleted and re-added, while `git diff` reported that same file as
 > **unchanged**. Default Windows configuration, `core.autocrlf=true`, in any
