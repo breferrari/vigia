@@ -1067,3 +1067,76 @@ fn margin_screen(name: &str, files: usize) -> u64 {
         .expect("view");
     delta(before, frame.stats()).computed
 }
+
+/// What totalling the diff's rows would cost, which is what a row-exact
+/// scrollbar needs.
+///
+/// **Ignored, diagnostic, not a gate.** It measures the thing `SPEC.md` §11.1
+/// rules out so the ruling rests on a number rather than on an argument, and so
+/// the number can be re-taken when the question comes back. Run it with:
+///
+/// ```text
+/// cargo test --release --test reads -- --ignored --nocapture what_a_row_exact_scrollbar_would_cost
+/// ```
+///
+/// The quantity a scrollbar needs is every changed file's **row count**, which is
+/// `span_of(kind, diff)` and therefore the whole diff. There is no by-product to
+/// reach for: `FileDiff` carries `lines`, `added` and `removed` already, but only
+/// for files something has diffed, and the un-diffed ones are by definition the
+/// paths that did not run.
+#[test]
+#[ignore = "diagnostic, not a gate"]
+fn what_a_row_exact_scrollbar_would_cost() {
+    for (label, files, lines) in [
+        ("a working session", 20usize, 200usize),
+        ("a formatter ran", 200, 200),
+        ("the I4 fixture", FILES, LINES),
+    ] {
+        let scratch = Scratch::large_diff(&format!("cost-{files}-{lines}"), files, lines);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+
+        // Built outside the timer, or the figure carries `Highlighter::new`'s
+        // grammar loading and stops being a screen's cost.
+        let mut app = App::new();
+        let mut highlighter = Highlighter::new();
+        let history = History::new();
+
+        // What one screen costs today: the diff's file plus the region's rows.
+        // A second screen, so the first one's cold-start is not in the number.
+        app.view(&mut frame, &mut highlighter, &history, layout())
+            .expect("view");
+        let before = frame.stats();
+        let began = Instant::now();
+        app.view(&mut frame, &mut highlighter, &history, layout())
+            .expect("view");
+        let screen = began.elapsed();
+        let screen_cost = delta(before, frame.stats());
+
+        // What totalling every file's rows costs on top, cold.
+        let before = frame.stats();
+        let began = Instant::now();
+        let mut total = 0usize;
+        for index in 0..files {
+            total += vigia::rows_in(&mut frame, index).expect("rows");
+        }
+        let sweep = began.elapsed();
+        let sweep_cost = delta(before, frame.stats());
+
+        // And warm, which is what every frame after the first would pay.
+        let began = Instant::now();
+        for index in 0..files {
+            vigia::rows_in(&mut frame, index).expect("rows");
+        }
+        let warm = began.elapsed();
+
+        println!(
+            "{label}: {files} files x {lines} lines, {total} diff rows\n  \
+             one screen      {screen:>10.2?}  {} files  {} bytes\n  \
+             + total, cold   {sweep:>10.2?}  {} files  {} bytes\n  \
+             + total, warm   {warm:>10.2?}  (every frame after the first)",
+            screen_cost.computed, screen_cost.bytes, sweep_cost.computed, sweep_cost.bytes,
+        );
+    }
+}
