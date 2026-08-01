@@ -16,49 +16,7 @@
 
 mod support;
 
-use support::Scratch;
-use vigia_core::{FileChange, Worktree};
-
-/// All changes, sorted by path so assertions do not depend on walk order.
-fn changes_of(worktree: &Worktree) -> Vec<FileChange> {
-    let mut all: Vec<FileChange> = worktree
-        .changes()
-        .expect("enumerate changes")
-        .map(|c| c.expect("change"))
-        .collect();
-    all.sort_by(|a, b| a.path.cmp(&b.path));
-    all
-}
-
-fn numbered_lines(count: usize) -> String {
-    (1..=count).map(|i| format!("line {i}\n")).collect()
-}
-
-/// What `git diff --numstat` says about one path: `(added, removed)`.
-///
-/// `None` when git reports the file as unchanged, which is the answer the first
-/// test below is about, and `Some((0, 0))` would not be the same claim.
-fn git_numstat(scratch: &Scratch, rela: &str) -> Option<(u32, u32)> {
-    let out = scratch.git(&["diff", "--numstat", "--", rela]);
-    let line = out.lines().next()?;
-    let mut fields = line.split('\t');
-    let added = fields.next()?.parse().ok()?;
-    let removed = fields.next()?.parse().ok()?;
-    Some((added, removed))
-}
-
-/// Put the file on disk the way `git checkout` would, rather than the way the
-/// test wrote it.
-///
-/// The difference is the entire fixture for the no-attributes case: with
-/// `core.autocrlf=true` a checkout writes CRLF even though the test's own source
-/// text is LF, so going through git is what produces the state a Windows reader
-/// actually has. Writing the CRLF by hand would test the same bytes for a reason
-/// that could stop being true.
-fn checkout(scratch: &Scratch, rela: &str) {
-    std::fs::remove_file(scratch.path_of(rela)).expect("remove before checkout");
-    scratch.git(&["checkout", "--", rela]);
-}
+use support::{Scratch, changes_sorted, numbered_lines};
 
 /// The reported case: a CRLF worktree file over an LF blob, and no real edit.
 ///
@@ -80,14 +38,14 @@ fn a_crlf_worktree_file_whose_blob_is_lf_diffs_as_no_change() {
     scratch.write_crlf("a.txt", &numbered_lines(20));
 
     assert_eq!(
-        git_numstat(&scratch, "a.txt"),
+        scratch.git_numstat("a.txt"),
         None,
         "the fixture is wrong: git has to call this file unchanged, or there is \
          nothing here to disagree with git about"
     );
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     let change = changes
         .iter()
         .find(|c| c.path == "a.txt")
@@ -116,7 +74,7 @@ fn a_one_line_edit_inside_a_crlf_file_diffs_as_one_line() {
     let scratch = Scratch::crlf_worktree("normalise-edit", None);
     scratch.write("a.txt", numbered_lines(20));
     scratch.commit_all("initial");
-    checkout(&scratch, "a.txt");
+    scratch.checkout("a.txt");
 
     let on_disk = std::fs::read(scratch.path_of("a.txt")).expect("read");
     assert!(
@@ -132,13 +90,13 @@ fn a_one_line_edit_inside_a_crlf_file_diffs_as_one_line() {
     );
 
     assert_eq!(
-        git_numstat(&scratch, "a.txt"),
+        scratch.git_numstat("a.txt"),
         Some((1, 1)),
         "the oracle disagrees with the fixture's own description of itself"
     );
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     let diff = worktree.diff(&changes[0]).expect("diff");
 
     assert_eq!(
@@ -166,7 +124,7 @@ fn a_normalised_diff_matches_git_hunk_for_hunk() {
         let scratch = Scratch::crlf_worktree(&format!("normalise-gap-{gap}"), None);
         scratch.write("a.txt", numbered_lines(TOTAL_LINES));
         scratch.commit_all("initial");
-        checkout(&scratch, "a.txt");
+        scratch.checkout("a.txt");
 
         let second_edit = FIRST_EDIT + gap + 1;
         let edited = numbered_lines(TOTAL_LINES)
@@ -175,7 +133,7 @@ fn a_normalised_diff_matches_git_hunk_for_hunk() {
         scratch.write_crlf("a.txt", &edited);
 
         let worktree = scratch.worktree();
-        let changes = changes_of(&worktree);
+        let changes = changes_sorted(&worktree);
         let diff = worktree.diff(&changes[0]).expect("diff");
 
         let ours: Vec<(u32, u32, u32, u32)> = diff
@@ -214,7 +172,7 @@ fn the_binary_attribute_turns_normalisation_off() {
         scratch.write_crlf("a.txt", &numbered_lines(20));
 
         let worktree = scratch.worktree();
-        let changes = changes_of(&worktree);
+        let changes = changes_sorted(&worktree);
         let change = changes
             .iter()
             .find(|c| c.path == "a.txt")
@@ -261,7 +219,7 @@ fn normalising_costs_no_extra_read_or_probe() {
         for f in 0..FILES {
             let path = format!("src/mod_{f}.rs");
             if crlf {
-                checkout(scratch, &path);
+                scratch.checkout(&path);
             }
             let edited = numbered_lines(LINES).replace("line 100\n", "CHANGED\n");
             if crlf {

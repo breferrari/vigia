@@ -6,25 +6,8 @@
 
 mod support;
 
-use support::Scratch;
-use vigia_core::{ChangeKind, ChangeOptions, FileChange, LineKind, Worktree};
-
-/// All changes, sorted by path so assertions do not depend on walk order.
-fn changes_of(worktree: &Worktree) -> Vec<FileChange> {
-    let mut all: Vec<FileChange> = worktree
-        .changes()
-        .expect("enumerate changes")
-        .map(|c| c.expect("change"))
-        .collect();
-    all.sort_by(|a, b| a.path.cmp(&b.path));
-    all
-}
-
-fn numbered_lines(count: usize) -> String {
-    (1..=count)
-        .map(|i| format!("line {i}\n"))
-        .collect::<String>()
-}
+use support::{Scratch, changes_sorted, numbered_lines};
+use vigia_core::{ChangeKind, ChangeOptions, LineKind};
 
 #[test]
 fn clean_worktree_yields_no_changes() {
@@ -32,7 +15,7 @@ fn clean_worktree_yields_no_changes() {
     scratch.write("a.txt", "hello\n");
     scratch.commit_all("initial");
 
-    assert_eq!(changes_of(&scratch.worktree()), Vec::new());
+    assert_eq!(changes_sorted(&scratch.worktree()), Vec::new());
 }
 
 #[test]
@@ -43,7 +26,7 @@ fn untracked_file_is_added_and_diffs_as_all_additions() {
     scratch.write("fresh.txt", "one\ntwo\n");
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
 
     assert_eq!(changes.len(), 1, "only the new file should be reported");
     assert_eq!(changes[0].path, "fresh.txt");
@@ -71,7 +54,7 @@ fn modified_file_reports_only_the_changed_lines() {
     );
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].kind, ChangeKind::Modified);
 
@@ -92,7 +75,7 @@ fn deleted_file_reports_every_line_removed() {
     scratch.remove("gone.txt");
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].kind, ChangeKind::Removed);
 
@@ -111,7 +94,7 @@ fn a_moved_file_is_reported_as_one_rename() {
     scratch.git(&["reset", "-q"]);
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
 
     let renamed = changes
         .iter()
@@ -159,7 +142,7 @@ fn binary_content_is_flagged_and_not_diffed() {
     scratch.write("blob.bin", [0x00, 0x09, 0x02, 0xfe, 0x00, 0x07]);
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     assert_eq!(changes.len(), 1);
 
     let diff = worktree.diff(&changes[0]).expect("diff binary file");
@@ -176,7 +159,7 @@ fn ignored_files_stay_invisible() {
     scratch.write("secret.txt", "do not show me\n");
     scratch.write("visible.txt", "show me\n");
 
-    let paths: Vec<String> = changes_of(&scratch.worktree())
+    let paths: Vec<String> = changes_sorted(&scratch.worktree())
         .into_iter()
         .map(|c| c.path)
         .collect();
@@ -191,7 +174,7 @@ fn nested_paths_use_forward_slashes_on_every_platform() {
     scratch.commit_all("initial");
     scratch.write("src/deep/nested.txt", "y\n");
 
-    let changes = changes_of(&scratch.worktree());
+    let changes = changes_sorted(&scratch.worktree());
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].path, "src/deep/nested.txt");
 }
@@ -211,7 +194,7 @@ fn hunk_headers_match_what_git_reports() {
     scratch.write("a.txt", &edited);
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     let diff = worktree.diff(&changes[0]).expect("diff");
 
     let ours: Vec<(u32, u32, u32, u32)> = diff
@@ -251,7 +234,7 @@ fn hunk_grouping_boundary_matches_git_at_every_gap() {
         scratch.write("a.txt", &edited);
 
         let worktree = scratch.worktree();
-        let changes = changes_of(&worktree);
+        let changes = changes_sorted(&worktree);
         let diff = worktree.diff(&changes[0]).expect("diff");
 
         let ours: Vec<(u32, u32, u32, u32)> = diff
@@ -276,7 +259,7 @@ fn rendered_lines_carry_no_line_terminators() {
     scratch.write("crlf.txt", "alpha\r\nBETA\r\ngamma\r\n");
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     let diff = worktree.diff(&changes[0]).expect("diff");
 
     for line in diff.hunks.iter().flat_map(|h| &h.lines) {
@@ -302,7 +285,7 @@ fn a_file_without_a_trailing_newline_still_diffs() {
     scratch.write("a.txt", "one\nTWO");
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     let diff = worktree.diff(&changes[0]).expect("diff");
 
     assert_eq!((diff.added, diff.removed), (1, 1));
@@ -324,7 +307,7 @@ fn one_unreadable_path_does_not_end_the_stream() {
     scratch.write("b.txt", "two changed\n");
 
     let worktree = scratch.worktree();
-    let changes = changes_of(&worktree);
+    let changes = changes_sorted(&worktree);
     assert_eq!(changes.len(), 2);
 
     // Delete one file after enumeration, which is exactly what the agent in
@@ -368,7 +351,7 @@ fn the_line_count_matches_the_file_on_disk() {
     let worktree = scratch.worktree();
     let counted = |text: &str| text.lines().count() as u32;
 
-    for change in changes_of(&worktree) {
+    for change in changes_sorted(&worktree) {
         let diff = worktree.diff(&change).expect("diff");
         let expected = match diff.path.as_str() {
             "modified.txt" => counted(&shrunk),
@@ -399,7 +382,7 @@ fn a_line_count_is_not_a_byte_count() {
     scratch.write("f.txt", "abcdefgh\n");
 
     let worktree = scratch.worktree();
-    let change = changes_of(&worktree)
+    let change = changes_sorted(&worktree)
         .into_iter()
         .find(|c| c.path == "f.txt")
         .expect("the rewritten file is changed");

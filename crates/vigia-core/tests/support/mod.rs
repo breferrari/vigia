@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
-use vigia_core::{CONTEXT, Frame, FrameStats, HighlightStats, Worktree};
+use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -84,6 +84,31 @@ pub fn exclusively_timed() -> MutexGuard<'static, ()> {
     TIMED
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Every change, sorted by path so assertions do not depend on walk order.
+///
+/// Named for the sort rather than for the call, because that is the property
+/// tests here rely on and because `budgets.rs` keeps its own unsorted spelling
+/// on purpose: it measures the walk, so reordering what the walk reported would
+/// be measuring something else.
+pub fn changes_sorted(worktree: &Worktree) -> Vec<FileChange> {
+    let mut all: Vec<FileChange> = worktree
+        .changes()
+        .expect("enumerate changes")
+        .map(|c| c.expect("change"))
+        .collect();
+    all.sort_by(|a, b| a.path.cmp(&b.path));
+    all
+}
+
+/// `count` lines of `line N`, newline terminated.
+///
+/// The plainest fixture content there is, and deliberately not [`generated`]:
+/// these lines are short enough to reason about a hunk header by eye, which is
+/// what the fidelity suites do with them.
+pub fn numbered_lines(count: usize) -> String {
+    (1..=count).map(|i| format!("line {i}\n")).collect()
 }
 
 /// Advance one frame and fetch every diff in it.
@@ -501,6 +526,37 @@ impl Scratch {
     /// Open the working tree through the crate under test.
     pub fn worktree(&self) -> Worktree {
         Worktree::discover(&self.path).expect("discover scratch repository")
+    }
+
+    /// Put a file on disk the way `git checkout` would, rather than the way the
+    /// test wrote it.
+    ///
+    /// The difference is the whole fixture for the CRLF cases: under
+    /// `core.autocrlf=true` a checkout writes CRLF even though the test's own
+    /// source text is LF, so going through git is what produces the state a
+    /// Windows reader actually has. Writing those bytes by hand would test the
+    /// same content for a reason that could stop being true.
+    pub fn checkout(&self, rela: &str) {
+        std::fs::remove_file(self.path_of(rela)).expect("remove before checkout");
+        self.git(&["checkout", "--", rela]);
+    }
+
+    /// What `git diff --numstat` says about one path: `(added, removed)`.
+    ///
+    /// `None` when git reports the file as unchanged, which is a different
+    /// claim from `Some((0, 0))` and is the answer the normalisation suite is
+    /// written against.
+    ///
+    /// Beside [`Scratch::git_hunk_headers`] because it is the same job: ask git
+    /// the question the engine just answered, and compare. `SPEC.md` §10 records
+    /// git as the oracle, so the accessors that reach it live together.
+    pub fn git_numstat(&self, rela: &str) -> Option<(u32, u32)> {
+        let out = self.git(&["diff", "--numstat", "--", rela]);
+        let line = out.lines().next()?;
+        let mut fields = line.split('\t');
+        let added = fields.next()?.parse().ok()?;
+        let removed = fields.next()?.parse().ok()?;
+        Some((added, removed))
     }
 
     /// Hunk headers as real git reports them, for fidelity comparison.
