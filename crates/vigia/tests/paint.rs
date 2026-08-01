@@ -251,10 +251,22 @@ fn a_clipped_wide_row_still_says_it_continues() {
     let buf = painted("paint-mark", WIDE_EXT, 80, 24).buf;
     let area = *buf.area();
 
+    // **The content's last column, which is not always the pane's.** `SPEC.md`
+    // §11.1 gives the diff region a scrollbar, and it takes the rightmost column
+    // whenever there is anywhere to scroll. Reading the pane's edge unconditionally
+    // would then be reading the bar and reporting every row as unmarked, which is
+    // this gate failing for a reason that has nothing to do with what it asserts.
+    //
+    // The last two columns rather than a computed one: which of them holds the
+    // mark depends on whether the bar is drawn, and recomputing that here would be
+    // restating the renderer's own rule instead of checking its output.
     let mut marked = 0usize;
     for y in 1..area.height.saturating_sub(1) {
-        let last = buf[(area.width - 1, y)].symbol().to_owned();
-        if last == CONTINUES.to_string() {
+        let tail: Vec<String> = (1..=2)
+            .filter(|back| area.width >= *back)
+            .map(|back| buf[(area.width - back, y)].symbol().to_owned())
+            .collect();
+        if tail.iter().any(|symbol| symbol == &CONTINUES.to_string()) {
             marked += 1;
         }
     }

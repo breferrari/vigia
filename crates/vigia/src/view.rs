@@ -280,6 +280,19 @@ pub struct View {
     /// fact the walk already established, and so a list drawn from a stale view
     /// cannot mark a different row than the diff under it came from.
     pub current: usize,
+    /// Rows the file at [`View::current`] contributes, heading included.
+    ///
+    /// **Free, and that is the whole reason the diff's scrollbar can move within
+    /// a file at all.** The file the viewport is inside has been diffed by
+    /// definition, so its height is already known; every *other* file's height
+    /// is not, and adding them up is the read `SPEC.md` §11.1 rules out for `G`
+    /// and I4 forbids generally. So the bar is exact inside this file and
+    /// file-granular between files, which is the honest limit rather than a
+    /// rounding error.
+    ///
+    /// Zero when there is nothing to be inside, which a renderer must read as
+    /// "no bar" rather than dividing by.
+    pub current_span: usize,
     /// Changed files in the whole worktree, not just the visible ones.
     ///
     /// Free: [`vigia_core::Frame::files`] knows it without reading anything.
@@ -453,6 +466,7 @@ impl View {
             // reports the request back unchanged and a caller keeps its place.
             list_top,
             current: position.file.min(files.saturating_sub(1)),
+            current_span: 0,
             files,
             // Until the walk below runs, the request is passed through with only
             // its file clamped. That matters for `height == 0`: a frame with no
@@ -554,6 +568,15 @@ impl View {
                         row: skip,
                     };
                     placed = true;
+                }
+
+                // The height of the file the viewport is inside, recorded where
+                // it is already known. Checked every iteration rather than only
+                // on placement, because the restart path below sets `view.top`
+                // from `last_screenful` with `placed` already true and would
+                // otherwise leave this at zero on exactly the frames that moved.
+                if index == view.top.file {
+                    view.current_span = span;
                 }
 
                 view.take_file(&change.kind, diff, &mut highlighter, history, skip, height);

@@ -140,6 +140,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             file('M', "src/a.rs", 1, 0),
             Row::Hunk {
@@ -192,6 +193,7 @@ fn one_file() -> View {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             file('M', "crates/vigia-core/src/frame.rs", 3, 1),
             Row::Hunk {
@@ -254,6 +256,7 @@ fn nothing_changed() -> View {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
@@ -472,6 +475,7 @@ fn a_file_with_no_line_diff_says_why() {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
@@ -520,6 +524,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![file(
             'M',
             "crates/vigia-core/src/very/deeply/nested/module/frame.rs",
@@ -546,6 +551,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             file('M', "VERSION", 1, 1),
             Row::Hunk {
@@ -807,6 +813,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             file('M', "Makefile", 1, 0),
             line(LineKind::Added, 1, "\tcargo build\ta\tb"),
@@ -838,6 +845,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             file('M', "docs/読み方.md", 2, 0),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
@@ -890,6 +898,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![line(LineKind::Added, 1234, "let value = compute(input);")],
         files: 1,
         top: Position::default(),
@@ -1187,6 +1196,7 @@ fn glancing() -> View {
         list: Vec::new(),
         list_top: 0,
         current: 0,
+        current_span: 0,
         rows: vec![
             Row::File(FileEntry {
                 path: "src/engine/watch.rs".to_owned(),
@@ -1470,8 +1480,9 @@ fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
 /// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
 ///
 /// `current` is an index into the list as drawn, so the caret's row is chosen by
-/// the fixture rather than derived from it.
-fn two_regions(current: usize) -> View {
+/// the fixture rather than derived from it. `row` is how far into that file the
+/// viewport has scrolled, which is what the diff's scrollbar reads.
+fn two_regions_at(current: usize, row: usize) -> View {
     View {
         list: vec![
             entry("src/engine/change.rs", 8, 2),
@@ -1480,6 +1491,9 @@ fn two_regions(current: usize) -> View {
         ],
         list_top: 0,
         current,
+        // Tall enough that a scroll inside one file is several rows of bar, which
+        // is what makes the within-a-file half of the ruling observable at all.
+        current_span: 400,
         rows: vec![
             file('M', "src/engine/watch.rs", 42, 7),
             Row::Hunk {
@@ -1492,13 +1506,15 @@ fn two_regions(current: usize) -> View {
             line(LineKind::Added, 39, "    if self.pending.is_empty() {"),
         ],
         files: 3,
-        top: Position {
-            file: current,
-            row: 0,
-        },
+        top: Position { file: current, row },
         read: 4,
         peak: 0,
     }
+}
+
+/// The same screen at the top of its current file.
+fn two_regions(current: usize) -> View {
+    two_regions_at(current, 0)
 }
 
 #[test]
@@ -1600,6 +1616,180 @@ fn the_caret_degrades_once_and_never_flickers() {
     assert!(
         drawn[first..].iter().all(|on| *on),
         "the caret came back after being dropped: {:?}",
+        &drawn[first..]
+    );
+}
+
+/// The rows of column `x` that carry the scrollbar's thumb.
+fn thumb_rows(backend: &TestBackend, x: u16, rows: std::ops::Range<u16>) -> Vec<u16> {
+    const THUMB: &str = "█";
+    let buffer = backend.buffer();
+    rows.filter(|y| buffer[(x, *y)].symbol() == THUMB).collect()
+}
+
+#[test]
+fn the_list_scrollbar_spans_the_visible_window() {
+    // The list's bar is exact, because both of its numbers are free: the window
+    // it shows and the changed-file count are known without reading anything.
+    //
+    // Ten files with three on screen, so the thumb is a proper fraction rather
+    // than the whole bar, and it has somewhere to move to.
+    const TRACK: &str = "▕";
+    let width = 64u16;
+
+    let mut seen = Vec::new();
+    for list_top in [0usize, 3, 7] {
+        let view = View {
+            list_top,
+            files: 10,
+            ..two_regions(list_top)
+        };
+        let backend = screen(width, 18, &view, &chrome());
+        let marks = thumb_rows(&backend, width - 1, 1..4);
+        assert!(
+            !marks.is_empty(),
+            "the list bar drew no thumb at all with the window at {list_top}"
+        );
+        assert!(
+            marks.len() < 3,
+            "the thumb filled the whole bar with ten files and three rows shown"
+        );
+        // And the rest of the column is track, not blank: a mark with no extent
+        // around it cannot be read as a position.
+        let buffer = backend.buffer();
+        for y in 1..4u16 {
+            let symbol = buffer[(width - 1, y)].symbol();
+            assert!(
+                symbol == TRACK || marks.contains(&y),
+                "row {y} of the list bar is {symbol:?}, neither thumb nor track"
+            );
+        }
+        seen.push(marks[0]);
+    }
+
+    // Monotone, and moving overall. Not strictly increasing at every step, and
+    // that is resolution rather than a defect: three rows of bar over ten files
+    // cannot separate every window, so windows 0 and 3 legitimately round to the
+    // same row. What must hold is that it never goes backwards and that it does
+    // move, which a bar ignoring its input would fail.
+    assert!(
+        seen.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the thumb went back up as the window moved down: {seen:?}"
+    );
+    assert!(
+        seen[0] < seen[seen.len() - 1],
+        "the thumb never moved across the whole range: {seen:?}"
+    );
+}
+
+#[test]
+fn the_diff_scrollbar_moves_within_a_file_and_not_only_between_them() {
+    // **The assertion that separates the ruled design from the one it could
+    // quietly collapse into.** `SPEC.md` §11.1 rules the diff's bar file-granular
+    // *plus the fraction within the file the top is in*, and the second half is
+    // the part that costs a field on the view. A bar built from `top.file` alone
+    // would pass every other test here and sit motionless while a reader scrolled
+    // four hundred rows through one file.
+    let width = 64u16;
+    let region = 5u16..17;
+
+    let mut firsts = Vec::new();
+    for row in [0usize, 100, 200, 399] {
+        let view = two_regions_at(1, row);
+        let backend = screen(width, 18, &view, &chrome());
+        let marks = thumb_rows(&backend, width - 1, region.clone());
+        assert!(
+            !marks.is_empty(),
+            "the diff bar drew no thumb at row {row} of the file"
+        );
+        firsts.push(marks[0]);
+    }
+
+    assert!(
+        firsts.first() < firsts.last(),
+        "the thumb never moved while the viewport crossed a whole file: {firsts:?}"
+    );
+    assert!(
+        firsts.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the thumb moved backwards as the viewport went forwards: {firsts:?}"
+    );
+
+    // And it still distinguishes files, which is the half that was never in
+    // doubt but which a within-file-only bar would have lost.
+    let early = thumb_rows(
+        &screen(width, 18, &two_regions_at(0, 0), &chrome()),
+        width - 1,
+        region.clone(),
+    );
+    let late = thumb_rows(
+        &screen(width, 18, &two_regions_at(2, 0), &chrome()),
+        width - 1,
+        region,
+    );
+    assert!(
+        early[0] < late[0],
+        "the thumb is in the same place for the first and last file: {early:?} \
+         against {late:?}"
+    );
+}
+
+#[test]
+fn a_region_with_nothing_to_scroll_spends_no_column_on_a_bar() {
+    // A full bar is a column saying there is nothing to say. The list of three
+    // files with three rows on screen has nowhere to scroll, so the region keeps
+    // its width for the paths.
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+    let width = 64u16;
+
+    let view = two_regions(1);
+    assert_eq!(
+        view.files,
+        view.list.len(),
+        "the fixture has room to scroll"
+    );
+    let backend = screen(width, 18, &view, &chrome());
+    let buffer = backend.buffer();
+
+    for y in 1..4u16 {
+        let symbol = buffer[(width - 1, y)].symbol();
+        assert!(
+            symbol != TRACK && symbol != THUMB,
+            "row {y} drew a bar for a list that fits entirely on screen"
+        );
+    }
+}
+
+#[test]
+fn the_scrollbars_degrade_once_and_never_flicker() {
+    // The same ladder rule the caret follows, for the same reason: a bar that
+    // reappeared at a narrower width would read as the position jumping while a
+    // reader dragged a pane edge.
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+
+    let drawn: Vec<bool> = (1..=60u16)
+        .map(|width| {
+            let view = View {
+                files: 10,
+                ..two_regions(1)
+            };
+            let backend = screen(width, 18, &view, &chrome());
+            let buffer = backend.buffer();
+            let symbol = buffer[(width - 1, 2)].symbol();
+            symbol == TRACK || symbol == THUMB
+        })
+        .collect();
+
+    assert!(drawn.iter().any(|on| *on), "no width drew a bar");
+    assert!(
+        drawn.iter().any(|on| !*on),
+        "no width was narrow enough to drop one, so the ladder is never exercised"
+    );
+    let first = drawn.iter().position(|on| *on).expect("a width with one");
+    assert!(
+        drawn[first..].iter().all(|on| *on),
+        "a bar came back after being dropped: {:?}",
         &drawn[first..]
     );
 }

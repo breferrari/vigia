@@ -164,6 +164,17 @@ const HEAT_BLOCK: char = '█';
 /// remove.
 const RULE: char = '─';
 
+/// The filled part of a scrollbar: where in the whole you are looking.
+const BAR_THUMB: char = '█';
+
+/// The unfilled part, which is drawn rather than left blank.
+///
+/// A bar with no track is a mark floating in space, and a reader cannot tell a
+/// short thumb near the top from a long one without the extent it sits in. The
+/// half-block is narrower than the thumb on purpose: the track is context and
+/// the thumb is the reading.
+const BAR_TRACK: char = '▕';
+
 /// What marks the row for the file the diff is currently inside.
 ///
 /// **Not a cursor**, and the glyph is chosen to say so. `SPEC.md` §11.2 B4 keeps
@@ -230,6 +241,16 @@ const CARET_WIDTH: usize = 2;
 /// a row that spent the file's name on a marker pointing at it would be naming
 /// nothing.
 const CARET_FLOOR: usize = CARET_WIDTH + CARET_WIDTH + MIN_PATH_WIDTH;
+
+/// Columns a scrollbar costs the region it is drawn beside.
+const BAR_WIDTH: usize = 1;
+
+/// The narrowest region that can afford a scrollbar.
+///
+/// Same reasoning as [`CARET_FLOOR`]: a bar is a glance element and
+/// [`MIN_PATH_WIDTH`] outranks every one of them. Two columns for the kind letter
+/// and its gap, twelve for the path's floor, and one for the bar itself.
+const BAR_FLOOR: usize = BAR_WIDTH + 2 + MIN_PATH_WIDTH;
 
 /// Columns the frame time's number gets, whatever it says.
 ///
@@ -681,6 +702,17 @@ impl<'r> Heading<'r> {
             heat: &entry.heat,
         }
     }
+}
+
+/// Whether a region showing `span` of `of` has anywhere to scroll.
+///
+/// Asked **before** the column is taken as well as inside
+/// [`Painter::scrollbar`], and the two must agree: a region that gave up a column
+/// for a bar the drawer then declined to draw would be a column of blank taken
+/// off every path on screen, for nothing. Every snapshot in `tests/render.rs`
+/// caught exactly that when this was one check instead of two.
+fn scrollable(span: u64, of: u64) -> bool {
+    of != 0 && span < of
 }
 
 /// Columns something of `width` costs on the right-hand side of a row.
@@ -1185,12 +1217,33 @@ pub fn render(
         .min(body_layout(area, chrome, view.files).list);
     let mut y = area.y + 1;
 
+    // Wide enough for a bar at all. Each region then decides separately whether
+    // it has anywhere to scroll, because a list of three files and a diff of
+    // thirty thousand rows are different questions.
+    let bars = usize::from(area.width) >= BAR_FLOOR;
+    let inset = |on: bool| {
+        if on {
+            area.width.saturating_sub(BAR_WIDTH as u16)
+        } else {
+            area.width
+        }
+    };
+
     if list > 0 {
+        let region = Rect {
+            y,
+            height: list as u16,
+            ..area
+        };
+        // Counted in **files**, which is exactly what this region shows.
+        let bar = bars && scrollable(list as u64, view.files as u64);
+        if bar {
+            painter.scrollbar(region, view.list_top as u64, list as u64, view.files as u64);
+        }
         painter.list(
             Rect {
-                y,
-                height: list as u16,
-                ..area
+                width: inset(bar),
+                ..region
             },
             view,
         );
@@ -1210,11 +1263,36 @@ pub fn render(
     let drawn = y.saturating_sub(area.y);
     let rows = area.height.saturating_sub(drawn + footer.rows);
     if rows > 0 {
+        let region = Rect {
+            y,
+            height: rows,
+            ..area
+        };
+        // **Counted in rows, but only the current file's rows are known.**
+        // `current_span` is free because that file has been diffed to be drawn;
+        // every other file's height would have to be read, which is the walk
+        // §11.1 already refuses for `G` and which I4 forbids. So the whole is
+        // approximated as `files` files of the current one's height: exact as
+        // the viewport moves *within* a file, file-granular between them, and
+        // recorded as a ruling in §11.1 rather than left to be discovered.
+        //
+        // The empty state has no file to be inside and draws no bar, which
+        // `scrollbar` handles by being told a whole of zero.
+        let span = view.current_span as u64;
+        let whole = view.files as u64 * span;
+        let bar = bars && scrollable(u64::from(rows), whole);
+        if bar {
+            painter.scrollbar(
+                region,
+                view.current as u64 * span + (view.top.row as u64).min(span),
+                u64::from(rows),
+                whole,
+            );
+        }
         painter.body(
             Rect {
-                y,
-                height: rows,
-                ..area
+                width: inset(bar),
+                ..region
             },
             view,
             chrome,
@@ -1514,6 +1592,43 @@ impl Painter<'_> {
                 &Heading::of(entry),
                 view.peak,
             );
+        }
+    }
+
+    /// Draw a one-column scrollbar down the right of `area`.
+    ///
+    /// The thumb covers `at..at + span` of `0..of`, in whatever units the caller
+    /// counts in. Two callers, two units, and keeping the arithmetic here rather
+    /// than in each of them is what stops the list's bar and the diff's bar
+    /// disagreeing about how a fraction becomes rows.
+    ///
+    /// **The thumb is never shorter than one row**, because a bar whose thumb
+    /// rounded away would say "nothing here" about a position that exists. It is
+    /// pushed up rather than allowed to overrun, so the last position is drawn at
+    /// the bottom rather than off it.
+    ///
+    /// Draws nothing when `of` is zero or when everything already fits: a full
+    /// bar is a column spent saying there is nothing to scroll. [`scrollable`]
+    /// is the same question asked before the column is taken away.
+    fn scrollbar(&mut self, area: Rect, at: u64, span: u64, of: u64) {
+        let rows = u64::from(area.height);
+        if rows == 0 || !scrollable(span, of) {
+            return;
+        }
+
+        let thumb = ((span * rows) / of).max(1).min(rows);
+        let start = ((at * rows) / of).min(rows - thumb);
+        let x = area.x + area.width - 1;
+
+        for row in 0..rows {
+            let filled = row >= start && row < start + thumb;
+            let (glyph, style) = if filled {
+                (BAR_THUMB, self.theme.bar)
+            } else {
+                (BAR_TRACK, self.theme.bar_track)
+            };
+            self.buf
+                .set_stringn(x, area.y + row as u16, glyph.to_string(), 1, style);
         }
     }
 
