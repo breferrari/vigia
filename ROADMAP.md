@@ -184,7 +184,9 @@ Two existing gates had to change for the same reason, and it is worth knowing be
 
 **And the pane went blank while the header said two files had changed.** [#57](https://github.com/breferrari/vigia/issues/57), reported mid-pass by using the tool: thousands of changed files, scrolled into, then `git reset --hard`. `View::collect` rested the diff's last row at the *top* of the viewport instead of the bottom, so it drew one row over twenty-two blank ones. Pulled into this phase rather than shelved, on [#45](https://github.com/breferrari/vigia/issues/45)'s precedent: found by using it, and a pane that goes blank has stopped being monitor-class.
 
-> [!warning] The gate that should have caught #57 asserted it instead
+> [!WARNING]
+> **The gate that should have caught #57 asserted it instead**
+>
 > `the_bottom_of_the_diff_is_content_rather_than_blank` read
 > `assert_eq!(view.rows.len(), 1)` against a twenty-two row body, under that name
 > and under a comment saying an empty pane is indistinguishable from a broken
@@ -210,7 +212,9 @@ Two existing gates had to change for the same reason, and it is worth knowing be
 
 The fix must not apply to a jump, and two `follow.rs` tests are what said so. Following a file puts it on the top row and so does `G`; backing up to fill a short tail moves it off and makes a reader hunt for what the jump was for. A `Position` cannot tell a scroll from a jump, so `App` carries it.
 
-> [!warning] The issue was filed on a diagnosis that was wrong
+> [!WARNING]
+> **The issue was filed on a diagnosis that was wrong**
+>
 > #59 claimed the rendered area exceeded the window in both dimensions, on four
 > symptoms read off video. A probe disproved the mechanism outright, and **two of
 > the four were mis-cropped frames**: the pane runs to y≈1265 and the crop stopped
@@ -226,7 +230,9 @@ The fix must not apply to a jump, and two `follow.rs` tests are what said so. Fo
 > The rule this leaves: **measure the artifact, not a picture of it.** Four
 > symptoms, one probe, and only one of them survived contact with a number.
 
-> [!note] Phase 3 re-opened for [#65](https://github.com/breferrari/vigia/issues/65) and is closed again
+> [!NOTE]
+> **Phase 3 re-opened for [#65](https://github.com/breferrari/vigia/issues/65) and is closed again**
+>
 > It re-opened the day theming landed. `vigia` drew a file as **+905 -885**, the
 > whole thing deleted and re-added, while `git diff` reported that same file as
 > **unchanged**. Default Windows configuration, `core.autocrlf=true`, in any
@@ -269,21 +275,43 @@ The fix must not apply to a jump, and two `follow.rs` tests are what said so. Fo
 > sweep of all hundred (p50 31.9ms to 40.8ms), which is not a frame any caller
 > performs because I4 already makes the shell read only what it draws.
 
-## Phase 4 — distribution
+## Phase 4 — the artifacts tell the truth
 
 Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
+
+**Filter: does this close a gap between what a published artifact claims and what the binary does?**
 
 | | Task | Issue |
 |---|---|---|
 | ✅ | B4 ruled as layout: the file list is a pinned, scrollable region | [#66](https://github.com/breferrari/vigia/issues/66) |
 | ⬜ | The header's two facts compose into a claim the tool does not make | [#67](https://github.com/breferrari/vigia/issues/67) |
-| ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
-| ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
-| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
+| ⬜ | The mockup lays the glance row in columns; the shell right-packs it | [#77](https://github.com/breferrari/vigia/issues/77) |
+| ⬜ | Every file has an empty sparkline at launch, which is the common case | [#78](https://github.com/breferrari/vigia/issues/78) |
 
-**The first two rows came before the other three, and the order was not preference.** [#66](https://github.com/breferrari/vigia/issues/66) is done; [#67](https://github.com/breferrari/vigia/issues/67) is the one still open. This phase is what gives `assets/preview.svg` an audience: a registry page and a README that people arrive at cold, having seen the picture before they have seen the tool. Both issues were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
+**The first two rows came before the other three, and the order was not preference.** [#66](https://github.com/breferrari/vigia/issues/66) is done; [#67](https://github.com/breferrari/vigia/issues/67) is the one still open. Both issues were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
 
-Both were found by a reader looking at the picture and asking what it promised — [#67](https://github.com/breferrari/vigia/issues/67) from *"what is `watching`, and how do I toggle it?"*, [#66](https://github.com/breferrari/vigia/issues/66) from noticing that `src/engine/watch.rs` is drawn **twice** in the mockup, once in the summary block and once as the diff heading, which a single scrolling stream never does. Neither is visible from inside the code, and neither was reachable by `take-next`'s pre-flight, which compares invariant tokens rather than pictures. That is the same blind spot [#40](https://github.com/breferrari/vigia/issues/40) hit when it found B5 shipped while still marked `(proposed)`.
+> [!NOTE]
+> **This phase was called "distribution" until 2026-08-01, and had stopped being a filter**
+>
+> It ended up holding eight issues of which exactly **one** was distribution.
+> Each of the other seven was filed here on the argument that it must land
+> *before* shipping — which is a statement about **ordering**, not about
+> membership, and the two were quietly treated as the same thing.
+>
+> Principle 1 at the top of this file says a phase name is something you can
+> quote back at a proposal to kill or delay it. "Distribution" cannot reject a
+> sparkline bug, so by its own test the name had stopped working, and a
+> milestone that accepts anything is a milestone `take-next` cannot take from
+> deliberately: step 1 asks for the earliest phase with open work and would have
+> answered "distribution" for a month of work that distributes nothing.
+>
+> Each phase now carries its filter in bold under the heading, so the next
+> mis-file has something to fail against. The split is by **what the work is**,
+> not by what it blocks.
+
+All four are places where something published says more than the code does, and **all four were found by looking at the picture or running the binary, never by reading the source.** [#67](https://github.com/breferrari/vigia/issues/67) came from asking *"what is `watching`, and how do I toggle it?"*; [#66](https://github.com/breferrari/vigia/issues/66) from noticing that `src/engine/watch.rs` is drawn **twice** in `assets/preview.svg`, once in the summary block and once as the diff heading, which one stream never does; [#77](https://github.com/breferrari/vigia/issues/77) and [#78](https://github.com/breferrari/vigia/issues/78) from running the branch that implements #66 and seeing rows that do not line up and sparklines that are not there.
+
+None of them was reachable by `take-next`'s pre-flight, which compares invariant tokens and issue metadata. **A picture is a specification that carries neither**, which is the same blind spot [#40](https://github.com/breferrari/vigia/issues/40) hit when it found B5 shipped while still marked `(proposed)`, and the reason this phase exists as its own thing rather than as polish inside another.
 
 [#66](https://github.com/breferrari/vigia/issues/66) is **B4**, and taking it means re-reading the question. §11.2 asks whether the file list is *navigable* and proposes "one continuous scroll, list as map"; the load-bearing half is whether the list is a **region of the screen** at all, which that proposal settles silently. Its two options have different costs and only one of them is free: a pinned list ordered from `History` costs nothing to rank, and one ordered by diff size needs every changed file's diff, which is [#49](https://github.com/breferrari/vigia/issues/49)'s argument against a repository-wide total arriving in a second place.
 
@@ -294,12 +322,46 @@ The ordering question this row worried about resolved the other way from both op
 **And the read bound was not the problem this row expected.** A pinned row for an undiffed file cannot draw a heat strip, which reads as a reason to leave the region out; the answer is that the region is bounded by its own height, so diffing its six rows is cost following the window, which is I4's shape rather than a breach of it. Under I2a five of those six are a `stat` and a cache hit reading zero bytes.
 
 What it cost, measured on the reference machine against the same gates before and after: the steady-state frame p99 moved from **103.6µs to 246.3µs** scrolling up and from **744.1µs to 860µs** scrolling back, against I9's 16ms, while scrolling down improved slightly (**1.2848ms to 1.2356ms**) because the diff region draws fewer rows. `vigia-core` is untouched, so I4 and I7 are unmoved.
+## Phase 6 — measured, not assumed
+
+Milestone: [Phase 6](https://github.com/breferrari/vigia/milestone/6)
+
+**Filter: can this be decided without a number?** If yes, it belongs somewhere else.
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
+| ⬜ | Every number here comes from a fixture, and the thesis is about a workload | [#72](https://github.com/breferrari/vigia/issues/72) |
+| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
+
+**Separated from Phase 4 because these are blocked on calendar time rather than on engineering time.** [#72](https://github.com/breferrari/vigia/issues/72) needs a real working session beside a real agent, and [#47](https://github.com/breferrari/vigia/issues/47) needs a runner without a six-hour cap. Bundled with the artifact fixes, a phase of one-afternoon changes would sit open behind a day of waiting, and a phase that cannot close stops being a unit of work.
+
+[#50](https://github.com/breferrari/vigia/issues/50) is here rather than anywhere else because it **cannot** be answered from a fixture: §10 says *"confirm against a week of real use"*, and until [#72](https://github.com/breferrari/vigia/issues/72) that week had no issue behind it, which is how #50 sat in a phase for a fortnight being permanently unresolvable.
+
+[#72](https://github.com/breferrari/vigia/issues/72) also pays for itself outside this phase. Four shelf entries — [#19](https://github.com/breferrari/vigia/issues/19), [#16](https://github.com/breferrari/vigia/issues/16), [#48](https://github.com/breferrari/vigia/issues/48), [#73](https://github.com/breferrari/vigia/issues/73) — are deferred on judgements about how many files are really dirty at once and how often. One session converts all four from judgement into evidence, and [#76](https://github.com/breferrari/vigia/issues/76) is the check that would notice when it does.
+
+## Phase 7 — distribution
+
+Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
+
+**Filter: does this put the binary in someone else's hands?**
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
+
+**Last on purpose, and the ordering argument survives the re-housing intact.** Every claim in Phase 4 and every unmeasured budget in Phase 6 is survivable while the only reader is the author, and becomes a support burden the moment this phase hands them an audience — a registry page and a README that people arrive at cold, having seen the picture before they have seen the tool.
+
+That is a *sequencing* claim, which is what this paragraph is for. It is not a reason for that work to live in this milestone, which is the mistake the note under Phase 4 records.
+
 
 ## Phase 5 — deferred findings
 
 Milestone: [Phase 5](https://github.com/breferrari/vigia/milestone/5)
 
 Everything on the deferral shelf below has a milestone here, so shelved work is still reachable by a milestone-filtered query rather than only readable in prose. The shelf carries the *reason*; this table carries the *state*.
+
+**This one sits last in the file although it is numbered fifth, and that is deliberate.** It is not a phase in the sequence — it is a shelf, permanently open, never "next". The sections above run 4 → 6 → 7 in the order they are meant to be taken, and putting a shelf between two of them would read as a step. The number is kept because [#19](https://github.com/breferrari/vigia/issues/19), [#34](https://github.com/breferrari/vigia/issues/34), [#51](https://github.com/breferrari/vigia/issues/51) and a dozen shelf entries cite "Phase 5" by name, and renumbering to tidy the file would silently repoint every one of them — the same argument §11.2 gives for leaving a ruled item's number behind.
 
 | | Task | Issue |
 |---|---|---|
@@ -319,6 +381,14 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The row wash drops a column under every wide glyph | [#63](https://github.com/breferrari/vigia/issues/63) |
 | ⬜ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
 | ⬜ | An LFS-tracked text file diffs its pointer against its content | [#69](https://github.com/breferrari/vigia/issues/69) |
+| ⬜ | The settle margin's cost is bounded structurally and unbounded temporally | [#73](https://github.com/breferrari/vigia/issues/73) |
+| ⬜ | The `gix` status surface is load-bearing on every budget with no seam | [#74](https://github.com/breferrari/vigia/issues/74) |
+| ⬜ | A push to `main` was cancelled where the concurrency guard says it cannot be | [#75](https://github.com/breferrari/vigia/issues/75) |
+| ⬜ | `take-next`: a deferral reason is a dated claim and nothing re-reads one | [#76](https://github.com/breferrari/vigia/issues/76) |
+| ⬜ | The wheel ignores the pointer, and the thumb it draws cannot be grabbed | [#79](https://github.com/breferrari/vigia/issues/79) |
+| ⬜ | The hint bar names a key twice and never names the arrows | [#80](https://github.com/breferrari/vigia/issues/80) |
+| ⬜ | A washed row may be reaching the scrollbar column, or the terminal is | [#81](https://github.com/breferrari/vigia/issues/81) |
+| ⬜ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 
 ---
@@ -344,6 +414,12 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | A file the attributes declare binary is diffed as text ([#68](https://github.com/breferrari/vigia/issues/68)) | #65, 2026-08-01 | Phase 5 | Out of scope for #65 because it is a **different attribute doing a different thing**: that issue normalises bytes, this one suppresses a diff. `hunk::compute` decides binary by sniffing content for NUL bytes, which is git's *fallback* and not its rule, so a path marked `binary` (shorthand for `-diff -merge -text`) is diffed as text anyway, and the reverse direction fails too: `diff` set positively on content that sniffs as binary is refused. Cheap when taken, and cheaper than it was: `filter.rs` now holds a primed `gix::worktree::Stack`, so the attribute is one lookup away on a structure that already exists. `SPEC.md` §11.1 says nothing about what decides binary, so this wants a spec line before an implementation |
 | An LFS-tracked text file diffs its pointer against its content ([#69](https://github.com/breferrari/vigia/issues/69)) | #65, 2026-08-01 | Phase 5 | **Not a defect discovered but a consequence recorded**, and not a regression: it is what happened before any filter ran. #65 declines to run external clean drivers, because `filter.lfs.clean` is a command and running it would mean a process per file per frame, which is the shape `SPEC.md` §6 rules out when it takes an in-process diff. So under LFS the worktree holds content while the blob holds a pointer. Mostly invisible, since most LFS payloads sniff as binary first; the case that shows is an LFS-tracked *text* file. Filed rather than left implicit because a ruling with a cost nobody wrote down is a ruling the next session re-litigates, and because the cheapest fix (report undiffable when a driver we do not run is named) is the same attribute lookup [#68](https://github.com/breferrari/vigia/issues/68) needs |
 | I7 is measured without the highlighter ([#51](https://github.com/breferrari/vigia/issues/51)) | #45, 2026-07-31 | Phase 5 | The same blind spot as #45's, one invariant over: I7's 20.37ms comes from `crates/vigia-core/examples/timings.rs`, which is core-only and builds no `Highlighter`, while the shipped first paint parses whatever the first screenful shows. Measured at **97.85ms** on Rust and **373.94ms** on wide Markdown against a 50ms budget, once per process rather than per file. Out of scope for #45 because it is a different invariant and because it cannot be the reported symptom: a once-per-process cost is not a repeated stutter, and #45's gates warm past it exactly as §7 says a steady-state gate should. The fix is a design question rather than an implementation detail, since the honest options include drawing the first frame unhighlighted, which needs a wake I1 forbids inventing a timer for |
+| The settle margin's cost is unbudgeted ([#73](https://github.com/breferrari/vigia/issues/73)) | Craft review, 2026-07-31 | Phase 5 | Not a rediscovery of [#32](https://github.com/breferrari/vigia/issues/32), which settled the margin's **soundness** and added the gate that drives frames without ever letting the fixture settle. That gate bounds the cost by the **viewport** and holds. What has no bound is the *volume*: inside the margin a drawn file whose fingerprint falls in the window is re-diffed by design, so recompute scales with how many drawn files are hot at once, and under continuous agent writes the hot set is permanently inside it. I9's 16ms does not close it either, because the in-margin hot set is whatever `budgets.rs` happens to produce — §7's pattern one level out, a gate whose **input size** is incidental rather than one that measures too early. Deferred rather than fixed because the third candidate answer is "leave it, the real hot set is small", and that needs [#72](https://github.com/breferrari/vigia/issues/72)'s number. Ranking it now would be the judgement-instead-of-evidence this shelf already carries too much of |
+| Five findings from using the pinned list ([#77](https://github.com/breferrari/vigia/issues/77), [#78](https://github.com/breferrari/vigia/issues/78), [#79](https://github.com/breferrari/vigia/issues/79), [#80](https://github.com/breferrari/vigia/issues/80), [#81](https://github.com/breferrari/vigia/issues/81)) | [#71](https://github.com/breferrari/vigia/pull/71) in draft, 2026-08-01 | #77 and #78 to Phase 4, the rest to Phase 5 | Reported by running the branch rather than by reading it, which is the fourth time that has been the finding method here after [#30](https://github.com/breferrari/vigia/issues/30), [#45](https://github.com/breferrari/vigia/issues/45) and [#57](https://github.com/breferrari/vigia/issues/57). Deferred out of [#71](https://github.com/breferrari/vigia/pull/71) deliberately: that PR delivers the region [#66](https://github.com/breferrari/vigia/issues/66) asked for and these are what the region turns out to need next, so folding them in would grow a draft that already works. Two are claims problems and sit with [#66](https://github.com/breferrari/vigia/issues/66)'s siblings in Phase 4 — the row is right-packed where `assets/preview.svg` is columnar, so no two rows align and the small-multiples reading the list exists for is gone; and every file carries an **empty** sparkline at launch, because I10's store is fed from the watch and a worktree that was already dirty has no ticks behind it. Three are interaction: the wheel ignores the pointer now that there are two regions, the drawn thumb cannot be grabbed, and the hint bar spends columns on `jk`/`JK` while never naming the arrows it binds |
+| `take-next` picks a phase by an undefined sort ([#83](https://github.com/breferrari/vigia/issues/83)) | The Phase 4 re-housing, 2026-08-01 | Phase 5 | Step 1 sorts milestones by `due_on` and **every milestone here has none**, so the order is whatever the API returns. It gave the right answer by luck while there were two open milestones and the lower number was the one to take. Splitting Phase 4 ended that: number order and execution order have come apart, and the one milestone that must never be selected — this shelf, twenty-two open — now sits numerically between two that must. The failure is silent and it is in the **first** command of the pass, so the plan, the branch, the PR and the audit all proceed correctly against the wrong task and nothing re-checks the choice. Deferred rather than fixed on the same grounds as [#36](https://github.com/breferrari/vigia/issues/36) and [#75](https://github.com/breferrari/vigia/issues/75): the cheap fix is due dates, which is what the query already assumes, and the better one is to sort on the phase number in the title and exclude the shelf by a stated rule — a choice worth making deliberately rather than in passing |
+| A `main` run was cancelled at queue time ([#75](https://github.com/breferrari/vigia/issues/75)) | #65's merge, 2026-08-01 | Phase 5 | `ci.yml` sets `cancel-in-progress` false on `main` and says why in a comment — *"a commit nobody verified lands looking like it was"* — and the run for `5c8af44` was cancelled before a single job started. Nothing was actually unverified: [#70](https://github.com/breferrari/vigia/pull/70)'s seven checks were green on its head, the only tree difference is docs and workflow config already green on their own pushes, and two later commits on a linear `main` carry the same content through a full matrix. **The content is fine and the guarantee is not**, which is why it is filed rather than closed. Cause undetermined and deliberately not guessed at: zero jobs ran, so there is no job-level evidence separating a manual cancellation from the guard failing to do what its comment claims. [#36](https://github.com/breferrari/vigia/issues/36)'s rule applies unchanged — one occurrence is not a number, so this needs a rate before a fix, and a guard rewritten against the wrong cause still does not hold while looking like it does |
+| A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | The shelf itself, 2026-08-01 | Phase 5 | Second instance, so it is a pattern rather than an incident. [#19](https://github.com/breferrari/vigia/issues/19)'s reason named a precondition Phase 2 then met, and it sat expired for a whole phase until a session happened to read the shelf — the section above this table exists because of it. The next three are already queued: [#73](https://github.com/breferrari/vigia/issues/73), [#16](https://github.com/breferrari/vigia/issues/16) and [#48](https://github.com/breferrari/vigia/issues/48) are all deferred on likelihood judgements that [#72](https://github.com/breferrari/vigia/issues/72) converts into evidence in one go, and nothing will notice when it does. Invisible to all five pre-flight comparisons for exactly [#34](https://github.com/breferrari/vigia/issues/34)'s reason, one file over: a `Why` cell is prose carrying no `I<n>` and no state glyph. Deferred rather than taken because a sixth comparison that nags devalues the five that work, and the honest version is narrow — surface entries whose reason **names something since closed**, and let a human read them |
+| No seam between this crate and `gix` ([#74](https://github.com/breferrari/vigia/issues/74)) | Craft review, 2026-07-31 | Phase 5 | The status walk, rename tracking, the attributes stack and the filter machinery are consumed directly and widely, so §3's budgets are a **transitive** property of a pre-1.0 dependency's implementation. Two §10 bullets are already `gix`'s walk shape rather than a choice made here, and [#65](https://github.com/breferrari/vigia/issues/65) closed correctly by reaching further in, which widened the surface again. Explicitly **not** an abstraction over version control — git is the thesis and a trait with one implementor is ceremony — but one module that owns the calls and states what is depended on in each, the shape `filter.rs` already has for the clean-filter half. Deferred because it is a refactor with no user-visible effect and this project does not take those on appetite; it earns its place when a `gix` bump costs a debugging session, when a red budget gate cannot localise, or when [#48](https://github.com/breferrari/vigia/issues/48) changes what is asked of `gix` and the seam is on the path anyway |
 
 ### A shelf entry whose reason has expired: [#19](https://github.com/breferrari/vigia/issues/19)
 

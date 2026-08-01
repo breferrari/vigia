@@ -9,6 +9,39 @@ Take **one** task from `ROADMAP.md` and carry it to done. Not part of a task, no
 
 This is a reconstruction. The original lived in a global skills directory, was never version controlled, and was lost in a machine migration. It lives in the repo now for that reason. Do not move it out.
 
+> [!IMPORTANT]
+> **Run this to the end. After the plan is approved, do not stop to ask.**
+>
+> This skill is invoked and then left alone, frequently overnight. **A step that
+> can only complete by asking a question does not complete** — it halts, and the
+> answer arrives hours later with all the expensive work already done and
+> nothing merged. That has happened: a pass finished 372 green tests, a clean
+> plan diff, 17 killed mutants and before/after budgets, then stopped at the
+> audit to ask permission for something this file already mandates.
+>
+> The line is **what** versus **how**. What gets built is settled at step 3 and
+> the plan is where a question belongs, because it is free there. Everything
+> after it is execution, and execution questions have answers in this file:
+>
+> - **The instruments are pre-authorized.** Invoking this skill *is* the request
+>   to run them, including the parallel review agents `/simplify` and `/harden`
+>   spawn. A standing "do not spawn agents unless asked" is satisfied by the
+>   invocation; it is not a second gate to clear at step 6. See that step.
+> - **Where a choice is documented, take the documented one** and say so in the
+>   report. Do not offer it as a menu.
+> - **Where a choice is genuinely open and nobody is there, take the more
+>   conservative branch, finish the pass, and put the question in the report.**
+>   A finished pass with a flagged decision beats an unfinished one with a
+>   pending question, because the flag survives and the prompt does not.
+>
+> Three things still stop the pass, and they are all *what*-shaped: a finding
+> that contradicts `SPEC.md` (step 4 says stop and decide which is wrong),
+> discovering the task is really two tasks, and anything destructive or
+> irreversible outside this branch. Those are worth waiting for. Nothing else is.
+>
+> **"Ship it as is" is never one of the options.** It is the self-authored
+> triage step 6 refuses, wearing a question mark.
+
 ## 1. Find your place
 
 Do not guess and do not scroll the code looking for where things stopped. One command finds the work:
@@ -58,7 +91,9 @@ git show origin/main:SPEC.md \
   | grep -inE 'do (this|that|it) (before|first)|(before|after) the [a-z]+ (test|soak|work|pass)|must (happen|land|come|ship|be done)|blocked (by|on|until)|prerequisite|revisit (together|with)|stand or fall together|confirm against|until [^ ]+ (lands|ships|merges|closes)'
 ```
 
-> [!note] Why that pattern is phrase-shaped and not a word list
+> [!NOTE]
+> **Why that pattern is phrase-shaped and not a word list**
+>
 > The obvious version greps bare `before|first|until`, and on this spec it is
 > **80% false positives**: §10 is full of "first paint", "the first frame that
 > draws deep", "the lines before it". A check that nags four times for every
@@ -77,7 +112,9 @@ Then five comparisons. Any hit is a finding to fix **in this pass**, not a note:
 4. **Unfiled** — an *open* issue with **no milestone**. This looks least like drift and matters most: the query above filters *by* milestone, so an unmilestoned issue is not deprioritised, it is **invisible** and will never be returned however long it sits. Seven had accumulated before anyone noticed.
 5. **Untracked prerequisite** — an open `SPEC.md` §10 bullet that **no issue names**, and above all one whose text orders work: *before*, *first*, *until*, *blocked*, *prerequisite*. Unlike the four above this wants judgement rather than a token match, so read the five to ten bullets the commands print and say which have nothing behind them. **A §10 bullet that says another task must happen first is a blocker with no tracker entry, and the task it blocks will be taken anyway** — every check above will run clean, because prose carries no `I<n>` and no `#<n>`. That is strictly worse than the unfiled case: an unmilestoned issue is at least *in* the tracker. §10 said *"narrow the settle margin… do this before the soak test"* and nothing tracked it, so [#5](https://github.com/breferrari/vigia/issues/5) sat blocked by name for **two phases** and was only caught by a session happening to read §10 while loading context. File the blocker, then decide whether it is in scope for this pass or a prerequisite to take first — but decide it before planning, not after.
 
-> [!warning] Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree
+> [!WARNING]
+> **Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree**
+>
 > The first run of this check read the checkout, which had a feature branch
 > active, and compared branch state against the live tracker. It reported the
 > roadmap as ahead of an issue when on `main` the two agreed — and **#2 was closed
@@ -215,7 +252,26 @@ Three shapes to look for, because these are the three that actually shipped once
 
 Any deviation lacking a justification **written when it was taken** is a defect, and it gets fixed in this pass. Not noted in the PR, not filed as a follow-up, not explained in the report. Correcting it is the requirement; reporting it is not a substitute. A reason invented now, for a choice made an hour ago, is rationalisation — and this skill does not accept self-authored triage anywhere else either.
 
-Then polish, and let the **diff** pick the instrument rather than your appetite:
+Then polish, and let the **diff** pick the instrument rather than your appetite.
+
+> [!IMPORTANT]
+> **Both instruments spawn parallel review agents, and this step authorizes them.**
+>
+> `/simplify` runs four — reuse, simplification, efficiency, altitude. `/harden`
+> runs three per round — adversarial, correctness, docs — and repeats until a
+> whole round finds nothing new. That fan-out is the instrument, not an
+> optimisation of it: the skill's own reason is that a solo reviewer
+> tunnel-visions and disjoint remits do not.
+>
+> So a standing "do not spawn agents unless asked" **has been satisfied** — by
+> the invocation that started this pass. Do not stop here to ask for it a second
+> time. A session that halts at this step has paid for the whole diff, the plan
+> fidelity check and the mutation run, and banked none of it.
+>
+> If the environment refuses the spawn outright rather than asking, that is a
+> different thing and it is reportable: run the audit single-threaded, say in
+> the report that it ran without fan-out, and name what that costs. Degrading
+> loudly is fine. Stopping is not.
 
 - **Under ~200 lines across ≤3 files** — `/simplify` alone. A full audit workflow on a small diff is theatre. (`/harden` states this floor itself and will decline; the number lives there, so if the two ever disagree, harden wins.)
 - **Anything larger, or anything the rest of the system stands on** — `/harden` **until dry**. It runs `/simplify` as one of its own phases, so do not run one first and then the other. It also carries its own plan-fidelity phase: tell it the diff above was already done, so it records the result instead of repeating it.
@@ -235,7 +291,9 @@ Everything until now happened inside a draft, where pushes are free. **Marking r
 
 So do not mark ready to "see what CI says". Mark it ready when the work is finished, the suite is green locally, and step 6's plan diff is clean. Everything else belongs in the draft.
 
-> [!warning] A draft shows **no checks**, and no checks is not green
+> [!WARNING]
+> **A draft shows no checks, and no checks is not green**
+>
 > The jobs are skipped, so the PR page shows an empty check list rather than a
 > passing one. That is the exact shape `SPEC.md` §7 keeps finding — a gate that
 > proves nothing while looking settled — and here it is on the review surface
@@ -308,6 +366,8 @@ What was taken, what shipped, the numbers, what moved on the roadmap, and what t
 
 Name the **review outcome** too: whether Copilot commented, how many, and what happened to each. A review whose result nobody states is one nobody can tell you skipped — the same reason step 6's plan diff has to be said out loud.
 
+And list **every decision taken without asking**, under its own heading, with the branch chosen and the one not taken. That is where the questions this pass did not stop for go, and it is the half that makes not stopping safe rather than merely faster: an unattended pass that finishes silently has decided things nobody can see. One line each is enough — it is a list to disagree with, not a justification.
+
 Include the **plan-fidelity result** explicitly — "every promise delivered", or the deviations and what was done about them. Silence here reads as clean, and a step whose absence is indistinguishable from success is a step that stops happening.
 
 Say what the record gave you, too: which recorded decisions the work stood on, or that there were none. The same reasoning applies — a consultation nobody reports is a consultation nobody can tell you skipped.
@@ -326,6 +386,10 @@ Say what the record gave you, too: which recorded decisions the work stood on, o
 - Filing a follow-up issue to avoid fixing something in scope
 - Running the full suite on a markdown diff, or skipping it on a manifest diff
 - Reporting green without naming what ran
+- Halting on a question this file already answers, above all at the audit
+- Offering "ship it as is" as an option
+- Asking permission for the review agents, which the invocation already gave
+- Leaving a pass unfinished with a pending prompt instead of finished with a flagged decision
 - Opening the PR ready, or marking it ready to see what CI says
 - Reading a draft's empty check list as a passing one
 - Requesting a Copilot review that automatic review was already sending
