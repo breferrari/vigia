@@ -1650,7 +1650,12 @@ impl Painter<'_> {
     /// is the same question asked before the column is taken away.
     fn scrollbar(&mut self, area: Rect, at: u64, span: u64, of: u64) {
         let rows = u64::from(area.height);
-        if rows == 0 || !scrollable(span, of) {
+        // **Width guarded here as well as by the caller.** `render` only calls
+        // this above `BAR_FLOOR`, so a zero width cannot reach it today, and the
+        // subtraction below would underflow if one ever did. A private method
+        // whose safety rests on a condition checked in another function is a
+        // panic waiting for the day someone adds a third caller.
+        if rows == 0 || area.width == 0 || !scrollable(span, of) {
             return;
         }
 
