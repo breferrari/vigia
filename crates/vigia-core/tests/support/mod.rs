@@ -86,6 +86,19 @@ pub fn exclusively_timed() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// What git reports for one path, with binary distinguishable from unchanged.
+///
+/// See [`Scratch::git_numstat`] for why the third variant exists.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Numstat {
+    /// git reports no difference at all, and printed nothing.
+    Unchanged,
+    /// git considers the path binary and printed `-` for both counts.
+    Binary,
+    /// Lines added and removed.
+    Lines(u32, u32),
+}
+
 /// Every change, sorted by path so assertions do not depend on walk order.
 ///
 /// Named for the sort rather than for the call, because that is the property
@@ -541,22 +554,33 @@ impl Scratch {
         self.git(&["checkout", "--", rela]);
     }
 
-    /// What `git diff --numstat` says about one path: `(added, removed)`.
-    ///
-    /// `None` when git reports the file as unchanged, which is a different
-    /// claim from `Some((0, 0))` and is the answer the normalisation suite is
-    /// written against.
+    /// What `git diff --numstat` says about one path.
     ///
     /// Beside [`Scratch::git_hunk_headers`] because it is the same job: ask git
     /// the question the engine just answered, and compare. `SPEC.md` §10 records
     /// git as the oracle, so the accessors that reach it live together.
-    pub fn git_numstat(&self, rela: &str) -> Option<(u32, u32)> {
+    ///
+    /// Three answers rather than an `Option<(u32, u32)>`, and the third is why.
+    /// git prints `-` for both counts on a path it considers binary, so a parser
+    /// returning `None` for "no output" collapses **binary** and **unchanged**
+    /// onto one value. A test asserting `None` to mean "git sees no change"
+    /// would then keep passing if its fixture ever became binary, which is
+    /// `SPEC.md` §7's "gate that passes for the wrong reason" exactly.
+    pub fn git_numstat(&self, rela: &str) -> Numstat {
         let out = self.git(&["diff", "--numstat", "--", rela]);
-        let line = out.lines().next()?;
+        let Some(line) = out.lines().next() else {
+            return Numstat::Unchanged;
+        };
         let mut fields = line.split('\t');
-        let added = fields.next()?.parse().ok()?;
-        let removed = fields.next()?.parse().ok()?;
-        Some((added, removed))
+        let added = fields.next().expect("numstat added field");
+        let removed = fields.next().expect("numstat removed field");
+        if added == "-" || removed == "-" {
+            return Numstat::Binary;
+        }
+        Numstat::Lines(
+            added.parse().expect("numstat added count"),
+            removed.parse().expect("numstat removed count"),
+        )
     }
 
     /// Hunk headers as real git reports them, for fidelity comparison.

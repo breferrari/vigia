@@ -16,7 +16,8 @@
 
 mod support;
 
-use support::{Scratch, changes_sorted, numbered_lines};
+use support::{Numstat, Scratch, changes_sorted, numbered_lines};
+use vigia_core::Worktree;
 
 /// The reported case: a CRLF worktree file over an LF blob, and no real edit.
 ///
@@ -39,7 +40,7 @@ fn a_crlf_worktree_file_whose_blob_is_lf_diffs_as_no_change() {
 
     assert_eq!(
         scratch.git_numstat("a.txt"),
-        None,
+        Numstat::Unchanged,
         "the fixture is wrong: git has to call this file unchanged, or there is \
          nothing here to disagree with git about"
     );
@@ -91,7 +92,7 @@ fn a_one_line_edit_inside_a_crlf_file_diffs_as_one_line() {
 
     assert_eq!(
         scratch.git_numstat("a.txt"),
-        Some((1, 1)),
+        Numstat::Lines(1, 1),
         "the oracle disagrees with the fixture's own description of itself"
     );
 
@@ -192,6 +193,137 @@ fn the_binary_attribute_turns_normalisation_off() {
         "`binary` implies `-text`, so git converts nothing and every line really \
          does differ; reporting no change here would mean the attributes are \
          being ignored"
+    );
+}
+
+/// A `.gitattributes` written mid-session reaches the very next frame.
+///
+/// **Driven through `Frame::advance`, because that is how the shell runs.** The
+/// same sequence against `Worktree::diff` called twice by hand passes whatever
+/// the filter's lifetime is, since nothing in it marks a frame boundary. A gate
+/// that does not model the caller cannot see this defect, and did not: the
+/// filter was originally built once per process and this test is what found it.
+///
+/// The failure it forbids is specific and silent. `.gitattributes` decides what
+/// a diff normalises, the agent in the other pane writes one, and a monitor
+/// holding its filter for the life of the process goes on drawing the old answer
+/// indefinitely while a restart draws a different one. That is I5 (correct with
+/// zero interaction) failing in a process I3 expects to run for days, and
+/// nothing on screen would say so.
+///
+/// The control is a **restarted** worktree, not a hand-written expectation: what
+/// the running session draws has to equal what a fresh one draws, which is the
+/// property that actually matters and the one a literal number would not pin.
+#[test]
+fn attributes_written_mid_session_reach_the_next_frame() {
+    let scratch = Scratch::crlf_worktree("normalise-restat", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+    scratch.write_crlf(
+        "a.txt",
+        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
+    );
+
+    let diff_of = |worktree: &Worktree| -> (u32, u32) {
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let at = frame
+            .files()
+            .iter()
+            .position(|c| c.path == "a.txt")
+            .expect("a.txt is changed");
+        let (_, diff) = frame.diff(at).expect("diff");
+        (diff.added, diff.removed)
+    };
+
+    let worktree = scratch.worktree();
+    assert_eq!(
+        diff_of(&worktree),
+        (1, 1),
+        "the fixture is wrong: the edit has to normalise to one line before the \
+         attributes change, or there is no stale answer to catch"
+    );
+
+    // The agent in the other pane marks the file binary, so `-text` applies and
+    // the CRLF difference stops being normalised away.
+    scratch.write(".gitattributes", "a.txt binary\n");
+
+    let restarted = diff_of(&scratch.worktree());
+    assert_eq!(
+        restarted,
+        (20, 20),
+        "the control is wrong: a restart has to see the new attributes, or this \
+         test cannot tell a stale filter from a correct one"
+    );
+    assert_eq!(
+        diff_of(&worktree),
+        restarted,
+        "the running session drew +{} −{} where a restart draws +{} −{}, so the \
+         filter is answering from `.gitattributes` that no longer exists",
+        diff_of(&worktree).0,
+        diff_of(&worktree).1,
+        restarted.0,
+        restarted.1
+    );
+}
+
+/// A configured external clean driver is **not** executed.
+///
+/// `SPEC.md` §6 takes an in-process diff over a subprocess per tick, and §11.1
+/// records dropping the drivers as the ruling that follows. An invariant without
+/// a failing test is a wish, so this is the test: the driver here rewrites every
+/// line, and running it would be unmistakable.
+///
+/// Both halves matter. `git` is asked the same question and reports **20 added,
+/// 20 removed**, because git does run the driver; this reports one line, the
+/// eol-normalised answer. So the assertion pins a deliberate **divergence from
+/// the oracle**, which is the only place in this suite that does, and the
+/// divergence is the ruling rather than a defect.
+///
+/// `filter.shout.required = true` is set on purpose: git treats a missing
+/// required driver as an error, and this asserts the diff still succeeds rather
+/// than failing the frame over a program a monitor declines to run. The cost of
+/// the ruling is [#69](https://github.com/breferrari/vigia/issues/69).
+#[test]
+fn an_external_clean_driver_is_never_run() {
+    let scratch = Scratch::crlf_worktree("normalise-driver", None);
+    scratch.write("a.txt", numbered_lines(20));
+    scratch.commit_all("initial");
+    scratch.checkout("a.txt");
+
+    scratch.git(&["config", "filter.shout.clean", "sed s/line/SHOUT/"]);
+    scratch.git(&["config", "filter.shout.required", "true"]);
+    scratch.write(".gitattributes", "a.txt filter=shout\n");
+    scratch.write_crlf(
+        "a.txt",
+        &numbered_lines(20).replace("line 10\n", "CHANGED\n"),
+    );
+
+    assert_eq!(
+        scratch.git_numstat("a.txt"),
+        Numstat::Lines(20, 20),
+        "the fixture is wrong: git has to run the driver and see every line \
+         change, or there is no spawning to decline"
+    );
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let a = changes
+        .iter()
+        .find(|c| c.path == "a.txt")
+        .expect("a.txt is changed");
+    let diff = worktree
+        .diff(a)
+        .expect("a required driver we decline to run must not fail the frame");
+
+    assert_eq!(
+        (diff.added, diff.removed),
+        (1, 1),
+        "reported +{} −{}. 20/20 would mean the driver ran, which is a process \
+         per file per frame and is what §6 forbids",
+        diff.added,
+        diff.removed
     );
 }
 

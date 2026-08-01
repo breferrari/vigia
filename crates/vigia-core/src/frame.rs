@@ -68,7 +68,15 @@ pub struct FrameStats {
     /// Bytes compared by computed diffs.
     ///
     /// A reuse adds nothing here, which is the number I2a is written against:
-    /// bytes read has to follow what changed, not how large the worktree is.
+    /// what a frame costs has to follow what changed, not how large the
+    /// worktree is.
+    ///
+    /// **Compared, not read**, and the two stopped being the same number when
+    /// the working-tree side began going through git's clean filter: a CRLF file
+    /// is read a carriage return per line larger than it is compared. Compared
+    /// is the right one to count, because it is what the diff algorithm walks,
+    /// and it is what makes a CRLF worktree and its LF twin report identical
+    /// costs. See `filter.rs`.
     pub bytes: u64,
     /// `stat` calls made, either to record a fingerprint or to check one.
     ///
@@ -278,6 +286,14 @@ impl<'w> Frame<'w> {
 
         // Nothing above this line touched `self`, which is what makes a failed
         // walk leave the previous frame intact.
+
+        // The clean filter is rebuilt with the next read rather than kept for
+        // the life of the process. `.gitattributes` and `core.autocrlf` decide
+        // what a diff normalises, and the agent in the other pane is free to
+        // write either at any moment; a filter built once would go on answering
+        // from rules that no longer exist. See `Worktree::invalidate_filter`.
+        self.worktree.invalidate_filter();
+
         let mut previous = std::mem::take(&mut self.cached);
         self.cached.reserve(files.len());
         for change in &files {
