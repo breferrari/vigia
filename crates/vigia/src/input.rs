@@ -93,12 +93,13 @@ pub enum Action {
     /// [`TRACK_SCALE`] rather than a file index, because the index needs the file
     /// count and this module does not have one.
     ListTo(u32),
-    /// Put the diff at this fraction of the changed set.
+    /// Put the diff at this fraction of its total height.
     ///
-    /// From dragging or clicking the diff's scrollbar. **A file, once the caller
-    /// resolves it**, not a row: the diff's bar counts files because its total
-    /// row count is the read I4 forbids, so the gesture can only be as precise as
-    /// the readout it is performed on.
+    /// From dragging or clicking the diff's scrollbar. **A row, once the caller
+    /// resolves it**, not a file: I4 was narrowed on 2026-08-01 precisely so the
+    /// diff's total row count could be counted rather than approximated, and a
+    /// gesture performed on a row-exact readout has to land as precisely as the
+    /// readout claims.
     DiffTo(u32),
     /// Draw again with no state change, which is what a resize needs.
     Redraw,
@@ -156,9 +157,13 @@ impl Action {
     /// it mattered.
     pub fn needs_height(self) -> bool {
         match self {
-            Self::Page(_) => true,
+            // A page steps by a screenful, and a drag on the diff's bar maps the
+            // track onto everything *but* the last screenful, so both need to
+            // know how tall one is. `ListTo` does not: the list's travel is its
+            // own row count, which the app already holds.
+            Self::Page(_) | Self::DiffTo(_) => true,
             Self::Scroll(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => false,
-            Self::ListTo(_) | Self::DiffTo(_) => false,
+            Self::ListTo(_) => false,
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
         }
     }

@@ -462,6 +462,11 @@ fn a_list_drag_leaves_the_diff_alone_and_a_diff_drag_does_not() {
     // like any other, so it disengages follow and hands the map back.
     assert!(!Action::ListTo(0).is_manual_scroll());
     assert!(Action::DiffTo(0).is_manual_scroll());
+    // And only one of them needs a height. Both map the track onto travel, but
+    // the list's travel is its own row count, which the app holds, where the
+    // diff's is the total minus a screenful and the screenful is the caller's to
+    // measure. `DiffTo` answered `false` here until 2026-08-02, so `apply`
+    // received a height of zero and the bottom of the track fell off the end.
     assert!(!Action::ListTo(0).needs_height());
-    assert!(!Action::DiffTo(0).needs_height());
+    assert!(Action::DiffTo(0).needs_height());
 }

@@ -401,21 +401,50 @@ impl App {
             // Dragging the list's own bar. The fraction is resolved against the
             // changed-file count here rather than in `input`, which has no frame
             // to ask.
+            // Both bars map the track onto **travel** rather than onto the whole,
+            // which is the arithmetic the thumb is drawn with. Mapping onto the
+            // whole instead leaves the last screenful's worth of track dead: the
+            // pointer reaches the bottom and the view is still short of the end.
             Action::ListTo(at) => {
-                let files = frame.files().len();
-                self.browse(scaled(at, files), frame);
+                let travel = frame.files().len().saturating_sub(self.list_rows.max(1));
+                self.browse(scaled(at, travel), frame);
             }
-            // Dragging the diff's bar, which counts **files**, so this lands on a
-            // file rather than on a row. `is_manual_scroll` already made it
-            // disengage follow and hand the map back, which is what any other
-            // deliberate move of the diff does.
+            // Dragging the diff's bar, which counts **rows**, so this resolves a
+            // row of the whole diff back into the file it falls inside and the
+            // offset within it.
+            //
+            // It counted files until 2026-08-02, from when the bar itself did.
+            // The bar became row-exact and this did not, so a drag had one
+            // landing spot per changed file while the thumb it followed had one
+            // per row: on a worktree of three long files the lower bar moved
+            // under the pointer and the diff jumped to a heading or did not move
+            // at all. Reported from use, which is the fifth time.
+            //
+            // `Frame::height` is the count the bar already drew itself with and
+            // is cached until the next `advance`, so the walk below reads
+            // nothing that this frame has not read already.
             Action::DiffTo(at) => {
-                let files = frame.files().len();
                 self.anchored = false;
-                self.position = Position {
-                    file: scaled(at, files).min(files.saturating_sub(1)),
+                let total = frame.height(crate::view::rows_of)?;
+                let target = scaled(at, total.saturating_sub(height));
+                let mut seen = 0;
+                let files = frame.files().len();
+                let mut position = Position {
+                    file: files.saturating_sub(1),
                     row: 0,
                 };
+                for file in 0..files {
+                    let rows = frame.rows_of(file, crate::view::rows_of)?;
+                    if seen + rows > target {
+                        position = Position {
+                            file,
+                            row: target - seen,
+                        };
+                        break;
+                    }
+                    seen += rows;
+                }
+                self.position = position;
             }
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.

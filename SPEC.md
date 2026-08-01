@@ -474,8 +474,15 @@ The height is a function of **pane geometry, follow state and changed-file count
 | `J`, `Shift-↓` | scroll the file list down one row |
 | `K`, `Shift-↑` | scroll the file list up one row |
 | `f` | engage follow mode, or disengage it |
-| mouse wheel | scroll the diff |
+| mouse wheel | scroll the region under the pointer |
+| drag either scrollbar | move that region |
 | terminal resize | redraw, no state change |
+
+**The wheel reads where the pointer is, and it is the only thing in this shell that does.** A reader hovering the map and turning the wheel means the map. §2 makes `btop` the reference and that is what `btop` does. It is not selection and it is not focus: nothing is remembered between events, so B4's ruling stands.
+
+**A drawn thumb is a published affordance, so both are draggable**, and a press anywhere on a track jumps to it. The scrollbar column is tested before the region containing it, or every drag would read as a wheel.
+
+**A track maps onto travel, not onto the whole.** The list's travel is its file count less its own height; the diff's is its total rows less a screenful. Mapping onto the whole instead leaves the last screenful's worth of track dead, since every fraction past the bound clamps to the same window, and the pointer then reaches the bottom with the view still short of the end. **The diff's drag resolved against the file count until 2026-08-02**, which is what its bar had counted before the narrowing above made the bar row-exact: three long files gave a track dozens of rows tall three landing spots. Reported from use, which is the fifth time a defect on this surface was, and the gates are `dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end` and `dragging_the_list_bar_reaches_the_first_file_and_the_last`. Both check the **middle** of the track as well as its ends, because the clamp makes the ends agree either way.
 
 **Scroll position is `(file, offset within that file)`, never a row index.** A frame that changes something above the viewport therefore does not teleport the view. This is a correctness property, not an implementation detail: with a row index, an agent writing to a file earlier in the list would yank the reader's position on every keystroke it makes.
 
@@ -483,7 +490,7 @@ The height is a function of **pane geometry, follow state and changed-file count
 
 Reachable two ways, and **only one of them is scrolling**. The other is the diff shrinking under a position that was reasonable when it was taken: `git reset --hard`, a branch switch, an agent reverting its own work. That is an ordinary event on the pane this tool exists for and it is exactly when someone looks over, which is why it is here rather than filed as an edge case. [#57](https://github.com/breferrari/vigia/issues/57).
 
-The walk back reads only the files the screen is about to draw, so I4 is untouched. It is deliberately **not** what `G` does: `End` goes to the last *file* from its top, because finding the diff's last row from the start would mean adding up every file's height. Backing off from an end already in hand costs a screenful; finding that end from the beginning costs the diff.
+The walk back reads only the files the screen is about to draw, so I4 is untouched. It is deliberately **not** what `G` does: `End` goes to the last *file* from its top. That was ruled on cost, and **the cost argument expired on 2026-08-01** when I4 was narrowed: adding up every file's height is what `Frame::height` now does once a tick, so a row-exact `End` is affordable in a way it was not when this was written. The behaviour stands on the other reason, which is what it should always have rested on: `g` and `G` are the two ends of the *file list*, the pair the header counts and the pinned region draws, and a `G` that landed mid-file would make the two keys mean different units. Backing off from an end already in hand still costs a screenful.
 
 **Follow mode**, which is I5. `less +F` semantics, and the toggle the README mockup already published: follow is **on at startup**, **any manual scroll disengages it**, and **`f` re-engages it and jumps straight to the newest change** rather than waiting for the next one. The footer shows `follow ▶` while it is engaged.
 

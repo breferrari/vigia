@@ -664,3 +664,74 @@ fn browsing_back_up_returns_the_window_to_the_top() {
         "the window lost rows on the way"
     );
 }
+
+/// Dragging the list's scrollbar to the bottom of its track shows the last file.
+///
+/// The sibling of `scroll.rs`'s diff-drag gate, and the reason both exist: a
+/// track that maps onto the whole changed set instead of onto its travel leaves
+/// its final `LIST_ROWS` worth of track dead, because every fraction past the
+/// bound clamps to the same window.
+///
+/// **The middle of the track is the assertion that can tell those apart**, and
+/// the ends are not. Mapping onto the whole still reaches the last file, since
+/// the clamp catches it; what it does is compress the live part of the track
+/// into the first 85% and pin the rest. So the ends are checked because a
+/// resolution ignoring the fraction entirely would pass a midpoint check alone,
+/// and the midpoint is checked because the ends cannot see the defect.
+#[test]
+fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
+    use vigia::TRACK_SCALE;
+
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-drag", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    // The app learns the region's height from a frame, the way the shell gives
+    // it one, rather than being told out of band.
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    app.apply(Action::ListTo(TRACK_SCALE), &mut frame, 0)
+        .expect("drag to the end");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(
+        view.list_top + view.list.len(),
+        FILES,
+        "the bottom of the track showed files {}..{} of {FILES}",
+        view.list_top,
+        view.list_top + view.list.len()
+    );
+
+    app.apply(Action::ListTo(0), &mut frame, 0)
+        .expect("drag to the start");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(view.list_top, 0, "the top of the track did not show file 0");
+
+    // Halfway down the track is halfway down the travel, not halfway down the
+    // changed set. The two differ by exactly half the region's height, which is
+    // the compression the clamp hides at the ends.
+    app.apply(Action::ListTo(TRACK_SCALE / 2), &mut frame, 0)
+        .expect("drag to the middle");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(
+        view.list_top,
+        (FILES - LIST_ROWS) / 2,
+        "halfway down the track showed files {}..{}",
+        view.list_top,
+        view.list_top + view.list.len()
+    );
+}

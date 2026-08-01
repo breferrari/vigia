@@ -710,3 +710,75 @@ fn a_diff_shorter_than_the_screen_starts_at_the_top() {
         2 * SPAN
     );
 }
+
+/// Dragging the diff's scrollbar lands where the thumb says it will.
+///
+/// **The gesture and the readout have to be the same arithmetic**, and for one
+/// day they were not. The bar was made row-exact when I4 was narrowed on
+/// 2026-08-01, and `Action::DiffTo` went on resolving its fraction against the
+/// *file count*, which is what it had counted before. The two agree only when
+/// every file is one row tall.
+///
+/// The fixture is deliberately few-files-many-rows, which is the shape that
+/// exposes it and the shape a reader actually has: three long files gave the
+/// old code three landing spots for a track dozens of rows tall, so the pointer
+/// moved and the diff either jumped to a heading or did not move at all.
+///
+/// Two claims, because they fail separately. Dragging *within* one file has to
+/// move the diff, which file granularity cannot do at all. And the bottom of
+/// the track has to reach the last screenful, which is the half that stays
+/// broken if the fraction is mapped onto the whole diff instead of onto its
+/// travel.
+#[test]
+fn dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end() {
+    use vigia::TRACK_SCALE;
+
+    const FILES: usize = 3;
+    const HEIGHT: usize = 12;
+
+    let scratch = Scratch::large_diff("diff-drag", FILES, 60);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let total = frame.height(vigia::rows_of).expect("total rows");
+    assert!(
+        total > FILES * HEIGHT,
+        "the fixture is too short to tell a row from a file: {total} rows over {FILES} files"
+    );
+
+    let mut app = App::new();
+    let mut seen = Vec::new();
+    for step in 0..=8u32 {
+        let at = (step * TRACK_SCALE) / 8;
+        app.apply(Action::DiffTo(at), &mut frame, HEIGHT)
+            .expect("drag");
+        seen.push(app.position());
+    }
+
+    // Monotonic and strictly moving: eight drags down a track this long may not
+    // produce eight identical positions, which is exactly what the file-granular
+    // resolution produced for the six steps that fell inside one file.
+    for pair in seen.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        assert!(
+            (b.file, b.row) > (a.file, a.row),
+            "a drag further down the track did not move the diff further down: \
+             {a:?} then {b:?}"
+        );
+    }
+
+    // The whole track is live. The bottom of it is the last screenful, not the
+    // top of the last file and not one screenful short of the end.
+    let end = seen.last().copied().expect("a last position");
+    let mut rows_above = 0;
+    for file in 0..end.file {
+        rows_above += frame.rows_of(file, vigia::rows_of).expect("rows");
+    }
+    assert_eq!(
+        rows_above + end.row,
+        total - HEIGHT,
+        "the bottom of the track landed at {end:?}, which is row {} of {total}",
+        rows_above + end.row
+    );
+}
