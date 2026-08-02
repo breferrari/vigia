@@ -1076,6 +1076,15 @@ fn fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> Option<&str> {
 ///
 /// `unwrap_or` is reachable only for an empty `ladder`, which no caller passes.
 /// It is what makes this total rather than a case anyone has to think about.
+///
+/// **`last` rather than `first` is unpinned by any test, deliberately.** Every
+/// ladder here is prefix-nested — the header's bare name is a prefix of its
+/// clause, and the footer's is one rung — so [`Painter::put_marked`] draws the
+/// same columns either way and no test can tell them apart. The single input
+/// that separates them is a worktree name that draws nothing, where `last`
+/// yields a bare mark and `first` a marked count, and neither is obviously the
+/// better screen. A gate here would pin a coin toss rather than a ruling, so
+/// what is recorded is that the choice is open and why nothing fails.
 fn widest_fitting_or_last<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
     fitting(ladder, room)
         .or_else(|| ladder.last().map(AsRef::as_ref))

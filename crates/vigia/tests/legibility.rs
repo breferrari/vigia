@@ -1101,15 +1101,23 @@ fn the_header_degrades_at_the_widths_the_spec_records() {
     // Every number §11.1 quotes, not a subset of them. Citing the gate for the
     // paragraph while asserting six of its ten numbers is the same false comfort
     // as not citing one at all.
-    const BANDS: [(&str, u16, u16, u16, u16, u16); 2] = [
+    //
+    // **The count's own boundary is here for a reason worth stating.** Every
+    // other number on this list is a *degradation* width, and pinning only those
+    // left the count's appearance movable on the most ordinary screen there is:
+    // two separate one-column mutations made `vigia`, three files, a live watch
+    // lose its count at 26 columns with the entire workspace green. The rung
+    // order was gated, the marking was gated, the styles were gated, and the
+    // width at which the header's own number arrives was gated by nothing.
+    const BANDS: [(&str, u16, u16, u16, u16, u16, u16); 2] = [
         // word; first and last width the name has the row alone; first width the
         // word has it alone; first width a marked fragment rejoins it; first
-        // width both are drawn whole.
-        ("watching", 5, 7, 8, 10, 14),
-        ("not watching", 5, 11, 12, 14, 18),
+        // width both are drawn whole; first width the count joins them.
+        ("watching", 5, 7, 8, 10, 14, 26),
+        ("not watching", 5, 11, 12, 14, 18, 30),
     ];
 
-    for (word, first_alone, name_alone, word_alone, rejoins, both) in BANDS {
+    for (word, first_alone, name_alone, word_alone, rejoins, both, counted) in BANDS {
         let chrome = if word == "watching" { chrome() } else { lost() };
         let view = every_row_kind();
         let name = chrome.worktree.clone();
@@ -1161,6 +1169,23 @@ fn the_header_degrades_at_the_widths_the_spec_records() {
             together.trim(),
             format!("{name} {word}"),
             "at {both} columns both facts should be drawn whole"
+        );
+
+        // The count's own arrival, and the column below it. `every_row_kind`
+        // carries three changed files, so the clause is `{name} · 3 changed`.
+        let clause = format!("{name}{FACT_JOIN}3 changed");
+        let with_count = row(counted);
+        assert_eq!(
+            with_count.trim(),
+            format!("{clause} {word}"),
+            "at {counted} columns the count should have joined the name"
+        );
+        let without = row(counted - 1);
+        assert!(
+            !without.contains(&clause),
+            "at {} columns the count is already drawn, so {counted} is not the \
+             first width that holds it: {without:?}",
+            counted - 1
         );
 
         // And one column below `both` the name is not yet whole, which is what

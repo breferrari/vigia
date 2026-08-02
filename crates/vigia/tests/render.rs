@@ -641,17 +641,14 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         files: 3,
         ..one_file()
     };
-    // **Empty is the easy half and not the reachable one.** The property that
-    // matters is columns, not bytes: a name of one zero-width character is a
-    // non-empty `String` that draws nothing, and every one of these is a legal
-    // directory name on Linux and macOS, so it arrives through `short_name`
-    // rather than only through the public API. Guarding `is_empty()` alone left
-    // the separator dangling for all five.
-    // Three classes, because the guard was wrong twice and each spelling failed
-    // a different one. Empty is caught by `is_empty`; the zero-width names are
-    // not, because they are non-empty `String`s that draw nothing; and the
+    // **Empty is the easy half and not the reachable one.** Four classes,
+    // because the guard was wrong three times and each spelling failed a class
+    // the last one passed. Empty is caught by `is_empty`; the zero-width names
+    // are not, because they are non-empty `String`s that draw nothing; the
     // whitespace names are caught by neither of those, because they *have* width
-    // and still show a reader nothing.
+    // and still show a reader nothing; and the control characters are caught by
+    // none of the three, because they measure a column each and `trim` keeps
+    // them while `ratatui` drops them before they reach a cell.
     let names = [
         ("empty", ""),
         ("zero-width space", "\u{200B}"),
@@ -678,22 +675,37 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
             ..chrome()
         };
 
-        for width in [40u16, 80, 120] {
+        // **Every width, and the separator looked for anywhere on the row.**
+        // Both halves of that were wrong first and both let a mutation through:
+        // asserting only that the row does not *open* with the separator passes
+        // against `3 changed · `, which is the same false promise with the
+        // halves swapped again, and sampling three widths hid that the mutant's
+        // wider clause also dropped the count entirely at 18 to 20 columns.
+        //
+        // Nothing else on this row can supply a `·`: the worktree name draws
+        // nothing by construction here, the count is digits and a word, and the
+        // mode words have no punctuation. So its absence is the whole rule.
+        let mut saw_the_count = 0usize;
+        for width in 1..=120u16 {
             let header = row_text(&screen(width, 8, &view, &nameless), 0);
             assert!(
-                !header.trim_start().starts_with(FACT_JOIN.trim_start()),
-                "at {width} columns a {label} worktree name opens the header \
-                 with a separator that joins nothing to the count: {header:?}"
+                !header.contains(FACT_JOIN.trim()),
+                "at {width} columns a {label} worktree name put a separator on \
+                 the header with nothing for it to join: {header:?}"
             );
-            // And the count still reaches the screen, so the fix is a guard on
-            // the separator rather than on the fact. Dropping the count instead
-            // would pass the assertion above by saying less.
-            assert!(
-                header.contains("3 changed"),
-                "at {width} columns a {label} worktree name took the count with \
-                 it: {header:?}"
-            );
+            if header.contains("3 changed") {
+                saw_the_count += 1;
+            }
         }
+        // And the count still reaches the screen, so the fix is a guard on the
+        // separator rather than on the fact. Dropping the count would satisfy
+        // every assertion above by saying less.
+        assert!(
+            saw_the_count > 90,
+            "a {label} worktree name drew the count at only {saw_the_count} of \
+             120 widths, so the guard is dropping the fact rather than the \
+             separator"
+        );
     }
 }
 
