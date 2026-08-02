@@ -431,8 +431,11 @@ fn the_header_carries_no_changed_line_total() {
     // checking that nothing is nothing.
     let height = backend.buffer().area.height;
     let body: String = (1..height).map(|y| row_text(&backend, y)).collect();
+    // The two halves separately rather than as one joined string: since #77 each
+    // is right-anchored in its own fixed-width column, so how many spaces sit
+    // between them is a property of the pane rather than of the counts.
     assert!(
-        body.contains("+42 -7"),
+        body.contains("+42") && body.contains("-7"),
         "no per-file counter was drawn, so the header's silence proves nothing: \
          {body:?}"
     );
@@ -537,25 +540,25 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
 /// on #77: every list fixture in this file gives every row the same churn, so
 /// right-packing and columns draw identically and the defect is invisible.
 /// `+2 -0` is five columns, `+42 -7` six, `+139 -131` nine.
+/// One list entry carrying every glance element, so the only thing that differs
+/// between two of them is the counts width.
+///
+/// File-level rather than a closure, because more than one gate now needs to
+/// build a window out of these.
+fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
+    FileEntry {
+        path: path.to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((added, removed)),
+        spark: [0, 0, 1, 3, 8, 5, 9, 12],
+        recency: Recency::Cold,
+        heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
+    }
+}
+
 fn ragged_counts() -> View {
-    // Identical spark and heat data on every row, so the *only* thing that
-    // differs between them is the counts width. Under right-packing that is
-    // enough to move every other element; under columns it must move nothing.
-    let row = |path: &str, added: u32, removed: u32| {
-        Row::File(FileEntry {
-            path: path.to_owned(),
-            from: None,
-            kind: 'M',
-            churn: Some((added, removed)),
-            spark: [0, 0, 1, 3, 8, 5, 9, 12],
-            recency: Recency::Cold,
-            heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
-        })
-    };
-    let listed = |path: &str, added: u32, removed: u32| match row(path, added, removed) {
-        Row::File(entry) => entry,
-        _ => unreachable!("row builds a file"),
-    };
+    let row = |path: &str, added: u32, removed: u32| Row::File(listed(path, added, removed));
     View {
         list: vec![
             listed("src/engine/watch.rs", 139, 131),
@@ -799,6 +802,63 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
         before[2],
         after[2]
     );
+}
+
+#[test]
+fn scrolling_the_list_does_not_move_the_columns() {
+    // **Reported from use, and the reason the columns are a property of the pane
+    // rather than of the rows.** The first attempt sized the counts field to the
+    // widest count among the rows the region was about to draw. That holds
+    // *within* a window and moves *between* windows: scroll a list until a file
+    // with `+1500 -1500` enters it and the field widens by six columns, sliding
+    // every heat strip and sparkline on every row. Intermittent, and therefore
+    // worse than a layout that was simply wrong.
+    //
+    // Two windows over the same list, one containing a file whose counts are
+    // four columns wider than anything in the other.
+    let mut view = ragged_counts();
+    view.list = vec![
+        listed("src/small.rs", 1, 1),
+        listed("src/also-small.rs", 2, 0),
+        listed("src/huge.rs", 1500, 1500),
+    ];
+    view.files = 3;
+
+    let narrow = View {
+        list: view.list[..2].to_vec(),
+        ..view.clone()
+    };
+    let wide = View {
+        list: view.list[1..].to_vec(),
+        list_top: 1,
+        ..view.clone()
+    };
+
+    // Non-vacuity: the two windows really do disagree about how wide a raw count
+    // is, or this compares two identical screens.
+    assert_ne!(
+        narrow.list.iter().filter_map(|e| e.churn).max(),
+        wide.list.iter().filter_map(|e| e.churn).max(),
+        "both windows hold the same widest count, so neither layout is under \
+         pressure and this proves nothing"
+    );
+
+    let before = glance_columns(&screen(80, 10, &narrow, &chrome()));
+    let after = glance_columns(&screen(80, 10, &wide, &chrome()));
+
+    // Row 1 of each window is a different *file*; what must match is where its
+    // elements sit, which is what `glance_columns` reports.
+    for (row, (a, b)) in before.iter().zip(after.iter()).enumerate() {
+        let (a, b): (String, String) = (
+            a.chars().map(|c| if c == 'n' { '_' } else { c }).collect(),
+            b.chars().map(|c| if c == 'n' { '_' } else { c }).collect(),
+        );
+        assert_eq!(
+            a, b,
+            "row {row}'s glance columns moved when the list scrolled a wider \
+             count into the window"
+        );
+    }
 }
 
 #[test]
@@ -1626,6 +1686,58 @@ fn any_area_renders_including_the_ones_that_fit_nothing() {
         // asked for, or it proved only that nothing was drawn.
         assert_eq!(backend.buffer().area.width, width);
         assert_eq!(backend.buffer().area.height, height);
+    }
+}
+
+#[test]
+fn hostile_content_never_panics_at_any_pane_size() {
+    // The sweep above drags one benign fixture through seven sizes, which is a
+    // real gate and structurally cannot find an arithmetic fault: nothing in
+    // `one_file` is big enough to overflow anything.
+    //
+    // **This one exists because a saturated heat strip panicked at 33x6.**
+    // `heat_at` folded a group of `u16` bucket counts with `sum()`, and the
+    // six-slice rung groups two buckets, so a file busy enough to fill them
+    // overflowed and took the pane down. #77's layout table is what made that
+    // rung the one an ordinary forty-column pane picks, so the fault went from
+    // theoretical to reachable. A monitor that dies on a file is the failure
+    // mode this repo rules out everywhere else.
+    //
+    // Values at the type's limit rather than at a plausible one, because the
+    // point is the arithmetic and not the plausibility.
+    let saturated = FileEntry {
+        path: "src/generated.rs".to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((u32::MAX, u32::MAX)),
+        spark: [u16::MAX; HISTORY_BUCKETS],
+        recency: Recency::Pulse,
+        heat: [HeatBucket {
+            added: u16::MAX,
+            removed: u16::MAX,
+        }; HEAT_BUCKETS],
+    };
+    let view = View {
+        list: vec![saturated.clone(), listed("a.rs", 0, 0)],
+        list_top: 0,
+        current_span: 400,
+        total_rows: 400,
+        rows_above: 0,
+        rows: vec![Row::File(saturated)],
+        files: 2,
+        top: Position::default(),
+        read: 1,
+        peak: u16::MAX,
+    };
+
+    // Every heat and sparkline rung is reached inside this range, which is what
+    // makes the grouping arithmetic exercised at all: the six-slice rung, where
+    // the fault was, is drawn between 31 and 45 columns.
+    for width in 0..=60u16 {
+        for height in 0..=8u16 {
+            let backend = screen(width, height, &view, &chrome());
+            assert_eq!(backend.buffer().area.width, width);
+        }
     }
 }
 

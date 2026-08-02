@@ -930,19 +930,125 @@ fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
     peak != 0 && buckets.iter().any(|&count| count != 0)
 }
 
-/// The widest rung of a numeric ladder that fits in `room`, its gap included.
+/// Columns one half of the counts cell occupies, whatever that half says.
 ///
-/// [`fitting`]'s numeric sibling, and its doc is the argument verbatim: a
-/// predicate written twice is a predicate that can be narrowed once, so a floor
-/// under the room would otherwise be added to the heat strip's search and
-/// silently not the sparkline's. Both ladders end in `0`, so the fallback is
-/// unreachable rather than a silent default.
-fn widest_rung(ladder: &[usize], room: usize) -> usize {
-    ladder
-        .iter()
-        .copied()
-        .find(|&rung| reserved(rung) <= room)
-        .unwrap_or(0)
+/// **A constant, and that is the whole of [#77](https://github.com/breferrari/vigia/issues/77)'s
+/// second half.** Sizing the field to the widest count in the drawn window made
+/// the layout a function of the *contents*, so scrolling a list until a busy
+/// file entered the window widened the field and slid every heat strip and
+/// sparkline on every row. `assets/preview.svg` right-anchors `+N` at one `x`
+/// and `-M` at another no matter what any row says, and a fixed frame is what
+/// makes that possible: the slots are a property of the pane, so nothing a
+/// reader scrolls past can move them.
+///
+/// Two rungs, widest first, because a constant is not the same as a wide one.
+/// Five holds `+9999` and every abbreviation [`churn_of`] falls back to past it;
+/// three holds `+42` and abbreviates sooner. A field wide enough for
+/// `+4294967295` would spend eleven columns a row forever on a number no file
+/// reaches, and a field fixed at five spends 27% of a forty-column pane on two
+/// numbers where `assets/preview.svg` spends about 11% of its own width.
+///
+/// **The counts cell degrades like everything else on the row**, which it has to:
+/// held at five, it starved the sparkline at exactly forty columns, the width I6
+/// is named for and where §5's differentiator matters most.
+const COUNT_RUNGS: [usize; 2] = [5, 3];
+
+/// Every shape a file row's right-hand side may take, widest first.
+///
+/// **Each row gives up exactly one thing against the one above it and gains
+/// nothing**, which is what makes narrowing monotone: widening a pane can never
+/// remove an element. Read down the table for the drop order, which is the
+/// ladder `SPEC.md` §11.1 states: the pulse *label* is the first luxury to go,
+/// then the sparkline's resolution, then the strip's, then the counts' width,
+/// then the sparkline entirely, then the strip, then the pulse mark, and the
+/// counts last, because they are the row's content rather than a signal drawn
+/// beside it.
+const ROW_LAYOUTS: [Columns; 9] = [
+    Columns::new(
+        COUNT_RUNGS[0],
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[0],
+        SPARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_RUNGS[0],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[0],
+        SPARK_RUNGS[0],
+    ),
+    Columns::new(
+        COUNT_RUNGS[0],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[0],
+        SPARK_RUNGS[1],
+    ),
+    Columns::new(
+        COUNT_RUNGS[0],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[1],
+        SPARK_RUNGS[1],
+    ),
+    Columns::new(
+        COUNT_RUNGS[1],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[1],
+        SPARK_RUNGS[1],
+    ),
+    Columns::new(
+        COUNT_RUNGS[1],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[1],
+        SPARK_RUNGS[2],
+    ),
+    Columns::new(
+        COUNT_RUNGS[1],
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[2],
+        SPARK_RUNGS[2],
+    ),
+    Columns::new(
+        COUNT_RUNGS[1],
+        PULSE_RUNGS[2],
+        HEAT_RUNGS[2],
+        SPARK_RUNGS[2],
+    ),
+    Columns::NOTHING,
+];
+
+/// Columns a whole counts cell of `cell`-wide halves occupies, its space included.
+const fn counts_width(cell: usize) -> usize {
+    if cell == 0 { 0 } else { cell * 2 + 1 }
+}
+
+/// One half of a counts cell, right-aligned by its caller into [`COUNT_CELL`].
+///
+/// **Magnitude gives way to a shorter form rather than to more digits**, which
+/// is the rule the status bar's frame and memory cells already follow when they
+/// draw `>1s` and `>9GiB`. A file with more than 9,999 added lines is a
+/// generated one, and whether it was 15,032 or 15,036 tells a reader nothing the
+/// `15k` does not, while the extra column would move the strip beside it.
+///
+/// Total for every `u32` at every rung [`COUNT_RUNGS`] offers, by construction:
+/// the narrowest rung leaves two characters, and `u32::MAX` divided by a billion
+/// is `4`, so `4G` always fits. The loop walks units rather than branching on
+/// magnitude, so adding a rung cannot leave one unit unreachable.
+fn churn_of(sigil: char, lines: u32, cell: usize) -> String {
+    let room = cell.saturating_sub(1);
+    for (unit, per) in [
+        ("", 1u32),
+        ("k", 1_000),
+        ("M", 1_000_000),
+        ("G", 1_000_000_000),
+    ] {
+        let text = format!("{}{unit}", lines / per);
+        if text.chars().count() <= room {
+            return format!("{sigil}{text}");
+        }
+    }
+    // Unreachable for any `u32` at any rung wider than two columns. Drawn rather
+    // than panicked, because a monitor that dies on a number is worse than one
+    // that rounds it.
+    format!("{sigil}9")
 }
 
 /// The two halves of a file row's counts cell, or empty strings when there is no
@@ -958,10 +1064,10 @@ fn widest_rung(ladder: &[usize], room: usize) -> usize {
 /// Lifted out of [`Painter::file_row`] so that the measurement deciding the
 /// columns and the drawing that fills them cannot disagree about what a counts
 /// cell is. They did not before, because there was no measurement.
-fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
+fn counts_of(churn: Option<(u32, u32)>, cell: usize) -> (String, String) {
     churn.map_or_else(
         || (String::new(), String::new()),
-        |(added, removed)| (format!("+{added}"), format!("-{removed}")),
+        |(added, removed)| (churn_of('+', added, cell), churn_of('-', removed, cell)),
     )
 }
 
@@ -976,12 +1082,21 @@ fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
 /// So the ladder runs **once for the region** and every row draws into the slots
 /// it produced, leaving a slot blank rather than letting its neighbours slide.
 ///
-/// **One of these per region, never one per screen.** A single set shared by the
-/// pinned list and the diff stream would let scrolling the *diff* move the
-/// *list's* columns, and the list is the map that has to hold still. `SPEC.md`
-/// §11.1 already rules that the two regions do not align glyph for glyph, and
-/// the two are different widths anyway: the list insets by [`CARET_WIDTH`] and
-/// may have given a column to a scrollbar.
+/// **Decided from the pane and never from the contents**, which is the half a
+/// first attempt got wrong and which only running the tool showed. Sizing the
+/// counts field to the widest count in the drawn window made the layout a
+/// function of the rows, so scrolling a list until a busy file entered it
+/// widened the field by six columns and slid every heat strip and sparkline on
+/// every row. The columns held *within* a window and moved *between* windows,
+/// which is the same defect one axis over and is worse for being intermittent.
+/// `assets/preview.svg` never had it: its positions do not depend on what any
+/// row says. So every slot here is a constant or a rung of the pane's width, and
+/// nothing a reader scrolls past can move anything.
+///
+/// **One of these per region, never one per screen**, because the two regions
+/// are different widths: the list insets by [`CARET_WIDTH`] and may have given a
+/// column to a scrollbar. `SPEC.md` §11.1 already rules that the two do not
+/// align glyph for glyph.
 ///
 /// **The pulse is deliberately not one of these**, and it is named here because
 /// this is the type that says what a column is, so a reader learning the
@@ -990,11 +1105,28 @@ fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
 /// slot taken only by rows that pulse is the right-packing this exists to
 /// remove. [`Painter::file_row`] draws it from the path's room and carries the
 /// mechanics.
+#[derive(Clone, Copy)]
 struct Columns {
-    /// Columns the `+N` half occupies on every row, whatever that row counts.
-    added: usize,
-    /// Columns the `-M` half occupies, right-anchored one space after `added`.
-    removed: usize,
+    /// Columns each half of the counts cell occupies, or zero where the pair
+    /// does not fit at all. The two halves stand or fall together, because `+42`
+    /// with no `-7` beside it reads as a total rather than as half a pair.
+    cell: usize,
+    /// The pulse rung reserved on every row, or empty when none fits.
+    ///
+    /// **A column after all, and the first attempt was wrong twice over.** It was
+    /// dropped from this set for costing fourteen columns at forty, but that was
+    /// a bug in the choosing rather than a fact about the pulse: the rung was
+    /// picked without counting the gap it needs, so the label was taken at widths
+    /// where it left nothing for the strip. Chosen with [`reserved`] it degrades
+    /// to the one-column mark instead, which is exactly what `PULSE_RUNGS` rules
+    /// that it should. Drawn from the path's room instead, it became the *last*
+    /// thing on the row to survive narrowing, where its own doc says it is among
+    /// the first.
+    ///
+    /// Reserved whether or not this row is pulsing, like every other slot here,
+    /// because a pulse lasts one tick and a slot that came and went with it would
+    /// reflow the row on the frame a reader is most likely to be looking at.
+    pulse: &'static str,
     /// Heat buckets drawn on every row.
     heat: usize,
     /// Sparkline buckets drawn on every row.
@@ -1002,81 +1134,64 @@ struct Columns {
 }
 
 impl Columns {
-    /// Walk the rows a region will draw, and decide the slots once.
-    ///
-    /// **A column exists only where some drawn row would fill it**, and that is
-    /// the half a first attempt got wrong: reserving the sparkline's width in a
-    /// region where no file has been written yet spends columns on a signal
-    /// nobody can see, and at forty columns it cost a path
-    /// `crates/vigia-core/src/frame.rs` to leave `…rc/frame.rs` beside a blank
-    /// gap. A column paid for by every row has to be earned by at least one.
-    ///
-    /// The order is unchanged: counts, then heat, then sparkline. What changed is
-    /// that it is decided here instead of re-derived per row, which is what makes
-    /// it a column rather than a cluster.
-    ///
-    /// **Measured over the drawn set, and that is forced rather than chosen.**
-    /// Measuring over every changed file would make the columns stable under
-    /// scrolling, and it needs every file's diff, which puts the frame in
-    /// proportion to the size of the diff and is exactly the I4 breach
-    /// [#49](https://github.com/breferrari/vigia/issues/49) rejected a
-    /// repository-wide `+`/`-` total for. What a region draws it has already
-    /// paid for; what it does not draw it must not read.
-    fn measure<'e>(width: u16, rows: impl Iterator<Item = &'e FileEntry>, peak: u16) -> Self {
-        let (mut any_heat, mut any_spark) = (false, false);
-        let mut columns = Self {
-            added: 0,
-            removed: 0,
-            heat: 0,
-            spark: 0,
-        };
-        for entry in rows {
-            let (added, removed) = counts_of(entry.churn);
-            columns.added = columns.added.max(width_of(&added));
-            columns.removed = columns.removed.max(width_of(&removed));
-            any_heat |= has_heat(&entry.heat);
-            any_spark |= has_spark(&entry.spark, peak);
+    /// A row with no room for anything but its path.
+    const NOTHING: Self = Self::new(0, "", 0, 0);
+
+    const fn new(cell: usize, pulse: &'static str, heat: usize, spark: usize) -> Self {
+        Self {
+            cell,
+            pulse,
+            heat,
+            spark,
         }
-
-        let mut budget = usize::from(width).saturating_sub(ROW_FLOOR);
-
-        // The counts cell outranks every glance element, because it is the row's
-        // content rather than a signal drawn beside it. Its two halves stand or
-        // fall together: `+42` with no `-7` beside it reads as a total rather
-        // than as half a pair.
-        if reserved(columns.counts()) > budget {
-            columns.added = 0;
-            columns.removed = 0;
-        }
-        budget = budget.saturating_sub(reserved(columns.counts()));
-
-        // The heat strip outranks the sparkline for what is left. Both are
-        // glance elements and only one of them is about the diff on screen: the
-        // strip says where in *this* file the change the reader is looking at
-        // sits, and the sparkline says how busy the file was before any of it
-        // was drawn.
-        if any_heat {
-            columns.heat = widest_rung(&HEAT_RUNGS, budget);
-        }
-        budget = budget.saturating_sub(reserved(columns.heat));
-
-        if any_spark {
-            columns.spark = widest_rung(&SPARK_RUNGS, budget);
-        }
-
-        columns
     }
 
-    /// Columns the whole counts cell occupies, its inner space included.
+    /// Run the ladder once for a region `width` columns wide.
     ///
-    /// Zero when neither half is drawn, so [`reserved`] does not buy a gap for
-    /// an element that is not there.
-    const fn counts(&self) -> usize {
-        if self.added == 0 && self.removed == 0 {
-            0
-        } else {
-            self.added + 1 + self.removed
-        }
+    /// **Nothing here reads a row**, and that is the ruling rather than an
+    /// economy: a slot whose width depended on the rows would move whenever the
+    /// rows did, which is what scrolling a list does. The order is unchanged and
+    /// is still counts, then heat, then sparkline; what changed is that it is
+    /// decided once per region from the pane instead of per row from the
+    /// contents.
+    ///
+    /// **Every slot is reserved whether or not anything can fill it**, including
+    /// the sparkline in a region where no file has a history yet, which at launch
+    /// is every file ([#78](https://github.com/breferrari/vigia/issues/78)). It
+    /// costs about nine columns of path until the first write. The alternative
+    /// was tried: reserving only what some drawn row could fill moves every
+    /// column on the tick the first file is written, which is precisely the
+    /// moment a reader is looking at the screen.
+    /// The widest layout that fits a region `width` columns wide.
+    ///
+    /// **One table rather than four searches, and that is what makes it a
+    /// frame.** Allocating element by element in priority order is what the rest
+    /// of this file does, and for a *shared* layout it produces a ladder that
+    /// oscillates: measured across every width, the row lost its sparkline at 37
+    /// columns, got it back at 40 and lost both glance elements at 41, because
+    /// each element took the widest rung it could afford and starved whatever
+    /// came after. Widening a pane must never take something away, and greedy
+    /// allocation over variable rungs cannot promise that.
+    ///
+    /// So the layouts are written out, widest first, and **each step gives up
+    /// exactly one thing and never gains any**. That makes the whole ladder
+    /// monotone by construction rather than by argument, which is the property a
+    /// reader dragging a pane edge actually notices.
+    fn plan(width: u16) -> Self {
+        let budget = usize::from(width).saturating_sub(ROW_FLOOR);
+        ROW_LAYOUTS
+            .iter()
+            .copied()
+            .find(|layout| layout.width() <= budget)
+            .unwrap_or(Self::NOTHING)
+    }
+
+    /// Columns this layout needs, every gap included.
+    fn width(&self) -> usize {
+        reserved(counts_width(self.cell))
+            + reserved(width_of(self.pulse))
+            + reserved(self.heat)
+            + reserved(self.spark)
     }
 }
 
@@ -1166,12 +1281,27 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
         return Vec::new();
     }
 
+    // **Saturating, because a projection must not be able to kill the pane.**
+    // Folding a group of `u16` counts with `sum()` overflows and panics in debug
+    // for a file busy enough to fill them, and a monitor that dies on a file is
+    // the failure `SPEC.md` §11.1 rules out for `core.safecrlf` one paragraph
+    // over. Saturating loses nothing that is drawn: the sum is only ever
+    // compared against the busiest group to pick a band, and a group at
+    // `u16::MAX` is the busiest either way.
+    //
+    // Reachable at ordinary widths rather than in theory. The six-slice rung
+    // groups two buckets, and #77's layout table makes that rung the one a
+    // forty-column pane picks.
     let group = HEAT_BUCKETS / width;
     let summed: Vec<HeatBucket> = buckets
         .chunks(group)
-        .map(|chunk| HeatBucket {
-            added: chunk.iter().map(|b| b.added).sum(),
-            removed: chunk.iter().map(|b| b.removed).sum(),
+        .map(|chunk| {
+            chunk
+                .iter()
+                .fold(HeatBucket::default(), |sum, bucket| HeatBucket {
+                    added: sum.added.saturating_add(bucket.added),
+                    removed: sum.removed.saturating_add(bucket.removed),
+                })
         })
         .collect();
 
@@ -2100,14 +2230,13 @@ impl Painter<'_> {
         // Measured over the rows this region is about to draw, and no further.
         // The list's own window, so scrolling the diff cannot move the map's
         // columns.
-        // Bound once each and used twice, because the property that makes the
-        // columns honest is that they are measured over **exactly** the rows
-        // that get drawn, at **exactly** the width they are drawn into. Spelled
-        // out at both the measuring and the drawing site, that invariant would
-        // be a coincidence of two identical literals twenty lines apart.
+        // From the region's own width, which is the pane less the caret's inset
+        // and less a scrollbar column if one was taken. Bound once and used
+        // twice, so the slots and the rows they are drawn into cannot disagree
+        // about how wide the region is.
         let shown = usize::from(area.height);
         let inner = area.width.saturating_sub(inset);
-        let columns = Columns::measure(inner, view.list.iter().take(shown), view.peak);
+        let columns = Columns::plan(inner);
 
         for (offset, entry) in view.list.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
@@ -2258,17 +2387,12 @@ impl Painter<'_> {
         // own set rather than the list's: a heading scrolling past must not move
         // the pinned region above it, and the two regions are separated by a
         // rule and do not align glyph for glyph anyway.
-        // Bound once and used twice, for `Painter::list`'s reason: measured over
-        // exactly the rows that get drawn, or the columns are honest by accident.
+        // The stream's own width rather than the list's: the two regions are
+        // different widths, and `SPEC.md` §11.1 rules they need not align glyph
+        // for glyph. Neither reads a row, so a heading scrolling past cannot
+        // move the pinned region above it, nor its own neighbours.
         let shown = usize::from(area.height);
-        let columns = Columns::measure(
-            area.width,
-            view.rows.iter().take(shown).filter_map(|row| match row {
-                Row::File(entry) => Some(entry),
-                _ => None,
-            }),
-            view.peak,
-        );
+        let columns = Columns::plan(area.width);
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             match row {
@@ -2347,7 +2471,7 @@ impl Painter<'_> {
         // Both are ordinary rather than exotic, since `spark_of` yields nothing
         // until a file has been written once and `heat_at` yields nothing for a
         // file with no line diff.
-        if columns.counts() > 0 {
+        if columns.cell > 0 {
             // Each half right-anchored in its own sub-column, so the digits
             // change under a reader without moving anything beside them, and an
             // eye running down the additions of three files compares them. Same
@@ -2357,7 +2481,7 @@ impl Painter<'_> {
             // Two statements rather than a loop over the pair: the offset from
             // the right edge coincides with the width for one half and not the
             // other, and a loop asks a reader to work that out.
-            let (added, removed) = counts_of(heading.churn);
+            let (added, removed) = counts_of(heading.churn, columns.cell);
             let end = right.x + right.width;
             let field = |width: usize, from_right: usize| Rect {
                 x: end.saturating_sub(from_right as u16),
@@ -2365,17 +2489,17 @@ impl Painter<'_> {
                 ..right
             };
             self.put_right(
-                field(columns.added, columns.counts()),
+                field(columns.cell, counts_width(columns.cell)),
                 &added,
                 self.theme.chrome_dim,
             );
             self.put_right(
-                field(columns.removed, columns.removed),
+                field(columns.cell, columns.cell),
                 &removed,
                 self.theme.chrome_dim,
             );
         }
-        past(&mut right, columns.counts());
+        past(&mut right, counts_width(columns.cell));
 
         // Drawn right to left, so each block knows where the one outside it
         // ended. The strip drawn is the **tail** of the window: dropping buckets
@@ -2418,28 +2542,21 @@ impl Painter<'_> {
             }
         }
         past(&mut right, columns.heat);
-        // **The pulse is the one glance element that is not a column**, and that
-        // is a ruling rather than an omission. It is per-row and it lasts one
-        // tick, so a slot reserved for it would reflow every row on the tick a
-        // file was written, which is the one moment a reader is looking; and a
-        // slot taken only by rows that pulse is the right-packing this change
-        // exists to remove. `assets/preview.svg` agrees and is the tiebreak: it
-        // draws no pulse on a summary row at all, only on the diff heading.
-        //
-        // So it comes out of the **path's** room instead, which is what
-        // `PULSE_RUNGS` already rules when it says the mark survives narrowing
-        // for the reason `f follow` is the last hint standing. A pulsing row has
-        // a shorter path and every column beside it is where it was.
-        if heading.recency == Recency::Pulse {
-            let pulse = widest_fitting(
-                &PULSE_RUNGS,
-                usize::from(right.width).saturating_sub(ROW_FLOOR),
+        // Into its reserved slot like everything else, so a file starting or
+        // stopping to pulse moves nothing.
+        if heading.recency == Recency::Pulse && !columns.pulse.is_empty() {
+            let width = width_of(columns.pulse) as u16;
+            self.put_right(
+                Rect {
+                    x: right.x + right.width - width,
+                    width,
+                    ..right
+                },
+                columns.pulse,
+                self.theme.pulse,
             );
-            if !pulse.is_empty() {
-                let taken = self.put_right(right, pulse, self.theme.pulse);
-                right.width = right.width.saturating_sub(taken as u16);
-            }
         }
+        past(&mut right, width_of(columns.pulse));
 
         let mut room = usize::from(right.width);
         let letter = format!("{} ", heading.kind);

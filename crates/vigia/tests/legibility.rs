@@ -1114,14 +1114,11 @@ fn the_glance_columns_collapse_in_one_order() {
     // went in.
     const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
         (1, (false, 0, 0)),
-        (19, (false, 0, 4)),
-        (21, (true, 0, 0)),
-        (26, (true, 0, 4)),
-        (28, (true, 6, 0)),
-        (33, (true, 6, 4)),
-        (34, (true, 12, 0)),
-        (39, (true, 12, 4)),
-        (43, (true, 12, 8)),
+        (22, (true, 0, 0)),
+        (31, (true, 6, 0)),
+        (36, (true, 6, 4)),
+        (46, (true, 12, 4)),
+        (50, (true, 12, 8)),
     ];
     let theme = theme();
     let heats = heat_colours(&theme);
@@ -1176,18 +1173,28 @@ fn the_glance_columns_collapse_in_one_order() {
          so it did not cover the whole ladder"
     );
 
-    // **The walk itself, pinned**, because the interesting property is not
-    // monotone and asserting that it were would be asserting something false.
-    // Two things make it ragged and both are the design rather than defects.
-    // The counts cell outranks both glance elements, so the width at which it
-    // arrives *removes* a sparkline that had fitted without it. And the heat
-    // strip's narrowest non-empty rung is six slices where the sparkline's is
-    // four buckets, so there is a band where heat cannot fit and the sparkline
-    // can, which is what "outranks" means here: first refusal on the budget,
-    // not a veto over what is left.
+    // **Monotone, which is the property a reader dragging a pane edge notices.**
+    // Widening must never take an element away. It did before the layouts were
+    // written out as a table: allocating element by element in priority order
+    // lost the sparkline at 37 columns, returned it at 40 and dropped both
+    // glance elements at 41, because each element took the widest rung it could
+    // afford and starved whatever came after it.
     //
-    // Written out rather than counted, so a renderer that reordered the ladder
-    // or shaved a rung has to change this line too.
+    // Asserted as a rule *and* pinned as a walk. The rule is what matters and
+    // the walk is what catches a renderer that stayed monotone while moving a
+    // boundary, which a sequence alone cannot see.
+    for pair in seen.windows(2) {
+        let ((below, (was_counts, was_heat, was_spark)), (above, (counts, heat, spark))) =
+            (pair[0], pair[1]);
+        assert!(
+            (counts || !was_counts) && heat >= was_heat && spark >= was_spark,
+            "widening from {below} to {above} columns took something away: \
+             {:?} became {:?}",
+            pair[0].1,
+            pair[1].1
+        );
+    }
+
     assert_eq!(
         seen.as_slice(),
         ACCEPTED_WALK,

@@ -3,6 +3,6 @@ source: crates/vigia/tests/render.rs
 expression: "screen(40, 4, &view, &chrome())"
 ---
 "vigia · 1 changed               watching"
-"M …/deeply/nested/module/frame.rs +12 -3"
+"M …le/frame.rs                 +12    -3"
 "                                        "
 "q quit · f follow · jk scroll        1/1"
