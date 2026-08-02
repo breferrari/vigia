@@ -42,6 +42,15 @@ use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 /// by construction instead of checking it.
 const CONTINUES: &str = "›";
 
+/// What joins two facts about one subject on a line of chrome.
+///
+/// Restated for [`CONTINUES`]' reason: the renderer keeps this apart from its
+/// hint separator on purpose, so that a change to how hints are joined cannot
+/// silently reshape the header, and a test importing the exported one would undo
+/// that separation. Named rather than inlined because the header now spells it
+/// in several assertions, and a separator change should be one edit.
+const FACT_JOIN: &str = " · ";
+
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -307,14 +316,26 @@ fn the_same_empty_state_at_a_hundred_and_twenty_columns() {
 
 #[test]
 fn the_header_says_which_mode_it_is_in() {
-    // The mockup headers `watching · 3 files` and only the count ever shipped.
+    // The mockup headered `watching · 3 files` and only the count ever shipped,
+    // until #67 split the two across the row and `assets/preview.svg` with them.
     //
     // Both directions in one test, because a word drawn unconditionally is not a
     // mode: it has to say something different when something different is true.
+    //
+    // **Distinctness is the whole of this test's job**, and it is not a subset of
+    // the sweep below. `"not watching"` ends with `" watching"`, so a renderer
+    // drawing the wrong word on a live watch satisfies every `ends_with` in
+    // `the_header_never_lets_the_mode_word_take_the_count_as_its_object`; only
+    // the negative assertion here catches it. What that sweep *does* cover, at
+    // this exact fixture and width, is where the count sits, so it is not
+    // asserted twice here.
     let view = one_file();
 
     let live = row_text(&screen(80, 6, &view, &chrome()), 0);
-    assert!(live.contains("watching · 1 file"), "live header: {live:?}");
+    assert!(
+        live.trim_end().ends_with("watching"),
+        "live header: {live:?}"
+    );
     assert!(!live.contains("not watching"), "live header: {live:?}");
 
     let stopped = Chrome {
@@ -323,7 +344,7 @@ fn the_header_says_which_mode_it_is_in() {
     };
     let lost = row_text(&screen(80, 6, &view, &stopped), 0);
     assert!(
-        lost.contains("not watching · 1 file"),
+        lost.trim_end().ends_with("not watching"),
         "lost header: {lost:?}"
     );
 }
@@ -388,7 +409,10 @@ fn the_header_carries_no_changed_line_total() {
 
     // And the header is populated, so its silence is about the total rather than
     // about the row being empty.
-    assert!(header.contains("watching · 3 files"), "header: {header:?}");
+    assert!(
+        header.contains(&format!("{worktree}{FACT_JOIN}3 changed")),
+        "header: {header:?}"
+    );
 
     for needle in TOTALS {
         assert!(
@@ -400,9 +424,295 @@ fn the_header_carries_no_changed_line_total() {
 }
 
 #[test]
+fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
+    // #67, and the whole of it. The header's two facts are about two different
+    // subjects: the mode word says whether the **watch thread** is live, and the
+    // count says how many files **differ from the index**. Drawn as
+    // `watching · 3 files` they fuse, because English reads a participle
+    // followed by a number as a verb with an object, and the set that names does
+    // not exist: `vigia` watches the whole worktree minus gitignore, and the
+    // count is what changed inside it.
+    //
+    // So the count sits with the worktree, which is the other **tree**-fact on
+    // the line, and the mode word takes the right alone where it can fuse with
+    // nothing.
+    //
+    // Three assertions, because the defect has three spellings and only the
+    // first is the one that shipped. Fusing again on the right is what this
+    // reverts; fusing on the *left* is what a naive fix would produce by putting
+    // the mode word beside the count on the other side; and a count that drifted
+    // away from the worktree would leave it modifying nothing at all.
+    let worktree = chrome().worktree;
+
+    for (mode, word) in [(Mode::Watching, "watching"), (Mode::Lost, "not watching")] {
+        // Hoisted out of the two loops below: neither pattern depends on the
+        // file count or the width, and building them per iteration would be
+        // eighteen allocations apiece for one constant string.
+        let governs = format!("{word}{FACT_JOIN}");
+        let governed = format!("{FACT_JOIN}{word}");
+        let ends_row = format!(" {word}");
+
+        for files in [1usize, 3, 100] {
+            let view = View {
+                files,
+                ..one_file()
+            };
+            // Every width §3 names. Forty is where the ladder is under most
+            // pressure and a hundred and twenty where nothing degrades, so a
+            // renderer that only fused when it was short and a renderer that
+            // only fused when it was roomy are both caught.
+            for width in [40u16, 80, 120] {
+                let header = row_text(&screen(width, 8, &view, &Chrome { mode, ..chrome() }), 0);
+
+                assert!(
+                    !header.contains(&governs),
+                    "at {width} columns with {files} files the mode word is \
+                     followed by a fact it reads as the object of: {header:?}"
+                );
+                assert!(
+                    !header.contains(&governed),
+                    "at {width} columns with {files} files the mode word was \
+                     joined to the fact before it: {header:?}"
+                );
+
+                // The count is drawn, and it is drawn against the worktree name.
+                // Non-vacuity and placement in one: a header that had dropped
+                // the count entirely would pass the two assertions above while
+                // saying nothing.
+                assert!(
+                    header.contains(&format!("{worktree}{FACT_JOIN}{files} changed")),
+                    "at {width} columns the count is not beside the worktree: \
+                     {header:?}"
+                );
+
+                // And the mode word ends the row, with blank before it, which is
+                // what "the right-hand side carries it alone" means where a test
+                // can see it. The leading space is half the assertion rather
+                // than tidiness: `1 changedwatching` would satisfy every check
+                // above and is the one arrangement that fuses harder than the
+                // defect being fixed.
+                assert!(
+                    header.trim_end().ends_with(&ends_row),
+                    "at {width} columns the row does not end in the mode word \
+                     with a gap before it: {header:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
+    // `SPEC.md` §11.1's other half of #67, and it had no gate. The count moved
+    // next to the worktree name because the two are one clause about one
+    // subject; drawing them in two weights would say in colour that they are
+    // separate claims, which is the seam the move exists to remove.
+    //
+    // **This is untestable by omission and that is why it is here.** The
+    // renderer takes one `style` for the whole left rung, so the ruling looks
+    // enforced by the signature — but a signature is not evidence, and the
+    // *which* half is unasserted by everything else on this screen: the
+    // lost-watch gate reads the first `w`, which is the mode word, and every
+    // legibility sweep reads symbols rather than cells. Drawing the left in
+    // `chrome_dim` restores the seam and reddens nothing without this.
+    let view = View {
+        files: 3,
+        ..one_file()
+    };
+    let theme = Theme::default();
+    let clause = format!("{}{FACT_JOIN}3 changed", chrome().worktree);
+
+    // Non-vacuity first. If the two chrome styles were equal, every assertion
+    // below would hold against a renderer that drew the clause in either, and
+    // the test would be checking that a thing equals itself.
+    assert_ne!(
+        theme.chrome.fg, theme.chrome_dim.fg,
+        "the theme draws chrome and chrome_dim alike, so this test cannot tell \
+         which weight the clause got"
+    );
+
+    // **Both modes and three widths**, because reading one screen is how a
+    // style gate passes while the case a reader actually hits is unasserted.
+    // A lost watch paints the right-hand side in `alert`, which is a third
+    // style on this row, so the clause has to hold its own weight against that
+    // too; and the continuation mark on a cut name inherits whatever style the
+    // run that reached the edge carried, which is only exercised where the
+    // clause does not fit.
+    let mut saw_the_clause = 0usize;
+    let mut saw_a_mark = 0usize;
+    for (label, mode) in [("live", Mode::Watching), ("lost", Mode::Lost)] {
+        // Seventeen is the clause's own width, so it is where the left is cut
+        // and the continuation mark inherits a style. Without it the sweep only
+        // ever saw a clause that fitted, and the comment above claimed a case
+        // the widths could not reach.
+        for width in [13u16, 17, 40, 80, 120] {
+            let chrome = Chrome { mode, ..chrome() };
+            let backend = screen(width, 8, &view, &chrome);
+            let header = row_text(&backend, 0);
+
+            // However much of the clause reached the screen. Read off the row
+            // rather than computed from the width, because where the left ends
+            // is what the ladder decided and recomputing it here would be the
+            // renderer's own arithmetic agreeing with itself.
+            // Trailing blanks are trimmed off the match, because the clause and
+            // the background agree on a space: at seventeen columns the row is
+            // `vigia   watching`, and the space after the name belongs to the
+            // gap rather than to the clause the ladder drew.
+            let matched: String = header
+                .chars()
+                .zip(clause.chars())
+                .take_while(|(row, want)| row == want)
+                .map(|(row, _)| row)
+                .collect();
+            let drawn = matched.trim_end();
+            if drawn.is_empty() {
+                continue;
+            }
+            saw_the_clause += 1;
+
+            // All ASCII, so one char is one column. The mark, where the clause
+            // was cut, is included deliberately: it inherits the style of the
+            // run that reached the edge, so it is part of the clause's weight
+            // rather than a separate decision.
+            let cut = header[drawn.len()..].starts_with(CONTINUES);
+            if cut {
+                saw_a_mark += 1;
+            }
+            let cells = drawn.chars().count() + usize::from(cut);
+            for x in 0..cells {
+                let cell = &backend.buffer()[(x as u16, 0)];
+                assert_eq!(
+                    cell.style().fg,
+                    theme.chrome.fg,
+                    "{label} at {width} columns: column {x} of the left clause \
+                     ({:?}) is not the worktree name's weight, so the header \
+                     draws two weights inside one clause",
+                    cell.symbol()
+                );
+            }
+        }
+    }
+    // Eight of the ten screens, because a lost watch at thirteen columns leaves
+    // the left no room at all: `not watching` plus its gap is the whole row.
+    assert!(
+        saw_the_clause >= 8,
+        "only {saw_the_clause} of the ten screens drew part of the clause, so \
+         this gate is weaker than it reads"
+    );
+    assert!(
+        saw_a_mark > 0,
+        "no width cut the clause, so the continuation mark's weight is unasserted"
+    );
+
+    // And the test can tell the two apart: the blank after the clause is the
+    // background style, which is the one a dimmed count would have taken.
+    // Without this the loop above would pass against a renderer that painted the
+    // entire row in `chrome`.
+    let backend = screen(80, 8, &view, &chrome());
+    let gap = &backend.buffer()[(clause.chars().count() as u16 + 1, 0)];
+    assert_eq!(
+        gap.style().fg,
+        theme.chrome_dim.fg,
+        "the column after the clause is not the chrome background, so this test \
+         cannot distinguish the two weights it is asserting between"
+    );
+}
+
+#[test]
+fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
+    // The inversion of #67, and this diff is what made it reachable. ` · `
+    // promises two facts about one subject; with the count on the right, a name
+    // that came back empty drew an empty left-hand side and nothing was joined
+    // to anything. With the count beside it, the same name builds
+    // `" · 3 changed"`: a separator modifying nothing, which is the same false
+    // promise the issue was filed about with the halves swapped.
+    //
+    // `short_name` cannot return an *empty* name on the shipped path, so the
+    // first case here is reachable only through the public `render` with a
+    // hand-built `Chrome`, which is what every test in this file does and what
+    // `Chrome::default()` produces. The other two classes are not so narrow, and
+    // that is the correction rather than a footnote: every name below is a legal
+    // directory name on Linux and macOS, so `short_name` returns them verbatim
+    // and they arrive on the shipped path like any other. **Linux and macOS
+    // rather than all three targets**, which is a narrowing of an earlier claim
+    // here: Windows strips a trailing space, so a name of one space resolves to
+    // the parent, and it refuses a tab outright. The rest are legal everywhere.
+    let view = View {
+        files: 3,
+        ..one_file()
+    };
+    // **Empty is the easy half and not the reachable one.** Four classes,
+    // because the guard was wrong three times and each spelling failed a class
+    // the last one passed. Empty is caught by `is_empty`; the zero-width names
+    // are not, because they are non-empty `String`s that draw nothing; the
+    // whitespace names are caught by neither of those, because they *have* width
+    // and still show a reader nothing; and the control characters are caught by
+    // none of the three, because they measure a column each and `trim` keeps
+    // them while `ratatui` drops them before they reach a cell.
+    let names = [
+        ("empty", ""),
+        ("zero-width space", "\u{200B}"),
+        ("zero-width joiner", "\u{200D}"),
+        ("right-to-left mark", "\u{200F}"),
+        ("combining acute", "\u{0301}"),
+        ("variation selector", "\u{FE0F}"),
+        ("one space", " "),
+        ("no-break space", "\u{00A0}"),
+        ("ideographic space", "\u{3000}"),
+        ("tab", "\t"),
+        ("space then zero-width", " \u{200B}"),
+        // The fourth class, and the one no width measurement can catch: these
+        // report a column each and `trim` keeps them, but `ratatui` drops any
+        // grapheme containing a control before it reaches a cell, so the name
+        // measures nonzero and draws nothing.
+        ("escape", "\u{001B}"),
+        ("bell", "\u{0007}"),
+    ];
+
+    for (label, name) in names {
+        let nameless = Chrome {
+            worktree: name.to_owned(),
+            ..chrome()
+        };
+
+        // **Every width, and the separator looked for anywhere on the row.**
+        // Both halves of that were wrong first and both let a mutation through:
+        // asserting only that the row does not *open* with the separator passes
+        // against `3 changed · `, which is the same false promise with the
+        // halves swapped again, and sampling three widths hid that the mutant's
+        // wider clause also dropped the count entirely at 18 to 20 columns.
+        //
+        // Nothing else on this row can supply a `·`: the worktree name draws
+        // nothing by construction here, the count is digits and a word, and the
+        // mode words have no punctuation. So its absence is the whole rule.
+        let mut saw_the_count = 0usize;
+        for width in 1..=120u16 {
+            let header = row_text(&screen(width, 8, &view, &nameless), 0);
+            assert!(
+                !header.contains(FACT_JOIN.trim()),
+                "at {width} columns a {label} worktree name put a separator on \
+                 the header with nothing for it to join: {header:?}"
+            );
+            if header.contains("3 changed") {
+                saw_the_count += 1;
+            }
+        }
+        // And the count still reaches the screen, so the fix is a guard on the
+        // separator rather than on the fact. Dropping the count would satisfy
+        // every assertion above by saying less.
+        assert!(
+            saw_the_count > 90,
+            "a {label} worktree name drew the count at only {saw_the_count} of \
+             120 widths, so the guard is dropping the fact rather than the \
+             separator"
+        );
+    }
+}
+
+#[test]
 fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     // A state nobody can see at a glance has not been reported. Drawn in the
-    // same dim grey as the count, `not watching` is a word a reader has to go
+    // header's dim grey, `not watching` is a word a reader has to go
     // looking for, and a monitor whose failure looks exactly like its working
     // state has failed twice.
     //
@@ -412,6 +722,19 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     // one-sided check while shouting at a healthy tree forever.
     let view = one_file();
     let theme = Theme::default();
+
+    // Guard the fixture, the way `the_header_carries_no_changed_line_total`
+    // does. The mode word is found by looking for the first `w` on the row, and
+    // since #67 the left of that row carries the worktree name **and** the
+    // count. A name or a count containing a `w` would silently point this at the
+    // wrong cell, and it would fail in the passing direction: the left is drawn
+    // in `chrome`, so a live watch would still look quiet.
+    let left = format!("{}{FACT_JOIN}1 changed", chrome().worktree);
+    assert!(
+        !left.contains('w'),
+        "the fixture's left-hand header {left:?} contains a `w`, so `column_of` \
+         below would read it instead of the mode word"
+    );
 
     let style_of = |chrome: &Chrome| {
         let backend = screen(80, 6, &view, chrome);

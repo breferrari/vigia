@@ -20,7 +20,8 @@
     <circle cx="54" cy="31" r="6" fill="#e3b341"/>
     <circle cx="74" cy="31" r="6" fill="#3fb950"/>
     <text class="m fg" x="102" y="36" font-size="14" font-weight="700">vigia</text>
-    <text class="m dim" x="866" y="36" font-size="13" text-anchor="end">watching &#183; 3 files</text>
+    <text class="m fg" x="152" y="36" font-size="14" font-weight="700">&#183; 3 changed</text>
+    <text class="m dim" x="866" y="36" font-size="13" text-anchor="end">watching</text>
 
     <!-- file rows -->
     <g font-size="13.5">

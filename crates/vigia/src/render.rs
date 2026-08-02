@@ -21,11 +21,14 @@
 //! items breaks, a thing made of characters marks its edge, and content is
 //! neither.**
 //!
-//! The hint bar is the only thing on screen made of items, so it is the only
-//! thing that breaks — onto [`Footer`]'s second line, and then by dropping whole
-//! rungs of [`HINT_RUNGS`]. Everything else is one token and says which end it
-//! lost: [`ELIDED`] on the left for a file path, whose tail names the file, and
-//! [`CONTINUES`] on the right for everything else, content included.
+//! The hint bar is the only thing that breaks by taking a **line** — [`Footer`]'s
+//! second one, and then by dropping whole rungs of [`HINT_RUNGS`]. Two other
+//! things are made of items and break by dropping a rung where they stand: the
+//! header's left, whose changed-file count goes whole before the worktree name
+//! beside it is ever cut, and a sparkline, which drops whole buckets. Everything
+//! else is one token and says which end it lost: [`ELIDED`] on the left for a
+//! file path, whose tail names the file, and [`CONTINUES`] on the right for
+//! everything else, content included.
 
 use std::time::Duration;
 
@@ -367,11 +370,17 @@ const MEMORY_CELL: usize = 6;
 /// What separates two facts drawn beside each other on the status bar.
 ///
 /// Two spaces rather than [`FACT_SEPARATOR`]'s middle dot, and that is a
-/// distinction rather than an inconsistency: `watching · 3 files` joins two
-/// facts about **one** subject, and these are separate readouts that happen to
-/// share a line. The mockup draws the dot; the shipped footer already used two
-/// spaces for `follow ▶  N/M` before this existed, and one status bar with two
-/// join styles on it would be the second dialect §11.1 keeps rejecting.
+/// distinction rather than an inconsistency: the dot joins two facts about
+/// **one** subject, and these are separate readouts that happen to share a line.
+/// The mockup draws the dot; the shipped footer already used two spaces for
+/// `follow ▶  N/M` before this existed, and one status bar with two join styles
+/// on it would be the second dialect §11.1 keeps rejecting.
+///
+/// This cell used to give `watching · 3 files` as its example of one subject,
+/// which was the wrong example for the right rule and is exactly what
+/// [#67](https://github.com/breferrari/vigia/issues/67) found: those were two
+/// subjects joined by a separator that promises one. The rule is unchanged and
+/// the header now draws a pair that keeps it.
 const CELL_GAP: &str = "  ";
 
 /// Shown on the footer while the viewport is moving itself.
@@ -384,10 +393,16 @@ const FOLLOWING: &str = "follow ▶";
 
 /// What joins two facts drawn on one line.
 ///
-/// Twice on screen: the header's mode word and its file count, and the empty
-/// state's "nothing changed" and the branch it did not change on. The mockup's
-/// own character, and the same one the hint bar uses, because two separators
-/// would be two dialects for one idea.
+/// Twice on screen: the header's worktree name and its changed-file count, and
+/// the empty state's "nothing changed" and the branch it did not change on. The
+/// mockup's own character, and the same one the hint bar uses, because two
+/// separators would be two dialects for one idea.
+///
+/// **What it joins has to be two facts about one subject**, which is a
+/// constraint on the caller rather than on this string.
+/// [#67](https://github.com/breferrari/vigia/issues/67) is what happens when it
+/// is not: the header joined a fact about the tree to a fact about `vigia`, and
+/// a separator that promises one subject made English supply one.
 ///
 /// Deliberately **not** [`HINT_SEPARATOR`] itself, which is exported so
 /// `tests/legibility.rs` can split the *hint bar* on it. Sharing the constant
@@ -445,12 +460,42 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The word the header draws.
+    /// The word the header draws, on the right, alone.
     ///
     /// `not watching` rather than `stalled` or `still`: it is the mockup's own
     /// word negated, so a reader who has learned one has learned both. `stalled`
     /// reads as temporary when this is not, and `still` means both "motionless"
     /// and "continuing".
+    ///
+    /// **It outranks everything else wherever it fits at all**, which is why it
+    /// holds the side `Painter::status_line` places first. The changed-file
+    /// count at the other end of the row summarises a body that is on screen and
+    /// can be recovered by counting; whether the pane is still live is
+    /// recoverable from nowhere at all. So the count is what yields when the two
+    /// cannot both fit, and that ordering matters most at exactly the widths
+    /// where the body has nothing in it to count, which is the empty state this
+    /// word exists for.
+    ///
+    /// **It is not the last thing standing on the row**, and the tidier claim was
+    /// written here once and is false. The sides have independent budgets: this
+    /// is all-or-nothing at its own width while the worktree name marks its edge
+    /// at any width above zero, so a live watch draws the name alone from 5 to 7
+    /// columns and this alone at 8 and 9. Widening a pane from 7 to 8 removes the
+    /// name. Unchanged behaviour, recorded because there is no gate for the
+    /// tidier version and could not be. The widths themselves are gated, by
+    /// `tests/legibility.rs::the_header_degrades_at_the_widths_the_spec_records`,
+    /// because a measurement that lives only in prose drifts from what it
+    /// measured and this one already had.
+    ///
+    /// **It is never cut**, which is stricter than the marking rule the rest of
+    /// the header follows: `wat›` is a state a reader cannot read, and unlike a
+    /// path it has no half that identifies it. That is delivered by
+    /// `Painter::put_right`, which drops a token whole rather than truncating
+    /// it, rather than by a ladder of its own. It used to need one, because this
+    /// side carried the count too and had a real choice to make between
+    /// `watching · 3 files` and `watching`; moving the count to the left
+    /// ([#67](https://github.com/breferrari/vigia/issues/67)) left a ladder with
+    /// one rung wrapped around a mechanism that was already doing the work.
     pub fn word(self) -> &'static str {
         match self {
             Self::Watching => "watching",
@@ -677,45 +722,98 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
     rungs
 }
 
-/// `N files`, or nothing at all when there is no diff to count.
+/// `N changed`, or nothing at all when there is no diff to count.
 ///
-/// Zero is nothing rather than `0 files`, the same way [`position_of`] is nothing
-/// when there is no diff to be positioned within. `0 files` spends columns
-/// restating what the empty state below says in words.
+/// Zero is nothing rather than `0 changed`, the same way [`position_of`] is
+/// nothing when there is no diff to be positioned within. `0 changed` spends
+/// columns restating what the empty state below says in words.
+///
+/// **`changed` rather than `files`, and that is the load-bearing half of
+/// [#67](https://github.com/breferrari/vigia/issues/67) rather than a rewording
+/// that came with it.** Beside the mode word this said `3 files`, and
+/// `watching · 3 files` reads as *"watching 3 files"*: a participle with an
+/// object, naming a curated set that does not exist, since this watches the
+/// whole worktree minus gitignore and the number is what changed inside it.
+/// Moving the count next to the worktree name defuses that, but `vigia · 3 files`
+/// would be a **worse** claim than the one it replaced, because the repository
+/// has more than three files in it. `changed` is what makes the count a fact
+/// about the tree rather than a description of it.
+///
+/// One rule where there used to be two: `changed` is a participle with no plural
+/// to inflect, so `1 changed` and `3 changed` need no singular case.
 fn count_of(files: usize) -> String {
-    match files {
-        0 => String::new(),
-        1 => "1 file".to_owned(),
-        n => format!("{n} files"),
+    if files == 0 {
+        String::new()
+    } else {
+        format!("{files} changed")
     }
 }
 
-/// The header's right-hand side, widest rung first.
+/// The header's left-hand side, widest rung first.
 ///
-/// `watching · 3 files`, then the mode word alone, then nothing.
+/// `vigia · 3 changed`, then the worktree name alone.
 ///
-/// **The count goes first and the mode word is the last rung standing**, which is
-/// [`state_rungs`]' rule one line up. The count summarises the body, which is on
-/// screen and can be counted by looking; whether the pane is still live is
-/// recoverable from nowhere else at all. That ordering matters most at exactly
-/// the widths where the body has nothing in it to count, which is the empty state
-/// this word exists for.
+/// **Both rungs are facts about the tree**, which is what puts them on one side.
+/// `SPEC.md` §11.1 lays the footer out by subject — advice, then what the tree is
+/// doing, then what `vigia` itself is doing — and the header has the same three
+/// subjects available. It used to seat a tree-fact next to the self-fact, and
+/// that adjacency is what let English fuse them.
 ///
-/// **The mode word is therefore never cut**, which is stricter than the marking
-/// rule the rest of the header follows: a ladder drops whole rungs, so the word
-/// is drawn entire or not drawn. `wat›` is a state a reader cannot read, and
-/// unlike a path it has no half that identifies it.
+/// **The count is the rung that drops and the name is the token that marks its
+/// edge**, which is §11.1's rule applied inside one clause: a thing made of items
+/// breaks, a thing made of characters marks its edge. The count goes first
+/// because the name is the one header fact a reader cannot recover by looking at
+/// the body, and because B3's empty state leans on it to say which repository
+/// this is.
 ///
-/// Always ends in an empty rung, which is what makes [`widest_fitting`] total.
-fn header_rungs(mode: Mode, files: usize) -> Vec<String> {
-    let word = mode.word();
-    let mut rungs = Vec::with_capacity(3);
+/// Deliberately **does not** end in an empty rung, unlike every other ladder
+/// here, so it needs [`widest_fitting_or_last`] rather than [`widest_fitting`].
+/// Its last rung is a token to be marked, not a rung to be dropped.
+/// **A worktree that draws no name gets the count and no separator**, which is
+/// the same guard [`count_of`] applies to zero and [`empty_state`] applies to a
+/// detached head: a separator is only owed where both facts exist.
+/// `" · 3 changed"` joins a fact to nothing and promises a subject that is not on
+/// the row, which is [#67](https://github.com/breferrari/vigia/issues/67)'s own
+/// failure with the halves swapped.
+///
+/// **The test took four spellings to get right and each was wrong in the same
+/// direction**, which is why the wrong ones are recorded rather than tidied away:
+/// the progression is the lesson, not the answer.
+///
+/// | spelling | what it misses |
+/// |---|---|
+/// | `is_empty()` | names of zero-width characters: a zero-width space, a joiner, a bidi mark, a lone combining accent, a variation selector. Non-empty `String`s that draw nothing |
+/// | `width_of(..) == 0` | names of whitespace, which *have* width and show nothing: a space, a no-break space, an ideographic space, a tab |
+/// | `width_of(trim()) == 0` | names of control characters. `\u{1B}` measures **one** column and `trim` keeps it, but `ratatui` drops every grapheme containing a control before it reaches a cell |
+///
+/// Each class is a legal directory name on Linux and macOS, so each arrives
+/// through `Worktree::short_name` rather than only through the public [`render`].
+///
+/// So the question was never "is this empty", nor "how wide is it", but **will
+/// the layer that draws it keep anything**, and each earlier spelling asked a
+/// question one layer too high. `len` is not width; width is not visibility; and
+/// what unicode-width reports is not what the buffer agrees to write. Two
+/// characters still escape and are left alone deliberately: `U+2800` and
+/// `U+115F` draw a real glyph that happens to be blank, and whether a *font*
+/// inks something is not a question this process can ask.
+fn header_left(worktree: &str, files: usize) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(2);
     let count = count_of(files);
     if !count.is_empty() {
-        rungs.push(format!("{word}{FACT_SEPARATOR}{count}"));
+        // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on
+        // stable. Noted because a reviewer read it as an unstable API: the
+        // `Pattern` *trait* is unstable to implement and its impls have been
+        // stable to use since 1.0, which is a distinction worth one line here
+        // rather than the same question being asked again.
+        let visible = worktree.trim().replace(|c: char| c.is_control(), "");
+        let joined = if width_of(&visible) == 0 {
+            count
+        } else {
+            format!("{worktree}{FACT_SEPARATOR}{count}")
+        };
+        rungs.push(joined);
     }
-    rungs.push(word.to_owned());
-    rungs.push(String::new());
+    rungs.push(worktree.to_owned());
     rungs
 }
 
@@ -934,13 +1032,67 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> Option<[char; HISTOR
 /// The widest rung of `ladder` that fits in `room`.
 ///
 /// Ladders are written widest first, so this is the first that fits. Every
-/// ladder ends in an empty rung, so the fallback is unreachable rather than a
-/// silent default.
+/// ladder *this* takes ends in an empty rung, so the fallback is unreachable
+/// rather than a silent default. [`header_left`] is the one that does not, which
+/// is why it goes through [`widest_fitting_or_last`] instead.
 fn widest_fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
+    fitting(ladder, room).unwrap_or("")
+}
+
+/// The widest rung that fits, or `None` when none does.
+///
+/// The one place this file decides what *fits* means, which is why it exists
+/// rather than the two pickers each carrying the test. They differ only in what
+/// they do when nothing fits, and a predicate written twice is a predicate that
+/// can be narrowed once: a reserved column for the mark, or a floor under the
+/// room, would otherwise be added to one picker and silently not the other.
+fn fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> Option<&str> {
     ladder
         .iter()
         .map(AsRef::as_ref)
         .find(|rung| width_of(rung) <= room)
+}
+
+/// The widest rung of `ladder` that fits, or its **last** rung when none does.
+///
+/// [`widest_fitting`]'s sibling, for a ladder whose final rung is a *token*
+/// rather than nothing, and the pair of them is `SPEC.md` §11.1's two halves:
+/// a thing made of items breaks, a thing made of characters marks its edge. The
+/// name of a function is what tells a reader which of the two a call site is
+/// asking for, which is why these are two names over one predicate rather than
+/// one function with a flag.
+///
+/// **It is reached from two call sites, both through [`Painter::status_line`],
+/// and the doc used to credit one**, which is worth stating because the missing
+/// one is what makes the `or_else` arm look like scaffolding.
+/// The header's left ends in the worktree name, which marks its edge instead of
+/// being dropped, so falling through to the empty string would delete the one
+/// fact on the row a reader cannot recover by looking at the body. **And the
+/// footer's left is a notice**, or the hints rung [`Footer::plan`] already
+/// resolved, passed as a single-rung ladder. For the notice this is the only
+/// thing standing between an over-long one and a blank row; for the hints the
+/// arm is unreachable by construction, because the plan fitted them first.
+/// Delete it as one-caller scaffolding and notices vanish at narrow widths.
+///
+/// So the two are not interchangeable, and the difference is which failure they
+/// produce. Used on a ladder that ends in nothing this returns that empty rung,
+/// which is [`widest_fitting`]'s own answer; used the other way round, a token
+/// too long for its room would vanish rather than be marked.
+///
+/// `unwrap_or` is reachable only for an empty `ladder`, which no caller passes.
+/// It is what makes this total rather than a case anyone has to think about.
+///
+/// **`last` rather than `first` is unpinned by any test, deliberately.** Every
+/// ladder here is prefix-nested — the header's bare name is a prefix of its
+/// clause, and the footer's is one rung — so [`Painter::put_marked`] draws the
+/// same columns either way and no test can tell them apart. The single input
+/// that separates them is a worktree name that draws nothing, where `last`
+/// yields a bare mark and `first` a marked count, and neither is obviously the
+/// better screen. A gate here would pin a coin toss rather than a ruling, so
+/// what is recorded is that the choice is open and why nothing fails.
+fn widest_fitting_or_last<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
+    fitting(ladder, room)
+        .or_else(|| ladder.last().map(AsRef::as_ref))
         .unwrap_or("")
 }
 
@@ -1542,8 +1694,15 @@ impl Painter<'_> {
 
     /// Write `text` so that it ends at the right edge of `area`.
     ///
-    /// Dropped entirely rather than truncated when it does not fit. Half a count
+    /// Dropped entirely rather than truncated when it does not fit. Half a token
     /// on the right of a line is noise; its absence is at least honest.
+    ///
+    /// **The header's mode word rests on this and on nothing else**, which is
+    /// worth saying here because the rule is otherwise located only at the
+    /// caller. `SPEC.md` §11.1 requires that `watching` is drawn whole or not at
+    /// all, since `wat›` is a state nobody can read; it had a ladder of its own
+    /// until [#67](https://github.com/breferrari/vigia/issues/67) left that
+    /// ladder with one rung, and this line is what replaced it.
     fn put_right(&mut self, area: Rect, text: &str, style: Style) -> usize {
         let width = width_of(text);
         if width == 0 || width > usize::from(area.width) {
@@ -1561,18 +1720,53 @@ impl Painter<'_> {
         width + 1
     }
 
-    /// One line of chrome: something on the left, something on the right, and the
+    /// One line of chrome: a ladder on the left, one token on the right, and the
     /// right-hand side wins the space.
     ///
     /// The header and the footer are the same shape, and having them share it is
-    /// not only brevity. The right-hand text is placed first so that a long name
-    /// on the left loses characters to it rather than the other way round: the
-    /// number is what changes, and what changes is what a glance is for. Written
-    /// twice, one of them eventually stops doing that.
-    fn status_line(
+    /// not only brevity. Written twice, one of them eventually stops doing that.
+    ///
+    /// **The right-hand text is placed first, and what that priority rests on
+    /// changed with [#67](https://github.com/breferrari/vigia/issues/67).** It
+    /// used to be that the number is what changes and what changes is what a
+    /// glance is for. The header's number now sits on the *left*, and the reason
+    /// survives the move without depending on it: the right carries the rung the
+    /// row must keep longest, which on the header is the mode word and on the
+    /// footer is the follow state. Both are facts recoverable from nowhere else
+    /// on screen, where a name and a hint bar are not.
+    ///
+    /// `left` is a **ladder** so the left-hand side can drop a whole item before
+    /// the last one is marked, which is what the header needs. The footer passes
+    /// a single rung, and that is not a degenerate case padding out a signature:
+    /// [`widest_fitting_or_last`] on one rung is the identity, which is exactly
+    /// what a notice requires, since a notice is a token to be marked and never
+    /// dropped. The footer *has* a ladder of its own — [`HINT_RUNGS`] — and
+    /// resolves it earlier only because [`Footer::plan`] has to know the height
+    /// before anything is drawn.
+    ///
+    /// **The two sides resolve at different altitudes on purpose.** The left is
+    /// picked here, after [`Painter::put_right`] has reported what it took,
+    /// because how much room the left has is not knowable until then. A right-hand
+    /// budget is known to the caller before the call, so a caller that has a
+    /// choice to make there makes it itself.
+    ///
+    /// One `style` for the whole left rung, which makes `SPEC.md` §11.1's ruling
+    /// that both header facts are drawn in one weight hard to break rather than
+    /// merely written down: a ladder of `(String, Style)` would put that
+    /// violation one line away. It is not *unrepresentable* — two `put_marked`
+    /// calls would still do it — so
+    /// `the_headers_two_tree_facts_are_drawn_in_one_weight` gates which weight
+    /// the clause actually gets, and reddens alone when it is changed.
+    ///
+    /// **Every left ladder gets mark-the-last-rung semantics**, because this
+    /// hard-codes [`widest_fitting_or_last`] rather than letting the caller pick.
+    /// A future left-hand ladder that wants to degrade to nothing has to end in
+    /// an empty rung to say so, the way every ladder resolved by
+    /// [`widest_fitting`] already does.
+    fn status_line<S: AsRef<str>>(
         &mut self,
         area: Rect,
-        left: &str,
+        left: &[S],
         style: Style,
         right: &str,
         right_style: Style,
@@ -1580,27 +1774,35 @@ impl Painter<'_> {
         self.buf.set_style(area, self.theme.chrome_dim);
         let taken = self.put_right(area, right, right_style);
         let room = usize::from(area.width).saturating_sub(taken);
-        self.put_marked(area.x, area.y, left, room, style);
+        let rung = widest_fitting_or_last(left, room);
+        self.put_marked(area.x, area.y, rung, room, style);
     }
 
     fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
-        // The worktree name and nothing else on the left, which is the one place
-        // the layout departs from `assets/preview.svg` on purpose: a title bar
-        // reading `vigia` spends six of forty columns telling the reader which
-        // program they started, and what they cannot tell by looking is which
-        // *tree*. `SPEC.md` §11.1 carries the argument, because §5.1's rule is
-        // that a published artifact answering a question is the answer, so a
-        // deliberate departure from one has to be written down or it reads as
-        // drift.
+        // The worktree name leads the left, which is the one place the layout
+        // departs from `assets/preview.svg` on purpose: a title bar reading
+        // `vigia` spends six of forty columns telling the reader which program
+        // they started, and what they cannot tell by looking is which *tree*.
+        // `SPEC.md` §11.1 carries the argument, because §5.1's rule is that a
+        // published artifact answering a question is the answer, so a deliberate
+        // departure from one has to be written down or it reads as drift.
+        //
+        // **The changed-file count sits with it**, and #67 is why: the two facts
+        // this row used to seat together were about two different subjects, and
+        // `watching · 3 files` fused them into a claim the tool does not make.
+        // The count is a fact about the tree, like the name; the mode word is a
+        // fact about `vigia`, and it now has the other end of the line to itself
+        // where it can fuse with nothing.
         //
         // The header never takes a second line the way the footer does. A name
         // is not a list and has nowhere to break, so a second line could not
-        // guarantee a fit and would spend a body row on a maybe. The right-hand
-        // side breaks instead, by dropping whole rungs.
-        let rungs = header_rungs(chrome.mode, view.files);
-        let right = widest_fitting(&rungs, usize::from(area.width));
-        // **A dead watch has to be visible, not merely present.** Drawn in the
-        // same dim grey as the count, `not watching` is a word a reader has to
+        // guarantee a fit and would spend a body row on a maybe. Both sides
+        // break instead: the left drops a whole rung, and the right drops its
+        // one token whole rather than truncating it, which `put_right` does
+        // without needing a ladder to say so.
+        let right = chrome.mode.word();
+        // **A dead watch has to be visible, not merely present.** Drawn in
+        // the header's dim grey, `not watching` is a word a reader has to
         // go looking for, and a monitor whose failure state looks exactly like
         // its working one has failed twice. `SPEC.md` §5 makes colour half the
         // differentiator, so the abnormal state is loud and the normal one stays
@@ -1614,9 +1816,15 @@ impl Painter<'_> {
             Mode::Watching => self.theme.chrome_dim,
             Mode::Lost => self.theme.alert,
         };
+        // **One style across both facts on the left, and that is a ruling.** The
+        // count used to be drawn in the same dim grey as the mode word it sat
+        // beside, and keeping that here would give one clause two weights: the
+        // reader would be told, in colour, that these are separate claims, which
+        // is the seam #67 exists to remove. They are one clause about one
+        // subject now, so they are drawn as one.
         self.status_line(
             area,
-            &chrome.worktree,
+            &header_left(&chrome.worktree, view.files),
             self.theme.chrome,
             right,
             right_style,
@@ -1667,14 +1875,14 @@ impl Painter<'_> {
             };
             self.status_line(
                 upper,
-                "",
+                &[""],
                 self.theme.chrome_dim,
                 &right,
                 self.theme.chrome_dim,
             );
-            self.status_line(bottom, footer.left, style, "", self.theme.chrome_dim);
+            self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
         } else {
-            self.status_line(bottom, footer.left, style, &right, self.theme.chrome_dim);
+            self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
         }
     }
 

@@ -102,7 +102,21 @@ macro_rules! palette {
 palette! {
     /// The header and footer lines.
     chrome,
-    /// Secondary text on those lines: key hints, counts, the readouts.
+    /// Secondary text on those lines: key hints, the follow marker, the footer's
+    /// `N/M` position, the readouts, and the header's mode word **while the watch
+    /// is live**, since a lost one takes [`Theme::alert`] instead. It is also the
+    /// background a chrome row is painted with before anything is drawn on it.
+    ///
+    /// **Not the header's changed-file count**, which took the worktree name's
+    /// [`Theme::chrome`] when it moved beside it
+    /// ([#67](https://github.com/breferrari/vigia/issues/67)), because two
+    /// weights inside one clause would draw the seam that move removed.
+    ///
+    /// The list is meant to be exhaustive for a line of chrome, which is what
+    /// makes the exclusion worth stating: a class with a named exception has to
+    /// name its members too, or the exception is the only thing anyone can
+    /// check. It was not exhaustive when it first named one, and the follow
+    /// marker is what it missed.
     chrome_dim,
 
     /// A changed file's path, at the recency the reader should read it as.

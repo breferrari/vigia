@@ -588,7 +588,7 @@ fn a_diff_that_shrank_under_the_viewport_still_fills_the_screen() {
     // it was taken and names a row the new diff does not have.
     //
     // What made it monitor-class rather than cosmetic: the header went on
-    // truthfully saying `watching · 2 files` over a blank body, so one thing on
+    // truthfully saying two files had changed over a blank body, so one thing on
     // screen contradicted the other two. `SPEC.md` §11.1 ruled the empty state
     // into existence to stop "nothing changed" and "this has stopped working"
     // looking alike, and this reintroduced that ambiguity by another route.
