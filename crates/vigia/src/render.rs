@@ -766,21 +766,27 @@ fn count_of(files: usize) -> String {
 /// Deliberately **does not** end in an empty rung, unlike every other ladder
 /// here, so it needs [`widest_fitting_or_last`] rather than [`widest_fitting`].
 /// Its last rung is a token to be marked, not a rung to be dropped.
-/// **A nameless worktree gets the count and no separator**, which is the same
-/// guard [`count_of`] applies to zero and [`empty_state`] applies to a detached
-/// head: a separator is only owed where both facts exist. `" · 3 changed"` joins
-/// a fact to nothing and promises a subject that is not on the row, which is
-/// [#67](https://github.com/breferrari/vigia/issues/67)'s own failure with the
-/// halves swapped. `Worktree::short_name` cannot return empty on the shipped
-/// path, so this is unreachable from `main.rs` today; it is guarded here anyway
-/// because [`render`] is public, [`Chrome`] has public fields and its `default`
-/// leaves the name empty, and a rule that holds only because one caller is
-/// careful is not a rule.
+/// **A worktree that draws no name gets the count and no separator**, which is
+/// the same guard [`count_of`] applies to zero and [`empty_state`] applies to a
+/// detached head: a separator is only owed where both facts exist.
+/// `" · 3 changed"` joins a fact to nothing and promises a subject that is not on
+/// the row, which is [#67](https://github.com/breferrari/vigia/issues/67)'s own
+/// failure with the halves swapped.
+///
+/// **The test is columns and not bytes, and that is the whole of the guard.**
+/// `is_empty()` was the first spelling and it is wrong for every name made of
+/// zero-width characters: a zero-width space, a joiner, a bidi mark, a lone
+/// combining accent and a variation selector are all non-empty `String`s that
+/// draw nothing, and all of them are legal directory names on Linux and macOS.
+/// So this is reachable through `Worktree::short_name` rather than only through
+/// the public [`render`], which is where the byte-shaped guard would have left
+/// it. The same distinction has bitten this renderer before: what a terminal
+/// owes a string is its *width*, and `len` is never that.
 fn header_left(worktree: &str, files: usize) -> Vec<String> {
     let mut rungs = Vec::with_capacity(2);
     let count = count_of(files);
     if !count.is_empty() {
-        let joined = if worktree.is_empty() {
+        let joined = if width_of(worktree) == 0 {
             count.clone()
         } else {
             format!("{worktree}{FACT_SEPARATOR}{count}")

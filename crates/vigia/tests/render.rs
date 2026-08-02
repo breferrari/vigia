@@ -576,25 +576,43 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         files: 3,
         ..one_file()
     };
-    let nameless = Chrome {
-        worktree: String::new(),
-        ..chrome()
-    };
+    // **Empty is the easy half and not the reachable one.** The property that
+    // matters is columns, not bytes: a name of one zero-width character is a
+    // non-empty `String` that draws nothing, and every one of these is a legal
+    // directory name on Linux and macOS, so it arrives through `short_name`
+    // rather than only through the public API. Guarding `is_empty()` alone left
+    // the separator dangling for all five.
+    let names = [
+        ("empty", ""),
+        ("zero-width space", "\u{200B}"),
+        ("zero-width joiner", "\u{200D}"),
+        ("right-to-left mark", "\u{200F}"),
+        ("combining acute", "\u{0301}"),
+        ("variation selector", "\u{FE0F}"),
+    ];
 
-    for width in [40u16, 80, 120] {
-        let header = row_text(&screen(width, 8, &view, &nameless), 0);
-        assert!(
-            !header.trim_start().starts_with(FACT_JOIN.trim_start()),
-            "at {width} columns the header opens with a separator that joins \
-             nothing to the count: {header:?}"
-        );
-        // And the count still reaches the screen, so the fix is a guard on the
-        // separator rather than on the fact. Dropping the count instead would
-        // pass the assertion above by saying less.
-        assert!(
-            header.contains("3 changed"),
-            "at {width} columns the count went missing with the name: {header:?}"
-        );
+    for (label, name) in names {
+        let nameless = Chrome {
+            worktree: name.to_owned(),
+            ..chrome()
+        };
+
+        for width in [40u16, 80, 120] {
+            let header = row_text(&screen(width, 8, &view, &nameless), 0);
+            assert!(
+                !header.trim_start().starts_with(FACT_JOIN.trim_start()),
+                "at {width} columns a {label} worktree name opens the header \
+                 with a separator that joins nothing to the count: {header:?}"
+            );
+            // And the count still reaches the screen, so the fix is a guard on
+            // the separator rather than on the fact. Dropping the count instead
+            // would pass the assertion above by saying less.
+            assert!(
+                header.contains("3 changed"),
+                "at {width} columns a {label} worktree name took the count with \
+                 it: {header:?}"
+            );
+        }
     }
 }
 
