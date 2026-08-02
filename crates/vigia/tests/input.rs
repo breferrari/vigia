@@ -407,16 +407,30 @@ fn dragging_a_bar_reports_where_along_its_own_track() {
         );
         assert_eq!(
             action_for(&at(kind, 79, 2), regions),
-            Some(Action::ListTo(TRACK_SCALE / 3))
+            Some(Action::ListTo(TRACK_SCALE / 2))
         );
-        // Top of the diff's track, and its middle.
+        // **And the last row of the track reports the full fraction.** Dividing
+        // by the row count instead of by the last row's index makes this
+        // `2/3`, so the bottom cell of the bar cannot ask for the end and the
+        // view stops one step short. Copilot found it on #71; the gates over the
+        // resolver missed it because they passed a fraction in directly rather
+        // than going through an event.
+        assert_eq!(
+            action_for(&at(kind, 79, 3), regions),
+            Some(Action::ListTo(TRACK_SCALE))
+        );
+        // Top of the diff's track, its middle, and its end.
         assert_eq!(
             action_for(&at(kind, 79, 5), regions),
             Some(Action::DiffTo(0))
         );
         assert_eq!(
             action_for(&at(kind, 79, 12), regions),
-            Some(Action::DiffTo((7 * TRACK_SCALE) / 15))
+            Some(Action::DiffTo((7 * TRACK_SCALE) / 14))
+        );
+        assert_eq!(
+            action_for(&at(kind, 79, 19), regions),
+            Some(Action::DiffTo(TRACK_SCALE))
         );
     }
 
@@ -450,7 +464,7 @@ fn dragging_the_bar_is_checked_before_the_region_under_it() {
     );
     assert_eq!(
         action_for(&at(MouseEventKind::Drag(MouseButton::Left), 79, 2), regions),
-        Some(Action::ListTo(TRACK_SCALE / 3)),
+        Some(Action::ListTo(TRACK_SCALE / 2)),
         "a drag on the bar became a wheel"
     );
 }

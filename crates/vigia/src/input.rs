@@ -49,7 +49,23 @@ impl Regions {
         if rows == 0 || row < top || row >= top + rows {
             return None;
         }
-        Some((u32::from(row - top) * TRACK_SCALE) / u32::from(rows))
+        // **Divided by the last row's index, not by the row count.** Over `rows`
+        // the last row yields `(rows - 1) / rows`, which is short of the full
+        // fraction by one row's worth and therefore can never ask for the end:
+        // the pointer sits on the bottom cell of the track and the view stops a
+        // step early. That is the same defect as mapping a track onto the whole
+        // instead of onto its travel, arriving one layer down, and the gates for
+        // that one missed it because they called the resolver with a fraction
+        // rather than going through a real event.
+        //
+        // A one-row track has no second position to express, and `regions` never
+        // publishes a bar for one, so it reports the top rather than dividing by
+        // zero.
+        let travel = u32::from(rows - 1);
+        if travel == 0 {
+            return Some(0);
+        }
+        Some((u32::from(row - top) * TRACK_SCALE) / travel)
     }
 }
 

@@ -1395,10 +1395,6 @@ pub fn render(
         // two thirds. Reported from use, which is the fourth time this repo has
         // been corrected by someone running it rather than by a gate.
         //
-        // The trade this keeps is the one §11.1 rules and I4 forces: the diff's
-        // total row count is unknowable without reading every file, so the bar
-        // measures the changed set rather than the diff's rows. It is exact at
-        // both ends and about the file count in between.
         // **Rows, exactly, because counting them turned out to be affordable.**
         // The thumb spans the screen's rows over the diff's total rows and sits
         // at the rows above it, which is what every other scrollbar means and
