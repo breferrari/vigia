@@ -800,6 +800,11 @@ fn header_left(worktree: &str, files: usize) -> Vec<String> {
     let mut rungs = Vec::with_capacity(2);
     let count = count_of(files);
     if !count.is_empty() {
+        // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on
+        // stable. Noted because a reviewer read it as an unstable API: the
+        // `Pattern` *trait* is unstable to implement and its impls have been
+        // stable to use since 1.0, which is a distinction worth one line here
+        // rather than the same question being asked again.
         let visible = worktree.trim().replace(|c: char| c.is_control(), "");
         let joined = if width_of(&visible) == 0 {
             count
