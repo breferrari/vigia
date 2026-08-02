@@ -316,7 +316,8 @@ fn the_same_empty_state_at_a_hundred_and_twenty_columns() {
 
 #[test]
 fn the_header_says_which_mode_it_is_in() {
-    // The mockup headers `watching · 3 files` and only the count ever shipped.
+    // The mockup headered `watching · 3 files` and only the count ever shipped,
+    // until #67 split the two across the row and `assets/preview.svg` with them.
     //
     // Both directions in one test, because a word drawn unconditionally is not a
     // mode: it has to say something different when something different is true.
@@ -501,9 +502,106 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
 }
 
 #[test]
+fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
+    // `SPEC.md` §11.1's other half of #67, and it had no gate. The count moved
+    // next to the worktree name because the two are one clause about one
+    // subject; drawing them in two weights would say in colour that they are
+    // separate claims, which is the seam the move exists to remove.
+    //
+    // **This is untestable by omission and that is why it is here.** The
+    // renderer takes one `style` for the whole left rung, so the ruling looks
+    // enforced by the signature — but a signature is not evidence, and the
+    // *which* half is unasserted by everything else on this screen: the
+    // lost-watch gate reads the first `w`, which is the mode word, and every
+    // legibility sweep reads symbols rather than cells. Drawing the left in
+    // `chrome_dim` restores the seam and reddens nothing without this.
+    let view = View {
+        files: 3,
+        ..one_file()
+    };
+    let theme = Theme::default();
+    let backend = screen(80, 8, &view, &chrome());
+    let clause = format!("{}{FACT_JOIN}3 changed", chrome().worktree);
+
+    // Non-vacuity first. If the two chrome styles were equal, every assertion
+    // below would hold against a renderer that drew the clause in either, and
+    // the test would be checking that a thing equals itself.
+    assert_ne!(
+        theme.chrome.fg, theme.chrome_dim.fg,
+        "the theme draws chrome and chrome_dim alike, so this test cannot tell \
+         which weight the clause got"
+    );
+
+    // The whole clause, cell by cell. All ASCII, so one char is one column.
+    let width = clause.chars().count() as u16;
+    for x in 0..width {
+        let cell = &backend.buffer()[(x, 0)];
+        assert_eq!(
+            cell.style().fg,
+            theme.chrome.fg,
+            "column {x} of the left clause ({:?}) is not the worktree name's \
+             weight, so the header draws two weights inside one clause",
+            cell.symbol()
+        );
+    }
+
+    // And the test can tell the two apart on this very row: the blank between
+    // the clause and the mode word is the background style, which is the one a
+    // dimmed count would have taken. Without this the loop above would pass
+    // against a renderer that painted the entire row in `chrome`.
+    let gap = &backend.buffer()[(width + 1, 0)];
+    assert_eq!(
+        gap.style().fg,
+        theme.chrome_dim.fg,
+        "the column after the clause is not the chrome background, so this test \
+         cannot distinguish the two weights it is asserting between"
+    );
+}
+
+#[test]
+fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
+    // The inversion of #67, and this diff is what made it reachable. ` · `
+    // promises two facts about one subject; with the count on the right, a name
+    // that came back empty drew an empty left-hand side and nothing was joined
+    // to anything. With the count beside it, the same name builds
+    // `" · 3 changed"`: a separator modifying nothing, which is the same false
+    // promise the issue was filed about with the halves swapped.
+    //
+    // `short_name` cannot return empty on the shipped path, so this is reachable
+    // only through the public `render` with a hand-built `Chrome` — which is
+    // exactly what every test in this file does, and `Chrome::default()` has an
+    // empty name. A rule that holds only because one caller is careful is not a
+    // rule the type says.
+    let view = View {
+        files: 3,
+        ..one_file()
+    };
+    let nameless = Chrome {
+        worktree: String::new(),
+        ..chrome()
+    };
+
+    for width in [40u16, 80, 120] {
+        let header = row_text(&screen(width, 8, &view, &nameless), 0);
+        assert!(
+            !header.trim_start().starts_with(FACT_JOIN.trim_start()),
+            "at {width} columns the header opens with a separator that joins \
+             nothing to the count: {header:?}"
+        );
+        // And the count still reaches the screen, so the fix is a guard on the
+        // separator rather than on the fact. Dropping the count instead would
+        // pass the assertion above by saying less.
+        assert!(
+            header.contains("3 changed"),
+            "at {width} columns the count went missing with the name: {header:?}"
+        );
+    }
+}
+
+#[test]
 fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     // A state nobody can see at a glance has not been reported. Drawn in the
-    // same dim grey as the count, `not watching` is a word a reader has to go
+    // header's dim grey, `not watching` is a word a reader has to go
     // looking for, and a monitor whose failure looks exactly like its working
     // state has failed twice.
     //
@@ -520,7 +618,7 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     // count. A name or a count containing a `w` would silently point this at the
     // wrong cell, and it would fail in the passing direction: the left is drawn
     // in `chrome`, so a live watch would still look quiet.
-    let left = format!("{} 1 changed", chrome().worktree);
+    let left = format!("{}{FACT_JOIN}1 changed", chrome().worktree);
     assert!(
         !left.contains('w'),
         "the fixture's left-hand header {left:?} contains a `w`, so `column_of` \

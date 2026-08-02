@@ -502,6 +502,22 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         // shared list rather than given gates of its own, which is the point:
         // every structural rule already swept here now covers the mode word too.
         ("every row kind, watch lost", every_row_kind(), lost()),
+        // **A worktree whose name is two columns per character**, which nothing
+        // put through the header's left before. A directory name is whatever the
+        // filesystem holds, and since #67 the left is a clause the ladder builds
+        // by `format!` and `put_marked` then marks — so the reserved-mark column
+        // is exercised here against wide glyphs the way
+        // `a_wide_glyph_at_the_edge_does_not_swallow_the_mark` exercises it on a
+        // content row. Same reasoning as the row above: added to the shared list
+        // so every structural sweep covers it rather than one new gate.
+        (
+            "a wide worktree name, following",
+            every_row_kind(),
+            Chrome {
+                worktree: "読み方リポジトリ".to_owned(),
+                ..following()
+            },
+        ),
         (
             "clean worktree, watch lost",
             empty(),
@@ -718,8 +734,9 @@ fn the_header_never_takes_a_second_line() {
     // The footer is allowed to grow and the header is not, so the difference has
     // to be gated rather than assumed. `SPEC.md` §11.1: a worktree name is not a
     // list and has nowhere to break, so a second line could not guarantee a fit
-    // and would spend a body row on a maybe. The right-hand side drops whole
-    // rungs instead, which is what makes one row always enough.
+    // and would spend a body row on a maybe. The **left** drops a whole rung
+    // instead, and the right drops its one token whole, which between them are
+    // what make one row always enough.
     //
     // Observed by finding the first body row rather than by asking the renderer
     // where it put one, which would be its own arithmetic agreeing with itself.
@@ -920,6 +937,49 @@ fn the_header_count_sits_with_the_worktree_at_every_width() {
         "the sweep saw the count {saw_the_count} times and saw it dropped \
          {saw_it_dropped} times"
     );
+
+    // **And a clean worktree draws no number at any width**, which `SPEC.md`
+    // §11.1 rules ("the count is nothing at all when it is zero") and which only
+    // three empty-state snapshots covered. `0 changed` would spend columns
+    // restating what the body says in words, and the sweep above cannot see it:
+    // every width it walks has three changed files.
+    let clean = empty();
+    for chrome in [chrome(), lost()] {
+        for width in WIDTHS {
+            let header = rows_at(width, 8, &clean, &chrome)[0].clone();
+            assert!(
+                !header.contains(|c: char| c.is_ascii_digit()),
+                "at {width} columns a worktree with nothing in it drew a number \
+                 on the header: {header:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_mode_word_alone_fills_a_row_it_exactly_fits() {
+    // The one arithmetic edge #67's deletion of the right-hand ladder touches.
+    // At exactly the mode word's own width `put_right` draws it flush and
+    // returns `width + 1`, which saturates the left's room to zero — so the row
+    // is the word and nothing else.
+    //
+    // `no_row_ever_occupies_more_columns_than_the_screen` catches an overflow
+    // here and would not catch a stray glyph *inside* the row, which is what a
+    // left-hand side computing its room from `area.width` rather than from what
+    // `put_right` reported would leave behind.
+    //
+    // Both words, because they are eight and twelve columns, and one of them
+    // exercising the boundary reads as though both did.
+    for (word, chrome) in [("watching", chrome()), ("not watching", lost())] {
+        let width = u16::try_from(word.chars().count()).expect("a word fits a u16");
+        let header = rows_at(width, 8, &every_row_kind(), &chrome)[0].clone();
+        assert_eq!(
+            header.trim(),
+            word,
+            "at {width} columns, which is exactly {word:?}, the row carries \
+             something besides the mode word"
+        );
+    }
 }
 
 #[test]

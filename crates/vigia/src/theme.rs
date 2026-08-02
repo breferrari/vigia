@@ -102,7 +102,11 @@ macro_rules! palette {
 palette! {
     /// The header and footer lines.
     chrome,
-    /// Secondary text on those lines: key hints, counts, the readouts.
+    /// Secondary text on those lines: key hints, the footer's `N/M` position,
+    /// the readouts. **Not the header's changed-file count**, which took the
+    /// worktree name's [`Theme::chrome`] when it moved beside it
+    /// ([#67](https://github.com/breferrari/vigia/issues/67)), because two
+    /// weights inside one clause would draw the seam that move removed.
     chrome_dim,
 
     /// A changed file's path, at the recency the reader should read it as.
