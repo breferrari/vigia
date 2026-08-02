@@ -311,10 +311,18 @@ fn the_header_says_which_mode_it_is_in() {
     //
     // Both directions in one test, because a word drawn unconditionally is not a
     // mode: it has to say something different when something different is true.
+    //
+    // The count is asserted beside it rather than with it, which is #67: the two
+    // are at opposite ends of the row now, and the assertion that they are is
+    // `the_header_never_lets_the_mode_word_take_the_count_as_its_object`.
     let view = one_file();
 
     let live = row_text(&screen(80, 6, &view, &chrome()), 0);
-    assert!(live.contains("watching · 1 file"), "live header: {live:?}");
+    assert!(live.contains("vigia · 1 changed"), "live header: {live:?}");
+    assert!(
+        live.trim_end().ends_with("watching"),
+        "live header: {live:?}"
+    );
     assert!(!live.contains("not watching"), "live header: {live:?}");
 
     let stopped = Chrome {
@@ -322,8 +330,9 @@ fn the_header_says_which_mode_it_is_in() {
         ..chrome()
     };
     let lost = row_text(&screen(80, 6, &view, &stopped), 0);
+    assert!(lost.contains("vigia · 1 changed"), "lost header: {lost:?}");
     assert!(
-        lost.contains("not watching · 1 file"),
+        lost.trim_end().ends_with("not watching"),
         "lost header: {lost:?}"
     );
 }
@@ -388,7 +397,7 @@ fn the_header_carries_no_changed_line_total() {
 
     // And the header is populated, so its silence is about the total rather than
     // about the row being empty.
-    assert!(header.contains("watching · 3 files"), "header: {header:?}");
+    assert!(header.contains("vigia · 3 changed"), "header: {header:?}");
 
     for needle in TOTALS {
         assert!(
@@ -396,6 +405,78 @@ fn the_header_carries_no_changed_line_total() {
             "the header drew {needle:?}, which is a changed-line total or half of \
              one: {header:?}"
         );
+    }
+}
+
+#[test]
+fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
+    // #67, and the whole of it. The header's two facts are about two different
+    // subjects: the mode word says whether the **watch thread** is live, and the
+    // count says how many files **differ from the index**. Drawn as
+    // `watching · 3 files` they fuse, because English reads a participle
+    // followed by a number as a verb with an object, and the set that names does
+    // not exist: `vigia` watches the whole worktree minus gitignore, and the
+    // count is what changed inside it.
+    //
+    // So the count sits with the worktree, which is the other **tree**-fact on
+    // the line, and the mode word takes the right alone where it can fuse with
+    // nothing.
+    //
+    // Three assertions, because the defect has three spellings and only the
+    // first is the one that shipped. Fusing again on the right is what this
+    // reverts; fusing on the *left* is what a naive fix would produce by putting
+    // the mode word beside the count on the other side; and a count that drifted
+    // away from the worktree would leave it modifying nothing at all.
+    let modes = [(Mode::Watching, "watching"), (Mode::Lost, "not watching")];
+    let worktree = chrome().worktree;
+
+    for (mode, word) in modes {
+        for files in [1usize, 3, 100] {
+            let view = View {
+                files,
+                ..one_file()
+            };
+            // Every width §3 names. Forty is where the ladder is under most
+            // pressure and a hundred and twenty where nothing degrades, so a
+            // renderer that only fused when it was short and a renderer that
+            // only fused when it was roomy are both caught.
+            for width in [40u16, 80, 120] {
+                let header = row_text(&screen(width, 8, &view, &Chrome { mode, ..chrome() }), 0);
+
+                assert!(
+                    !header.contains(&format!("{word} · ")),
+                    "at {width} columns with {files} files the mode word is \
+                     followed by a fact it reads as the object of: {header:?}"
+                );
+                assert!(
+                    !header.contains(&format!(" · {word}")),
+                    "at {width} columns with {files} files the mode word was \
+                     joined to the fact before it: {header:?}"
+                );
+
+                // The count is drawn, and it is drawn against the worktree name.
+                // Non-vacuity and placement in one: a header that had dropped
+                // the count entirely would pass the two assertions above while
+                // saying nothing.
+                assert!(
+                    header.contains(&format!("{worktree} · {files} changed")),
+                    "at {width} columns the count is not beside the worktree: \
+                     {header:?}"
+                );
+
+                // And the mode word ends the row, with blank before it, which is
+                // what "the right-hand side carries it alone" means where a test
+                // can see it. The leading space is half the assertion rather
+                // than tidiness: `1 changedwatching` would satisfy every check
+                // above and is the one arrangement that fuses harder than the
+                // defect being fixed.
+                assert!(
+                    header.trim_end().ends_with(&format!(" {word}")),
+                    "at {width} columns the row does not end in the mode word \
+                     with a gap before it: {header:?}"
+                );
+            }
+        }
     }
 }
 
@@ -412,6 +493,19 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     // one-sided check while shouting at a healthy tree forever.
     let view = one_file();
     let theme = Theme::default();
+
+    // Guard the fixture, the way `the_header_carries_no_changed_line_total`
+    // does. The mode word is found by looking for the first `w` on the row, and
+    // since #67 the left of that row carries the worktree name **and** the
+    // count. A name or a count containing a `w` would silently point this at the
+    // wrong cell, and it would fail in the passing direction: the left is drawn
+    // in `chrome`, so a live watch would still look quiet.
+    let left = format!("{} 1 changed", chrome().worktree);
+    assert!(
+        !left.contains('w'),
+        "the fixture's left-hand header {left:?} contains a `w`, so `column_of` \
+         below would read it instead of the mode word"
+    );
 
     let style_of = |chrome: &Chrome| {
         let backend = screen(80, 6, &view, chrome);

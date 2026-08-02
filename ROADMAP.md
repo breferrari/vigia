@@ -284,11 +284,13 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 | | Task | Issue |
 |---|---|---|
 | ✅ | B4 ruled as layout: the file list is a pinned, scrollable region | [#66](https://github.com/breferrari/vigia/issues/66) |
-| ⬜ | The header's two facts compose into a claim the tool does not make | [#67](https://github.com/breferrari/vigia/issues/67) |
+| ✅ | The header's two facts compose into a claim the tool does not make | [#67](https://github.com/breferrari/vigia/issues/67) |
 | ⬜ | The mockup lays the glance row in columns; the shell right-packs it | [#77](https://github.com/breferrari/vigia/issues/77) |
 | ⬜ | Every file has an empty sparkline at launch, which is the common case | [#78](https://github.com/breferrari/vigia/issues/78) |
 
-**The first two rows came before the other two, and the order was not preference.** [#66](https://github.com/breferrari/vigia/issues/66) is done; [#67](https://github.com/breferrari/vigia/issues/67) is the one still open. Both issues were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
+**The first two rows came before the other two, and the order was not preference.** Both are done. Both were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
+
+**[#67](https://github.com/breferrari/vigia/issues/67) was a layout ruling wearing a wording bug**, which is why it is worth a paragraph rather than a row. The header's two facts were about two different subjects, the mode word about the watch thread and the count about the tree, and ` · ` promises one subject, so English composed `watching · 3 files` into *"watching 3 files"*: a verb with an object, naming a curated watch set that does not exist and that B6's no-flags ruling puts out of scope. Nothing about either fact was wrong. Their **adjacency** was. The count moved left to sit with the worktree, which is the other tree-fact on the line, and the mode word took the right alone, where there is nothing beside it a participle could govern. `changed` rather than `files` is the half that only shows up after the move: `vigia · 3 files` next to a tree's name would be a *worse* claim than the one it replaced, because this repository has more than three files in it. The ladder kept its order and changed which side each rung is dropped from, and that is now gated at every width from 1 to 120 rather than at the three the snapshots cover.
 
 > [!NOTE]
 > **This phase was called "distribution" until 2026-08-01, and had stopped being a filter**

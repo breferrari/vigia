@@ -41,6 +41,14 @@ const ELIDED: char = '…';
 /// would make every state assertion pass against a footer showing only advice.
 const FOLLOW_MARK: char = '▶';
 
+/// What joins two facts about one subject on a line of chrome.
+///
+/// Restated rather than imported, for [`CONTINUES`]' reason and one more. The
+/// renderer keeps this separate from `HINT_SEPARATOR` on purpose, so that a
+/// change to how *hints* are joined cannot silently reshape the header, and a
+/// test that reached for the exported one would undo exactly that separation.
+const FACT_JOIN: &str = " · ";
+
 /// Widths every sweep covers. One column to well past the widest snapshot.
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
@@ -419,8 +427,8 @@ fn entry(path: &str) -> FileEntry {
 /// I6 calls truncated-to-useless.
 ///
 /// Dropped entirely is legal because the right-hand text is placed first: a
-/// header at six columns spends them on `1 file` and shows no name at all,
-/// which `Painter::put_right` documents as deliberate.
+/// header at eight columns spends all of them on `watching` and shows no name at
+/// all, which `Painter::put_right` documents as deliberate.
 fn label_is_honest(row: &str, label: &str) -> bool {
     let common: String = row
         .chars()
@@ -759,25 +767,50 @@ fn the_header_ladder_keeps_the_mode_word_last() {
     // be counted by looking, while whether the pane is still live is recoverable
     // from nowhere at all.
     //
+    // **Since #67 the two rungs are on opposite sides**, and the order is the
+    // half that did not change. The count drops first and the mode word is last
+    // standing; what moved is which side each is dropped from, so this reads the
+    // row as two halves rather than as one right-hand ladder.
+    //
     // The two words are restated here rather than read from `Mode::word`. A test
     // that imported them would agree with the renderer by construction, which is
     // why the hint ladder is observed by rendering too.
     for (word, chrome) in [("watching", chrome()), ("not watching", lost())] {
         let view = every_row_kind();
+        // `every_row_kind` carries three changed files, so this is the count the
+        // header has to draw whole or not at all.
+        let full = format!("{}{FACT_JOIN}3 changed", chrome.worktree);
         let (mut saw_both, mut saw_word_only, mut saw_neither) = (false, false, false);
 
         for width in WIDTHS {
             let header = rows_at(width, 8, &view, &chrome)[0].clone();
-            let has_word = header.contains(word);
-            // The count itself, not the separator that happens to join it: a
-            // renderer that dropped the word and kept `· 3 files` would still
-            // match on the rung as a whole.
-            let has_count = header.contains("file");
+            let has_word = header.ends_with(word);
+            // What is left once the mode word is off the row, which is the only
+            // honest way to ask what the *left* drew: the word is right-aligned
+            // and the blanks between the two halves belong to neither.
+            let left = match header.strip_suffix(word) {
+                Some(left) => left.trim_end(),
+                None => header.trim_end(),
+            };
+            // The separator rather than the count, because a renderer that drew
+            // `vigia · ` and dropped the number would still have to answer for
+            // it. The rung is the whole clause or nothing.
+            let has_count = left.contains(FACT_JOIN);
 
             if has_count {
                 assert!(
                     has_word,
                     "at {width} columns the count outlived {word:?}: {header:?}"
+                );
+                // **The count is never cut**, and this is where that is caught.
+                // A ladder drops whole rungs, so the left is either the whole
+                // clause or the name without it; `vigia · 3 chan›` is neither,
+                // and it is what a left-hand side that marked its edge instead
+                // of dropping its rung would draw.
+                assert_eq!(
+                    left, full,
+                    "at {width} columns the left-hand side is neither the whole \
+                     clause nor the name alone: {header:?}"
                 );
                 saw_both = true;
             } else if has_word {
@@ -786,10 +819,10 @@ fn the_header_ladder_keeps_the_mode_word_last() {
                 saw_neither = true;
             }
 
-            // **Never cut**, which is stricter than the marking rule the rest of
-            // the header follows. A ladder drops whole rungs, so a fragment of
-            // the word reaching the screen means someone replaced it with a
-            // token that truncates, and `wat›` is a state nobody can read.
+            // **The mode word is never cut either**, which is stricter than the
+            // marking rule the rest of the header follows. A fragment of the word
+            // reaching the screen means someone replaced it with a token that
+            // truncates, and `wat›` is a state nobody can read.
             //
             // Both spellings of cut, because they fail differently and only one
             // of them looks broken. Silently truncated ends in the fragment;
@@ -797,9 +830,11 @@ fn the_header_ladder_keeps_the_mode_word_last() {
             // the bare fragment alone passes against `wat›`, which is the very
             // shape this rule exists to forbid.
             //
-            // Reading how the row *ends* is sound only because the fixture's
-            // worktree name cannot end in any prefix of either word, so anything
-            // matching here came from the mode word. See `chrome`.
+            // Reading how the row *ends* is sound only because neither the
+            // fixture's worktree name nor the count can end in a prefix of either
+            // word: the name is guarded by `chrome`, and a count ends in
+            // `changed`, which shares no prefix with `watching` past `w`, and
+            // `wat` is three characters longer than anything `changed` ends in.
             for cut in 1..word.chars().count() {
                 let fragment: String = word.chars().take(cut).collect();
                 let marked = format!("{fragment}{CONTINUES}");
@@ -817,6 +852,59 @@ fn the_header_ladder_keeps_the_mode_word_last() {
              neither={saw_neither}, so it did not cover the whole ladder"
         );
     }
+}
+
+#[test]
+fn the_header_count_sits_with_the_worktree_at_every_width() {
+    // #67's structural half, and the one a snapshot cannot assert: a picture
+    // shows one width, and what has to hold is that the count never drifts away
+    // from the noun it modifies at *any* of them.
+    //
+    // The count is a fact about the **tree**, so it is drawn against the tree's
+    // name. Beside the mode word it fused into `watching 3 files`, a verb with
+    // an object naming a curated set that does not exist; beside the worktree
+    // name it reads as what it is, which is how much of that tree has moved.
+    //
+    // Swept over both mode words, because the two differ by four columns and so
+    // move every width at which the ladder changes rung, and a fixture of one
+    // word exercises one column-width class while reading as though it covered
+    // both.
+    let view = every_row_kind();
+    let mut saw_the_count = 0usize;
+    let mut saw_it_dropped = 0usize;
+
+    for chrome in [chrome(), lost()] {
+        let joined = format!("{}{FACT_JOIN}", chrome.worktree);
+        for width in WIDTHS {
+            let header = rows_at(width, 8, &view, &chrome)[0].clone();
+            // The count is the only number the header can draw: `#49` ruled
+            // there is no changed-line total, the worktree name has no digit in
+            // it, and neither mode word does. So the first digit on this row is
+            // where the count starts, wherever the renderer chose to put it.
+            //
+            // Found rather than computed, because where the left clause ends
+            // depends on what the right-hand side took, and a test that
+            // recomputed that would be the renderer's own arithmetic agreeing
+            // with itself.
+            let Some(at) = header.find(|c: char| c.is_ascii_digit()) else {
+                saw_it_dropped += 1;
+                continue;
+            };
+            saw_the_count += 1;
+            assert!(
+                header[..at].ends_with(&joined),
+                "at {width} columns the count is not joined to the worktree \
+                 name: {header:?}"
+            );
+        }
+    }
+
+    // Both directions, or the sweep proved only that one of them can happen.
+    assert!(
+        saw_the_count > 0 && saw_it_dropped > 0,
+        "the sweep saw the count {saw_the_count} times and saw it dropped \
+         {saw_it_dropped} times"
+    );
 }
 
 #[test]
@@ -1341,10 +1429,14 @@ fn a_label_cut_at_the_right_edge_says_so() {
     let mut cut = 0usize;
     for width in WIDTHS {
         let rows = rows_at(width, 8, &view, &long_name);
-        // The header shares its line with the file count, so how much room the
-        // name actually gets is the renderer's business and `label_is_honest` is
-        // the whole assertion for it. The two body rows own their full width, so
-        // for those the width alone decides and both directions can be checked.
+        // The header shares its line with the mode word and its own side with
+        // the count, so how much room the name actually gets is the renderer's
+        // business and `label_is_honest` is the whole assertion for it. Since
+        // #67 the count is what gives way first, so a name this long is drawn
+        // alone long before it is cut, and the ladder that decides the order is
+        // gated by `the_header_ladder_keeps_the_mode_word_last`. The two body
+        // rows own their full width, so for those the width alone decides and
+        // both directions can be checked.
         assert!(
             label_is_honest(&rows[0], &long_name.worktree),
             "the worktree name was cut at {width} columns without saying so: {:?}",
