@@ -2128,7 +2128,11 @@ fn a_wash_stops_before_the_scrollbar_column() {
                 new_start: 38,
                 new_lines: 9,
             },
-            line(LineKind::Removed, 38, "    let stale = self.pending.take();"),
+            line(
+                LineKind::Removed,
+                38,
+                "    let stale = self.pending.take();",
+            ),
             line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
         ],
         ..two_regions(1)
@@ -2150,7 +2154,8 @@ fn a_wash_stops_before_the_scrollbar_column() {
         "the removed line was not washed at all, so this gate proves nothing"
     );
     assert_ne!(
-        bar, wash,
+        bar,
+        wash,
         "the wash reached the scrollbar's own column at x={}",
         width - 1
     );
