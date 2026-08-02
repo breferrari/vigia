@@ -1378,12 +1378,10 @@ pub fn render(
             height: body.diff as u16,
             ..area
         };
-        // **Counted in files, with the current one's own progress inside its
-        // slot.** The whole is `view.files`, which is exact and free; the thumb
-        // spans the files this screen actually draws, which is also free; and the
-        // position interpolates through the current file using `top.row` against
-        // `current_span`, both of which are free because that file has been
-        // diffed to be drawn.
+        // **Counted in rows**, which is what the call below passes: `rows_above`
+        // over `total_rows`, with the thumb spanning the screen's own height.
+        // Two superseded rulings are recorded under this one, because both were
+        // reported from use and the second replaced the first within the hour.
         //
         // **The earlier ruling made the *whole* depend on the current file**, as
         // `files * current_span`, and it was wrong in three visible ways at once:

@@ -18,6 +18,8 @@ It shows your working tree changing, continuously, without being touched. No bra
 
 It is closer to `btop` than to a git client: something you glance at, read from shape and colour, then glance away from.
 
+**It takes the mouse.** The wheel scrolls whichever half of the pane you are pointing at, both scrollbars can be grabbed and dragged, and clicking a file in the pinned list jumps the diff to it. None of that costs you a mode: nothing is ever selected, so the keys mean the same thing on every frame.
+
 **A monitor, not a reviewer.** A reviewer is something you launch per changeset to step through, annotate, and decide on. `vigia` is already open. It should be correct when nobody has touched it for an hour, and still cheap when nobody has closed it for a week.
 
 ## 📦 Try it
@@ -45,7 +47,12 @@ vigia ~/code/some-repo
 | `g` `Home` / `G` `End` | first / last changed file |
 | `J` `K` `Shift+↑` `Shift+↓` | scroll the pinned file list |
 | `f` | follow the newest change, or stop following |
-| wheel | scroll |
+
+| Mouse | |
+|---|---|
+| wheel | scroll whichever region the pointer is over |
+| drag a scrollbar | move that region, and both bars are exact |
+| click a listed file | jump the diff to it |
 
 It shows the working tree against the index, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and names the branch it found nothing on.
 

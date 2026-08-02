@@ -288,7 +288,7 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 | ⬜ | The mockup lays the glance row in columns; the shell right-packs it | [#77](https://github.com/breferrari/vigia/issues/77) |
 | ⬜ | Every file has an empty sparkline at launch, which is the common case | [#78](https://github.com/breferrari/vigia/issues/78) |
 
-**The first two rows came before the other three, and the order was not preference.** [#66](https://github.com/breferrari/vigia/issues/66) is done; [#67](https://github.com/breferrari/vigia/issues/67) is the one still open. Both issues were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
+**The first two rows came before the other two, and the order was not preference.** [#66](https://github.com/breferrari/vigia/issues/66) is done; [#67](https://github.com/breferrari/vigia/issues/67) is the one still open. Both issues were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
 
 > [!NOTE]
 > **This phase was called "distribution" until 2026-08-01, and had stopped being a filter**
@@ -321,7 +321,7 @@ The ordering question this row worried about resolved the other way from both op
 
 **And the read bound was not the problem this row expected.** A pinned row for an undiffed file cannot draw a heat strip, which reads as a reason to leave the region out; the answer is that the region is bounded by its own height, so diffing its six rows is cost following the window, which is I4's shape rather than a breach of it. Under I2a five of those six are a `stat` and a cache hit reading zero bytes.
 
-What it cost, measured on the reference machine against the same gates before and after: the steady-state frame p99 moved from **103.6µs to 246.3µs** scrolling up and from **744.1µs to 860µs** scrolling back, against I9's 16ms, while scrolling down improved slightly (**1.2848ms to 1.2356ms**) because the diff region draws fewer rows. `vigia-core` is untouched, so I4 and I7 are unmoved.
+What it cost, measured on the reference machine against the same gates before and after: the steady-state frame p99 moved from **103.6µs to 246.3µs** scrolling up and from **744.1µs to 860µs** scrolling back, against I9's 16ms, while scrolling down improved slightly (**1.2848ms to 1.2356ms**) because the diff region draws fewer rows. `vigia-core` is **not** untouched: it gained the counting path the row-exact bar needs, which is why I4 was narrowed in its own commit. Counting a hundred files of five hundred rewritten lines is **8.76ms** against **442.71ms** to materialise the same diffs, and I7 is unmoved because none of it runs before first paint.
 ## Phase 6 — measured, not assumed
 
 Milestone: [Phase 6](https://github.com/breferrari/vigia/milestone/6)

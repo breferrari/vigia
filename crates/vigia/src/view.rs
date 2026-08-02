@@ -297,11 +297,16 @@ pub struct View {
     ///
     /// **Free, and that is the whole reason the diff's scrollbar can move within
     /// a file at all.** The file the viewport is inside has been diffed by
-    /// definition, so its height is already known; every *other* file's height
-    /// is not, and adding them up is the read `SPEC.md` §11.1 rules out for `G`
-    /// and I4 forbids generally. So the bar is exact inside this file and
-    /// file-granular between files, which is the honest limit rather than a
-    /// rounding error.
+    /// definition, so its height is already known, and positioning `rows_above`
+    /// inside it is what keeps the bar smooth while a reader scrolls one long
+    /// file rather than stepping once per file.
+    ///
+    /// It carried an argument that every *other* file's height was the read
+    /// §11.1 rules out for `G` and I4 forbids generally, so the bar could only
+    /// be file-granular between files. **Both halves of that expired on
+    /// 2026-08-01**: counting a height costs a fiftieth of materialising the
+    /// diff it describes, I4 was narrowed to admit the walk, and `total_rows`
+    /// below is the result. See §3's I4 note.
     ///
     /// Zero when there is nothing to be inside, which a renderer must read as
     /// "no bar" rather than dividing by.
