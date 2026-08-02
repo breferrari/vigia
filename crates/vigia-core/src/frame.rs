@@ -376,36 +376,7 @@ impl<'w> Frame<'w> {
     pub fn height(&mut self, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> Result<usize> {
         let mut total = 0usize;
         for index in 0..self.files.len() {
-            let change = &self.files[index];
-            if !self.spans.contains_key(&change.path) {
-                // A diff already in hand answers this for free, and re-reading
-                // to count what is already counted would be the waste this
-                // method exists to avoid.
-                let span = match self.cached.get(&change.path) {
-                    // Free: the diff is already in hand, and no byte is read
-                    // again, so nothing is added to the counters either.
-                    Some(cached) => FileSpan::from(&cached.diff),
-                    // **An unreadable file costs its own rows, never the
-                    // frame.** This walk is the first thing in the frame path to
-                    // touch the whole changed set rather than the window, so a
-                    // `?` here hands one share-locked or unreadable path the
-                    // power to fail every frame, for a file nobody is looking
-                    // at. `Changes` rules the opposite one layer down: a single
-                    // unreadable file does not end the stream, because a monitor
-                    // keeps going. A zero span counts it as nothing, so the
-                    // total is short by its rows, which is a scrollbar slightly
-                    // wrong about a file that cannot be read either way.
-                    None => match self.worktree.measure(change) {
-                        Ok(span) => {
-                            self.stats.measured += 1;
-                            self.stats.bytes += span.bytes;
-                            span
-                        }
-                        Err(_) => FileSpan::default(),
-                    },
-                };
-                self.spans.insert(change.path.clone(), span);
-            }
+            self.fill_span(index);
             let change = &self.files[index];
             total += rows_of(change, &self.spans[&change.path]);
         }
@@ -421,15 +392,40 @@ impl<'w> Frame<'w> {
         index: usize,
         rows_of: impl Fn(&FileChange, &FileSpan) -> usize,
     ) -> Result<usize> {
-        let change = &self.files[index];
-        if !self.spans.contains_key(&change.path) {
-            let span = self.worktree.measure(change)?;
-            self.stats.measured += 1;
-            self.stats.bytes += span.bytes;
-            self.spans.insert(change.path.clone(), span);
-        }
+        self.fill_span(index);
         let change = &self.files[index];
         Ok(rows_of(change, &self.spans[&change.path]))
+    }
+
+    /// Put a span for the file at `index` in the cache, if one is not there.
+    ///
+    /// **Shared, because the two callers answered the same question
+    /// differently.** [`Frame::height`] consulted the diff cache first and
+    /// [`Frame::rows_of`] went straight to disk, so for one file in one frame
+    /// the answer depended on which had been called first, and `rows_of`'s own
+    /// doc claiming it uses the cache `height` fills was true only because both
+    /// live call sites happen to call `height` first. Nothing enforced that, and
+    /// the cold path was an unbudgeted whole-file read on the scroll arithmetic.
+    ///
+    /// Infallible on purpose; see the read-error rule in [`Frame::height`].
+    fn fill_span(&mut self, index: usize) {
+        let change = &self.files[index];
+        if self.spans.contains_key(&change.path) {
+            return;
+        }
+        let span = match self.cached.get(&change.path) {
+            Some(cached) => FileSpan::from(&cached.diff),
+            None => match self.worktree.measure(change) {
+                Ok(span) => {
+                    self.stats.measured += 1;
+                    self.stats.bytes += span.bytes;
+                    span
+                }
+                Err(_) => FileSpan::default(),
+            },
+        };
+        let change = &self.files[index];
+        self.spans.insert(change.path.clone(), span);
     }
 
     /// The change at `index` and its diff, computed now or reused from an
