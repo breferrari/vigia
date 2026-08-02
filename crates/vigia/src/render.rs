@@ -468,7 +468,7 @@ impl Mode {
     /// and "continuing".
     ///
     /// **It outranks everything else wherever it fits at all**, which is why it
-    /// holds the side [`Painter::status_line`] places first. The changed-file
+    /// holds the side `Painter::status_line` places first. The changed-file
     /// count at the other end of the row summarises a body that is on screen and
     /// can be recovered by counting; whether the pane is still live is
     /// recoverable from nowhere at all. So the count is what yields when the two
@@ -482,12 +482,15 @@ impl Mode {
     /// at any width above zero, so a live watch draws the name alone from 5 to 7
     /// columns and this alone at 8 and 9. Widening a pane from 7 to 8 removes the
     /// name. Unchanged behaviour, recorded because there is no gate for the
-    /// tidier version and could not be.
+    /// tidier version and could not be. The widths themselves are gated, by
+    /// `tests/legibility.rs::the_header_degrades_at_the_widths_the_spec_records`,
+    /// because a measurement that lives only in prose drifts from what it
+    /// measured and this one already had.
     ///
     /// **It is never cut**, which is stricter than the marking rule the rest of
     /// the header follows: `wat›` is a state a reader cannot read, and unlike a
     /// path it has no half that identifies it. That is delivered by
-    /// [`Painter::put_right`], which drops a token whole rather than truncating
+    /// `Painter::put_right`, which drops a token whole rather than truncating
     /// it, rather than by a ladder of its own. It used to need one, because this
     /// side carried the count too and had a real choice to make between
     /// `watching · 3 files` and `watching`; moving the count to the left
@@ -773,20 +776,27 @@ fn count_of(files: usize) -> String {
 /// the row, which is [#67](https://github.com/breferrari/vigia/issues/67)'s own
 /// failure with the halves swapped.
 ///
-/// **The test is columns and not bytes, and that is the whole of the guard.**
-/// `is_empty()` was the first spelling and it is wrong for every name made of
-/// zero-width characters: a zero-width space, a joiner, a bidi mark, a lone
-/// combining accent and a variation selector are all non-empty `String`s that
-/// draw nothing, and all of them are legal directory names on Linux and macOS.
-/// So this is reachable through `Worktree::short_name` rather than only through
-/// the public [`render`], which is where the byte-shaped guard would have left
-/// it. The same distinction has bitten this renderer before: what a terminal
-/// owes a string is its *width*, and `len` is never that.
+/// **The test took three spellings to get right, and each was wrong in the same
+/// direction**, which is why the wrong ones are recorded here rather than tidied
+/// away. `is_empty()` misses every name made of zero-width characters: a
+/// zero-width space, a joiner, a bidi mark, a lone combining accent and a
+/// variation selector are all non-empty `String`s that draw nothing.
+/// `width_of(..) == 0` misses every name made of whitespace, which *has* width
+/// and shows nothing: a single space, a no-break space, an ideographic space, a
+/// tab. All of them are legal directory names on every tier-1 target, so all of them
+/// arrive through `Worktree::short_name` rather than only through the public
+/// [`render`].
+///
+/// So the question is not "is this string empty" or even "how wide is it" but
+/// **is there anything a reader could see**, and `trim` is what asks that. The
+/// general shape, and the reason it is worth a paragraph: a guard on a drawn
+/// thing has to test the drawn property, and `len` is not width, and width is
+/// not visibility.
 fn header_left(worktree: &str, files: usize) -> Vec<String> {
     let mut rungs = Vec::with_capacity(2);
     let count = count_of(files);
     if !count.is_empty() {
-        let joined = if width_of(worktree) == 0 {
+        let joined = if width_of(worktree.trim()) == 0 {
             count.clone()
         } else {
             format!("{worktree}{FACT_SEPARATOR}{count}")
@@ -1772,7 +1782,7 @@ impl Painter<'_> {
         // one token whole rather than truncating it, which `put_right` does
         // without needing a ladder to say so.
         let right = chrome.mode.word();
-        // **A dead watch has to be visible, not merely present.** Drawn in the
+        // **A dead watch has to be visible, not merely present.** Drawn in
         // the header's dim grey, `not watching` is a word a reader has to
         // go looking for, and a monitor whose failure state looks exactly like
         // its working one has failed twice. `SPEC.md` §5 makes colour half the

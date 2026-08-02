@@ -103,10 +103,14 @@ palette! {
     /// The header and footer lines.
     chrome,
     /// Secondary text on those lines: key hints, the footer's `N/M` position,
-    /// the readouts. **Not the header's changed-file count**, which took the
-    /// worktree name's [`Theme::chrome`] when it moved beside it
-    /// ([#67](https://github.com/breferrari/vigia/issues/67)), because two
-    /// weights inside one clause would draw the seam that move removed.
+    /// the readouts, and the header's mode word. **Not the header's changed-file
+    /// count**, which took the worktree name's [`Theme::chrome`] when it moved
+    /// beside it ([#67](https://github.com/breferrari/vigia/issues/67)), because
+    /// two weights inside one clause would draw the seam that move removed.
+    ///
+    /// The list is exhaustive for a line of chrome, which is what makes the
+    /// exclusion worth stating: a class with a named exception has to name its
+    /// members too, or the exception is the only thing anyone can check.
     chrome_dim,
 
     /// A changed file's path, at the recency the reader should read it as.

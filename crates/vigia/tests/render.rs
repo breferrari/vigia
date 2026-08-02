@@ -520,7 +520,6 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
         ..one_file()
     };
     let theme = Theme::default();
-    let backend = screen(80, 8, &view, &chrome());
     let clause = format!("{}{FACT_JOIN}3 changed", chrome().worktree);
 
     // Non-vacuity first. If the two chrome styles were equal, every assertion
@@ -532,24 +531,61 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
          which weight the clause got"
     );
 
-    // The whole clause, cell by cell. All ASCII, so one char is one column.
-    let width = clause.chars().count() as u16;
-    for x in 0..width {
-        let cell = &backend.buffer()[(x, 0)];
-        assert_eq!(
-            cell.style().fg,
-            theme.chrome.fg,
-            "column {x} of the left clause ({:?}) is not the worktree name's \
-             weight, so the header draws two weights inside one clause",
-            cell.symbol()
-        );
-    }
+    // **Both modes and three widths**, because reading one screen is how a
+    // style gate passes while the case a reader actually hits is unasserted.
+    // A lost watch paints the right-hand side in `alert`, which is a third
+    // style on this row, so the clause has to hold its own weight against that
+    // too; and the continuation mark on a cut name inherits whatever style the
+    // run that reached the edge carried, which is only exercised where the
+    // clause does not fit.
+    let mut saw_the_clause = 0usize;
+    for (label, mode) in [("live", Mode::Watching), ("lost", Mode::Lost)] {
+        for width in [40u16, 80, 120] {
+            let chrome = Chrome { mode, ..chrome() };
+            let backend = screen(width, 8, &view, &chrome);
+            let header = row_text(&backend, 0);
 
-    // And the test can tell the two apart on this very row: the blank between
-    // the clause and the mode word is the background style, which is the one a
-    // dimmed count would have taken. Without this the loop above would pass
-    // against a renderer that painted the entire row in `chrome`.
-    let gap = &backend.buffer()[(width + 1, 0)];
+            // However much of the clause reached the screen. Read off the row
+            // rather than computed from the width, because where the left ends
+            // is what the ladder decided and recomputing it here would be the
+            // renderer's own arithmetic agreeing with itself.
+            let drawn: String = header
+                .chars()
+                .zip(clause.chars())
+                .take_while(|(row, want)| row == want)
+                .map(|(row, _)| row)
+                .collect();
+            if drawn.is_empty() {
+                continue;
+            }
+            saw_the_clause += 1;
+
+            // All ASCII, so one char is one column.
+            for x in 0..drawn.chars().count() {
+                let cell = &backend.buffer()[(x as u16, 0)];
+                assert_eq!(
+                    cell.style().fg,
+                    theme.chrome.fg,
+                    "{label} at {width} columns: column {x} of the left clause \
+                     ({:?}) is not the worktree name's weight, so the header \
+                     draws two weights inside one clause",
+                    cell.symbol()
+                );
+            }
+        }
+    }
+    assert!(
+        saw_the_clause >= 6,
+        "only {saw_the_clause} of the six screens drew any of the clause, so \
+         this gate is weaker than it reads"
+    );
+
+    // And the test can tell the two apart: the blank after the clause is the
+    // background style, which is the one a dimmed count would have taken.
+    // Without this the loop above would pass against a renderer that painted the
+    // entire row in `chrome`.
+    let backend = screen(80, 8, &view, &chrome());
+    let gap = &backend.buffer()[(clause.chars().count() as u16 + 1, 0)];
     assert_eq!(
         gap.style().fg,
         theme.chrome_dim.fg,
@@ -567,11 +603,14 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
     // `" · 3 changed"`: a separator modifying nothing, which is the same false
     // promise the issue was filed about with the halves swapped.
     //
-    // `short_name` cannot return empty on the shipped path, so this is reachable
-    // only through the public `render` with a hand-built `Chrome` — which is
-    // exactly what every test in this file does, and `Chrome::default()` has an
-    // empty name. A rule that holds only because one caller is careful is not a
-    // rule the type says.
+    // `short_name` cannot return an *empty* name on the shipped path, so the
+    // first case here is reachable only through the public `render` with a
+    // hand-built `Chrome`, which is what every test in this file does and what
+    // `Chrome::default()` produces. The other two classes are not so narrow, and
+    // that is the correction rather than a footnote: every zero-width and
+    // whitespace name below is a legal directory name on all three tier-1
+    // targets, so `short_name` returns them verbatim and they arrive on the
+    // shipped path like any other.
     let view = View {
         files: 3,
         ..one_file()
@@ -582,6 +621,11 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
     // directory name on Linux and macOS, so it arrives through `short_name`
     // rather than only through the public API. Guarding `is_empty()` alone left
     // the separator dangling for all five.
+    // Three classes, because the guard was wrong twice and each spelling failed
+    // a different one. Empty is caught by `is_empty`; the zero-width names are
+    // not, because they are non-empty `String`s that draw nothing; and the
+    // whitespace names are caught by neither of those, because they *have* width
+    // and still show a reader nothing.
     let names = [
         ("empty", ""),
         ("zero-width space", "\u{200B}"),
@@ -589,6 +633,11 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         ("right-to-left mark", "\u{200F}"),
         ("combining acute", "\u{0301}"),
         ("variation selector", "\u{FE0F}"),
+        ("one space", " "),
+        ("no-break space", "\u{00A0}"),
+        ("ideographic space", "\u{3000}"),
+        ("tab", "\t"),
+        ("space then zero-width", " \u{200B}"),
     ];
 
     for (label, name) in names {

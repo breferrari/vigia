@@ -970,67 +970,176 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
     // The header's version of `the_caret_degrades_once_and_never_flickers` and
     // `the_scrollbars_degrade_once_and_never_flicker`, and it exists because the
     // header is **not** monotone and that was ruled deliberate rather than
-    // fixed. `SPEC.md` §11.1 records the measurement: the two sides have
-    // independent budgets, so on a live watch the worktree name has the row
-    // alone from 5 to 7 columns, the mode word alone from 8, and both from 14.
-    // Widening a pane from 7 to 8 removes the name.
+    // fixed. The two sides have independent budgets, so widening a live pane
+    // from 7 to 8 columns *removes* the worktree name. `SPEC.md` §11.1 records
+    // the bands and `the_header_degrades_at_the_widths_the_spec_records` is what
+    // holds those numbers to the renderer; this gate owns the shape.
     //
-    // **So this pins the exception rather than asserting the rule**, and the
-    // sequence is written out rather than counted, because counting it was the
-    // first attempt and it was a guess: the row passes through *five* states, not
-    // three. Narrowing from 120, with the name reappearing once the mode word can
-    // no longer be placed at all:
+    // **The name is three-valued and reading it as a boolean was wrong.** A
+    // marked fragment is a different screen from an absent name — `vig› watching`
+    // against ` watching` — and collapsing them let a mutation that made the left
+    // degrade to nothing instead of marking pass this gate untouched. Narrowing
+    // from 120 on a live watch:
     //
-    // | fact set | why |
-    // |---|---|
-    // | name, count, word | everything fits |
-    // | name, word | the count is the first rung to go |
-    // | word | the mode word is placed first and takes the row |
-    // | name | below the word's own width there is nothing to place |
-    // | nothing | no room for either |
+    // | name | count | word | widths | why |
+    // |---|---|---|---|---|
+    // | whole | yes | yes | 26+ | everything fits |
+    // | whole | no | yes | 14-25 | the count is the first rung to go |
+    // | marked | no | yes | 10-13 | the name cannot fit what is left |
+    // | absent | no | yes | 8-9 | the word is placed first and takes the row |
+    // | whole | no | no | 5-7 | below the word's own width there is nothing to place |
+    // | marked | no | no | 1-4 | not even the name fits |
     //
-    // A sixth state, or a different order, is a new flicker and nothing else on
-    // this screen would notice it. What is asserted *absolutely*, inside the
-    // sweep, is the ladder's own order: the count never appears without the name
-    // it modifies.
+    // **Asserted as a subsequence, because the full list is the five-column
+    // fixture's.** A one-character name never reaches `marked` (it always fits
+    // what it is given), and a name longer than the pane never reaches `whole`,
+    // so both legitimately skip states. What must never happen is a state that
+    // is not on this list at all, or two of them in the wrong order. The
+    // fixture's own sweep is asserted to produce the whole list, so the
+    // subsequence rule cannot pass vacuously.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Name {
+        Whole,
+        Marked,
+        Absent,
+    }
+
+    const ACCEPTED: [(Name, bool, bool); 6] = [
+        (Name::Whole, true, true),
+        (Name::Whole, false, true),
+        (Name::Marked, false, true),
+        (Name::Absent, false, true),
+        (Name::Whole, false, false),
+        (Name::Marked, false, false),
+    ];
+
+    // Hoisted past the shadowing below, and it is the name the full walk is
+    // claimed of.
+    let fixture_name = chrome().worktree;
+
     for (word, chrome) in [("watching", chrome()), ("not watching", lost())] {
-        let view = every_row_kind();
-        let mut seen: Vec<(bool, bool, bool)> = Vec::new();
+        // Three name widths, because the sequence a pane walks depends on the
+        // name's own width and pinning one fixture's walk pins a coincidence.
+        for name in [fixture_name.clone(), "v".to_owned(), "a".repeat(64)] {
+            let chrome = Chrome {
+                worktree: name.clone(),
+                ..chrome.clone()
+            };
+            let view = every_row_kind();
+            let mut seen: Vec<(Name, bool, bool)> = Vec::new();
 
-        for width in WIDTHS.rev() {
-            let header = rows_at(width, 8, &view, &chrome)[0].clone();
-            let has_word = header.ends_with(word);
-            let left = header.strip_suffix(word).unwrap_or(&header).trim_end();
-            let has_name = left.starts_with(&chrome.worktree);
-            let has_count = left.contains(FACT_JOIN);
+            for width in WIDTHS.rev() {
+                let header = rows_at(width, 8, &view, &chrome)[0].clone();
+                let has_word = header.ends_with(word);
+                let left = header.strip_suffix(word).unwrap_or(&header).trim_end();
+                let has_count = left.contains(FACT_JOIN);
 
-            assert!(
-                !has_count || has_name,
-                "at {width} columns the count is drawn without the name it \
-                 modifies: {header:?}"
-            );
+                let drawn: String = left
+                    .chars()
+                    .zip(name.chars())
+                    .take_while(|(row, want)| row == want)
+                    .map(|(row, _)| row)
+                    .collect();
+                let named = if left.starts_with(&name) {
+                    Name::Whole
+                } else if left[drawn.len()..].starts_with(CONTINUES) {
+                    Name::Marked
+                } else {
+                    Name::Absent
+                };
 
-            let facts = (has_name, has_count, has_word);
-            if seen.last() != Some(&facts) {
-                seen.push(facts);
+                assert!(
+                    !has_count || named == Name::Whole,
+                    "at {width} columns the count is drawn without the whole \
+                     name it modifies: {header:?}"
+                );
+
+                let facts = (named, has_count, has_word);
+                if seen.last() != Some(&facts) {
+                    seen.push(facts);
+                }
+            }
+
+            // A subsequence of the accepted walk: every state is on the list and
+            // they arrive in the listed order.
+            let mut accepted = ACCEPTED.iter();
+            for state in &seen {
+                assert!(
+                    accepted.any(|want| want == state),
+                    "{word}, name {:?}: the header enters {state:?}, which is \
+                     not the next state `SPEC.md` §11.1 records, so it gains or \
+                     loses a fact at a width nothing else would catch: {seen:?}",
+                    name.chars().count()
+                );
+            }
+
+            // And the fixture's own name walks all six, or the rule above holds
+            // only because the sweep never reached the interesting states.
+            if name == fixture_name {
+                assert_eq!(
+                    seen.as_slice(),
+                    ACCEPTED.as_slice(),
+                    "{word}: the five-column fixture no longer walks every \
+                     recorded state, so the subsequence rule above is vacuous"
+                );
             }
         }
+    }
+}
 
-        // `(name, count, word)`, narrowing. Restated rather than derived, so a
-        // renderer that changed the order has to change this line too.
-        const ACCEPTED: [(bool, bool, bool); 5] = [
-            (true, true, true),
-            (true, false, true),
-            (false, false, true),
-            (true, false, false),
-            (false, false, false),
-        ];
+#[test]
+fn the_header_degrades_at_the_widths_the_spec_records() {
+    // `SPEC.md` §11.1 quotes measured column numbers for where the header's
+    // facts appear and vanish, and prose carrying a measurement drifts from the
+    // thing it measured. It already had: the spec said both facts appear from
+    // 13 and the renderer draws `vig› watching` there, with the whole name only
+    // from 14. Nothing failed, because the number lived in two documents and no
+    // test.
+    //
+    // So the bands are asserted here and the spec cites this test. Both mode
+    // words, because the word's own width shifts every boundary by four.
+    const BANDS: [(&str, u16, u16, u16); 2] = [
+        // word, last width the name has the row alone, first width the word has
+        // it alone, first width both are drawn whole.
+        ("watching", 7, 8, 14),
+        ("not watching", 11, 12, 18),
+    ];
+
+    for (word, name_alone, word_alone, both) in BANDS {
+        let chrome = if word == "watching" { chrome() } else { lost() };
+        let view = every_row_kind();
+        let name = chrome.worktree.clone();
+        let row = |width: u16| rows_at(width, 8, &view, &chrome)[0].clone();
+
+        let alone = row(name_alone);
         assert_eq!(
-            seen.as_slice(),
-            ACCEPTED.as_slice(),
-            "{word}: the header passes through a different set of fact \
-             combinations than `SPEC.md` §11.1 records, so the row gains or \
-             loses a fact at a width nothing else on screen would catch"
+            alone.trim(),
+            name,
+            "at {name_alone} columns the name should have the row to itself"
+        );
+
+        let taken = row(word_alone);
+        assert_eq!(
+            taken.trim(),
+            word,
+            "at {word_alone} columns the mode word should have taken the row"
+        );
+
+        let together = row(both);
+        assert_eq!(
+            together.trim(),
+            format!("{name} {word}"),
+            "at {both} columns both facts should be drawn whole"
+        );
+
+        // And one column below `both` the name is not yet whole, which is what
+        // makes `both` the *first* such width rather than merely one of them.
+        let below = row(both - 1);
+        assert!(
+            !below.contains(&format!("{name} ")),
+            "at {} columns the whole name is already drawn, so {both} is not the \
+             first width that fits both: {below:?}",
+            both - 1
         );
     }
 }
