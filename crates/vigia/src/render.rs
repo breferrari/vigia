@@ -457,12 +457,30 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The word the header draws.
+    /// The word the header draws, on the right, alone.
     ///
     /// `not watching` rather than `stalled` or `still`: it is the mockup's own
     /// word negated, so a reader who has learned one has learned both. `stalled`
     /// reads as temporary when this is not, and `still` means both "motionless"
     /// and "continuing".
+    ///
+    /// **This is the last thing on the row to give way**, which is why it holds
+    /// the side [`Painter::status_line`] places first. The changed-file count
+    /// beside it summarises a body that is on screen and can be recovered by
+    /// counting; whether the pane is still live is recoverable from nowhere at
+    /// all. So the count is what yields when the two cannot both fit, and that
+    /// ordering matters most at exactly the widths where the body has nothing in
+    /// it to count, which is the empty state this word exists for.
+    ///
+    /// **It is never cut**, which is stricter than the marking rule the rest of
+    /// the header follows: `wat›` is a state a reader cannot read, and unlike a
+    /// path it has no half that identifies it. That is delivered by
+    /// [`Painter::put_right`], which drops a token whole rather than truncating
+    /// it, rather than by a ladder of its own. It used to need one, because this
+    /// side carried the count too and had a real choice to make between
+    /// `watching · 3 files` and `watching`; moving the count to the left
+    /// ([#67](https://github.com/breferrari/vigia/issues/67)) left a ladder with
+    /// one rung wrapped around a mechanism that was already doing the work.
     pub fn word(self) -> &'static str {
         match self {
             Self::Watching => "watching",
@@ -709,9 +727,10 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
 /// One rule where there used to be two: `changed` is a participle with no plural
 /// to inflect, so `1 changed` and `3 changed` need no singular case.
 fn count_of(files: usize) -> String {
-    match files {
-        0 => String::new(),
-        n => format!("{n} changed"),
+    if files == 0 {
+        String::new()
+    } else {
+        format!("{files} changed")
     }
 }
 
@@ -743,31 +762,6 @@ fn header_left(worktree: &str, files: usize) -> Vec<String> {
     }
     rungs.push(worktree.to_owned());
     rungs
-}
-
-/// The header's right-hand side, widest rung first: the mode word, then nothing.
-///
-/// **The mode word is the last rung standing on the whole row**, which is
-/// [`state_rungs`]' rule one line up. The count summarises the body, which is on
-/// screen and can be counted by looking; whether the pane is still live is
-/// recoverable from nowhere else at all. That ordering matters most at exactly
-/// the widths where the body has nothing in it to count, which is the empty state
-/// this word exists for.
-///
-/// It outranks the count across the row because [`Painter::status_line`] places
-/// the right-hand side first, so the count is what gives way when the two cannot
-/// both fit. That is the ladder order this side has always had; what
-/// [#67](https://github.com/breferrari/vigia/issues/67) changed is which side
-/// each rung is dropped from.
-///
-/// **The mode word is never cut**, which is stricter than the marking rule the
-/// rest of the header follows: a ladder drops whole rungs, so the word is drawn
-/// entire or not drawn. `wat›` is a state a reader cannot read, and unlike a path
-/// it has no half that identifies it.
-///
-/// Always ends in an empty rung, which is what makes [`widest_fitting`] total.
-fn header_right(mode: Mode) -> [&'static str; 2] {
-    [mode.word(), ""]
 }
 
 /// The one body line a worktree with no changes gets.
@@ -988,31 +982,50 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> Option<[char; HISTOR
 /// ladder ends in an empty rung, so the fallback is unreachable rather than a
 /// silent default.
 fn widest_fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
+    fitting(ladder, room).unwrap_or("")
+}
+
+/// The widest rung that fits, or `None` when none does.
+///
+/// The one place this file decides what *fits* means, which is why it exists
+/// rather than the two pickers each carrying the test. They differ only in what
+/// they do when nothing fits, and a predicate written twice is a predicate that
+/// can be narrowed once: a reserved column for the mark, or a floor under the
+/// room, would otherwise be added to one picker and silently not the other.
+fn fitting<S: AsRef<str>>(ladder: &[S], room: usize) -> Option<&str> {
     ladder
         .iter()
         .map(AsRef::as_ref)
         .find(|rung| width_of(rung) <= room)
-        .unwrap_or("")
 }
 
 /// The widest rung of `ladder` that fits, or its **last** rung when none does.
 ///
 /// [`widest_fitting`]'s sibling, for a ladder whose final rung is a *token*
-/// rather than nothing. The header's left-hand side ends in the worktree name,
-/// which `SPEC.md` §11.1 rules marks its edge instead of being dropped, so
-/// falling through to the empty string would delete the one fact on the row a
-/// reader cannot recover by looking at the body. Handing the last rung back
-/// instead lets [`Painter::put_marked`] do what that rule asks.
+/// rather than nothing, and the pair of them is `SPEC.md` §11.1's two halves:
+/// a thing made of items breaks, a thing made of characters marks its edge. The
+/// name of a function is what tells a reader which of the two a call site is
+/// asking for, which is why these are two names over one predicate rather than
+/// one function with a flag.
 ///
-/// The two are not interchangeable and the difference is which failure they
+/// **It has two callers and the doc used to credit one**, which is worth stating
+/// because the missing one is what makes the `or_else` arm look like scaffolding.
+/// The header's left ends in the worktree name, which marks its edge instead of
+/// being dropped, so falling through to the empty string would delete the one
+/// fact on the row a reader cannot recover by looking at the body. **And the
+/// footer's left is a notice**, passed as a single-rung ladder, where this is the
+/// only thing standing between an over-long notice and a blank row. Delete the
+/// arm as one-caller scaffolding and notices vanish silently at narrow widths.
+///
+/// So the two are not interchangeable, and the difference is which failure they
 /// produce. Used on a ladder that ends in nothing this returns that empty rung,
-/// which is [`widest_fitting`]'s own answer; used the other way round, a name
+/// which is [`widest_fitting`]'s own answer; used the other way round, a token
 /// too long for its room would vanish rather than be marked.
+///
+/// `unwrap_or` is reachable only for an empty `ladder`, which no caller passes.
+/// It is what makes this total rather than a case anyone has to think about.
 fn widest_fitting_or_last<S: AsRef<str>>(ladder: &[S], room: usize) -> &str {
-    ladder
-        .iter()
-        .map(AsRef::as_ref)
-        .find(|rung| width_of(rung) <= room)
+    fitting(ladder, room)
         .or_else(|| ladder.last().map(AsRef::as_ref))
         .unwrap_or("")
 }
@@ -1650,12 +1663,24 @@ impl Painter<'_> {
     /// on screen, where a name and a hint bar are not.
     ///
     /// `left` is a **ladder** so the left-hand side can drop a whole item before
-    /// the last one is marked, which is what the header needs and what the footer
-    /// has no use for: its own left is a hint bar already laddered by
-    /// [`Footer::plan`], or a notice, so it passes a single rung and gets exactly
-    /// the behaviour it had before. Picked with [`widest_fitting_or_last`]
-    /// **after** [`Painter::put_right`] has reported what it took, because how
-    /// much room the left has is not knowable until then.
+    /// the last one is marked, which is what the header needs. The footer passes
+    /// a single rung, and that is not a degenerate case padding out a signature:
+    /// [`widest_fitting_or_last`] on one rung is the identity, which is exactly
+    /// what a notice requires, since a notice is a token to be marked and never
+    /// dropped. The footer *has* a ladder of its own — [`HINT_RUNGS`] — and
+    /// resolves it earlier only because [`Footer::plan`] has to know the height
+    /// before anything is drawn.
+    ///
+    /// **The two sides resolve at different altitudes on purpose.** The left is
+    /// picked here, after [`Painter::put_right`] has reported what it took,
+    /// because how much room the left has is not knowable until then. A right-hand
+    /// budget is known to the caller before the call, so a caller that has a
+    /// choice to make there makes it itself.
+    ///
+    /// One `style` for the whole left rung, which makes `SPEC.md` §11.1's ruling
+    /// that both header facts are drawn in one weight **unrepresentable** to
+    /// break rather than merely written down. A ladder of `(String, Style)` would
+    /// put that violation one line away.
     fn status_line<S: AsRef<str>>(
         &mut self,
         area: Rect,
@@ -1690,9 +1715,10 @@ impl Painter<'_> {
         // The header never takes a second line the way the footer does. A name
         // is not a list and has nowhere to break, so a second line could not
         // guarantee a fit and would spend a body row on a maybe. Both sides
-        // break instead, by dropping whole rungs.
-        let rungs = header_right(chrome.mode);
-        let right = widest_fitting(&rungs, usize::from(area.width));
+        // break instead: the left drops a whole rung, and the right drops its
+        // one token whole rather than truncating it, which `put_right` does
+        // without needing a ladder to say so.
+        let right = chrome.mode.word();
         // **A dead watch has to be visible, not merely present.** Drawn in the
         // same dim grey as the count, `not watching` is a word a reader has to
         // go looking for, and a monitor whose failure state looks exactly like

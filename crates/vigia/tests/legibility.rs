@@ -784,13 +784,16 @@ fn the_header_ladder_keeps_the_mode_word_last() {
 
         for width in WIDTHS {
             let header = rows_at(width, 8, &view, &chrome)[0].clone();
-            let has_word = header.ends_with(word);
             // What is left once the mode word is off the row, which is the only
             // honest way to ask what the *left* drew: the word is right-aligned
             // and the blanks between the two halves belong to neither.
-            let left = match header.strip_suffix(word) {
-                Some(left) => left.trim_end(),
-                None => header.trim_end(),
+            //
+            // One match rather than a `strip_suffix` beside an `ends_with`. Two
+            // spellings of one predicate can drift under edit, and every
+            // assertion below is keyed on the answer.
+            let (left, has_word) = match header.strip_suffix(word) {
+                Some(left) => (left.trim_end(), true),
+                None => (header.trim_end(), false),
             };
             // The separator rather than the count, because a renderer that drew
             // `vigia · ` and dropped the number would still have to answer for
@@ -872,6 +875,18 @@ fn the_header_count_sits_with_the_worktree_at_every_width() {
     let view = every_row_kind();
     let mut saw_the_count = 0usize;
     let mut saw_it_dropped = 0usize;
+
+    // Guard the fixture, the way `a_lost_watch_is_loud_and_a_live_one_is_quiet`
+    // does for its own `w`. The sweep finds the count by locating the first
+    // digit on the row, which is sound only while nothing else on the row can
+    // supply one. A worktree named `vigia2` would point every assertion below at
+    // its own left-hand side, silently and in the passing direction.
+    assert!(
+        !chrome().worktree.contains(|c: char| c.is_ascii_digit()),
+        "the fixture's worktree name {:?} contains a digit, so the sweep below \
+         would read it as the count",
+        chrome().worktree
+    );
 
     for chrome in [chrome(), lost()] {
         let joined = format!("{}{FACT_JOIN}", chrome.worktree);

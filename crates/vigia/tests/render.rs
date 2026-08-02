@@ -42,6 +42,15 @@ use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 /// by construction instead of checking it.
 const CONTINUES: &str = "›";
 
+/// What joins two facts about one subject on a line of chrome.
+///
+/// Restated for [`CONTINUES`]' reason: the renderer keeps this apart from its
+/// hint separator on purpose, so that a change to how hints are joined cannot
+/// silently reshape the header, and a test importing the exported one would undo
+/// that separation. Named rather than inlined because the header now spells it
+/// in several assertions, and a separator change should be one edit.
+const FACT_JOIN: &str = " · ";
+
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -312,13 +321,16 @@ fn the_header_says_which_mode_it_is_in() {
     // Both directions in one test, because a word drawn unconditionally is not a
     // mode: it has to say something different when something different is true.
     //
-    // The count is asserted beside it rather than with it, which is #67: the two
-    // are at opposite ends of the row now, and the assertion that they are is
-    // `the_header_never_lets_the_mode_word_take_the_count_as_its_object`.
+    // **Distinctness is the whole of this test's job**, and it is not a subset of
+    // the sweep below. `"not watching"` ends with `" watching"`, so a renderer
+    // drawing the wrong word on a live watch satisfies every `ends_with` in
+    // `the_header_never_lets_the_mode_word_take_the_count_as_its_object`; only
+    // the negative assertion here catches it. What that sweep *does* cover, at
+    // this exact fixture and width, is where the count sits, so it is not
+    // asserted twice here.
     let view = one_file();
 
     let live = row_text(&screen(80, 6, &view, &chrome()), 0);
-    assert!(live.contains("vigia · 1 changed"), "live header: {live:?}");
     assert!(
         live.trim_end().ends_with("watching"),
         "live header: {live:?}"
@@ -330,7 +342,6 @@ fn the_header_says_which_mode_it_is_in() {
         ..chrome()
     };
     let lost = row_text(&screen(80, 6, &view, &stopped), 0);
-    assert!(lost.contains("vigia · 1 changed"), "lost header: {lost:?}");
     assert!(
         lost.trim_end().ends_with("not watching"),
         "lost header: {lost:?}"
@@ -397,7 +408,10 @@ fn the_header_carries_no_changed_line_total() {
 
     // And the header is populated, so its silence is about the total rather than
     // about the row being empty.
-    assert!(header.contains("vigia · 3 changed"), "header: {header:?}");
+    assert!(
+        header.contains(&format!("{worktree}{FACT_JOIN}3 changed")),
+        "header: {header:?}"
+    );
 
     for needle in TOTALS {
         assert!(
@@ -427,10 +441,16 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
     // reverts; fusing on the *left* is what a naive fix would produce by putting
     // the mode word beside the count on the other side; and a count that drifted
     // away from the worktree would leave it modifying nothing at all.
-    let modes = [(Mode::Watching, "watching"), (Mode::Lost, "not watching")];
     let worktree = chrome().worktree;
 
-    for (mode, word) in modes {
+    for (mode, word) in [(Mode::Watching, "watching"), (Mode::Lost, "not watching")] {
+        // Hoisted out of the two loops below: neither pattern depends on the
+        // file count or the width, and building them per iteration would be
+        // eighteen allocations apiece for one constant string.
+        let governs = format!("{word}{FACT_JOIN}");
+        let governed = format!("{FACT_JOIN}{word}");
+        let ends_row = format!(" {word}");
+
         for files in [1usize, 3, 100] {
             let view = View {
                 files,
@@ -444,12 +464,12 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                 let header = row_text(&screen(width, 8, &view, &Chrome { mode, ..chrome() }), 0);
 
                 assert!(
-                    !header.contains(&format!("{word} · ")),
+                    !header.contains(&governs),
                     "at {width} columns with {files} files the mode word is \
                      followed by a fact it reads as the object of: {header:?}"
                 );
                 assert!(
-                    !header.contains(&format!(" · {word}")),
+                    !header.contains(&governed),
                     "at {width} columns with {files} files the mode word was \
                      joined to the fact before it: {header:?}"
                 );
@@ -459,7 +479,7 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                 // the count entirely would pass the two assertions above while
                 // saying nothing.
                 assert!(
-                    header.contains(&format!("{worktree} · {files} changed")),
+                    header.contains(&format!("{worktree}{FACT_JOIN}{files} changed")),
                     "at {width} columns the count is not beside the worktree: \
                      {header:?}"
                 );
@@ -471,7 +491,7 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
                 // above and is the one arrangement that fuses harder than the
                 // defect being fixed.
                 assert!(
-                    header.trim_end().ends_with(&format!(" {word}")),
+                    header.trim_end().ends_with(&ends_row),
                     "at {width} columns the row does not end in the mode word \
                      with a gap before it: {header:?}"
                 );
