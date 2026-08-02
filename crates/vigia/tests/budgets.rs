@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, PaintStats, Row, Theme, WHEEL_ROWS, body_height, render};
+use vigia::{Action, App, Body, PaintStats, Row, Theme, WHEEL_ROWS, body_layout, render};
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
 
 use support::{
@@ -90,8 +90,12 @@ fn area() -> Rect {
     Rect::new(0, 0, 80, 24)
 }
 
+fn layout(app: &App, files: usize) -> Body {
+    body_layout(area(), &app.chrome("fixture", None), files)
+}
+
 fn body(app: &App, files: usize) -> usize {
-    body_height(area(), &app.chrome("fixture", None), files)
+    layout(app, files).diff
 }
 
 /// One frame of the shell, timed whole: diff, collect, paint.
@@ -118,13 +122,13 @@ fn shell_frame(
     history: &History,
     buf: &mut Buffer,
     theme: &Theme,
-    height: usize,
+    screen: Body,
 ) {
     let began = Instant::now();
     frame.advance().expect("advance");
     app.sample_memory();
     let chrome = app.chrome("fixture", None);
-    let view = app.view(frame, highlighter, history, height).expect("view");
+    let view = app.view(frame, highlighter, history, screen).expect("view");
     render(buf, area(), &view, theme, &chrome);
     // Recorded from an inner clock rather than handed the caller's, because
     // every caller times this differently: some wrap it in `time`, some in
@@ -193,7 +197,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    let height = body(&app, 4);
+    let screen = layout(&app, 4);
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
@@ -205,7 +209,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
             &history,
             &mut buf,
             &theme,
-            height,
+            screen,
         );
     }
 
@@ -315,6 +319,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     let mut highlighter = Highlighter::new();
     let mut history = History::new();
     let height = body(&app, FILES);
+    let screen = layout(&app, FILES);
 
     if depth > 0 {
         // A manual scroll, which disengages follow exactly as a reader's would
@@ -327,7 +332,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
         )
         .expect("scroll");
         let view = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(&mut frame, &mut highlighter, &history, screen)
             .expect("view");
         assert_eq!(
             view.top.row, depth,
@@ -365,7 +370,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
                 // does not have. It is what I10 costs per tick, measured where I9
                 // can see it.
                 history.record([EDITED_PATH], Instant::now());
-                shell_frame(frame, app, highlighter, history, &mut buf, &theme, height);
+                shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
         };
 
@@ -398,7 +403,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // The screen has to have been full, or a frame that drew two rows would be
     // a cheap frame for a reason that is not the code.
     let view = app
-        .view(&mut frame, &mut highlighter, &history, height)
+        .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
     assert_eq!(
         view.rows.len(),
@@ -498,6 +503,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let mut highlighter = Highlighter::new();
     let mut history = History::new();
     let height = body(&app, FILES);
+    let screen = layout(&app, FILES);
 
     if !absolute_gates_apply() {
         return;
@@ -511,7 +517,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
             time(|| {
                 history.record([EDITED_PATH], Instant::now());
-                shell_frame(frame, app, highlighter, history, &mut buf, &theme, height);
+                shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
         };
 
@@ -608,7 +614,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
 
     // And the screen has to have been full, for the reason the gate above gives.
     let view = app
-        .view(&mut frame, &mut highlighter, &history, height)
+        .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
     assert_eq!(
         view.rows.len(),
@@ -865,6 +871,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let height = body(&app, WIDE_FILES);
+    let screen = layout(&app, WIDE_FILES);
 
     if motion == Motion::Up {
         app.apply(
@@ -879,7 +886,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
         // per file. So the position is asserted *after* a view, and in files
         // rather than in rows.
         let view = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(&mut frame, &mut highlighter, &history, screen)
             .expect("view");
         assert!(
             view.top.file >= UP_FILES,
@@ -924,7 +931,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
 
         let before = highlighter.stats();
         let (screen, collect) = timed(|| {
-            app.view(&mut frame, &mut highlighter, &history, height)
+            app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
         let chrome = app.chrome("fixture", None);

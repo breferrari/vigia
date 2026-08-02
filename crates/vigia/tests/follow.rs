@@ -28,7 +28,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Position, Row, Theme, body_height, render};
+use vigia::{Action, App, Body, FileEntry, Position, Row, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, delta};
@@ -43,14 +43,18 @@ const TARGET: usize = 7;
 /// assertions.
 const OTHER: usize = 21;
 
-fn body() -> usize {
-    // Eighty columns, where the footer is one line whatever the state, so the
-    // row count here does not move when I6's two-line footer engages.
-    body_height(
+/// The shipped split, list included, for the gates that assert about a whole
+/// screen rather than about the diff walk under it.
+fn layout() -> Body {
+    body_layout(
         Rect::new(0, 0, 80, 24),
         &App::new().chrome("fixture", None),
         FILES,
     )
+}
+
+fn body() -> usize {
+    layout().diff
 }
 
 fn fixture(name: &str) -> Scratch {
@@ -78,9 +82,11 @@ fn top_file(
     highlighter: &mut Highlighter,
     history: &History,
 ) -> String {
-    let view = app.view(frame, highlighter, history, body()).expect("view");
+    let view = app
+        .view(frame, highlighter, history, layout())
+        .expect("view");
     match view.rows.first() {
-        Some(Row::File { path, .. }) => path.clone(),
+        Some(Row::File(FileEntry { path, .. })) => path.clone(),
         other => panic!("the top row is {other:?}, not a file heading"),
     }
 }
@@ -167,7 +173,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     }
 
     let area = Rect::new(0, 0, 64, 12);
-    let height = body_height(area, &app.chrome("fixture", None), frame.files().len());
+    let height = body_layout(area, &app.chrome("fixture", None), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
@@ -413,7 +419,7 @@ fn a_position_survives_the_file_it_points_at_being_committed() {
     assert_eq!(frame.files().len(), 0, "the commit left changes behind");
 
     let view = app
-        .view(&mut frame, &mut highlighter, &history, body())
+        .view(&mut frame, &mut highlighter, &history, layout())
         .expect("a shrunken list must not panic");
     assert!(view.rows.is_empty(), "a clean worktree drew rows");
     assert_eq!(

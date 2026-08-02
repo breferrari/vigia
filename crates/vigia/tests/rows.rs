@@ -21,7 +21,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{App, Position, Row, Theme, View, body_height, render};
+use vigia::{App, Body, FileEntry, Position, Row, Theme, View, Viewport, body_layout, render};
 use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
@@ -85,7 +85,12 @@ fn every_line_number_names_the_line_it_is_on() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(ALL_ROWS),
+        )
         .expect("view");
 
     let mut counts = [0usize; 3];
@@ -165,13 +170,18 @@ fn a_file_is_its_heading_then_its_hunks() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(ALL_ROWS),
+        )
         .expect("view");
 
     let mut headings = 0usize;
     for (index, row) in view.rows.iter().enumerate() {
         match row {
-            Row::File { churn, .. } => {
+            Row::File(FileEntry { churn, .. }) => {
                 headings += 1;
                 assert!(
                     matches!(view.rows.get(index + 1), Some(Row::Hunk { .. })),
@@ -234,16 +244,21 @@ fn each_kind_of_change_gets_its_own_letter() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(ALL_ROWS),
+        )
         .expect("view");
 
     let mut seen: Vec<(char, String, Option<String>)> = view
         .rows
         .iter()
         .filter_map(|row| match row {
-            Row::File {
+            Row::File(FileEntry {
                 kind, path, from, ..
-            } => Some((*kind, path.clone(), from.clone())),
+            }) => Some((*kind, path.clone(), from.clone())),
             _ => None,
         })
         .collect();
@@ -311,12 +326,16 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         &mut frame,
         &mut highlighter,
         &history,
-        Position { file: 0, row: 0 },
-        ALL_ROWS,
-        // Unanchored, because this slides a window and compares it against slices
-        // of the whole. Letting the viewport back up to fill a short tail would be
-        // comparing a different window from the one the offset names.
-        false,
+        Viewport {
+            position: Position { file: 0, row: 0 },
+            // Unanchored, because this slides a window and compares it against
+            // slices of the whole. Letting the viewport back up to fill a short
+            // tail would be comparing a different window from the one the offset
+            // names.
+            anchored: false,
+            diff_rows: ALL_ROWS,
+            ..Viewport::default()
+        },
     )
     .expect("view");
     let hunks = whole
@@ -336,12 +355,15 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
             &mut frame,
             &mut highlighter,
             &history,
-            Position {
-                file: 0,
-                row: offset,
+            Viewport {
+                position: Position {
+                    file: 0,
+                    row: offset,
+                },
+                anchored: false,
+                diff_rows: height,
+                ..Viewport::default()
             },
-            height,
-            false,
         )
         .expect("view");
         let end = (offset + height).min(whole.rows.len());
@@ -393,14 +415,24 @@ fn a_real_repository_draws() {
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
     let area = Rect::new(0, 0, 64, 18);
-    let height = body_height(area, &app.chrome("fixture", None), frame.files().len());
+    // **The shipped split, because this is the only whole-composition test.**
+    // Everything else in the suite holds the pinned list out on purpose, to keep
+    // some other measurement clean. If this one did too, no test anywhere would
+    // draw a real frame's two regions together and the snapshot would be a
+    // picture of a screen nobody gets.
+    let split = body_layout(area, &app.chrome("fixture", None), frame.files().len());
     let view = app
-        .view(&mut frame, &mut highlighter, &history, height)
+        .view(&mut frame, &mut highlighter, &history, split)
         .expect("view");
     // Non-vacuity: the fixture has to have produced something to draw, or the
     // snapshot below is a picture of an empty pane.
     assert_eq!(view.files, 2, "the fixture is not two changed files");
     assert!(view.rows.len() > 4, "only {} rows to draw", view.rows.len());
+    assert_eq!(
+        view.list.len(),
+        2,
+        "both changed files should be pinned above the diff"
+    );
 
     let theme = Theme::default();
     let chrome = app.chrome("fixture", None);
@@ -429,11 +461,19 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let view = app
-        .view(&mut frame, &mut highlighter, &history, ALL_ROWS)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(ALL_ROWS),
+        )
         .expect("view");
 
     assert!(
-        matches!(view.rows.first(), Some(Row::File { churn: None, .. })),
+        matches!(
+            view.rows.first(),
+            Some(Row::File(FileEntry { churn: None, .. }))
+        ),
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()
     );

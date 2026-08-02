@@ -24,7 +24,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Position, View, body_height};
+use vigia::{Action, App, Body, FileEntry, Position, View, Viewport, diff_height};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -36,7 +36,7 @@ const FILES: usize = 12;
 const SPAN: usize = 4;
 
 fn body() -> usize {
-    body_height(
+    diff_height(
         Rect::new(0, 0, 80, 24),
         &App::new().chrome("fixture", None),
         FILES,
@@ -84,7 +84,12 @@ fn scrolling_to_the_bottom_never_leaves_the_pane_half_empty() {
         app.apply(Action::Scroll(1), &mut frame, height)
             .expect("apply");
         let view = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Body::diff_only(height),
+            )
             .expect("view");
         assert_eq!(
             view.rows.len(),
@@ -116,7 +121,12 @@ fn a_page_down_past_the_end_holds_the_last_screenful() {
         app.apply(Action::Page(1), &mut frame, height)
             .expect("apply");
         let view = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Body::diff_only(height),
+            )
             .expect("view");
         assert_eq!(
             view.rows.len(),
@@ -149,7 +159,12 @@ fn a_diff_shorter_than_the_pane_draws_what_it_has_and_no_more() {
             .expect("apply");
     }
     let view = app
-        .view(&mut frame, &mut highlighter, &history, height)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(height),
+        )
         .expect("view");
 
     assert!(view.rows.len() <= height);
@@ -181,13 +196,23 @@ fn the_resolved_position_is_stable_once_it_reaches_the_bottom() {
             .expect("apply");
     }
     let settled = app
-        .view(&mut frame, &mut highlighter, &history, height)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(height),
+        )
         .expect("view")
         .top;
 
     for round in 0..3 {
         let again = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Body::diff_only(height),
+            )
             .expect("view")
             .top;
         assert_eq!(again, settled, "round {round} moved a settled viewport");
@@ -228,16 +253,24 @@ fn a_backed_up_body_holds_the_rows_its_own_position_names() {
         app.apply(Action::Scroll(1), &mut frame, height)
             .expect("apply");
         let drawn = app
-            .view(&mut frame, &mut highlighter, &history, height)
+            .view(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Body::diff_only(height),
+            )
             .expect("view");
 
         let from_position = View::collect(
             &mut frame,
             &mut highlighter,
             &history,
-            drawn.top,
-            height,
-            false,
+            Viewport {
+                position: drawn.top,
+                anchored: false,
+                diff_rows: height,
+                ..Viewport::default()
+            },
         )
         .expect("collect");
 
@@ -268,7 +301,12 @@ fn the_last_row_of_the_diff_is_always_on_screen_at_the_bottom() {
             .expect("apply");
     }
     let view: View = app
-        .view(&mut frame, &mut highlighter, &history, height)
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(height),
+        )
         .expect("view");
 
     // The final file's heading has to be somewhere on screen, and the rows after
@@ -277,7 +315,7 @@ fn the_last_row_of_the_diff_is_always_on_screen_at_the_bottom() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            vigia::Row::File { path, .. } => Some(path.clone()),
+            vigia::Row::File(FileEntry { path, .. }) => Some(path.clone()),
             _ => None,
         })
         .next_back()

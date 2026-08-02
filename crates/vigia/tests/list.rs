@@ -1,0 +1,887 @@
+//! The pinned file list, which `SPEC.md` §11.1 makes the upper of two regions.
+//!
+//! > The body is two regions: a pinned file list, a rule, and the scrolling
+//! > diff.
+//!
+//! Four claims live here, and they fail in different ways, which is why they are
+//! four tests rather than one screen inspected from four angles.
+//!
+//! **Its height is a function of pane height and changed-file count, and of
+//! nothing else.** That is the same pair `Footer::plan` takes, and for the same
+//! reason: both change only when the diff does, so neither can move content
+//! under a reader who did nothing. A notice is the thing most likely to break it
+//! and gets its own gate.
+//!
+//! **It gives way before the diff does.** A monitor whose diff has been squeezed
+//! out by the map of the diff has stopped being one.
+//!
+//! **It tracks the diff.** The caret marks the file the diff is inside, and the
+//! window slides to keep that file on screen, so the region is correct with no
+//! interaction the way I5 requires of everything else.
+//!
+//! What is deliberately *not* here is what the region costs: that is an I4 claim
+//! and `tests/reads.rs` is where every I4 claim in this crate lives, beside the
+//! ones bounding the diff walk rather than in a file of its own.
+
+#[path = "../../vigia-core/tests/support/mod.rs"]
+mod support;
+
+use ratatui::layout::Rect;
+use vigia::{Action, App, Body, LIST_ROWS, Position, View, Viewport, body_layout};
+use vigia_core::{Highlighter, History};
+
+use support::{Scratch, materialise};
+
+/// The smallest diff the layout will leave behind, restated rather than
+/// imported.
+///
+/// `render.rs` keeps this as a private constant. A test that shared it would
+/// agree with the renderer by construction, which is the same reason the
+/// sparkline's ramp and the heat strip's block are restated in
+/// `tests/legibility.rs`.
+const MIN_BODY: usize = 2;
+
+/// Eighty columns, where the footer is one line whatever the state, so nothing
+/// below is entangled with I6's two-line footer.
+const WIDE: u16 = 80;
+
+fn chrome(app: &App) -> vigia::Chrome {
+    app.chrome("fixture", None)
+}
+
+fn split(width: u16, height: u16, files: usize) -> Body {
+    body_layout(Rect::new(0, 0, width, height), &chrome(&App::new()), files)
+}
+
+#[test]
+fn the_list_grows_to_the_file_count_and_stops_at_the_cap() {
+    // The difference between this region and a fixed one, and the whole reason
+    // `assets/preview.svg` can be honest: three changed files draw three rows,
+    // exactly the picture, and a formatter touching two hundred draws the cap.
+    //
+    // A gate over only the capped end would pass against a region that was
+    // always `LIST_ROWS` tall and padded with blanks, which is the design this
+    // one was chosen over.
+    for files in 1..=LIST_ROWS {
+        assert_eq!(
+            split(WIDE, 24, files).list,
+            files,
+            "{files} changed files did not draw {files} rows"
+        );
+    }
+    for files in [LIST_ROWS + 1, 47, 200, 10_000] {
+        assert_eq!(
+            split(WIDE, 24, files).list,
+            LIST_ROWS,
+            "{files} changed files drew more than the cap"
+        );
+    }
+
+    // Nothing changed is B3's empty state, which has no list and no rule over
+    // it: a rule above nothing is chrome announcing an absent region.
+    let empty = split(WIDE, 24, 0);
+    assert_eq!(empty.list, 0);
+    assert!(!empty.rule, "a rule was drawn over an empty list");
+}
+
+#[test]
+fn the_list_region_gives_way_before_the_diff_falls_below_min_body() {
+    // The ordering rule. The list is what shrinks, and it shrinks to nothing
+    // rather than taking the diff below two rows, because a pane showing a map
+    // of a diff it can no longer show has stopped being a monitor.
+    //
+    // Swept over every height a pane can plausibly be rather than checked at the
+    // boundary, because the boundary moves with the footer's own height and a
+    // gate that hardcoded it would be restating the arithmetic it is checking.
+    let mut saw_a_region = false;
+    let mut saw_it_give_way = false;
+
+    for height in 1..=40u16 {
+        for files in [1usize, 3, LIST_ROWS, 100] {
+            let body = split(WIDE, height, files);
+            if body.list > 0 {
+                saw_a_region = true;
+                assert!(
+                    body.diff >= MIN_BODY,
+                    "at {WIDE}x{height} over {files} files the list took {} rows \
+                     and left the diff {}, below MIN_BODY",
+                    body.list,
+                    body.diff
+                );
+                assert!(body.rule, "a list was drawn with no rule under it");
+            } else {
+                saw_it_give_way = true;
+                assert!(!body.rule, "a rule was drawn with no list above it");
+            }
+        }
+    }
+
+    assert!(saw_a_region, "no height in the sweep drew a region at all");
+    assert!(
+        saw_it_give_way,
+        "no height in the sweep was short enough to drop the region, so the \
+         giving-way half proves nothing"
+    );
+}
+
+#[test]
+fn a_notice_does_not_change_the_list_height() {
+    // §11.1's no-jog rule, one region up from the footer it was written for. A
+    // notice is transient: a file that vanished between being named and being
+    // read, a repository mid-`git gc`. If one could resize the region, the
+    // reader's diff would jump a row and back every time one flickered, which is
+    // the same thing a resize is forbidden from doing.
+    //
+    // Follow state is swept too. It changes the *footer's* height, so it changes
+    // the body, and this is what says the list still divides that body the same
+    // way rather than absorbing the difference itself.
+    let mut app = App::new();
+    let quiet = chrome(&app);
+    app.warn("a file vanished between being named and being read");
+    let noisy = chrome(&app);
+
+    let mut compared = 0;
+    for height in 3..=40u16 {
+        for width in [40u16, WIDE, 120] {
+            for files in [1usize, 3, 100] {
+                let area = Rect::new(0, 0, width, height);
+                let without = body_layout(area, &quiet, files);
+                let with = body_layout(area, &noisy, files);
+                assert_eq!(
+                    without, with,
+                    "at {width}x{height} over {files} files a notice changed the \
+                     layout from {without:?} to {with:?}"
+                );
+                compared += 1;
+            }
+        }
+    }
+    assert!(compared > 0, "the sweep compared nothing");
+}
+
+#[test]
+fn the_list_window_slides_to_keep_the_current_file_visible() {
+    // The tracking half, and what makes the caret worth drawing. Scroll the diff
+    // a file at a time and the window has to follow, or the map stops being a
+    // map of where the reader is.
+    //
+    // Asserted at **every** step rather than at the end, because the failure is
+    // not at the far end of the walk: a window that never moved would satisfy a
+    // final check on a fixture short enough for one screenful and fail silently
+    // on a longer one.
+    const FILES: usize = 40;
+    const SPAN: usize = 4;
+
+    let scratch = Scratch::large_diff("list-track", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+
+    let mut moved_window = false;
+    for step in 0..FILES {
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+
+        assert!(
+            view.list_top <= view.top.file && view.top.file < view.list_top + view.list.len(),
+            "step {step}: the diff is inside file {} and the list shows {}..{}",
+            view.top.file,
+            view.list_top,
+            view.list_top + view.list.len()
+        );
+        assert_eq!(
+            view.list.len(),
+            LIST_ROWS,
+            "step {step}: the window shrank instead of sliding"
+        );
+        if view.list_top > 0 {
+            moved_window = true;
+        }
+
+        // A whole file per step, so the current file changes every time and the
+        // window is really asked to move rather than being carried by one long
+        // file's worth of rows.
+        for _ in 0..SPAN {
+            app.apply(Action::Scroll(1), &mut frame, body.diff)
+                .expect("apply");
+        }
+    }
+
+    assert!(
+        moved_window,
+        "the window never left the top, so sliding was never exercised"
+    );
+}
+
+#[test]
+fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
+    // `View::current` is resolved **after** the walk, and this is why. A position
+    // can overshoot its file, point past a list the agent in the other pane has
+    // shortened, or be backed up to rest the diff's last row on the bottom. Mark
+    // the caret from the request and it names a file the diff is not in, on
+    // exactly the frames that moved.
+    const FILES: usize = 12;
+
+    let scratch = Scratch::large_diff("list-jump", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    // Far past the end, which resolves back to the last screenful rather than to
+    // the file that was asked for.
+    for _ in 0..FILES * 8 {
+        app.apply(Action::Scroll(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_ne!(
+        view.top.file,
+        FILES - 1,
+        "the fixture resolved to the last file, so a caret taken from the \
+         request would have been right by accident"
+    );
+    assert!(
+        view.list_top <= view.top.file && view.top.file < view.list_top + view.list.len(),
+        "the window does not contain the file the diff resolved into"
+    );
+
+    // And `g` is a jump rather than a scroll, which the window has to honour the
+    // same way.
+    app.apply(Action::Top, &mut frame, body.diff)
+        .expect("apply");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(view.top.file, 0);
+    assert_eq!(view.top, Position::default());
+    assert_eq!(view.list_top, 0, "the window did not follow the jump home");
+}
+
+#[test]
+fn scrolling_the_list_leaves_the_diff_where_it_was() {
+    // The half of the ruling that is about state rather than about keys. `J`
+    // moves a window over the map; the diff does not move, and follow stays
+    // engaged, so an agent writing in the other pane goes on dragging the diff
+    // to what it just wrote while a reader browses the changed set.
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-browse", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    let before = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(app.following(), "the shell did not start following");
+
+    for _ in 0..10 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let after = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_eq!(
+        after.top, before.top,
+        "scrolling the list moved the diff from {:?} to {:?}",
+        before.top, after.top
+    );
+    assert!(app.following(), "scrolling the list disengaged follow mode");
+    assert!(
+        after.list_top > before.list_top,
+        "the window did not move: {} to {}",
+        before.list_top,
+        after.list_top
+    );
+    assert_eq!(
+        after.list.len(),
+        LIST_ROWS,
+        "the window shrank instead of sliding"
+    );
+
+    // The caret is gone from the region, because the diff is no longer inside
+    // any file the window is showing. That is honest rather than a gap: the map
+    // is deliberately looking somewhere else, and inventing a caret would say
+    // the diff had moved.
+    assert!(
+        after.top.file < after.list_top || after.top.file >= after.list_top + after.list.len(),
+        "the fixture did not browse past the current file, so this proves nothing"
+    );
+}
+
+#[test]
+fn the_window_is_overtaken_when_the_diff_leaves_it() {
+    // The other side of the rule above. Browsing sticks, right up until the
+    // thing the map is a map *of* moves somewhere the map cannot show, at which
+    // point the map has to follow. Without this, a reader who scrolled the list
+    // once would have a region that never agreed with the diff again.
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-overtaken", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    for _ in 0..20 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let browsed = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(browsed.list_top > 0, "the window never moved");
+
+    // Now take the diff somewhere the window cannot show.
+    app.apply(Action::Bottom, &mut frame, body.diff)
+        .expect("apply");
+    let caught = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_eq!(
+        caught.top.file,
+        FILES - 1,
+        "the jump did not land on the last file"
+    );
+    assert!(
+        caught.list_top <= caught.top.file && caught.top.file < caught.list_top + caught.list.len(),
+        "the window at {} does not contain file {}",
+        caught.list_top,
+        caught.top.file
+    );
+}
+
+/// A picture of the two regions at a scale the snapshots do not reach.
+///
+/// **Ignored, diagnostic, not a gate**, the way `vigia-core`'s
+/// `frame_time_distribution` is. Every assertion above is structural, and
+/// structure is exactly what cannot tell you whether a screen is *good*: the cap,
+/// the caret and both scrollbars are each proved by a number somewhere, and none
+/// of those numbers says what fifty changed files actually look like beside an
+/// agent. Run it with:
+///
+/// ```text
+/// cargo test --test list -- --ignored --nocapture the_region_at_fifty_files
+/// ```
+#[test]
+#[ignore = "diagnostic, not a gate"]
+fn the_region_at_fifty_files() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use vigia::{Theme, render};
+
+    const FILES: usize = 50;
+    let scratch = Scratch::large_diff("list-picture", FILES, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    for (label, top) in [
+        ("at the top", 0usize),
+        ("scrolled in", 4 * 20),
+        ("past the end", 4 * 200),
+    ] {
+        for _ in 0..top {
+            app.apply(Action::Scroll(1), &mut frame, 1).expect("apply");
+        }
+        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        let body = body_layout(area, &app.chrome("vigia", None), FILES);
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
+        let theme = Theme::default();
+        let chrome = app.chrome("vigia", None);
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render(f.buffer_mut(), area, &view, &theme, &chrome);
+            })
+            .expect("draw");
+        println!("\n=== {FILES} files, {label} ===\n{}", terminal.backend());
+    }
+}
+
+#[test]
+fn the_window_survives_a_pane_too_short_to_show_it() {
+    // **The asymmetry `View::collect` already argues against, one region up.**
+    // For the diff, a frame with no room to draw "resolved nothing, so it has
+    // nothing to say about where the reader is", and reporting a zero would drag
+    // them to the top for as long as the pane stayed short. The list did the
+    // opposite in exactly that situation: `take_list` zeroed `list_top`, `App`
+    // stored it back, and because nothing but a diff-moving action hands the map
+    // back, the window never recovered.
+    //
+    // Reachable by dragging a pane edge, which is a thing a reader does to a
+    // monitor beside an agent, and `SPEC.md` §11.1 rules a resize "no state
+    // change".
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-short-pane", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let tall = split(WIDE, 24, FILES);
+
+    for _ in 0..12 {
+        app.apply(Action::ScrollList(1), &mut frame, tall.diff)
+            .expect("apply");
+    }
+    let browsed = app
+        .view(&mut frame, &mut highlighter, &history, tall)
+        .expect("view")
+        .list_top;
+    assert!(browsed > 0, "the fixture never browsed anywhere");
+
+    // A pane too short for a region at all. Non-vacuity: the layout really must
+    // refuse the region here, or this is a redraw at the same size.
+    let short = split(WIDE, 5, FILES);
+    assert_eq!(short.list, 0, "the short pane still affords a region");
+    app.view(&mut frame, &mut highlighter, &history, short)
+        .expect("view");
+
+    let restored = app
+        .view(&mut frame, &mut highlighter, &history, tall)
+        .expect("view");
+    assert_eq!(
+        restored.list_top, browsed,
+        "dragging the pane through a height with no region moved the map from \
+         {browsed} to {}",
+        restored.list_top
+    );
+}
+
+#[test]
+fn the_two_regions_tile_the_body_exactly() {
+    // `Body::clamped_to` holds the layout's only subtraction and had no direct
+    // test: mutating its give-back term left the suite green, because no fixture
+    // reached a stale view. This is the property in full — the header, the list,
+    // the rule, the diff and the footer account for every row of the pane, at
+    // every height and for every number of entries a view might carry.
+    let mut checked = 0;
+    let mut saw_a_clamp = false;
+
+    for height in 1..=40u16 {
+        for width in [40u16, WIDE, 120] {
+            for files in [0usize, 1, 3, LIST_ROWS, LIST_ROWS + 1, 200] {
+                let area = Rect::new(0, 0, width, height);
+                let chrome = chrome(&App::new());
+                let full = body_layout(area, &chrome, files);
+
+                for have in 0..=LIST_ROWS + 2 {
+                    let body = full.clamped_to(have);
+                    if body.list != full.list {
+                        saw_a_clamp = true;
+                    }
+
+                    // The footer's own height is not exposed, so it is recovered
+                    // from the unclamped split rather than restated: whatever it
+                    // is, clamping must not change it.
+                    let footer = usize::from(height)
+                        .saturating_sub(1 + full.list + usize::from(full.rule) + full.diff);
+                    assert_eq!(
+                        1 + body.list + usize::from(body.rule) + body.diff + footer,
+                        usize::from(height),
+                        "at {width}x{height} over {files} files with {have} \
+                         entries, {body:?} plus a header and {footer} footer rows \
+                         does not tile the pane"
+                    );
+                    assert_eq!(
+                        body.rule,
+                        body.list > 0,
+                        "a rule and a list disagree about each other: {body:?}"
+                    );
+                    assert_eq!(
+                        body.clamped_to(have),
+                        body,
+                        "clamping twice is not clamping once: {body:?}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+
+    assert!(checked > 1000, "the sweep checked only {checked} shapes");
+    assert!(
+        saw_a_clamp,
+        "no shape in the sweep actually shortened the region, so the clamp is \
+         never exercised"
+    );
+}
+
+#[test]
+fn collect_resolves_every_degenerate_viewport() {
+    // `View::take_list` indexes the frame through `Frame::diff`, which **panics**
+    // by design on an index past the end of the file list. That it cannot be
+    // reached is currently proved only by a comment. This drives the public
+    // signature with the positions that comment is about.
+    //
+    // It also covers the pair `body_layout` never produces and `View::collect`'s
+    // own doc argues at length: no diff rows and a region anyway.
+    const FILES: usize = 12;
+
+    let scratch = Scratch::large_diff("list-degenerate", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    for list_top in [0usize, 1, FILES - 1, FILES, FILES + 9, usize::MAX] {
+        for list_rows in [0usize, 1, LIST_ROWS, FILES, FILES + 5, 10_000] {
+            for diff_rows in [0usize, 1, 22] {
+                for file in [0usize, FILES - 1, FILES, FILES + 3] {
+                    for list_follows in [true, false] {
+                        let view = View::collect(
+                            &mut frame,
+                            &mut highlighter,
+                            &history,
+                            Viewport {
+                                position: Position { file, row: 0 },
+                                anchored: false,
+                                diff_rows,
+                                list_top,
+                                list_rows,
+                                list_follows,
+                                measured: true,
+                            },
+                        )
+                        .expect("collect");
+
+                        assert!(
+                            view.list.len() <= list_rows,
+                            "asked for {list_rows} list rows and got {}",
+                            view.list.len()
+                        );
+                        // **Only while there is a window.** A pane with no region
+                        // hands `list_top` back untouched, which is the whole
+                        // point of `the_window_survives_a_pane_too_short_to_show_it`
+                        // and is what the diff's own walk does with `top.row`. So
+                        // an out-of-range request survives a region-less frame and
+                        // is clamped by the next one that draws. What must always
+                        // hold is that a window which exists fits inside the file
+                        // list, because that is what keeps `Frame::diff` — which
+                        // panics on an out-of-range index by design — in range.
+                        if !view.list.is_empty() {
+                            assert!(
+                                view.list_top + view.list.len() <= FILES,
+                                "the window {}..{} runs past {FILES} files",
+                                view.list_top,
+                                view.list_top + view.list.len()
+                            );
+                        }
+                        assert!(
+                            view.rows.len() <= diff_rows,
+                            "asked for {diff_rows} diff rows and got {}",
+                            view.rows.len()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn browsing_back_up_returns_the_window_to_the_top() {
+    // `Action::ScrollList(-1)` end to end. `input.rs` gates the key mapping and
+    // the follow ruling, but nothing drove the negative delta through
+    // `App::apply` and `App::view`, so `saturating_add_signed`'s down-path and
+    // the browse-back-up journey were untested.
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-back-up", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    for _ in 0..15 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let out = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view")
+        .list_top;
+    assert!(out > 0, "the fixture never browsed away");
+
+    // Further back than it went, so the saturation is exercised rather than the
+    // arithmetic alone.
+    for _ in 0..40 {
+        app.apply(Action::ScrollList(-1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let back = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    assert_eq!(back.list_top, 0, "browsing back up did not reach the top");
+    assert_eq!(
+        back.list.len(),
+        LIST_ROWS,
+        "the window lost rows on the way"
+    );
+}
+
+/// Dragging the list's scrollbar to the bottom of its track shows the last file.
+///
+/// The sibling of `scroll.rs`'s diff-drag gate, and the reason both exist: a
+/// track that maps onto the whole changed set instead of onto its travel leaves
+/// its final `LIST_ROWS` worth of track dead, because every fraction past the
+/// bound clamps to the same window.
+///
+/// **The middle of the track is the assertion that can tell those apart**, and
+/// the ends are not. Mapping onto the whole still reaches the last file, since
+/// the clamp catches it; what it does is compress the live part of the track
+/// into the first 85% and pin the rest. So the ends are checked because a
+/// resolution ignoring the fraction entirely would pass a midpoint check alone,
+/// and the midpoint is checked because the ends cannot see the defect.
+#[test]
+fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
+    use vigia::TRACK_SCALE;
+
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-drag", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+
+    // The app learns the region's height from a frame, the way the shell gives
+    // it one, rather than being told out of band.
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    app.apply(Action::ListTo(TRACK_SCALE), &mut frame, 0)
+        .expect("drag to the end");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(
+        view.list_top + view.list.len(),
+        FILES,
+        "the bottom of the track showed files {}..{} of {FILES}",
+        view.list_top,
+        view.list_top + view.list.len()
+    );
+
+    app.apply(Action::ListTo(0), &mut frame, 0)
+        .expect("drag to the start");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(view.list_top, 0, "the top of the track did not show file 0");
+
+    // Halfway down the track is halfway down the travel, not halfway down the
+    // changed set. The two differ by exactly half the region's height, which is
+    // the compression the clamp hides at the ends.
+    app.apply(Action::ListTo(TRACK_SCALE / 2), &mut frame, 0)
+        .expect("drag to the middle");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(
+        view.list_top,
+        (FILES - LIST_ROWS) / 2,
+        "halfway down the track showed files {}..{}",
+        view.list_top,
+        view.list_top + view.list.len()
+    );
+}
+
+/// The caret walks down the window before the window moves under it.
+///
+/// **Reported from use, and it is the second fixed-position rule this region
+/// has had.** Ending the window on the current file showed the six files before
+/// the six the diff was drawing; starting the window on it fixed that and
+/// pinned the caret to the first row, so scrolling a seventeen-file tree moved
+/// the list on every step while the marker never went anywhere. Both are the
+/// same defect: a constant row is not following a file.
+///
+/// So this asserts **travel**, which neither fixed rule can satisfy and which
+/// `the_list_window_slides_to_keep_the_current_file_visible` cannot see, since
+/// containment holds for a pinned caret too.
+#[test]
+fn the_caret_travels_the_window_before_the_window_moves() {
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-travel", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+
+    // Walking the diff forward one file at a time from the start, the caret's
+    // row is the file's own index until the window has to move, and the window
+    // does not move until then.
+    let mut seen = Vec::new();
+    for file in 0..LIST_ROWS + 4 {
+        // `view` is what advances the file, not `apply`: a scroll down adds to
+        // the offset and lets `View::collect` carry the overrun into the files
+        // after it, so a loop that only applied would spin forever.
+        let mut view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+        let mut guard = 0;
+        while view.top.file < file {
+            app.apply(Action::Scroll(1), &mut frame, body.diff)
+                .expect("apply");
+            view = app
+                .view(&mut frame, &mut highlighter, &history, body)
+                .expect("view");
+            guard += 1;
+            assert!(guard < 10_000, "never reached file {file}");
+        }
+        let caret = view.top.file - view.list_top;
+        seen.push((view.list_top, caret));
+
+        if file < LIST_ROWS {
+            assert_eq!(
+                view.list_top, 0,
+                "the window moved at file {file}, which still fits in it"
+            );
+            assert_eq!(
+                caret, file,
+                "the caret sat at row {caret} for file {file}, so it is pinned \
+                 rather than travelling"
+            );
+        } else {
+            // Past the window, the caret rests on the last row and the window
+            // advances by exactly the overshoot. More would jump the map; less
+            // would leave the current file off it.
+            assert_eq!(
+                caret,
+                LIST_ROWS - 1,
+                "at file {file} the caret left the last row, so the window moved \
+                 by more than the overshoot"
+            );
+            assert_eq!(view.list_top, file + 1 - LIST_ROWS);
+        }
+    }
+
+    assert!(
+        seen.iter().any(|(top, _)| *top > 0),
+        "the window never moved at all over {} files",
+        LIST_ROWS + 4
+    );
+}
+
+/// Clicking a listed file sends the diff to it.
+///
+/// The gesture a reader tries without being told, and the one the region most
+/// obviously invites by drawing a list of names next to the thing they name.
+///
+/// It is **not** selection, which is what `SPEC.md` §11.2 B4 refuses: nothing is
+/// remembered, no row becomes special, and the event after it means exactly what
+/// it would have meant. The same argument already licensed dragging a scrollbar.
+#[test]
+fn clicking_a_listed_file_sends_the_diff_to_it() {
+    use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use vigia::{action_for, regions};
+
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-click", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    // Through the real hit-test rather than by constructing the action, because
+    // the row-to-offset arithmetic is half of what can be wrong here.
+    let area = Rect::new(0, 0, WIDE, 24);
+    let regions = regions(area, &chrome(&app), &view);
+    let (list_top_row, list_rows) = regions.list;
+    assert!(list_rows > 1, "no region was published to click on");
+
+    let click = |row: u16| {
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            // Not the bar's column: that is a drag, and it is checked first.
+            column: 2,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+
+    for offset in [0u16, 2, list_rows - 1] {
+        let action = action_for(&click(list_top_row + offset), regions);
+        assert_eq!(action, Some(Action::ListRow(offset)));
+        app.apply(action.expect("action"), &mut frame, body.diff)
+            .expect("apply");
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+        assert_eq!(
+            view.top,
+            Position {
+                file: usize::from(offset),
+                row: 0
+            },
+            "a click on row {offset} did not put the diff at the top of that file"
+        );
+    }
+
+    // And a click on the diff below is still inert, which is B4 standing.
+    assert_eq!(action_for(&click(regions.diff.0 + 1), regions), None);
+}

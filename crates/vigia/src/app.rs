@@ -11,8 +11,8 @@ use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
 use crate::input::Action;
 use crate::memory;
-use crate::render::{Chrome, Mode};
-use crate::view::{Position, View, rows_in};
+use crate::render::{Body, Chrome, Mode};
+use crate::view::{Position, View, Viewport, rows_in};
 
 /// Completed frames the status bar's frame time is taken over.
 ///
@@ -32,6 +32,19 @@ use crate::view::{Position, View, rows_in};
 /// Bounded on purpose, which is I3's business: at 128 durations this is two
 /// kilobytes allocated once per session and never grown.
 const FRAME_SAMPLES: usize = 128;
+
+/// A track fraction resolved against a count.
+///
+/// [`crate::input::TRACK_SCALE`] is the denominator the input layer reports in,
+/// because it has no frame to ask how many files there are. Saturating at the
+/// last index rather than wrapping: a drag to the very bottom of a track is a
+/// request for the end, not for one past it.
+fn scaled(at: u32, count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
+}
 
 /// The shell's state.
 #[derive(Debug, Clone)]
@@ -63,6 +76,36 @@ pub struct App {
     /// `SPEC.md` §11.1 rules. One path, replaced per tick: bounded by one
     /// string rather than by the session, so I3 never sees it.
     newest: Option<String>,
+    /// First file the pinned list shows.
+    ///
+    /// A second window onto one file list, and deliberately **not** derived from
+    /// [`Self::position`]. It tracks the diff on its own, so most of the time it
+    /// is whatever [`View::collect`] resolved it to; what it carries between
+    /// frames is the one thing that walk cannot know, which is that a reader
+    /// moved it themselves with `J` and has not been overtaken yet.
+    list_top: usize,
+    /// Whether the list's window is still the diff's to move.
+    ///
+    /// **The list's own `following`, and it exists for the same reason.** The
+    /// window tracks the diff by default, so the region is correct untouched the
+    /// way I5 requires; `J` takes it over, and anything that moves the *diff*
+    /// hands it back. Without the second half a reader who browsed once would
+    /// have a map that never agreed with the diff again; without the first, `J`
+    /// does nothing at all, because the next frame drags the window straight
+    /// back onto the current file.
+    ///
+    /// True at rest, which `Default` gives, and which is the right answer here
+    /// rather than an accident: a monitor's map follows what it is a map of.
+    list_follows: bool,
+    /// Rows the pinned list had on the frame that was last drawn.
+    ///
+    /// Carried only so a list gesture can be clamped against the window's real
+    /// bound rather than against the file count. Without it, `J` at the last
+    /// window moves `list_top` past where `View::take_list` will put it, so a
+    /// keypress that changes nothing on screen still takes the map over. Zero
+    /// until the first frame, which is the honest answer before anything has
+    /// been laid out.
+    list_rows: usize,
     /// Whether the watch is still live, which the header draws as a word.
     ///
     /// [`Mode::Watching`] is `Default`, and unlike `following` that is the right
@@ -106,6 +149,9 @@ impl Default for App {
             // would have put it, so nothing is owed a back-up before the reader
             // has moved.
             anchored: false,
+            list_top: 0,
+            list_follows: true,
+            list_rows: 0,
             newest: None,
             mode: Mode::default(),
             frames: Samples::new(FRAME_SAMPLES),
@@ -283,6 +329,10 @@ impl App {
         };
         self.anchored = false;
         self.position = Position { file, row: 0 };
+        // A jump moves the diff, so the map goes back to following it. Follow
+        // mode dragging the view to a file the pinned list was not showing is
+        // exactly when a reader most needs the two to agree.
+        self.list_follows = true;
         true
     }
 
@@ -303,6 +353,13 @@ impl App {
         // silently: follow mode would simply keep dragging the reader back.
         if action.is_manual_scroll() {
             self.following = false;
+            // **And the map is handed back.** Every action that reaches here
+            // moves the diff, and a reader who moves the diff is asking to see
+            // where it went; a window left behind from an earlier `J` would be
+            // showing somewhere else with no caret to say so. This is the exact
+            // mirror of the line above it: manual scrolling takes the *diff*
+            // away from follow mode and gives the *list* back to it.
+            self.list_follows = true;
         }
 
         match action {
@@ -321,6 +378,84 @@ impl App {
             Action::Scroll(rows) => {
                 self.anchored = true;
                 self.scroll(rows, frame)?;
+            }
+            // **Moves the window and nothing else**, which is the whole of
+            // `SPEC.md` §11.1's ruling: the diff does not move, follow is not
+            // disengaged (see `Action::is_manual_scroll`), and `anchored` is
+            // untouched because that word is about how the *diff's* position was
+            // reached.
+            //
+            // Bounded here only against the file list's length, because the real
+            // clamp needs the region's height and `View::take_list` is where that
+            // is known. Same division of labour the diff's position already has:
+            // this moves a number, the collect resolves it, and the resolved
+            // answer comes back through `App::view`.
+            // **Only a move that moves something takes the map over.** `K` at
+            // the top, or `J` at the last window, changes not one cell on screen,
+            // and detaching there leaves a reader with a map that has silently
+            // stopped following and no readout saying so: `following` has
+            // `follow ▶` in the footer and this has nothing.
+            Action::ScrollList(rows) => {
+                self.browse(self.list_top.saturating_add_signed(rows), frame);
+            }
+            // Dragging the list's own bar. The fraction is resolved against the
+            // changed-file count here rather than in `input`, which has no frame
+            // to ask.
+            // Both bars map the track onto **travel** rather than onto the whole,
+            // which is the arithmetic the thumb is drawn with. Mapping onto the
+            // whole instead leaves the last screenful's worth of track dead: the
+            // pointer reaches the bottom and the view is still short of the end.
+            Action::ListTo(at) => {
+                let travel = frame.files().len().saturating_sub(self.list_rows.max(1));
+                self.browse(scaled(at, travel), frame);
+            }
+            // A click on a listed file. Out of range is a click on blank space
+            // under a list shorter than its region, which is not a file and so
+            // is not a jump: silently doing nothing is right where clamping to
+            // the last file would move the diff somewhere nobody pointed at.
+            Action::ListRow(offset) => {
+                let file = self.list_top.saturating_add(usize::from(offset));
+                if file < frame.files().len() {
+                    self.anchored = false;
+                    self.position = Position { file, row: 0 };
+                }
+            }
+            // Dragging the diff's bar, which counts **rows**, so this resolves a
+            // row of the whole diff back into the file it falls inside and the
+            // offset within it.
+            //
+            // It counted files until 2026-08-02, from when the bar itself did.
+            // The bar became row-exact and this did not, so a drag had one
+            // landing spot per changed file while the thumb it followed had one
+            // per row: on a worktree of three long files the lower bar moved
+            // under the pointer and the diff jumped to a heading or did not move
+            // at all. Reported from use, which is the fifth time.
+            //
+            // `Frame::height` is the count the bar already drew itself with and
+            // is cached until the next `advance`, so the walk below reads
+            // nothing that this frame has not read already.
+            Action::DiffTo(at) => {
+                self.anchored = false;
+                let total = frame.height(crate::view::rows_of)?;
+                let target = scaled(at, total.saturating_sub(height));
+                let mut seen = 0;
+                let files = frame.files().len();
+                let mut position = Position {
+                    file: files.saturating_sub(1),
+                    row: 0,
+                };
+                for file in 0..files {
+                    let rows = frame.rows_of(file, crate::view::rows_of)?;
+                    if seen + rows > target {
+                        position = Position {
+                            file,
+                            row: target - seen,
+                        };
+                        break;
+                    }
+                    seen += rows;
+                }
+                self.position = position;
             }
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
@@ -349,6 +484,23 @@ impl App {
             }
         }
         Ok(true)
+    }
+
+    /// Move the list's window, and take the map over only if it moved.
+    ///
+    /// **Clamped against the window's real bound**, which is the file count less
+    /// the region's height, not less one. `View::take_list` clamps there anyway,
+    /// so a gesture past it changes nothing on screen — and detaching the map for
+    /// a keypress a reader cannot see is worse than ignoring it, because
+    /// `following` has `follow ▶` in the footer to say what it is doing and this
+    /// has nothing.
+    fn browse(&mut self, to: usize, frame: &Frame) {
+        let bound = frame.files().len().saturating_sub(self.list_rows.max(1));
+        let moved = to.min(bound);
+        if moved != self.list_top {
+            self.list_top = moved;
+            self.list_follows = false;
+        }
     }
 
     /// The two directions are deliberately not symmetrical, and the signatures
@@ -411,22 +563,38 @@ impl App {
     /// and a copy of it behind [`App`]'s derived `Clone` would be a second
     /// answer to "what changed recently" that nothing keeps in step with the
     /// first.
+    /// `body` is [`crate::render::body_layout`]'s answer, so the two regions are
+    /// sized by one rule rather than by this method's idea of one.
     pub fn view(
         &mut self,
         frame: &mut Frame,
         highlighter: &mut Highlighter,
         history: &History,
-        height: usize,
+        body: Body,
     ) -> Result<View> {
         let view = View::collect(
             frame,
             highlighter,
             history,
-            self.position,
-            height,
-            self.anchored,
+            Viewport {
+                position: self.position,
+                anchored: self.anchored,
+                diff_rows: body.diff,
+                list_top: self.list_top,
+                list_rows: body.list,
+                list_follows: self.list_follows,
+                // Asked for whenever a bar could be drawn, which is what
+                // `body_layout` already decided by giving the diff more than one
+                // row. A pane too short for a bar pays nothing.
+                measured: body.diff > 1,
+            },
         )?;
         self.position = view.top;
+        self.list_rows = body.list;
+        // Stored back for the reason the position is: resolution happens once,
+        // in the code that knows where the diff landed, and a caller that kept
+        // its own answer would be a second rule for the same fact.
+        self.list_top = view.list_top;
         Ok(view)
     }
 }

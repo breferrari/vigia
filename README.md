@@ -18,6 +18,8 @@ It shows your working tree changing, continuously, without being touched. No bra
 
 It is closer to `btop` than to a git client: something you glance at, read from shape and colour, then glance away from.
 
+**It takes the mouse.** The wheel scrolls whichever half of the pane you are pointing at, both scrollbars can be grabbed and dragged, and clicking a file in the pinned list jumps the diff to it. None of that costs you a mode: nothing is ever selected, so the keys mean the same thing on every frame.
+
 **A monitor, not a reviewer.** A reviewer is something you launch per changeset to step through, annotate, and decide on. `vigia` is already open. It should be correct when nobody has touched it for an hour, and still cheap when nobody has closed it for a week.
 
 ## 📦 Try it
@@ -43,8 +45,14 @@ vigia ~/code/some-repo
 | `j` `k` `↑` `↓` | scroll a row |
 | `Space` `PgDn` `PgUp` | page |
 | `g` `Home` / `G` `End` | first / last changed file |
+| `J` `K` `Shift+↑` `Shift+↓` | scroll the pinned file list |
 | `f` | follow the newest change, or stop following |
-| wheel | scroll |
+
+| Mouse | |
+|---|---|
+| wheel | scroll whichever region the pointer is over |
+| drag a scrollbar | move that region, and both bars are exact |
+| click a listed file | jump the diff to it |
 
 It shows the working tree against the index, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and names the branch it found nothing on.
 
@@ -81,6 +89,7 @@ The keys, which are every colour the shell draws with:
 | Group | Keys |
 |---|---|
 | Chrome | `chrome` `chrome_dim` |
+| Scrollbars | `bar` `bar_track` |
 | File rows | `path` `path_live` `path_cold` `pulse` `spark` `kind` |
 | Heat strip | `heat_track`, and `heat_added` `heat_removed` `heat_mixed` each with a `_warm` and `_hot` twin |
 | Diff | `hunk` `gutter` `added` `removed` `context` `note` `alert` |
@@ -104,11 +113,11 @@ How many colours your terminal has is detected. `VIGIA_COLOR` overrides that wit
 
 ## 🖼️ Where it is going
 
-Target layout. **This is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header's `watching · 3 files`, the file rows, the counters, the change sparklines, the heat bars and their three-step ramp, the pulse on what just changed, the tinted rows and their left bars, and the highlighted diff under them. The status bar draws too, and the two departures from the picture are deliberate: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and memory is quoted in `MiB` because that is the unit the soak that budgets it uses.
+Target layout. **This is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header's `watching · 3 files`, the pinned list of changed files above the rule, the counters, the change sparklines, the heat bars and their three-step ramp, the caret on the file the diff is inside, the pulse on what just changed, the scrollbar down the diff, the tinted rows and their left bars, and the highlighted diff under them. The status bar draws too, and the departures from the picture are deliberate and written down in `SPEC.md`: the left of the header reads the worktree's name rather than `vigia`, on the argument that a title bar spends six of forty columns telling you which program you started, and both regions draw a file the same way where the mockup splits the elements between them, because a file scrolled out of a capped list would otherwise take its counters with it.
 
-<img src="assets/preview.svg" alt="Mockup of the vigia interface: a file list with change sparklines above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
+<img src="assets/preview.svg" alt="Mockup of the vigia interface: a pinned list of changed files with sparklines and heat bars above a syntax highlighted diff, and a status bar showing frame time and memory." width="900">
 
-The sparklines are change density over time. The bars locate change within each file. The frame time sits in the status bar because it is a promise, not a diagnostic: it is the p99 of the last 128 frames, against the 16ms this is gated at. The memory beside it is read once a frame and costs 193ns to read.
+The sparklines are change density over time. The bars locate change within each file. The list is pinned, so those signals stay on screen while you read the diff under them; it grows to the number of changed files, caps, and scrolls with `J` and `K` when there are more than fit. The scrollbar beside the diff is row-exact: it spans the screen's rows over the diff's total rows and sits at the rows above it. Counting every changed file's height turned out to cost 8.76ms where materialising the same diffs costs 442.71ms, so the bar says where the end is rather than approximating it. The frame time sits in the status bar because it is a promise, not a diagnostic: it is the p99 of the last 128 frames, against the 16ms this is gated at. The memory beside it is read once a frame and costs 193ns to read.
 
 ## ⚡ Design commitments
 

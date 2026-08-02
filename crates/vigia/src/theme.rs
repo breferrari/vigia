@@ -120,6 +120,25 @@ palette! {
     /// A churn sparkline's blocks.
     spark,
 
+    /// The filled part of a scrollbar: where in the whole a region is looking.
+    ///
+    /// **Deliberately not `chrome`**, which every other structural mark uses.
+    /// The thumb is drawn as `█`, and `chrome` shares its foreground with
+    /// [`Theme::spark`] on every palette here, so a bar drawn in it would be
+    /// indistinguishable from a sparkline at full height to anything reading
+    /// cells. That is not a hypothetical: `tests/legibility.rs` counts a
+    /// sparkline's buckets by colour *and* glyph precisely because the heat strip
+    /// already collided with it once, and the first draft of this bar collided
+    /// with it again the same day.
+    bar,
+    /// The unfilled part, which is drawn rather than left blank.
+    ///
+    /// A bar with no track is a mark floating in space: a reader cannot tell a
+    /// short thumb near the top from a long one without seeing the extent it sits
+    /// in. Dimmer than the thumb, for the same reason [`Theme::heat_track`] is
+    /// dimmer than a slice.
+    bar_track,
+
     /// A heat-strip slice nothing changed in.
     ///
     /// A track rather than a gap, which is what `assets/preview.svg` draws: an
@@ -394,6 +413,12 @@ impl Theme {
             // already means two rows below.
             pulse: fg(Color::Cyan),
             spark: fg(Color::Cyan),
+            // Grey rather than cyan, for the reason the field's own doc gives:
+            // the thumb is a full block and cyan is the sparkline's, so the two
+            // would be one colour drawing two meanings. Grey is what this palette
+            // already uses for everything structural.
+            bar: fg(Color::Gray),
+            bar_track: fg(Color::DarkGray),
             // **The one place colour 8 is the right answer**, and the exception
             // proves the rule that sent everything else to `DIM`. A track is not
             // text: it is a solid block that should sit just above the background,
@@ -479,6 +504,8 @@ impl Theme {
             // does is that green already means addition two rows down, and a churn
             // sparkline is about *when*, not *what*.
             spark: rgb(0x39, 0xc5, 0xcf),
+            bar: rgb(0x8b, 0x94, 0x9e),
+            bar_track: rgb(0x21, 0x26, 0x2d),
             heat_track: rgb(0x21, 0x26, 0x2d),
             heat_added: rgb(0x3f, 0xb9, 0x50),
             heat_added_warm: rgb(0x56, 0xd3, 0x64),
@@ -566,6 +593,8 @@ impl Theme {
             path_cold: rgb(0x81, 0x8b, 0x98),
             pulse: rgb(0x0a, 0x62, 0x6b),
             spark: rgb(0x0a, 0x62, 0x6b),
+            bar: rgb(0x59, 0x63, 0x6e),
+            bar_track: rgb(0xd0, 0xd7, 0xde),
             // Light enough to read as a track on white, dark enough to be visible.
             heat_track: rgb(0xd0, 0xd7, 0xde),
             heat_added: rgb(0x4a, 0xc2, 0x6b),

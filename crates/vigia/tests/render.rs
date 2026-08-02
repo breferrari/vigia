@@ -28,8 +28,10 @@ use std::time::Duration;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use vigia::{
-    Chrome, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, body_height, render,
+    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, diff_height,
+    render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -136,8 +138,13 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     );
 
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            file('M', "src/a.rs", 1, 0),
+            file("src/a.rs", 1, 0),
             Row::Hunk {
                 old_start: 5,
                 old_lines: 0,
@@ -170,11 +177,12 @@ fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
         .unwrap_or_else(|| panic!("no {needle:?} anywhere on row {y}"))
 }
 
-fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
-    Row::File {
+/// One changed file, as the pinned list carries it.
+fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
+    FileEntry {
         path: path.to_owned(),
         from: None,
-        kind,
+        kind: 'M',
         churn: Some((added, removed)),
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
@@ -182,11 +190,26 @@ fn file(kind: char, path: &str, added: u32, removed: u32) -> Row {
     }
 }
 
+/// The same file, as a heading in the diff stream.
+///
+/// One constructor behind both, because `SPEC.md` §11.1 draws the two regions
+/// from one `FileEntry` and a fixture that built them separately could drift in
+/// exactly the way the shared type exists to prevent. Two of the call sites
+/// below build the same file for both regions of one screen.
+fn file(path: &str, added: u32, removed: u32) -> Row {
+    Row::File(entry(path, added, removed))
+}
+
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
 fn one_file() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            file('M', "crates/vigia-core/src/frame.rs", 3, 1),
+            file("crates/vigia-core/src/frame.rs", 3, 1),
             Row::Hunk {
                 old_start: 258,
                 old_lines: 7,
@@ -244,6 +267,11 @@ fn the_same_screenful_at_a_hundred_and_twenty_columns() {
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: Vec::new(),
         files: 0,
         top: Position::default(),
@@ -459,8 +487,13 @@ fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
 #[test]
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -468,9 +501,9 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Note("binary"),
-            Row::File {
+            Row::File(FileEntry {
                 path: "src/merge.rs".to_owned(),
                 from: None,
                 kind: 'U',
@@ -478,9 +511,9 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
             Row::Note("unresolved conflict"),
-            Row::File {
+            Row::File(FileEntry {
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -488,7 +521,7 @@ fn a_file_with_no_line_diff_says_why() {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
         ],
         files: 3,
         top: Position::default(),
@@ -504,8 +537,12 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     // nothing. This is the truncated-to-useless shape I6 forbids, and it is the
     // one part of I6 the renderer decides on its own rather than by layout.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![file(
-            'M',
             "crates/vigia-core/src/very/deeply/nested/module/frame.rs",
             12,
             3,
@@ -527,8 +564,13 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     // file produces a single-line hunk. Found by mutation, which is also why it
     // has a test of its own rather than a comment.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            file('M', "VERSION", 1, 1),
+            file("VERSION", 1, 1),
             Row::Hunk {
                 old_start: 1,
                 old_lines: 1,
@@ -785,8 +827,13 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     // screen rather than one row. Both arrive from ordinary files that nobody
     // wrote for a display.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            file('M', "Makefile", 1, 0),
+            file("Makefile", 1, 0),
             line(LineKind::Added, 1, "\tcargo build\ta\tb"),
             line(LineKind::Context, 2, "bell\u{7}esc\u{1b}[31mnul\u{0}"),
         ],
@@ -813,8 +860,13 @@ fn a_double_width_character_is_never_cut_in_half() {
     // failure only happens when a character straddles the exact clip boundary,
     // so a single width tests one alignment out of two.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            file('M', "docs/読み方.md", 2, 0),
+            file("docs/読み方.md", 2, 0),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
             line(LineKind::Added, 2, "🙂🙂🙂 tail"),
         ],
@@ -862,6 +914,11 @@ fn the_gutter_gives_way_before_the_text_does() {
     // than a readable column. Both sides are asserted, because a rule that only
     // ever fires one way is not a rule.
     let view = View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![line(LineKind::Added, 1234, "let value = compute(input);")],
         files: 1,
         top: Position::default(),
@@ -890,7 +947,7 @@ fn the_gutter_gives_way_before_the_text_does() {
 fn any_area_renders_including_the_ones_that_fit_nothing() {
     // A pane being dragged narrow steps through every one of these sizes. A
     // monitor that panics on the way is worse than one that draws something
-    // cramped, and `body_height` is what the caller uses to ask for rows, so it
+    // cramped, and `diff_height` is what the caller uses to ask for rows, so it
     // must never ask for more rows than the screen has after its chrome.
     //
     // That it asks for exactly the right number is a stronger claim and it is
@@ -901,8 +958,8 @@ fn any_area_renders_including_the_ones_that_fit_nothing() {
         let backend = screen(width, height, &view, &chrome());
         let area = ratatui::layout::Rect::new(0, 0, width, height);
         assert!(
-            body_height(area, &chrome(), view.files) < usize::from(height).max(1),
-            "body_height asked for more rows than {width}x{height} has"
+            diff_height(area, &chrome(), view.files) < usize::from(height).max(1),
+            "diff_height asked for more rows than {width}x{height} has"
         );
         // Non-vacuity: the loop must actually have produced a buffer of the size
         // asked for, or it proved only that nothing was drawn.
@@ -1156,8 +1213,13 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 /// able to fail.
 fn glancing() -> View {
     View {
+        list: Vec::new(),
+        list_top: 0,
+        current_span: 0,
+        total_rows: 0,
+        rows_above: 0,
         rows: vec![
-            Row::File {
+            Row::File(FileEntry {
                 path: "src/engine/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1168,8 +1230,8 @@ fn glancing() -> View {
                 // at the tail. One row carrying all three kinds plus the track,
                 // which is what the colour gate below reads.
                 heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
-            },
-            Row::File {
+            }),
+            Row::File(FileEntry {
                 path: "src/render/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1177,8 +1239,8 @@ fn glancing() -> View {
                 spark: [0, 0, 0, 2, 1, 0, 0, 0],
                 recency: Recency::Live,
                 heat: heat(&[(3, 2, 1)]),
-            },
-            Row::File {
+            }),
+            Row::File(FileEntry {
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1186,7 +1248,7 @@ fn glancing() -> View {
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
-            },
+            }),
         ],
         files: 3,
         top: Position::default(),
@@ -1422,3 +1484,687 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 // was deleted rather than stored. What a symbol snapshot cannot see at all is
 // the colour, and that is
 // `the_four_heat_kinds_reach_the_cells_and_are_distinct` above.
+
+/// The two-region screen `SPEC.md` §11.1 rules: a pinned list over a diff.
+///
+/// `current` is an index into the list as drawn, so the caret's row is chosen by
+/// the fixture rather than derived from it. `row` is how far into that file the
+/// viewport has scrolled, which is what the diff's scrollbar reads.
+fn two_regions_at(current: usize, row: usize) -> View {
+    View {
+        list: vec![
+            entry("src/engine/change.rs", 8, 2),
+            entry("src/engine/watch.rs", 42, 7),
+            entry("src/render/frame.rs", 11, 3),
+        ],
+        list_top: 0,
+        // Tall enough that a scroll inside one file is several rows of bar, which
+        // is what makes the within-a-file half of the ruling observable at all.
+        current_span: 400,
+        total_rows: 0,
+        rows_above: 0,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
+            line(LineKind::Added, 39, "    if self.pending.is_empty() {"),
+        ],
+        files: 3,
+        top: Position { file: current, row },
+        read: 4,
+        peak: 0,
+    }
+}
+
+/// The same screen at the top of its current file.
+fn two_regions(current: usize) -> View {
+    two_regions_at(current, 0)
+}
+
+#[test]
+fn the_caret_marks_the_file_the_diff_is_inside() {
+    // The one thing on screen that says which of the listed files the diff below
+    // belongs to. Asserted by row rather than by presence: a caret drawn on every
+    // row, or on a fixed row, would satisfy "there is a caret somewhere" and say
+    // nothing.
+    //
+    // Both directions, per this file's own rule: the marked row has it and the
+    // others do not.
+    const CARET: &str = "▸";
+
+    for current in 0..3usize {
+        let view = two_regions(current);
+        let backend = screen(64, 18, &view, &chrome());
+        let buffer = backend.buffer();
+
+        for row in 0..3u16 {
+            // The list starts on row 1, immediately under the single header line.
+            let marked = buffer[(0, row + 1)].symbol() == CARET;
+            assert_eq!(
+                marked,
+                row as usize == current,
+                "with the diff in file {current}, row {row} of the list {} the \
+                 caret",
+                if marked { "carries" } else { "does not carry" }
+            );
+        }
+    }
+}
+
+#[test]
+fn the_rule_separates_the_regions_and_spans_the_pane() {
+    // The rule is what makes two regions read as two rather than as a list that
+    // ran out. It has to reach both edges: one that stopped short would read as a
+    // box someone forgot to close.
+    const RULE: char = '─';
+
+    for width in [40u16, 64, 120] {
+        let view = two_regions(1);
+        let backend = screen(width, 18, &view, &chrome());
+        let buffer = backend.buffer();
+
+        // Three list rows under the header, so the rule is row four.
+        let y = 4u16;
+        let drawn: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
+        assert_eq!(
+            drawn,
+            RULE.to_string().repeat(usize::from(width)),
+            "at {width} columns the rule is {drawn:?}"
+        );
+
+        // And nothing above or below it is one, so the row is the separator
+        // rather than a fill the renderer sprayed everywhere.
+        for other in [y - 1, y + 1] {
+            let row: String = (0..width).map(|x| buffer[(x, other)].symbol()).collect();
+            assert!(
+                !row.contains(RULE),
+                "row {other} also holds the rule: {row:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_caret_degrades_once_and_never_flickers() {
+    // I6's ladder applied to the newest glance element. The caret costs the list
+    // a column, so it is dropped on a pane too narrow to spare one, and the only
+    // thing that makes such a drop legible is that it happens **once**: a marker
+    // that came back at a narrower width would read as the current file changing
+    // while a reader dragged a pane edge.
+    //
+    // Monotonicity rather than a threshold, deliberately. The threshold is the
+    // renderer's own constant, and a test that restated it would agree with the
+    // code by construction instead of checking it. This asserts the shape of the
+    // ladder, which no constant can satisfy by accident.
+    const CARET: &str = "▸";
+
+    let drawn: Vec<bool> = (1..=60u16)
+        .map(|width| {
+            let view = two_regions(1);
+            let backend = screen(width, 18, &view, &chrome());
+            let buffer = backend.buffer();
+            (0..width)
+                .map(|x| buffer[(x, 2)].symbol())
+                .collect::<String>()
+                .contains(CARET)
+        })
+        .collect();
+
+    assert!(drawn.iter().any(|on| *on), "no width drew the caret");
+    assert!(
+        drawn.iter().any(|on| !*on),
+        "no width was narrow enough to drop it, so the ladder is never exercised"
+    );
+
+    let first = drawn.iter().position(|on| *on).expect("a width with it");
+    assert!(
+        drawn[first..].iter().all(|on| *on),
+        "the caret came back after being dropped: {:?}",
+        &drawn[first..]
+    );
+}
+
+/// The rows of column `x` that carry the scrollbar's thumb.
+fn thumb_rows(backend: &TestBackend, x: u16, rows: std::ops::Range<u16>) -> Vec<u16> {
+    const THUMB: &str = "█";
+    let buffer = backend.buffer();
+    rows.filter(|y| buffer[(x, *y)].symbol() == THUMB).collect()
+}
+
+#[test]
+fn the_list_scrollbar_spans_the_visible_window() {
+    // The list's bar is exact, because both of its numbers are free: the window
+    // it shows and the changed-file count are known without reading anything.
+    //
+    // Ten files with three on screen, so the thumb is a proper fraction rather
+    // than the whole bar, and it has somewhere to move to.
+    const TRACK: &str = "▕";
+    let width = 64u16;
+
+    let mut seen = Vec::new();
+    for list_top in [0usize, 3, 7] {
+        let view = View {
+            list_top,
+            files: 10,
+            ..two_regions(list_top)
+        };
+        let backend = screen(width, 18, &view, &chrome());
+        let marks = thumb_rows(&backend, width - 1, 1..4);
+        assert!(
+            !marks.is_empty(),
+            "the list bar drew no thumb at all with the window at {list_top}"
+        );
+        assert!(
+            marks.len() < 3,
+            "the thumb filled the whole bar with ten files and three rows shown"
+        );
+        // And the rest of the column is track, not blank: a mark with no extent
+        // around it cannot be read as a position.
+        let buffer = backend.buffer();
+        for y in 1..4u16 {
+            let symbol = buffer[(width - 1, y)].symbol();
+            assert!(
+                symbol == TRACK || marks.contains(&y),
+                "row {y} of the list bar is {symbol:?}, neither thumb nor track"
+            );
+        }
+        seen.push(marks[0]);
+    }
+
+    // Monotone, and moving overall. Not strictly increasing at every step, and
+    // that is resolution rather than a defect: three rows of bar over ten files
+    // cannot separate every window, so windows 0 and 3 legitimately round to the
+    // same row. What must hold is that it never goes backwards and that it does
+    // move, which a bar ignoring its input would fail.
+    assert!(
+        seen.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the thumb went back up as the window moved down: {seen:?}"
+    );
+    assert!(
+        seen[0] < seen[seen.len() - 1],
+        "the thumb never moved across the whole range: {seen:?}"
+    );
+}
+
+#[test]
+fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
+    // **What the bar means since I4 was narrowed**: the thumb is the screen's
+    // rows over the diff's rows, and it sits at the rows above the screen. That
+    // is what every other scrollbar means, and it is only sayable because
+    // counting a diff's height turned out to cost 8.76ms where building it cost
+    // 442.71ms.
+    //
+    // Replaces a gate named for the approximation this shipped with first, which
+    // interpolated the whole from the current file's height. That bar vanished on
+    // a short file, ballooned on a long one and never reached the bottom, and no
+    // assertion about "moving within a file" can catch any of those.
+    let width = 64u16;
+    let height = 24u16;
+    let region = 5u16..height - 1;
+    let rows = usize::from(region.end - region.start);
+
+    // A thumb that halves when the diff doubles, which is the proportionality no
+    // file-counting scheme can express.
+    let mut lengths = Vec::new();
+    for total in [rows * 2, rows * 4, rows * 8] {
+        let view = View {
+            total_rows: total,
+            rows_above: 0,
+            ..a_list_of(3, 3, 0)
+        };
+        let marks = thumb_rows(
+            &screen(width, height, &view, &chrome()),
+            width - 1,
+            region.clone(),
+        );
+        assert!(!marks.is_empty(), "a diff of {total} rows drew no thumb");
+        lengths.push(marks.len());
+    }
+    assert!(
+        lengths[0] > lengths[1] && lengths[1] > lengths[2],
+        "the thumb did not shrink as the diff grew: {lengths:?}"
+    );
+
+    // And it travels the whole track, ending exactly at the bottom.
+    let total = rows * 6;
+    let mut firsts = Vec::new();
+    for above in [0, total / 4, total / 2, total - rows] {
+        let view = View {
+            total_rows: total,
+            rows_above: above,
+            ..a_list_of(3, 3, 0)
+        };
+        let marks = thumb_rows(
+            &screen(width, height, &view, &chrome()),
+            width - 1,
+            region.clone(),
+        );
+        assert!(!marks.is_empty(), "{above} rows above drew no thumb");
+        firsts.push(marks[0]);
+        if above == 0 {
+            assert_eq!(marks[0], region.start, "the top of the diff is not the top");
+        }
+        if above == total - rows {
+            assert_eq!(
+                *marks.last().expect("a thumb"),
+                region.end - 1,
+                "the end of the diff is not the bottom"
+            );
+        }
+    }
+    assert!(
+        firsts.windows(2).all(|pair| pair[0] < pair[1]),
+        "the thumb did not descend as the viewport did: {firsts:?}"
+    );
+}
+
+#[test]
+fn a_region_with_nothing_to_scroll_spends_no_column_on_a_bar() {
+    // A full bar is a column saying there is nothing to say. The list of three
+    // files with three rows on screen has nowhere to scroll, so the region keeps
+    // its width for the paths.
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+    let width = 64u16;
+
+    let view = two_regions(1);
+    assert_eq!(
+        view.files,
+        view.list.len(),
+        "the fixture has room to scroll"
+    );
+    let backend = screen(width, 18, &view, &chrome());
+    let buffer = backend.buffer();
+
+    for y in 1..4u16 {
+        let symbol = buffer[(width - 1, y)].symbol();
+        assert!(
+            symbol != TRACK && symbol != THUMB,
+            "row {y} drew a bar for a list that fits entirely on screen"
+        );
+    }
+}
+
+#[test]
+fn the_scrollbars_degrade_once_and_never_flicker() {
+    // The same ladder rule the caret follows, for the same reason: a bar that
+    // reappeared at a narrower width would read as the position jumping while a
+    // reader dragged a pane edge.
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+
+    let drawn: Vec<bool> = (1..=60u16)
+        .map(|width| {
+            let view = View {
+                files: 10,
+                ..two_regions(1)
+            };
+            let backend = screen(width, 18, &view, &chrome());
+            let buffer = backend.buffer();
+            let symbol = buffer[(width - 1, 2)].symbol();
+            symbol == TRACK || symbol == THUMB
+        })
+        .collect();
+
+    assert!(drawn.iter().any(|on| *on), "no width drew a bar");
+    assert!(
+        drawn.iter().any(|on| !*on),
+        "no width was narrow enough to drop one, so the ladder is never exercised"
+    );
+    let first = drawn.iter().position(|on| *on).expect("a width with one");
+    assert!(
+        drawn[first..].iter().all(|on| *on),
+        "a bar came back after being dropped: {:?}",
+        &drawn[first..]
+    );
+}
+
+/// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
+fn a_list_of(files: usize, shown: usize, top: usize) -> View {
+    View {
+        list: (0..shown)
+            .map(|i| entry(&format!("src/f{i}.rs"), 1, 0))
+            .collect(),
+        list_top: top,
+        current_span: 400,
+        // A diff far taller than any pane, with the viewport at its top. Gates
+        // about where the thumb sits override these two.
+        total_rows: 400 * files.max(1),
+        rows_above: 0,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
+        ],
+        files,
+        top: Position::default(),
+        read: 2,
+        peak: 0,
+    }
+}
+
+#[test]
+fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
+    // **The invariant `Painter::scrollbar`'s own doc claims and neither region's
+    // gate stated**: the thumb's travel maps onto the track's travel, so the last
+    // position fills the bottom row exactly as the first fills the top.
+    //
+    // Swept over the file count rather than checked at one, because the defect
+    // this exists for hides at particular denominators: the previous gate used
+    // ten files in a three-row region, where the floor division truncates to zero
+    // and `.max(1)` makes the wrong formula accidentally right. That is the
+    // "measured at its cheapest position" shape §7 already records, one axis over.
+    let width = 64u16;
+    let shown = 6usize;
+    let region = 1u16..1 + shown as u16;
+
+    for files in (shown + 1)..=30 {
+        let last = files - shown;
+
+        let bottom = a_list_of(files, shown, last);
+        let backend = screen(width, 24, &bottom, &chrome());
+        let marks = thumb_rows(&backend, width - 1, region.clone());
+        assert!(
+            !marks.is_empty(),
+            "{files} files: the last window drew no thumb"
+        );
+        assert_eq!(
+            *marks.last().expect("a thumb"),
+            region.end - 1,
+            "{files} files: the last window's thumb ends at row {:?}, not the \
+             bottom of the track",
+            marks.last()
+        );
+
+        // And the first window fills the top, so the two ends are distinguishable.
+        let first = a_list_of(files, shown, 0);
+        let top_marks = thumb_rows(
+            &screen(width, 24, &first, &chrome()),
+            width - 1,
+            region.clone(),
+        );
+        assert_eq!(
+            top_marks.first().copied(),
+            Some(region.start),
+            "{files} files: the first window's thumb does not start at the top"
+        );
+        assert_ne!(
+            marks, top_marks,
+            "{files} files: the bar draws the same column at both ends, so it \
+             says nothing about where the window is"
+        );
+    }
+}
+
+#[test]
+fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
+    // The same invariant on the other region, where the units are rows rather
+    // than files. One file, the viewport resting on its last screenful.
+    let width = 64u16;
+    let height = 24u16;
+
+    for span in 20..=60usize {
+        let mut view = a_list_of(3, 3, 0);
+        view.files = 1;
+        view.current_span = span;
+        // The diff region starts under three list rows and the rule.
+        let region = 5u16..height - 1;
+        let rows = usize::from(region.end - region.start);
+        view.top = Position {
+            file: 0,
+            row: span.saturating_sub(rows),
+        };
+
+        let backend = screen(width, height, &view, &chrome());
+        let marks = thumb_rows(&backend, width - 1, region.clone());
+        if marks.is_empty() {
+            continue; // nothing to scroll at this span
+        }
+        assert_eq!(
+            *marks.last().expect("a thumb"),
+            region.end - 1,
+            "span {span}: the last screenful's thumb ends at {:?}, not the \
+             bottom of the track",
+            marks.last()
+        );
+    }
+}
+
+#[test]
+fn the_caret_does_not_vanish_because_another_file_changed() {
+    // Two ladders that collide. `Painter::list` decides the caret against the
+    // width it is handed, and `render` has already taken the bar's columns off
+    // that width — so whether the caret survives depends on whether the list is
+    // *scrollable*, which depends on the changed-file count. Both floors are
+    // sixteen, so at sixteen and seventeen columns a seventh changed file made
+    // the marker saying which file the diff is inside disappear with nothing
+    // about the pane having moved.
+    //
+    // That is precisely the reading `the_caret_degrades_once_and_never_flickers`
+    // exists to prevent, and it was blind to this because its fixture has
+    // `files == list.len()` and is never scrollable. The file count is the second
+    // axis.
+    const CARET: &str = "▸";
+
+    for width in 1..=60u16 {
+        let mut drawn = Vec::new();
+        for files in [3usize, 30] {
+            let view = a_list_of(files, 3, 0);
+            let backend = screen(width, 24, &view, &chrome());
+            let buffer = backend.buffer();
+            drawn.push(
+                (0..width)
+                    .map(|x| buffer[(x, 1)].symbol())
+                    .collect::<String>()
+                    .contains(CARET),
+            );
+        }
+        assert_eq!(
+            drawn[0],
+            drawn[1],
+            "at {width} columns the caret is {} with three changed files and {} \
+             with thirty, so a file appearing elsewhere moved the marker",
+            if drawn[0] { "drawn" } else { "absent" },
+            if drawn[1] { "drawn" } else { "absent" }
+        );
+    }
+}
+
+#[test]
+fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
+    // What `CARET_FLOOR`'s `BAR_WIDTH` term buys, which is not the same property
+    // as `the_caret_does_not_vanish_because_another_file_changed`. That one says
+    // the caret's presence depends on the pane alone; this one says the caret is
+    // never drawn on a row too narrow to still name its file afterwards, on a
+    // screen where the bar has already taken its columns.
+    //
+    // Found by mutation: dropping the `BAR_WIDTH` term left the consistency gate
+    // green, because both file counts then lost the caret at the same widths and
+    // agreed with each other while the row underneath was two columns short.
+    //
+    // Constants restated for the reason this file always restates them: sharing
+    // the renderer's own would make the assertion agree with the code by
+    // construction.
+    const ROW_FLOOR: usize = 2 + 12; // the kind letter and its gap, plus MIN_PATH_WIDTH
+    const BAR_COLUMNS: usize = 2;
+    const CARET_COLUMNS: usize = 2;
+    const CARET: &str = "▸";
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+
+    let mut saw_both = false;
+    for width in 1..=60u16 {
+        // Thirty files over three rows, so the list is scrollable and the bar is
+        // drawn wherever the pane can afford one.
+        let view = a_list_of(30, 3, 0);
+        let backend = screen(width, 24, &view, &chrome());
+        let buffer = backend.buffer();
+
+        let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
+        let caret = row.contains(CARET);
+        let bar = row.ends_with(TRACK) || row.ends_with(THUMB);
+
+        if !caret {
+            continue;
+        }
+        if bar {
+            saw_both = true;
+        }
+        let left = usize::from(width) - if bar { BAR_COLUMNS } else { 0 } - CARET_COLUMNS;
+        assert!(
+            left >= ROW_FLOOR,
+            "at {width} columns the row draws a caret{} leaving {left} columns, \
+             below the {ROW_FLOOR} it needs to name its file",
+            if bar { " and a bar," } else { "," }
+        );
+    }
+
+    assert!(
+        saw_both,
+        "no width drew a caret and a bar together, so the term this gate is \
+         about is never exercised"
+    );
+}
+
+#[test]
+fn render_never_writes_outside_its_area_over_a_degenerate_view() {
+    // `any_area_renders_including_the_ones_that_fit_nothing` sweeps pane sizes
+    // but only over `one_file()`, whose list is empty and whose `current_span` is
+    // zero — so the three fields this branch added are never degenerate in it.
+    // Writing past a `Buffer`'s area panics inside ratatui, which is how the
+    // region overdrawing the footer was found at 1x3, and that was caught by a
+    // different sweep by luck rather than by this one.
+    //
+    // The origin is non-zero as well, because every `Rect` the renderer builds
+    // inherits `..area` and an off-by-one in `x` or `y` is invisible at (0, 0).
+    let shapes: Vec<View> = vec![
+        a_list_of(0, 0, 0),
+        a_list_of(1, 1, 0),
+        a_list_of(6, 6, 0),
+        a_list_of(7, 6, 1),
+        a_list_of(10_000, 6, 9_994),
+        // A window past the end, which a short pane hands back untouched.
+        a_list_of(3, 3, 99),
+        // More entries than any pane affords.
+        a_list_of(40, 20, 0),
+        // Nothing to be inside, so the diff bar is told a whole of zero.
+        View {
+            current_span: 0,
+            total_rows: 0,
+            rows_above: 0,
+            ..a_list_of(9, 3, 0)
+        },
+        // A path of wide glyphs, at the caret and bar boundary.
+        View {
+            list: vec![entry("src/日本語/テスト.rs", 3, 1)],
+            ..a_list_of(9, 1, 0)
+        },
+    ];
+
+    for (shape, view) in shapes.iter().enumerate() {
+        for width in 0..=44u16 {
+            for height in 0..=14u16 {
+                for origin in [(0u16, 0u16), (3, 2)] {
+                    let area = Rect::new(origin.0, origin.1, width, height);
+                    let mut buf = ratatui::buffer::Buffer::empty(area);
+                    // Panics inside ratatui if anything writes out of range.
+                    render(&mut buf, area, view, &Theme::default(), &chrome());
+                    assert_eq!(
+                        *buf.area(),
+                        area,
+                        "shape {shape} at {width}x{height} resized its own buffer"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A removed line's wash stops before the scrollbar's column.
+///
+/// [#81](https://github.com/breferrari/vigia/issues/81) was filed **undiagnosed
+/// on purpose**, from a real pane where the wash appeared to reach the far right
+/// and meet the bar. Two explanations fit that report and only one is ours: the
+/// row may be washing the columns `with_bar` took, or the host terminal may be
+/// drawing its own scrollbar over a correct full-bleed band.
+///
+/// This is the gate that tells them apart, and it is the thing the issue says
+/// does not exist. It reads the **background** of the bar's column on a row that
+/// is definitely washed, which is the property the snapshots structurally cannot
+/// see: `TestBackend`'s `Display` writes symbols and drops styles.
+#[test]
+fn a_wash_stops_before_the_scrollbar_column() {
+    /// The same draw as [`screen`], on the palette that actually tints a row.
+    ///
+    /// `Theme::default()` is the sixteen named colours, which draw **no row tint
+    /// at any depth** by the ruling in `theme.rs`. Rendering this gate through it
+    /// would assert that a wash which was never painted did not reach a column,
+    /// which is the shape §7 keeps finding: a gate that cannot fail.
+    fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        let theme = vigia::Theme::dark();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+            })
+            .expect("draw");
+        terminal.backend().clone()
+    }
+
+    let width = 64u16;
+    let view = View {
+        total_rows: 400,
+        rows_above: 40,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            line(
+                LineKind::Removed,
+                38,
+                "    let stale = self.pending.take();",
+            ),
+            line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+        ],
+        ..two_regions(1)
+    };
+    let backend = washed_screen(width, 18, &view, &chrome());
+    let buffer = backend.buffer();
+
+    // The washed row, found by its content rather than by a hardcoded y: the
+    // regions above it move when the list's height rule does.
+    let washed = (0..18u16)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn at all");
+
+    let wash = buffer[(1, washed)].bg;
+    let bar = buffer[(width - 1, washed)].bg;
+    assert_ne!(
+        wash,
+        ratatui::style::Color::Reset,
+        "the removed line was not washed at all, so this gate proves nothing"
+    );
+    assert_ne!(
+        bar,
+        wash,
+        "the wash reached the scrollbar's own column at x={}",
+        width - 1
+    );
+
+    // And the gap beside it, which is what `BAR_WIDTH` reserves so the thumb does
+    // not sit flush against a count.
+    assert_ne!(
+        buffer[(width - 2, washed)].bg,
+        wash,
+        "the wash reached the column reserved beside the bar"
+    );
+}

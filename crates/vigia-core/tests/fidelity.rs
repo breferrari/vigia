@@ -398,3 +398,52 @@ fn a_line_count_is_not_a_byte_count() {
     );
     assert_eq!(diff.lines, 1);
 }
+
+/// A recomputed diff does not leave last tick's height behind.
+///
+/// `Frame::height` fills a span for every changed file, and `Frame::diff` then
+/// recomputes whichever file the viewport reaches. Until 2026-08-02 the
+/// recompute replaced the cached diff and left the span alone, so a frame that
+/// counted before it drew reported the file's **old** height beside its new
+/// rows: the scrollbar's total and the content disagreed inside one frame, and
+/// a drag resolved through that total landed on the wrong row.
+///
+/// Free to fix, which is what separates it from [#84]: the fresh diff is
+/// already in hand, so the span rebuilds from it without reading a byte. #84 is
+/// the other half, a file that changed and has *not* been re-diffed, and that
+/// one needs a read to notice.
+#[test]
+fn a_recomputed_diff_invalidates_its_span() {
+    let scratch = Scratch::new("span-invalidation");
+    scratch.write("a.txt", "one\ntwo\nthree\n");
+    scratch.commit_all("base");
+    scratch.write("a.txt", "one\nchanged\nthree\n");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    let rows = |_: &vigia_core::FileChange, span: &vigia_core::FileSpan| {
+        1 + span.hunks as usize + span.lines as usize
+    };
+    let before = frame.height(rows).expect("height");
+
+    // Grow the file, then re-diff it the way a viewport reaching it would.
+    scratch.write("a.txt", "one\nchanged\nthree\nfour\nfive\nsix\nseven\n");
+    frame.diff(0).expect("diff");
+
+    let after = frame.rows_of(0, rows).expect("rows_of");
+    let drawn = {
+        let (_, diff) = frame.diff(0).expect("diff");
+        1 + diff.hunks.len() + diff.hunks.iter().map(|h| h.lines.len()).sum::<usize>()
+    };
+    assert_eq!(
+        after, drawn,
+        "the span survived the recompute: it reports {after} rows where the diff \
+         drawn in the same frame is {drawn}"
+    );
+    assert_ne!(
+        before, after,
+        "the fixture did not change the file's height, so this proves nothing"
+    );
+}
