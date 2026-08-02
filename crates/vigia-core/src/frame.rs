@@ -384,18 +384,25 @@ impl<'w> Frame<'w> {
                 let span = match self.cached.get(&change.path) {
                     // Free: the diff is already in hand, and no byte is read
                     // again, so nothing is added to the counters either.
-                    Some(cached) => FileSpan {
-                        hunks: cached.diff.hunks.len() as u32,
-                        lines: cached.diff.hunks.iter().map(|h| h.lines.len() as u32).sum(),
-                        binary: cached.diff.binary,
-                        bytes: 0,
+                    Some(cached) => FileSpan::from(&cached.diff),
+                    // **An unreadable file costs its own rows, never the
+                    // frame.** This walk is the first thing in the frame path to
+                    // touch the whole changed set rather than the window, so a
+                    // `?` here hands one share-locked or unreadable path the
+                    // power to fail every frame, for a file nobody is looking
+                    // at. `Changes` rules the opposite one layer down: a single
+                    // unreadable file does not end the stream, because a monitor
+                    // keeps going. A zero span counts it as nothing, so the
+                    // total is short by its rows, which is a scrollbar slightly
+                    // wrong about a file that cannot be read either way.
+                    None => match self.worktree.measure(change) {
+                        Ok(span) => {
+                            self.stats.measured += 1;
+                            self.stats.bytes += span.bytes;
+                            span
+                        }
+                        Err(_) => FileSpan::default(),
                     },
-                    None => {
-                        let span = self.worktree.measure(change)?;
-                        self.stats.measured += 1;
-                        self.stats.bytes += span.bytes;
-                        span
-                    }
                 };
                 self.spans.insert(change.path.clone(), span);
             }
@@ -485,6 +492,13 @@ impl<'w> Frame<'w> {
 
         self.stats.computed += 1;
         self.stats.bytes += diff.bytes;
+        // **The height goes with the diff it was taken from.** A span filled
+        // earlier in this same tick describes the file as it was before this
+        // recompute, and dropping it costs nothing: `height`'s cached branch
+        // rebuilds it from the fresh diff without reading a byte. This is the
+        // half of #84 that is free. The half that is not is a file that changed
+        // and has *not* been re-diffed, which needs a read to notice.
+        self.spans.remove(&change.path);
         self.cached.insert(
             change.path.clone(),
             Cached {

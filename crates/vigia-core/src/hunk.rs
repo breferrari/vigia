@@ -139,6 +139,28 @@ pub struct FileSpan {
     pub bytes: u64,
 }
 
+impl From<&FileDiff> for FileSpan {
+    /// The span a diff already in hand describes, without reading anything.
+    ///
+    /// **One mapping rather than one per caller.** [`groups`] and [`bounds`]
+    /// exist so two heights cannot disagree, and hand-rolling this conversion at
+    /// each call site reintroduces exactly that hazard one layer up: a new field
+    /// would be silently defaulted by whichever copy was not updated, and
+    /// nothing would fail.
+    ///
+    /// `bytes` is zero because nothing was read. The caller paid for those bytes
+    /// when it computed the diff, and counting them again would double them in
+    /// any budget denominated in reads.
+    fn from(diff: &FileDiff) -> Self {
+        Self {
+            hunks: diff.hunks.len() as u32,
+            lines: diff.hunks.iter().map(|hunk| hunk.lines.len() as u32).sum(),
+            binary: diff.binary,
+            bytes: 0,
+        }
+    }
+}
+
 /// Merge raw changes into the hunks a reader sees.
 ///
 /// Shared by [`compute`] and [`measure`] rather than written twice, because the
