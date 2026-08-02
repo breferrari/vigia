@@ -897,6 +897,54 @@ const fn reserved(width: usize) -> usize {
     if width == 0 { 0 } else { width + 1 }
 }
 
+/// Narrow `right` past a slot `width` columns wide, drawn or not.
+///
+/// **Called unconditionally, which is the ruling rather than a convenience.** A
+/// slot is subtracted whether or not this row filled it, because a row that
+/// closed the gap it left would slide every element outside it and pull the row
+/// out of line with its neighbours, which is exactly what [`Columns`] exists to
+/// prevent. Guarding the narrowing would make that true only by way of
+/// [`reserved`]'s zero case, where here it is what the code says.
+fn past(right: &mut Rect, width: usize) {
+    right.width = right.width.saturating_sub(reserved(width) as u16);
+}
+
+/// Whether this file has any heat strip to draw at all.
+///
+/// **Asked before the column is reserved as well as inside [`heat_at`], and the
+/// two must agree**, which is the shape [`scrollable`] already has one region
+/// down: a region that reserved a column the drawer then declined to fill is
+/// exactly the blank slot [`Columns`] exists to prevent. Written once so that
+/// "earned a column" and "drew something" cannot drift apart.
+fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
+    buckets.iter().any(|bucket| bucket.total() > 0)
+}
+
+/// Whether this file has any sparkline to draw at all.
+///
+/// [`has_heat`]'s twin, and the reason it is a function rather than a call to
+/// [`spark_of`]: asking the producer for a boolean runs a `div_ceil` per bucket
+/// per row to learn something its own first line already knows. This is that
+/// first line.
+fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
+    peak != 0 && buckets.iter().any(|&count| count != 0)
+}
+
+/// The widest rung of a numeric ladder that fits in `room`, its gap included.
+///
+/// [`fitting`]'s numeric sibling, and its doc is the argument verbatim: a
+/// predicate written twice is a predicate that can be narrowed once, so a floor
+/// under the room would otherwise be added to the heat strip's search and
+/// silently not the sparkline's. Both ladders end in `0`, so the fallback is
+/// unreachable rather than a silent default.
+fn widest_rung(ladder: &[usize], room: usize) -> usize {
+    ladder
+        .iter()
+        .copied()
+        .find(|&rung| reserved(rung) <= room)
+        .unwrap_or(0)
+}
+
 /// The two halves of a file row's counts cell, or empty strings when there is no
 /// line diff to count.
 ///
@@ -931,7 +979,17 @@ fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
 /// **One of these per region, never one per screen.** A single set shared by the
 /// pinned list and the diff stream would let scrolling the *diff* move the
 /// *list's* columns, and the list is the map that has to hold still. `SPEC.md`
-/// §11.1 already rules that the two regions do not align glyph for glyph.
+/// §11.1 already rules that the two regions do not align glyph for glyph, and
+/// the two are different widths anyway: the list insets by [`CARET_WIDTH`] and
+/// may have given a column to a scrollbar.
+///
+/// **The pulse is deliberately not one of these**, and it is named here because
+/// this is the type that says what a column is, so a reader learning the
+/// mechanism has to be told what it excludes. It is per-row and lasts one tick,
+/// so a slot for it would reflow every row on the tick a file was written, and a
+/// slot taken only by rows that pulse is the right-packing this exists to
+/// remove. [`Painter::file_row`] draws it from the path's room and carries the
+/// mechanics.
 struct Columns {
     /// Columns the `+N` half occupies on every row, whatever that row counts.
     added: usize,
@@ -964,15 +1022,20 @@ impl Columns {
     /// [#49](https://github.com/breferrari/vigia/issues/49) rejected a
     /// repository-wide `+`/`-` total for. What a region draws it has already
     /// paid for; what it does not draw it must not read.
-    fn measure<'e, I: Iterator<Item = &'e FileEntry>>(width: u16, rows: I, peak: u16) -> Self {
-        let (mut added, mut removed) = (0, 0);
+    fn measure<'e>(width: u16, rows: impl Iterator<Item = &'e FileEntry>, peak: u16) -> Self {
         let (mut any_heat, mut any_spark) = (false, false);
+        let mut columns = Self {
+            added: 0,
+            removed: 0,
+            heat: 0,
+            spark: 0,
+        };
         for entry in rows {
-            let (a, r) = counts_of(entry.churn);
-            added = added.max(width_of(&a));
-            removed = removed.max(width_of(&r));
-            any_heat |= entry.heat.iter().any(|bucket| bucket.total() > 0);
-            any_spark |= spark_of(&entry.spark, peak).is_some();
+            let (added, removed) = counts_of(entry.churn);
+            columns.added = columns.added.max(width_of(&added));
+            columns.removed = columns.removed.max(width_of(&removed));
+            any_heat |= has_heat(&entry.heat);
+            any_spark |= has_spark(&entry.spark, peak);
         }
 
         let mut budget = usize::from(width).saturating_sub(ROW_FLOOR);
@@ -981,61 +1044,39 @@ impl Columns {
         // content rather than a signal drawn beside it. Its two halves stand or
         // fall together: `+42` with no `-7` beside it reads as a total rather
         // than as half a pair.
-        if reserved(counts_width(added, removed)) > budget {
-            added = 0;
-            removed = 0;
+        if reserved(columns.counts()) > budget {
+            columns.added = 0;
+            columns.removed = 0;
         }
-        budget = budget.saturating_sub(reserved(counts_width(added, removed)));
+        budget = budget.saturating_sub(reserved(columns.counts()));
 
         // The heat strip outranks the sparkline for what is left. Both are
         // glance elements and only one of them is about the diff on screen: the
         // strip says where in *this* file the change the reader is looking at
         // sits, and the sparkline says how busy the file was before any of it
         // was drawn.
-        let heat = if any_heat {
-            HEAT_RUNGS
-                .iter()
-                .copied()
-                .find(|&rung| reserved(rung) <= budget)
-                .unwrap_or(0)
-        } else {
-            0
-        };
-        budget = budget.saturating_sub(reserved(heat));
-
-        let spark = if any_spark {
-            SPARK_RUNGS
-                .iter()
-                .copied()
-                .find(|&rung| reserved(rung) <= budget)
-                .unwrap_or(0)
-        } else {
-            0
-        };
-
-        Self {
-            added,
-            removed,
-            heat,
-            spark,
+        if any_heat {
+            columns.heat = widest_rung(&HEAT_RUNGS, budget);
         }
+        budget = budget.saturating_sub(reserved(columns.heat));
+
+        if any_spark {
+            columns.spark = widest_rung(&SPARK_RUNGS, budget);
+        }
+
+        columns
     }
 
     /// Columns the whole counts cell occupies, its inner space included.
     ///
     /// Zero when neither half is drawn, so [`reserved`] does not buy a gap for
     /// an element that is not there.
-    fn counts(&self) -> usize {
-        counts_width(self.added, self.removed)
-    }
-}
-
-/// The two counts sub-columns plus the space between them, or zero for neither.
-const fn counts_width(added: usize, removed: usize) -> usize {
-    if added == 0 && removed == 0 {
-        0
-    } else {
-        added + 1 + removed
+    const fn counts(&self) -> usize {
+        if self.added == 0 && self.removed == 0 {
+            0
+        } else {
+            self.added + 1 + self.removed
+        }
     }
 }
 
@@ -1121,7 +1162,7 @@ impl Band {
 /// pure track says "this file is in the diff and I cannot tell you where", which
 /// is worse than saying nothing and costs twelve columns to say it.
 fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
-    if width == 0 || buckets.iter().all(|bucket| bucket.total() == 0) {
+    if width == 0 || !has_heat(buckets) {
         return Vec::new();
     }
 
@@ -1157,7 +1198,7 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// distinction the strip exists to make and rounding the first down to nothing
 /// would erase it.
 fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> Option<[char; HISTORY_BUCKETS]> {
-    if peak == 0 || buckets.iter().all(|&count| count == 0) {
+    if !has_spark(buckets, peak) {
         return None;
     }
     let mut glyphs = [SPARK_EMPTY; HISTORY_BUCKETS];
@@ -2059,14 +2100,16 @@ impl Painter<'_> {
         // Measured over the rows this region is about to draw, and no further.
         // The list's own window, so scrolling the diff cannot move the map's
         // columns.
+        // Bound once each and used twice, because the property that makes the
+        // columns honest is that they are measured over **exactly** the rows
+        // that get drawn, at **exactly** the width they are drawn into. Spelled
+        // out at both the measuring and the drawing site, that invariant would
+        // be a coincidence of two identical literals twenty lines apart.
         let shown = usize::from(area.height);
-        let columns = Columns::measure(
-            area.width.saturating_sub(inset),
-            view.list.iter().take(shown),
-            view.peak,
-        );
+        let inner = area.width.saturating_sub(inset);
+        let columns = Columns::measure(inner, view.list.iter().take(shown), view.peak);
 
-        for (offset, entry) in view.list.iter().take(usize::from(area.height)).enumerate() {
+        for (offset, entry) in view.list.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             // Saturating, because `list_top` is not bounded by the file count:
             // a pane too short for a region hands the reader's request back
@@ -2080,7 +2123,7 @@ impl Painter<'_> {
                     y,
                     height: 1,
                     x: area.x + inset,
-                    width: area.width.saturating_sub(inset),
+                    width: inner,
                 },
                 &Heading::of(entry),
                 view.peak,
@@ -2215,18 +2258,18 @@ impl Painter<'_> {
         // own set rather than the list's: a heading scrolling past must not move
         // the pinned region above it, and the two regions are separated by a
         // rule and do not align glyph for glyph anyway.
+        // Bound once and used twice, for `Painter::list`'s reason: measured over
+        // exactly the rows that get drawn, or the columns are honest by accident.
+        let shown = usize::from(area.height);
         let columns = Columns::measure(
             area.width,
-            view.rows
-                .iter()
-                .take(usize::from(area.height))
-                .filter_map(|row| match row {
-                    Row::File(entry) => Some(entry),
-                    _ => None,
-                }),
+            view.rows.iter().take(shown).filter_map(|row| match row {
+                Row::File(entry) => Some(entry),
+                _ => None,
+            }),
             view.peak,
         );
-        for (offset, row) in view.rows.iter().take(usize::from(area.height)).enumerate() {
+        for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             match row {
                 Row::File(entry) => {
@@ -2310,33 +2353,36 @@ impl Painter<'_> {
             // eye running down the additions of three files compares them. Same
             // shape the status bar's frame and memory cells already use, one
             // element wider.
+            //
+            // Two statements rather than a loop over the pair: the offset from
+            // the right edge coincides with the width for one half and not the
+            // other, and a loop asks a reader to work that out.
             let (added, removed) = counts_of(heading.churn);
             let end = right.x + right.width;
-            for (text, width, offset) in [
-                (&removed, columns.removed, columns.removed),
-                (&added, columns.added, columns.counts()),
-            ] {
-                if width == 0 {
-                    continue;
-                }
-                self.put_right(
-                    Rect {
-                        x: end.saturating_sub(offset as u16),
-                        width: width as u16,
-                        ..right
-                    },
-                    text,
-                    self.theme.chrome_dim,
-                );
-            }
-            right.width = right
-                .width
-                .saturating_sub(reserved(columns.counts()) as u16);
+            let field = |width: usize, from_right: usize| Rect {
+                x: end.saturating_sub(from_right as u16),
+                width: width as u16,
+                ..right
+            };
+            self.put_right(
+                field(columns.added, columns.counts()),
+                &added,
+                self.theme.chrome_dim,
+            );
+            self.put_right(
+                field(columns.removed, columns.removed),
+                &removed,
+                self.theme.chrome_dim,
+            );
         }
+        past(&mut right, columns.counts());
 
         // Drawn right to left, so each block knows where the one outside it
         // ended. The strip drawn is the **tail** of the window: dropping buckets
         // means dropping the oldest, and the oldest are on the left.
+        //
+        // Guarded where the heat strip below is not, because `spark_of` does
+        // real per-row work and `heat_at` opens by returning nothing.
         if columns.spark > 0 {
             if let Some(strip) = spark_of(heading.spark, peak) {
                 let tail: String = strip[HISTORY_BUCKETS - columns.spark..].iter().collect();
@@ -2347,27 +2393,31 @@ impl Painter<'_> {
                 };
                 self.put_right(field, &tail, self.theme.spark);
             }
-            right.width = right.width.saturating_sub(reserved(columns.spark) as u16);
         }
-        if columns.heat > 0 {
-            let heat = heat_at(heading.heat, columns.heat);
-            if !heat.is_empty() {
-                // Cell by cell rather than as one string: every slice is the
-                // same glyph and only the style differs, which is the whole
-                // design.
-                let x = right.x + right.width - heat.len() as u16;
-                for (offset, slice) in heat.iter().enumerate() {
-                    self.buf.set_stringn(
-                        x + offset as u16,
-                        right.y,
-                        HEAT_BLOCK.to_string(),
-                        1,
-                        self.theme.heat(*slice),
-                    );
-                }
+        past(&mut right, columns.spark);
+
+        // Unguarded, because `heat_at` opens by returning nothing for a zero
+        // width, so an outer `if` would be the same precondition twice.
+        let heat = heat_at(heading.heat, columns.heat);
+        if !heat.is_empty() {
+            // Cell by cell rather than as one string: every slice is the same
+            // glyph and only the style differs, which is the whole design.
+            //
+            // Written through `set_symbol` rather than `set_stringn`, for the
+            // reason `Painter::scrollbar` gives: a string call allocates per
+            // cell and then segments the graphemes of a single-character
+            // string, and there are twelve of these on every file row of every
+            // frame.
+            let mut glyph = [0u8; 4];
+            let glyph = HEAT_BLOCK.encode_utf8(&mut glyph);
+            let x = right.x + right.width - heat.len() as u16;
+            for (offset, slice) in heat.iter().enumerate() {
+                self.buf[(x + offset as u16, right.y)]
+                    .set_symbol(glyph)
+                    .set_style(self.theme.heat(*slice));
             }
-            right.width = right.width.saturating_sub(reserved(columns.heat) as u16);
         }
+        past(&mut right, columns.heat);
         // **The pulse is the one glance element that is not a column**, and that
         // is a ruling rather than an omission. It is per-row and it lasts one
         // tick, so a slot reserved for it would reflow every row on the tick a

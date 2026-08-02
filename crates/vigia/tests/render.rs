@@ -52,6 +52,37 @@ const CONTINUES: &str = "›";
 /// in several assertions, and a separator change should be one edit.
 const FACT_JOIN: &str = " · ";
 
+/// The sparkline's ramp, tallest last.
+///
+/// Restated for [`CONTINUES`]' reason, and declared **once** for a different
+/// one: three copies appeared in this file and a fourth spelling as a string to
+/// `contains`, and a second copy does not check the renderer, it checks the
+/// first copy.
+const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/// Every foreground a heat slice can take.
+///
+/// One list, because adding a band to the theme should be one edit here rather
+/// than three, and a missed one makes a gate quietly stop seeing a colour rather
+/// than fail. `tests/legibility.rs` already solved it this way.
+fn heat_colours(theme: &Theme) -> Vec<Option<Color>> {
+    [
+        theme.heat_track,
+        theme.heat_added,
+        theme.heat_added_warm,
+        theme.heat_added_hot,
+        theme.heat_removed,
+        theme.heat_removed_warm,
+        theme.heat_removed_hot,
+        theme.heat_mixed,
+        theme.heat_mixed_warm,
+        theme.heat_mixed_hot,
+    ]
+    .iter()
+    .map(|style| style.fg)
+    .collect()
+}
+
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -181,9 +212,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
 /// gutter's width, and a test that recomputed that would be a second
 /// implementation of it agreeing with itself.
 fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
-    let buffer = backend.buffer();
-    (0..buffer.area.width)
-        .find(|x| buffer[(*x, y)].symbol() == needle)
+    column_where(backend, y, |symbol, _| symbol == needle)
         .unwrap_or_else(|| panic!("no {needle:?} anywhere on row {y}"))
 }
 
@@ -574,7 +603,7 @@ fn column_where(
 /// additions and compare them.
 fn run_end(backend: &TestBackend, y: u16, sigil: &str) -> Option<u16> {
     let buffer = backend.buffer();
-    let start = (0..buffer.area.width).find(|x| buffer[(*x, y)].symbol() == sigil)?;
+    let start = column_where(backend, y, |symbol, _| symbol == sigil)?;
     let mut end = start;
     for x in start + 1..buffer.area.width {
         if !buffer[(x, y)].symbol().chars().all(|c| c.is_ascii_digit()) {
@@ -625,23 +654,8 @@ fn the_glance_columns_agree_down_the_list() {
     // with, which nothing else on a list row draws. Read off the cells rather
     // than computed, because recomputing where the renderer put them would be
     // its own arithmetic agreeing with itself.
-    const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
     let spark = theme.spark.fg;
-    let heats_fg: Vec<Option<Color>> = [
-        theme.heat_track,
-        theme.heat_added,
-        theme.heat_added_warm,
-        theme.heat_added_hot,
-        theme.heat_removed,
-        theme.heat_removed_warm,
-        theme.heat_removed_hot,
-        theme.heat_mixed,
-        theme.heat_mixed_warm,
-        theme.heat_mixed_hot,
-    ]
-    .iter()
-    .map(|s| s.fg)
-    .collect();
+    let heats_fg = heat_colours(&theme);
 
     let sparks: Vec<(u16, u16)> = (1..4u16)
         .filter_map(|y| {
@@ -705,29 +719,16 @@ fn the_glance_columns_agree_down_the_list() {
 /// Colour and glyph together, for the reason [`blocks_of`] gives: the heat strip
 /// and a full sparkline bucket draw the same block, and `Theme::pulse` shares a
 /// foreground with `Theme::spark`, so neither alone identifies anything.
-fn glance_columns(view: &View) -> Vec<String> {
-    const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+/// Takes a drawn backend rather than a view, the way every other reader helper
+/// in this file does, so a caller that also needs the cells does not render the
+/// same screen twice.
+fn glance_columns(backend: &TestBackend) -> Vec<String> {
     let theme = Theme::default();
-    let heats: Vec<Option<Color>> = [
-        theme.heat_track,
-        theme.heat_added,
-        theme.heat_added_warm,
-        theme.heat_added_hot,
-        theme.heat_removed,
-        theme.heat_removed_warm,
-        theme.heat_removed_hot,
-        theme.heat_mixed,
-        theme.heat_mixed_warm,
-        theme.heat_mixed_hot,
-    ]
-    .iter()
-    .map(|s| s.fg)
-    .collect();
-    let backend = screen(80, 10, view, &chrome());
+    let heats = heat_colours(&theme);
+    let buffer = backend.buffer();
 
     (1..4u16)
         .map(|y| {
-            let buffer = backend.buffer();
             (0..buffer.area.width)
                 .map(|x| {
                     let cell = &buffer[(x, y)];
@@ -736,7 +737,7 @@ fn glance_columns(view: &View) -> Vec<String> {
                         'h'
                     } else if RAMP.contains(&sym) && fg == theme.spark.fg {
                         's'
-                    } else if sym.chars().all(|c| c.is_ascii_digit()) && !sym.is_empty() {
+                    } else if sym.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                         'n'
                     } else {
                         '_'
@@ -758,13 +759,26 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
     //
     // Asserted as "the *other* rows are unchanged", which is the property that
     // matters: a row may draw less, and it may not move anything else.
+    //
+    // Guard the fixture, the way `the_glance_columns_agree_down_the_list` does
+    // for its sigils: `glance_columns` reads any digit as a counts cell, so a
+    // path carrying one would be classified as content and the comparison would
+    // be over the wrong columns.
+    for path in ragged_counts().list.iter().map(|entry| entry.path.clone()) {
+        assert!(
+            !path.contains(|c: char| c.is_ascii_digit()),
+            "the fixture path {path:?} carries a digit, which `glance_columns` \
+             reads as a counts cell"
+        );
+    }
+
     let full = ragged_counts();
     let mut gapped = ragged_counts();
     gapped.list[1].spark = [0; HISTORY_BUCKETS];
     gapped.list[2].heat = [HeatBucket::default(); HEAT_BUCKETS];
 
-    let before = glance_columns(&full);
-    let after = glance_columns(&gapped);
+    let before = glance_columns(&screen(80, 10, &full, &chrome()));
+    let after = glance_columns(&screen(80, 10, &gapped, &chrome()));
 
     assert_eq!(
         before[0], after[0],
@@ -789,18 +803,24 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
 
 #[test]
 fn a_pulse_does_not_move_the_columns() {
-    // `Footer::plan` sizes itself from the file count rather than the scroll
-    // position so the footer cannot gain or lose a row while a reader scrolls.
-    // The same rule one region up: the pulse slot is reserved whether or not
-    // anything is pulsing, because a slot taken only by pulsing rows would
+    // **There is no pulse column, and that is the mechanism being asserted.**
+    // The pulse is per-row and lasts one tick, so a slot reserved for it would
     // reflow every row on the tick a file was written, which is the one moment
-    // a reader is looking at it.
+    // a reader is looking; and a slot taken only by pulsing rows is the
+    // right-packing #77 removes. So it comes out of the *path's* room instead,
+    // and the columns beside it are untouched.
+    //
+    // An earlier draft of this comment described a reserved slot, which is the
+    // design that was tried and abandoned mid-implementation for costing
+    // fourteen of twenty-six glance columns at forty. The assertion was right
+    // and its stated reason was the opposite of the shipped rule.
     let quiet = ragged_counts();
     let mut pulsing = ragged_counts();
     pulsing.list[0].recency = Recency::Pulse;
 
-    let before = glance_columns(&quiet);
-    let after = glance_columns(&pulsing);
+    let before = glance_columns(&screen(80, 10, &quiet, &chrome()));
+    let drawn = screen(80, 10, &pulsing, &chrome());
+    let after = glance_columns(&drawn);
 
     for (row, (a, b)) in before.iter().zip(after.iter()).enumerate() {
         assert_eq!(
@@ -810,12 +830,12 @@ fn a_pulse_does_not_move_the_columns() {
     }
 
     // Non-vacuity: the pulse really is drawn, so this is not comparing a screen
-    // against itself.
-    let backend = screen(80, 10, &pulsing, &chrome());
-    let drawn = row_text(&backend, 1);
+    // against itself. Read off the backend already rendered above rather than
+    // drawing the same screen a second time.
+    let row = row_text(&drawn, 1);
     assert!(
-        drawn.contains('●'),
-        "no pulse reached the row, so nothing was asserted: {drawn:?}"
+        row.contains('●'),
+        "no pulse reached the row, so nothing was asserted: {row:?}"
     );
 }
 

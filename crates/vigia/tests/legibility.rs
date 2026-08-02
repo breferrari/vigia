@@ -1099,10 +1099,11 @@ fn the_glance_columns_collapse_in_one_order() {
     // Read off the drawn row by colour and glyph together, for the reason the
     // renderer's own doc gives: the heat strip and a full sparkline bucket draw
     // the same block, and the pulse shares a foreground with the sparkline.
-    const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     // Restated rather than imported, the way `CONTINUES` and `FACT_JOIN` are: a
     // test that read the renderer's own table would agree with it by
-    // construction instead of checking it.
+    // construction instead of checking it. `RAMP` and `HEAT_BLOCK` are *not*
+    // restated here, because this file already declares them at the top and a
+    // second copy would check the first copy rather than the renderer.
     const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
     const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
     // The first width each state is drawn at, and `(counts, heat slices,
@@ -1128,25 +1129,19 @@ fn the_glance_columns_collapse_in_one_order() {
     let (mut saw_all, mut saw_none) = (false, false);
     let mut seen: Vec<(u16, (bool, usize, usize))> = Vec::new();
 
+    let spark_fg = [theme.spark.fg.expect("the sparkline has a colour")];
     for width in WIDTHS {
         let backend = drawn(width, 8, &view, &chrome());
-        let buffer = backend.buffer();
         // Row 1 is the first file heading: `glancing`'s rows start at the top of
         // the body and the header owns row 0.
         let y = 1u16;
-        let (mut spark, mut heat, mut counts) = (0usize, 0usize, false);
-        for x in 0..width {
-            let cell = &buffer[(x, y)];
-            let symbol = cell.symbol().chars().next().unwrap_or(' ');
-            let fg = cell.style().fg;
-            if symbol == '█' && heats.contains(&fg.unwrap_or(ratatui::style::Color::Reset)) {
-                heat += 1;
-            } else if RAMP.contains(&symbol) && fg == theme.spark.fg {
-                spark += 1;
-            } else if symbol == '+' {
-                counts = true;
-            }
-        }
+        // Through `cells_coloured`, which this file already uses for exactly
+        // these two counts. A fourth hand-rolled walk would be a fourth spelling
+        // of "is this cell a heat slice", and the one that drifts is the one
+        // nobody is reading.
+        let heat = cells_coloured(&backend, y, &heats, &[HEAT_BLOCK]).len();
+        let spark = cells_coloured(&backend, y, &spark_fg, &RAMP).len();
+        let counts = rows_at(width, 8, &view, &chrome())[usize::from(y)].contains('+');
 
         // **Whole rungs.** A count of slices or buckets that is not on the
         // ladder is a strip shaved one item at a time, which §11.1 forbids for a
