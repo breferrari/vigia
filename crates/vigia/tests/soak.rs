@@ -75,6 +75,23 @@ const DEFAULT_SECS: u64 = 15;
 /// The budget gates use 100 x 500, and the scheduled soak does too. Building
 /// that fixture costs seconds, which is most of a fifteen-second window, so the
 /// per-commit run takes a smaller one and the environment carries the rest.
+///
+/// **Twenty was too few once the body grew a second region, and the failure was
+/// on the assertion rather than on the claim.** `SPEC.md` §11.1's pinned list
+/// diffs every row it draws, so the working set is the diff viewport *plus* the
+/// list. On macOS that took tracked diffs to 23 against 26 files ever present,
+/// and the situation guard below asks for twice as many paths as the high-water
+/// mark: with a working set that size, a twenty-file fixture cannot churn
+/// enough paths for "bounded by the diff" to look different from "bounded by
+/// the session", however correct the bound is. I3 itself was fine on that run,
+/// with drift at 1.30% of a 5% budget and fifteen diffs evicted.
+///
+/// The lever is **churn**, not fixture size, and `CREATE_EVERY` below carries
+/// it. Both raise the guard's numerator and leave its denominator alone, since
+/// the high-water mark is bounded by the screen. Churn is the one that does not
+/// also move RSS: doubling the fixture took the reported drift from 1.30% to
+/// between 5% and 11% over three local runs, and a fixture that makes a printed
+/// budget look blown is not worth the paths it buys.
 const DEFAULT_FILES: usize = 20;
 const DEFAULT_LINES: usize = 200;
 
@@ -560,7 +577,13 @@ fn sparse(lines: usize, every: usize) -> String {
 /// gate would blame the product for a backlog the test manufactured.
 const WRITE_PAUSE: Duration = Duration::from_millis(50);
 const COLD_EVERY: usize = 4;
-const CREATE_EVERY: usize = 5;
+// Churn, and the reason it moved is in `DEFAULT_FILES` above: paths ever
+// changed is the fixture size plus write rounds over this, so this is the term
+// that keeps I3's situation guard satisfiable now that the pinned list has
+// widened the working set. Two rather than three for margin on a slow runner,
+// where fewer rounds fit in the window: macOS managed 104, and at 2 that is
+// still ~72 paths against a high-water mark of 23.
+const CREATE_EVERY: usize = 2;
 const KEEP_CREATED: u64 = 6;
 const REVERT_EVERY: usize = 13;
 const BULK_EVERY: usize = 100;
