@@ -1117,6 +1117,18 @@ fn the_header_degrades_at_the_widths_the_spec_records() {
         ("not watching", 5, 11, 12, 14, 18, 30),
     ];
 
+    // Guard the fixture, the way this file's other sweeps do. Every number above
+    // is hand-derived from two fixture properties: a five-column name and three
+    // changed files. They are literals rather than a computation on purpose, so
+    // that a renderer which moved a boundary has to change this table too, but
+    // that only holds while the fixture is what they were derived from.
+    assert_eq!(
+        (chrome().worktree.chars().count(), every_row_kind().files),
+        (5, 3),
+        "the fixture moved out from under the band table, so its widths are \
+         derived from something that no longer exists"
+    );
+
     for (word, first_alone, name_alone, word_alone, rejoins, both, counted) in BANDS {
         let chrome = if word == "watching" { chrome() } else { lost() };
         let view = every_row_kind();
@@ -1289,7 +1301,16 @@ fn a_notice_too_long_for_its_pane_is_marked_rather_than_dropped() {
     const NOTICE: &str = "the index entry for src/lib.rs points at a missing blob";
     let view = every_row_kind();
     let chrome = with_notice();
-    let mut saw_marked = 0usize;
+    // **Counted per footer shape, because the footer draws itself from two call
+    // sites and one counter cannot tell them apart.** `Painter::footer` calls
+    // `status_line` once for a one-row footer and once more for the bottom of a
+    // two-row one, and both pass the notice as a single-rung ladder. Giving
+    // *either* of them the escape hatch `status_line`'s own doc names, a
+    // trailing empty rung, blanks the notice at about thirty widths while the
+    // other branch keeps a single `saw_marked` counter positive and the whole
+    // workspace green. Two counters is what makes each call site answer for
+    // itself.
+    let mut marked = [0usize; 2];
     let mut saw_whole = 0usize;
 
     // The fixture has to be the thing under test: a notice that fits every width
@@ -1303,6 +1324,18 @@ fn a_notice_too_long_for_its_pane_is_marked_rather_than_dropped() {
     for width in WIDTHS {
         let rows = rows_at(width, 8, &view, &chrome);
         let footer = rows.last().expect("a footer row").clone();
+        // Which of `Painter::footer`'s two `status_line` calls drew this row,
+        // read off the screen rather than recomputed. A two-row footer puts the
+        // state on the upper line and leaves the notice the bottom one alone; a
+        // one-row footer shares the line, so the follow marker is on the row
+        // itself. `Footer::plan`'s arithmetic is not consulted, because a test
+        // that asked it would be the renderer agreeing with itself about which
+        // branch it took.
+        let two_row = rows
+            .len()
+            .checked_sub(2)
+            .is_some_and(|above| rows[above].contains(FOLLOW_MARK));
+        let shape = usize::from(two_row);
         // Below the width where a footer exists at all there is nothing to
         // assert; `the_footer_never_takes_the_body_below_its_floor` owns that.
         if footer.is_empty() {
@@ -1329,20 +1362,25 @@ fn a_notice_too_long_for_its_pane_is_marked_rather_than_dropped() {
             // is what detects.
             continue;
         }
-        saw_marked += 1;
+        marked[shape] += 1;
         assert!(
             footer[drawn.len()..].starts_with(CONTINUES),
             "at {width} columns the notice was cut without saying so: {footer:?}"
         );
     }
 
-    // **Both directions, and the marked one is the mutation detector.** Swap
+    // **Both directions, and the marked ones are the mutation detector.** Swap
     // `widest_fitting_or_last` for `widest_fitting` and every over-long notice
-    // stops being drawn at all, so `saw_marked` falls to zero while every other
-    // assertion here still holds vacuously.
+    // stops being drawn at all, so the marked counts fall to zero while every
+    // other assertion here still holds vacuously. Both footer shapes are
+    // required, because each is a different call site and either can be
+    // regressed while the other keeps a shared counter positive.
     assert!(
-        saw_marked > 0 && saw_whole > 0,
-        "the sweep saw {saw_marked} marked and {saw_whole} whole"
+        marked[0] > 0 && marked[1] > 0 && saw_whole > 0,
+        "the sweep saw {} marked on a one-row footer, {} on a two-row one, and \
+         {saw_whole} whole",
+        marked[0],
+        marked[1]
     );
 }
 
