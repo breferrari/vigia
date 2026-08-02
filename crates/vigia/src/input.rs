@@ -109,6 +109,18 @@ pub enum Action {
     /// [`TRACK_SCALE`] rather than a file index, because the index needs the file
     /// count and this module does not have one.
     ListTo(u32),
+    /// Put the diff at the file this many rows down the pinned list.
+    ///
+    /// From a click on a list row. An **offset into the window**, not a file
+    /// index, because the window's position is the app's state and this module
+    /// does not have it.
+    ///
+    /// A click is the one gesture a reader will try without being told, and it
+    /// is still not selection: nothing is remembered, no row becomes special,
+    /// and the next event is interpreted exactly as it would have been. That is
+    /// what `SPEC.md` §11.2 B4 refuses, and it is untouched. The same argument
+    /// already licensed dragging a scrollbar.
+    ListRow(u16),
     /// Put the diff at this fraction of its total height.
     ///
     /// From dragging or clicking the diff's scrollbar. **A row, once the caller
@@ -152,7 +164,9 @@ impl Action {
             // is `ScrollList` by another input device. Dragging the **diff's**
             // moves the viewport and is a manual scroll like any other.
             Self::ListTo(_) => false,
-            Self::DiffTo(_) => true,
+            // A click on a row moves the diff, so it is a manual scroll for the
+            // same reason a drag on the diff's bar is.
+            Self::DiffTo(_) | Self::ListRow(_) => true,
         }
     }
 
@@ -179,7 +193,7 @@ impl Action {
             // own row count, which the app already holds.
             Self::Page(_) | Self::DiffTo(_) => true,
             Self::Scroll(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => false,
-            Self::ListTo(_) => false,
+            Self::ListTo(_) | Self::ListRow(_) => false,
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
         }
     }
@@ -294,9 +308,16 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         MouseEventKind::ScrollUp if regions.over_list(mouse.row) => Some(Action::ScrollList(-1)),
         MouseEventKind::ScrollDown => Some(Action::Scroll(WHEEL_ROWS)),
         MouseEventKind::ScrollUp => Some(Action::Scroll(-WHEEL_ROWS)),
+        // **A click on a listed file sends the diff to it.** The row is reported
+        // as an offset into the window; the app owns where the window is. Only
+        // the list, because the diff below is already showing what it is showing
+        // and a click on it would have nothing to mean.
+        MouseEventKind::Down(MouseButton::Left) if regions.over_list(mouse.row) => {
+            Some(Action::ListRow(mouse.row - regions.list.0))
+        }
         // Everything else is deliberately inert. Horizontal wheels exist and
         // lines do not pan: the renderer clips instead, which is what I6 asks
-        // for. A click anywhere but the bar does nothing, because nothing is
+        // for. A click on the diff does nothing, because nothing there is
         // selectable in a monitor and §11.2 B4 keeps it that way, and plain
         // movement is not an event worth a frame.
         _ => None,

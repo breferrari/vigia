@@ -908,7 +908,37 @@ impl View {
             // Still pulled back by the first clamp when the tail is shorter than
             // the window, so the last file can rest on the bottom row rather than
             // leaving blanks under it.
-            top = self.top.file.min(self.files.saturating_sub(rows));
+            // **The window moves the least it can, so the caret travels.** Held
+            // while the current file is inside it, and pushed by exactly the
+            // overshoot when the file leaves: forward off the bottom, back off
+            // the top. Scrolling from the start therefore walks the caret down
+            // the rows, and only then does the list move under it.
+            //
+            // **Both fixed positions were tried first and both were wrong**, in
+            // opposite directions and for the same reason: a rule that puts the
+            // current file at a constant row is not following it, it is dragging
+            // the window on every step and pinning the caret. Ending the window
+            // on the current file showed the six files *before* the six the diff
+            // was drawing. Starting the window on it fixed that and pinned the
+            // caret to the first row, which is what a reader sees as the list
+            // scrolling while the marker never moves. Reported from use both
+            // times.
+            //
+            // Minimal movement subsumes them. At the top of the changed set the
+            // caret sits on the first row because the file is the first, not
+            // because the row is; at the end the clamp above rests the last file
+            // on the bottom row, and the caret is there because it belongs there.
+            //
+            // Still **not navigable**, which is §11.2 B4: the caret cannot be
+            // moved on its own, nothing is selected, and no key changes meaning.
+            // What travels is a marker, not a cursor.
+            let current = self.top.file;
+            if current < top {
+                top = current;
+            } else if current >= top + rows {
+                top = current + 1 - rows;
+            }
+            top = top.min(self.files.saturating_sub(rows));
         }
         self.list_top = top;
 

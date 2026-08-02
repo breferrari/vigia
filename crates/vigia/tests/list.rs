@@ -735,3 +735,153 @@ fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
         view.list_top + view.list.len()
     );
 }
+
+/// The caret walks down the window before the window moves under it.
+///
+/// **Reported from use, and it is the second fixed-position rule this region
+/// has had.** Ending the window on the current file showed the six files before
+/// the six the diff was drawing; starting the window on it fixed that and
+/// pinned the caret to the first row, so scrolling a seventeen-file tree moved
+/// the list on every step while the marker never went anywhere. Both are the
+/// same defect: a constant row is not following a file.
+///
+/// So this asserts **travel**, which neither fixed rule can satisfy and which
+/// `the_list_window_slides_to_keep_the_current_file_visible` cannot see, since
+/// containment holds for a pinned caret too.
+#[test]
+fn the_caret_travels_the_window_before_the_window_moves() {
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-travel", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+
+    // Walking the diff forward one file at a time from the start, the caret's
+    // row is the file's own index until the window has to move, and the window
+    // does not move until then.
+    let mut seen = Vec::new();
+    for file in 0..LIST_ROWS + 4 {
+        // `view` is what advances the file, not `apply`: a scroll down adds to
+        // the offset and lets `View::collect` carry the overrun into the files
+        // after it, so a loop that only applied would spin forever.
+        let mut view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+        let mut guard = 0;
+        while view.top.file < file {
+            app.apply(Action::Scroll(1), &mut frame, body.diff)
+                .expect("apply");
+            view = app
+                .view(&mut frame, &mut highlighter, &history, body)
+                .expect("view");
+            guard += 1;
+            assert!(guard < 10_000, "never reached file {file}");
+        }
+        let caret = view.top.file - view.list_top;
+        seen.push((view.list_top, caret));
+
+        if file < LIST_ROWS {
+            assert_eq!(
+                view.list_top, 0,
+                "the window moved at file {file}, which still fits in it"
+            );
+            assert_eq!(
+                caret, file,
+                "the caret sat at row {caret} for file {file}, so it is pinned \
+                 rather than travelling"
+            );
+        } else {
+            // Past the window, the caret rests on the last row and the window
+            // advances by exactly the overshoot. More would jump the map; less
+            // would leave the current file off it.
+            assert_eq!(
+                caret,
+                LIST_ROWS - 1,
+                "at file {file} the caret left the last row, so the window moved \
+                 by more than the overshoot"
+            );
+            assert_eq!(view.list_top, file + 1 - LIST_ROWS);
+        }
+    }
+
+    assert!(
+        seen.iter().any(|(top, _)| *top > 0),
+        "the window never moved at all over {} files",
+        LIST_ROWS + 4
+    );
+}
+
+/// Clicking a listed file sends the diff to it.
+///
+/// The gesture a reader tries without being told, and the one the region most
+/// obviously invites by drawing a list of names next to the thing they name.
+///
+/// It is **not** selection, which is what `SPEC.md` §11.2 B4 refuses: nothing is
+/// remembered, no row becomes special, and the event after it means exactly what
+/// it would have meant. The same argument already licensed dragging a scrollbar.
+#[test]
+fn clicking_a_listed_file_sends_the_diff_to_it() {
+    use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+    use vigia::{action_for, regions};
+
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-click", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+
+    // Through the real hit-test rather than by constructing the action, because
+    // the row-to-offset arithmetic is half of what can be wrong here.
+    let area = Rect::new(0, 0, WIDE, 24);
+    let regions = regions(area, &chrome(&app), &view);
+    let (list_top_row, list_rows) = regions.list;
+    assert!(list_rows > 1, "no region was published to click on");
+
+    let click = |row: u16| {
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            // Not the bar's column: that is a drag, and it is checked first.
+            column: 2,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+
+    for offset in [0u16, 2, list_rows - 1] {
+        let action = action_for(&click(list_top_row + offset), regions);
+        assert_eq!(action, Some(Action::ListRow(offset)));
+        app.apply(action.expect("action"), &mut frame, body.diff)
+            .expect("apply");
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+        assert_eq!(
+            view.top,
+            Position {
+                file: usize::from(offset),
+                row: 0
+            },
+            "a click on row {offset} did not put the diff at the top of that file"
+        );
+    }
+
+    // And a click on the diff below is still inert, which is B4 standing.
+    assert_eq!(action_for(&click(regions.diff.0 + 1), regions), None);
+}

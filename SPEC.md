@@ -476,7 +476,12 @@ The height is a function of **pane geometry, follow state and changed-file count
 | `f` | engage follow mode, or disengage it |
 | mouse wheel | scroll the region under the pointer |
 | drag either scrollbar | move that region |
+| click a listed file | put the diff at that file |
 | terminal resize | redraw, no state change |
+
+**The caret travels the window; the window moves the least it can.** It is held while the current file is inside it and pushed by exactly the overshoot when the file leaves. Scrolling from the start therefore walks the caret down the rows, and only then does the list move under it. **Two fixed positions were ruled first and both were wrong**, in opposite directions and for one reason: a constant row is not following a file, it is dragging the window on every step. Ending the window on the current file showed the six files *before* the six the diff was drawing. Starting the window on it fixed that and pinned the caret to the first row, which reads as the list scrolling while the marker never moves. Both reported from use. Minimal movement subsumes them: at the top the caret is on the first row because the file is first, and at the end the pull-back rests the last file on the bottom row.
+
+**A click on a listed file puts the diff at it.** The gesture a reader tries without being told, next to a region that draws the names of the things it is a map of. It is **not** selection and B4 stands: nothing is remembered, no row becomes special, no mode appears, and the event after it means what it would have meant. That is the same argument that already licensed dragging a scrollbar, and the caret is still a marker rather than a cursor: it cannot be moved on its own. A click on the diff below stays inert, because nothing there is selectable.
 
 **The wheel reads where the pointer is, and it is the only thing in this shell that does.** A reader hovering the map and turning the wheel means the map. §2 makes `btop` the reference and that is what `btop` does. It is not selection and it is not focus: nothing is remembered between events, so B4's ruling stands.
 

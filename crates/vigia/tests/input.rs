@@ -439,10 +439,12 @@ fn dragging_a_bar_reports_where_along_its_own_track() {
         action_for(&at(MouseEventKind::Drag(MouseButton::Left), 40, 2), regions),
         None
     );
-    // And a screen with no bars has nothing to drag.
+    // And a screen with no bars has nothing to drag. Pressed on a row *below*
+    // the list, because a press inside it is a jump to that file now and would
+    // pass this for the wrong reason.
     assert_eq!(
         action_for(
-            &at(MouseEventKind::Down(MouseButton::Left), 79, 2),
+            &at(MouseEventKind::Down(MouseButton::Left), 79, 12),
             Regions {
                 bar: None,
                 ..regions

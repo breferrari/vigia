@@ -409,6 +409,17 @@ impl App {
                 let travel = frame.files().len().saturating_sub(self.list_rows.max(1));
                 self.browse(scaled(at, travel), frame);
             }
+            // A click on a listed file. Out of range is a click on blank space
+            // under a list shorter than its region, which is not a file and so
+            // is not a jump: silently doing nothing is right where clamping to
+            // the last file would move the diff somewhere nobody pointed at.
+            Action::ListRow(offset) => {
+                let file = self.list_top.saturating_add(usize::from(offset));
+                if file < frame.files().len() {
+                    self.anchored = false;
+                    self.position = Position { file, row: 0 };
+                }
+            }
             // Dragging the diff's bar, which counts **rows**, so this resolves a
             // row of the whole diff back into the file it falls inside and the
             // offset within it.
