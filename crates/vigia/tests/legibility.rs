@@ -1088,6 +1088,119 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 }
 
 #[test]
+fn the_glance_columns_collapse_in_one_order() {
+    // #77's ladder. The columns are decided once for a region now, so the order
+    // they give way in is a property of the region rather than of a row, and it
+    // is the one `SPEC.md` §11.1 records: counts, then heat, then sparkline.
+    //
+    // Swept rather than sampled, because a ladder is only ever wrong at the
+    // widths where it changes rung, and those move with the fixture's counts.
+    //
+    // Read off the drawn row by colour and glyph together, for the reason the
+    // renderer's own doc gives: the heat strip and a full sparkline bucket draw
+    // the same block, and the pulse shares a foreground with the sparkline.
+    const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    // Restated rather than imported, the way `CONTINUES` and `FACT_JOIN` are: a
+    // test that read the renderer's own table would agree with it by
+    // construction instead of checking it.
+    const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
+    const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+    // The first width each state is drawn at, and `(counts, heat slices,
+    // sparkline buckets)`. **The widths are pinned as well as the order**,
+    // because a sequence alone is a weak gate: removing the gap the heat strip
+    // reserves shifts every boundary below it by a column and leaves the walk
+    // itself identical, and that mutation survived this test until the widths
+    // went in.
+    const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
+        (1, (false, 0, 0)),
+        (19, (false, 0, 4)),
+        (21, (true, 0, 0)),
+        (26, (true, 0, 4)),
+        (28, (true, 6, 0)),
+        (33, (true, 6, 4)),
+        (34, (true, 12, 0)),
+        (39, (true, 12, 4)),
+        (43, (true, 12, 8)),
+    ];
+    let theme = theme();
+    let heats = heat_colours(&theme);
+    let view = glancing();
+    let (mut saw_all, mut saw_none) = (false, false);
+    let mut seen: Vec<(u16, (bool, usize, usize))> = Vec::new();
+
+    for width in WIDTHS {
+        let backend = drawn(width, 8, &view, &chrome());
+        let buffer = backend.buffer();
+        // Row 1 is the first file heading: `glancing`'s rows start at the top of
+        // the body and the header owns row 0.
+        let y = 1u16;
+        let (mut spark, mut heat, mut counts) = (0usize, 0usize, false);
+        for x in 0..width {
+            let cell = &buffer[(x, y)];
+            let symbol = cell.symbol().chars().next().unwrap_or(' ');
+            let fg = cell.style().fg;
+            if symbol == '█' && heats.contains(&fg.unwrap_or(ratatui::style::Color::Reset)) {
+                heat += 1;
+            } else if RAMP.contains(&symbol) && fg == theme.spark.fg {
+                spark += 1;
+            } else if symbol == '+' {
+                counts = true;
+            }
+        }
+
+        // **Whole rungs.** A count of slices or buckets that is not on the
+        // ladder is a strip shaved one item at a time, which §11.1 forbids for a
+        // thing made of items: it drops whole ones or none.
+        assert!(
+            HEAT_RUNGS.contains(&heat),
+            "at {width} columns the heat strip drew {heat} slices, which is not \
+             one of its rungs"
+        );
+        assert!(
+            SPARK_RUNGS.contains(&spark),
+            "at {width} columns the sparkline drew {spark} buckets, which is not \
+             one of its rungs"
+        );
+
+        let state = (counts, heat, spark);
+        if seen.last().map(|(_, s)| s) != Some(&state) {
+            seen.push((width, state));
+        }
+        if counts && heat > 0 && spark > 0 {
+            saw_all = true;
+        }
+        if !counts && heat == 0 && spark == 0 {
+            saw_none = true;
+        }
+    }
+
+    // Both ends of the ladder, or the sweep only ever saw one of them.
+    assert!(
+        saw_all && saw_none,
+        "the sweep saw everything drawn={saw_all} and nothing drawn={saw_none}, \
+         so it did not cover the whole ladder"
+    );
+
+    // **The walk itself, pinned**, because the interesting property is not
+    // monotone and asserting that it were would be asserting something false.
+    // Two things make it ragged and both are the design rather than defects.
+    // The counts cell outranks both glance elements, so the width at which it
+    // arrives *removes* a sparkline that had fitted without it. And the heat
+    // strip's narrowest non-empty rung is six slices where the sparkline's is
+    // four buckets, so there is a band where heat cannot fit and the sparkline
+    // can, which is what "outranks" means here: first refusal on the budget,
+    // not a veto over what is left.
+    //
+    // Written out rather than counted, so a renderer that reordered the ladder
+    // or shaved a rung has to change this line too.
+    assert_eq!(
+        seen.as_slice(),
+        ACCEPTED_WALK,
+        "the glance ladder walks a different set of states than §11.1 records"
+    );
+}
+
+#[test]
 fn the_header_degrades_at_the_widths_the_spec_records() {
     // `SPEC.md` §11.1 quotes measured column numbers for where the header's
     // facts appear and vanish, and prose carrying a measurement drifts from the
