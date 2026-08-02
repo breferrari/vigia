@@ -776,28 +776,33 @@ fn count_of(files: usize) -> String {
 /// the row, which is [#67](https://github.com/breferrari/vigia/issues/67)'s own
 /// failure with the halves swapped.
 ///
-/// **The test took three spellings to get right, and each was wrong in the same
-/// direction**, which is why the wrong ones are recorded here rather than tidied
-/// away. `is_empty()` misses every name made of zero-width characters: a
-/// zero-width space, a joiner, a bidi mark, a lone combining accent and a
-/// variation selector are all non-empty `String`s that draw nothing.
-/// `width_of(..) == 0` misses every name made of whitespace, which *has* width
-/// and shows nothing: a single space, a no-break space, an ideographic space, a
-/// tab. All of them are legal directory names on every tier-1 target, so all of them
-/// arrive through `Worktree::short_name` rather than only through the public
-/// [`render`].
+/// **The test took four spellings to get right and each was wrong in the same
+/// direction**, which is why the wrong ones are recorded rather than tidied away:
+/// the progression is the lesson, not the answer.
 ///
-/// So the question is not "is this string empty" or even "how wide is it" but
-/// **is there anything a reader could see**, and `trim` is what asks that. The
-/// general shape, and the reason it is worth a paragraph: a guard on a drawn
-/// thing has to test the drawn property, and `len` is not width, and width is
-/// not visibility.
+/// | spelling | what it misses |
+/// |---|---|
+/// | `is_empty()` | names of zero-width characters: a zero-width space, a joiner, a bidi mark, a lone combining accent, a variation selector. Non-empty `String`s that draw nothing |
+/// | `width_of(..) == 0` | names of whitespace, which *have* width and show nothing: a space, a no-break space, an ideographic space, a tab |
+/// | `width_of(trim()) == 0` | names of control characters. `\u{1B}` measures **one** column and `trim` keeps it, but `ratatui` drops every grapheme containing a control before it reaches a cell |
+///
+/// Each class is a legal directory name on Linux and macOS, so each arrives
+/// through `Worktree::short_name` rather than only through the public [`render`].
+///
+/// So the question was never "is this empty", nor "how wide is it", but **will
+/// the layer that draws it keep anything**, and each earlier spelling asked a
+/// question one layer too high. `len` is not width; width is not visibility; and
+/// what unicode-width reports is not what the buffer agrees to write. Two
+/// characters still escape and are left alone deliberately: `U+2800` and
+/// `U+115F` draw a real glyph that happens to be blank, and whether a *font*
+/// inks something is not a question this process can ask.
 fn header_left(worktree: &str, files: usize) -> Vec<String> {
     let mut rungs = Vec::with_capacity(2);
     let count = count_of(files);
     if !count.is_empty() {
-        let joined = if width_of(worktree.trim()) == 0 {
-            count.clone()
+        let visible = worktree.trim().replace(|c: char| c.is_control(), "");
+        let joined = if width_of(&visible) == 0 {
+            count
         } else {
             format!("{worktree}{FACT_SEPARATOR}{count}")
         };

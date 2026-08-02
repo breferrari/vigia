@@ -1098,24 +1098,55 @@ fn the_header_degrades_at_the_widths_the_spec_records() {
     //
     // So the bands are asserted here and the spec cites this test. Both mode
     // words, because the word's own width shifts every boundary by four.
-    const BANDS: [(&str, u16, u16, u16); 2] = [
-        // word, last width the name has the row alone, first width the word has
-        // it alone, first width both are drawn whole.
-        ("watching", 7, 8, 14),
-        ("not watching", 11, 12, 18),
+    // Every number §11.1 quotes, not a subset of them. Citing the gate for the
+    // paragraph while asserting six of its ten numbers is the same false comfort
+    // as not citing one at all.
+    const BANDS: [(&str, u16, u16, u16, u16, u16); 2] = [
+        // word; first and last width the name has the row alone; first width the
+        // word has it alone; first width a marked fragment rejoins it; first
+        // width both are drawn whole.
+        ("watching", 5, 7, 8, 10, 14),
+        ("not watching", 5, 11, 12, 14, 18),
     ];
 
-    for (word, name_alone, word_alone, both) in BANDS {
+    for (word, first_alone, name_alone, word_alone, rejoins, both) in BANDS {
         let chrome = if word == "watching" { chrome() } else { lost() };
         let view = every_row_kind();
         let name = chrome.worktree.clone();
         let row = |width: u16| rows_at(width, 8, &view, &chrome)[0].clone();
 
-        let alone = row(name_alone);
-        assert_eq!(
-            alone.trim(),
+        for width in [first_alone, name_alone] {
+            let alone = row(width);
+            assert_eq!(
+                alone.trim(),
+                name,
+                "at {width} columns the name should have the row to itself"
+            );
+        }
+        // One below the first is where it stops being the whole name, which is
+        // what makes `first_alone` a boundary rather than a width that happens
+        // to work.
+        let under = row(first_alone - 1);
+        assert_ne!(
+            under.trim(),
             name,
-            "at {name_alone} columns the name should have the row to itself"
+            "at {} columns the name is already whole, so {first_alone} is not \
+             the first width that holds it",
+            first_alone - 1
+        );
+
+        let fragment = row(rejoins);
+        assert!(
+            fragment.ends_with(word) && fragment.contains(CONTINUES),
+            "at {rejoins} columns a marked fragment of the name should share the \
+             row with the mode word: {fragment:?}"
+        );
+        let before = row(rejoins - 1);
+        assert!(
+            !before.contains(CONTINUES),
+            "at {} columns the name already shares the row, so {rejoins} is not \
+             where it rejoins: {before:?}",
+            rejoins - 1
         );
 
         let taken = row(word_alone);
@@ -1134,9 +1165,16 @@ fn the_header_degrades_at_the_widths_the_spec_records() {
 
         // And one column below `both` the name is not yet whole, which is what
         // makes `both` the *first* such width rather than merely one of them.
+        //
+        // The name alone, **not** the name followed by a space. Looking for the
+        // space was the first spelling and it left a mutation alive: reclaiming
+        // the column `put_right` reserves for the gap draws `vigiawatching`, the
+        // two facts fused with nothing between them, at five widths and with the
+        // whole workspace green. That is worse than the defect #67 was filed
+        // about, and this assertion is the only thing on the row that can see it.
         let below = row(both - 1);
         assert!(
-            !below.contains(&format!("{name} ")),
+            !below.contains(name.as_str()),
             "at {} columns the whole name is already drawn, so {both} is not the \
              first width that fits both: {below:?}",
             both - 1

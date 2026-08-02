@@ -539,8 +539,13 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
     // run that reached the edge carried, which is only exercised where the
     // clause does not fit.
     let mut saw_the_clause = 0usize;
+    let mut saw_a_mark = 0usize;
     for (label, mode) in [("live", Mode::Watching), ("lost", Mode::Lost)] {
-        for width in [40u16, 80, 120] {
+        // Seventeen is the clause's own width, so it is where the left is cut
+        // and the continuation mark inherits a style. Without it the sweep only
+        // ever saw a clause that fitted, and the comment above claimed a case
+        // the widths could not reach.
+        for width in [13u16, 17, 40, 80, 120] {
             let chrome = Chrome { mode, ..chrome() };
             let backend = screen(width, 8, &view, &chrome);
             let header = row_text(&backend, 0);
@@ -549,19 +554,32 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             // rather than computed from the width, because where the left ends
             // is what the ladder decided and recomputing it here would be the
             // renderer's own arithmetic agreeing with itself.
-            let drawn: String = header
+            // Trailing blanks are trimmed off the match, because the clause and
+            // the background agree on a space: at seventeen columns the row is
+            // `vigia   watching`, and the space after the name belongs to the
+            // gap rather than to the clause the ladder drew.
+            let matched: String = header
                 .chars()
                 .zip(clause.chars())
                 .take_while(|(row, want)| row == want)
                 .map(|(row, _)| row)
                 .collect();
+            let drawn = matched.trim_end();
             if drawn.is_empty() {
                 continue;
             }
             saw_the_clause += 1;
 
-            // All ASCII, so one char is one column.
-            for x in 0..drawn.chars().count() {
+            // All ASCII, so one char is one column. The mark, where the clause
+            // was cut, is included deliberately: it inherits the style of the
+            // run that reached the edge, so it is part of the clause's weight
+            // rather than a separate decision.
+            let cut = header[drawn.len()..].starts_with(CONTINUES);
+            if cut {
+                saw_a_mark += 1;
+            }
+            let cells = drawn.chars().count() + usize::from(cut);
+            for x in 0..cells {
                 let cell = &backend.buffer()[(x as u16, 0)];
                 assert_eq!(
                     cell.style().fg,
@@ -574,10 +592,16 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             }
         }
     }
+    // Eight of the ten screens, because a lost watch at thirteen columns leaves
+    // the left no room at all: `not watching` plus its gap is the whole row.
     assert!(
-        saw_the_clause >= 6,
-        "only {saw_the_clause} of the six screens drew any of the clause, so \
+        saw_the_clause >= 8,
+        "only {saw_the_clause} of the ten screens drew part of the clause, so \
          this gate is weaker than it reads"
+    );
+    assert!(
+        saw_a_mark > 0,
+        "no width cut the clause, so the continuation mark's weight is unasserted"
     );
 
     // And the test can tell the two apart: the blank after the clause is the
@@ -607,10 +631,12 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
     // first case here is reachable only through the public `render` with a
     // hand-built `Chrome`, which is what every test in this file does and what
     // `Chrome::default()` produces. The other two classes are not so narrow, and
-    // that is the correction rather than a footnote: every zero-width and
-    // whitespace name below is a legal directory name on all three tier-1
-    // targets, so `short_name` returns them verbatim and they arrive on the
-    // shipped path like any other.
+    // that is the correction rather than a footnote: every name below is a legal
+    // directory name on Linux and macOS, so `short_name` returns them verbatim
+    // and they arrive on the shipped path like any other. **Linux and macOS
+    // rather than all three targets**, which is a narrowing of an earlier claim
+    // here: Windows strips a trailing space, so a name of one space resolves to
+    // the parent, and it refuses a tab outright. The rest are legal everywhere.
     let view = View {
         files: 3,
         ..one_file()
@@ -638,6 +664,12 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         ("ideographic space", "\u{3000}"),
         ("tab", "\t"),
         ("space then zero-width", " \u{200B}"),
+        // The fourth class, and the one no width measurement can catch: these
+        // report a column each and `trim` keeps them, but `ratatui` drops any
+        // grapheme containing a control before it reaches a cell, so the name
+        // measures nonzero and draws nothing.
+        ("escape", "\u{001B}"),
+        ("bell", "\u{0007}"),
     ];
 
     for (label, name) in names {
