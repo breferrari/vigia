@@ -3,8 +3,8 @@ source: crates/vigia/tests/rows.rs
 expression: terminal.backend()
 ---
 "fixture · 2 changed                                     watching"
-"▸ A src/added.rs               ████████████             +2    -0"
-"  M src/lib.rs                 ████████████             +1    -1"
+"▸ A src/added.rs             ████████████             +2    -0  "
+"  M src/lib.rs               ████████████             +1    -1  "
 "────────────────────────────────────────────────────────────────"
 "A src/added.rs               ████████████             +2    -0 █"
 "@@ -0,0 +1,2 @@                                                █"

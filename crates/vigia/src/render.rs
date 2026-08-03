@@ -900,6 +900,27 @@ fn scrollable(span: u64, of: u64) -> bool {
     of != 0 && span < of
 }
 
+/// The width a region's glance columns are planned against.
+///
+/// **The pane, less a caret inset it may have and less a scrollbar column
+/// whether or not one is drawn.** The bar's presence is a fact about the
+/// contents rather than the pane: [`scrollable`] asks whether what a region
+/// holds outruns what it can show, so a seventh changed file or a diff one row
+/// taller than the screen makes a bar appear and narrows the region under a
+/// layout that was supposed to be a property of the pane.
+///
+/// Paying it unconditionally is the ruling [`CARET_FLOOR`] already made against
+/// the identical hazard, and for the identical reason: a decision that flips
+/// with the contents flips on the frame a reader is looking at. It costs two
+/// columns of path on a pane with nothing to scroll, which is the trade
+/// [`Columns`] already makes every time it reserves a slot no row can fill.
+///
+/// Written once because both regions need it and they must agree; [`Painter::body`]
+/// takes no caret, so it passes zero.
+const fn planning_width(pane: u16, inset: u16) -> u16 {
+    pane.saturating_sub(BAR_WIDTH as u16).saturating_sub(inset)
+}
+
 /// Columns something of `width` costs on the right-hand side of a row.
 ///
 /// One more than it measures, because [`Painter::put_right`] leaves a gap so the
@@ -935,10 +956,12 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
 
 /// Whether this file has any sparkline to draw at all.
 ///
-/// [`has_heat`]'s twin, and the reason it is a function rather than a call to
-/// [`spark_of`]: asking the producer for a boolean runs a `div_ceil` per bucket
-/// per row to learn something its own first line already knows. This is that
-/// first line.
+/// [`has_heat`]'s twin, and named for the same reason: "has anything to draw" is
+/// one predicate wherever it is asked. Its own caller is [`spark_of`], whose
+/// first line this is, so the saving it once argued for (a boolean that did not
+/// run a `div_ceil` per bucket) is realised by nobody today. Kept as a name
+/// rather than a guard inlined into the producer, so the two spellings cannot
+/// drift.
 fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
     peak != 0 && buckets.iter().any(|&count| count != 0)
 }
@@ -953,8 +976,6 @@ fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
 /// and `-M` at another no matter what any row says, and a fixed frame is what
 /// makes that possible: the slots are a property of the pane, so nothing a
 /// reader scrolls past can move them.
-///
-/// Columns one half of the counts cell occupies, whatever that half says.
 ///
 /// **Five, and it does not degrade, because five is the narrowest width at which
 /// the abbreviation is total.** A narrower rung was tried and shipped a wrong
@@ -981,10 +1002,14 @@ const COUNT_CELL: usize = 5;
 /// nothing**, which is what makes narrowing monotone: widening a pane can never
 /// remove an element. Read down the table for the drop order, which is the
 /// ladder `SPEC.md` §11.1 states: the pulse *label* is the first luxury to go,
-/// then the sparkline's resolution, then the strip's, then the counts' width,
-/// then the sparkline entirely, then the strip, then the pulse mark, and the
-/// counts last, because they are the row's content rather than a signal drawn
-/// beside it.
+/// then the sparkline's resolution, then the strip's, then the sparkline
+/// entirely, then the strip, then the pulse mark, and the counts last, because
+/// they are the row's content rather than a signal drawn beside it.
+///
+/// Seven drops for seven steps. The counts' *width* used to sit between the
+/// strip's resolution and the sparkline, and it is gone because [`COUNT_CELL`]
+/// no longer has a narrow rung to give up: every row of this table carries the
+/// same cell.
 const ROW_LAYOUTS: [Columns; 8] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[0], SPARK_RUNGS[0]),
@@ -1020,10 +1045,17 @@ const fn counts_width(cell: usize) -> usize {
 /// hundred and fifty. Unreachable at five columns, kept because the failure is
 /// silent and its cost is one comparison.
 ///
-/// The loop walks units rather than branching on magnitude, so a change to the
-/// cell cannot leave one unit unreachable.
-fn churn_of(sigil: char, lines: u32, cell: usize) -> String {
-    let room = cell.saturating_sub(1);
+/// The loop walks units rather than branching on magnitude, so a change to
+/// [`COUNT_CELL`] cannot leave one unit unreachable.
+///
+/// **Takes no width.** It had one while the cell was a two-rung ladder, and kept
+/// it for a while after the ladder went, which left two branches below that no
+/// caller could reach and no gate could cover: at the only width ever passed,
+/// the zero guard never fires and the fallthrough never runs. Reading
+/// [`COUNT_CELL`] directly is what makes the totality argument above checkable
+/// against the constant it is about.
+fn churn_of(sigil: char, lines: u32) -> String {
+    let room = COUNT_CELL.saturating_sub(1);
     for (unit, per) in [
         ("", 1u32),
         ("k", 1_000),
@@ -1056,13 +1088,15 @@ fn churn_of(sigil: char, lines: u32, cell: usize) -> String {
 /// ragged, which is the same complaint [#77](https://github.com/breferrari/vigia/issues/77)
 /// makes about the row as a whole, one element in.
 ///
-/// Lifted out of [`Painter::file_row`] so that the measurement deciding the
-/// columns and the drawing that fills them cannot disagree about what a counts
-/// cell is. They did not before, because there was no measurement.
-fn counts_of(churn: Option<(u32, u32)>, cell: usize) -> (String, String) {
+/// Named rather than inlined into [`Painter::file_row`] so that "what a counts
+/// cell says" is one definition. It was lifted out to keep a *measurement* and a
+/// drawing in agreement, back when the columns were sized from the widest cell
+/// among the drawn rows; that design is gone and nothing measures now, so what
+/// the split still earns is a name and a place for the empty case to live.
+fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
     churn.map_or_else(
         || (String::new(), String::new()),
-        |(added, removed)| (churn_of('+', added, cell), churn_of('-', removed, cell)),
+        |(added, removed)| (churn_of('+', added), churn_of('-', removed)),
     )
 }
 
@@ -1873,7 +1907,7 @@ pub fn render(
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
-        painter.body(region, view, chrome);
+        painter.body(region, view, chrome, area.width);
     }
 
     painter.paint
@@ -2235,10 +2269,19 @@ impl Painter<'_> {
         // carries nothing, so a loop that asked both questions of the same cell
         // made no progress on `>1s` and spun forever with the pane frozen. Every
         // pass of the outer loop now advances `x` by at least one column.
-        let end = at.saturating_add(readouts as u16).min(row.x + row.width);
+        // **Clipped to the buffer, not to the area.** `render`'s own contract is
+        // that any area is legal, and every other writer here reaches the cells
+        // through `Buffer::set_stringn` or `set_style`, both of which clip. These
+        // two loops index directly, so an area wider than the buffer it is drawn
+        // into panicked where nothing used to.
+        if row.y >= self.buf.area.bottom() {
+            return;
+        }
+        let edge = row.x.saturating_add(row.width).min(self.buf.area.right());
+        let end = at.saturating_add(readouts as u16).min(edge);
         let opening = |c: char| c.is_ascii_digit() || c == '>';
         let carrying = |c: char| c.is_ascii_digit() || c == '.' || c.is_ascii_alphabetic();
-        let mut x = at;
+        let mut x = at.min(edge);
         while x < end {
             let head = self.buf[(x, row.y)].symbol().chars().next();
             if !head.is_some_and(opening) {
@@ -2259,9 +2302,16 @@ impl Painter<'_> {
             }
         }
 
+        // **Bounded to the state's own columns**, which start where the
+        // diagnostics end. Scanning the whole row let a `▶` in the *notice* take
+        // the green: a notice is an error string carrying a path, `▶` is a legal
+        // filename character, and the first match won. That fabricated the one
+        // glyph on the footer a reader checks rather than reads, saying the view
+        // was live when it was not, and when follow really was on it lit the
+        // wrong glyph and left the real marker grey.
         let mut glyph = [0u8; 4];
         let glyph: &str = FOLLOW_MARK.encode_utf8(&mut glyph);
-        for x in row.x..row.x + row.width {
+        for x in end.min(edge)..edge {
             if self.buf[(x, row.y)].symbol() == glyph {
                 self.buf[(x, row.y)].set_style(self.theme.added);
                 return;
@@ -2297,15 +2347,30 @@ impl Painter<'_> {
         let caret = usize::from(pane) >= CARET_FLOOR;
         let inset = if caret { CARET_WIDTH as u16 } else { 0 };
 
-        // Measured over the rows this region is about to draw, and no further.
-        // The list's own window, so scrolling the diff cannot move the map's
-        // columns.
-        // From the region's own width, which is the pane less the caret's inset
-        // and less a scrollbar column if one was taken. Bound once and used
-        // twice, so the slots and the rows they are drawn into cannot disagree
-        // about how wide the region is.
+        // From the **pane**, less the caret's inset and less a scrollbar column
+        // whether or not one was taken, for [`CARET_FLOOR`]'s reason one element
+        // out. `area` has already lost the bar's columns when a bar was drawn,
+        // and whether it was is a fact about the *contents*: `scrollable` asks
+        // whether the file count outruns the region. Planning from `area` put the
+        // whole layout back under the contents' control on that one axis, which
+        // is the defect this type exists to remove. It was visible rather than
+        // theoretical: at 28 columns a seventh changed file crossed a rung
+        // boundary and took the counts cell off every row of the list, and at
+        // forty it slid every element two columns sideways.
+        //
+        // So the bar's columns are paid unconditionally here, exactly as
+        // [`CARET_FLOOR`] pays them. It costs the path two columns on a pane with
+        // nothing to scroll, which is the same trade this type already makes for
+        // every glance slot it reserves whether or not a row can fill it.
+        // Bound once and used twice, so the slots and the rows drawn into them
+        // cannot disagree about how wide the region is. The rows are given this
+        // width rather than the region's own, which is what keeps the *anchor*
+        // still as well as the rung: every element is placed from the right edge,
+        // so a region that grew two columns when the bar went away would slide
+        // all of them even while the layout stayed the same. Those two columns
+        // are left blank when there is no bar.
         let shown = usize::from(area.height);
-        let inner = area.width.saturating_sub(inset);
+        let inner = planning_width(pane, inset);
         let columns = Columns::plan(inner);
 
         for (offset, entry) in view.list.iter().take(shown).enumerate() {
@@ -2440,7 +2505,7 @@ impl Painter<'_> {
         }
     }
 
-    fn body(&mut self, area: Rect, view: &View, chrome: &Chrome) {
+    fn body(&mut self, area: Rect, view: &View, chrome: &Chrome, pane: u16) {
         if view.files == 0 {
             self.put_marked(
                 area.x,
@@ -2453,22 +2518,34 @@ impl Painter<'_> {
         }
 
         self.gutter = gutter_width(view, usize::from(area.width));
-        // The stream's own headings, measured over the rows it will draw. Its
-        // own set rather than the list's: a heading scrolling past must not move
-        // the pinned region above it, and the two regions are separated by a
-        // rule and do not align glyph for glyph anyway.
         // The stream's own width rather than the list's: the two regions are
         // different widths, and `SPEC.md` §11.1 rules they need not align glyph
         // for glyph. Neither reads a row, so a heading scrolling past cannot
         // move the pinned region above it, nor its own neighbours.
+        //
+        // From the pane and net of a scrollbar column whether or not one was
+        // drawn, for the reason [`Painter::list`] carries in full: this region's
+        // bar appears when the diff outgrows the pane, so planning from `area`
+        // let the diff's own height decide the layout of every heading in it.
         let shown = usize::from(area.height);
-        let columns = Columns::plan(area.width);
+        let inner = planning_width(pane, 0);
+        let columns = Columns::plan(inner);
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             match row {
-                Row::File(entry) => {
-                    self.file_row(Rect { y, ..area }, &Heading::of(entry), view.peak, &columns)
-                }
+                // Given the planning width rather than the region's, for
+                // [`Painter::list`]'s reason: the elements are placed from the
+                // right edge, so the edge has to be a fact about the pane too.
+                Row::File(entry) => self.file_row(
+                    Rect {
+                        y,
+                        width: inner,
+                        ..area
+                    },
+                    &Heading::of(entry),
+                    view.peak,
+                    &columns,
+                ),
                 Row::Hunk {
                     old_start,
                     old_lines,
@@ -2523,7 +2600,7 @@ impl Painter<'_> {
     ///
     /// Everything to the right of the path goes into a slot [`Columns`] already
     /// chose, drawn right to left so each block knows where the one outside it
-    /// ended. **This function allocates nothing**, which is what makes the row a
+    /// ended. **Nothing here is sized from this row**, which is what makes the row a
     /// column rather than a cluster: the widths are the region's, not this row's,
     /// so a row that has no sparkline leaves that slot blank instead of closing
     /// it. The drawn order, left to right, is pulse, heat strip, sparkline,
@@ -2552,7 +2629,7 @@ impl Painter<'_> {
             // Two statements rather than a loop over the pair: the offset from
             // the right edge coincides with the width for one half and not the
             // other, and a loop asks a reader to work that out.
-            let (added, removed) = counts_of(heading.churn, columns.cell);
+            let (added, removed) = counts_of(heading.churn);
             let end = right.x + right.width;
             let field = |width: usize, from_right: usize| Rect {
                 x: end.saturating_sub(from_right as u16),

@@ -1120,30 +1120,42 @@ fn the_glance_columns_collapse_in_one_order() {
     //
     // | Layout | counts | pulse | heat | spark | width | from |
     // |---|---|---|---|---|---|---|
-    // | 6 | 12 | 0 | 0 | 0 | 12 | 26 |
-    // | 5 | 12 | 2 | 0 | 0 | 14 | 28 |
-    // | 4 | 12 | 2 | 7 | 0 | 21 | 35 |
-    // | 3 | 12 | 2 | 7 | 5 | 26 | 40 |
-    // | 2 | 12 | 2 | 13 | 5 | 32 | 46 |
-    // | 1 | 12 | 2 | 13 | 9 | 36 | 50 |
-    // | 0 | 12 | 15 | 13 | 9 | 49 | 63 |
+    // | 6 | 12 | 0 | 0 | 0 | 12 | 28 |
+    // | 5 | 12 | 2 | 0 | 0 | 14 | 30 |
+    // | 4 | 12 | 2 | 7 | 0 | 21 | 37 |
+    // | 3 | 12 | 2 | 7 | 5 | 26 | 42 |
+    // | 2 | 12 | 2 | 13 | 5 | 32 | 48 |
+    // | 1 | 12 | 2 | 13 | 9 | 36 | 52 |
+    // | 0 | 12 | 15 | 13 | 9 | 49 | 65 |
+    //
+    // The `from` column is `ROW_FLOOR + BAR_WIDTH + width`: a region is planned
+    // against the pane less a scrollbar column **whether or not one is drawn**,
+    // because whether one is drawn is a fact about the contents and the layout
+    // is not allowed to be. That is the whole of `planning_width`.
     //
     // Layouts 5 and 0 are absent below because neither changes what this test
     // can see: 5 differs from 6 only by the pulse mark and 0 from 1 only by the
     // pulse label, and the pulse is read by neither of the two counts.
     //
-    // Three boundaries moved four columns up when the counts cell stopped
-    // degrading — 22, 31 and 36 became 26, 35 and 40 — which is both halves
-    // going from three columns to five. That is the trade §11.1 records: the
-    // sparkline is gone between 36 and 39 columns, and in exchange no width
-    // draws `+0k` for a 250-line change.
+    // The walk has moved twice on this branch and both moves are recorded
+    // because both cost something visible:
+    //
+    // - **Four columns up** when the counts cell stopped degrading (22, 31, 36
+    //   became 26, 35, 40), which is both halves going from three columns to
+    //   five. It bought a cell that never draws `+0k` for a 250-line change.
+    // - **Two more** when the scrollbar column became unconditional (26, 35, 40
+    //   became 28, 37, 42). It bought a layout that cannot be moved by a seventh
+    //   changed file appearing.
+    //
+    // The bill for both lands on the sparkline, which now needs 42 columns where
+    // it used to need 36. §11.1 carries the argument.
     const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
         (1, (false, 0, 0)),
-        (26, (true, 0, 0)),
-        (35, (true, 6, 0)),
-        (40, (true, 6, 4)),
-        (46, (true, 12, 4)),
-        (50, (true, 12, 8)),
+        (28, (true, 0, 0)),
+        (37, (true, 6, 0)),
+        (42, (true, 6, 4)),
+        (48, (true, 12, 4)),
+        (52, (true, 12, 8)),
     ];
     let theme = theme();
     let heats = heat_colours(&theme);
@@ -2461,15 +2473,21 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // predates this region entirely. The question the bar owes an answer to is
     // whether it costs anything **beyond** the column it occupies.
     //
-    // Asked by comparison rather than by arithmetic: the same list row drawn at
-    // `width` with a bar must read exactly as it does at `width - BAR_COLUMNS`
-    // without one. Anything else means the bar is squeezing the row rather than
-    // sitting beside it, and a gate that recomputed the expected path would be
-    // restating `Painter::file_row`'s own ladder.
-    // The bar itself plus the gap before it, restated rather than imported for
-    // the reason `RAMP` and `HEAT_BLOCK` are: a test sharing the renderer's own
-    // constant would agree with it by construction.
-    const BAR_COLUMNS: u16 = 2;
+    // **The answer is now "nothing at all", and this gate says so directly.**
+    // Until #77 the bar's column was taken only when a bar was drawn, so the
+    // question was whether it cost anything *beyond* that column, and the way to
+    // ask it was to compare `width` with a bar against `width - 2` without.
+    //
+    // A region is planned against the pane less a scrollbar column whether or not
+    // one is drawn, because whether one is drawn is a fact about the contents:
+    // the old form let a seventh changed file re-plan every row. So the bar now
+    // costs a drawn row **nothing**, and the comparison is between two screens of
+    // the *same* width that differ only in whether the list overflows. That is
+    // strictly the stronger statement, and it is the one §11.1 makes.
+    //
+    // Asked by comparison rather than by arithmetic throughout, because a gate
+    // that recomputed the expected path would be restating `Painter::file_row`'s
+    // own ladder.
 
     let entries = vec![
         entry("crates/vigia-core/src/frame.rs"),
@@ -2496,7 +2514,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     let mut compared = 0;
     for width in 10..=*WIDTHS.end() {
         let barred = rows_at(width, 24, &with_bar, &chrome());
-        let bare = rows_at(width - BAR_COLUMNS, 24, &without_bar, &chrome());
+        let bare = rows_at(width, 24, &without_bar, &chrome());
 
         // Row one is the first list row. Trailing blanks are already trimmed by
         // `rows_at`, and the bar's own column is the only thing that can follow
@@ -2516,14 +2534,15 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
             continue;
         }
 
-        // Only where a bar is actually drawn. Below the floor the two screens are
-        // one column apart and genuinely draw different rows.
+        // Only where a bar is actually drawn, or the two screens are identical
+        // and the comparison is vacuous.
         if barred[1].ends_with('▕') || barred[1].ends_with('█') {
             assert_eq!(
                 barred_row, bare_row,
                 "at {width} columns a list row with a bar reads {barred_row:?} \
-                 where the same row one column narrower without one reads \
-                 {bare_row:?}, so the bar costs more than its column"
+                 where the same row at the same width without one reads \
+                 {bare_row:?}, so a file count crossing the point where a bar \
+                 appears re-planned the row"
             );
             compared += 1;
         }

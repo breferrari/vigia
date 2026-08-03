@@ -28,6 +28,7 @@ use std::time::Duration;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
@@ -787,6 +788,41 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
         "the first row moved when a *different* row lost its sparkline"
     );
 
+    // **The load-bearing half, and it has to be read across rows of the *same*
+    // screen.** The comparison above is between two screens, and row 0's own
+    // data is identical in both, so right-packing draws it identically too: it
+    // is a real property but not one that can fail against the defect. What
+    // separates a column from a cluster is that a row which drew *less* still
+    // has its remaining elements where its neighbours have theirs. Under
+    // right-packing the freed columns are reclaimed and everything outside them
+    // slides.
+    let columns_of = |row: &str, class: char| -> Vec<usize> {
+        row.char_indices()
+            .filter(|(_, c)| *c == class)
+            .map(|(i, _)| i)
+            .collect()
+    };
+    // The strip and the sparkline only. The digits are *not* comparable across
+    // rows here and that is not a gap: `ragged_counts` gives each row a
+    // different count, and each half is right-aligned inside its fixed field, so
+    // `+2` and `+139` legitimately occupy different columns of the same slot.
+    // What pins the field itself is
+    // `a_counts_cell_never_rounds_a_change_to_nothing`, which holds the removed
+    // half still while the added half grows.
+    for (row, lost, kept) in [(1usize, 's', ['h']), (2, 'h', ['s'])] {
+        for class in kept {
+            assert_eq!(
+                columns_of(&after[row], class),
+                columns_of(&after[0], class),
+                "row {row} lost its {lost:?} and its {class:?} moved with it, so \
+                 the blank slot was closed rather than left: {:?} against row 0 \
+                 {:?}",
+                after[row],
+                after[0]
+            );
+        }
+    }
+
     // Non-vacuity: the gapped rows really did stop drawing those elements, or
     // the comparison above is between two identical screens.
     assert!(
@@ -857,6 +893,154 @@ fn scrolling_the_list_does_not_move_the_columns() {
             "row {row}'s glance columns moved when the list scrolled a wider \
              count into the window"
         );
+    }
+}
+
+#[test]
+fn a_changed_file_appearing_does_not_move_the_glance_columns() {
+    // **The scrollbar is the other way the contents reached the layout**, and it
+    // survived the fix above because it does not look like contents. A region's
+    // bar is drawn when `scrollable` finds the region cannot show everything it
+    // holds, so a seventh changed file makes one appear, which narrows the region
+    // by two columns, which re-plans every row in it. At some widths that merely
+    // slid every element sideways; at others it crossed a rung boundary and took
+    // the whole counts cell off every row of the list, for no reason a reader
+    // could see and on the exact frame they were looking at.
+    //
+    // The repo had already ruled this hazard once: `CARET_FLOOR` counts
+    // `BAR_WIDTH` on a screen with no bar so that the caret's presence cannot
+    // depend on the file count. The columns pay it for the same reason now.
+    //
+    // Swept, because a boundary is the only place a rung can move, and asserted
+    // over both regions.
+    let entries: Vec<_> = (0..8)
+        .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
+        .collect();
+    let view_of = |files: usize| View {
+        list: entries[..files.min(entries.len())].to_vec(),
+        rows: entries[..files.min(entries.len())]
+            .iter()
+            .cloned()
+            .map(Row::File)
+            .collect(),
+        files,
+        total_rows: files,
+        ..ragged_counts()
+    };
+
+    // Few enough to need no bar, and enough to force one, at a height that shows
+    // the list region.
+    let (few, many) = (view_of(2), view_of(8));
+    let mut differed = false;
+    for width in 16..=120u16 {
+        let quiet = glance_columns(&screen(width, 12, &few, &chrome()));
+        let busy = glance_columns(&screen(width, 12, &many, &chrome()));
+        // Row 0 of each is the first file row of the pinned list, and it is the
+        // same file in both fixtures.
+        if quiet.is_empty() || busy.is_empty() {
+            continue;
+        }
+        if quiet[0] != busy[0] {
+            differed = true;
+        }
+        assert_eq!(
+            quiet[0], busy[0],
+            "at {width} columns the list's glance columns moved because the \
+             changed-file count crossed the point where a scrollbar appears"
+        );
+    }
+    assert!(
+        !differed,
+        "the sweep recorded a difference it then failed to assert on"
+    );
+}
+
+#[test]
+fn a_notice_can_never_colour_the_follow_marker() {
+    // A notice is an error string, an error string carries a path, and `▶` is a
+    // legal character in a path on every platform this ships to. The recolouring
+    // pass scanned the whole footer row for the marker and stopped at the first
+    // one it found, so a file called `▶.rs` in an error message took the green.
+    //
+    // Both directions, and both are wrong screens rather than cosmetic ones.
+    // With follow off it *fabricates* the one glyph on the footer that says the
+    // view is live. With follow on it lights the notice and leaves the real
+    // marker grey, so the reader is told the opposite in the wrong place.
+    let theme = Theme::default();
+    for following in [false, true] {
+        let chrome = Chrome {
+            notice: Some("cannot read ▶.rs".to_owned()),
+            following,
+            ..diagnostics_chrome()
+        };
+        for width in 20..=120u16 {
+            let backend = screen(width, 8, &one_file(), &chrome);
+            let green: Vec<u16> = (7..8)
+                .flat_map(|y| (0..width).map(move |x| (x, y)))
+                .chain((6..7).flat_map(|y| (0..width).map(move |x| (x, y))))
+                .filter(|&(x, y)| {
+                    backend.buffer()[(x, y)].symbol() == "▶"
+                        && backend.buffer()[(x, y)].style().fg == theme.added.fg
+                })
+                .map(|(x, _)| x)
+                .collect();
+            assert!(
+                green.len() <= 1,
+                "at {width} columns with following={following} more than one \
+                 marker is green: {green:?}"
+            );
+            if !following {
+                assert!(
+                    green.is_empty(),
+                    "at {width} columns a notice's own glyph was painted as the \
+                     follow marker while follow is off: {green:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn render_clips_to_the_buffer_rather_than_the_area() {
+    // `render`'s own contract is that any area is legal, and every writer here
+    // reaches the cells through `Buffer::set_stringn` or `set_style`, which clip.
+    // The footer's recolouring pass indexes cells directly, so it panicked on an
+    // area wider or taller than the buffer it was drawing into, on a path that
+    // had no panic before this branch.
+    //
+    // Asserted through the public entry point, because that is where the
+    // contract is stated.
+    //
+    // **Width only, and the height case is deliberately not here.** An area
+    // *taller* than its buffer panics too, in the row-drawing paths, and it does
+    // so identically on `origin/main`: that is a pre-existing gap in the same
+    // contract rather than something this branch introduced, and it is filed
+    // rather than widened into here. What this pins is the regression, which is
+    // that the footer's recolouring pass walks columns by index.
+    let theme = Theme::default();
+    for (buffer, area) in [
+        ((40u16, 10u16), (60u16, 10u16)),
+        ((40, 10), (200, 10)),
+        ((10, 6), (80, 6)),
+    ] {
+        for view in [
+            one_file(),
+            View {
+                files: 0,
+                list: Vec::new(),
+                rows: Vec::new(),
+                ..one_file()
+            },
+        ] {
+            let mut buf = Buffer::empty(Rect::new(0, 0, buffer.0, buffer.1));
+            render(
+                &mut buf,
+                Rect::new(0, 0, area.0, area.1),
+                &view,
+                &theme,
+                &diagnostics_chrome(),
+            );
+        }
     }
 }
 
@@ -1857,25 +2041,52 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
         (u32::MAX, "+4G"),
     ];
 
+    // **Whole tokens, not prefixes**, because `contains` is the wrong instrument
+    // for a value: `contains("+1")` is satisfied by `+1k`, `+1M` and `+139`, and
+    // `contains("-0")` is satisfied by `-0k`, which is precisely the wrong number
+    // this test is named after. A token counts only when what follows it cannot
+    // be part of the same number.
+    let draws = |row: &str, want: &str| {
+        row.match_indices(want).any(|(at, _)| {
+            row[at + want.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_ascii_digit() && !"kMG".contains(c))
+        })
+    };
+
+    let mut removed_at = Vec::new();
     for (lines, want) in BOUNDARIES {
         let view = View {
             list: vec![listed("src/f.rs", lines, 0)],
             files: 1,
             ..ragged_counts()
         };
-        let row = row_text(&screen(80, 8, &view, &chrome()), 1);
+        let backend = screen(80, 8, &view, &chrome());
+        let row = row_text(&backend, 1);
         assert!(
-            row.contains(want),
+            draws(&row, want),
             "a file of {lines} added lines draws something other than {want:?}: \
              {row:?}"
         );
         // The half it shares the cell with, so a fix that widened one and not
         // the other cannot pass.
         assert!(
-            row.contains("-0"),
+            draws(&row, "-0"),
             "the removed half went missing at {lines} added lines: {row:?}"
         );
+        removed_at.push(column_of(&backend, 1, "-"));
     }
+
+    // **The field is fixed, which is the whole reason `COUNT_CELL` is a constant
+    // rather than a rung.** The added half grows from `+0` to `+9999` across
+    // these boundaries; if the halves were sized to their contents the removed
+    // half would be pushed sideways as it did. Nothing else here would notice.
+    assert!(
+        removed_at.windows(2).all(|pair| pair[0] == pair[1]),
+        "the removed half moved as the added half grew, so the cell is sized \
+         from its contents: {removed_at:?} for {BOUNDARIES:?}"
+    );
 }
 
 #[test]
@@ -1974,8 +2185,21 @@ fn the_readouts_are_coloured_and_their_label_is_not() {
     }
 
     // The label beside the frame number, which must stay dim. Found by its own
-    // letter rather than by arithmetic over the cell's width.
-    let at = column_of(&backend, 5, "f");
+    // **Found to the right of the frame number, not by the leftmost `f`.** The
+    // hint bar shares this row and opens `q quit · f follow`, so a scan from
+    // column 0 lands on the hints' own `f` at column 9 and reads a cell that is
+    // dim for reasons of its own. That made this assertion vacuous: adding
+    // `is_ascii_alphabetic` to the tint's opening test paints the whole word
+    // `frame` cyan and the old form still passed.
+    let number = column_of(&backend, 5, "0");
+    let at = (number..80)
+        .find(|&x| backend.buffer()[(x, 5)].symbol() == "f")
+        .expect("the `frame` label is drawn after the number it labels");
+    assert!(
+        at > number,
+        "the label was found at or before the readout, so this is reading the \
+         hint bar again: {footer:?}"
+    );
     assert_eq!(
         backend.buffer()[(at, 5)].style().fg,
         theme.chrome_dim.fg,
