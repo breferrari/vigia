@@ -3233,3 +3233,295 @@ fn a_wash_stops_before_the_scrollbar_column() {
         "the wash reached the column reserved beside the bar"
     );
 }
+
+#[test]
+fn the_follow_marker_is_green_where_the_word_beside_it_is_dim() {
+    // `assets/preview.svg` draws `follow ` in `.dim` and `▶` in `.grn`, and
+    // §5.1's rule is that a published artifact answering a question is the
+    // answer. The shell drew the whole state in one dim grey, so the one glyph a
+    // reader checks at a glance rather than reads looked like the word beside
+    // it.
+    //
+    // Invisible to every snapshot by construction: `TestBackend`'s `Display`
+    // writes symbols and drops styles, so this has to read cells.
+    let view = one_file();
+    let theme = Theme::default();
+    let backend = screen(80, 6, &view, &following_chrome());
+
+    let at = column_of(&backend, 5, "▶");
+    let mark = backend.buffer()[(at, 5)].style();
+    let word = backend.buffer()[(at - 2, 5)].style();
+
+    assert_eq!(
+        mark.fg, theme.added.fg,
+        "the follow marker is not the picture's green"
+    );
+    assert_eq!(
+        word.fg, theme.chrome_dim.fg,
+        "the word beside the marker is not the footer's dim grey, so the split \
+         the picture draws is gone"
+    );
+    // Both directions, or a footer painted green throughout would pass.
+    assert_ne!(
+        theme.added.fg, theme.chrome_dim.fg,
+        "the theme draws the marker and the word alike, so this cannot tell them \
+         apart"
+    );
+}
+
+#[test]
+fn the_readouts_are_coloured_and_their_label_is_not() {
+    // `assets/preview.svg` draws `0.8ms` and `24MiB` in `.cyn` and the word
+    // `frame` beside them in `.dim`. The shipped footer drew all of it in one
+    // grey, so the two numbers a reader checks at a glance looked like the words
+    // around them.
+    //
+    // Both directions in one test: a footer painted `chrome` throughout would
+    // satisfy the first assertion and fail the second.
+    let theme = Theme::default();
+    let backend = screen(80, 6, &one_file(), &diagnostics_chrome());
+    let footer = row_text(&backend, 5);
+
+    // Guard the fixture: the readouts have to be on this screen at all.
+    assert!(
+        footer.contains("0.8ms") && footer.contains("19MiB"),
+        "the fixture drew no readouts, so this proves nothing: {footer:?}"
+    );
+
+    for (label, needle) in [("frame time", "0"), ("memory", "9")] {
+        let at = column_of(&backend, 5, needle);
+        assert_eq!(
+            backend.buffer()[(at, 5)].style().fg,
+            theme.chrome.fg,
+            "the {label} readout is not the picture's cyan: {footer:?}"
+        );
+    }
+
+    // The label beside the frame number, which must stay dim.
+    // **Found to the right of the frame number, not by the leftmost `f`.** The
+    // hint bar shares this row and opens `q quit · f follow`, so a scan from
+    // column 0 lands on the hints' own `f` at column 9 and reads a cell that is
+    // dim for reasons of its own. That made this assertion vacuous: adding
+    // `is_ascii_alphabetic` to the tint's opening test paints the whole word
+    // `frame` cyan and the old form still passed.
+    let number = column_of(&backend, 5, "0");
+    let at = (number..80)
+        .find(|&x| backend.buffer()[(x, 5)].symbol() == "f")
+        .expect("the `frame` label is drawn after the number it labels");
+    assert!(
+        at > number,
+        "the label was found at or before the readout, so this is reading the \
+         hint bar again: {footer:?}"
+    );
+    assert_eq!(
+        backend.buffer()[(at, 5)].style().fg,
+        theme.chrome_dim.fg,
+        "the `frame` label took the readout's colour, so the split the picture \
+         draws is gone: {footer:?}"
+    );
+    assert_ne!(
+        theme.chrome.fg, theme.chrome_dim.fg,
+        "the theme draws the readout and its label alike, so this cannot tell \
+         them apart"
+    );
+}
+
+#[test]
+fn the_follow_marker_is_the_last_character_of_the_state() {
+    // `FOLLOW_MARK` is restated beside `FOLLOWING` rather than composed into it,
+    // because `concat!` takes no `char`. Two spellings of one glyph can drift,
+    // and the drift is silent: the recolouring pass would simply find nothing
+    // and the marker would quietly go back to grey.
+    //
+    // Asserted through the drawn row rather than by importing either constant,
+    // which is this file's rule for anything the renderer also spells.
+    //
+    // **The claim is about `FOLLOWING`'s own token, not about the row.** An
+    // earlier form allowed `state.ends_with('▶')` *or* any word containing the
+    // marker, and the second disjunct subsumes the first: the position is drawn
+    // after the state at this width, so the row never ends in the marker and
+    // only the weak half ever fired. What it proved was "the marker is on the
+    // footer somewhere", which is not what it is named for and not what
+    // `FOLLOW_MARK`'s docblock cites it for.
+    let backend = screen(80, 6, &one_file(), &following_chrome());
+    let footer = row_text(&backend, 5);
+    let mark = footer
+        .split_whitespace()
+        .find(|word| word.contains('▶'))
+        .unwrap_or_else(|| panic!("the footer carries no marker at all: {footer:?}"));
+    assert!(
+        mark.ends_with('▶'),
+        "the marker is no longer the last character of the state's own token, \
+         so `FOLLOWING` and `FOLLOW_MARK` have drifted apart: {mark:?} in \
+         {footer:?}"
+    );
+    // The token is the mode word's, not something else that happens to carry the
+    // glyph, or a notice could satisfy this.
+    assert_eq!(
+        mark, "▶",
+        "the marker is not standing alone after the mode word: {footer:?}"
+    );
+}
+
+#[test]
+fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
+    // **This one gates a hang, not a colour**, and it is the more valuable half.
+    // The recolouring pass walked a run by asking two questions of a cell: does
+    // it *open* a measurement, and does it *carry* one. `>` answers yes and no,
+    // so on `>1s` the inner walk broke without consuming the column the outer
+    // walk had just accepted, and the two spun against each other forever with
+    // the pane frozen mid-frame. A monitor that stops redrawing is the one
+    // failure this product class cannot absorb.
+    //
+    // It was reachable from the ordinary path rather than from hostile input:
+    // `>1s` is what a frame over a second draws and `>1GiB` what memory over a
+    // gigabyte draws, both of which `SPEC.md` §11.1 specifies.
+    //
+    // Two existing gates already drew `>1s` and so *hung* rather than failed,
+    // which is why this is stated as its own property: a suite that times out
+    // names no defect.
+    let theme = Theme::default();
+    for (what, chrome, sigil) in [
+        (
+            "a frame over a second",
+            Chrome {
+                frame: Some(Duration::from_secs(2)),
+                ..diagnostics_chrome()
+            },
+            ">1s",
+        ),
+        (
+            "memory over a gigabyte",
+            Chrome {
+                memory: Some(2 * 1024 * 1024 * 1024),
+                ..diagnostics_chrome()
+            },
+            ">1GiB",
+        ),
+    ] {
+        let backend = screen(80, 6, &one_file(), &chrome);
+        let footer = row_text(&backend, 5);
+        // Guard the fixture, or a readout that silently stopped being drawn
+        // would make this vacuous.
+        assert!(
+            footer.contains(sigil),
+            "{what} drew no {sigil:?} readout, so this proves nothing: {footer:?}"
+        );
+
+        // The sigil opens the run, so it and every column of the abbreviation
+        // after it carry the measurement's colour. A `>` left grey would mean
+        // the run started one column late, which is the shape the hang came
+        // from.
+        let at = column_of(&backend, 5, ">");
+        for (offset, glyph) in sigil.chars().enumerate() {
+            let x = at + offset as u16;
+            assert_eq!(
+                backend.buffer()[(x, 5)].symbol().chars().next(),
+                Some(glyph),
+                "{what} draws {sigil:?} broken up: {footer:?}"
+            );
+            assert_eq!(
+                backend.buffer()[(x, 5)].style().fg,
+                theme.chrome.fg,
+                "{what} leaves {glyph:?} of {sigil:?} outside the readout's \
+                 colour: {footer:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_notice_can_never_colour_the_follow_marker() {
+    // A notice is an error string, an error string carries a path, and `▶` is a
+    // legal character in a path on every platform this ships to. The recolouring
+    // pass scanned the whole footer row for the marker and stopped at the first
+    // one it found, so a file called `▶.rs` in an error message took the green.
+    //
+    // Both directions, and both are wrong screens rather than cosmetic ones.
+    // With follow off it *fabricates* the one glyph on the footer that says the
+    // view is live. With follow on it lights the notice and leaves the real
+    // marker grey, so the reader is told the opposite in the wrong place.
+    let theme = Theme::default();
+    for following in [false, true] {
+        let chrome = Chrome {
+            notice: Some("cannot read ▶.rs".to_owned()),
+            following,
+            ..diagnostics_chrome()
+        };
+        for width in 20..=120u16 {
+            let backend = screen(width, 8, &one_file(), &chrome);
+            let green: Vec<u16> = (7..8)
+                .flat_map(|y| (0..width).map(move |x| (x, y)))
+                .chain((6..7).flat_map(|y| (0..width).map(move |x| (x, y))))
+                .filter(|&(x, y)| {
+                    backend.buffer()[(x, y)].symbol() == "▶"
+                        && backend.buffer()[(x, y)].style().fg == theme.added.fg
+                })
+                .map(|(x, _)| x)
+                .collect();
+            assert!(
+                green.len() <= 1,
+                "at {width} columns with following={following} more than one \
+                 marker is green: {green:?}"
+            );
+            if following {
+                // **Exactly one, not at most one.** `<= 1` alone is satisfied by
+                // a pass that stopped tinting the real marker altogether, which
+                // is the other half of the same defect: the notice's glyph won
+                // the scan and the marker it should have lit stayed grey.
+                assert_eq!(
+                    green.len(),
+                    1,
+                    "at {width} columns follow is on and exactly one marker \
+                     should be green: {green:?}"
+                );
+            } else {
+                assert!(
+                    green.is_empty(),
+                    "at {width} columns a notice's own glyph was painted as the \
+                     follow marker while follow is off: {green:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_position_keeps_its_grey_where_the_readouts_take_a_colour() {
+    // §11.1 rules that `N/M` stays dim: the picture gives it no colour, and it
+    // is a *place* rather than a measurement, which is the whole distinction the
+    // footer's three colours draw. It is a number sitting a few columns from two
+    // other numbers that are cyan, so the rule is one bound away from being
+    // wrong and nothing was reading it.
+    //
+    // Ungated until now, and the gap was reachable by a one-word edit: widening
+    // the tint's `end` from the diagnostics' own columns to the row's edge turns
+    // `1/1` cyan and leaves every other gate green, because the `frame` label
+    // survives on its own (a letter opens no run).
+    let theme = Theme::default();
+    let backend = screen(80, 6, &one_file(), &diagnostics_chrome());
+    let footer = row_text(&backend, 5);
+
+    // Guard the fixture: the position and the readouts must both be on screen,
+    // or this proves nothing about the boundary between them.
+    assert!(
+        footer.contains("1/1") && footer.contains("0.8ms"),
+        "the fixture drew no position beside a readout: {footer:?}"
+    );
+
+    let slash = column_of(&backend, 5, "/");
+    for (offset, what) in [(-1i32, "the file number"), (1, "the file count")] {
+        let x = (i32::from(slash) + offset) as u16;
+        assert_eq!(
+            backend.buffer()[(x, 5)].style().fg,
+            theme.chrome_dim.fg,
+            "{what} of the position took the readouts' colour, so the tint \
+             reached past the diagnostics: {footer:?}"
+        );
+    }
+    assert_ne!(
+        theme.chrome.fg, theme.chrome_dim.fg,
+        "the theme draws the readout and the position alike, so this cannot \
+         tell them apart"
+    );
+}
