@@ -179,7 +179,16 @@ fn the_shells_first_paint_holds_the_startup_budget() {
 
     // **The assertion the row count cannot make.** Deferring colour has to
     // change colour and nothing else, so the two frames must draw the same rows
-    // once spans are taken out of the comparison. A row count alone is satisfied
+    // once spans are taken out of the comparison.
+    //
+    // **This holds at the `Row` level, which is what it compares, and it is one
+    // level short of what a reader sees.** The paint walks a budget per *span*
+    // rather than per row, so on decomposed Unicode the plain row and the
+    // coloured row can fill a cell differently from identical `Row`s. That is
+    // [#106](https://github.com/breferrari/vigia/issues/106), it is pre-existing
+    // and independent of highlighting, and comparing rendered cells here is its
+    // acceptance rather than this gate's. Named so the gap is a decision rather
+    // than an oversight. A row count alone is satisfied
     // by a plain frame that drew different content: mutating `View::collect` to
     // stop pushing content lines left `rows == height` green, because the walk
     // reached further down the file list and drew more headings instead.
