@@ -89,9 +89,11 @@
       <!-- The track, all eight buckets. This row is the dimmed one, and dim is
            the recency ladder's `cold` rung, which means *nothing is tracked for
            this path* rather than *this path is old*. So it can carry no bucket
-           at all, and it used to be drawn with seven track bars and one green
-           bump: a state the tool cannot produce. Corrected for #78, in the same
-           #21262d the heat strip's own empty slice is drawn in three rows up. -->
+           at all, and it used to draw eight of them: seven at the ramp's floor
+           height in the ramp's own floor colour #1f6f3f, one taller. A state the
+           tool cannot produce. Corrected for #78, in the #21262d this row's own
+           heat strip is drawn in, which is the only track colour the picture
+           has. -->
       <g>
         <rect x="300" y="152" width="7" height="2" rx="1" fill="#21262d"/>
         <rect x="310" y="152" width="7" height="2" rx="1" fill="#21262d"/>

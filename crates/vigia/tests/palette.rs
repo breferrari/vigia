@@ -541,6 +541,15 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     // Against `chrome_dim` as well, because that is the one other style that
     // draws a `·`-weight mark on a chrome line: two dim greys carrying two
     // meanings is the collision `Theme::bar` records being hit twice already.
+    //
+    // **`Depth::None` is left out on purpose and it is the interesting one.**
+    // There every foreground resolves to `Color::Reset`, so this property is
+    // false by construction: a reader on `NO_COLOR` or `TERM=dumb` has no colour
+    // channel at all. That depth is exactly why the track is `_` rather than the
+    // ramp's `▁`, because the glyph is then the only thing left carrying the
+    // distinction, and `a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all`
+    // is where that is asserted. The depths are listed rather than iterated so
+    // the omission is visible instead of silent.
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -560,12 +569,181 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     }
 }
 
+#[test]
+fn a_sparkline_track_is_never_the_colour_behind_it() {
+    // **The failure a track has that a bucket does not: quantising into the
+    // background.** A track is authored just above the pane, which is the point
+    // of it, and the sixteen-colour rung has nothing that close to either end.
+    // `dark`'s track was `#21262d` and resolves to `Color::Black` at `Ansi16` on
+    // a `#0d1117` pane; `light`'s was `#d0d7de` and resolves to `Color::White` on
+    // white. Either one draws a full row of track in the pane's own colour, which
+    // is pixel for pixel the blank column
+    // [#78](https://github.com/breferrari/vigia/issues/78) exists to remove: the
+    // element would have looked exactly as broken as before, on the one frame it
+    // was added for.
+    //
+    // Against the background rather than against `spark`, because those are two
+    // different failures and the gate above catches only the second. `ansi` is
+    // exempt, and stated rather than skipped: it names no background at all,
+    // which is that palette's whole contract.
+    //
+    // `heat_track` and `bar_track` fail this today and are deliberately not
+    // asserted here. Their truecolour values are read off `assets/preview.svg`
+    // and are right, so the defect is in what sixteen colours do to them rather
+    // than in the value, which is a different repair from this one and is filed
+    // separately.
+    for (name, base, behind) in [
+        ("dark", Theme::dark(), Color::Black),
+        ("light", Theme::light(), Color::White),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            assert_ne!(
+                theme.spark_track.fg,
+                Some(behind),
+                "{name} at {depth:?} draws the sparkline track in the colour of \
+                 the pane behind it, so a launched worktree draws a blank column \
+                 again"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sparkline_track_is_never_the_colour_of_a_path() {
+    // `track_at` in `tests/render.rs` reads a track by symbol and style, and the
+    // symbol is `_`, which is also most of what a `snake_case` path is made of.
+    // The two are drawn on the same row, so if a path style and the track style
+    // ever resolve alike, that helper counts a file name as track cells and a
+    // reader sees one dim underscore run where there are two things.
+    //
+    // **`light` at `Ansi16` is exempt, and enumerating why is the point.** That
+    // rung has exactly four greys and this palette has already spent all of them:
+    // `White` is the pane, `Black` is `path`, `Gray` is `path_cold`, `DarkGray`
+    // is `chrome_dim`. There is no fifth for a track to take, so the collision is
+    // arithmetic rather than a choice, and moving the track onto `DarkGray` only
+    // trades this collision for the `chrome_dim` one. Left where it is because
+    // the two are not equally bad: a path's underscores sit inside a word in the
+    // left column, the track is eight contiguous ones in a reserved slot, and
+    // nothing in the suite reads a track under this palette (`Theme::default` is
+    // `ansi`, where the track is `DarkGray` and `path_cold` is `Gray`).
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            if name == "light" && depth == Depth::Ansi16 {
+                continue;
+            }
+            let theme = base.resolve(depth);
+            for (which, path) in [
+                ("path", theme.path),
+                ("path_live", theme.path_live),
+                ("path_cold", theme.path_cold),
+            ] {
+                assert_ne!(
+                    theme.spark_track.fg, path.fg,
+                    "{name} at {depth:?} draws {which} in the track's own colour, \
+                     so an underscore in a file name is a track cell"
+                );
+            }
+        }
+    }
+
+    // The exemption is a measurement, not a licence: if the palette ever frees a
+    // grey, this fails and the `continue` above comes out.
+    let light = Theme::light().resolve(Depth::Ansi16);
+    assert_eq!(
+        light.spark_track.fg, light.path_cold.fg,
+        "`light` at sixteen colours no longer collides with `path_cold`, so the \
+         exemption above is stale and should be deleted"
+    );
+}
+
+#[test]
+fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
+    // **The depth the whole glyph choice was made for.** At `Depth::None` every
+    // style is `Color::Reset`, so a track and a bucket are the same colour and
+    // the shape is all a reader has. That is why `SPEC.md` §5.1 refuses the
+    // ramp's floor for the track: the heat strip may draw a live slice and its
+    // track from one `█` because colour is its only channel, and here the
+    // sparkline has no colour channel either, so the glyph has to carry it.
+    //
+    // Read by symbol alone, which is correct exactly here and nowhere else:
+    // every other gate in this suite matches symbol and colour together because
+    // two elements can share a glyph. At this depth matching on colour would
+    // match everything.
+    let mut view = three_kinds();
+    if let Row::File(entry) = &mut view.rows[0] {
+        entry.spark = [0, 0, 0, 0, 0, 0, 0, 3];
+    }
+    view.peak = 3;
+
+    let flat = Theme::dark().resolve(Depth::None);
+    assert_eq!(
+        flat.spark.fg, flat.spark_track.fg,
+        "this depth is supposed to have collapsed the two colours, so the \
+         assertion below is not testing what it says it is"
+    );
+
+    let backend = draw(80, 8, &view, flat);
+    let buffer = backend.buffer();
+    let row: Vec<&str> = (0..buffer.area.width)
+        .map(|x| buffer[(x, HEADING)].symbol())
+        .collect();
+    let bars = row.iter().filter(|s| "▁▂▃▄▅▆▇█".contains(**s)).count();
+    let track = row.iter().filter(|s| **s == "_").count();
+
+    assert_eq!(
+        bars, 1,
+        "one written bucket did not draw exactly one block with colour off"
+    );
+    assert_eq!(
+        track,
+        HISTORY_BUCKETS - 1,
+        "the seven empty buckets did not draw a track with colour off, so \
+         nothing separates them from the written one on a `NO_COLOR` terminal"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The theme file, which is how a palette is specified rather than what it draws.
 // ---------------------------------------------------------------------------
 
 use vigia::ThemeError;
 use vigia::theme;
+
+#[test]
+fn a_theme_file_can_set_the_sparkline_track() {
+    // Every palette field is a key by construction, because the `palette!` macro
+    // derives `Theme::KEYS` from the struct, and
+    // `every_key_the_struct_has_is_a_key_a_file_can_set` asserts that shape. What
+    // that cannot assert is that a *new* key reaches the field a reader meant,
+    // since it only checks each key is accepted.
+    //
+    // Worth its own gate for this key rather than in general: `README.md` lists
+    // the theme keys by hand and omitted this one until an audit found it, so a
+    // reader following the README could not reach it at all. A parse test is what
+    // makes the documented key and the drawn colour the same thing.
+    let theme = theme::parse("base = dark\nspark_track = #ff00ff\n").expect("parses");
+    assert_eq!(
+        theme.spark_track.fg,
+        Some(Color::Rgb(0xff, 0x00, 0xff)),
+        "a theme file naming the sparkline track did not reach the field"
+    );
+    assert_eq!(
+        theme.spark,
+        Theme::dark().spark,
+        "setting the track moved the bucket colour with it"
+    );
+    assert_eq!(
+        theme.heat_track,
+        Theme::dark().heat_track,
+        "setting the sparkline's track moved the heat strip's, so the two are \
+         one key after all"
+    );
+}
 
 #[test]
 fn a_theme_file_overrides_only_what_it_names() {

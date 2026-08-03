@@ -472,6 +472,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     let now = Instant::now();
     let mut history = History::starting_at(now);
     history.record(["src/lib.rs"], now);
+    history.record(["src/lib.rs"], now);
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -488,9 +489,15 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 
     // Non-vacuity, and it is the assertion that would have caught the hardcode
     // on its own: the store was asked and answered.
+    //
+    // **Two recorded ticks rather than one**, so the expected peak is 2 and not
+    // 1. A one-tick fixture asserts `peak == 1`, which a renderer hardcoding the
+    // *ramp's* denominator to one would also satisfy: the value a store returns
+    // has to differ from every constant a mutation would reach for, or the gate
+    // that exists to kill a hardcode is one.
     assert_eq!(
-        view.peak, 1,
-        "the recorded tick did not reach the view's shared scale"
+        view.peak, 2,
+        "the recorded ticks did not reach the view's shared scale"
     );
 
     let theme = Theme::default();

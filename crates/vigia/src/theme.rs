@@ -136,18 +136,37 @@ palette! {
     /// A sparkline bucket nothing was written in.
     ///
     /// A track rather than a gap, which is the rule [`Theme::heat_track`] and
-    /// [`Theme::bar_track`] already follow and which `assets/preview.svg` draws
-    /// for all three of them: every one of the eight bucket positions carries a
-    /// mark in the picture, and the quiet ones are short and dark rather than
-    /// absent. A file with no history at all is the *all*-empty case, so at
-    /// launch a worktree that was already dirty draws a full track on every row
+    /// [`Theme::bar_track`] already follow. A file with no history at all is the
+    /// *all*-empty case, so at launch a worktree that was already dirty draws a
+    /// full track on every row
     /// ([#78](https://github.com/breferrari/vigia/issues/78)).
+    ///
+    /// **Not read off the picture, and it cannot be**, which is worth saying
+    /// because everything else in [`Theme::dark`] is. `assets/preview.svg` draws
+    /// all eight bucket positions on all three rows, so nothing there is absent
+    /// — but its quiet buckets are `#1f6f3f`, the ramp's own floor colour, which
+    /// makes them *written* buckets rather than track. **The picture has no
+    /// sparkline track in it to read.**
+    ///
+    /// **One step brighter than the other two tracks, because ink is not
+    /// value.** [`Theme::heat_track`] argues `DarkGray` is right on the ground
+    /// that "a track is not text: it is a solid block that should sit just above
+    /// the background". A sparkline track is `_`, one stroke in a cell, so that
+    /// premise does not reach it: the same colour behind a twelfth of the ink
+    /// reads as absence, which is the state this element exists to stop looking
+    /// like. What should match across the three tracks is perceived **weight**,
+    /// and matching the value is what would break it. The 16-colour palette keeps
+    /// `DarkGray` because there is nothing between it and `Gray`, and `Gray` is
+    /// this palette's content weight.
     ///
     /// **Its own key rather than [`Theme::heat_track`]'s**, which holds the same
     /// value in all three built-ins. The precedent is [`Theme::bar_track`], which
     /// does too and is still separate: a distinct element gets a distinct key, so
-    /// a theme author can move one without the others and so a test can tell two
-    /// tracks apart by style when they land on the same row.
+    /// a theme author can move one without moving the others. That is the whole
+    /// of the argument. It used to add "so a test can tell two tracks apart by
+    /// style", which is not true of fields holding identical values: what
+    /// separates a spark track from a heat track on one row is the **glyph**,
+    /// `_` against `█`, and `tests/render.rs` matches on the pair.
     spark_track,
 
     /// The filled part of a scrollbar: where in the whole a region is looking.
@@ -443,11 +462,12 @@ impl Theme {
             // already means two rows below.
             pulse: fg(Color::Cyan),
             spark: fg(Color::Cyan),
-            // `DarkGray` for [`Theme::heat_track`]'s reason exactly, three fields
-            // down: a track sits just above the background and colour 8 is what
-            // most schemes define to be just above the background. It is also far
-            // enough from this palette's `Gray` chrome that the `_` a track draws
-            // cannot be confused with the `·` a hint separator draws.
+            // `DarkGray`, and the one palette where the track does *not* step
+            // towards the foreground the way `dark` and `light` do. Sixteen names
+            // hold nothing between colour 8 and `Gray`, and `Gray` is what this
+            // palette draws content in, so a step up would put a track at the
+            // weight of the counts beside it. The field's own doc carries the
+            // rule this is the exception to.
             spark_track: fg(Color::DarkGray),
             // Grey rather than cyan, for the reason the field's own doc gives:
             // the thumb is a full block and cyan is the sparkline's, so the two
@@ -540,7 +560,10 @@ impl Theme {
             // does is that green already means addition two rows down, and a churn
             // sparkline is about *when*, not *what*.
             spark: rgb(0x39, 0xc5, 0xcf),
-            spark_track: rgb(0x21, 0x26, 0x2d),
+            // One step above `heat_track`'s `#21262d`, for the field's own
+            // reason: a stroke needs more contrast than a block to read as the
+            // same weight, and `#21262d` on this background is a block colour.
+            spark_track: rgb(0x30, 0x36, 0x3d),
             bar: rgb(0x8b, 0x94, 0x9e),
             bar_track: rgb(0x21, 0x26, 0x2d),
             heat_track: rgb(0x21, 0x26, 0x2d),
@@ -630,7 +653,11 @@ impl Theme {
             path_cold: rgb(0x81, 0x8b, 0x98),
             pulse: rgb(0x0a, 0x62, 0x6b),
             spark: rgb(0x0a, 0x62, 0x6b),
-            spark_track: rgb(0xd0, 0xd7, 0xde),
+            // **Darker** here where `dark`'s is brighter, which is the same rule
+            // and not a second one: both move one step *towards* the foreground,
+            // and on a light background that direction is down. `#d0d7de` is a
+            // block colour on white and a stroke drawn in it is barely there.
+            spark_track: rgb(0xaf, 0xb8, 0xc1),
             bar: rgb(0x59, 0x63, 0x6e),
             bar_track: rgb(0xd0, 0xd7, 0xde),
             // Light enough to read as a track on white, dark enough to be visible.

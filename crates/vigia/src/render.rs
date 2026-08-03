@@ -175,9 +175,9 @@ const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', 
 /// `_` rather than `·`, which the hint bar already draws: a middle dot sits
 /// mid-cell, so an empty bucket would be drawn *higher* than a bucket holding
 /// one write, which is backwards for a thing read as a bar chart. `_` sits where
-/// a bar stands. It is also ASCII, so it adds nothing to the legacy-console
-/// question §10 leaves open, which [`SPARK_RAMP`] is already on the wrong side
-/// of.
+/// a bar stands. It is also ASCII, so it is on the right side of the
+/// legacy-console question §10 records, where [`SPARK_RAMP`] is on the wrong
+/// one: on a console that cannot draw the ramp, a row of track is what survives.
 const SPARK_TRACK: char = '_';
 
 /// How many buckets a sparkline may show, widest rung first.
@@ -1373,16 +1373,22 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// allocation, being a fixed-size array on the stack either way.
 ///
 /// What it buys is what [`Painter::scrollbar`] gets from its `filled` boolean:
-/// **the glyph and the style are chosen from one value, so they cannot
-/// disagree.** [`spark_of`] briefly returned bare `char`s and the painter read
-/// the style back off them by testing against [`SPARK_TRACK`], which worked only
-/// while that glyph stayed outside [`SPARK_RAMP`] — a convention a test defends
-/// rather than one the compiler does. It also had a live failure case: on the
-/// `peak == 0` path every bucket draws the track *whatever its count says*, so a
-/// painter branching on the count instead would have drawn a track glyph in the
-/// bar's colour. Neither spelling of "derive one from the other" is safe, and
-/// deriving both from a third thing is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// **the style is chosen from the variant rather than read back off the
+/// glyph.** [`spark_of`] briefly returned bare `char`s and the painter decided
+/// the style by testing against [`SPARK_TRACK`], which worked only while that
+/// glyph stayed outside [`SPARK_RAMP`] — a convention a test defends rather than
+/// one the compiler does. It also had a live failure case in the other
+/// direction: on the `peak == 0` path every bucket draws the track *whatever its
+/// count says*, so a painter branching on the count instead would have drawn a
+/// track glyph in the bar's colour. Neither spelling of "derive one from the
+/// other" is safe, and deriving both from a third thing is.
+///
+/// **What this does not do is constrain the payload**, and the difference is
+/// worth stating rather than implying: `Written(SPARK_TRACK)` is constructible
+/// and would draw the track glyph in the bar's style. What rules it out is that
+/// [`spark_of`] is the only producer and fills it from [`SPARK_RAMP`], not the
+/// type. An index would move the same hole one level down rather than close it.
+#[derive(Clone, Copy)]
 enum Bucket {
     /// Nothing was written in this bucket's slice of the window.
     Empty,
@@ -1430,6 +1436,11 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUC
         if count == 0 {
             continue;
         }
+        // The clamp's **upper** bound is the live one: a bucket busier than the
+        // screen's peak is an inconsistent view, and without it the index runs
+        // off the ramp and takes the pane with it. Its lower bound is defensive
+        // only, since `count >= 1` already puts the numerator at or above
+        // `SPARK_RAMP.len()`.
         let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
         *bucket = Bucket::Written(SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1]);
     }
@@ -2682,15 +2693,21 @@ impl Painter<'_> {
         }
     }
 
-    /// `M src/engine/watch.rs    ● just changed ████████████   ▁▂▆▄▆█   +42    -7`
+    /// `M src/engine/watch.rs    ● just changed ████████████ __▁▂▆▄▆█   +42    -7`
     ///
     /// Everything to the right of the path goes into a slot [`Columns`] already
     /// chose, drawn right to left so each block knows where the one outside it
     /// ended. **Nothing here is sized from this row**, which is what makes the row a
     /// column rather than a cluster: the widths are the region's, not this row's,
-    /// so a row that has no sparkline leaves that slot blank instead of closing
-    /// it. The drawn order, left to right, is pulse, heat strip, sparkline,
-    /// counters; the order they *survive* narrowing in is the layout table's.
+    /// so a row with nothing to put in a slot **keeps** it rather than closing
+    /// it. What it puts there differs by element and that difference is a ruling
+    /// rather than an inconsistency: the sparkline fills its slot with track, so
+    /// the two leading `_` above are a window with no writes in its oldest
+    /// quarter ([#78](https://github.com/breferrari/vigia/issues/78)), while a
+    /// file with no line diff leaves the heat strip's slot blank for the reason
+    /// [`heat_at`] gives. The drawn order, left to right, is pulse, heat strip,
+    /// sparkline, counters; the order they *survive* narrowing in is the layout
+    /// table's.
     ///
     /// Nothing is allowed to take the path below [`MIN_PATH_WIDTH`]. A glance
     /// element that cost a reader the name of the file would be spending the
@@ -2758,6 +2775,19 @@ impl Painter<'_> {
             // style differs *per cell* now, so a single styled write could not
             // draw this row anyway. It also drops the per-row `String` the tail
             // used to collect into.
+            // The precondition the slice below rests on, checked here rather
+            // than assumed, for `Painter::scrollbar`'s stated reason: a private
+            // method whose safety rests on a condition held in another function
+            // is a panic waiting for the day someone adds a third caller.
+            // `SPARK_RUNGS` derives every rung from `HISTORY_BUCKETS`, but
+            // `ROW_LAYOUTS` is a hand-written table and `Columns::new` takes a
+            // bare `usize`.
+            debug_assert!(
+                columns.spark <= HISTORY_BUCKETS,
+                "a layout asked for {} sparkline buckets where the window holds \
+                 {HISTORY_BUCKETS}",
+                columns.spark
+            );
             let strip = spark_of(heading.spark, peak);
             let x = right.x + right.width - columns.spark as u16;
             for (offset, bucket) in strip[HISTORY_BUCKETS - columns.spark..].iter().enumerate() {

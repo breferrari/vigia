@@ -354,8 +354,13 @@ pub struct View {
     /// against its own maximum draws every file at full height the moment it is
     /// the busiest thing it has ever been, which answers a question nobody asked.
     ///
-    /// Zero means nothing is tracked, and a renderer must read it as "draw no
-    /// sparkline" rather than dividing by it.
+    /// **Zero means nothing is tracked, which is a scale a renderer must not
+    /// divide by.** It used to say a renderer must read zero as "draw no
+    /// sparkline", and that is the ruling
+    /// [#78](https://github.com/breferrari/vigia/issues/78) reversed: an empty
+    /// bucket draws a track, so a peak of zero means every bucket is empty and
+    /// every one of them is still drawn. `vigia_core::History::peak` carries the
+    /// same correction, and this is the copy a renderer actually reads.
     pub peak: u16,
 }
 

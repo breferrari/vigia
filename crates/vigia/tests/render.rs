@@ -63,12 +63,16 @@ const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
 
 /// What a sparkline bucket nothing was written in draws.
 ///
-/// Restated for [`CONTINUES`]' reason, and load-bearing beyond that: this test
-/// file is the only place that can check the track glyph is **not** one of
-/// [`RAMP`]'s, which is what keeps the height channel free to mean "how much".
-/// Importing the renderer's constant would make that comparison true by
-/// construction.
-const TRACK: &str = "_";
+/// Restated for [`CONTINUES`]' reason: a test sharing the renderer's own
+/// constant would agree with it by construction rather than check it.
+///
+/// **`SPARK_` rather than plain `TRACK`, which four gates below already declare
+/// with a different value.** The scrollbar's track is `▕`, function-local in
+/// each of them, and a file-level `TRACK` beside those would compile by
+/// shadowing and mean one thing here and another there. That is the same
+/// symbol-collision hazard this file's other helpers exist to name, arriving as
+/// two constants rather than two elements.
+const SPARK_TRACK: &str = "_";
 
 /// Every foreground a heat slice can take.
 ///
@@ -749,7 +753,7 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
                         'h'
                     } else if RAMP.contains(&sym) && fg == theme.spark.fg {
                         's'
-                    } else if sym == TRACK && fg == theme.spark_track.fg {
+                    } else if sym == SPARK_TRACK && fg == theme.spark_track.fg {
                         // Its own class rather than folded into `s`. A track and
                         // a bar occupy the same slot and must therefore compare
                         // equal *positionally*, which they do because both are
@@ -770,7 +774,7 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
 }
 
 #[test]
-fn a_row_missing_a_glance_element_leaves_its_column_empty() {
+fn a_row_missing_a_glance_element_keeps_its_column() {
     // The launch case, and the reason #77 is universal rather than occasional.
     // `spark_of` used to yield nothing until a file had been written once, which
     // is every file on the first frame, and `heat_at` yields nothing for a file
@@ -851,8 +855,8 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
     assert_eq!(
         columns_of(&after[1], 'h'),
         columns_of(&after[0], 'h'),
-        "row 1 lost its sparkline and its heat strip moved with it, so the blank \
-         slot was closed rather than left: {:?} against row 0 {:?}",
+        "row 1 lost its sparkline buckets and its heat strip moved with them, so \
+         the slot was closed rather than kept: {:?} against row 0 {:?}",
         after[1],
         after[0]
     );
@@ -2394,7 +2398,12 @@ fn blocks_of(backend: &TestBackend, y: u16, colour: ratatui::style::Color) -> Ve
 /// [`blocks_of`]'s twin, and matched on symbol **and** style for the reason that
 /// function gives, sharpened by what the track is drawn from: `_` is an ordinary
 /// character, and a `snake_case` path two columns to the left of the strip is
-/// full of them. Only `Theme::spark_track` separates the two.
+/// full of them. `Theme::spark_track` is what separates the two here, and
+/// `tests/palette.rs` holds that it can: under `Theme::default`, which is what
+/// every caller below draws with, the track is `DarkGray` where a path is
+/// `White`, `White` bold or `Gray`. That gate also records the one palette and
+/// depth where the separation does **not** hold, which is why this says "here"
+/// rather than "always".
 ///
 /// Columns rather than glyphs, because every track cell carries the same glyph
 /// and what the gates below ask is *where* and *how many*.
@@ -2403,7 +2412,7 @@ fn track_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
     (0..buffer.area.width)
         .filter(|&x| {
             let cell = &buffer[(x, y)];
-            cell.symbol() == TRACK && cell.style().fg == theme.spark_track.fg
+            cell.symbol() == SPARK_TRACK && cell.style().fg == theme.spark_track.fg
         })
         .collect()
 }
@@ -2605,6 +2614,34 @@ fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
 }
 
 #[test]
+fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
+    // The **other** inconsistent caller, and the one the clamp's upper bound is
+    // for. `peak == 0` above is the store's own empty state; this is a peak that
+    // exists and is too small, where `count * 8 / peak` runs off the end of
+    // `SPARK_RAMP` and indexing it aborts the pane. `SPEC.md` §11.1 rules that a
+    // monitor which dies on a file is the failure to avoid, and `heat_at`'s
+    // saturating fold two functions away is the same ruling applied to the same
+    // shape of arithmetic.
+    //
+    // Its own gate because the guard is a `clamp` whose two bounds are not alike:
+    // the lower one is unreachable (a count of at least one already puts the
+    // numerator at or above the ramp's length) and the upper one is live.
+    let mut view = glancing();
+    if let Row::File(entry) = &mut view.rows[0] {
+        entry.spark = [u16::MAX; HISTORY_BUCKETS];
+    }
+    view.peak = 1;
+
+    let theme = Theme::default();
+    let backend = screen(80, 5, &view, &chrome());
+    assert_eq!(
+        blocks_of(&backend, 1, theme.spark.fg.expect("a colour")),
+        vec!['█'; HISTORY_BUCKETS],
+        "a bucket far busier than the screen's peak did not simply top out"
+    );
+}
+
+#[test]
 fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
     // One rule rather than a special case for the cold file: the launch screen
     // above is just the all-empty end of *this*. Row 2 of the mockup's own
@@ -2642,12 +2679,17 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
     // same shape and leave colour alone carrying a distinction `SPEC.md` §11.1
     // spends the lowest block to protect.
     //
-    // Read off the drawn row rather than by comparing two constants, so it
-    // cannot be satisfied by restating the renderer: row 2 holds a bucket of 1
-    // against a screen peak of 12, which is exactly the ramp's floor.
+    // **Both symbols read off the screen**, which is the whole of what this gate
+    // is. It used to end on `assert_ne!(TRACK, RAMP[0])`, comparing two
+    // constants *this file declares* — an assertion that cannot fail whatever
+    // the renderer does, sitting under a name that promised otherwise. Row 2
+    // holds a bucket of 1 against a screen peak of 12, which is exactly the
+    // ramp's floor, so the two glyphs compared below are the two the ruling says
+    // must differ.
     let theme = Theme::default();
     let spark = theme.spark.fg.expect("the sparkline has a colour");
     let backend = screen(80, 5, &glancing(), &chrome());
+    let buffer = backend.buffer();
 
     let bars = blocks_of(&backend, 2, spark);
     assert!(
@@ -2655,14 +2697,62 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
         "the fixture no longer draws the ramp's floor, so this proves nothing \
          about it: {bars:?}"
     );
-    assert!(
-        !track_at(&backend, 2, &theme).is_empty(),
-        "the fixture drew no track, so this proves nothing about it"
-    );
+    let floor_at = bars_at(&backend, 2, &theme)
+        .into_iter()
+        .find(|&x| buffer[(x, 2)].symbol() == RAMP[0])
+        .expect("the row draws the ramp's floor somewhere");
+    let empty_at = *track_at(&backend, 2, &theme)
+        .first()
+        .expect("the row draws a track somewhere");
+
     assert_ne!(
-        TRACK, RAMP[0],
-        "the track is drawn at the ramp's floor, so a bucket holding one write \
-         and a bucket holding none are now the same shape"
+        buffer[(empty_at, 2)].symbol(),
+        buffer[(floor_at, 2)].symbol(),
+        "an empty bucket at column {empty_at} and a one-write bucket at column \
+         {floor_at} drew the same glyph, so the height channel no longer \
+         separates 'nothing happened' from 'a little did'"
+    );
+}
+
+#[test]
+fn a_narrowed_sparkline_keeps_the_newest_buckets_and_drops_the_oldest() {
+    // **The one property of the narrow rung nothing could see.** At the widths
+    // where the sparkline halves, `Painter::file_row` draws `strip[8 - n..]`, the
+    // *tail* of the window, because dropping buckets means dropping the oldest
+    // and the oldest are on the left. Drawing `strip[..n]` instead is the same
+    // number of cells in the same columns, so every gate that counts a rung
+    // agrees with both, and every fixture in this file is drawn at a width where
+    // the slot is 8 or 0 and the two slices are identical.
+    //
+    // Verified by mutation before it was written: swapping the slice for its
+    // head killed **nothing** across the whole workspace. Widths 42 to 51 are the
+    // band where the rung is four, measured rather than assumed.
+    //
+    // Row 2 holds `[0, 0, 0, 2, 1, 0, 0, 0]`. Its newest four are `[1, 0, 0, 0]`,
+    // which draws bar-then-track; its oldest four are `[0, 0, 0, 2]`, which draws
+    // track-then-bar. The two are each other's reverse, so this cannot pass
+    // against the wrong end.
+    let theme = Theme::default();
+    let backend = screen(44, 5, &glancing(), &chrome());
+
+    let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
+        .into_iter()
+        .map(|x| (x, 't'))
+        .chain(bars_at(&backend, 2, &theme).into_iter().map(|x| (x, 's')))
+        .collect();
+    slot.sort_unstable();
+
+    assert_eq!(
+        slot.len(),
+        HISTORY_BUCKETS / 2,
+        "44 columns is meant to be the four-bucket rung, so this fixture is no \
+         longer exercising the narrow slice at all: {slot:?}"
+    );
+    let drawn: String = slot.iter().map(|&(_, class)| class).collect();
+    assert_eq!(
+        drawn, "sttt",
+        "the narrowed strip drew {drawn:?}; \"sttt\" is the newest four buckets \
+         and \"ttts\" is the oldest four, so this is the wrong end of the window"
     );
 }
 
