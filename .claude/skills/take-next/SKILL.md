@@ -47,13 +47,25 @@ This is a reconstruction. The original lived in a global skills directory, was n
 Do not guess and do not scroll the code looking for where things stopped. One command finds the work:
 
 ```sh
-# The earliest milestone that still HAS open issues, then its issues.
-gh api "repos/{owner}/{repo}/milestones?state=open&sort=due_on&direction=asc" \
-  --jq '[.[] | select(.open_issues > 0)][0].title'
+# The earliest ELIGIBLE milestone that still HAS open issues, then its issues.
+gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" --jq '
+  [ .[]
+    | select(.open_issues > 0)
+    | select(((.description // "") | test("^Shelf:")) | not)
+    | { order: (((.title | [scan("^Phase +([0-9]+)")] | flatten | first) // "9999") | tonumber), title: .title }
+  ] | sort_by(.order, .title) | .[0].title // empty'
 gh issue list --state open --milestone "<that title>"
 ```
 
 **Not "the earliest open milestone".** A finished phase leaves its milestone open until someone closes it, so the earliest *open* milestone can be one with zero open issues, and the query then returns nothing and the session has no work to take. That happened the first time this was tried: Phase 1 was complete, merged, and still open, so `take-next` found the plan and then found nothing in it.
+
+**And not "the earliest" by whatever the API hands back, either.** That query used to sort on `due_on`, and **every milestone here has none** — sorting a set on a key that is null for every member does not define an order, so `[0]` was whichever one the API happened to return first. It gave the right answer by luck while there were two open milestones and the lower number was the one to take. The Phase 4 re-housing ended that: number order and execution order came apart, and the one milestone that must **never** be selected now sits numerically between two that must. It returned the shelf twice before [#83](https://github.com/breferrari/vigia/issues/83) fixed it, and both times the pass carried on correctly against the wrong task, because the failure is silent and it is in the **first** command.
+
+Three rules, so that the next milestone added inherits them rather than the accident:
+
+1. **The order is the phase number in the title.** It is deterministic, it needs no metadata, and it cannot drift from what a reader sees on the milestone page — which is the argument `SPEC.md` §7 keeps arriving at, that a rule checkable from what is already on screen beats one resting on a field nobody looks at. A title with no `Phase <n>` in it sorts **last** rather than being dropped: the query uses `scan` and not `capture` for exactly this reason, since `capture` emits an empty stream on no match and would silently vanish the milestone, which is a fresh instance of the bug being fixed. Ties break on the title, so two milestones sharing a number still have a defined order.
+2. **A milestone whose description begins with `Shelf:` is never selected.** A shelf is permanently open and never "next", and until #83 that was a fact only prose knew, so no query could act on it. Mark one by starting its description with `Shelf:` — [Phase 5](https://github.com/breferrari/vigia/milestone/5) reads `Shelf: never next. …` — and leave the marker off anything meant to be taken in sequence.
+3. **An empty result means every eligible milestone is empty and only shelved work remains.** That is not "no work" and it is not an error. It is the point at which taking from the shelf becomes a deliberate choice rather than a default, and the deferral reason is re-read before anything is taken, because a reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)).
 
 **If you finish the last issue in a milestone, close the milestone.** It is the step that makes the next session's first command work.
 
