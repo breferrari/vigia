@@ -413,7 +413,7 @@ fn the_header_carries_no_changed_line_total() {
     // row, which is the level the ruling was made at.
     //
     // `glancing()` is the fixture rather than a plainer one on purpose: its rows
-    // carry the pulse label, the heat strips and the sparklines, so the header is
+    // carry the pulse, the heat strips and the sparklines, so the header is
     // asserted silent against the busiest row set the shell can draw rather than
     // against the emptiest. Its counters are the mockup's own.
     let backend = screen(80, 5, &glancing(), &chrome());
@@ -727,7 +727,7 @@ fn the_glance_columns_agree_down_the_list() {
 /// Where each glance element sits on every list row, as one comparable value.
 ///
 /// **Positions rather than contents.** A row drawing different digits, a shorter
-/// path or a pulse label must compare equal; a row whose elements sit in
+/// path or a pulse mark must compare equal; a row whose elements sit in
 /// different columns must not. So everything that is not a sparkline bucket, a
 /// heat slice or a digit collapses to `_`, which is what lets this be compared
 /// across screens that legitimately say different things.
@@ -2798,24 +2798,30 @@ fn the_glance_elements_at_forty_columns() {
 }
 
 #[test]
-fn a_file_that_just_changed_says_so_and_the_rest_dim() {
+fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     // Two claims, and the second is invisible to every snapshot in this file
-    // because `TestBackend`'s `Display` drops styles: the pulse label belongs to
+    // because `TestBackend`'s `Display` drops styles: the pulse belongs to
     // exactly one row, and the three rungs have to be three *different*
     // intensities or the gradient `SPEC.md` §5.1 asks for is not being drawn.
+    //
+    // Read as a glyph rather than as words since 2026-08-03, when the
+    // `just changed` label went and the dot became the whole signal. The mark
+    // is unique on a file row: the caret is `▸`, the heat strip is `█` and the
+    // sparkline is drawn from the eighth-blocks, so a `●` anywhere on the row
+    // is the pulse and nothing else.
     let theme = Theme::default();
     let backend = screen(80, 5, &glancing(), &chrome());
 
     // Body rows start at y = 1; the header is y = 0.
     let pulsing = row_text(&backend, 1);
     assert!(
-        pulsing.contains("just changed"),
+        pulsing.contains('●'),
         "the file named by the newest tick carries no pulse: {pulsing:?}"
     );
     for y in [2, 3] {
         let row = row_text(&backend, y);
         assert!(
-            !row.contains("just changed"),
+            !row.contains('●'),
             "row {y} carries the pulse too, so it marks more than the newest \
              tick: {row:?}"
         );

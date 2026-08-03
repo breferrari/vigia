@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" role="img"
-     aria-label="Mockup of the vigia terminal interface: a pinned list of changed files with sparklines, heat strips and line counts, the file being read marked with a caret, above a syntax highlighted diff with a scrollbar, and a status bar showing frame time, resident memory and the follow state.">
+     aria-label="Mockup of the vigia terminal interface: a pinned list of changed files with sparklines, heat strips and line counts, the file being read marked with a caret, above a syntax highlighted diff with a scrollbar and a heading whose dot marks the file that just changed, and a status bar showing frame time, resident memory and the follow state.">
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="884" height="454" rx="12"/></clipPath>
     <style>
@@ -130,8 +130,7 @@
     <!-- focused file header -->
     <line x1="8" y1="178" x2="892" y2="178" stroke="#21262d" stroke-width="1"/>
     <text class="m fg" x="32" y="202" font-size="13.5" font-weight="700">src/engine/watch.rs</text>
-    <circle cx="762" cy="197" r="4" fill="#39c5cf"/>
-    <text class="m cyn" x="866" y="202" font-size="13" text-anchor="end">just changed</text>
+    <circle cx="862" cy="197" r="4" fill="#39c5cf"/>
 
     <!-- diff scrollbar: file-granular plus the fraction within the current
          file, which is all SPEC.md 11.1 lets it know without reading every

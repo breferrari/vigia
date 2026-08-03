@@ -699,21 +699,22 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
     // The exemption is a measurement, not a licence: if the palette ever frees a
     // grey, this fails and the `continue` above comes out.
     //
-    // Against the **set** rather than one field, because `Gray` has two occupants
-    // there. Keyed to `path_cold` alone, moving that one field would report the
-    // exemption stale while `gutter` still held the colour and the collision was
-    // still real.
+    // **The exact negation of the one comparison that is skipped**, which is
+    // narrower than it was and had to become so. While the `continue` skipped the
+    // whole rung, a disjunction over `path_cold` and `gutter` was right, because
+    // either one holding `Gray` kept some skipped comparison live. Now that only
+    // the `path_cold` comparison is skipped, `gutter` is not among the three
+    // fields the loop compares at all, so accepting it as evidence would keep the
+    // exemption alive after the thing it exempts had gone: move `path_cold` off
+    // `Gray` and the skipped comparison would pass, the `continue` would be dead
+    // weight, and this would stay green on `gutter`'s account.
     //
-    // The disjunction cannot currently distinguish its two halves, because
-    // `path_cold` and `gutter` are the same literal in this palette. That is
-    // future-proofing rather than two independent readings, and saying so is the
-    // difference between a check that is ready for the split and one that looks
-    // stronger than it is.
+    // The narrowing and the disjunction were landed in different rounds, which is
+    // how the two ended up disagreeing about which fact keeps the exemption alive.
     let light = Theme::light().resolve(Depth::Ansi16);
-    assert!(
-        light.spark_track.fg == light.path_cold.fg || light.spark_track.fg == light.gutter.fg,
-        "`light` at sixteen colours no longer collides with any path-weight grey, \
-         so the exemption above is stale and the `continue` should come out"
+    assert_eq!(
+        light.spark_track.fg, light.path_cold.fg,
+        "`light` at sixteen colours no longer draws the track in `path_cold`'s          colour, so the skipped comparison above would now pass and the          `continue` should come out"
     );
 }
 
