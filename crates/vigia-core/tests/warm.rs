@@ -2,7 +2,7 @@
 //!
 //! `syntect` defers a grammar's patterns to `fancy_regex` on first use, so the
 //! first parse under one costs 74-362ms where loading all seventy-five costs
-//! 318µs. [`vigia_core::warm`] pays that where nothing is waiting on it.
+//! 318µs. `Highlighter::warm_ahead` pays that where nothing is waiting on it.
 //!
 //! **The claim being tested is deliberately weak, and the weakness is the
 //! finding.** There is no such thing as a warm grammar: compilation is per
@@ -16,7 +16,7 @@
 mod support;
 
 use support::{Scratch, absolute_gates_apply, exclusively_timed, time};
-use vigia_core::{Highlighter, WARM_FILES, WARM_PER_GRAMMAR};
+use vigia_core::{Highlighter, WARM_BYTES, WARM_FILES, WARM_PER_GRAMMAR, WARM_TOTAL};
 
 #[test]
 fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
@@ -43,7 +43,7 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
 
     assert_eq!(
         warmed, 0,
-        "the warmer counted a file `syntect` has no grammar for, so it read one          it could not have compiled anything from"
+        "the warmer counted a file `syntect` has no grammar for, so it read one it could not have compiled anything from"
     );
 }
 
@@ -135,7 +135,7 @@ fn a_path_that_is_not_there_is_skipped_rather_than_fatal() {
 
     assert_eq!(
         warmed, 2,
-        "the warmer counted {warmed} files where two of the four exist, so a          missing path is either fatal or is spending the per-grammar budget"
+        "the warmer counted {warmed} files where two of the four exist, so a missing path is either fatal or is spending the per-grammar budget"
     );
 }
 
@@ -145,16 +145,21 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
     // than asserted structurally: there is no observable state to check, because
     // the compiled patterns live in `syntect`'s own `OnceCell`s.
     //
-    // Two highlighters, so each starts with a genuinely cold `SyntaxSet`. Sharing
-    // one would make the second measurement free for a reason that is not the
-    // code, which is the trap this whole issue was about.
+    // One highlighter, deliberately: the second timing has to meet the patterns
+    // the first compiled, and a fresh `SyntaxSet` would be cold again and measure
+    // nothing.
     if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
     // Taken for the reason `crates/vigia/tests/budgets.rs` takes it: this binary
-    // also runs `the_warmer_is_bounded_by_its_file_cap`, which builds an
-    // eighty-four file fixture and warms sixty-four of them on a thread. A wall
-    // clock measured beside that is measuring the neighbour.
+    // also runs `many_files_of_one_language_warm_only_a_few`, which builds an
+    // eighty-four file fixture, and a polyglot gate that writes twenty-five files
+    // and compiles up to twelve grammars on a thread. A wall clock measured
+    // beside either is measuring the neighbour.
+    //
+    // **It works only because they take it too.** A mutual-exclusion protocol one
+    // participant observes is not one, and the two heavy gates hold it across
+    // their fixture building for exactly that reason.
     let _timed = exclusively_timed();
 
     let scratch = Scratch::large_diff("warm-cost", 1, 40);
@@ -185,5 +190,252 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
         after * 10 < cold_parse,
         "a warmed parse took {after:?} against {cold_parse:?} cold, so warming \
          is not moving the grammar compile anywhere"
+    );
+}
+
+#[test]
+fn the_per_grammar_cap_is_per_grammar_and_not_one_shared_counter() {
+    // **The bound the docs call "the bound that matters" had no test saying it
+    // was per grammar at all.** Replacing the map with a single counter left
+    // every other gate here green, because each of their fixtures is one
+    // language. `SPEC.md` §7's ASCII-fixture rule one axis over: a
+    // single-language fixture cannot tell a per-grammar cap from a global one.
+    let scratch = Scratch::large_diff("warm-two-languages", 1, 4);
+    let mut paths = Vec::new();
+    for n in 0..WARM_PER_GRAMMAR + 1 {
+        for (ext, body) in [("rs", "fn a() {}\n"), ("md", "# h\n\ntext\n")] {
+            let name = format!("pair_{n}.{ext}");
+            std::fs::write(scratch.path_of(&name), body).expect("write");
+            paths.push(name);
+        }
+    }
+
+    let warmed = Highlighter::new()
+        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .join()
+        .expect("the warmer thread");
+
+    assert_eq!(
+        warmed,
+        2 * WARM_PER_GRAMMAR,
+        "two languages offering {WARM_PER_GRAMMAR} files each warmed {warmed}, \
+         not {}, so the cap is one shared counter rather than one per grammar",
+        2 * WARM_PER_GRAMMAR
+    );
+}
+
+#[test]
+fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
+    // The per-grammar cap gives a polyglot tree as many budgets as it has
+    // languages. Measured before `WARM_TOTAL` existed: fifty extensions warmed
+    // forty-three files in 3.93s of held core, against the 1.053s worst case the
+    // per-grammar cap was reasoned about with.
+    let scratch = Scratch::large_diff("warm-polyglot", 1, 4);
+    let exts = [
+        "rs", "md", "py", "js", "go", "toml", "json", "yaml", "c", "cpp", "h", "rb", "sh", "php",
+        "java", "cs", "css", "html", "xml", "sql", "lua", "swift", "hs", "clj", "erl",
+    ];
+    let mut paths = Vec::new();
+    for (n, ext) in exts.iter().enumerate() {
+        let name = format!("file_{n}.{ext}");
+        std::fs::write(scratch.path_of(&name), "text\nmore text\n").expect("write");
+        paths.push(name);
+    }
+    assert!(
+        paths.len() > WARM_TOTAL,
+        "the fixture offers {} files against a total cap of {WARM_TOTAL}, so it \
+         cannot reach the bound it exists to test",
+        paths.len()
+    );
+
+    let warmed = Highlighter::new()
+        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .join()
+        .expect("the warmer thread");
+
+    assert!(
+        warmed <= WARM_TOTAL,
+        "the warmer parsed {warmed} files across distinct languages, over the \
+         {WARM_TOTAL} it is allowed in total, so a polyglot tree holds a core \
+         for seconds beside the frame path"
+    );
+}
+
+#[test]
+fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
+    // A UTF-16 BOM is the ordinary way a path with a known extension is not
+    // text. It trims to the empty string and can compile nothing, so counting it
+    // both overstates the result and burns one of three per-grammar slots. The
+    // sibling rule is already asserted for a path that vanished.
+    let scratch = Scratch::large_diff("warm-not-text", 5, 4);
+    std::fs::write(scratch.path_of("src/utf16.rs"), [0xFFu8, 0xFE, 0x66, 0x00]).expect("write");
+
+    let alone = Highlighter::new()
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["src/utf16.rs".to_owned()],
+        )
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        alone, 0,
+        "a file that is not text counted as a warm, so the result counts files \
+         opened rather than grammars compiled"
+    );
+
+    // And placed first it must not cost a real file its slot.
+    let mut paths = vec!["src/utf16.rs".to_owned()];
+    paths.extend((0..5).map(|n| format!("src/mod_{n}.rs")));
+    let warmed = Highlighter::new()
+        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        warmed, WARM_PER_GRAMMAR,
+        "with an unreadable file first the warmer parsed {warmed} real files \
+         against {WARM_PER_GRAMMAR}, so it spent a slot on one that compiled \
+         nothing"
+    );
+}
+
+#[test]
+fn the_warmer_reads_nothing_outside_the_worktree() {
+    // `PathBuf::join` silently discards the root for an absolute path. Not
+    // reachable from the shell, which passes what status reported, but
+    // `warm_ahead` is public on a public type with no other precondition.
+    let scratch = Scratch::large_diff("warm-escape", 1, 4);
+    let outside = scratch.path_of("../outside-the-worktree.rs");
+    std::fs::write(&outside, "fn escaped() {}\n").expect("write");
+
+    let warmed = Highlighter::new()
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec![
+                outside.to_string_lossy().into_owned(),
+                "../outside-the-worktree.rs".to_owned(),
+            ],
+        )
+        .join()
+        .expect("the warmer thread");
+
+    let _ = std::fs::remove_file(&outside);
+    assert_eq!(
+        warmed, 0,
+        "the warmer read {warmed} files from outside the worktree it was given"
+    );
+}
+
+#[test]
+fn the_read_is_bounded_and_a_file_cut_mid_character_still_parses() {
+    // Two claims sharing one fixture. `WARM_BYTES` bounds the **read** rather
+    // than only the parse, which is what keeps a changed lockfile or dataset
+    // from being pulled whole into a `String`; and the cut it makes lands
+    // mid-character on anything that is not ASCII, which the `valid_up_to` trim
+    // absorbs. Neither had a test, and dropping either is one edit.
+    let scratch = Scratch::large_diff("warm-bounded-read", 1, 4);
+    let mut text = String::from("// ");
+    while text.len() < WARM_BYTES.saturating_sub(2) {
+        text.push('a');
+    }
+    // A four-byte character straddling the cut.
+    text.push('\u{1F600}');
+    // Far past the bound, so an unbounded read would take all of it.
+    while text.len() < WARM_BYTES * 8 {
+        text.push_str("\nfn filler() { let s = \"x\"; }");
+    }
+    std::fs::write(scratch.path_of("src/straddle.rs"), &text).expect("write");
+
+    let warmed = Highlighter::new()
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["src/straddle.rs".to_owned()],
+        )
+        .join()
+        .expect("the warmer thread");
+
+    assert_eq!(
+        warmed, 1,
+        "a file whose bounded read lands mid-character was skipped, so any file \
+         with a wide glyph near {WARM_BYTES} bytes warms nothing"
+    );
+}
+
+#[test]
+fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
+    // **Two problem sizes whose first `WARM_BYTES` are byte-identical**, which is
+    // the only shape that can see this bound. Every structural assertion here is
+    // satisfied whether or not the read is capped — a warm counts the same either
+    // way — and mutating the `take` away survived all of them. What separates the
+    // two is wall clock against file size, so it takes the absolute tier.
+    //
+    // `SPEC.md` §7's rule about not comparing a part against the whole it belongs
+    // to applies directly: the shared term is the first `WARM_BYTES`, and it
+    // cancels, so what is left is exactly the tail an unbounded read would take.
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("warm-read-bound", 1, 4);
+    let head: String =
+        std::iter::repeat_n("fn f() { let s = \"x\"; }\n", WARM_BYTES / 24 + 1).collect::<String>();
+    assert!(
+        head.len() >= WARM_BYTES,
+        "the shared prefix is {} bytes, under the {WARM_BYTES} the read is capped \
+         at, so the two fixtures differ inside the window rather than beyond it",
+        head.len()
+    );
+
+    let mut big = head.clone();
+    while big.len() < WARM_BYTES * 256 {
+        big.push_str("fn g() { let s = \"y\"; }\n");
+    }
+    std::fs::write(scratch.path_of("src/small.rs"), &head).expect("write");
+    std::fs::write(scratch.path_of("src/big.rs"), &big).expect("write");
+
+    // One highlighter, warmed first, so neither timing carries the one-off
+    // grammar compile and what is left is read plus parse.
+    let highlighter = Highlighter::new();
+    highlighter
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["src/mod_0.rs".to_owned()],
+        )
+        .join()
+        .expect("the warmer thread");
+
+    let small = time(|| {
+        highlighter
+            .warm_ahead(
+                scratch.root().to_path_buf(),
+                vec!["src/small.rs".to_owned()],
+            )
+            .join()
+            .expect("the warmer thread");
+    });
+    let large = time(|| {
+        highlighter
+            .warm_ahead(scratch.root().to_path_buf(), vec!["src/big.rs".to_owned()])
+            .join()
+            .expect("the warmer thread");
+    });
+
+    eprintln!(
+        "note: warming {} bytes took {small:?}; warming {} bytes took {large:?}",
+        head.len(),
+        big.len()
+    );
+
+    // A file 256 times larger, read to its end, cannot come out inside four
+    // times the cost of the capped one. Loose on purpose: the point is to catch
+    // a read proportional to the file, which is two orders of magnitude, not to
+    // track microseconds on a shared runner.
+    assert!(
+        large <= small * 4,
+        "warming a {}-byte file took {large:?} against {small:?} for the \
+         {}-byte one with the same first {WARM_BYTES} bytes, so the read follows \
+         the file rather than the bound",
+        big.len(),
+        head.len()
     );
 }

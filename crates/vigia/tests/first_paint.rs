@@ -20,8 +20,8 @@
 //! The axis is new, though, and it is the one this repo keeps rediscovering.
 //! §7 already records that a budget measured at one *position* is measured at its
 //! cheapest, and that a gate which *settles* first has measured the cheapest
-//! state. This is the third: **every wall-clock gate here discards fifty warmup
-//! frames, which is correct for a steady-state budget and is exactly where a
+//! state. This is the third: **every steady-state wall-clock gate here discards
+//! fifty warmup frames, which is correct for such a budget and is exactly where a
 //! first-paint cost hides.**
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
@@ -72,7 +72,14 @@ struct FirstPaint {
     parsed_second: u64,
 }
 
-/// One cold start, staged exactly as `vigia::run` stages it.
+/// One cold start, staged as `vigia::run` stages it.
+///
+/// **Not identically, and every difference is in the cheap direction.** `run`
+/// also resolves the colour depth and the theme and shortens the worktree name
+/// before its first paint, none of which this includes; and `run`'s single
+/// `Shell::draw` paints *twice*, where this times the two separately so the
+/// second can be reported rather than gated. What is measured is time to the
+/// screen the reader first sees, which is what I7 is about.
 ///
 /// **A fresh [`Highlighter`] every time, which is what makes this repeatable.**
 /// The compile is cached on the `SyntaxSet` a highlighter owns, so a run reusing

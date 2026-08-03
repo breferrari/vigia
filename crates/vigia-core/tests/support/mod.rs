@@ -88,8 +88,9 @@ pub fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
 /// the half that has to be right. Two of the four copies printed
 /// `cargo test --release --test budgets`, which is ambiguous because both crates
 /// ship a `budgets.rs`, and the four disagreed on whether it was one gate or
-/// several being skipped. Taking `how` is what makes a wrong hint impossible to
-/// write without noticing.
+/// several being skipped. Taking `how` does not make a wrong hint impossible —
+/// it is still hand-typed per call site — but it puts the command beside the
+/// gate it reruns instead of inside a helper copied between crates.
 pub fn absolute_gates_apply(how: &str) -> bool {
     if cfg!(debug_assertions) {
         eprintln!("note: the absolute budget gates are skipped in a debug build; run `{how}`");

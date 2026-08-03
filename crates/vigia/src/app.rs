@@ -246,7 +246,7 @@ impl App {
 
     /// Whether a coloured frame is owed for the plain one already on screen.
     ///
-    /// **The debt [`Self::paint`] exists to carry.** [`crate::Shell::draw`] is
+    /// **The debt `Self::paint` exists to carry.** `Shell::draw` is
     /// the only caller and it settles it immediately, which is what keeps the
     /// opening two frames one mechanism rather than two statements a future
     /// edit can separate.

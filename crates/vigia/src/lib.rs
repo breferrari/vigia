@@ -186,6 +186,30 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // before, 13.26ms now.
     shell.draw(&mut frame, &worktree)?;
 
+    // **For a screen with rows on it, so a clean worktree spawns nothing.**
+    // Starting a monitor on a tree nobody has touched is an ordinary way to
+    // start one, and there is no grammar to compile for an empty state.
+    //
+    // `take` before `map`, not after: `warm_ahead` considers at most
+    // `WARM_FILES` paths, so cloning the rest would be ten thousand `String`
+    // allocations at the scale [#48] contemplates, every one of them dropped
+    // unread.
+    //
+    // Detached by dropping the handle, like the two threads below and for a
+    // simpler reason: it ends by itself, and nothing waits for a result that
+    // only ever makes a later frame cheaper.
+    if !frame.files().is_empty() {
+        shell.highlighter.warm_ahead(
+            worktree.workdir().to_path_buf(),
+            frame
+                .files()
+                .iter()
+                .take(vigia_core::WARM_FILES)
+                .map(|change| change.path.clone())
+                .collect(),
+        );
+    }
+
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and
     // FSEvents both report reads and attribute touches, so the shell would wake
@@ -470,13 +494,23 @@ impl Shell {
     /// extra frame once per process: measured at ~1.8ms on the hundred-file
     /// fixture, against the 91.51ms compile it exists to hide.
     ///
-    /// The loop runs at most twice — `App::view` leaves no debt on the frame that
-    /// settles one — but it is written as a `while` rather than an `if` so that
-    /// the invariant is *"draw until nothing is owed"* rather than *"draw twice"*,
-    /// which is the form that survives a third state being added.
+    /// **At most one repaint, and the bound is structural rather than argued.**
+    /// Written as a `while` this spun forever: [`Self::paint`] swallows a failed
+    /// collect into [`App::warn`] and returns `Ok`, while [`App::view`] advances
+    /// its state only past the `?`, so a collect that keeps failing leaves the
+    /// debt standing and the condition can never clear — 100% CPU with the
+    /// alternate screen held and the quit key unreachable, which is the terminal
+    /// this shell refuses to leave a reader in. It is reachable rather than
+    /// exotic: `Frame::diff` re-reads any file written in the last two seconds,
+    /// so a `git checkout` landing between the two paints does it.
+    ///
+    /// An `if` cannot spin, and a debt that survives it is simply carried to the
+    /// next wake, where the reader is looking at the plain frame rather than at
+    /// nothing. That is the same "report and keep the previous screen" rule the
+    /// rest of the frame path already follows.
     fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
         self.paint(frame, worktree)?;
-        while self.app.owes_repaint() {
+        if self.app.owes_repaint() {
             self.paint(frame, worktree)?;
         }
         Ok(())
