@@ -141,7 +141,9 @@ while IFS= read -r s; do
 done < /tmp/order.txt
 
 # Open milestones with work that no ROADMAP section names.
-LC_ALL=C comm -23 <(LC_ALL=C sort /tmp/withwork.txt) <(LC_ALL=C sort /tmp/order.txt)
+LC_ALL=C sort /tmp/withwork.txt > /tmp/withwork.sorted
+LC_ALL=C sort /tmp/order.txt > /tmp/order.sorted
+LC_ALL=C comm -23 /tmp/withwork.sorted /tmp/order.sorted
 ```
 
 **Two ways it fires, and each catches a different silent failure.** A *disagreement* between step 1's answer and the roadmap's means the `Shelf:` marker was edited off, or gained a leading space, or a phase was renumbered — the marker is remote free text with none of this repo's controls over it, and it is the load-bearing input the diff cannot show you. An *orphan* means a milestone was renamed off `Phase <n>` and now sorts to the 9999 bucket, so its turn is skipped without anything saying so, or a new milestone was created with no roadmap section at all. Mutation-tested on all four before landing, plus the unchanged case, because a check that cannot report "no drift" has not been tested.
