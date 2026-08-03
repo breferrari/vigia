@@ -1187,9 +1187,7 @@ impl View {
                         // with no grammar produces, so the renderer needs no new
                         // case for this. See `Viewport::highlight`.
                         spans: match highlighter.as_deref_mut() {
-                            Some(pass) => {
-                                pass.spans(&diff.path, ordinal, hunk, within).to_vec()
-                            }
+                            Some(pass) => pass.spans(&diff.path, ordinal, hunk, within).to_vec(),
                             None => Vec::new(),
                         },
                     });

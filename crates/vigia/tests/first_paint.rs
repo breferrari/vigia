@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Theme, body_layout, render};
+use vigia::{App, Body, Row, Theme, body_layout, render};
 use vigia_core::{Highlighter, History, Worktree};
 
 use support::{Scratch, budget, exclusively_timed, highlight_delta};
@@ -70,6 +70,15 @@ struct FirstPaint {
     /// Rows the first frame drew, against the rows its body had.
     rows: usize,
     height: usize,
+    /// The two frames' rows with every span stripped.
+    ///
+    /// The gate's real subject. Deferring colour must change **colour**, and a
+    /// row count alone cannot say that: mutating the plain frame to stop drawing
+    /// content lines left `rows == height` satisfied, because the walk simply
+    /// reached further down the file list and drew more headings instead. Found
+    /// by mutation, which is why this field exists.
+    plain: Vec<Row>,
+    coloured: Vec<Row>,
     /// Lines the first frame parsed, and the second.
     parsed_first: u64,
     parsed_second: u64,
@@ -107,6 +116,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let first = began.elapsed();
     let parsed_first = highlight_delta(before, highlighter.stats()).lines;
     let rows = view.rows.len();
+    let plain = stripped(&view.rows);
 
     // The frame after it, timed separately. This is where the compile lands once
     // the first frame stops paying for it, and it is reported rather than gated:
@@ -121,15 +131,36 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     render(&mut buf, area(), &view, &theme, &chrome);
     let second = began.elapsed();
     let parsed_second = highlight_delta(before, highlighter.stats()).lines;
+    let coloured = stripped(&view.rows);
 
     FirstPaint {
         first,
         second,
         rows,
         height: body.diff,
+        plain,
+        coloured,
         parsed_first,
         parsed_second,
     }
+}
+
+/// The same rows with every span removed, so two frames can be compared on
+/// everything except the one thing that is meant to differ.
+fn stripped(rows: &[Row]) -> Vec<Row> {
+    rows.iter()
+        .map(|row| match row {
+            Row::Line {
+                kind, number, text, ..
+            } => Row::Line {
+                kind: *kind,
+                number: *number,
+                text: text.clone(),
+                spans: Vec::new(),
+            },
+            other => other.clone(),
+        })
+        .collect()
 }
 
 #[test]
@@ -150,6 +181,19 @@ fn the_shells_first_paint_holds_the_startup_budget() {
         "the first paint drew {} of {} body rows, so it is fast because it drew \
          less rather than because it deferred the parse",
         run.rows, run.height
+    );
+
+    // **The assertion the row count cannot make.** Deferring colour has to
+    // change colour and nothing else, so the two frames must draw the same rows
+    // once spans are taken out of the comparison. A row count alone is satisfied
+    // by a plain frame that drew different content: mutating `View::collect` to
+    // stop pushing content lines left `rows == height` green, because the walk
+    // reached further down the file list and drew more headings instead.
+    assert_eq!(
+        run.plain, run.coloured,
+        "the plain first frame and the coloured second one drew different rows, \
+         so deferring the parse is changing what the reader sees rather than \
+         only when it is coloured"
     );
 
     // And it really is the plain frame rather than a lucky one.

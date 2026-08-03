@@ -20,12 +20,19 @@
 //! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
 //! proof for I5 and I6, and a test cannot import a `main.rs`.
 //!
-//! ## Why two threads and two repositories
+//! ## Why three threads and two repositories
 //!
 //! I1 says an idle monitor does no work, and the core delivers that by blocking:
 //! [`vigia_core::Watcher::next_tick`] waits on an untimed `recv`. `crossterm`
 //! reads input the same way. Two blocking sources need two threads and one
 //! channel, or a poll loop, and a poll loop is the timer I1 forbids.
+//!
+//! The third is [`vigia_core::Highlighter::warm_ahead`], and it is not on that
+//! channel at all: it sends no wake, so it cannot make an idle monitor do work
+//! and I1 never sees it. It compiles grammars ahead of the reader and ends by
+//! itself. That it reports nothing back is the design rather than a shortcut —
+//! there is no such thing as a warm grammar for the frame path to believe in,
+//! which `warm_ahead` documents in full.
 //!
 //! The watch thread opens its own [`vigia_core::Worktree`]. That is not
 //! duplication for its own sake: a [`vigia_core::Watcher`] borrows the
@@ -138,10 +145,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
-        // Its 318µs of grammar loading lands before first paint, which is where
-        // it belongs: I7 gives startup 50ms and measures 20ms, so this is 1.5%
-        // of what starting already costs, and deferring it would only move it
-        // onto the first frame that draws something.
+        // Its 318µs of grammar *loading* lands before first paint, which is
+        // where it belongs: I7 gives startup 50ms, so this is well under one
+        // percent of it and deferring it would only move it onto the first frame
+        // that draws something.
+        //
+        // **Loading is not compiling, and only the small half is this line.**
+        // `syntect` hands each pattern to `fancy_regex` on first use, which is
+        // 74-362ms per grammar, and that is why the first frame below draws
+        // plain. The earlier version of this comment cited I7 "measuring 20ms",
+        // which was the core's frame path from an example that builds no
+        // highlighter at all; the shipped first paint measured 105.03ms.
         //
         // Not "before the screen is taken", which an earlier version of this
         // comment claimed: struct fields evaluate in written order and
@@ -177,14 +191,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Detached by dropping the handle, like the two threads below and for a
     // simpler reason: it ends by itself, and nothing waits for a result that
     // only ever makes a later frame cheaper.
-    drop(shell.highlighter.warm_ahead(
-        worktree.workdir().to_path_buf(),
-        frame
-            .files()
-            .iter()
-            .map(|change| change.path.clone())
-            .collect(),
-    ));
+    drop(
+        shell.highlighter.warm_ahead(
+            worktree.workdir().to_path_buf(),
+            frame
+                .files()
+                .iter()
+                .map(|change| change.path.clone())
+                .collect(),
+        ),
+    );
 
     // And the coloured one, immediately. This is the frame that pays the
     // compile, and it pays it behind a screen that already has the diff on it.
