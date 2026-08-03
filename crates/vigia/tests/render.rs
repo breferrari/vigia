@@ -29,6 +29,7 @@ use std::time::Duration;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, diff_height,
     render,
@@ -50,6 +51,37 @@ const CONTINUES: &str = "›";
 /// that separation. Named rather than inlined because the header now spells it
 /// in several assertions, and a separator change should be one edit.
 const FACT_JOIN: &str = " · ";
+
+/// The sparkline's ramp, tallest last.
+///
+/// Restated for [`CONTINUES`]' reason, and declared **once** for a different
+/// one: three copies appeared in this file and a fourth spelling as a string to
+/// `contains`, and a second copy does not check the renderer, it checks the
+/// first copy.
+const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/// Every foreground a heat slice can take.
+///
+/// One list, because adding a band to the theme should be one edit here rather
+/// than three, and a missed one makes a gate quietly stop seeing a colour rather
+/// than fail. `tests/legibility.rs` already solved it this way.
+fn heat_colours(theme: &Theme) -> Vec<Option<Color>> {
+    [
+        theme.heat_track,
+        theme.heat_added,
+        theme.heat_added_warm,
+        theme.heat_added_hot,
+        theme.heat_removed,
+        theme.heat_removed_warm,
+        theme.heat_removed_hot,
+        theme.heat_mixed,
+        theme.heat_mixed_warm,
+        theme.heat_mixed_hot,
+    ]
+    .iter()
+    .map(|style| style.fg)
+    .collect()
+}
 
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
@@ -180,9 +212,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
 /// gutter's width, and a test that recomputed that would be a second
 /// implementation of it agreeing with itself.
 fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
-    let buffer = backend.buffer();
-    (0..buffer.area.width)
-        .find(|x| buffer[(*x, y)].symbol() == needle)
+    column_where(backend, y, |symbol, _| symbol == needle)
         .unwrap_or_else(|| panic!("no {needle:?} anywhere on row {y}"))
 }
 
@@ -401,8 +431,11 @@ fn the_header_carries_no_changed_line_total() {
     // checking that nothing is nothing.
     let height = backend.buffer().area.height;
     let body: String = (1..height).map(|y| row_text(&backend, y)).collect();
+    // The two halves separately rather than as one joined string: since #77 each
+    // is right-anchored in its own fixed-width column, so how many spaces sit
+    // between them is a property of the pane rather than of the counts.
     assert!(
-        body.contains("+42 -7"),
+        body.contains("+42") && body.contains("-7"),
         "no per-file counter was drawn, so the header's silence proves nothing: \
          {body:?}"
     );
@@ -499,6 +532,510 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
             }
         }
     }
+}
+
+/// One list entry carrying every glance element, so the only thing that differs
+/// between two of them is the counts width.
+///
+/// File-level rather than a closure, because more than one gate now needs to
+/// build a window out of these.
+fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
+    FileEntry {
+        path: path.to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((added, removed)),
+        spark: [0, 0, 1, 3, 8, 5, 9, 12],
+        recency: Recency::Cold,
+        heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
+    }
+}
+
+/// Three list rows whose counts cells are deliberately three different widths.
+///
+/// That is the whole fixture design and the reason no existing test could fail
+/// on #77: every list fixture in this file gave every row the same churn, so
+/// right-packing and columns drew identically and the defect was invisible.
+fn ragged_counts() -> View {
+    let row = |path: &str, added: u32, removed: u32| Row::File(listed(path, added, removed));
+    View {
+        list: vec![
+            listed("src/engine/watch.rs", 139, 131),
+            listed("src/render/frame.rs", 42, 7),
+            listed("Cargo.toml", 2, 0),
+        ],
+        list_top: 0,
+        current_span: 400,
+        total_rows: 400,
+        rows_above: 0,
+        rows: vec![row("src/engine/watch.rs", 139, 131)],
+        files: 3,
+        top: Position::default(),
+        read: 1,
+        peak: 12,
+    }
+}
+
+/// The leftmost column of row `y` whose cell satisfies `is`.
+///
+/// **Glyph and colour together**, because neither alone identifies a glance
+/// element. The heat strip and a full sparkline bucket draw the same block, so a
+/// scan for a character finds whichever comes first ([`blocks_of`] gives that
+/// reason one screen down); and `Theme::spark` shares its foreground with
+/// `Theme::chrome` on every palette here, so a scan for the colour finds the
+/// caret. The callers below pass both.
+fn column_where(
+    backend: &TestBackend,
+    y: u16,
+    is: impl Fn(&str, Option<Color>) -> bool,
+) -> Option<u16> {
+    let buffer = backend.buffer();
+    (0..buffer.area.width).find(|x| {
+        let cell = &buffer[(*x, y)];
+        is(cell.symbol(), cell.style().fg)
+    })
+}
+
+/// The last column of the digit run that `sigil` opens on row `y`.
+///
+/// The **end** rather than the start, because each half of the counts cell is
+/// right-anchored in its own sub-column the way `assets/preview.svg` draws it:
+/// `+139` and `+42` in a four-column field start one apart and finish together,
+/// and finishing together is the property that lets an eye run down three files'
+/// additions and compare them.
+fn run_end(backend: &TestBackend, y: u16, sigil: &str) -> Option<u16> {
+    let buffer = backend.buffer();
+    let start = column_where(backend, y, |symbol, _| symbol == sigil)?;
+    let mut end = start;
+    for x in start + 1..buffer.area.width {
+        if !buffer[(x, y)].symbol().chars().all(|c| c.is_ascii_digit()) {
+            break;
+        }
+        end = x;
+    }
+    Some(end)
+}
+
+#[test]
+fn the_glance_columns_agree_down_the_list() {
+    // #77. `assets/preview.svg` puts every glance element at the same x on every
+    // file row, which is what makes three sparklines read as one small-multiples
+    // chart and three heat strips as a comparison. The shell right-packed
+    // instead, so each element's x was a function of the widths of the elements
+    // outside it, and the counts cell is the widest variable thing there.
+    //
+    // Asserted over the pinned list, because that is the region the
+    // small-multiples reading belongs to: three summary rows one above another.
+    let view = ragged_counts();
+
+    // Guard the fixture first. If every row's counts were the same width, right
+    // packing and columns would draw identically and this test would pass
+    // against the defect it exists to catch.
+    let widths: Vec<usize> = view
+        .list
+        .iter()
+        .map(|e| {
+            let (a, r) = e.churn.expect("the fixture gives every row churn");
+            format!("+{a} -{r}").chars().count()
+        })
+        .collect();
+    assert!(
+        widths
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            > 1,
+        "every row's counts cell is the same width ({widths:?}), so this fixture \
+         cannot tell columns from right-packing"
+    );
+
+    let theme = Theme::default();
+    let backend = screen(80, 10, &view, &chrome());
+
+    // Each element by its own colour, and the counts cell by the `+` it opens
+    // with, which nothing else on a list row draws. Read off the cells rather
+    // than computed, because recomputing where the renderer put them would be
+    // its own arithmetic agreeing with itself.
+    let spark = theme.spark.fg;
+    let heats_fg = heat_colours(&theme);
+
+    let sparks: Vec<(u16, u16)> = (1..4u16)
+        .filter_map(|y| {
+            column_where(&backend, y, |sym, fg| fg == spark && RAMP.contains(&sym)).map(|x| (y, x))
+        })
+        .collect();
+    let heats: Vec<(u16, u16)> = (1..4u16)
+        .filter_map(|y| {
+            column_where(&backend, y, |sym, fg| sym == "█" && heats_fg.contains(&fg))
+                .map(|x| (y, x))
+        })
+        .collect();
+    // Both halves, by where each ends. The fixture's paths carry neither sigil,
+    // so a run found here came from the counts cell.
+    for path in view.list.iter().map(|e| &e.path) {
+        assert!(
+            !path.contains('+') && !path.contains('-'),
+            "the fixture path {path:?} carries a counts sigil, so the scan below \
+             would read the path instead"
+        );
+    }
+    let added: Vec<(u16, u16)> = (1..4u16)
+        .filter_map(|y| run_end(&backend, y, "+").map(|x| (y, x)))
+        .collect();
+    let removed: Vec<(u16, u16)> = (1..4u16)
+        .filter_map(|y| run_end(&backend, y, "-").map(|x| (y, x)))
+        .collect();
+
+    for (label, found) in [
+        ("sparkline", sparks),
+        ("heat", heats),
+        ("added count", added),
+        ("removed count", removed),
+    ] {
+        assert_eq!(
+            found.len(),
+            3,
+            "{label}: only {} of three list rows drew it, so the column \
+             comparison below proves nothing",
+            found.len()
+        );
+        let (first_row, first) = found[0];
+        for (y, x) in &found {
+            assert_eq!(
+                *x, first,
+                "{label} starts at column {x} on row {y} and column {first} on \
+                 row {first_row}, so the rows do not line up"
+            );
+        }
+    }
+}
+
+/// Where each glance element sits on every list row, as one comparable value.
+///
+/// **Positions rather than contents.** A row drawing different digits, a shorter
+/// path or a pulse label must compare equal; a row whose elements sit in
+/// different columns must not. So everything that is not a sparkline bucket, a
+/// heat slice or a digit collapses to `_`, which is what lets this be compared
+/// across screens that legitimately say different things.
+///
+/// Colour and glyph together, for the reason [`blocks_of`] gives: the heat strip
+/// and a full sparkline bucket draw the same block, and `Theme::pulse` shares a
+/// foreground with `Theme::spark`, so neither alone identifies anything.
+/// Takes a drawn backend rather than a view, the way every other reader helper
+/// in this file does, so a caller that also needs the cells does not render the
+/// same screen twice.
+fn glance_columns(backend: &TestBackend) -> Vec<String> {
+    let theme = Theme::default();
+    let heats = heat_colours(&theme);
+    let buffer = backend.buffer();
+
+    (1..4u16)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| {
+                    let cell = &buffer[(x, y)];
+                    let (sym, fg) = (cell.symbol(), cell.style().fg);
+                    if sym == "█" && heats.contains(&fg) {
+                        'h'
+                    } else if RAMP.contains(&sym) && fg == theme.spark.fg {
+                        's'
+                    } else if sym.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                        'n'
+                    } else {
+                        '_'
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn a_row_missing_a_glance_element_leaves_its_column_empty() {
+    // The launch case, and the reason #77 is universal rather than occasional.
+    // `spark_of` yields nothing until a file has been written once, which is
+    // every file on the first frame (#78), and `heat_at` yields nothing for a
+    // file with no line diff. Under right-packing each absence let that row's
+    // remaining elements slide right into the space, so one quiet file pulled
+    // its neighbours out of line.
+    //
+    // Asserted as "the *other* rows are unchanged", which is the property that
+    // matters: a row may draw less, and it may not move anything else.
+    //
+    // Guard the fixture, the way `the_glance_columns_agree_down_the_list` does
+    // for its sigils: `glance_columns` reads any digit as a counts cell, so a
+    // path carrying one would be classified as content and the comparison would
+    // be over the wrong columns.
+    for path in ragged_counts().list.iter().map(|entry| entry.path.clone()) {
+        assert!(
+            !path.contains(|c: char| c.is_ascii_digit()),
+            "the fixture path {path:?} carries a digit, which `glance_columns` \
+             reads as a counts cell"
+        );
+    }
+
+    let full = ragged_counts();
+    let mut gapped = ragged_counts();
+    gapped.list[1].spark = [0; HISTORY_BUCKETS];
+    gapped.list[2].heat = [HeatBucket::default(); HEAT_BUCKETS];
+
+    let before = glance_columns(&screen(80, 10, &full, &chrome()));
+    let after = glance_columns(&screen(80, 10, &gapped, &chrome()));
+
+    assert_eq!(
+        before[0], after[0],
+        "the first row moved when a *different* row lost its sparkline"
+    );
+
+    // **The load-bearing half, and it has to be read across rows of the *same*
+    // screen.** The comparison above is between two screens, and row 0's own
+    // data is identical in both, so right-packing draws it identically too: it
+    // is a real property but not one that can fail against the defect. What
+    // separates a column from a cluster is that a row which drew *less* still
+    // has its remaining elements where its neighbours have theirs. Under
+    // right-packing the freed columns are reclaimed and everything outside them
+    // slides.
+    let columns_of = |row: &str, class: char| -> Vec<usize> {
+        row.char_indices()
+            .filter(|(_, c)| *c == class)
+            .map(|(i, _)| i)
+            .collect()
+    };
+    // The strip and the sparkline only. The digits are *not* comparable across
+    // rows here and that is not a gap: `ragged_counts` gives each row a
+    // different count, and each half is right-aligned inside its fixed field, so
+    // `+2` and `+139` legitimately occupy different columns of the same slot.
+    // What pins the field itself is
+    // `a_counts_cell_never_rounds_a_change_to_nothing`, which holds the removed
+    // half still while the added half grows.
+    // **Only the sparkline's slot is readable here, and that is a property of
+    // the drawing order rather than an omission.** The elements are placed right
+    // to left, so a closed slot pulls what is *left* of it rightwards and leaves
+    // everything right of it alone. The sparkline sits between the heat strip
+    // and the counts, so closing its slot moves the strip and this can see it.
+    // The strip's own slot is the leftmost of the three, and the only things
+    // left of *it* are the pulse and the path, both of which `glance_columns`
+    // maps to `_`. Pairing the heat-losing row with the sparkline would assert
+    // something that cannot fail, and an earlier form of this test did.
+    //
+    // What holds the strip's slot instead is
+    // `the_glance_columns_collapse_in_one_order`, whose pinned walk reads the
+    // strip's own width at every column from 1 to 120, and the snapshots. Said
+    // here because a gate that looks symmetrical and is not is worse than one
+    // that states its own reach.
+    assert_eq!(
+        columns_of(&after[1], 'h'),
+        columns_of(&after[0], 'h'),
+        "row 1 lost its sparkline and its heat strip moved with it, so the blank \
+         slot was closed rather than left: {:?} against row 0 {:?}",
+        after[1],
+        after[0]
+    );
+
+    // Non-vacuity: the gapped rows really did stop drawing those elements, or
+    // the comparison above is between two identical screens.
+    assert!(
+        before[1].contains('s') && !after[1].contains('s'),
+        "row 1 was supposed to lose its sparkline: {:?} then {:?}",
+        before[1],
+        after[1]
+    );
+    assert!(
+        before[2].contains('h') && !after[2].contains('h'),
+        "row 2 was supposed to lose its heat strip: {:?} then {:?}",
+        before[2],
+        after[2]
+    );
+}
+
+#[test]
+fn scrolling_the_list_does_not_move_the_columns() {
+    // **Reported from use, and the reason the columns are a property of the pane
+    // rather than of the rows.** The first attempt sized the counts field to the
+    // widest count among the rows the region was about to draw. That holds
+    // *within* a window and moves *between* windows: scroll a list until a file
+    // with `+1500 -1500` enters it and the field widens by six columns, sliding
+    // every heat strip and sparkline on every row. Intermittent, and therefore
+    // worse than a layout that was simply wrong.
+    //
+    // Two windows over the same list, one containing a file whose counts are
+    // four columns wider than anything in the other.
+    let mut view = ragged_counts();
+    view.list = vec![
+        listed("src/small.rs", 1, 1),
+        listed("src/also-small.rs", 2, 0),
+        listed("src/huge.rs", 1500, 1500),
+    ];
+    view.files = 3;
+
+    let narrow = View {
+        list: view.list[..2].to_vec(),
+        ..view.clone()
+    };
+    let wide = View {
+        list: view.list[1..].to_vec(),
+        list_top: 1,
+        ..view.clone()
+    };
+
+    // Non-vacuity: the two windows really do disagree about how wide a raw count
+    // is, or this compares two identical screens.
+    assert_ne!(
+        narrow.list.iter().filter_map(|e| e.churn).max(),
+        wide.list.iter().filter_map(|e| e.churn).max(),
+        "both windows hold the same widest count, so neither layout is under \
+         pressure and this proves nothing"
+    );
+
+    let before = glance_columns(&screen(80, 10, &narrow, &chrome()));
+    let after = glance_columns(&screen(80, 10, &wide, &chrome()));
+
+    // Row 1 of each window is a different *file*; what must match is where its
+    // elements sit, which is what `glance_columns` reports.
+    for (row, (a, b)) in before.iter().zip(after.iter()).enumerate() {
+        let (a, b): (String, String) = (
+            a.chars().map(|c| if c == 'n' { '_' } else { c }).collect(),
+            b.chars().map(|c| if c == 'n' { '_' } else { c }).collect(),
+        );
+        assert_eq!(
+            a, b,
+            "row {row}'s glance columns moved when the list scrolled a wider \
+             count into the window"
+        );
+    }
+}
+
+#[test]
+fn a_changed_file_appearing_does_not_move_the_glance_columns() {
+    // **The scrollbar is the other way the contents reached the layout**, and it
+    // survived the fix above because it does not look like contents. A region's
+    // bar is drawn when `scrollable` finds the region cannot show everything it
+    // holds, so a seventh changed file makes one appear, which narrows the region
+    // by two columns, which re-plans every row in it. At some widths that merely
+    // slid every element sideways; at others it crossed a rung boundary and took
+    // the whole counts cell off every row of the list, for no reason a reader
+    // could see and on the exact frame they were looking at.
+    //
+    // The repo had already ruled this hazard once: `CARET_FLOOR` counts
+    // `BAR_WIDTH` on a screen with no bar so that the caret's presence cannot
+    // depend on the file count. The columns pay it for the same reason now.
+    //
+    // Swept, because a boundary is the only place a rung can move, and asserted
+    // over both regions: the list's bar answers to the changed-file count and
+    // the stream's to the diff's total height, so each needs its own fixture
+    // pair. An earlier form of this test claimed both and compared only the
+    // list, which is the shape it exists to catch one level down.
+    let entries: Vec<_> = (0..8)
+        .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
+        .collect();
+    let view_of = |files: usize| View {
+        list: entries[..files.min(entries.len())].to_vec(),
+        rows: entries[..files.min(entries.len())]
+            .iter()
+            .cloned()
+            .map(Row::File)
+            .collect(),
+        files,
+        total_rows: files,
+        ..ragged_counts()
+    };
+
+    // Few enough to need no bar, and enough to force one, at a height that shows
+    // the list region.
+    let (few, many) = (view_of(2), view_of(8));
+    // Non-vacuity, and it has to be counted rather than flagged: a `differed`
+    // bool set beside the assertion below can never be read, because the
+    // assertion panics first. What can go wrong silently is the sweep drawing
+    // *nothing* at every width, so what is counted is the widths that drew a
+    // glance element at all.
+    let mut drew = 0usize;
+    for width in 16..=120u16 {
+        let quiet = glance_columns(&screen(width, 12, &few, &chrome()));
+        let busy = glance_columns(&screen(width, 12, &many, &chrome()));
+        // Row 0 of each is the first file row of the pinned list, and it is the
+        // same file in both fixtures.
+        assert_eq!(
+            quiet[0], busy[0],
+            "at {width} columns the list's glance columns moved because the \
+             changed-file count crossed the point where a scrollbar appears"
+        );
+        if quiet[0].contains('h') || quiet[0].contains('s') || quiet[0].contains('n') {
+            drew += 1;
+        }
+    }
+    assert!(
+        drew > 40,
+        "only {drew} widths drew a glance element at all, so this swept over \
+         blank rows"
+    );
+
+    // **The stream, whose bar answers to the diff's height rather than the file
+    // count.** A separate fixture pair, because nothing about the list can make
+    // the stream's bar appear.
+    let short = View {
+        total_rows: 2,
+        rows_above: 0,
+        ..view_of(2)
+    };
+    let tall = View {
+        total_rows: 4_000,
+        rows_above: 0,
+        ..view_of(2)
+    };
+    // Compared with the bar's own column stripped, since that column is what
+    // differs by construction; what must not differ is everything left of it.
+    let strip = |row: String| row.trim_end_matches(['▕', '█']).trim_end().to_owned();
+    for width in 16..=120u16 {
+        let flat = screen(width, 12, &short, &chrome());
+        let deep = screen(width, 12, &tall, &chrome());
+        // The first stream heading sits below the list and its rule.
+        for y in 4..8u16 {
+            assert_eq!(
+                strip(row_text(&flat, y)),
+                strip(row_text(&deep, y)),
+                "at {width} columns row {y} of the stream moved because the diff \
+                 grew taller than the pane"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_pulse_does_not_move_the_columns() {
+    // **The pulse has a reserved slot, and that is the mechanism being
+    // asserted.** It is reserved on every row of the region whether or not any
+    // row is pulsing, so a file starting or stopping to pulse changes what is
+    // *drawn* in that slot and never where any column sits.
+    //
+    // This comment has now been wrong in both directions, which is worth leaving
+    // on the record: the slot was removed mid-branch when reserving the label
+    // looked unaffordable at forty columns, and restored once that turned out to
+    // be a bug in the choosing rather than a fact about the pulse. The assertion
+    // never changed. Its stated reason was inverted twice, and a reader learning
+    // the design from a test comment would have learned the opposite each time.
+    let quiet = ragged_counts();
+    let mut pulsing = ragged_counts();
+    pulsing.list[0].recency = Recency::Pulse;
+
+    let before = glance_columns(&screen(80, 10, &quiet, &chrome()));
+    let drawn = screen(80, 10, &pulsing, &chrome());
+    let after = glance_columns(&drawn);
+
+    for (row, (a, b)) in before.iter().zip(after.iter()).enumerate() {
+        assert_eq!(
+            a, b,
+            "row {row}'s columns moved when a file started pulsing"
+        );
+    }
+
+    // Non-vacuity: the pulse really is drawn, so this is not comparing a screen
+    // against itself. Read off the backend already rendered above rather than
+    // drawing the same screen a second time.
+    let row = row_text(&drawn, 1);
+    assert!(
+        row.contains('●'),
+        "no pulse reached the row, so nothing was asserted: {row:?}"
+    );
 }
 
 #[test]
@@ -1289,6 +1826,211 @@ fn any_area_renders_including_the_ones_that_fit_nothing() {
         assert_eq!(backend.buffer().area.width, width);
         assert_eq!(backend.buffer().area.height, height);
     }
+}
+
+#[test]
+fn hostile_content_never_panics_at_any_pane_size() {
+    // The sweep above drags one benign fixture through seven sizes, which is a
+    // real gate and structurally cannot find an arithmetic fault: nothing in
+    // `one_file` is big enough to overflow anything.
+    //
+    // **This one exists because a saturated heat strip panicked at 33x6**, as
+    // the layout table stood when the fault was found.
+    // `heat_at` folded a group of `u16` bucket counts with `sum()`, and the
+    // six-slice rung groups two buckets, so a file busy enough to fill them
+    // overflowed and took the pane down. #77's layout table is what made that
+    // rung the one an ordinary forty-column pane picks, so the fault went from
+    // theoretical to reachable. A monitor that dies on a file is the failure
+    // mode this repo rules out everywhere else.
+    //
+    // Values at the type's limit rather than at a plausible one, because the
+    // point is the arithmetic and not the plausibility.
+    let saturated = FileEntry {
+        path: "src/generated.rs".to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((u32::MAX, u32::MAX)),
+        spark: [u16::MAX; HISTORY_BUCKETS],
+        recency: Recency::Pulse,
+        heat: [HeatBucket {
+            added: u16::MAX,
+            removed: u16::MAX,
+        }; HEAT_BUCKETS],
+    };
+    let view = View {
+        list: vec![saturated.clone(), listed("a.rs", 0, 0)],
+        list_top: 0,
+        current_span: 400,
+        total_rows: 400,
+        rows_above: 0,
+        rows: vec![Row::File(saturated)],
+        files: 2,
+        top: Position::default(),
+        read: 1,
+        peak: u16::MAX,
+    };
+
+    // Every heat and sparkline rung is reached inside this range, which is what
+    // makes the grouping arithmetic exercised at all: the six-slice rung, where
+    // the fault was, is drawn between 37 and 47 columns in a region with no
+    // caret, and 39 to 49 in the pinned list, which has one. Read off
+    // `ROW_LAYOUTS` rather than swept, because a full sparkline bucket draws the
+    // same block as a heat slice and a sweep that counted glyphs would count
+    // both.
+    for width in 0..=60u16 {
+        for height in 0..=8u16 {
+            let backend = screen(width, height, &view, &chrome());
+            assert_eq!(backend.buffer().area.width, width);
+        }
+    }
+}
+
+#[test]
+fn a_rename_never_names_only_the_file_it_came_from() {
+    // `elide_head` cuts the head because a path's tail identifies the file. That
+    // premise is false of `new ← old`: cutting the head of the pair leaves
+    // `…src/main.rs`, which names the file the rename came *from* and never
+    // mentions the one the row is about.
+    //
+    // Latent before this branch and ordinary after it, because fixed slots left
+    // the path less room: the pair stopped fitting at 107 columns where it used
+    // to stop at 60.
+    let renamed = FileEntry {
+        path: "crates/vigia/src/shell.rs".to_owned(),
+        from: Some("crates/vigia/src/main.rs".to_owned()),
+        kind: 'R',
+        churn: Some((0, 0)),
+        spark: [0; HISTORY_BUCKETS],
+        recency: Recency::Cold,
+        heat: [HeatBucket::default(); HEAT_BUCKETS],
+    };
+    let view = View {
+        list: vec![renamed.clone()],
+        rows: vec![Row::File(renamed)],
+        files: 1,
+        ..ragged_counts()
+    };
+
+    let mut saw_pair = 0usize;
+    let mut saw_alone = 0usize;
+    for width in 1..=120u16 {
+        let row = row_text(&screen(width, 8, &view, &chrome()), 1);
+        if row.contains('←') {
+            // Drawn as a pair: both names have to be on the row whole.
+            saw_pair += 1;
+            assert!(
+                row.contains("shell.rs") && row.contains("main.rs"),
+                "at {width} columns the pair is cut: {row:?}"
+            );
+            continue;
+        }
+        // Drawn alone, so whatever of the label reached the screen must belong
+        // to the file the row is about, never to the one it came from.
+        if row.contains("shell.rs") {
+            saw_alone += 1;
+        }
+        assert!(
+            !row.contains("main.rs"),
+            "at {width} columns the row names only the file the rename came \
+             from: {row:?}"
+        );
+    }
+
+    // Both directions, or the sweep saw only the width where this cannot fail.
+    assert!(
+        saw_pair > 0 && saw_alone > 0,
+        "the sweep saw the pair {saw_pair} times and the new name alone \
+         {saw_alone} times"
+    );
+}
+
+#[test]
+fn a_counts_cell_never_rounds_a_change_to_nothing() {
+    // The counts abbreviation had no gate, and it shipped a wrong number: a
+    // narrower cell left two characters, a 250-line change has no truthful form
+    // in two, and the search fell through to the thousands unit and drew `+0k`.
+    // At exactly forty columns, which is the width I6 is named for.
+    //
+    // Asserted over the drawn row, and at the boundaries of every unit rather
+    // than at comfortable values, because an abbreviation is only ever wrong
+    // where one unit gives way to the next.
+    const BOUNDARIES: [(u32, &str); 10] = [
+        (0, "+0"),
+        (1, "+1"),
+        (250, "+250"),
+        (9_999, "+9999"),
+        (10_000, "+10k"),
+        (999_999, "+999k"),
+        (1_000_000, "+1M"),
+        (999_999_999, "+999M"),
+        (1_000_000_000, "+1G"),
+        (u32::MAX, "+4G"),
+    ];
+
+    // **Whole tokens, not prefixes**, because `contains` is the wrong instrument
+    // for a value: `contains("+1")` is satisfied by `+1k`, `+1M` and `+139`, and
+    // `contains("-0")` is satisfied by `-0k`, which is precisely the wrong number
+    // this test is named after. A token counts only when what follows it cannot
+    // be part of the same number.
+    let draws = |row: &str, want: &str| {
+        row.match_indices(want).any(|(at, _)| {
+            row[at + want.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_ascii_digit() && !"kMG".contains(c))
+        })
+    };
+
+    let mut removed_at = Vec::new();
+    let mut added_at = Vec::new();
+    for (lines, want) in BOUNDARIES {
+        let view = View {
+            list: vec![listed("src/f.rs", lines, 0)],
+            files: 1,
+            ..ragged_counts()
+        };
+        let backend = screen(80, 8, &view, &chrome());
+        let row = row_text(&backend, 1);
+        assert!(
+            draws(&row, want),
+            "a file of {lines} added lines draws something other than {want:?}: \
+             {row:?}"
+        );
+        // The half it shares the cell with, so a fix that widened one and not
+        // the other cannot pass.
+        assert!(
+            draws(&row, "-0"),
+            "the removed half went missing at {lines} added lines: {row:?}"
+        );
+        removed_at.push(column_of(&backend, 1, "-"));
+        // Where the *added* half starts, which is the half a content-sized cell
+        // actually moves. The removed half is right-anchored at the row's edge
+        // and cannot move however the cell is sized, so recording only that
+        // would state a property the layout gets for free.
+        added_at.push(column_of(&backend, 1, "+"));
+    }
+
+    // **The field is fixed, which is the whole reason `COUNT_CELL` is a constant
+    // rather than a rung.** The added half's text grows from `+0` to `+9999`
+    // across these boundaries. Right-aligned inside a fixed field its start
+    // column moves by exactly the text's length; sized to its contents, the
+    // *removed* half would move too. Both are recorded, because each catches a
+    // different way of getting this wrong and neither catches the other's.
+    assert!(
+        removed_at.windows(2).all(|pair| pair[0] == pair[1]),
+        "the removed half moved as the added half grew, so the pair is not two \
+         independently anchored fields: {removed_at:?} for {BOUNDARIES:?}"
+    );
+    let span =
+        |at: &[u16]| at.iter().max().copied().unwrap_or(0) - at.iter().min().copied().unwrap_or(0);
+    assert_eq!(
+        span(&added_at),
+        3,
+        "the added half's start moved by {} columns across `+0` to `+9999`, \
+         where a fixed field right-aligning a two-to-five-character token moves \
+         it by exactly three: {added_at:?}",
+        span(&added_at)
+    );
 }
 
 #[test]

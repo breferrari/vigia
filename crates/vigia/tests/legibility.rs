@@ -1088,6 +1088,160 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 }
 
 #[test]
+fn the_glance_columns_collapse_in_one_order() {
+    // #77's ladder. The columns are decided once for a region now, so the order
+    // they give way in is a property of the region rather than of a row, and it
+    // is the one `SPEC.md` §11.1 records: counts, then the pulse, then heat,
+    // then sparkline.
+    //
+    // Swept rather than sampled, because a ladder is only ever wrong at the
+    // widths where it changes rung, and those move with the fixture's counts.
+    //
+    // Read off the drawn row by colour and glyph together, for the reason the
+    // renderer's own doc gives: the heat strip and a full sparkline bucket draw
+    // the same block, and the pulse shares a foreground with the sparkline.
+    // Restated rather than imported, the way `CONTINUES` and `FACT_JOIN` are: a
+    // test that read the renderer's own table would agree with it by
+    // construction instead of checking it. `RAMP` and `HEAT_BLOCK` are *not*
+    // restated here, because this file already declares them at the top and a
+    // second copy would check the first copy rather than the renderer.
+    const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
+    const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+    // The first width each state is drawn at, and `(counts, heat slices,
+    // sparkline buckets)`. **The widths are pinned as well as the order**,
+    // because a sequence alone is a weak gate: removing the gap the heat strip
+    // reserves shifts every boundary below it by a column and leaves the walk
+    // itself identical, and that mutation survived this test until the widths
+    // went in.
+    //
+    // **Derived rather than recorded from a run**, because a number copied out
+    // of a failure message agrees with the renderer by construction and gates
+    // nothing. Each boundary is `ROW_FLOOR` plus `BAR_WIDTH` plus the layout's
+    // own width, and a layout's width is each slot plus the one column of gap
+    // `reserved` adds:
+    //
+    // | Layout | counts | pulse | heat | spark | width | from |
+    // |---|---|---|---|---|---|---|
+    // | 6 | 12 | 0 | 0 | 0 | 12 | 28 |
+    // | 5 | 12 | 2 | 0 | 0 | 14 | 30 |
+    // | 4 | 12 | 2 | 7 | 0 | 21 | 37 |
+    // | 3 | 12 | 2 | 7 | 5 | 26 | 42 |
+    // | 2 | 12 | 2 | 13 | 5 | 32 | 48 |
+    // | 1 | 12 | 2 | 13 | 9 | 36 | 52 |
+    // | 0 | 12 | 15 | 13 | 9 | 49 | 65 |
+    //
+    // The `from` column is `ROW_FLOOR + BAR_WIDTH + width`: a region is planned
+    // against the pane less a scrollbar column **whether or not one is drawn**,
+    // because whether one is drawn is a fact about the contents and the layout
+    // is not allowed to be. That is the whole of `planning_width`.
+    //
+    // Layouts 5 and 0 are absent below because neither changes what this test
+    // can see: 5 differs from 6 only by the pulse mark and 0 from 1 only by the
+    // pulse label, and the pulse is read by neither of the two counts.
+    //
+    // The walk has moved twice on this branch and both moves are recorded
+    // because both cost something visible:
+    //
+    // - **Four columns up** when the counts cell stopped degrading (22, 31, 36
+    //   became 26, 35, 40), which is both halves going from three columns to
+    //   five. It bought a cell that never draws `+0k` for a 250-line change.
+    // - **Two more** when the scrollbar column became unconditional (26, 35, 40
+    //   became 28, 37, 42). It bought a layout that cannot be moved by a seventh
+    //   changed file appearing.
+    //
+    // The bill for both lands on the sparkline, which now needs 42 columns where
+    // it used to need 36. §11.1 carries the argument.
+    const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
+        (1, (false, 0, 0)),
+        (28, (true, 0, 0)),
+        (37, (true, 6, 0)),
+        (42, (true, 6, 4)),
+        (48, (true, 12, 4)),
+        (52, (true, 12, 8)),
+    ];
+    let theme = theme();
+    let heats = heat_colours(&theme);
+    let view = glancing();
+    let (mut saw_all, mut saw_none) = (false, false);
+    let mut seen: Vec<(u16, (bool, usize, usize))> = Vec::new();
+
+    let spark_fg = [theme.spark.fg.expect("the sparkline has a colour")];
+    for width in WIDTHS {
+        let backend = drawn(width, 8, &view, &chrome());
+        // Row 1 is the first file heading: `glancing`'s rows start at the top of
+        // the body and the header owns row 0.
+        let y = 1u16;
+        // Through `cells_coloured`, which this file already uses for exactly
+        // these two counts. A fourth hand-rolled walk would be a fourth spelling
+        // of "is this cell a heat slice", and the one that drifts is the one
+        // nobody is reading.
+        let heat = cells_coloured(&backend, y, &heats, &[HEAT_BLOCK]).len();
+        let spark = cells_coloured(&backend, y, &spark_fg, &RAMP).len();
+        let counts = rows_at(width, 8, &view, &chrome())[usize::from(y)].contains('+');
+
+        // **Whole rungs.** A count of slices or buckets that is not on the
+        // ladder is a strip shaved one item at a time, which §11.1 forbids for a
+        // thing made of items: it drops whole ones or none.
+        assert!(
+            HEAT_RUNGS.contains(&heat),
+            "at {width} columns the heat strip drew {heat} slices, which is not \
+             one of its rungs"
+        );
+        assert!(
+            SPARK_RUNGS.contains(&spark),
+            "at {width} columns the sparkline drew {spark} buckets, which is not \
+             one of its rungs"
+        );
+
+        let state = (counts, heat, spark);
+        if seen.last().map(|(_, s)| s) != Some(&state) {
+            seen.push((width, state));
+        }
+        if counts && heat > 0 && spark > 0 {
+            saw_all = true;
+        }
+        if !counts && heat == 0 && spark == 0 {
+            saw_none = true;
+        }
+    }
+
+    // Both ends of the ladder, or the sweep only ever saw one of them.
+    assert!(
+        saw_all && saw_none,
+        "the sweep saw everything drawn={saw_all} and nothing drawn={saw_none}, \
+         so it did not cover the whole ladder"
+    );
+
+    // **Monotone, which is the property a reader dragging a pane edge notices.**
+    // Widening must never take an element away. It did before the layouts were
+    // written out as a table: allocating element by element in priority order
+    // lost the sparkline at 37 columns, returned it at 40 and dropped both
+    // glance elements at 41, because each element took the widest rung it could
+    // afford and starved whatever came after it.
+    //
+    // Asserted as a rule *and* pinned as a walk. The rule is what matters and
+    // the walk is what catches a renderer that stayed monotone while moving a
+    // boundary, which a sequence alone cannot see.
+    for pair in seen.windows(2) {
+        let ((below, (was_counts, was_heat, was_spark)), (above, (counts, heat, spark))) =
+            (pair[0], pair[1]);
+        assert!(
+            (counts || !was_counts) && heat >= was_heat && spark >= was_spark,
+            "widening from {below} to {above} columns took something away: \
+             {:?} became {:?}",
+            pair[0].1,
+            pair[1].1
+        );
+    }
+
+    assert_eq!(
+        seen.as_slice(),
+        ACCEPTED_WALK,
+        "the glance ladder walks a different set of states than §11.1 records"
+    );
+}
+
+#[test]
 fn the_header_degrades_at_the_widths_the_spec_records() {
     // `SPEC.md` §11.1 quotes measured column numbers for where the header's
     // facts appear and vanish, and prose carrying a measurement drifts from the
@@ -2321,15 +2475,21 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // predates this region entirely. The question the bar owes an answer to is
     // whether it costs anything **beyond** the column it occupies.
     //
-    // Asked by comparison rather than by arithmetic: the same list row drawn at
-    // `width` with a bar must read exactly as it does at `width - BAR_COLUMNS`
-    // without one. Anything else means the bar is squeezing the row rather than
-    // sitting beside it, and a gate that recomputed the expected path would be
-    // restating `Painter::file_row`'s own ladder.
-    // The bar itself plus the gap before it, restated rather than imported for
-    // the reason `RAMP` and `HEAT_BLOCK` are: a test sharing the renderer's own
-    // constant would agree with it by construction.
-    const BAR_COLUMNS: u16 = 2;
+    // **The answer is now "nothing at all", and this gate says so directly.**
+    // Until #77 the bar's column was taken only when a bar was drawn, so the
+    // question was whether it cost anything *beyond* that column, and the way to
+    // ask it was to compare `width` with a bar against `width - 2` without.
+    //
+    // A region is planned against the pane less a scrollbar column whether or not
+    // one is drawn, because whether one is drawn is a fact about the contents:
+    // the old form let a seventh changed file re-plan every row. So the bar now
+    // costs a drawn row **nothing**, and the comparison is between two screens of
+    // the *same* width that differ only in whether the list overflows. That is
+    // strictly the stronger statement, and it is the one §11.1 makes.
+    //
+    // Asked by comparison rather than by arithmetic throughout, because a gate
+    // that recomputed the expected path would be restating `Painter::file_row`'s
+    // own ladder.
 
     let entries = vec![
         entry("crates/vigia-core/src/frame.rs"),
@@ -2356,7 +2516,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     let mut compared = 0;
     for width in 10..=*WIDTHS.end() {
         let barred = rows_at(width, 24, &with_bar, &chrome());
-        let bare = rows_at(width - BAR_COLUMNS, 24, &without_bar, &chrome());
+        let bare = rows_at(width, 24, &without_bar, &chrome());
 
         // Row one is the first list row. Trailing blanks are already trimmed by
         // `rows_at`, and the bar's own column is the only thing that can follow
@@ -2376,14 +2536,15 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
             continue;
         }
 
-        // Only where a bar is actually drawn. Below the floor the two screens are
-        // one column apart and genuinely draw different rows.
+        // Only where a bar is actually drawn, or the two screens are identical
+        // and the comparison is vacuous.
         if barred[1].ends_with('▕') || barred[1].ends_with('█') {
             assert_eq!(
                 barred_row, bare_row,
                 "at {width} columns a list row with a bar reads {barred_row:?} \
-                 where the same row one column narrower without one reads \
-                 {bare_row:?}, so the bar costs more than its column"
+                 where the same row at the same width without one reads \
+                 {bare_row:?}, so a file count crossing the point where a bar \
+                 appears re-planned the row"
             );
             compared += 1;
         }

@@ -3,7 +3,7 @@ source: crates/vigia/tests/render.rs
 expression: "screen(80, 6, &view, &following_chrome())"
 ---
 "vigia · 1 changed                                                       watching"
-"M crates/vigia-core/src/frame.rs                                           +3 -1"
+"M …es/vigia-core/src/frame.rs                                         +3    -1  "
 "@@ -258,7 +258,9 @@                                                             "
 "258      pub fn advance(&mut self) {                                            "
 "259          let mut files = Vec::new();                                        "
