@@ -74,12 +74,23 @@ struct FirstPaint {
 
 /// One cold start, staged as `vigia::run` stages it.
 ///
-/// **Not identically, and every difference is in the cheap direction.** `run`
-/// also resolves the colour depth and the theme and shortens the worktree name
-/// before its first paint, none of which this includes; and `run`'s single
-/// `Shell::draw` paints *twice*, where this times the two separately so the
-/// second can be reported rather than gated. What is measured is time to the
-/// screen the reader first sees, which is what I7 is about.
+/// **Not identically.** `run` also resolves the colour depth and the theme and
+/// shortens the worktree name before its first paint, none of which this
+/// includes; and `run`'s single `Shell::draw` paints *twice*, where this times
+/// the two separately so the second can be reported rather than gated. What is
+/// measured is time to the screen the reader first sees, which is what I7 is
+/// about.
+///
+/// **One omission is in the expensive direction and is deliberate: the warmer.**
+/// `run` spawns `Highlighter::warm_ahead` just before its draw, so on the real
+/// path a thread is compiling grammars while this window is open. Including it
+/// here would be worse rather than better, because the best-of-three below
+/// would put *three* detached warmers into one measurement where the product
+/// has one, and a gate whose noise floor is its own harness cannot see the
+/// code. Measured at nil on the reference machine (14.85ms against 14.78ms
+/// median over six alternating pairs), and the residual risk is a two-core
+/// runner, where `VIGIA_BUDGET_SLACK` is the lever `SPEC.md` §7 already
+/// provides.
 ///
 /// **A fresh [`Highlighter`] every time, which is what makes this repeatable.**
 /// The compile is cached on the `SyntaxSet` a highlighter owns, so a run reusing

@@ -307,11 +307,28 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     let bait = Scratch::large_diff("warm-escape-bait", 1, 4);
     let outside = bait.path_of("src/mod_0.rs");
 
+    // **Every spelling here has to resolve to a file that exists**, or refused
+    // and not-found are the same answer and the gate is green either way. That
+    // is not hypothetical: an earlier version pointed the `..` spelling at
+    // nothing, and adding `ParentDir` back to the whitelist left it passing.
+    let sibling = bait
+        .root()
+        .file_name()
+        .expect("the bait scratch has a directory name")
+        .to_string_lossy()
+        .into_owned();
     let mut spellings = vec![
         // Absolute, which `PathBuf::join` discards the root for.
         outside.to_string_lossy().into_owned(),
-        "../outside-the-worktree.rs".to_owned(),
+        // And up-and-over into the sibling scratch, which is the `ParentDir`
+        // arm of the guard and the only one that needs no platform spelling.
+        format!("../{sibling}/src/mod_0.rs"),
     ];
+    assert!(
+        scratch.root().join(&spellings[1]).exists(),
+        "the `..` spelling resolves to nothing, so refusing it and failing to \
+         find it are the same answer and this gate cannot fail"
+    );
 
     // **The spelling a blacklist misses, and it has to name a file that really
     // exists.** A path pointing at nothing is refused and not-found alike, so a
@@ -323,8 +340,16 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     //
     // On Unix an absolute path has no prefix, so the case is already the one a
     // line above and there is nothing extra to spell.
+    //
+    // Asserted to round-trip rather than assumed: `get(2..)` strips two bytes,
+    // not a prefix, so on a machine whose temp directory is a UNC share or a
+    // verbatim path it yields something the guard *accepts* and that joins to
+    // nothing under the worktree. The gate would then pass while asserting
+    // nothing, which is the failure it exists to prevent one level up.
     #[cfg(windows)]
-    if let Some(rooted) = outside.to_string_lossy().get(2..) {
+    if let Some(rooted) = outside.to_string_lossy().get(2..)
+        && scratch.root().join(rooted) == outside
+    {
         spellings.push(rooted.to_owned());
     }
 
