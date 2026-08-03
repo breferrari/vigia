@@ -1,0 +1,164 @@
+#!/usr/bin/env sh
+# Self-test for step 1's milestone selection and pre-flight comparison 6.
+#
+# Why this exists: the selection rule is a jq filter inside a markdown file, so
+# no cargo test can reach it, and the first two edits to it were verified by
+# hand into a GitHub comment. That verification died with the shell it ran in.
+# CLAUDE.md's rule is that an invariant without a failing test is a wish, and
+# this is the cheapest thing that makes it one.
+#
+# It is offline and hermetic: every case is a fixture, so it needs no network,
+# no `gh`, and no particular state of the tracker. Run it after any edit to the
+# query or to the three rules beside it.
+#
+#   sh .claude/skills/take-next/selftest.sh
+#
+# Requires `jq` only, which step 1 already requires.
+
+set -u
+FAIL=0
+SKILL="$(dirname "$0")/SKILL.md"
+
+# The filter under test. It is duplicated from SKILL.md deliberately rather than
+# parsed out of it, because a parser that silently matches nothing would make
+# this whole file green against code it never ran. Instead the duplication is
+# asserted below, which fails loudly in both directions.
+SELECT='[ .[]
+    | select(.open_issues > 0)
+    | select((.description // "") | startswith("Shelf:") | not)
+    | { order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }
+  ] | sort_by(.order, .title) | .[0].title // empty'
+
+ok() { printf '  ok   %s\n' "$1"; }
+no() { printf '  FAIL %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; FAIL=$((FAIL + 1)); }
+
+case_is() { # name, expected, json
+  actual=$(printf '%s' "$3" | jq -r "$SELECT" 2>&1 | tr -d '\r')
+  [ "$actual" = "$2" ] && ok "$1" || no "$1" "$2" "$actual"
+}
+
+echo "selection:"
+
+# The live shape at the time of #83: the shelf carries the marker and sits
+# numerically below both phases that must be taken. Answer must be Phase 6.
+case_is "shelf is skipped even when its number is lowest" \
+  "Phase 6 - measured" \
+  '[{"title":"Phase 5 - deferred","description":"Shelf: never next. Work found mid-phase","open_issues":28},
+    {"title":"Phase 6 - measured","description":"A claim that outruns its evidence","open_issues":4},
+    {"title":"Phase 7 - distribution","description":"Filter: does this ship","open_issues":1}]'
+
+# #83's own stated correct answer, from when Phase 4 was still open.
+case_is "lowest eligible phase number wins" \
+  "Phase 4 - artifacts" \
+  '[{"title":"Phase 4 - artifacts","description":"","open_issues":7},
+    {"title":"Phase 5 - deferred","description":"Shelf: never next.","open_issues":28},
+    {"title":"Phase 6 - measured","description":"","open_issues":4}]'
+
+# The bug: a milestone with no open issues must not be selected, which is the
+# case the paragraph above rule 1 has warned about since the first version.
+case_is "a milestone with no open issues is not selected" \
+  "Phase 7 - distribution" \
+  '[{"title":"Phase 6 - measured","description":"","open_issues":0},
+    {"title":"Phase 7 - distribution","description":"","open_issues":1}]'
+
+# Rule 3: only shelved work left is empty output, not an answer.
+case_is "only shelved work remaining gives empty" \
+  "" \
+  '[{"title":"Phase 5 - deferred","description":"Shelf: never next.","open_issues":28}]'
+
+case_is "an empty board gives empty" "" '[]'
+
+# Rule 1: an unrecognised title sorts last rather than vanishing. Both halves
+# matter, so both are asserted: it loses to a real phase, and it still wins when
+# it is the only thing eligible.
+case_is "an unnumbered milestone sorts last" \
+  "Phase 7 - distribution" \
+  '[{"title":"Housekeeping","description":"","open_issues":3},
+    {"title":"Phase 7 - distribution","description":"","open_issues":1}]'
+
+case_is "an unnumbered milestone is still selectable alone" \
+  "Housekeeping" \
+  '[{"title":"Housekeeping","description":"","open_issues":3}]'
+
+# The anchor is real: "Phase 6" not at the start does not make it phase 6.
+case_is "the phase number must begin the title" \
+  "Phase 2 - two" \
+  '[{"title":"The Phase 1 retrospective","description":"","open_issues":1},
+    {"title":"Phase 2 - two","description":"","open_issues":1}]'
+
+# Ordering is numeric, not lexicographic. 10 must not beat 9.
+case_is "ordering is numeric, not lexicographic" \
+  "Phase 9 - nine" \
+  '[{"title":"Phase 10 - ten","description":"","open_issues":1},
+    {"title":"Phase 9 - nine","description":"","open_issues":1}]'
+
+# A tie must be defined rather than input-order dependent, so the same two
+# milestones are asserted in both orders and must give the same answer.
+case_is "a tie breaks on title, given one order" \
+  "Phase 6 - alpha" \
+  '[{"title":"Phase 6 - zulu","description":"","open_issues":1},
+    {"title":"Phase 6 - alpha","description":"","open_issues":1}]'
+
+case_is "a tie breaks on title, given the other" \
+  "Phase 6 - alpha" \
+  '[{"title":"Phase 6 - alpha","description":"","open_issues":1},
+    {"title":"Phase 6 - zulu","description":"","open_issues":1}]'
+
+# Rule 2 is a prefix rule. "Shelf:" further in is prose, not a marker.
+case_is "Shelf: mid-description does not exclude" \
+  "Phase 6 - measured" \
+  '[{"title":"Phase 6 - measured","description":"Not a Shelf: this is real work","open_issues":1}]'
+
+# A null description must not throw, which is what `// ""` is for. GitHub
+# returns null rather than "" for a milestone created without one.
+case_is "a null description is handled" \
+  "Phase 6 - measured" \
+  '[{"title":"Phase 6 - measured","description":null,"open_issues":1}]'
+
+echo "mutation (the check must be able to fail):"
+
+# Rule 1 claims the fallback is what stops a milestone vanishing, and that scan
+# fails loudly where capture fails silently. Both halves are asserted, because
+# the rule said the opposite before #83's review corrected it and the prose is
+# only trustworthy if something holds it to account.
+F='[{"title":"Phase 6 - six","description":"","open_issues":1},{"title":"Backlog","description":"","open_issues":1}]'
+
+kept=$(printf '%s' "$F" | jq -c '[.[] | {o:(((.title|capture("^Phase +(?<n>[0-9]+)").n)//"9999")|tonumber)}] | length' 2>/dev/null | tr -d '\r')
+[ "$kept" = "2" ] && ok "with the fallback, capture keeps every milestone too" \
+  || no "with the fallback, capture keeps every milestone too" "2" "$kept"
+
+kept=$(printf '%s' "$F" | jq -c '[.[] | {o:((.title|capture("^Phase +(?<n>[0-9]+)").n)|tonumber)}] | length' 2>/dev/null | tr -d '\r')
+[ "$kept" = "1" ] && ok "without the fallback, capture drops one silently" \
+  || no "without the fallback, capture drops one silently" "1" "$kept"
+
+if printf '%s' "$F" | jq -c '[.[] | {o:((.title|[scan("^Phase +([0-9]+)")[]]|first)|tonumber)}]' >/dev/null 2>&1; then
+  no "without the fallback, scan fails loudly" "a jq error" "no error"
+else
+  ok "without the fallback, scan fails loudly"
+fi
+
+echo "drift:"
+
+# The filter above must be the filter SKILL.md tells a session to run. Checking
+# one distinctive line is enough to catch an edit to either side, and it is the
+# line carrying every property asserted above.
+NEEDLE='{ order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }'
+if grep -qF "$NEEDLE" "$SKILL" 2>/dev/null; then
+  ok "the tested filter is the one SKILL.md documents"
+else
+  no "the tested filter is the one SKILL.md documents" "found in SKILL.md" "not found"
+fi
+
+# Comparison 6 says the shelf is identified by a description prefix, so the
+# marker string must appear in both places that depend on it.
+grep -qF 'startswith("Shelf:")' "$SKILL" 2>/dev/null \
+  && ok "SKILL.md still identifies the shelf by prefix" \
+  || no "SKILL.md still identifies the shelf by prefix" "startswith(\"Shelf:\")" "absent"
+
+echo
+if [ "$FAIL" -eq 0 ]; then
+  echo "all checks passed"
+else
+  echo "$FAIL check(s) failed"
+fi
+exit "$FAIL"

@@ -47,13 +47,27 @@ This is a reconstruction. The original lived in a global skills directory, was n
 Do not guess and do not scroll the code looking for where things stopped. One command finds the work:
 
 ```sh
-# The earliest milestone that still HAS open issues, then its issues.
-gh api "repos/{owner}/{repo}/milestones?state=open&sort=due_on&direction=asc" \
-  --jq '[.[] | select(.open_issues > 0)][0].title'
+# The earliest ELIGIBLE milestone that still HAS open issues, then its issues.
+gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" --jq '
+  [ .[]
+    | select(.open_issues > 0)
+    | select((.description // "") | startswith("Shelf:") | not)
+    | { order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }
+  ] | sort_by(.order, .title) | .[0].title // empty'
 gh issue list --state open --milestone "<that title>"
 ```
 
 **Not "the earliest open milestone".** A finished phase leaves its milestone open until someone closes it, so the earliest *open* milestone can be one with zero open issues, and the query then returns nothing and the session has no work to take. That happened the first time this was tried: Phase 1 was complete, merged, and still open, so `take-next` found the plan and then found nothing in it.
+
+**And not "the earliest" by whatever the API hands back, either.** That query used to sort on `due_on`, and **every milestone here has none** — sorting a set on a key that is null for every member does not define an order, so `[0]` was whichever one the API happened to return first. It gave the right answer by luck while there were two open milestones and the lower number was the one to take. The Phase 4 re-housing ended that: number order and execution order came apart, and the shelf, which must **never** be selected, stopped being separable from the phases by number alone — it sat between Phase 4 and Phase 6 while all three had work, and it is below both survivors now that Phase 4 is closed. **What it actually cost is one occurrence and one near miss**, which is worth stating precisely because the case for the fix does not need more: the [#66](https://github.com/breferrari/vigia/issues/66) session recorded that step 1 returned the wrong phase and shipped Phase 4 work regardless, so the wrong answer was caught; the pass that fixed this was handed `Phase 5` outright and caught it only by reading the roadmap prose the query cannot see. Neither was caught by anything automatic, and that is the finding — not a tally.
+
+Three rules, so that the next milestone added inherits them rather than the accident:
+
+1. **The order is the phase number in the title.** It is deterministic and it needs no metadata, where `due_on` was the same shape `SPEC.md` §7 keeps finding one domain over: an instrument that looks settled and proves nothing, because a sort key that is null on every row reads exactly like an order and defines none. A title not *beginning* `Phase <n>` sorts **last** rather than being dropped, and the thing holding that line is `// "9999"`, not the choice of `scan`: with the fallback in place `capture` behaves identically, and it is only with the fallback removed that the two come apart. That is the reason `scan` is still the right one to write. Delete the fallback and `scan` fails **loudly** (`null cannot be parsed as a number`) while `capture` silently keeps 2 milestones of 3 — so the form that survives a future edit badly is the one to leave behind. Ties break on the title, so two milestones sharing a number still have a defined order. **Sorting last is a cheaper failure than vanishing, not a safe one:** a milestone renamed off `Phase <n>` still skips its turn silently, which is why comparison 6 below exists.
+2. **A milestone whose description begins with `Shelf:` is never selected.** A shelf is permanently open and never "next", and until #83 that was a fact only prose knew, so no query could act on it. Mark one by starting its description with `Shelf:` — [Phase 5](https://github.com/breferrari/vigia/milestone/5) reads `Shelf: never next. …` — and leave the marker off anything meant to be taken in sequence.
+3. **An empty result is not an error, and it is not the paragraph above either.** Line 56's "returns nothing" is a milestone left open with zero open issues, which `select(.open_issues > 0)` now discards on its own. Empty *here* means every eligible milestone was discarded that way and what is left is shelved, exhausted, or nothing at all — so read which before acting, because the three want different things and only the first leads anywhere. Shelved work remaining is the point at which taking from the shelf becomes a deliberate choice rather than a default, and the deferral reason is re-read first, because a reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)). Drop the trailing `| .[0].title // empty` to see the ranked list the answer came from; one bare title is the answer without any of its evidence.
+
+**All three rules are asserted by `sh .claude/skills/take-next/selftest.sh`**, which is offline, needs only `jq`, and takes a second. Run it after any edit to the query or to the rules beside it. It exists because the first two edits to this command were verified by hand into a GitHub comment, which is verification that dies with the shell it ran in, and because the rationale in rule 1 was **wrong** in its first version and nothing would have caught that. It also fails if the filter here and the filter it tests drift apart, in either direction.
 
 **If you finish the last issue in a milestone, close the milestone.** It is the step that makes the next session's first command work.
 
@@ -104,13 +118,37 @@ git show origin/main:SPEC.md \
 > closed — it returns the settle-margin bullet, the exact prerequisite that hid
 > for two phases. Widen it only with the same two runs.
 
-Then five comparisons. Any hit is a finding to fix **in this pass**, not a note:
+Then six comparisons. Any hit is a finding to fix **in this pass**, not a note:
 
 1. **Untracked** — an invariant the spec declares that no issue title names.
 2. **Orphan** — an issue naming an `I<n>` token the spec no longer declares. This is what catches a rename or a split that left the tracker behind.
 3. **State** — a roadmap row marked `✅` whose issue is open, or a row not marked done whose issue is closed.
 4. **Unfiled** — an *open* issue with **no milestone**. This looks least like drift and matters most: the query above filters *by* milestone, so an unmilestoned issue is not deprioritised, it is **invisible** and will never be returned however long it sits. Seven had accumulated before anyone noticed.
 5. **Untracked prerequisite** — an open `SPEC.md` §10 bullet that **no issue names**, and above all one whose text orders work: *before*, *first*, *until*, *blocked*, *prerequisite*. Unlike the four above this wants judgement rather than a token match, so read the five to ten bullets the commands print and say which have nothing behind them. **A §10 bullet that says another task must happen first is a blocker with no tracker entry, and the task it blocks will be taken anyway** — every check above will run clean, because prose carries no `I<n>` and no `#<n>`. That is strictly worse than the unfiled case: an unmilestoned issue is at least *in* the tracker. §10 said *"narrow the settle margin… do this before the soak test"* and nothing tracked it, so [#5](https://github.com/breferrari/vigia/issues/5) sat blocked by name for **two phases** and was only caught by a session happening to read §10 while loading context. File the blocker, then decide whether it is in scope for this pass or a prerequisite to take first — but decide it before planning, not after.
+6. **Milestone drift** — the phase step 1 chose must be the phase `ROADMAP.md` would have chosen, and every open milestone with open issues must have a `## Phase <n>` section. This is the only comparison that checks *this file's own first command*, and it exists because every other one ran clean on the pass that [#83](https://github.com/breferrari/vigia/issues/83) fixed while step 1 was handing that session the shelf. Step 1's answer is now correct **by construction**; comparison 6 is what makes it correct **by evidence**, and the two are not the same claim, which is the distinction §10 draws between a gate that fires and a budget met at its own window.
+
+```sh
+git show origin/main:ROADMAP.md | grep -oE '^## Phase [0-9]+.*' | sed 's/^## //' | tr -d '\r' > /tmp/order.txt
+gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" > /tmp/ms.json
+jq -r '.[] | select(.open_issues > 0) | .title' /tmp/ms.json | tr -d '\r' > /tmp/withwork.txt
+jq -r '.[] | select(.open_issues > 0) | select((.description // "") | startswith("Shelf:")) | .title' /tmp/ms.json | tr -d '\r' > /tmp/shelved.txt
+
+# What ROADMAP.md's section order says, which is the authority on sequence.
+while IFS= read -r s; do
+  grep -qxF "$s" /tmp/withwork.txt || continue
+  grep -qxF "$s" /tmp/shelved.txt && continue
+  echo "roadmap says: $s"; break
+done < /tmp/order.txt
+
+# Open milestones with work that no ROADMAP section names.
+LC_ALL=C sort /tmp/withwork.txt > /tmp/withwork.sorted
+LC_ALL=C sort /tmp/order.txt > /tmp/order.sorted
+LC_ALL=C comm -23 /tmp/withwork.sorted /tmp/order.sorted
+```
+
+**Two ways it fires, and each catches a different silent failure.** A *disagreement* between step 1's answer and the roadmap's means the `Shelf:` marker was edited off, or gained a leading space, or a phase was renumbered — the marker is remote free text with none of this repo's controls over it, and it is the load-bearing input the diff cannot show you. An *orphan* means a milestone was renamed off `Phase <n>` and now sorts to the 9999 bucket, so its turn is skipped without anything saying so, or a new milestone was created with no roadmap section at all. Mutation-tested on all four before landing, plus the unchanged case, because a check that cannot report "no drift" has not been tested.
+
+**`tr -d '\r'` is not optional here**, and it is the trap two bullets below rather than a new one: `jq` emits CRLF on Windows, `grep -qxF` then fails against every line, and the comparison reports the entire board as orphaned. It did exactly that on the first run of this check.
 
 > [!WARNING]
 > **Read `SPEC.md` and `ROADMAP.md` from `origin/main`, never the working tree**
@@ -124,20 +162,21 @@ Then five comparisons. Any hit is a finding to fix **in this pass**, not a note:
 > Comparing uncommitted state is occasionally what you want. It has to be asked
 > for out loud, never the default.
 
-Only the first two directions are cheap to eyeball; run all four anyway. A check that nags forever gets ignored exactly like one that stays silent, so if a finding is a false positive, fix the *check* here rather than learning to skip it.
+Only the first two directions are cheap to eyeball; run all six anyway. A check that nags forever gets ignored exactly like one that stays silent, so if a finding is a false positive, fix the *check* here rather than learning to skip it.
 
-**Two traps if you match these with `jq`, both of which made the first run report every invariant as drifting in both directions at once:**
+**Three traps if you match these with `jq`. The first two made the first run report every invariant as drifting in both directions at once; the third silently halves a comparison rather than breaking it:**
 
 - **`\b` does not work.** In a `jq` string, `\b` is the *backspace* character, so `test("\\bI1\\b")` compiles a regex containing two backspaces and matches nothing — silently, and in the "everything is broken" direction. Use an explicit class instead of escaping harder:
   ```sh
   B='(^|[^A-Za-z0-9])'; A='([^A-Za-z0-9]|$)'
   jq -e --arg i "$inv" --arg b "$B" --arg a "$A" 'any(.[]; .title | test($b+$i+$a))'
   ```
-- **`jq` emits CRLF on Windows.** Its output into a shell loop carries `\r`, so `grep -qxF "$token"` fails against a clean list for every token. Pipe through `tr -d '\r'` before comparing.
+- **`jq` emits CRLF on Windows.** Its output into a shell loop carries `\r`, so `grep -qxF "$token"` fails against a clean list for every token. Pipe through `tr -d '\r'` before comparing. Comparison 6 hit this on its own first run and reported every milestone as orphaned, which is what the bullet above predicts and is still what it looks like from the outside: a catastrophic finding.
+- **`--paginate` does not compose with `--jq`.** `gh api --paginate --jq` runs the filter **once per page** and concatenates the outputs, so a filter that sorts and takes `.[0]` emits one answer per page rather than one answer. Verified against this repository at `per_page=2`: two lines came back, `Phase 6` and `Phase 7`, which is the ambiguity step 1 exists to remove, reintroduced by the flag that looks like the careful choice. `--slurp` is refused outright alongside `--jq`. So step 1 uses `per_page=100` and no `--paginate`, and it stays that way until something needs more than 100 milestones, at which point the fix is to page and sort in the shell, not to add the flag.
 
-The two together produce a check that is *100% false positive* while looking like a catastrophic finding. Mutate it once before you trust it: point a comparison at a token you know is tracked and confirm it comes back **clean**. A drift check that cannot report "no drift" has not been tested.
+The first two together produce a check that is *100% false positive* while looking like a catastrophic finding. Mutate it once before you trust it: point a comparison at a token you know is tracked and confirm it comes back **clean**. A drift check that cannot report "no drift" has not been tested.
 
-Take the **topmost unstarted task in the earliest open phase**. Do not skip ahead to something more interesting. If a later task genuinely blocks the current one, say so and take the blocker, but say it out loud first.
+Take the **topmost unstarted task in the earliest *eligible* phase** — eligible in the sense the three rules above give it, not "the earliest open milestone", which is the phrasing this section opens by rejecting twice. Do not skip ahead to something more interesting. If a later task genuinely blocks the current one, say so and take the blocker, but say it out loud first.
 
 If a task is already `🔨 in progress`, check `git status` and the open PRs before starting anything: another session may be mid-flight, and two sessions on one task is worse than one session idle.
 
@@ -215,6 +254,8 @@ At the end of the pass, diff the shipment against the plan and report the result
   ```sh
   gh issue create --title "..." --body-file f.md --milestone "Phase 5 — deferred findings"
   ```
+
+  That milestone is named literally because it is the shelf that exists today. **The shelf is a class, not a name** — step 1's rule 2 identifies one by a description beginning `Shelf:` — so if a second is ever added, file against the right one rather than against this string.
 - **An invariant is not landed until a test fails when it is violated.** Write the failing test first, watch it fail, then make it pass. A test that passes against broken code is worse than no test.
 - **Budgets are tests.** If the task touches the frame path, the budget gate runs.
 - **Do not add a dependency `SPEC.md` does not name.** Propose it into the spec, in its own commit, then use it.
