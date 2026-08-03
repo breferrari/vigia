@@ -291,10 +291,12 @@ const CARET_WIDTH: usize = 2;
 /// that spent the file's name on a marker pointing at it would be naming nothing.
 ///
 /// **It counts [`BAR_WIDTH`] even on a screen with no bar, and that is the
-/// ruling.** The two ladders otherwise collide: [`Painter::list`] measures the
-/// width it is handed, `render` has already taken the bar's columns off it, and
-/// whether a bar exists depends on whether the list is *scrollable* — which is a
-/// fact about the changed-file count, not about the pane. With both floors at
+/// ruling.** The two ladders otherwise collide: `render` has already taken the
+/// bar's columns off the width the region is handed, and whether a bar exists
+/// depends on whether the list is *scrollable* — which is a fact about the
+/// changed-file count, not about the pane. [`planning_width`] now generalises
+/// this ruling to the glance columns, which had the identical defect for the
+/// identical reason; this floor is where it was first paid. With both floors at
 /// sixteen, a seventh changed file made the caret vanish at sixteen and seventeen
 /// columns with nothing about the pane having moved, which is exactly the
 /// "reads as the current file changing" failure the ladder's own gate exists to
@@ -702,7 +704,7 @@ fn memory_cell(bytes: u64) -> String {
 
 /// The diagnostics ladder, widest rung first.
 ///
-/// `0.8ms frame  19MiB`, then the frame time alone, then nothing. These are the
+/// `0.8ms frame   19MiB`, then the frame time alone, then nothing. These are the
 /// two cells that describe **`vigia` itself** rather than the worktree, which is
 /// what puts them below both the hints and the state in `SPEC.md` §11.1's drop
 /// order: the hints are how a reader operates the tool and the state is what the
@@ -994,7 +996,9 @@ fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
 /// `+4294967295` would instead spend eleven columns a row forever on a number no
 /// file reaches.
 ///
-/// What it costs is the sparkline between 36 and 39 columns, where the wider
+/// What it cost when it landed was the sparkline between 36 and 39 columns
+/// (38 to 41 against today's [`planning_width`], which moved every boundary two
+/// columns after this was measured), where the wider
 /// counts field no longer leaves room for it. That is the honest trade: a
 /// glance element at four widths against a number that says zero when it means
 /// two hundred and fifty.
@@ -1127,9 +1131,10 @@ fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
 /// nothing a reader scrolls past can move anything.
 ///
 /// **One of these per region, never one per screen**, because the two regions
-/// are different widths: the list insets by [`CARET_WIDTH`] and may have given a
-/// column to a scrollbar. `SPEC.md` §11.1 already rules that the two do not
-/// align glyph for glyph.
+/// are different widths: the list insets by [`CARET_WIDTH`] and the stream does
+/// not. That is now the only difference between them, since [`planning_width`]
+/// has both pay the scrollbar column whether or not one is drawn. `SPEC.md`
+/// §11.1 already rules that the two do not align glyph for glyph.
 ///
 #[derive(Clone, Copy)]
 struct Columns {
@@ -2484,9 +2489,13 @@ impl Painter<'_> {
             // single-character string, which measured ten times the cost of
             // writing the cell. A bar is `list + diff` rows of that, twice a
             // screen.
-            self.buf[(x, area.y + row as u16)]
-                .set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
-                .set_style(style);
+            // `cell_mut` for the reason the strip and the rule give: trading a
+            // clipping writer for a direct one to save the allocation traded the
+            // clipping away too, and `render` promises any area is legal.
+            if let Some(cell) = self.buf.cell_mut((x, area.y + row as u16)) {
+                cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
+                    .set_style(style);
+            }
         }
     }
 
@@ -2505,7 +2514,10 @@ impl Painter<'_> {
         let mut glyph = [0u8; 4];
         let glyph = RULE.encode_utf8(&mut glyph);
         for x in area.x..area.x + area.width {
-            self.buf[(x, area.y)].set_symbol(glyph).set_style(style);
+            let Some(cell) = self.buf.cell_mut((x, area.y)) else {
+                continue;
+            };
+            cell.set_symbol(glyph).set_style(style);
         }
     }
 
@@ -2521,7 +2533,6 @@ impl Painter<'_> {
             return;
         }
 
-        self.gutter = gutter_width(view, usize::from(area.width));
         // The stream's own width rather than the list's: the two regions are
         // different widths, and `SPEC.md` §11.1 rules they need not align glyph
         // for glyph. Neither reads a row, so a heading scrolling past cannot
@@ -2534,6 +2545,15 @@ impl Painter<'_> {
         let shown = usize::from(area.height);
         let inner = planning_width(pane, 0);
         let columns = Columns::plan(inner);
+
+        // **The gutter comes from the same width, and that is the same ruling
+        // one element over.** `area` has already lost the scrollbar's columns
+        // when a bar was drawn, so measuring the gutter against it made the line
+        // numbers a function of the *diff's height*: at 29 and 30 columns a diff
+        // growing past the pane took the whole gutter off every content row,
+        // which is the layout defect this branch exists to remove, on the rows a
+        // reader is actually reading rather than on a heading.
+        self.gutter = gutter_width(view, usize::from(inner));
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             match row {
@@ -2689,9 +2709,15 @@ impl Painter<'_> {
             let glyph = HEAT_BLOCK.encode_utf8(&mut glyph);
             let x = right.x + right.width - heat.len() as u16;
             for (offset, slice) in heat.iter().enumerate() {
-                self.buf[(x + offset as u16, right.y)]
-                    .set_symbol(glyph)
-                    .set_style(self.theme.heat(*slice));
+                // `cell_mut` rather than `Index`, because this used to be a
+                // `set_stringn` call and that clipped. Trading it for a direct
+                // write to stop the per-cell allocation also traded away the
+                // clipping, and `render`'s contract is that any area is legal:
+                // an area wider than its buffer aborted the whole paint on the
+                // one row carrying a strip.
+                if let Some(cell) = self.buf.cell_mut((x + offset as u16, right.y)) {
+                    cell.set_symbol(glyph).set_style(self.theme.heat(*slice));
+                }
             }
         }
         past(&mut right, columns.heat);

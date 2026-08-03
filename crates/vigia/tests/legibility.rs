@@ -1116,8 +1116,9 @@ fn the_glance_columns_collapse_in_one_order() {
     //
     // **Derived rather than recorded from a run**, because a number copied out
     // of a failure message agrees with the renderer by construction and gates
-    // nothing. Each boundary is `ROW_FLOOR` plus the layout's own width, and a
-    // layout's width is each slot plus the one column of gap `reserved` adds:
+    // nothing. Each boundary is `ROW_FLOOR` plus `BAR_WIDTH` plus the layout's
+    // own width, and a layout's width is each slot plus the one column of gap
+    // `reserved` adds:
     //
     // | Layout | counts | pulse | heat | spark | width | from |
     // |---|---|---|---|---|---|---|

@@ -809,19 +809,29 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
     // What pins the field itself is
     // `a_counts_cell_never_rounds_a_change_to_nothing`, which holds the removed
     // half still while the added half grows.
-    for (row, lost, kept) in [(1usize, 's', ['h']), (2, 'h', ['s'])] {
-        for class in kept {
-            assert_eq!(
-                columns_of(&after[row], class),
-                columns_of(&after[0], class),
-                "row {row} lost its {lost:?} and its {class:?} moved with it, so \
-                 the blank slot was closed rather than left: {:?} against row 0 \
-                 {:?}",
-                after[row],
-                after[0]
-            );
-        }
-    }
+    // **Only the sparkline's slot is readable here, and that is a property of
+    // the drawing order rather than an omission.** The elements are placed right
+    // to left, so a closed slot pulls what is *left* of it rightwards and leaves
+    // everything right of it alone. The sparkline sits between the heat strip
+    // and the counts, so closing its slot moves the strip and this can see it.
+    // The strip's own slot is the leftmost of the three, and the only things
+    // left of *it* are the pulse and the path, both of which `glance_columns`
+    // maps to `_`. Pairing the heat-losing row with the sparkline would assert
+    // something that cannot fail, and an earlier form of this test did.
+    //
+    // What holds the strip's slot instead is
+    // `the_glance_columns_collapse_in_one_order`, whose pinned walk reads the
+    // strip's own width at every column from 1 to 120, and the snapshots. Said
+    // here because a gate that looks symmetrical and is not is worse than one
+    // that states its own reach.
+    assert_eq!(
+        columns_of(&after[1], 'h'),
+        columns_of(&after[0], 'h'),
+        "row 1 lost its sparkline and its heat strip moved with it, so the blank \
+         slot was closed rather than left: {:?} against row 0 {:?}",
+        after[1],
+        after[0]
+    );
 
     // Non-vacuity: the gapped rows really did stop drawing those elements, or
     // the comparison above is between two identical screens.
@@ -912,7 +922,10 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
     // depend on the file count. The columns pay it for the same reason now.
     //
     // Swept, because a boundary is the only place a rung can move, and asserted
-    // over both regions.
+    // over both regions: the list's bar answers to the changed-file count and
+    // the stream's to the diff's total height, so each needs its own fixture
+    // pair. An earlier form of this test claimed both and compared only the
+    // list, which is the shape it exists to catch one level down.
     let entries: Vec<_> = (0..8)
         .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
         .collect();
@@ -931,27 +944,113 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
     // Few enough to need no bar, and enough to force one, at a height that shows
     // the list region.
     let (few, many) = (view_of(2), view_of(8));
-    let mut differed = false;
+    // Non-vacuity, and it has to be counted rather than flagged: a `differed`
+    // bool set beside the assertion below can never be read, because the
+    // assertion panics first. What can go wrong silently is the sweep drawing
+    // *nothing* at every width, so what is counted is the widths that drew a
+    // glance element at all.
+    let mut drew = 0usize;
     for width in 16..=120u16 {
         let quiet = glance_columns(&screen(width, 12, &few, &chrome()));
         let busy = glance_columns(&screen(width, 12, &many, &chrome()));
         // Row 0 of each is the first file row of the pinned list, and it is the
         // same file in both fixtures.
-        if quiet.is_empty() || busy.is_empty() {
-            continue;
-        }
-        if quiet[0] != busy[0] {
-            differed = true;
-        }
         assert_eq!(
             quiet[0], busy[0],
             "at {width} columns the list's glance columns moved because the \
              changed-file count crossed the point where a scrollbar appears"
         );
+        if quiet[0].contains('h') || quiet[0].contains('s') || quiet[0].contains('n') {
+            drew += 1;
+        }
     }
     assert!(
-        !differed,
-        "the sweep recorded a difference it then failed to assert on"
+        drew > 40,
+        "only {drew} widths drew a glance element at all, so this swept over \
+         blank rows"
+    );
+
+    // **The stream, whose bar answers to the diff's height rather than the file
+    // count.** A separate fixture pair, because nothing about the list can make
+    // the stream's bar appear.
+    let short = View {
+        total_rows: 2,
+        rows_above: 0,
+        ..view_of(2)
+    };
+    let tall = View {
+        total_rows: 4_000,
+        rows_above: 0,
+        ..view_of(2)
+    };
+    // Compared with the bar's own column stripped, since that column is what
+    // differs by construction; what must not differ is everything left of it.
+    let strip = |row: String| row.trim_end_matches(['▕', '█']).trim_end().to_owned();
+    for width in 16..=120u16 {
+        let flat = screen(width, 12, &short, &chrome());
+        let deep = screen(width, 12, &tall, &chrome());
+        // The first stream heading sits below the list and its rule.
+        for y in 4..8u16 {
+            assert_eq!(
+                strip(row_text(&flat, y)),
+                strip(row_text(&deep, y)),
+                "at {width} columns row {y} of the stream moved because the diff \
+                 grew taller than the pane"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
+    // **The same defect as the glance columns, one element over, and on the rows
+    // a reader is actually reading.** The gutter was measured against the
+    // region's width, and the stream's region loses two columns to a scrollbar,
+    // and that bar appears when the diff outgrows the pane. So crossing the pane
+    // height took the whole gutter off every content row: watching an agent
+    // write, the line numbers vanish the moment the diff gets long, for no
+    // reason on screen.
+    //
+    // Two views identical in what they draw, differing only in `total_rows`.
+    // Swept, because the gutter gives way at a width band that moves with the
+    // digit count rather than at a single boundary; it was reachable at 29 and
+    // 30 columns for three-digit numbers.
+    let body = |total_rows: usize| View {
+        rows: vec![
+            Row::File(listed("src/engine/watch.rs", 42, 7)),
+            line(LineKind::Added, 258, "    pub fn advance(&mut self) {"),
+        ],
+        list: Vec::new(),
+        files: 1,
+        total_rows,
+        rows_above: 0,
+        ..ragged_counts()
+    };
+
+    // **Asserted on the gutter, not on the whole row.** A drawn scrollbar takes
+    // two columns and the text reflows into what is left, which is what a
+    // scrollbar is for and is true on `main` too. What was the defect is the
+    // gutter *vanishing*: it is all-or-nothing rather than a reflow, so the line
+    // numbers left the screen entirely on the tick the diff got long.
+    let mut compared = 0usize;
+    for width in 20..=120u16 {
+        let flat = row_text(&screen(width, 8, &body(2), &chrome()), 2);
+        let deep = row_text(&screen(width, 8, &body(10_000), &chrome()), 2);
+        if !flat.contains("258") {
+            continue;
+        }
+        compared += 1;
+        assert!(
+            deep.contains("258"),
+            "at {width} columns a diff taller than the pane lost its line \
+             numbers entirely, so the gutter is sized from the diff's height: \
+             {flat:?} became {deep:?}"
+        );
+    }
+    assert!(
+        compared > 40,
+        "only {compared} widths drew the line number at all, so this swept over \
+         rows with no gutter to lose"
     );
 }
 
@@ -989,7 +1088,18 @@ fn a_notice_can_never_colour_the_follow_marker() {
                 "at {width} columns with following={following} more than one \
                  marker is green: {green:?}"
             );
-            if !following {
+            if following {
+                // **Exactly one, not at most one.** `<= 1` alone is satisfied by
+                // a pass that stopped tinting the real marker altogether, which
+                // is the other half of the same defect: the notice's glyph won
+                // the scan and the marker it should have lit stayed grey.
+                assert_eq!(
+                    green.len(),
+                    1,
+                    "at {width} columns follow is on and exactly one marker \
+                     should be green: {green:?}"
+                );
+            } else {
                 assert!(
                     green.is_empty(),
                     "at {width} columns a notice's own glyph was painted as the \
@@ -1023,6 +1133,13 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
         ((40, 10), (200, 10)),
         ((10, 6), (80, 6)),
     ] {
+        // **The fixture matrix is the gate here, not the sweep.** An earlier
+        // form carried neither a heat strip nor a pinned list, so it reached
+        // only the footer's recolouring pass and passed against a renderer that
+        // still panicked in two other places: the heat strip and the rule
+        // between the regions both write cells by index, and the strip stopped
+        // clipping when it traded `set_stringn` for a direct write to save an
+        // allocation per cell. A view carrying each is what makes the claim true.
         for view in [
             one_file(),
             View {
@@ -1030,6 +1147,18 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                 list: Vec::new(),
                 rows: Vec::new(),
                 ..one_file()
+            },
+            // A heat strip, a pinned list to put a rule on screen, and enough
+            // files to make the list scrollable so the bar is drawn too.
+            View {
+                list: vec![
+                    listed("src/engine/watch.rs", 42, 7),
+                    listed("src/render/frame.rs", 11, 3),
+                ],
+                rows: vec![Row::File(listed("src/engine/watch.rs", 42, 7))],
+                files: 40,
+                total_rows: 4_000,
+                ..ragged_counts()
             },
         ] {
             let mut buf = Buffer::empty(Rect::new(0, 0, buffer.0, buffer.1));
@@ -2061,6 +2190,7 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
     };
 
     let mut removed_at = Vec::new();
+    let mut added_at = Vec::new();
     for (lines, want) in BOUNDARIES {
         let view = View {
             list: vec![listed("src/f.rs", lines, 0)],
@@ -2081,16 +2211,33 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
             "the removed half went missing at {lines} added lines: {row:?}"
         );
         removed_at.push(column_of(&backend, 1, "-"));
+        // Where the *added* half starts, which is the half a content-sized cell
+        // actually moves. The removed half is right-anchored at the row's edge
+        // and cannot move however the cell is sized, so recording only that
+        // would state a property the layout gets for free.
+        added_at.push(column_of(&backend, 1, "+"));
     }
 
     // **The field is fixed, which is the whole reason `COUNT_CELL` is a constant
-    // rather than a rung.** The added half grows from `+0` to `+9999` across
-    // these boundaries; if the halves were sized to their contents the removed
-    // half would be pushed sideways as it did. Nothing else here would notice.
+    // rather than a rung.** The added half's text grows from `+0` to `+9999`
+    // across these boundaries. Right-aligned inside a fixed field its start
+    // column moves by exactly the text's length; sized to its contents, the
+    // *removed* half would move too. Both are recorded, because each catches a
+    // different way of getting this wrong and neither catches the other's.
     assert!(
         removed_at.windows(2).all(|pair| pair[0] == pair[1]),
-        "the removed half moved as the added half grew, so the cell is sized \
-         from its contents: {removed_at:?} for {BOUNDARIES:?}"
+        "the removed half moved as the added half grew, so the pair is not two \
+         independently anchored fields: {removed_at:?} for {BOUNDARIES:?}"
+    );
+    let span =
+        |at: &[u16]| at.iter().max().copied().unwrap_or(0) - at.iter().min().copied().unwrap_or(0);
+    assert_eq!(
+        span(&added_at),
+        3,
+        "the added half's start moved by {} columns across `+0` to `+9999`, \
+         where a fixed field right-aligning a two-to-five-character token moves \
+         it by exactly three: {added_at:?}",
+        span(&added_at)
     );
 }
 
@@ -2189,7 +2336,7 @@ fn the_readouts_are_coloured_and_their_label_is_not() {
         );
     }
 
-    // The label beside the frame number, which must stay dim. Found by its own
+    // The label beside the frame number, which must stay dim.
     // **Found to the right of the frame number, not by the leftmost `f`.** The
     // hint bar shares this row and opens `q quit · f follow`, so a scan from
     // column 0 lands on the hints' own `f` at column 9 and reads a cell that is
@@ -2219,6 +2366,46 @@ fn the_readouts_are_coloured_and_their_label_is_not() {
 }
 
 #[test]
+fn the_position_keeps_its_grey_where_the_readouts_take_a_colour() {
+    // §11.1 rules that `N/M` stays dim: the picture gives it no colour, and it
+    // is a *place* rather than a measurement, which is the whole distinction the
+    // footer's three colours draw. It is a number sitting a few columns from two
+    // other numbers that are cyan, so the rule is one bound away from being
+    // wrong and nothing was reading it.
+    //
+    // Ungated until now, and the gap was reachable by a one-word edit: widening
+    // the tint's `end` from the diagnostics' own columns to the row's edge turns
+    // `1/1` cyan and leaves every other gate green, because the `frame` label
+    // survives on its own (a letter opens no run).
+    let theme = Theme::default();
+    let backend = screen(80, 6, &one_file(), &diagnostics_chrome());
+    let footer = row_text(&backend, 5);
+
+    // Guard the fixture: the position and the readouts must both be on screen,
+    // or this proves nothing about the boundary between them.
+    assert!(
+        footer.contains("1/1") && footer.contains("0.8ms"),
+        "the fixture drew no position beside a readout: {footer:?}"
+    );
+
+    let slash = column_of(&backend, 5, "/");
+    for (offset, what) in [(-1i32, "the file number"), (1, "the file count")] {
+        let x = (i32::from(slash) + offset) as u16;
+        assert_eq!(
+            backend.buffer()[(x, 5)].style().fg,
+            theme.chrome_dim.fg,
+            "{what} of the position took the readouts' colour, so the tint \
+             reached past the diagnostics: {footer:?}"
+        );
+    }
+    assert_ne!(
+        theme.chrome.fg, theme.chrome_dim.fg,
+        "the theme draws the readout and the position alike, so this cannot \
+         tell them apart"
+    );
+}
+
+#[test]
 fn the_follow_marker_is_the_last_character_of_the_state() {
     // `FOLLOW_MARK` is restated beside `FOLLOWING` rather than composed into it,
     // because `concat!` takes no `char`. Two spellings of one glyph can drift,
@@ -2227,12 +2414,31 @@ fn the_follow_marker_is_the_last_character_of_the_state() {
     //
     // Asserted through the drawn row rather than by importing either constant,
     // which is this file's rule for anything the renderer also spells.
+    //
+    // **The claim is about `FOLLOWING`'s own token, not about the row.** An
+    // earlier form allowed `state.ends_with('▶')` *or* any word containing the
+    // marker, and the second disjunct subsumes the first: the position is drawn
+    // after the state at this width, so the row never ends in the marker and
+    // only the weak half ever fired. What it proved was "the marker is on the
+    // footer somewhere", which is not what it is named for and not what
+    // `FOLLOW_MARK`'s docblock cites it for.
     let backend = screen(80, 6, &one_file(), &following_chrome());
     let footer = row_text(&backend, 5);
-    let state = footer.trim_end();
+    let mark = footer
+        .split_whitespace()
+        .find(|word| word.contains('▶'))
+        .unwrap_or_else(|| panic!("the footer carries no marker at all: {footer:?}"));
     assert!(
-        state.ends_with('▶') || state.split_whitespace().any(|word| word.contains('▶')),
-        "the state no longer carries the marker this pass recolours: {state:?}"
+        mark.ends_with('▶'),
+        "the marker is no longer the last character of the state's own token, \
+         so `FOLLOWING` and `FOLLOW_MARK` have drifted apart: {mark:?} in \
+         {footer:?}"
+    );
+    // The token is the mode word's, not something else that happens to carry the
+    // glyph, or a notice could satisfy this.
+    assert_eq!(
+        mark, "▶",
+        "the marker is not standing alone after the mode word: {footer:?}"
     );
 }
 
