@@ -129,7 +129,7 @@ palette! {
     path_live,
     /// A path nothing has written since `vigia` started watching.
     path_cold,
-    /// The `● just changed` label on a file that moved in the last tick.
+    /// The `●` marking a file that moved in the last tick.
     pulse,
     /// A churn sparkline's blocks.
     spark,

@@ -8,7 +8,7 @@
 //! the things it asks for are the same question asked at different resolutions:
 //! *when did this file last change, and how busy has it been.* A churn
 //! sparkline, the recency gradient that dims a settled row, and the
-//! `● just changed` pulse all read from here.
+//! `●` pulse all read from here.
 //!
 //! ## Why this cannot live in the frame path
 //!
@@ -51,7 +51,7 @@
 //!
 //! ## One mechanism, not three
 //!
-//! §5.1 rules that the dimmed row and the `just changed` label are one
+//! §5.1 rules that the dimmed row and the pulse are one
 //! mechanism, because specifying them separately would produce two decay clocks
 //! that disagree on screen. They are three rungs of [`Recency`], read from one
 //! store through one lookup, and [`Recency::Cold`] is not a fourth rule: it is
@@ -101,7 +101,7 @@ pub const HISTORY_PATHS: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Recency {
     /// Named by the most recent tick. Drawn brightest, and the only rung that
-    /// carries the `● just changed` label.
+    /// carries the `●` mark.
     ///
     /// Not a duration. See the module docs: a rung measured in seconds would
     /// have to age while the event loop is blocked, and being able to see that

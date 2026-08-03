@@ -171,11 +171,17 @@ const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
 
 /// The pulse, widest rung first.
 ///
-/// `SPEC.md` §5.1 draws this as a persisting label with a dot rather than a
-/// flash. The mark survives narrowing on its own, for the reason `f follow` is
-/// the last hint standing: it is the one signal on the row that cannot be
-/// recovered from anything else on screen, and one column is what it costs.
-const PULSE_RUNGS: [&str; 3] = ["● just changed", "●", ""];
+/// `SPEC.md` §5.1 draws this as a persisting mark rather than a flash, and as of
+/// 2026-08-03 the mark is the whole of it: the `● just changed` rung above this
+/// one is gone from the picture and from here together. The label restated a
+/// fact the dot had already made, on a row that is also the brightest rung of
+/// the recency gradient, and a monitor pays for a label in reading rather than
+/// in columns.
+///
+/// So the ladder is two rungs and the survivor is one column, for the reason
+/// `f follow` is the last hint standing: it is the one signal on the row that
+/// cannot be recovered from anything else on screen.
+const PULSE_RUNGS: [&str; 2] = ["●", ""];
 
 /// One slice of a file, whatever it holds.
 ///
@@ -233,7 +239,8 @@ const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
 /// A heading whose path has been elided past this is a row that has stopped
 /// naming its own file, which is exactly the "truncated to useless" shape I6
 /// forbids. Twelve leaves `…engine/watch.rs` legible at forty columns, where the
-/// counters and the pulse together already want twenty.
+/// counters and the pulse together already want fourteen and the heat strip
+/// beside them wants seven more.
 const MIN_PATH_WIDTH: usize = 12;
 
 /// Columns the kind letter and its gap take at the head of every file row.
@@ -1009,23 +1016,25 @@ const COUNT_CELL: usize = 5;
 /// **Each row gives up exactly one thing against the one above it and gains
 /// nothing**, which is what makes narrowing monotone: widening a pane can never
 /// remove an element. Read down the table for the drop order, which is the
-/// ladder `SPEC.md` §11.1 states: the pulse *label* is the first luxury to go,
-/// then the sparkline's resolution, then the strip's, then the sparkline
-/// entirely, then the strip, then the pulse mark, and the counts last, because
-/// they are the row's content rather than a signal drawn beside it.
+/// ladder `SPEC.md` §11.1 states: the sparkline's resolution is the first luxury
+/// to go, then the strip's, then the sparkline entirely, then the strip, then
+/// the pulse, and the counts last, because they are the row's content rather
+/// than a signal drawn beside it.
 ///
-/// Seven drops for seven steps. The counts' *width* used to sit between the
-/// strip's resolution and the sparkline, and it is gone because [`COUNT_CELL`]
-/// no longer has a narrow rung to give up: every row of this table carries the
-/// same cell.
-const ROW_LAYOUTS: [Columns; 8] = [
+/// Six drops for six steps. Two rungs have left this table and neither moved a
+/// boundary under it, which is a property of where they sat rather than luck.
+/// The counts' *width* was one, and it is gone because [`COUNT_CELL`] no longer
+/// has a narrow rung to give up: every row here carries the same cell. The
+/// pulse's *label* was the other, and it opened the ladder, so removing it only
+/// removed the widest layout: a layout's width is the sum of its own slots, and
+/// none of the six left changed.
+const ROW_LAYOUTS: [Columns; 7] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[0], SPARK_RUNGS[0]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[0], SPARK_RUNGS[1]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[1], SPARK_RUNGS[1]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[1], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[1]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[2], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[2], HEAT_RUNGS[2], SPARK_RUNGS[2]),
     Columns::NOTHING,
 ];
 
@@ -1148,11 +1157,14 @@ struct Columns {
     /// dropped from this set for costing fourteen columns at forty, but that was
     /// a bug in the choosing rather than a fact about the pulse: the rung was
     /// picked without counting the gap it needs, so the label was taken at widths
-    /// where it left nothing for the strip. Chosen with [`reserved`] it degrades
-    /// to the one-column mark instead, which is exactly what `PULSE_RUNGS` rules
-    /// that it should. Drawn from the path's room instead, it became the *last*
-    /// thing on the row to survive narrowing, where its own doc says it is among
-    /// the first.
+    /// where it left nothing for the strip. Chosen with [`reserved`] it degraded
+    /// to the one-column mark instead, which is what `PULSE_RUNGS` ruled that it
+    /// should. Drawn from the path's room instead, it became the *last* thing on
+    /// the row to survive narrowing, where its own doc says it is among the
+    /// first. Kept as the history of a slot that now has one rung to reserve:
+    /// the fourteen-column label went in 2026-08-03, and the argument that it
+    /// belongs to *this* set rather than to the path's leftovers is the half of
+    /// that episode which outlived it.
     ///
     /// Reserved whether or not this row is pulsing, like every other slot here,
     /// because a pulse lasts one tick and a slot that came and went with it would
@@ -2620,7 +2632,7 @@ impl Painter<'_> {
         }
     }
 
-    /// `M src/engine/watch.rs    ● just changed ████████████   ▁▂▆▄▆█   +42    -7`
+    /// `M src/engine/watch.rs                ● ████████████   ▁▂▆▄▆█   +42    -7`
     ///
     /// Everything to the right of the path goes into a slot [`Columns`] already
     /// chose, drawn right to left so each block knows where the one outside it
