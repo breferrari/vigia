@@ -681,6 +681,36 @@ fn drive(
 
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
+
+    // **The warmer, because `run` spawns one and this harness claims to be `run`
+    // with the terminal taken out.** It compiles grammars ahead of the reader,
+    // and what it leaves behind is `syntect`'s compiled-pattern cache, which is
+    // the one thing in the process that grows as more grammars are touched and
+    // is never evicted.
+    //
+    // That is a **plateau rather than drift**, the same shape `RETAINED_HUNKS`
+    // already argued for: a bigger constant is a higher level, and drift
+    // compares a window against itself so it cannot see a level. Which is
+    // exactly why it has to be in here rather than reasoned about in a comment
+    // alone — a claim that something cannot drift is worth more when the gate
+    // that would notice has actually been run with it present.
+    //
+    // Joined rather than detached, unlike in `run`: the warm is bounded and
+    // finishes in well under a second, and a soak that started sampling while a
+    // one-off startup cost was still landing would put it in the first quarter's
+    // median and read it as drift in the wrong direction.
+    highlighter
+        .warm_ahead(
+            worktree.workdir().to_path_buf(),
+            frame
+                .files()
+                .iter()
+                .map(|change| change.path.clone())
+                .collect(),
+        )
+        .join()
+        .expect("the warmer thread");
+
     // The third retained cache, and the one this run exists to bound now: it is
     // the only one that deliberately outlives the diff, so a soak that left it
     // out would be measuring I3 against two thirds of what the process keeps.
