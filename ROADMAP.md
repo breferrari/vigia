@@ -288,7 +288,7 @@ Milestone: [Phase 4](https://github.com/breferrari/vigia/milestone/4)
 | ✅ | The mockup lays the glance row in columns; the shell right-packs it | [#77](https://github.com/breferrari/vigia/issues/77) |
 | ⬜ | Every file has an empty sparkline at launch, which is the common case | [#78](https://github.com/breferrari/vigia/issues/78) |
 | ✅ | The mockup gives the footer's readouts three colours, and the shell draws one grey | [#92](https://github.com/breferrari/vigia/issues/92) |
-| 🔨 | The pane-not-contents ruling, in the two elements #77 does not touch | [#93](https://github.com/breferrari/vigia/issues/93) |
+| ✅ | The pane-not-contents ruling, in the two elements #77 does not touch | [#93](https://github.com/breferrari/vigia/issues/93) |
 
 **The first two rows came before the other two, and the order was not preference.** Both are done. Both were places where the picture and the binary disagreed, and a disagreement that ships is a support burden rather than a stale artifact.
 
