@@ -2679,38 +2679,59 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
     // same shape and leave colour alone carrying a distinction `SPEC.md` §11.1
     // spends the lowest block to protect.
     //
-    // **Both symbols read off the screen**, which is the whole of what this gate
-    // is. It used to end on `assert_ne!(TRACK, RAMP[0])`, comparing two
-    // constants *this file declares* — an assertion that cannot fail whatever
-    // the renderer does, sitting under a name that promised otherwise. Row 2
-    // holds a bucket of 1 against a screen peak of 12, which is exactly the
-    // ramp's floor, so the two glyphs compared below are the two the ruling says
-    // must differ.
+    // **The columns are chosen by position and the glyphs are read off them**,
+    // which is the third spelling of this gate and the first that can fail.
+    //
+    // It ended on `assert_ne!(TRACK, RAMP[0])` to begin with, comparing two
+    // constants this file declares. That was replaced with a comparison of two
+    // cells, which looked like a fix and was the same tautology one indirection
+    // deeper: the cells were *found* by matching those constants, so their
+    // symbols were what the search asked for and the assertion still could not
+    // fail. Worse, the violation it is named for (`SPARK_TRACK` at the ramp's
+    // floor) made the search find nothing and died on an `expect` whose message
+    // blamed the fixture.
+    //
+    // So the slot is located **off a different row**, and that is what finally
+    // makes the assertion load-bearing. Row 1 is given a history with no empty
+    // bucket, so all eight of its cells are bars and `bars_at` returns the
+    // slot's columns without the track glyph entering into it at all. The
+    // layout is a property of the region rather than of a row (#77), so those
+    // columns are row 2's slot too.
+    //
+    // Then bucket 0 of row 2's `[0, 0, 0, 2, 1, 0, 0, 0]` is empty according to
+    // the *store*, and what the renderer put in that column is read out of the
+    // buffer with nothing having said what to expect. Changing `SPARK_TRACK` to
+    // the ramp's floor now fails on the claim rather than on a lookup.
     let theme = Theme::default();
-    let spark = theme.spark.fg.expect("the sparkline has a colour");
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let mut view = glancing();
+    if let Row::File(entry) = &mut view.rows[0] {
+        entry.spark = [1, 2, 3, 4, 5, 6, 7, 8];
+    }
+    let backend = screen(80, 5, &view, &chrome());
     let buffer = backend.buffer();
 
-    let bars = blocks_of(&backend, 2, spark);
-    assert!(
-        bars.contains(&'▁'),
-        "the fixture no longer draws the ramp's floor, so this proves nothing \
-         about it: {bars:?}"
+    let slot = bars_at(&backend, 1, &theme);
+    assert_eq!(
+        slot.len(),
+        HISTORY_BUCKETS,
+        "row 1 was given a bucket in every slice so its bars would locate the \
+         slot, and it drew {} of them: {slot:?}",
+        slot.len()
     );
-    let floor_at = bars_at(&backend, 2, &theme)
-        .into_iter()
-        .find(|&x| buffer[(x, 2)].symbol() == RAMP[0])
-        .expect("the row draws the ramp's floor somewhere");
-    let empty_at = *track_at(&backend, 2, &theme)
-        .first()
-        .expect("the row draws a track somewhere");
 
-    assert_ne!(
-        buffer[(empty_at, 2)].symbol(),
-        buffer[(floor_at, 2)].symbol(),
-        "an empty bucket at column {empty_at} and a one-write bucket at column \
-         {floor_at} drew the same glyph, so the height channel no longer \
-         separates 'nothing happened' from 'a little did'"
+    let empty = buffer[(slot[0], 2)].symbol();
+    assert!(
+        !RAMP.contains(&empty),
+        "row 2's oldest bucket holds no writes and drew {empty:?}, which is a \
+         rung of the ramp, so the height channel no longer separates 'nothing \
+         happened' from 'a little did'"
+    );
+    // Non-vacuity from the other side: row 2 really does draw the ramp's floor
+    // somewhere, or "not a rung" is being asserted about a row with no rungs.
+    assert!(
+        blocks_of(&backend, 2, theme.spark.fg.expect("a colour")).contains(&'▁'),
+        "the fixture no longer draws the ramp's floor, so the comparison above \
+         is not against the glyph the ruling is about"
     );
 }
 

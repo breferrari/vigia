@@ -621,10 +621,19 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// A file heading at each rung of the recency ladder, with churn and heat behind
 /// it.
 ///
-/// **Every bucket is non-zero on purpose.** An empty bucket draws as a space, so
-/// a fixture with gaps in it makes the strip's *width* unobservable from the
-/// rendered row, and the ladder gate below could not tell four buckets from
-/// eight. The counts still differ, so the shared scale is exercised as well.
+/// **The two live rows' buckets are non-zero on purpose**, and their counts
+/// differ, so the shared scale is exercised down the list. The third row is all
+/// zeroes, because a cold file is what the ladder has to keep drawing too.
+///
+/// This used to say every bucket was non-zero *because* an empty one drew a
+/// space, which made a strip's width unreadable off the row and left the ladder
+/// gate below unable to tell four buckets from eight. Both halves are now
+/// wrong: since [#78](https://github.com/breferrari/vigia/issues/78) an empty
+/// bucket draws the track, so the width is readable off any fixture, and the
+/// third row was never non-zero anyway. `spark_slot` counts the whole slot for
+/// exactly this reason. **This is the sentence the two gates below took their
+/// rationale from**, so it is the one that had to move for their corrections to
+/// mean anything.
 ///
 /// The heat strips are the mirror image: **the two ends of the file are changed
 /// and the middle is not**, which is the only shape that can tell a

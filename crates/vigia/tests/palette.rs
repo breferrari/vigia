@@ -267,10 +267,35 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
     //
     // The rule is about *text*, not about the colour. `heat_track` is deliberately
     // still colour 8 and is exempt by name: a track is a solid block that should
-    // sit just above the background, which is exactly what the colour is for. The
-    // exemption is listed rather than inferred, so adding a field cannot join it by
-    // accident.
+    // sit just above the background, which is exactly what the colour is for.
+    //
+    // **The exemption used to be by omission and this comment used to deny it.**
+    // It claimed "the exemption is listed rather than inferred, so adding a field
+    // cannot join it by accident", and what was listed was the *readable* side, so
+    // every field not in that array was exempt by default. `spark_track` joined
+    // that way in [#78](https://github.com/breferrari/vigia/issues/78): a track
+    // drawn as one stroke rather than a solid block, taking the colour this gate
+    // exists to keep off anything a reader has to see, and no gate said a word.
+    // Whether that value is right is [#60](https://github.com/breferrari/vigia/issues/60)'s
+    // question; that it was never a decision is this gate's, and the count below
+    // is what turns the next one into a decision.
     let ansi = Theme::ansi();
+
+    // **A tripwire, because the partition cannot be derived.** `Theme::KEYS` is
+    // public and complete, but the styles behind the keys are not reachable by
+    // name from outside the crate, so a test cannot walk every field and ask its
+    // colour. What it can do is notice that the field *count* moved and refuse to
+    // pass until someone says which side the new one is on. Deliberately annoying
+    // exactly once per added field, which is the frequency this decision should
+    // be made at.
+    assert_eq!(
+        Theme::KEYS.len(),
+        40,
+        "a palette field was added or removed. Decide which side of this gate it \
+         is on: if a reader has to *read* it, put it in `readable` below, and if \
+         it is a block or a track that should sit just above the pane, say so \
+         here and update this count. Do not update the count alone"
+    );
     let readable: [(&str, ratatui::style::Style); 12] = [
         ("chrome", ansi.chrome),
         ("chrome_dim", ansi.chrome_dim),
@@ -619,14 +644,19 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
     //
     // **`light` at `Ansi16` is exempt, and enumerating why is the point.** That
     // rung has exactly four greys and this palette has already spent all of them:
-    // `White` is the pane, `Black` is `path`, `Gray` is `path_cold`, `DarkGray`
-    // is `chrome_dim`. There is no fifth for a track to take, so the collision is
-    // arithmetic rather than a choice, and moving the track onto `DarkGray` only
-    // trades this collision for the `chrome_dim` one. Left where it is because
-    // the two are not equally bad: a path's underscores sit inside a word in the
-    // left column, the track is eight contiguous ones in a reserved slot, and
-    // nothing in the suite reads a track under this palette (`Theme::default` is
-    // `ansi`, where the track is `DarkGray` and `path_cold` is `Gray`).
+    // `White` is the pane, `Black` is `path` and `path_live`, `Gray` is
+    // `path_cold` **and `gutter`**, `DarkGray` is `chrome_dim`. There is no fifth
+    // for a track to take, so the collision is arithmetic rather than a choice,
+    // and moving the track onto `DarkGray` only trades this collision for the
+    // `chrome_dim` one. Left where it is because the two are not equally bad: a
+    // path's underscores sit inside a word in the left column, the track is eight
+    // contiguous ones in a reserved slot, and nothing in the suite reads a track
+    // under this palette (`Theme::default` is `ansi`, where the track is
+    // `DarkGray` and `path_cold` is `Gray`).
+    //
+    // `gutter` was missing from that list for one round, which mattered less for
+    // the count than for the staleness check below: keyed to `path_cold` alone it
+    // would have called the exemption stale while `gutter` still held `Gray`.
     for (name, base) in [
         ("ansi", Theme::ansi()),
         ("dark", Theme::dark()),
@@ -653,11 +683,16 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
 
     // The exemption is a measurement, not a licence: if the palette ever frees a
     // grey, this fails and the `continue` above comes out.
+    //
+    // Against the **set** rather than one field, because `Gray` has two occupants
+    // there. Keyed to `path_cold` alone, moving that one field would report the
+    // exemption stale while `gutter` still held the colour and the collision was
+    // still real.
     let light = Theme::light().resolve(Depth::Ansi16);
-    assert_eq!(
-        light.spark_track.fg, light.path_cold.fg,
-        "`light` at sixteen colours no longer collides with `path_cold`, so the \
-         exemption above is stale and should be deleted"
+    assert!(
+        light.spark_track.fg == light.path_cold.fg || light.spark_track.fg == light.gutter.fg,
+        "`light` at sixteen colours no longer collides with any path-weight grey, \
+         so the exemption above is stale and the `continue` should come out"
     );
 }
 

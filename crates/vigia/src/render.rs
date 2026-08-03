@@ -147,17 +147,25 @@ pub const HINT_SEPARATOR: &str = " · ";
 
 /// A churn bucket's height, emptiest first.
 ///
-/// The eighth-blocks every sparkline in every terminal is drawn from. They are
-/// outside CP437, like the `▶` the footer has carried since I5, so the legacy
-/// Windows console `SPEC.md` §10 leaves open degrades on both together rather
-/// than on this alone.
+/// The eighth-blocks every sparkline in every terminal is drawn from.
+///
+/// **Six of the eight are outside CP437 and two are not**, which this said
+/// wrongly for three phases and `SPEC.md` §10 now records measured rather than
+/// assumed: `▄` and `█` are 0xDC and 0xDB in that code page, the other six are
+/// not there at all. So a legacy Windows console does not lose the sparkline, it
+/// loses its *resolution*: the top and half rungs still draw and everything
+/// between them does not, which is worse than losing the element, because a
+/// strip that renders some buckets and drops others is a shape that lies. The
+/// `▶` the footer has carried since I5 is genuinely outside, and so is the
+/// pulse's `●`.
 const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 /// A bucket nothing happened in.
 ///
 /// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
-/// the heat strip and [`BAR_TRACK`] the scrollbar, applied to the third of the
-/// four glance elements ([#78](https://github.com/breferrari/vigia/issues/78)).
+/// the heat strip and [`BAR_TRACK`] the scrollbar, reaching the sparkline last
+/// though §5 lists it first
+/// ([#78](https://github.com/breferrari/vigia/issues/78)).
 /// A file with no history at all is the *all*-empty case, so a worktree that was
 /// already dirty when `vigia` started draws a full track on every row, which is
 /// the ordinary first frame: history is fed from the watch, so nothing a reader
@@ -175,9 +183,10 @@ const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', 
 /// `_` rather than `·`, which the hint bar already draws: a middle dot sits
 /// mid-cell, so an empty bucket would be drawn *higher* than a bucket holding
 /// one write, which is backwards for a thing read as a bar chart. `_` sits where
-/// a bar stands. It is also ASCII, so it is on the right side of the
-/// legacy-console question §10 records, where [`SPARK_RAMP`] is on the wrong
-/// one: on a console that cannot draw the ramp, a row of track is what survives.
+/// a bar stands. It is also ASCII, which puts it on the surviving side of the
+/// legacy-console question §10 records: six of [`SPARK_RAMP`]'s eight rungs are
+/// outside CP437 and this is not, so on such a console an empty window still
+/// reads as an empty window even where a busy one loses its shape.
 const SPARK_TRACK: char = '_';
 
 /// How many buckets a sparkline may show, widest rung first.
@@ -1368,9 +1377,10 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 ///
 /// **[`Heat`]'s small private cousin, and private for the reason `Heat` is
 /// not.** `Theme::heat` resolves a kind-by-band cross product and is public API
-/// because the theme has to name every one of those styles; this is a single bit
-/// that never leaves this file, so an enum here costs no public surface and no
-/// allocation, being a fixed-size array on the stack either way.
+/// because the theme has to name every one of those styles; the distinction here
+/// is one bit and it never leaves this file, so an enum costs no public surface
+/// and no allocation, being a fixed-size array on the stack either way. The
+/// *payload* is a glyph rather than a bit, which the last paragraph is about.
 ///
 /// What it buys is what [`Painter::scrollbar`] gets from its `filled` boolean:
 /// **the style is chosen from the variant rather than read back off the
@@ -2788,9 +2798,18 @@ impl Painter<'_> {
                  {HISTORY_BUCKETS}",
                 columns.spark
             );
+            // **Clamped as well as asserted, because the assert is not in the
+            // binary that ships.** `debug_assert!` compiles out under
+            // `--release`, and `[profile.release]` sets `panic = "abort"`, so a
+            // rung wider than the window would wrap the subtraction below, index
+            // the slice out of range, and take the process down without
+            // restoring the terminal: I8's failure reached by the one path that
+            // skips its handler. The assert keeps the message a developer needs
+            // and this keeps the promise a reader needs.
+            let take = columns.spark.min(HISTORY_BUCKETS);
             let strip = spark_of(heading.spark, peak);
-            let x = right.x + right.width - columns.spark as u16;
-            for (offset, bucket) in strip[HISTORY_BUCKETS - columns.spark..].iter().enumerate() {
+            let x = right.x + right.width - take as u16;
+            for (offset, bucket) in strip[HISTORY_BUCKETS - take..].iter().enumerate() {
                 // Both out of the one value, which is [`Bucket`]'s whole reason.
                 let (glyph, style) = bucket.drawn(self.theme);
                 // `set_char` rather than an `encode_utf8` into a local buffer,

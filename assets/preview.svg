@@ -91,18 +91,23 @@
            this path* rather than *this path is old*. So it can carry no bucket
            at all, and it used to draw eight of them: seven at the ramp's floor
            height in the ramp's own floor colour #1f6f3f, one taller. A state the
-           tool cannot produce. Corrected for #78, in the #21262d this row's own
-           heat strip is drawn in, which is the only track colour the picture
-           has. -->
+           tool cannot produce. Corrected for #78.
+
+           Drawn in #30363d, which is Theme::dark's spark_track and NOT the
+           #21262d the heat strip on this row uses. The two tracks differ on
+           purpose: a sparkline track is one stroke where a heat slice is a
+           solid block, and the same value behind a twelfth of the ink reads as
+           absence. This picture is the specification, so it carries the value
+           the shell actually draws rather than the one its neighbour uses. -->
       <g>
-        <rect x="300" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="310" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="320" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="330" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="340" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="350" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="360" y="152" width="7" height="2" rx="1" fill="#21262d"/>
-        <rect x="370" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="300" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="310" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="320" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="330" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="340" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="350" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="360" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="370" y="152" width="7" height="2" rx="1" fill="#30363d"/>
       </g>
       <text class="m grn" x="452" y="156" text-anchor="end">+2</text>
       <text class="m faint" x="500" y="156" text-anchor="end">&#8722;0</text>

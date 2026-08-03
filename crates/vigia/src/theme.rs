@@ -141,12 +141,15 @@ palette! {
     /// full track on every row
     /// ([#78](https://github.com/breferrari/vigia/issues/78)).
     ///
-    /// **Not read off the picture, and it cannot be**, which is worth saying
-    /// because everything else in [`Theme::dark`] is. `assets/preview.svg` draws
-    /// all eight bucket positions on all three rows, so nothing there is absent
-    /// — but its quiet buckets are `#1f6f3f`, the ramp's own floor colour, which
-    /// makes them *written* buckets rather than track. **The picture has no
-    /// sparkline track in it to read.**
+    /// **Chosen rather than read off the picture, which is the one value in
+    /// [`Theme::dark`] that is.** `assets/preview.svg` drew all eight bucket
+    /// positions on all three rows, so nothing in it was ever absent — but its
+    /// quiet buckets were `#1f6f3f`, the ramp's own floor colour, which makes
+    /// them *written* buckets rather than track. There was no sparkline track in
+    /// the file to read. So this was picked for the reason below and the picture
+    /// was then corrected to draw it, which is why the artifact and the shell
+    /// still agree: the cold row's eight bars are `#30363d` today, deliberately
+    /// **not** the `#21262d` the heat strip on that same row uses.
     ///
     /// **One step brighter than the other two tracks, because ink is not
     /// value.** [`Theme::heat_track`] argues `DarkGray` is right on the ground
@@ -155,18 +158,31 @@ palette! {
     /// premise does not reach it: the same colour behind a twelfth of the ink
     /// reads as absence, which is the state this element exists to stop looking
     /// like. What should match across the three tracks is perceived **weight**,
-    /// and matching the value is what would break it. The 16-colour palette keeps
-    /// `DarkGray` because there is nothing between it and `Gray`, and `Gray` is
-    /// this palette's content weight.
+    /// and matching the value is what would break it.
     ///
-    /// **Its own key rather than [`Theme::heat_track`]'s**, which holds the same
-    /// value in all three built-ins. The precedent is [`Theme::bar_track`], which
-    /// does too and is still separate: a distinct element gets a distinct key, so
-    /// a theme author can move one without moving the others. That is the whole
-    /// of the argument. It used to add "so a test can tell two tracks apart by
-    /// style", which is not true of fields holding identical values: what
-    /// separates a spark track from a heat track on one row is the **glyph**,
-    /// `_` against `█`, and `tests/render.rs` matches on the pair.
+    /// **[`Theme::ansi`] is the exception and it is a forced one.** Sixteen
+    /// names hold nothing between colour 8 and `Gray`, and `Gray` is what that
+    /// palette draws content in, so the track keeps `DarkGray` and inherits the
+    /// risk [#60](https://github.com/breferrari/vigia/issues/60) is open on. That
+    /// palette assumes no background, so it cannot be gated the way
+    /// `tests/palette.rs` gates `dark` and `light` against the pane behind them;
+    /// what it gets instead is a named entry in
+    /// `nothing_a_reader_has_to_read_is_drawn_in_colour_eight`, so the exemption
+    /// is a decision on record rather than a field nobody added to a list.
+    ///
+    /// **Its own key rather than [`Theme::heat_track`]'s**, which is what it
+    /// started as and would still be sharing a value with in all three built-ins
+    /// had the paragraph above not moved two of them. The precedent for the
+    /// separate key is [`Theme::bar_track`], which *does* still hold
+    /// [`Theme::heat_track`]'s value everywhere and is separate anyway: a
+    /// distinct element gets a distinct key, so a theme author can move one
+    /// without moving the others. That the sparkline's then had to move is this
+    /// field's own vindication rather than a coincidence.
+    ///
+    /// It used to add "so a test can tell two tracks apart by style", which was
+    /// not true when the values were identical and is only accidentally true
+    /// now: what actually separates a spark track from a heat track on one row is
+    /// the **glyph**, `_` against `█`, and `tests/render.rs` matches on the pair.
     spark_track,
 
     /// The filled part of a scrollbar: where in the whole a region is looking.
