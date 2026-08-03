@@ -1140,8 +1140,10 @@ fn the_glance_columns_collapse_in_one_order() {
     //
     // **The table lost a row on 2026-08-03 and the walk did not move**, which is
     // the check that ruling owed this test. A seventh layout used to sit above
-    // layout 0 with a fifteen-column `● just changed` in the pulse slot, from 65
-    // columns up. It went with the label. Every `width` here is the sum of one
+    // layout 0 carrying `● just changed`, which is fourteen columns of text and
+    // fifteen of slot once `reserved` adds its gap, so it read `15` in the pulse
+    // column of this table. From 65 columns up, and it went with the label along
+    // with the only rung that column ever had. Every `width` here is the sum of one
     // layout's own slots, so dropping the widest one cannot shift the five below
     // it, and the boundaries below are unchanged rather than re-derived.
     //
