@@ -98,16 +98,22 @@
            purpose: a sparkline track is one stroke where a heat slice is a
            solid block, and the same value behind a twelfth of the ink reads as
            absence. This picture is the specification, so it carries the value
-           the shell actually draws rather than the one its neighbour uses. -->
+           the shell actually draws rather than the one its neighbour uses.
+
+           One pixel tall where a written bucket's floor is two, because the
+           shell separates the two by HEIGHT as well as colour: `_` against
+           `▁`. Drawn at the same height in two colours, this picture would
+           demonstrate the colour-only arrangement SPARK_TRACK's own doc
+           rejects, in the artifact section 5.1 treats as the answer. -->
       <g>
-        <rect x="300" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="310" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="320" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="330" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="340" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="350" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="360" y="152" width="7" height="2" rx="1" fill="#30363d"/>
-        <rect x="370" y="152" width="7" height="2" rx="1" fill="#30363d"/>
+        <rect x="300" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="310" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="320" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="330" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="340" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="350" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="360" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
+        <rect x="370" y="153" width="7" height="1" rx="0.5" fill="#30363d"/>
       </g>
       <text class="m grn" x="452" y="156" text-anchor="end">+2</text>
       <text class="m faint" x="500" y="156" text-anchor="end">&#8722;0</text>

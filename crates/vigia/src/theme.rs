@@ -169,12 +169,12 @@ palette! {
     /// risk [#60](https://github.com/breferrari/vigia/issues/60) is open on. That
     /// palette assumes no background, so it cannot be gated the way
     /// `tests/palette.rs` gates `dark` and `light` against the pane behind them;
-    /// what it gets instead is a paragraph and a count tripwire in
+    /// what it gets instead is a named place in the destructure at the top of
     /// `nothing_a_reader_has_to_read_is_drawn_in_colour_eight`, so the exemption
-    /// is a decision on record rather than a field nobody added to a list. A
-    /// named entry is not available: the styles behind `Theme::KEYS` cannot be
-    /// reached by key from outside this crate, so a test cannot walk the fields
-    /// and ask each one its colour.
+    /// is a decision the compiler makes someone take rather than a field nobody
+    /// added to a list. What is not available is walking the styles **by key
+    /// string**: `Theme::KEYS` is public and the values behind those names are
+    /// not, which is why that gate is a destructure rather than a loop.
     ///
     /// **Its own key rather than [`Theme::heat_track`]'s**, which is what it
     /// started as and would still be sharing a value with in all three built-ins
