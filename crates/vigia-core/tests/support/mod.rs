@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Worktree};
 
@@ -57,6 +57,46 @@ pub fn slack() -> f64 {
 /// `base`, loosened by [`slack`].
 pub fn budget(base: Duration) -> Duration {
     base.mul_f64(slack())
+}
+
+/// How long `work` took, for a stage whose result nothing downstream needs.
+///
+/// Shared for the reason the policy helpers above are: a timer is the one helper
+/// where a divergent copy silently changes what a budget gate measured. `FnOnce`
+/// rather than `FnMut`, which subsumes every call site the suites had.
+pub fn time(work: impl FnOnce()) -> Duration {
+    timed(work).1
+}
+
+/// [`time`], for a stage that produces something the next stage needs.
+pub fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
+    let start = Instant::now();
+    let value = work();
+    (value, start.elapsed())
+}
+
+/// Whether the absolute wall-clock tier should assert.
+///
+/// A debug build is several times slower than the one the budgets were set
+/// against, so asserting there would fail for a reason that is not a regression.
+/// Reported rather than silently skipped, and `how` is the exact command that
+/// enforces it, because a note telling a reader to re-run without saying how is
+/// a note they have to go and work out.
+///
+/// Here for the reason [`slack`] and [`exclusively_timed`] are: it is one policy
+/// and copies drift. **This one had already drifted before it was folded**, in
+/// the half that has to be right. Two of the four copies printed
+/// `cargo test --release --test budgets`, which is ambiguous because both crates
+/// ship a `budgets.rs`, and the four disagreed on whether it was one gate or
+/// several being skipped. Taking `how` is what makes a wrong hint impossible to
+/// write without noticing.
+pub fn absolute_gates_apply(how: &str) -> bool {
+    if cfg!(debug_assertions) {
+        eprintln!("note: the absolute budget gates are skipped in a debug build; run `{how}`");
+        false
+    } else {
+        true
+    }
 }
 
 /// Held for the timed region of an absolute gate, so two never overlap.

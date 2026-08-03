@@ -174,36 +174,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
     };
-    // **The plain frame, and it is the whole of I7's fix.** `App::view` draws
-    // this one without parsing, because a grammar's patterns compile on first
-    // use at 74-362ms and this is the frame I7 gives 50ms to. Measured over the
-    // hundred-file fixture: 105.03ms before, 13.26ms now.
+    // **One call, two frames.** `Shell::draw` settles the repaint debt itself,
+    // so the opening is one mechanism rather than two statements in a row that a
+    // future edit can separate. `App::paint` records why that matters: deleting
+    // the second statement left the whole suite green while the product sat on a
+    // permanently uncoloured screen.
     //
-    // What the reader gains is not a cheaper screen but an earlier one. The
-    // alternate screen is already taken by the line above, so the whole compile
-    // used to happen with nothing on it at all.
-    shell.draw(&mut frame, &worktree)?;
-
-    // Ahead of the second draw, so the two are compiling different files rather
-    // than the same one twice. It races the frame path and is allowed to lose:
-    // see `Highlighter::warm_ahead`, which upholds nothing by design.
-    //
-    // Detached by dropping the handle, like the two threads below and for a
-    // simpler reason: it ends by itself, and nothing waits for a result that
-    // only ever makes a later frame cheaper.
-    drop(
-        shell.highlighter.warm_ahead(
-            worktree.workdir().to_path_buf(),
-            frame
-                .files()
-                .iter()
-                .map(|change| change.path.clone())
-                .collect(),
-        ),
-    );
-
-    // And the coloured one, immediately. This is the frame that pays the
-    // compile, and it pays it behind a screen that already has the diff on it.
+    // The alternate screen is already taken by the line above, so before this
+    // the reader watched the whole 74-362ms grammar compile happen on a blank
+    // one. Measured over the hundred-file fixture: 105.03ms to first paint
+    // before, 13.26ms now.
     shell.draw(&mut frame, &worktree)?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore
@@ -474,8 +454,36 @@ impl Shell {
         self.regions
     }
 
-    /// Collect a screenful and paint it.
+    /// Collect a screenful and paint it, settling any repaint it leaves owed.
+    ///
+    /// **The opening two frames are one call, and that is the point.** The first
+    /// frame of a process draws plain, because a grammar's patterns compile on
+    /// first use at 74-362ms and I7 gives the whole of startup 50ms; the frame
+    /// after it colours. Written as two `draw` statements in [`run`] that held
+    /// only by statement order, deleting the second left the entire suite green
+    /// while the product sat on a permanently uncoloured screen for any tree
+    /// nobody was writing to — an I5 failure, since a monitor is meant to be
+    /// correct untouched. Found by mutation.
+    ///
+    /// So [`App::owes_repaint`] carries the debt and this collects it, which
+    /// makes the pair impossible to separate by editing one line. It costs one
+    /// extra frame once per process: measured at ~1.8ms on the hundred-file
+    /// fixture, against the 91.51ms compile it exists to hide.
+    ///
+    /// The loop runs at most twice — `App::view` leaves no debt on the frame that
+    /// settles one — but it is written as a `while` rather than an `if` so that
+    /// the invariant is *"draw until nothing is owed"* rather than *"draw twice"*,
+    /// which is the form that survives a third state being added.
     fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+        self.paint(frame, worktree)?;
+        while self.app.owes_repaint() {
+            self.paint(frame, worktree)?;
+        }
+        Ok(())
+    }
+
+    /// One collect and one paint, with no view of what it leaves owed.
+    fn paint(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
         // Before the chrome, because the chrome carries it, and from the frame's
         // own file count so the read happens on exactly the frames that draw the
         // answer. That is the whole of I4 for this read.

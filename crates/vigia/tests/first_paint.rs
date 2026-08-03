@@ -34,7 +34,7 @@ use ratatui::layout::Rect;
 use vigia::{App, Body, Row, Theme, body_layout, render};
 use vigia_core::{Highlighter, History, Worktree};
 
-use support::{Scratch, budget, exclusively_timed, highlight_delta};
+use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_delta};
 
 /// I7: startup to first paint.
 const I7_STARTUP: Duration = Duration::from_millis(50);
@@ -48,27 +48,15 @@ fn area() -> Rect {
     Rect::new(0, 0, 80, 24)
 }
 
-/// Whether the absolute wall-clock gate should assert.
-fn absolute_gates_apply() -> bool {
-    if cfg!(debug_assertions) {
-        eprintln!(
-            "note: the absolute budget gate is skipped in a debug build; \
-             run `cargo test --release --test first_paint` to enforce it"
-        );
-        false
-    } else {
-        true
-    }
-}
-
 /// What one cold start cost, and what it drew.
 struct FirstPaint {
     /// Discover, advance, build a highlighter, collect and paint.
     first: Duration,
     /// The frame after it, which is the one that pays for the compile.
     second: Duration,
-    /// Rows the first frame drew, against the rows its body had.
-    rows: usize,
+    /// Rows the first frame's body had, which is not recoverable from the rows
+    /// themselves: it is `Body::diff`, and a frame that drew too few is exactly
+    /// what this gate must not accept.
     height: usize,
     /// The two frames' rows with every span stripped.
     ///
@@ -104,7 +92,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let history = History::new();
 
     let chrome = app.chrome("fixture", None);
-    let body: Body = body_layout(area(), &chrome, frame.files().len());
+    let body = body_layout(area(), &chrome, frame.files().len());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
@@ -115,7 +103,6 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     render(&mut buf, area(), &view, &theme, &chrome);
     let first = began.elapsed();
     let parsed_first = highlight_delta(before, highlighter.stats()).lines;
-    let rows = view.rows.len();
     let plain = stripped(&view.rows);
 
     // The frame after it, timed separately. This is where the compile lands once
@@ -136,7 +123,6 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     FirstPaint {
         first,
         second,
-        rows,
         height: body.diff,
         plain,
         coloured,
@@ -166,21 +152,22 @@ fn stripped(rows: &[Row]) -> Vec<Row> {
 #[test]
 fn the_shells_first_paint_holds_the_startup_budget() {
     let scratch = Scratch::large_diff("shell-i7", FILES, LINES);
-    let root = scratch.path_of(".");
 
     // Structural first, so a debug build still checks the shape even though it
     // cannot check the clock.
-    let run = cold_start(&root);
+    let run = cold_start(scratch.root());
 
     // Non-vacuity, in the direction that matters most here: a frame is not
     // allowed to be fast because it drew less. The whole risk of a plain first
     // paint is that it quietly becomes a *smaller* paint, and then this gate
     // passes while the reader looks at an empty pane.
     assert_eq!(
-        run.rows, run.height,
+        run.plain.len(),
+        run.height,
         "the first paint drew {} of {} body rows, so it is fast because it drew \
          less rather than because it deferred the parse",
-        run.rows, run.height
+        run.plain.len(),
+        run.height
     );
 
     // **The assertion the row count cannot make.** Deferring colour has to
@@ -213,7 +200,7 @@ fn the_shells_first_paint_holds_the_startup_budget() {
          that never highlights rather than one that defers"
     );
 
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
         return;
     }
     let _timed = exclusively_timed();
@@ -224,7 +211,7 @@ fn the_shells_first_paint_holds_the_startup_budget() {
     // compile that has already happened.
     let mut runs = Vec::new();
     for _ in 0..3 {
-        runs.push(cold_start(&root));
+        runs.push(cold_start(scratch.root()));
     }
     let best = runs
         .iter()
@@ -235,7 +222,11 @@ fn the_shells_first_paint_holds_the_startup_budget() {
         "note: first paint {:?} (then {:?} for the frame that compiles the \
          grammar), over {FILES} files x {LINES} lines, {} rows drawn, {} lines \
          parsed on the first frame and {} on the second",
-        best.first, best.second, best.rows, best.parsed_first, best.parsed_second
+        best.first,
+        best.second,
+        best.plain.len(),
+        best.parsed_first,
+        best.parsed_second
     );
 
     assert!(
@@ -246,4 +237,99 @@ fn the_shells_first_paint_holds_the_startup_budget() {
         budget(I7_STARTUP),
         best.second
     );
+}
+
+/// The opening two frames, as the state machine they are.
+///
+/// **What this can and cannot reach.** [`App`]'s half is here: which frame
+/// parses, and that the plain one leaves a debt exactly once. The other half
+/// is `Shell::draw`'s `while self.app.owes_repaint()` loop, and that is not
+/// reachable from any test — `Shell` owns a `Session`, which takes the
+/// alternate screen and needs a tty, the same carve-out `budgets.rs` and
+/// `soak.rs` already name.
+///
+/// So the loop is held by construction rather than by a gate: it is one
+/// expression over a public predicate, where before it was two `draw`
+/// statements in a row whose pairing nothing recorded. Deleting the second
+/// of those left the entire suite green while the product sat on a
+/// permanently uncoloured screen, which is what this state machine exists to
+/// make un-deletable. Naming the gap rather than implying coverage.
+#[test]
+fn the_first_frame_is_plain_and_owes_exactly_one_repaint() {
+    let scratch = Scratch::large_diff("app-paint", 2, 8);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = Body::diff_only(8);
+
+    let mut app = App::new();
+    assert!(
+        !app.owes_repaint(),
+        "a shell that has drawn nothing is owed nothing; the debt is for a \
+         plain frame that is already on screen"
+    );
+
+    // The plain one, which is I7's whole fix.
+    let before = highlighter.stats();
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(
+        highlight_delta(before, highlighter.stats()).lines,
+        0,
+        "the first frame parsed, so the grammar compile is back on the frame \
+         I7 gives fifty milliseconds to"
+    );
+    assert!(
+        app.owes_repaint(),
+        "the plain frame left no debt, so nothing makes the shell draw the \
+         coloured one and the pane stays grey until something else wakes it"
+    );
+
+    // And the one that settles it.
+    let before = highlighter.stats();
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(
+        highlight_delta(before, highlighter.stats()).lines > 0,
+        "the frame that settles the debt parsed nothing, so the shell never \
+         colours at all"
+    );
+    assert!(
+        !app.owes_repaint(),
+        "the debt survived the frame that paid it, so `Shell::draw` would \
+         loop forever"
+    );
+
+    // One direction only. A later frame must not re-owe, or a monitor would
+    // draw every screen twice for the life of the process.
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(!app.owes_repaint());
+}
+
+#[test]
+fn a_shell_past_its_first_paint_owes_nothing_and_colours_at_once() {
+    // The test affordance, asserted rather than assumed: three gates depend
+    // on it starting coloured, and if it ever stopped doing that they would
+    // silently measure the plain frame instead.
+    let scratch = Scratch::large_diff("app-paint-past", 2, 8);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    let mut app = App::past_first_paint();
+    assert!(!app.owes_repaint());
+    let before = highlighter.stats();
+    app.view(&mut frame, &mut highlighter, &history, Body::diff_only(8))
+        .expect("view");
+    assert!(
+        highlight_delta(before, highlighter.stats()).lines > 0,
+        "`past_first_paint`'s first frame drew plain, so every gate using it \
+         to measure a coloured screen is measuring the opposite"
+    );
+    assert!(!app.owes_repaint());
 }

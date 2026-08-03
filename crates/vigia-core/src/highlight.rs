@@ -60,9 +60,10 @@
 //! onto one of nine [`Class`]es and stops, because `SPEC.md` §6 puts no terminal
 //! in this crate and §11.1 leaves the palette to the shell.
 
-use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -620,9 +621,13 @@ impl Highlighter {
     /// caller does. The thread ends on its own and holds nothing but an `Arc` to
     /// the grammars.
     ///
-    /// Bounded in both directions it can run away in: [`WARM_FILES`] files, and
-    /// [`WARM_CHARS`] characters of each. A monitor is left open for days and I3
-    /// is what would notice an unbounded sweep of a worktree.
+    /// Bounded in the three directions it can run away in: [`WARM_FILES`] paths
+    /// considered, [`WARM_PER_GRAMMAR`] files parsed per language, and
+    /// [`WARM_BYTES`] read from each. A monitor is left open for days and I3 is
+    /// what would notice an unbounded sweep of a worktree.
+    ///
+    /// The per-grammar cap is checked **before** the read, so a run over a
+    /// single-language changed set does three reads rather than sixty-four.
     pub fn warm_ahead(
         &self,
         root: std::path::PathBuf,
@@ -631,18 +636,48 @@ impl Highlighter {
         let syntaxes = Arc::clone(&self.syntaxes);
         std::thread::spawn(move || {
             let mut warmed = 0usize;
+            let mut per_grammar: HashMap<String, usize> = HashMap::new();
             for path in paths.into_iter().take(WARM_FILES) {
-                // A file that vanished between status naming it and this thread
-                // reaching it is ordinary, and so is one that is not UTF-8:
-                // both mean there is nothing here to compile a grammar with.
-                let Ok(text) = std::fs::read_to_string(root.join(&path)) else {
+                // Looked up before anything is read, which is what makes the
+                // per-grammar cap save the I/O and not merely the parse. A path
+                // with no grammar is skipped here rather than read and thrown
+                // away, and it is the same answer `syntax_for` gives the frame
+                // path for a file type nothing recognises.
+                let Some(grammar) = syntax_for(&syntaxes, &path).map(|s| s.name.clone()) else {
                     continue;
                 };
-                let head = match text.char_indices().nth(WARM_CHARS) {
-                    Some((at, _)) => &text[..at],
-                    None => &text[..],
+                let seen = per_grammar.entry(grammar).or_insert(0);
+                if *seen >= WARM_PER_GRAMMAR {
+                    continue;
+                }
+
+                // Bounded at the read rather than after it: see `WARM_BYTES`.
+                // A file that vanished between status naming it and this thread
+                // reaching it is ordinary beside an agent, and so is one that is
+                // not text; both mean there is nothing here to compile with.
+                let Ok(file) = std::fs::File::open(root.join(&path)) else {
+                    continue;
                 };
-                warm(&syntaxes, &path, head);
+                let mut buf = Vec::with_capacity(WARM_BYTES.min(64 * 1024));
+                if std::io::Read::take(file, WARM_BYTES as u64)
+                    .read_to_end(&mut buf)
+                    .is_err()
+                {
+                    continue;
+                }
+                // A bounded read lands mid-codepoint on any file that is not
+                // ASCII, so the tail is trimmed to the last complete character
+                // rather than the read being widened to avoid it.
+                let text = match std::str::from_utf8(&buf) {
+                    Ok(text) => text,
+                    Err(e) => match std::str::from_utf8(&buf[..e.valid_up_to()]) {
+                        Ok(text) => text,
+                        Err(_) => continue,
+                    },
+                };
+
+                warm(&syntaxes, &path, text);
+                *seen += 1;
                 warmed += 1;
             }
             warmed
@@ -892,27 +927,51 @@ fn plain(len: usize) -> Vec<Span> {
     }
 }
 
-/// Files [`Highlighter::warm_ahead`] will read, at most.
+/// Paths [`Highlighter::warm_ahead`] will consider, at most.
 ///
-/// Sixty-four, and the number is about what it is *for* rather than what it can
-/// afford. The grammars a diff needs are a handful even when its files are
-/// thousands, so a walk of the whole changed set would spend nearly all of its
-/// work recompiling patterns that are already compiled. Sixty-four covers the
-/// languages in any real worktree several times over and bounds the read.
+/// The outer bound, and it counts paths *offered* rather than files read: a run
+/// where the first sixty-four have all vanished warms nothing and stops, which
+/// is the bounded answer. What decides how much work actually happens is
+/// [`WARM_PER_GRAMMAR`], not this.
 pub const WARM_FILES: usize = 64;
 
-/// Characters of each file [`Highlighter::warm_ahead`] will parse, at most.
+/// Files [`Highlighter::warm_ahead`] will parse **per grammar**.
+///
+/// **The bound that matters, because the benefit is per grammar and the cost is
+/// per file.** Compiling a grammar is one file's work; every later file of the
+/// same language costs a flat parse and buys only the decaying residual, and a
+/// changed set is usually one language. Measured in release on real source
+/// truncated the way this thread truncates: 1 file 43.4ms, 2 files 62.7ms, 8
+/// files 154.9ms, 64 files **1.053s**. So a file cap alone spends about
+/// **96%** of a full run re-parsing under a grammar already compiled, while
+/// holding a core and touching `syntect`'s global scope-repository mutex next to
+/// the frame path.
+///
+/// Three, because the residual decays rather than vanishing: the first file
+/// compiles the grammar and the next two reach constructs it missed (a sibling
+/// `.rs` file still cost 41.41ms after one). Past that the curve is flat and the
+/// contention is not.
+pub const WARM_PER_GRAMMAR: usize = 3;
+
+/// Bytes of each file [`Highlighter::warm_ahead`] will read and parse, at most.
 ///
 /// Enough to reach the constructs a grammar is expensive for (strings, comments,
-/// nesting) without walking a generated file to its end. A parse is linear in
-/// what it reads, and this thread is competing with the frame path for a core.
-pub const WARM_CHARS: usize = 16 * 1024;
+/// nesting) without walking a generated file to its end.
+///
+/// **A bound on the read, not only on the parse**, and the distinction cost a
+/// rewrite: reading whole and truncating after is `read_to_string` on whatever
+/// the agent in the other pane happened to change, which for a lockfile, a
+/// minified bundle or a dataset is the whole thing. Measured on a 32.4 MB file
+/// with the page cache warm, **8.08ms against 0.166ms** for a bounded read, and
+/// far worse cold — plus a `String` the size of the largest changed file, which
+/// is an RSS spike I3 has no reason to absorb.
+pub const WARM_BYTES: usize = 64 * 1024;
 
 /// Compile the patterns `text` reaches under `path`'s grammar, so a later frame
 /// drawing that content does not.
 ///
 /// A free function over `&SyntaxSet` rather than a method, because the caller is
-/// on another thread: it holds an [`Highlighter::grammars`] handle and the
+/// on another thread: it holds an [`Highlighter::warm_ahead`] handle and the
 /// compiled patterns land in the set both of them share. Nothing is returned and
 /// nothing is recorded, which is deliberate and is the whole subtlety here.
 ///

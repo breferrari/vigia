@@ -56,8 +56,8 @@ pub use change::{ChangeKind, FileChange};
 pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
 pub use highlight::{
-    CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_CHARS,
-    WARM_FILES,
+    CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_BYTES,
+    WARM_FILES, WARM_PER_GRAMMAR,
 };
 pub use history::{
     HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, HistoryStats, Recency,
