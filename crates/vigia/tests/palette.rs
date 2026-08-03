@@ -219,6 +219,47 @@ fn the_sigil_keeps_its_own_colour_on_the_wash() {
 }
 
 #[test]
+fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
+    // **A published recipe with no gate is a promise nothing keeps.** The README
+    // answers "I want my own scheme *and* the row tint" with three lines of theme
+    // file, and it is the only answer there is: `ansi` refuses a wash at every
+    // depth by contract, because a wash has to assume a background and that
+    // palette's whole point is that it assumes none. Overriding the two keys is
+    // the reader supplying the assumption themselves.
+    //
+    // Restated here rather than read out of `README.md`. A test that parsed the
+    // file would pass on a README that had quietly stopped saying this.
+    let theme = vigia::theme::parse(
+        "base        = ansi\n\
+         added_row   = on #1b3d29\n\
+         removed_row = on #45222a\n",
+    )
+    .expect("the README's recipe parses")
+    .resolve(Depth::Truecolor);
+
+    // Still the reader's own scheme everywhere else, which is the half that would
+    // be silently lost if `base` were dropped or a value replaced a whole style.
+    assert_eq!(theme.added, Theme::ansi().added);
+    assert_eq!(theme.context, Theme::ansi().context);
+
+    let backend = draw(60, 8, &three_kinds(), theme);
+    for (row, added) in [(ADDED, true), (REMOVED, false)] {
+        let want = wash_of(theme, added);
+        assert_eq!(
+            backgrounds(&backend, row).last().copied().flatten(),
+            Some(want),
+            "row {row} draws no wash, so the recipe in the README does nothing"
+        );
+    }
+    assert_ne!(
+        wash_of(theme, true),
+        wash_of(theme, false),
+        "an addition and a removal wash the same, which is the one thing no rung \
+         may do"
+    );
+}
+
+#[test]
 fn a_palette_that_declines_a_bar_leaves_the_sigil_alone() {
     // The `_bar` keys still exist so a theme file can ask for one. What must hold
     // is that leaving them unset changes nothing: patching an empty style over the
@@ -334,8 +375,12 @@ fn sixteen_colours_draw_no_background_and_keep_the_sigil() {
     // the tool. What must not go with the wash is the sigil's own colour: patching
     // an unset bar over the diff style has to leave the diff style alone, and
     // getting that wrong blanks the last thing distinguishing an addition.
+    // **`Ansi256` is in this list and used to be in the washing one.** The cube
+    // cannot hold a subtle colour: `#1b3d29` quantises to `#005f00`, and over a
+    // newly added file that is a screen of flat green rather than a tint. The
+    // arithmetic is in `tests/colour.rs`; this is the half that draws.
     let dark = Theme::dark();
-    for depth in [Depth::Ansi16, Depth::None] {
+    for depth in [Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let backend = draw(60, 8, &three_kinds(), dark.resolve(depth));
         let buffer = backend.buffer();
         for row in [ADDED, REMOVED] {

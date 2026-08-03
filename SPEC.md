@@ -676,11 +676,15 @@ The depth ladder, and what each rung loses:
 | Rung | Foreground | Background |
 |---|---|---|
 | truecolour | 24-bit, as authored | as authored |
-| 256 | quantised to the xterm palette | quantised |
-| 16 | nearest of the sixteen names | **dropped** |
+| 256 | quantised to the xterm palette | **dropped** |
+| 16 | nearest of the sixteen names | dropped |
 | none | dropped | dropped |
 
-**Background is dropped a rung above foreground**, and that asymmetry is the one thing here worth arguing with. §5.1 already records that an ANSI background is a solid block rather than a tint: at sixteen colours the darkest available green behind a line of code is a slab, and a slab destroys the syntax colours sitting on it. Worse than no tint. So the row wash stops at 256 while the text goes down to sixteen, and below that the diff signal narrows back to the sigil column exactly as §11.1 recorded before #11.
+**A background needs 24-bit and a foreground does not**, and that asymmetry is the one thing here worth arguing with. §5.1 already records that a quantised background is a solid block rather than a tint: the darkest available green behind a line of code is a slab, and a slab destroys the syntax colours sitting on it. Worse than no tint. So the row wash needs the top rung while the text goes all the way down to sixteen, and below it the diff signal narrows back to the sigil column exactly as §11.1 recorded before #11.
+
+**That boundary sat at 256 for a phase and it took a screen to move.** The cube has six levels per axis and its darkest two are 0 and 95, so a *subtle* colour has nowhere to land: `#1b3d29` quantises to `#005f00` and `#45222a` to `#5f0000`, saturated primaries at roughly two and a half times the authored luminance. Over a hunk that reads as a strong tint and the report would have been "the colour looks wrong". Over a **newly added file, where every row is an addition**, it is a screenful of flat green, and §5's whole claim is that colour carries signal. Reported 2026-08-03 with two photographs of it. The argument was already written here as the reason Windows detects 24-bit rather than 256; what was missing was applying it to the rung itself.
+
+**The grey ramp is not the escape**, and it is worth naming because it is the obvious next idea. It is far nearer in distance than the cube, and it is where the quantiser would send a desaturated wash if its chroma gate did not stop it. But `#1b3d29` and `#45222a` average to the *same* grey, so an added row and a removed row would be one colour, which is the one thing §5 says may never happen at any rung that has colour at all. There is no honest wash below 24-bit. A reader whose terminal draws more than detection can prove says so with `VIGIA_COLOR`, and inside `tmux` that also needs the multiplexer to pass 24-bit through rather than approximate it.
 
 Detection is a precedence chain, first answer wins: `VIGIA_COLOR`, then `NO_COLOR`, then `TERM=dumb`, then `COLORTERM` claiming 24-bit, then **`TERM_PROGRAM`**, then **Windows with `WT_SESSION`**, then `TERM` promising 24-bit, then `TERM` containing `256color`, then **Windows**, then sixteen.
 

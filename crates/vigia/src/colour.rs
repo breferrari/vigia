@@ -19,17 +19,34 @@
 //! | Rung | Foreground | Background |
 //! |---|---|---|
 //! | [`Depth::Truecolor`] | 24-bit, as authored | as authored |
-//! | [`Depth::Ansi256`] | quantised to the 256-colour palette | quantised |
-//! | [`Depth::Ansi16`] | nearest of the sixteen names | **dropped** |
+//! | [`Depth::Ansi256`] | quantised to the 256-colour palette | **dropped** |
+//! | [`Depth::Ansi16`] | nearest of the sixteen names | dropped |
 //! | [`Depth::None`] | dropped | dropped |
 //!
-//! **Background is dropped a rung above foreground**, and that is the one asymmetry
-//! worth arguing. `SPEC.md` §5.1 records that an ANSI background is a solid block
-//! rather than a tint: at sixteen colours the darkest available green behind a line
-//! of code is a slab, not the wash `assets/preview.svg` draws. A slab is worse than
-//! nothing, because it destroys the syntax colours sitting on it. So the row tint
-//! stops one rung earlier than the text does, and the diff signal narrows back to
-//! the sigil column exactly as it did before #11.
+//! **A background needs 24-bit and a foreground does not**, and that asymmetry is
+//! the one thing here worth arguing. `SPEC.md` §5.1 records that an ANSI background
+//! is a solid block rather than a tint: the darkest available green behind a line of
+//! code is a slab, not the wash `assets/preview.svg` draws, and a slab is worse than
+//! nothing because it destroys the syntax colours sitting on it.
+//!
+//! **That argument was applied at sixteen and it holds one rung higher, which took a
+//! screen to establish.** The 256-colour cube has six levels per axis and its darkest
+//! two are 0 and 95, so a *subtle* colour has nowhere to land: the wash `#1b3d29`
+//! quantises to `#005f00` and `#45222a` to `#5f0000`, which are saturated primaries
+//! at roughly two and a half times the authored luminance. On a hunk or two that
+//! reads as a strong tint. On a newly added file, where every row is an addition, it
+//! is a screen of flat green, and `SPEC.md` §5's whole claim is that colour carries
+//! signal. This was already written down as the reason Windows detects 24-bit rather
+//! than 256; what was missing was applying it to the rung itself.
+//!
+//! The grey ramp is not the escape. It is much nearer in distance, and it is where
+//! [`to_indexed`] would send a desaturated wash if its chroma gate did not stop it,
+//! but `#1b3d29` and `#45222a` both average to the *same* grey. An added row and a
+//! removed row would be one colour, which is the one thing §5 says may never happen.
+//!
+//! So there is no honest wash below 24-bit, and the diff signal narrows back to the
+//! sigil column exactly as it did before #11. A reader whose terminal draws more
+//! than detection can prove says so with `VIGIA_COLOR`.
 //!
 //! ## Modifiers survive every rung
 //!
@@ -248,8 +265,14 @@ impl Depth {
             // behind this cell", which is the reader's own background; `Reset` means
             // "the terminal's default", which is not the same thing inside a pane
             // that has been given one.
-            Self::None | Self::Ansi16 => Option::None,
-            _ => style.bg.map(|colour| self.colour(colour)),
+            //
+            // **`Ansi256` is on this side of the line and used to be on the other.**
+            // See the module docs: the cube cannot express a subtle wash, the grey
+            // ramp cannot tell an addition from a removal, and a slab is worse than
+            // no tint. Nothing else changes at this rung, so the foreground is
+            // quantised exactly as it was.
+            Self::Truecolor => style.bg,
+            _ => Option::None,
         };
         out
     }
