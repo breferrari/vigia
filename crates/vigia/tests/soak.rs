@@ -705,6 +705,7 @@ fn drive(
             frame
                 .files()
                 .iter()
+                .take(vigia_core::WARM_FILES)
                 .map(|change| change.path.clone())
                 .collect(),
         )

@@ -669,12 +669,21 @@ impl Highlighter {
                 // silently *discards* the root for an absolute path, so a caller
                 // one `Vec<String>` away from wrong would read anywhere on the
                 // disk.
-                let relative = std::path::Path::new(&path);
-                if relative.is_absolute()
-                    || relative
-                        .components()
-                        .any(|c| matches!(c, std::path::Component::ParentDir))
-                {
+                //
+                // **A whitelist, because the blacklist it replaced had three
+                // holes on Windows.** `Path::is_absolute` there requires a prefix
+                // *and* a root, so `C:relative.rs`, `\\dir\\file.rs` and
+                // `/dir/file.rs` all passed it while `join` still discarded the
+                // worktree. Verified against the shipped `warm_ahead`: all three
+                // read the bait file, and the gate covering this was green only
+                // because it happened to use the two spellings the blacklist did
+                // catch. Naming what a path may contain has no such holes.
+                if !std::path::Path::new(&path).components().all(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::Normal(_) | std::path::Component::CurDir
+                    )
+                }) {
                     continue;
                 }
 

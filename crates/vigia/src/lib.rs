@@ -41,8 +41,9 @@
 //! second open costs one repository discovery, paid after first paint, off the
 //! path I7 measures.
 //!
-//! Both threads are detached rather than scoped. Quitting means main returning,
-//! and neither thread can be woken to be joined: `crossterm` has no portable
+//! All three are detached rather than scoped. Quitting means main returning,
+//! and none of them can be woken to be joined: the warmer ends by itself, and
+//! for the other two, `crossterm` has no portable
 //! interruptible read, and the one handle that unblocks the watcher makes its
 //! `next_tick` return `None` permanently, which is a shutdown and not a nudge.
 
@@ -174,30 +175,25 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
     };
-    // **One call, two frames.** `Shell::draw` settles the repaint debt itself,
-    // so the opening is one mechanism rather than two statements in a row that a
-    // future edit can separate. `App::paint` records why that matters: deleting
-    // the second statement left the whole suite green while the product sat on a
-    // permanently uncoloured screen.
-    //
-    // The alternate screen is already taken by the line above, so before this
-    // the reader watched the whole 74-362ms grammar compile happen on a blank
-    // one. Measured over the hundred-file fixture: 105.03ms to first paint
-    // before, 13.26ms now.
-    shell.draw(&mut frame, &worktree)?;
-
     // **For a screen with rows on it, so a clean worktree spawns nothing.**
     // Starting a monitor on a tree nobody has touched is an ordinary way to
     // start one, and there is no grammar to compile for an empty state.
     //
     // `take` before `map`, not after: `warm_ahead` considers at most
     // `WARM_FILES` paths, so cloning the rest would be ten thousand `String`
-    // allocations at the scale [#48] contemplates, every one of them dropped
+    // allocations at the scale [#48](https://github.com/breferrari/vigia/issues/48)
+    // contemplates, every one of them dropped
     // unread.
     //
     // Detached by dropping the handle, like the two threads below and for a
     // simpler reason: it ends by itself, and nothing waits for a result that
     // only ever makes a later frame cheaper.
+    //
+    // **Above the draw, so it overlaps the frame that compiles.** Below it,
+    // the warm starts only once paint two has finished paying the 74-362ms
+    // for what is on screen, which turns `max(paint, warm)` into their sum
+    // and widens the window in which a first scroll below the fold meets a
+    // cold grammar. That window is the whole reason this thread exists.
     if !frame.files().is_empty() {
         shell.highlighter.warm_ahead(
             worktree.workdir().to_path_buf(),
@@ -209,6 +205,18 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 .collect(),
         );
     }
+
+    // **One call, two frames.** `Shell::draw` settles the repaint debt itself,
+    // so the opening is one mechanism rather than two statements in a row that a
+    // future edit can separate. `App::paint` records why that matters: deleting
+    // the second statement left the whole suite green while the product sat on a
+    // permanently uncoloured screen.
+    //
+    // The alternate screen is already taken by the line above, so before this
+    // the reader watched the whole 74-362ms grammar compile happen on a blank
+    // one. Measured over the hundred-file fixture: 105.03ms to first paint
+    // before, 13.26ms now.
+    shell.draw(&mut frame, &worktree)?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and

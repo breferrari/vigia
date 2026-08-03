@@ -71,7 +71,10 @@ fn engine(c: &mut Criterion) {
         })
     });
 
-    // I7 and I4 together: open cold, then paint the first file.
+    // I4: open cold, then paint the first file. **Not I7**, which is a claim
+    // about the shell first paint and is gated in
+    // `crates/vigia/tests/first_paint.rs`: nothing here builds a `Highlighter`,
+    // and a grammar first parse is 74-362ms of what a real first paint costs.
     let root = scratch.path_of(".");
     group.bench_function("open_and_first_paint", |b| {
         b.iter(|| {

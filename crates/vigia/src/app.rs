@@ -158,7 +158,7 @@ pub struct App {
     /// to be correct untouched. Found by mutation.
     ///
     /// Here rather than in [`crate::run`]'s loop for the reason
-    /// [`Self::frames`] gives further down: every caller that builds a view gets
+    /// [`Self::frames`] gives further up: every caller that builds a view gets
     /// the behaviour, so `tests/soak.rs` and the budget gates drive the shipped
     /// opening rather than one with the rule taken out.
     ///

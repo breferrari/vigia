@@ -253,11 +253,15 @@ fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
         .join()
         .expect("the warmer thread");
 
-    assert!(
-        warmed <= WARM_TOTAL,
-        "the warmer parsed {warmed} files across distinct languages, over the \
-         {WARM_TOTAL} it is allowed in total, so a polyglot tree holds a core \
-         for seconds beside the frame path"
+    // `assert_eq!` rather than `<=`, because a bound is only evidence when
+    // something reached it: `warmed <= WARM_TOTAL` is satisfied by a `warm_ahead`
+    // whose loop body was deleted. The fixture offers twice the cap, so equality
+    // is what says the run both reached it and stopped there.
+    assert_eq!(
+        warmed, WARM_TOTAL,
+        "the warmer parsed {warmed} files across distinct languages against a \
+         total cap of {WARM_TOTAL}, so it either walked past the cap or never \
+         reached it and this gate is vacuous"
     );
 }
 
@@ -303,22 +307,39 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     // `PathBuf::join` silently discards the root for an absolute path. Not
     // reachable from the shell, which passes what status reported, but
     // `warm_ahead` is public on a public type with no other precondition.
+    // The bait lives in its own `Scratch` rather than at a fixed name beside the
+    // worktree: the temp directory is shared, and a fixed name is one panic away
+    // from being left behind, against the soak's zero-retained-temp-files claim.
     let scratch = Scratch::large_diff("warm-escape", 1, 4);
-    let outside = scratch.path_of("../outside-the-worktree.rs");
-    std::fs::write(&outside, "fn escaped() {}\n").expect("write");
+    let bait = Scratch::large_diff("warm-escape-bait", 1, 4);
+    let outside = bait.path_of("src/mod_0.rs");
+
+    let mut spellings = vec![
+        // Absolute, which `PathBuf::join` discards the root for.
+        outside.to_string_lossy().into_owned(),
+        "../outside-the-worktree.rs".to_owned(),
+    ];
+
+    // **The spelling a blacklist misses, and it has to name a file that really
+    // exists.** A path pointing at nothing is refused and not-found alike, so a
+    // gate built on one is green either way: reverting this guard to its earlier
+    // `is_absolute() || ParentDir` form left an earlier version of this test
+    // passing. `Path::is_absolute` on Windows wants a prefix *and* a root, so
+    // stripping the drive from the bait leaves a path that fails that test and
+    // that `join` still resolves to the same real file.
+    //
+    // On Unix an absolute path has no prefix, so the case is already the one a
+    // line above and there is nothing extra to spell.
+    #[cfg(windows)]
+    if let Some(rooted) = outside.to_string_lossy().get(2..) {
+        spellings.push(rooted.to_owned());
+    }
 
     let warmed = Highlighter::new()
-        .warm_ahead(
-            scratch.root().to_path_buf(),
-            vec![
-                outside.to_string_lossy().into_owned(),
-                "../outside-the-worktree.rs".to_owned(),
-            ],
-        )
+        .warm_ahead(scratch.root().to_path_buf(), spellings)
         .join()
         .expect("the warmer thread");
 
-    let _ = std::fs::remove_file(&outside);
     assert_eq!(
         warmed, 0,
         "the warmer read {warmed} files from outside the worktree it was given"
@@ -326,12 +347,15 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
 }
 
 #[test]
-fn the_read_is_bounded_and_a_file_cut_mid_character_still_parses() {
-    // Two claims sharing one fixture. `WARM_BYTES` bounds the **read** rather
-    // than only the parse, which is what keeps a changed lockfile or dataset
-    // from being pulled whole into a `String`; and the cut it makes lands
-    // mid-character on anything that is not ASCII, which the `valid_up_to` trim
-    // absorbs. Neither had a test, and dropping either is one edit.
+fn a_file_cut_mid_character_still_parses() {
+    // The cut `WARM_BYTES` makes lands mid-character on anything that is not
+    // ASCII, which the `valid_up_to` trim absorbs. Dropping that trim is one
+    // edit and nothing else here would notice.
+    //
+    // **Only the trim, not the bound.** This file is valid UTF-8 throughout, so
+    // it warms either way and an unbounded read passes it; the bound is gated by
+    // `the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file`, which is
+    // the one that can see it.
     let scratch = Scratch::large_diff("warm-bounded-read", 1, 4);
     let mut text = String::from("// ");
     while text.len() < WARM_BYTES.saturating_sub(2) {

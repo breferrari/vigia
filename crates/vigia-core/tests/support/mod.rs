@@ -85,10 +85,10 @@ pub fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
 ///
 /// Here for the reason [`slack`] and [`exclusively_timed`] are: it is one policy
 /// and copies drift. **This one had already drifted before it was folded**, in
-/// the half that has to be right. Two of the four copies printed
+/// the half that has to be right. Both copies printed
 /// `cargo test --release --test budgets`, which is ambiguous because both crates
-/// ship a `budgets.rs`, and the four disagreed on whether it was one gate or
-/// several being skipped. Taking `how` does not make a wrong hint impossible —
+/// ship a `budgets.rs`, and they disagreed on whether it was one gate or several
+/// being skipped. Taking `how` does not make a wrong hint impossible —
 /// it is still hand-typed per call site — but it puts the command beside the
 /// gate it reruns instead of inside a helper copied between crates.
 pub fn absolute_gates_apply(how: &str) -> bool {
