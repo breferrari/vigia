@@ -28,6 +28,7 @@ use std::time::Duration;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
@@ -3524,4 +3525,111 @@ fn the_position_keeps_its_grey_where_the_readouts_take_a_colour() {
         "the theme draws the readout and the position alike, so this cannot \
          tell them apart"
     );
+}
+
+#[test]
+fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
+    // **[#77](https://github.com/breferrari/vigia/issues/77)'s ruling one
+    // element over, and on the rows a reader actually reads.** The gutter was
+    // measured against the region's width, and the stream's region loses two
+    // columns to a scrollbar, and that bar appears when the diff outgrows the
+    // pane. So crossing the pane height took the whole gutter off every content
+    // row: watching an agent write, the line numbers vanish the moment the diff
+    // gets long, for no reason on screen.
+    //
+    // Asserted on the gutter, not on the whole row. A drawn scrollbar takes two
+    // columns and the text reflows into what is left, which is what a scrollbar
+    // is for and is true on `main` too. What was the defect is the gutter
+    // *vanishing*: all-or-nothing rather than a reflow.
+    //
+    // Swept, because the gutter gives way at a width band that moves with the
+    // digit count rather than at a single boundary; it was reachable at 29 and
+    // 30 columns for three-digit numbers.
+    let body = |total_rows: usize| View {
+        rows: vec![
+            Row::File(listed("src/engine/watch.rs", 42, 7)),
+            line(LineKind::Added, 258, "    pub fn advance(&mut self) {"),
+        ],
+        list: Vec::new(),
+        files: 1,
+        total_rows,
+        rows_above: 0,
+        ..ragged_counts()
+    };
+
+    let mut compared = 0usize;
+    for width in 20..=120u16 {
+        let flat = row_text(&screen(width, 8, &body(2), &chrome()), 2);
+        let deep = row_text(&screen(width, 8, &body(10_000), &chrome()), 2);
+        if !flat.contains("258") {
+            continue;
+        }
+        compared += 1;
+        assert!(
+            deep.contains("258"),
+            "at {width} columns a diff taller than the pane lost its line              numbers entirely, so the gutter is sized from the diff's height:              {flat:?} became {deep:?}"
+        );
+    }
+    assert!(
+        compared > 40,
+        "only {compared} widths drew the line number at all, so this swept over          rows with no gutter to lose"
+    );
+}
+
+#[test]
+fn render_clips_to_the_buffer_rather_than_the_area() {
+    // `render`'s own contract is that any area is legal, and most writers here
+    // reach the cells through `Buffer::set_stringn` or `set_style`, which clip.
+    // Three reached them by index and asserted: the heat strip, the rule and the
+    // scrollbar. Each traded a string call for a direct cell write to stop an
+    // allocation per cell, which was the right trade, and each traded the
+    // clipping away with it unremarked.
+    //
+    // **The fixture matrix is the gate here, not the sweep.** An earlier form
+    // carried neither a heat strip nor a pinned list, so it reached only one
+    // writer and passed against a renderer that still panicked in two other
+    // places. A view carrying each is what makes the claim true.
+    //
+    // **Width only, and the height case is deliberately not here.** An area
+    // *taller* than its buffer panics too, in the row-drawing paths, and does so
+    // identically on `origin/main`: that is
+    // [#91](https://github.com/breferrari/vigia/issues/91), a pre-existing gap
+    // in the same contract, filed rather than widened into here.
+    let theme = Theme::default();
+    for (buffer, area) in [
+        ((40u16, 10u16), (60u16, 10u16)),
+        ((40, 10), (200, 10)),
+        ((10, 6), (80, 6)),
+    ] {
+        for view in [
+            one_file(),
+            View {
+                files: 0,
+                list: Vec::new(),
+                rows: Vec::new(),
+                ..one_file()
+            },
+            // A heat strip, a pinned list to put a rule on screen, and enough
+            // files to make the list scrollable so the bar is drawn too.
+            View {
+                list: vec![
+                    listed("src/engine/watch.rs", 42, 7),
+                    listed("src/render/frame.rs", 11, 3),
+                ],
+                rows: vec![Row::File(listed("src/engine/watch.rs", 42, 7))],
+                files: 40,
+                total_rows: 4_000,
+                ..ragged_counts()
+            },
+        ] {
+            let mut buf = Buffer::empty(Rect::new(0, 0, buffer.0, buffer.1));
+            render(
+                &mut buf,
+                Rect::new(0, 0, area.0, area.1),
+                &view,
+                &theme,
+                &chrome(),
+            );
+        }
+    }
 }

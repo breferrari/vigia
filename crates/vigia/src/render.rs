@@ -2488,9 +2488,11 @@ impl Painter<'_> {
             // single-character string, which measured ten times the cost of
             // writing the cell. A bar is `list + diff` rows of that, twice a
             // screen.
-            self.buf[(x, area.y + row as u16)]
-                .set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
-                .set_style(style);
+            // Clipped, for the reason the heat strip gives.
+            if let Some(cell) = self.buf.cell_mut((x, area.y + row as u16)) {
+                cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
+                    .set_style(style);
+            }
         }
     }
 
@@ -2509,7 +2511,11 @@ impl Painter<'_> {
         let mut glyph = [0u8; 4];
         let glyph = RULE.encode_utf8(&mut glyph);
         for x in area.x..area.x + area.width {
-            self.buf[(x, area.y)].set_symbol(glyph).set_style(style);
+            // Clipped, for the reason the heat strip gives.
+            let Some(cell) = self.buf.cell_mut((x, area.y)) else {
+                continue;
+            };
+            cell.set_symbol(glyph).set_style(style);
         }
     }
 
@@ -2538,7 +2544,16 @@ impl Painter<'_> {
         let inner = planning_width(pane, 0);
         let columns = Columns::plan(inner);
 
-        self.gutter = gutter_width(view, usize::from(area.width));
+        // **The gutter comes from the same width, and that is
+        // [#77](https://github.com/breferrari/vigia/issues/77)'s ruling one
+        // element over.** `area` has already lost the scrollbar's columns when a
+        // bar was drawn, and the stream's bar appears when the diff outgrows the
+        // pane, so measuring the gutter against it made the line numbers a
+        // function of the *diff's height*. At 29 and 30 columns a diff crossing
+        // the pane height took the whole gutter off every content row: not a
+        // reflow but an all-or-nothing disappearance, on the tick an agent's
+        // edit made the diff long.
+        self.gutter = gutter_width(view, usize::from(inner));
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             match row {
@@ -2694,9 +2709,15 @@ impl Painter<'_> {
             let glyph = HEAT_BLOCK.encode_utf8(&mut glyph);
             let x = right.x + right.width - heat.len() as u16;
             for (offset, slice) in heat.iter().enumerate() {
-                self.buf[(x + offset as u16, right.y)]
-                    .set_symbol(glyph)
-                    .set_style(self.theme.heat(*slice));
+                // `cell_mut` rather than `Index`, because this used to be a
+                // `set_stringn` call and that clipped. Trading it for a direct
+                // write to stop the per-cell allocation traded away the clipping
+                // too, and `render`'s contract is that any area is legal: an
+                // area wider than its buffer aborted the whole paint on the one
+                // row carrying a strip.
+                if let Some(cell) = self.buf.cell_mut((x + offset as u16, right.y)) {
+                    cell.set_symbol(glyph).set_style(self.theme.heat(*slice));
+                }
             }
         }
         past(&mut right, columns.heat);
