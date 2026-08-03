@@ -1091,7 +1091,8 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
 fn the_glance_columns_collapse_in_one_order() {
     // #77's ladder. The columns are decided once for a region now, so the order
     // they give way in is a property of the region rather than of a row, and it
-    // is the one `SPEC.md` §11.1 records: counts, then heat, then sparkline.
+    // is the one `SPEC.md` §11.1 records: counts, then the pulse, then heat,
+    // then sparkline.
     //
     // Swept rather than sampled, because a ladder is only ever wrong at the
     // widths where it changes rung, and those move with the fixture's counts.

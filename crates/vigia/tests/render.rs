@@ -1878,7 +1878,8 @@ fn hostile_content_never_panics_at_any_pane_size() {
     // real gate and structurally cannot find an arithmetic fault: nothing in
     // `one_file` is big enough to overflow anything.
     //
-    // **This one exists because a saturated heat strip panicked at 33x6.**
+    // **This one exists because a saturated heat strip panicked at 33x6**, as
+    // the layout table stood when the fault was found.
     // `heat_at` folded a group of `u16` bucket counts with `sum()`, and the
     // six-slice rung groups two buckets, so a file busy enough to fill them
     // overflowed and took the pane down. #77's layout table is what made that
@@ -1915,7 +1916,11 @@ fn hostile_content_never_panics_at_any_pane_size() {
 
     // Every heat and sparkline rung is reached inside this range, which is what
     // makes the grouping arithmetic exercised at all: the six-slice rung, where
-    // the fault was, is drawn between 31 and 45 columns.
+    // the fault was, is drawn between 37 and 47 columns in a region with no
+    // caret, and 39 to 49 in the pinned list, which has one. Read off
+    // `ROW_LAYOUTS` rather than swept, because a full sparkline bucket draws the
+    // same block as a heat slice and a sweep that counted glyphs would count
+    // both.
     for width in 0..=60u16 {
         for height in 0..=8u16 {
             let backend = screen(width, height, &view, &chrome());
@@ -1967,7 +1972,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
     // mentions the one the row is about.
     //
     // Latent before this branch and ordinary after it, because fixed slots left
-    // the path less room: the pair stopped fitting at 87 columns where it used
+    // the path less room: the pair stopped fitting at 107 columns where it used
     // to stop at 60.
     let renamed = FileEntry {
         path: "crates/vigia/src/shell.rs".to_owned(),
@@ -2101,7 +2106,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
     //
     // It was reachable from the ordinary path rather than from hostile input:
     // `>1s` is what a frame over a second draws and `>1GiB` what memory over a
-    // gigabyte draws, both of which `SPEC.md` §5.1 specifies.
+    // gigabyte draws, both of which `SPEC.md` §11.1 specifies.
     //
     // Two existing gates already drew `>1s` and so *hung* rather than failed,
     // which is why this is stated as its own property: a suite that times out

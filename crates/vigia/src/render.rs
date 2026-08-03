@@ -401,8 +401,12 @@ const FOLLOWING: &str = "follow ▶";
 /// thing on the footer a reader checks at a glance rather than reads.
 ///
 /// Restated as a `char` beside the string rather than composed into it, because
-/// `concat!` cannot take a `char` and a mismatch is caught by
-/// `the_follow_marker_is_the_last_character_of_the_state`.
+/// `concat!` cannot take a `char`. Two spellings of one glyph can drift, and the
+/// drift is silent: the recolouring pass would simply find nothing and the mark
+/// would go back to grey. `the_follow_marker_is_the_last_character_of_the_state`
+/// catches a change to [`FOLLOWING`], and
+/// `the_follow_marker_is_green_where_the_word_beside_it_is_dim` catches a change
+/// to this, because it reads the colour this constant is what places.
 const FOLLOW_MARK: char = '▶';
 
 /// What joins two facts drawn on one line.
@@ -2242,7 +2246,7 @@ impl Painter<'_> {
     ///
     /// **A second pass over drawn cells rather than a second placement**, and
     /// that is the load-bearing choice. Each of these is part of a token the
-    /// ladder picks *whole*: `  0.8ms frame  19MiB` is one rung of
+    /// ladder picks *whole*: `0.8ms frame   19MiB` is one rung of
     /// [`diagnostic_rungs`] and `follow ▶  1/3` is one rung of [`state_rungs`].
     /// Splitting them to place each colour separately would mean the ladders no
     /// longer decide what the row draws, and `Footer::plan`'s width arithmetic
@@ -2613,7 +2617,8 @@ impl Painter<'_> {
         let mut right = area;
 
         // **Every slot is subtracted whether or not this row fills it**, which is
-        // the whole of #67's sibling ruling: a row without a sparkline used to
+        // the whole of [#77](https://github.com/breferrari/vigia/issues/77)'s
+        // ruling: a row without a sparkline used to
         // let its neighbours' elements slide right into the space, and a row
         // with a two-column-narrower counts cell moved everything outside it.
         // Both are ordinary rather than exotic, since `spark_of` yields nothing
@@ -2722,7 +2727,7 @@ impl Painter<'_> {
         // pair or the new path alone, never a cut that changes the subject.
         //
         // Latent before the row had fixed slots and ordinary after: the pair
-        // stopped fitting at 87 columns where it used to stop at 60.
+        // stopped fitting at 107 columns where it used to stop at 60.
         let full = heading
             .from
             .map(|from| format!("{} ← {from}", heading.path));
