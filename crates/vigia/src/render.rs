@@ -391,6 +391,20 @@ const CELL_GAP: &str = "  ";
 /// what they are looking at is live.
 const FOLLOWING: &str = "follow ▶";
 
+/// The marker inside [`FOLLOWING`], which is drawn green where the word beside
+/// it stays dim.
+///
+/// **The picture's own split, and it is not decoration.** `assets/preview.svg`
+/// draws `follow ` in `.dim` and this glyph in `.grn`, and §5.1's rule is that a
+/// published artifact answering a question is the answer. It earns the colour:
+/// the word names a mode and the mark says the mode is *on*, which is the one
+/// thing on the footer a reader checks at a glance rather than reads.
+///
+/// Restated as a `char` beside the string rather than composed into it, because
+/// `concat!` cannot take a `char` and a mismatch is caught by
+/// `the_follow_marker_is_the_last_character_of_the_state`.
+const FOLLOW_MARK: char = '▶';
+
 /// What joins two facts drawn on one line.
 ///
 /// Twice on screen: the header's worktree name and its changed-file count, and
@@ -911,11 +925,10 @@ fn past(right: &mut Rect, width: usize) {
 
 /// Whether this file has any heat strip to draw at all.
 ///
-/// **Asked before the column is reserved as well as inside [`heat_at`], and the
-/// two must agree**, which is the shape [`scrollable`] already has one region
-/// down: a region that reserved a column the drawer then declined to fill is
-/// exactly the blank slot [`Columns`] exists to prevent. Written once so that
-/// "earned a column" and "drew something" cannot drift apart.
+/// Named rather than inlined into [`heat_at`]'s guard, so that "has anything to
+/// draw" is one predicate wherever it is asked. It was briefly asked twice, when
+/// a column was reserved only where some drawn row could fill it; that rule is
+/// gone and every slot is reserved from the pane, so this has one caller today.
 fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
     buckets.iter().any(|bucket| bucket.total() > 0)
 }
@@ -941,17 +954,26 @@ fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
 /// makes that possible: the slots are a property of the pane, so nothing a
 /// reader scrolls past can move them.
 ///
-/// Two rungs, widest first, because a constant is not the same as a wide one.
-/// Five holds `+9999` and every abbreviation [`churn_of`] falls back to past it;
-/// three holds `+42` and abbreviates sooner. A field wide enough for
-/// `+4294967295` would spend eleven columns a row forever on a number no file
-/// reaches, and a field fixed at five spends 27% of a forty-column pane on two
-/// numbers where `assets/preview.svg` spends about 11% of its own width.
+/// Columns one half of the counts cell occupies, whatever that half says.
 ///
-/// **The counts cell degrades like everything else on the row**, which it has to:
-/// held at five, it starved the sparkline at exactly forty columns, the width I6
-/// is named for and where §5's differentiator matters most.
-const COUNT_RUNGS: [usize; 2] = [5, 3];
+/// **Five, and it does not degrade, because five is the narrowest width at which
+/// the abbreviation is total.** A narrower rung was tried and shipped a wrong
+/// number: at three columns [`churn_of`] has two characters to work with, and a
+/// 250-line change has no truthful form in two characters, so the search fell
+/// through to the thousands unit and drew `+0k`. `+0M` for 999,999 likewise. It
+/// was reachable at exactly forty columns, the width I6 is named for, which is
+/// the worst place in the tool to round a number to zero.
+///
+/// At four characters every `u32` has a form and none of them is a lie: `9999`
+/// plain, `10k` to `999k`, `1M` to `999M`, `1G` to `4G`. A field wide enough for
+/// `+4294967295` would instead spend eleven columns a row forever on a number no
+/// file reaches.
+///
+/// What it costs is the sparkline between 36 and 39 columns, where the wider
+/// counts field no longer leaves room for it. That is the honest trade: a
+/// glance element at four widths against a number that says zero when it means
+/// two hundred and fifty.
+const COUNT_CELL: usize = 5;
 
 /// Every shape a file row's right-hand side may take, widest first.
 ///
@@ -963,55 +985,14 @@ const COUNT_RUNGS: [usize; 2] = [5, 3];
 /// then the sparkline entirely, then the strip, then the pulse mark, and the
 /// counts last, because they are the row's content rather than a signal drawn
 /// beside it.
-const ROW_LAYOUTS: [Columns; 9] = [
-    Columns::new(
-        COUNT_RUNGS[0],
-        PULSE_RUNGS[0],
-        HEAT_RUNGS[0],
-        SPARK_RUNGS[0],
-    ),
-    Columns::new(
-        COUNT_RUNGS[0],
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[0],
-        SPARK_RUNGS[0],
-    ),
-    Columns::new(
-        COUNT_RUNGS[0],
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[0],
-        SPARK_RUNGS[1],
-    ),
-    Columns::new(
-        COUNT_RUNGS[0],
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[1],
-        SPARK_RUNGS[1],
-    ),
-    Columns::new(
-        COUNT_RUNGS[1],
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[1],
-        SPARK_RUNGS[1],
-    ),
-    Columns::new(
-        COUNT_RUNGS[1],
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[1],
-        SPARK_RUNGS[2],
-    ),
-    Columns::new(
-        COUNT_RUNGS[1],
-        PULSE_RUNGS[1],
-        HEAT_RUNGS[2],
-        SPARK_RUNGS[2],
-    ),
-    Columns::new(
-        COUNT_RUNGS[1],
-        PULSE_RUNGS[2],
-        HEAT_RUNGS[2],
-        SPARK_RUNGS[2],
-    ),
+const ROW_LAYOUTS: [Columns; 8] = [
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[0], SPARK_RUNGS[0]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[0], SPARK_RUNGS[1]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[1], SPARK_RUNGS[1]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[1], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[2], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[2], HEAT_RUNGS[2], SPARK_RUNGS[2]),
     Columns::NOTHING,
 ];
 
@@ -1024,14 +1005,23 @@ const fn counts_width(cell: usize) -> usize {
 ///
 /// **Magnitude gives way to a shorter form rather than to more digits**, which
 /// is the rule the status bar's frame and memory cells already follow when they
-/// draw `>1s` and `>9GiB`. A file with more than 9,999 added lines is a
+/// draw `>1s` and `>1GiB`. A file with more than 9,999 added lines is a
 /// generated one, and whether it was 15,032 or 15,036 tells a reader nothing the
 /// `15k` does not, while the extra column would move the strip beside it.
 ///
-/// Total for every `u32` at every rung [`COUNT_RUNGS`] offers, by construction:
-/// the narrowest rung leaves two characters, and `u32::MAX` divided by a billion
-/// is `4`, so `4G` always fits. The loop walks units rather than branching on
-/// magnitude, so adding a rung cannot leave one unit unreachable.
+/// **Total for every `u32` at [`COUNT_CELL`], and the totality is the whole
+/// argument for that width.** Four characters cover `9999` plain, `10k` to
+/// `999k`, `1M` to `999M` and `1G` to `4G`, and every step up happens before the
+/// step below runs out, so no value falls between two units.
+///
+/// The zero guard is what a narrower cell taught. With two characters a
+/// 250-line change has no truthful form, and the search fell through to the
+/// thousands unit and returned `+0k`: a number that says none where it means two
+/// hundred and fifty. Unreachable at five columns, kept because the failure is
+/// silent and its cost is one comparison.
+///
+/// The loop walks units rather than branching on magnitude, so a change to the
+/// cell cannot leave one unit unreachable.
 fn churn_of(sigil: char, lines: u32, cell: usize) -> String {
     let room = cell.saturating_sub(1);
     for (unit, per) in [
@@ -1040,14 +1030,19 @@ fn churn_of(sigil: char, lines: u32, cell: usize) -> String {
         ("M", 1_000_000),
         ("G", 1_000_000_000),
     ] {
-        let text = format!("{}{unit}", lines / per);
+        let scaled = lines / per;
+        if scaled == 0 && per > 1 {
+            // A unit this value is smaller than. Taking it would draw `0k` for
+            // 250, which is not an abbreviation but a wrong number.
+            continue;
+        }
+        let text = format!("{scaled}{unit}");
         if text.chars().count() <= room {
             return format!("{sigil}{text}");
         }
     }
-    // Unreachable for any `u32` at any rung wider than two columns. Drawn rather
-    // than panicked, because a monitor that dies on a number is worse than one
-    // that rounds it.
+    // Unreachable at [`COUNT_CELL`]. Drawn rather than panicked, because a
+    // monitor that dies on a number is worse than one that rounds it.
     format!("{sigil}9")
 }
 
@@ -1098,13 +1093,6 @@ fn counts_of(churn: Option<(u32, u32)>, cell: usize) -> (String, String) {
 /// column to a scrollbar. `SPEC.md` §11.1 already rules that the two do not
 /// align glyph for glyph.
 ///
-/// **The pulse is deliberately not one of these**, and it is named here because
-/// this is the type that says what a column is, so a reader learning the
-/// mechanism has to be told what it excludes. It is per-row and lasts one tick,
-/// so a slot for it would reflow every row on the tick a file was written, and a
-/// slot taken only by rows that pulse is the right-packing this exists to
-/// remove. [`Painter::file_row`] draws it from the path's room and carries the
-/// mechanics.
 #[derive(Clone, Copy)]
 struct Columns {
     /// Columns each half of the counts cell occupies, or zero where the pair
@@ -1146,32 +1134,33 @@ impl Columns {
         }
     }
 
-    /// Run the ladder once for a region `width` columns wide.
+    /// The widest layout that fits a region `width` columns wide.
     ///
     /// **Nothing here reads a row**, and that is the ruling rather than an
     /// economy: a slot whose width depended on the rows would move whenever the
-    /// rows did, which is what scrolling a list does. The order is unchanged and
-    /// is still counts, then heat, then sparkline; what changed is that it is
-    /// decided once per region from the pane instead of per row from the
-    /// contents.
+    /// rows did, which is what scrolling a list does.
     ///
     /// **Every slot is reserved whether or not anything can fill it**, including
     /// the sparkline in a region where no file has a history yet, which at launch
-    /// is every file ([#78](https://github.com/breferrari/vigia/issues/78)). It
-    /// costs about nine columns of path until the first write. The alternative
-    /// was tried: reserving only what some drawn row could fill moves every
-    /// column on the tick the first file is written, which is precisely the
+    /// is every file ([#78](https://github.com/breferrari/vigia/issues/78)). The
+    /// alternative was tried: reserving only what some drawn row could fill moves
+    /// every column on the tick the first file is written, which is precisely the
     /// moment a reader is looking at the screen.
-    /// The widest layout that fits a region `width` columns wide.
     ///
     /// **One table rather than four searches, and that is what makes it a
     /// frame.** Allocating element by element in priority order is what the rest
     /// of this file does, and for a *shared* layout it produces a ladder that
-    /// oscillates: measured across every width, the row lost its sparkline at 37
-    /// columns, got it back at 40 and lost both glance elements at 41, because
-    /// each element took the widest rung it could afford and starved whatever
-    /// came after. Widening a pane must never take something away, and greedy
-    /// allocation over variable rungs cannot promise that.
+    /// oscillates: swept across every width, the greedy form lost the sparkline
+    /// at 37 columns, got it back at 40 and lost both glance elements at 41,
+    /// because each element took the widest rung it could afford and starved
+    /// whatever came after. Widening a pane must never take something away, and
+    /// greedy allocation over variable rungs cannot promise that.
+    ///
+    /// Those three widths were measured when the counts cell still had a narrow
+    /// rung, so they do not reproduce against [`COUNT_CELL`] today and are kept
+    /// as the evidence that retired the greedy form rather than as a claim about
+    /// the current table. What survives the change is the shape: greedy
+    /// allocation over variable rungs oscillates, and a written-out table cannot.
     ///
     /// So the layouts are written out, widest first, and **each step gives up
     /// exactly one thing and never gains any**. That makes the whole ladder
@@ -2178,6 +2167,13 @@ impl Painter<'_> {
             ..area
         };
 
+        // Where `put_right` will place that string, and how much of its head the
+        // readouts occupy. Computed from the same two strings it is drawn from,
+        // so the tint below cannot address a column the text does not.
+        let placed =
+            bottom.x + bottom.width - width_of(&right).min(usize::from(bottom.width)) as u16;
+        let readouts = width_of(&footer.diagnostics);
+
         if footer.rows == 2 {
             // State above, hints below. The hints keep the bottom row they had
             // at eighty columns, so narrowing a pane moves the new line in
@@ -2193,9 +2189,83 @@ impl Painter<'_> {
                 &right,
                 self.theme.chrome_dim,
             );
+            self.tint_readouts(upper, placed, readouts);
             self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
         } else {
             self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
+            self.tint_readouts(bottom, placed, readouts);
+        }
+    }
+
+    /// Give the footer's right-hand side the three colours the picture draws.
+    ///
+    /// `assets/preview.svg` draws `0.8ms` and `24MiB` in `.cyn`, the word
+    /// `frame` beside them in `.dim`, and the follow marker in `.grn`. The
+    /// shipped footer drew all of it in one grey, so the two numbers a reader
+    /// checks at a glance and the mode marker looked like the words around them.
+    /// §5.1's rule is that a published artifact answering a question is the
+    /// answer.
+    ///
+    /// **A second pass over drawn cells rather than a second placement**, and
+    /// that is the load-bearing choice. Each of these is part of a token the
+    /// ladder picks *whole*: `  0.8ms frame  19MiB` is one rung of
+    /// [`diagnostic_rungs`] and `follow ▶  1/3` is one rung of [`state_rungs`].
+    /// Splitting them to place each colour separately would mean the ladders no
+    /// longer decide what the row draws, and `Footer::plan`'s width arithmetic
+    /// would have to be told about colours to stay correct. Tinting after the
+    /// fact cannot move a column.
+    ///
+    /// **Bounded to the diagnostics' own columns** for the numbers, because the
+    /// state carries a number too and `1/3` is a position rather than a
+    /// measurement. The picture gives no colour for it, so it keeps the grey it
+    /// has.
+    ///
+    /// The styles are reused rather than named anew: [`Theme::chrome`] is the
+    /// picture's `.cyn` and [`Theme::added`] its `.grn`, both to the byte on the
+    /// dark palette. A colour of their own would be a palette decision, which
+    /// stays [#11](https://github.com/breferrari/vigia/issues/11)'s, and it is
+    /// the same reuse the header's `not watching` makes of the footer's alert.
+    fn tint_readouts(&mut self, row: Rect, at: u16, readouts: usize) {
+        // A measurement and its unit: a run opening with a digit or the
+        // over-magnitude sigil, carried through the letters that name the unit.
+        // The label `frame` opens with a letter and so is never picked up.
+        //
+        // **The opening cell is consumed by the run whatever it says**, and that
+        // is a termination argument rather than a detail. `>` opens a run and
+        // carries nothing, so a loop that asked both questions of the same cell
+        // made no progress on `>1s` and spun forever with the pane frozen. Every
+        // pass of the outer loop now advances `x` by at least one column.
+        let end = at.saturating_add(readouts as u16).min(row.x + row.width);
+        let opening = |c: char| c.is_ascii_digit() || c == '>';
+        let carrying = |c: char| c.is_ascii_digit() || c == '.' || c.is_ascii_alphabetic();
+        let mut x = at;
+        while x < end {
+            let head = self.buf[(x, row.y)].symbol().chars().next();
+            if !head.is_some_and(opening) {
+                x += 1;
+                continue;
+            }
+            self.buf[(x, row.y)].set_style(self.theme.chrome);
+            x += 1;
+            while x < end
+                && self.buf[(x, row.y)]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(carrying)
+            {
+                self.buf[(x, row.y)].set_style(self.theme.chrome);
+                x += 1;
+            }
+        }
+
+        let mut glyph = [0u8; 4];
+        let glyph: &str = FOLLOW_MARK.encode_utf8(&mut glyph);
+        for x in row.x..row.x + row.width {
+            if self.buf[(x, row.y)].symbol() == glyph {
+                self.buf[(x, row.y)].set_style(self.theme.added);
+                return;
+            }
         }
     }
 
@@ -2449,14 +2519,15 @@ impl Painter<'_> {
         }
     }
 
-    /// `M src/frame.rs        ● just changed  ▁▃█▅▂▁▁▁      +12 -3`
+    /// `M src/engine/watch.rs    ● just changed ████████████   ▁▂▆▄▆█   +42    -7`
     ///
-    /// Everything to the right of the path is placed right to left, and the
-    /// order it is *allocated* in is not the order it is drawn in. Allocation is
-    /// priority: the counters first because they are the row's content, then the
-    /// pulse, then the sparkline. The pulse outranks the strip for the same
-    /// reason `f follow` is the last hint standing, and because its narrow rung
-    /// costs one column against the strip's four.
+    /// Everything to the right of the path goes into a slot [`Columns`] already
+    /// chose, drawn right to left so each block knows where the one outside it
+    /// ended. **This function allocates nothing**, which is what makes the row a
+    /// column rather than a cluster: the widths are the region's, not this row's,
+    /// so a row that has no sparkline leaves that slot blank instead of closing
+    /// it. The drawn order, left to right, is pulse, heat strip, sparkline,
+    /// counters; the order they *survive* narrowing in is the layout table's.
     ///
     /// Nothing is allowed to take the path below [`MIN_PATH_WIDTH`]. A glance
     /// element that cost a reader the name of the file would be spending the
@@ -2563,17 +2634,29 @@ impl Painter<'_> {
         let x = self.put(area.x, area.y, &letter, room, self.theme.kind);
         room = room.saturating_sub(usize::from(x - area.x));
 
-        let mut label = heading.path.to_owned();
-        if let Some(from) = heading.from {
-            // Which file it *was* is the whole content of a rename, so it is
-            // part of the label rather than something to reveal on a keypress.
-            label.push_str(" ← ");
-            label.push_str(from);
-        }
+        // Which file it *was* is the whole content of a rename, so it is part of
+        // the label rather than something to reveal on a keypress.
+        //
+        // **But it is a rung, not part of the token**, and that is a fix rather
+        // than a refinement. `elide_head` cuts the head because a path's *tail*
+        // identifies the file, and that premise is false of `new ← old`: cutting
+        // the head of the pair leaves `…src/main.rs`, which names the file the
+        // rename came *from* and never mentions the one on screen. The whole
+        // pair or the new path alone, never a cut that changes the subject.
+        //
+        // Latent before the row had fixed slots and ordinary after: the pair
+        // stopped fitting at 87 columns where it used to stop at 60.
+        let full = heading
+            .from
+            .map(|from| format!("{} ← {from}", heading.path));
+        let label = match &full {
+            Some(pair) if width_of(pair) <= room => pair.as_str(),
+            _ => heading.path,
+        };
         self.put(
             x,
             area.y,
-            &elide_head(&label, room),
+            &elide_head(label, room),
             room,
             self.theme.recency(heading.recency),
         );

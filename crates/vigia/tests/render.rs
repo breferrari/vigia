@@ -534,12 +534,6 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
     }
 }
 
-/// Three list rows whose counts cells are deliberately three different widths.
-///
-/// That is the whole fixture design and the reason no existing test could fail
-/// on #77: every list fixture in this file gives every row the same churn, so
-/// right-packing and columns draw identically and the defect is invisible.
-/// `+2 -0` is five columns, `+42 -7` six, `+139 -131` nine.
 /// One list entry carrying every glance element, so the only thing that differs
 /// between two of them is the counts width.
 ///
@@ -557,6 +551,11 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
     }
 }
 
+/// Three list rows whose counts cells are deliberately three different widths.
+///
+/// That is the whole fixture design and the reason no existing test could fail
+/// on #77: every list fixture in this file gave every row the same churn, so
+/// right-packing and columns drew identically and the defect was invisible.
 fn ragged_counts() -> View {
     let row = |path: &str, added: u32, removed: u32| Row::File(listed(path, added, removed));
     View {
@@ -863,17 +862,17 @@ fn scrolling_the_list_does_not_move_the_columns() {
 
 #[test]
 fn a_pulse_does_not_move_the_columns() {
-    // **There is no pulse column, and that is the mechanism being asserted.**
-    // The pulse is per-row and lasts one tick, so a slot reserved for it would
-    // reflow every row on the tick a file was written, which is the one moment
-    // a reader is looking; and a slot taken only by pulsing rows is the
-    // right-packing #77 removes. So it comes out of the *path's* room instead,
-    // and the columns beside it are untouched.
+    // **The pulse has a reserved slot, and that is the mechanism being
+    // asserted.** It is reserved on every row of the region whether or not any
+    // row is pulsing, so a file starting or stopping to pulse changes what is
+    // *drawn* in that slot and never where any column sits.
     //
-    // An earlier draft of this comment described a reserved slot, which is the
-    // design that was tried and abandoned mid-implementation for costing
-    // fourteen of twenty-six glance columns at forty. The assertion was right
-    // and its stated reason was the opposite of the shipped rule.
+    // This comment has now been wrong in both directions, which is worth leaving
+    // on the record: the slot was removed mid-branch when reserving the label
+    // looked unaffordable at forty columns, and restored once that turned out to
+    // be a bug in the choosing rather than a fact about the pulse. The assertion
+    // never changed. Its stated reason was inverted twice, and a reader learning
+    // the design from a test comment would have learned the opposite each time.
     let quiet = ragged_counts();
     let mut pulsing = ragged_counts();
     pulsing.list[0].recency = Recency::Pulse;
@@ -1739,6 +1738,273 @@ fn hostile_content_never_panics_at_any_pane_size() {
             assert_eq!(backend.buffer().area.width, width);
         }
     }
+}
+
+#[test]
+fn the_follow_marker_is_green_where_the_word_beside_it_is_dim() {
+    // `assets/preview.svg` draws `follow ` in `.dim` and `▶` in `.grn`, and
+    // §5.1's rule is that a published artifact answering a question is the
+    // answer. The shell drew the whole state in one dim grey, so the one glyph a
+    // reader checks at a glance rather than reads looked like the word beside
+    // it.
+    //
+    // Invisible to every snapshot by construction: `TestBackend`'s `Display`
+    // writes symbols and drops styles, so this has to read cells.
+    let view = one_file();
+    let theme = Theme::default();
+    let backend = screen(80, 6, &view, &following_chrome());
+
+    let at = column_of(&backend, 5, "▶");
+    let mark = backend.buffer()[(at, 5)].style();
+    let word = backend.buffer()[(at - 2, 5)].style();
+
+    assert_eq!(
+        mark.fg, theme.added.fg,
+        "the follow marker is not the picture's green"
+    );
+    assert_eq!(
+        word.fg, theme.chrome_dim.fg,
+        "the word beside the marker is not the footer's dim grey, so the split \
+         the picture draws is gone"
+    );
+    // Both directions, or a footer painted green throughout would pass.
+    assert_ne!(
+        theme.added.fg, theme.chrome_dim.fg,
+        "the theme draws the marker and the word alike, so this cannot tell them \
+         apart"
+    );
+}
+
+#[test]
+fn a_rename_never_names_only_the_file_it_came_from() {
+    // `elide_head` cuts the head because a path's tail identifies the file. That
+    // premise is false of `new ← old`: cutting the head of the pair leaves
+    // `…src/main.rs`, which names the file the rename came *from* and never
+    // mentions the one the row is about.
+    //
+    // Latent before this branch and ordinary after it, because fixed slots left
+    // the path less room: the pair stopped fitting at 87 columns where it used
+    // to stop at 60.
+    let renamed = FileEntry {
+        path: "crates/vigia/src/shell.rs".to_owned(),
+        from: Some("crates/vigia/src/main.rs".to_owned()),
+        kind: 'R',
+        churn: Some((0, 0)),
+        spark: [0; HISTORY_BUCKETS],
+        recency: Recency::Cold,
+        heat: [HeatBucket::default(); HEAT_BUCKETS],
+    };
+    let view = View {
+        list: vec![renamed.clone()],
+        rows: vec![Row::File(renamed)],
+        files: 1,
+        ..ragged_counts()
+    };
+
+    let mut saw_pair = 0usize;
+    let mut saw_alone = 0usize;
+    for width in 1..=120u16 {
+        let row = row_text(&screen(width, 8, &view, &chrome()), 1);
+        if row.contains('←') {
+            // Drawn as a pair: both names have to be on the row whole.
+            saw_pair += 1;
+            assert!(
+                row.contains("shell.rs") && row.contains("main.rs"),
+                "at {width} columns the pair is cut: {row:?}"
+            );
+            continue;
+        }
+        // Drawn alone, so whatever of the label reached the screen must belong
+        // to the file the row is about, never to the one it came from.
+        if row.contains("shell.rs") {
+            saw_alone += 1;
+        }
+        assert!(
+            !row.contains("main.rs"),
+            "at {width} columns the row names only the file the rename came \
+             from: {row:?}"
+        );
+    }
+
+    // Both directions, or the sweep saw only the width where this cannot fail.
+    assert!(
+        saw_pair > 0 && saw_alone > 0,
+        "the sweep saw the pair {saw_pair} times and the new name alone \
+         {saw_alone} times"
+    );
+}
+
+#[test]
+fn a_counts_cell_never_rounds_a_change_to_nothing() {
+    // The counts abbreviation had no gate, and it shipped a wrong number: a
+    // narrower cell left two characters, a 250-line change has no truthful form
+    // in two, and the search fell through to the thousands unit and drew `+0k`.
+    // At exactly forty columns, which is the width I6 is named for.
+    //
+    // Asserted over the drawn row, and at the boundaries of every unit rather
+    // than at comfortable values, because an abbreviation is only ever wrong
+    // where one unit gives way to the next.
+    const BOUNDARIES: [(u32, &str); 10] = [
+        (0, "+0"),
+        (1, "+1"),
+        (250, "+250"),
+        (9_999, "+9999"),
+        (10_000, "+10k"),
+        (999_999, "+999k"),
+        (1_000_000, "+1M"),
+        (999_999_999, "+999M"),
+        (1_000_000_000, "+1G"),
+        (u32::MAX, "+4G"),
+    ];
+
+    for (lines, want) in BOUNDARIES {
+        let view = View {
+            list: vec![listed("src/f.rs", lines, 0)],
+            files: 1,
+            ..ragged_counts()
+        };
+        let row = row_text(&screen(80, 8, &view, &chrome()), 1);
+        assert!(
+            row.contains(want),
+            "a file of {lines} added lines draws something other than {want:?}: \
+             {row:?}"
+        );
+        // The half it shares the cell with, so a fix that widened one and not
+        // the other cannot pass.
+        assert!(
+            row.contains("-0"),
+            "the removed half went missing at {lines} added lines: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
+    // **This one gates a hang, not a colour**, and it is the more valuable half.
+    // The recolouring pass walked a run by asking two questions of a cell: does
+    // it *open* a measurement, and does it *carry* one. `>` answers yes and no,
+    // so on `>1s` the inner walk broke without consuming the column the outer
+    // walk had just accepted, and the two spun against each other forever with
+    // the pane frozen mid-frame. A monitor that stops redrawing is the one
+    // failure this product class cannot absorb.
+    //
+    // It was reachable from the ordinary path rather than from hostile input:
+    // `>1s` is what a frame over a second draws and `>1GiB` what memory over a
+    // gigabyte draws, both of which `SPEC.md` §5.1 specifies.
+    //
+    // Two existing gates already drew `>1s` and so *hung* rather than failed,
+    // which is why this is stated as its own property: a suite that times out
+    // names no defect.
+    let theme = Theme::default();
+    for (what, chrome, sigil) in [
+        (
+            "a frame over a second",
+            Chrome {
+                frame: Some(Duration::from_secs(2)),
+                ..diagnostics_chrome()
+            },
+            ">1s",
+        ),
+        (
+            "memory over a gigabyte",
+            Chrome {
+                memory: Some(2 * 1024 * 1024 * 1024),
+                ..diagnostics_chrome()
+            },
+            ">1GiB",
+        ),
+    ] {
+        let backend = screen(80, 6, &one_file(), &chrome);
+        let footer = row_text(&backend, 5);
+        // Guard the fixture, or a readout that silently stopped being drawn
+        // would make this vacuous.
+        assert!(
+            footer.contains(sigil),
+            "{what} drew no {sigil:?} readout, so this proves nothing: {footer:?}"
+        );
+
+        // The sigil opens the run, so it and every column of the abbreviation
+        // after it carry the measurement's colour. A `>` left grey would mean
+        // the run started one column late, which is the shape the hang came
+        // from.
+        let at = column_of(&backend, 5, ">");
+        for (offset, glyph) in sigil.chars().enumerate() {
+            let x = at + offset as u16;
+            assert_eq!(
+                backend.buffer()[(x, 5)].symbol().chars().next(),
+                Some(glyph),
+                "{what} draws {sigil:?} broken up: {footer:?}"
+            );
+            assert_eq!(
+                backend.buffer()[(x, 5)].style().fg,
+                theme.chrome.fg,
+                "{what} leaves {glyph:?} of {sigil:?} outside the readout's \
+                 colour: {footer:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_readouts_are_coloured_and_their_label_is_not() {
+    // `assets/preview.svg` draws `0.8ms` and `24MiB` in `.cyn` and the word
+    // `frame` beside them in `.dim`. The shipped footer drew all of it in one
+    // grey, so the two numbers a reader checks at a glance looked like the words
+    // around them.
+    //
+    // Both directions in one test: a footer painted `chrome` throughout would
+    // satisfy the first assertion and fail the second.
+    let theme = Theme::default();
+    let backend = screen(80, 6, &one_file(), &diagnostics_chrome());
+    let footer = row_text(&backend, 5);
+
+    // Guard the fixture: the readouts have to be on this screen at all.
+    assert!(
+        footer.contains("0.8ms") && footer.contains("19MiB"),
+        "the fixture drew no readouts, so this proves nothing: {footer:?}"
+    );
+
+    for (label, needle) in [("frame time", "0"), ("memory", "9")] {
+        let at = column_of(&backend, 5, needle);
+        assert_eq!(
+            backend.buffer()[(at, 5)].style().fg,
+            theme.chrome.fg,
+            "the {label} readout is not the picture's cyan: {footer:?}"
+        );
+    }
+
+    // The label beside the frame number, which must stay dim. Found by its own
+    // letter rather than by arithmetic over the cell's width.
+    let at = column_of(&backend, 5, "f");
+    assert_eq!(
+        backend.buffer()[(at, 5)].style().fg,
+        theme.chrome_dim.fg,
+        "the `frame` label took the readout's colour, so the split the picture \
+         draws is gone: {footer:?}"
+    );
+    assert_ne!(
+        theme.chrome.fg, theme.chrome_dim.fg,
+        "the theme draws the readout and its label alike, so this cannot tell \
+         them apart"
+    );
+}
+
+#[test]
+fn the_follow_marker_is_the_last_character_of_the_state() {
+    // `FOLLOW_MARK` is restated beside `FOLLOWING` rather than composed into it,
+    // because `concat!` takes no `char`. Two spellings of one glyph can drift,
+    // and the drift is silent: the recolouring pass would simply find nothing
+    // and the marker would quietly go back to grey.
+    //
+    // Asserted through the drawn row rather than by importing either constant,
+    // which is this file's rule for anything the renderer also spells.
+    let backend = screen(80, 6, &one_file(), &following_chrome());
+    let footer = row_text(&backend, 5);
+    let state = footer.trim_end();
+    assert!(
+        state.ends_with('▶') || state.split_whitespace().any(|word| word.contains('▶')),
+        "the state no longer carries the marker this pass recolours: {state:?}"
+    );
 }
 
 #[test]

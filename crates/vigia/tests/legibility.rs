@@ -1112,11 +1112,36 @@ fn the_glance_columns_collapse_in_one_order() {
     // reserves shifts every boundary below it by a column and leaves the walk
     // itself identical, and that mutation survived this test until the widths
     // went in.
+    //
+    // **Derived rather than recorded from a run**, because a number copied out
+    // of a failure message agrees with the renderer by construction and gates
+    // nothing. Each boundary is `ROW_FLOOR` plus the layout's own width, and a
+    // layout's width is each slot plus the one column of gap `reserved` adds:
+    //
+    // | Layout | counts | pulse | heat | spark | width | from |
+    // |---|---|---|---|---|---|---|
+    // | 6 | 12 | 0 | 0 | 0 | 12 | 26 |
+    // | 5 | 12 | 2 | 0 | 0 | 14 | 28 |
+    // | 4 | 12 | 2 | 7 | 0 | 21 | 35 |
+    // | 3 | 12 | 2 | 7 | 5 | 26 | 40 |
+    // | 2 | 12 | 2 | 13 | 5 | 32 | 46 |
+    // | 1 | 12 | 2 | 13 | 9 | 36 | 50 |
+    // | 0 | 12 | 15 | 13 | 9 | 49 | 63 |
+    //
+    // Layouts 5 and 0 are absent below because neither changes what this test
+    // can see: 5 differs from 6 only by the pulse mark and 0 from 1 only by the
+    // pulse label, and the pulse is read by neither of the two counts.
+    //
+    // Three boundaries moved four columns up when the counts cell stopped
+    // degrading — 22, 31 and 36 became 26, 35 and 40 — which is both halves
+    // going from three columns to five. That is the trade §11.1 records: the
+    // sparkline is gone between 36 and 39 columns, and in exchange no width
+    // draws `+0k` for a 250-line change.
     const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
         (1, (false, 0, 0)),
-        (22, (true, 0, 0)),
-        (31, (true, 6, 0)),
-        (36, (true, 6, 4)),
+        (26, (true, 0, 0)),
+        (35, (true, 6, 0)),
+        (40, (true, 6, 4)),
         (46, (true, 12, 4)),
         (50, (true, 12, 8)),
     ];
