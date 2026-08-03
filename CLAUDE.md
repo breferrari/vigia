@@ -73,13 +73,18 @@ Two tools, and picking the wrong one is the common mistake. **The test is whethe
 **`remember`** stores a durable **lesson**: a constraint you discovered, a gotcha that cost time, a rule that generalises. Not status, not a task summary, not anything you would resent being told again in six weeks.
 
 - `confidence` is `verified` | `inferred` | `unverified`. Be honest, it is what a reader trusts. Supply `verification` whenever you claim `verified`: how you know, i.e. the test you ran or the source you read.
-- `scope` is `project` | `platform` | `general`. For something specific to this tool use `scope: "project"` with `projects: ["vigia"]`. Use `general` only when it genuinely applies everywhere.
-- `links` connects it to existing notes by title. `supersedes` corrects an earlier memory: the old one is kept and back-linked rather than deleted.
+- `scope` decides who ever sees the memory again, and it is the field most often got wrong from this repo. Three values, and the middle one is not decoration:
+  - **`project`** — true because of how *this* tool is built. `scope: "project"` with `projects: ["vigia"]`. The settle margin being two seconds is this.
+  - **`platform`** — true for anyone on the same technology, whoever they are. **This repo sits on two, and they are not the same one.** A `gix`, `syntect` or `ratatui` limitation is `platforms: ["rust"]`. A `TERM`, colour-depth, ANSI or terminfo fact is `platforms: ["terminal"]` — it reaches a Go or Python TUI identically, and reaches nothing that has no terminal. Name both when both are true.
+  - **`general`** — true with no platform at all: test shapes, review process, git and CI workflow, how an audit converges. It reaches **every** project the vault serves, so a fact about `TERM` filed here is served to a backend that has no terminal in it.
+
+  `general` is the easy over-claim, because it is the only one that needs no vocabulary. **If the lesson names a specific library, runtime, or environment variable, it is almost certainly `platform`.**
+- `links` connects it to existing notes by title. `supersedes` corrects an earlier memory: the old one is kept and back-linked rather than deleted. **Correcting the scope of an earlier memory is a real use for it** — re-file with the right scope and supersede the original. The original keeps the reach it declared, but is served only where its correction is also served, so the narrowing actually takes effect instead of leaving the stale, wider copy reaching everybody alone.
 - `dry_run: true` previews first.
 
 **`record_work`** files what happened **here** into the vault. Use it at the end of a real piece of work. Write it for a session that will not have your context and cannot re-read your diff, so fill every field you can: `summary`, `changes` (one line per file, what and why), `decisions` (especially where you rejected an alternative), `learned` (surprises and near-misses), `open` (unresolved threads nobody should assume are handled), `verification` (tests run and their result, failures stated honestly). `kind: "decision"` files it as a decision record; `informed_by` credits the notes you actually read.
 
-Rule of thumb: **a `gix` limitation that would bite any Rust project is a `remember`. "Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
+Rule of thumb: **a `gix` limitation that would bite any Rust project is a `remember`** — and note that it is `scope: "platform"` with `platforms: ["rust"]`, not `general`, which is exactly the call this section exists to get right. **"Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
 
 Before finishing work that changed or clarified a decision here, write it down. A finding that stays in this session is a finding the next session pays for again.
 
