@@ -1122,22 +1122,28 @@ fn the_glance_columns_collapse_in_one_order() {
     //
     // | Layout | counts | pulse | heat | spark | width | from |
     // |---|---|---|---|---|---|---|
-    // | 6 | 12 | 0 | 0 | 0 | 12 | 28 |
-    // | 5 | 12 | 2 | 0 | 0 | 14 | 30 |
-    // | 4 | 12 | 2 | 7 | 0 | 21 | 37 |
-    // | 3 | 12 | 2 | 7 | 5 | 26 | 42 |
-    // | 2 | 12 | 2 | 13 | 5 | 32 | 48 |
-    // | 1 | 12 | 2 | 13 | 9 | 36 | 52 |
-    // | 0 | 12 | 15 | 13 | 9 | 49 | 65 |
+    // | 5 | 12 | 0 | 0 | 0 | 12 | 28 |
+    // | 4 | 12 | 2 | 0 | 0 | 14 | 30 |
+    // | 3 | 12 | 2 | 7 | 0 | 21 | 37 |
+    // | 2 | 12 | 2 | 7 | 5 | 26 | 42 |
+    // | 1 | 12 | 2 | 13 | 5 | 32 | 48 |
+    // | 0 | 12 | 2 | 13 | 9 | 36 | 52 |
     //
     // The `from` column is `ROW_FLOOR + BAR_WIDTH + width`: a region is planned
     // against the pane less a scrollbar column **whether or not one is drawn**,
     // because whether one is drawn is a fact about the contents and the layout
     // is not allowed to be. That is the whole of `planning_width`.
     //
-    // Layouts 5 and 0 are absent below because neither changes what this test
-    // can see: 5 differs from 6 only by the pulse mark and 0 from 1 only by the
-    // pulse label, and the pulse is read by neither of the two counts.
+    // Layout 4 is absent below because it changes nothing this test can see: it
+    // differs from 5 only by the pulse mark, and the pulse is read by neither of
+    // the two counts.
+    //
+    // **The table lost a row on 2026-08-03 and the walk did not move**, which is
+    // the check that ruling owed this test. A seventh layout used to sit above
+    // layout 0 with a fifteen-column `● just changed` in the pulse slot, from 65
+    // columns up. It went with the label. Every `width` here is the sum of one
+    // layout's own slots, so dropping the widest one cannot shift the five below
+    // it, and the boundaries below are unchanged rather than re-derived.
     //
     // The walk has moved twice on this branch and both moves are recorded
     // because both cost something visible:
@@ -2290,22 +2296,24 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
 /// bearing: at every width from one to a hundred and twenty, a heading either
 /// names its file or says which end it lost. A glance element that reduced a row
 /// to `M …` would have spent the content to decorate it.
+///
+/// **This used to assert that the pulse is never drawn part-way**, back when its
+/// widest rung was the fourteen-column `● just changed`. That rung went on
+/// 2026-08-03 and the assertion went with it rather than being kept as
+/// decoration: one glyph cannot be cut, so the check would have passed against
+/// any renderer and gated nothing. What the ladder still owes is the same rule
+/// stated for a strip made of many glyphs, and
+/// `the_glance_columns_collapse_in_one_order` is where that lives.
 #[test]
-fn the_pulse_label_never_pushes_a_path_off_its_own_row() {
+fn the_pulse_never_pushes_a_path_off_its_own_row() {
     let view = glancing();
     let mut narrowest_named = u16::MAX;
 
     for width in WIDTHS {
         let rows = rows_at(width, 6, &view, &following());
         let heading = &rows[1];
-        // The pulse is whole or absent: it is a ladder, so it never appears cut.
-        let dotted = heading.contains('●');
-        assert!(
-            !dotted || heading.contains("● just changed") || !heading.contains("just"),
-            "at {width} columns the pulse is drawn part-way: {heading:?}"
-        );
 
-        // And the row still names its file, by tail or by mark.
+        // The row still names its file, by tail or by mark.
         let tail = "watch.rs";
         if heading.contains(tail) {
             narrowest_named = narrowest_named.min(width);
@@ -2323,6 +2331,49 @@ fn the_pulse_label_never_pushes_a_path_off_its_own_row() {
         "the heading only named its file from {narrowest_named} columns up, so a \
          glance element is eating the path well before the pane gets small"
     );
+}
+
+/// The pulse is a mark, and a mark is one column.
+///
+/// `SPEC.md` §5.1's 2026-08-03 ruling, which without this is a wish: the
+/// `just changed` label is gone from the picture and from the shell, and the dot
+/// carries the top rung of the recency ladder alone. The ruling is about what a
+/// monitor asks a reader to *read*, so the gate is over text rather than over
+/// width: any letter drawn in the pulse colour is a caption on a signal that has
+/// already been read, whatever it happens to say.
+///
+/// Swept rather than sampled, because a label would come back the way it left,
+/// as the widest rung of a ladder: reachable only at the widths nothing
+/// degrades at, and invisible to the two snapshots that pin 40 and 80.
+///
+/// Read by colour rather than by glyph, and the caret is why that is safe: it
+/// shares `Theme::pulse` and is drawn on the same row, so a glyph test would
+/// have to know about it. It is `▸`, which is not a letter, and nothing else on
+/// a heading takes this colour.
+#[test]
+fn the_pulse_draws_a_mark_and_never_a_label() {
+    let theme = theme();
+    let view = glancing();
+    let pulse = theme.pulse.fg.expect("the pulse has a colour");
+
+    for width in WIDTHS {
+        let backend = drawn(width, 6, &view, &following());
+        let buffer = backend.buffer();
+        // Row 1 is the pulsing file's heading: `glancing`'s rows start at the
+        // top of the body and the header owns row 0.
+        let lettered: String = (0..buffer.area.width)
+            .map(|x| &buffer[(x, 1)])
+            .filter(|cell| cell.style().fg == Some(pulse))
+            .map(|cell| cell.symbol())
+            .filter(|symbol| symbol.chars().any(char::is_alphanumeric))
+            .collect();
+
+        assert!(
+            lettered.is_empty(),
+            "at {width} columns the pulse drew {lettered:?} beside its mark, so \
+             the row states one fact twice"
+        );
+    }
 }
 
 /// The third case of `SPEC.md` §11.1's layout rule, and the one that is a
