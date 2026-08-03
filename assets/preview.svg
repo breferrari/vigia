@@ -86,15 +86,21 @@
 
       <text class="m dim" x="32" y="156">M</text>
       <text class="m dim" x="50" y="156">Cargo.toml</text>
+      <!-- The track, all eight buckets. This row is the dimmed one, and dim is
+           the recency ladder's `cold` rung, which means *nothing is tracked for
+           this path* rather than *this path is old*. So it can carry no bucket
+           at all, and it used to be drawn with seven track bars and one green
+           bump: a state the tool cannot produce. Corrected for #78, in the same
+           #21262d the heat strip's own empty slice is drawn in three rows up. -->
       <g>
-        <rect x="300" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
-        <rect x="310" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
-        <rect x="320" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
-        <rect x="330" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
-        <rect x="340" y="148" width="7" height="6" rx="1.5" fill="#2a8f4f"/>
-        <rect x="350" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
-        <rect x="360" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
-        <rect x="370" y="152" width="7" height="2" rx="1" fill="#1f6f3f"/>
+        <rect x="300" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="310" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="320" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="330" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="340" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="350" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="360" y="152" width="7" height="2" rx="1" fill="#21262d"/>
+        <rect x="370" y="152" width="7" height="2" rx="1" fill="#21262d"/>
       </g>
       <text class="m grn" x="452" y="156" text-anchor="end">+2</text>
       <text class="m faint" x="500" y="156" text-anchor="end">&#8722;0</text>

@@ -133,6 +133,22 @@ palette! {
     pulse,
     /// A churn sparkline's blocks.
     spark,
+    /// A sparkline bucket nothing was written in.
+    ///
+    /// A track rather than a gap, which is the rule [`Theme::heat_track`] and
+    /// [`Theme::bar_track`] already follow and which `assets/preview.svg` draws
+    /// for all three of them: every one of the eight bucket positions carries a
+    /// mark in the picture, and the quiet ones are short and dark rather than
+    /// absent. A file with no history at all is the *all*-empty case, so at
+    /// launch a worktree that was already dirty draws a full track on every row
+    /// ([#78](https://github.com/breferrari/vigia/issues/78)).
+    ///
+    /// **Its own key rather than [`Theme::heat_track`]'s**, which holds the same
+    /// value in all three built-ins. The precedent is [`Theme::bar_track`], which
+    /// does too and is still separate: a distinct element gets a distinct key, so
+    /// a theme author can move one without the others and so a test can tell two
+    /// tracks apart by style when they land on the same row.
+    spark_track,
 
     /// The filled part of a scrollbar: where in the whole a region is looking.
     ///
@@ -427,6 +443,12 @@ impl Theme {
             // already means two rows below.
             pulse: fg(Color::Cyan),
             spark: fg(Color::Cyan),
+            // `DarkGray` for [`Theme::heat_track`]'s reason exactly, three fields
+            // down: a track sits just above the background and colour 8 is what
+            // most schemes define to be just above the background. It is also far
+            // enough from this palette's `Gray` chrome that the `_` a track draws
+            // cannot be confused with the `·` a hint separator draws.
+            spark_track: fg(Color::DarkGray),
             // Grey rather than cyan, for the reason the field's own doc gives:
             // the thumb is a full block and cyan is the sparkline's, so the two
             // would be one colour drawing two meanings. Grey is what this palette
@@ -518,6 +540,7 @@ impl Theme {
             // does is that green already means addition two rows down, and a churn
             // sparkline is about *when*, not *what*.
             spark: rgb(0x39, 0xc5, 0xcf),
+            spark_track: rgb(0x21, 0x26, 0x2d),
             bar: rgb(0x8b, 0x94, 0x9e),
             bar_track: rgb(0x21, 0x26, 0x2d),
             heat_track: rgb(0x21, 0x26, 0x2d),
@@ -607,6 +630,7 @@ impl Theme {
             path_cold: rgb(0x81, 0x8b, 0x98),
             pulse: rgb(0x0a, 0x62, 0x6b),
             spark: rgb(0x0a, 0x62, 0x6b),
+            spark_track: rgb(0xd0, 0xd7, 0xde),
             bar: rgb(0x59, 0x63, 0x6e),
             bar_track: rgb(0xd0, 0xd7, 0xde),
             // Light enough to read as a track on white, dark enough to be visible.

@@ -132,6 +132,10 @@ const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
 /// [`RAMP`].
 const HEAT_BLOCK: char = '█';
 
+/// What a sparkline bucket nothing was written in draws, restated for [`RAMP`]'s
+/// reason.
+const TRACK: char = '_';
+
 /// Cells on row `y` whose foreground is one of `colours`, in column order.
 ///
 /// **Symbol and colour together, because neither alone separates the two strips
@@ -156,6 +160,26 @@ fn cells_coloured(
         })
         .map(|cell| cell.style())
         .collect()
+}
+
+/// How many columns of row `y` the sparkline slot occupies, bars and track
+/// together.
+///
+/// **The slot rather than the data, which is what the ladder is about.** Since
+/// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
+/// the track, so counting bars alone would read a rung as narrower than it is
+/// wherever a file's history has a gap in it, and as *zero* on a file with no
+/// history. Both gates below read a rung off this.
+///
+/// Two calls rather than one with both symbol sets and both colours, because
+/// [`cells_coloured`] would then accept the cross products: a `_` in the bucket
+/// colour, or a block in the track's. Neither is ever drawn, and a helper that
+/// would count them is the loose selector this file's own doc warns about.
+fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme) -> usize {
+    let bars = theme.spark.fg.expect("the sparkline has a colour");
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    cells_coloured(backend, y, &[bars], &RAMP).len()
+        + cells_coloured(backend, y, &[track], &[TRACK]).len()
 }
 
 /// Every foreground the heat strip can draw a slice in.
@@ -1165,7 +1189,6 @@ fn the_glance_columns_collapse_in_one_order() {
     let (mut saw_all, mut saw_none) = (false, false);
     let mut seen: Vec<(u16, (bool, usize, usize))> = Vec::new();
 
-    let spark_fg = [theme.spark.fg.expect("the sparkline has a colour")];
     for width in WIDTHS {
         let backend = drawn(width, 8, &view, &chrome());
         // Row 1 is the first file heading: `glancing`'s rows start at the top of
@@ -1176,7 +1199,12 @@ fn the_glance_columns_collapse_in_one_order() {
         // of "is this cell a heat slice", and the one that drifts is the one
         // nobody is reading.
         let heat = cells_coloured(&backend, y, &heats, &[HEAT_BLOCK]).len();
-        let spark = cells_coloured(&backend, y, &spark_fg, &RAMP).len();
+        // The whole slot, bars and track together: the ladder is about how many
+        // columns the element is given, and since #78 an empty bucket fills its
+        // column rather than leaving it. Counting bars alone happens to agree
+        // here, because `glancing`'s first row has no empty bucket, and that
+        // agreement is a property of the fixture rather than of the renderer.
+        let spark = spark_slot(&backend, y, &theme);
         let counts = rows_at(width, 8, &view, &chrome())[usize::from(y)].contains('+');
 
         // **Whole rungs.** A count of slices or buckets that is not on the
@@ -2238,9 +2266,11 @@ fn a_clipped_content_line_says_it_continues() {
 /// > and content is neither.
 ///
 /// A sparkline is made of items, so it drops **whole buckets** and never draws a
-/// partial one. Observable because [`glancing`]'s buckets are all non-zero: an
-/// empty bucket is a space, so a fixture with gaps would make the strip's width
-/// unreadable from the row and this gate would be asserting about nothing.
+/// partial one. This used to say it was observable only because [`glancing`]'s
+/// buckets are all non-zero, an empty one being a space; since
+/// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
+/// the track, so the strip's width is readable off any fixture and the gate no
+/// longer rests on a property of the data.
 ///
 /// The rungs are read off the screen rather than imported. A test comparing the
 /// renderer's ladder against the renderer's own constant would agree with itself
@@ -2252,14 +2282,14 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
     // counted glyphs; a heat slice is the same full block, so the count became
     // eighteen and the gate started failing for a reason that was not a
     // regression. `cells_coloured` says why the pair is needed.
-    let spark = theme().spark.fg.expect("the sparkline has a colour");
+    let theme = theme();
     let mut seen = std::collections::BTreeSet::new();
 
     for (name, view, chrome) in cases() {
         for width in WIDTHS {
             for y in 0..6u16 {
                 let backend = drawn(width, 6, &view, &chrome);
-                let buckets = cells_coloured(&backend, y, &[spark], &RAMP).len();
+                let buckets = spark_slot(&backend, y, &theme);
                 let row = rows_at(width, 6, &view, &chrome)[usize::from(y)].clone();
                 assert!(
                     buckets <= 8,

@@ -61,6 +61,15 @@ const FACT_JOIN: &str = " · ";
 /// first copy.
 const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
+/// What a sparkline bucket nothing was written in draws.
+///
+/// Restated for [`CONTINUES`]' reason, and load-bearing beyond that: this test
+/// file is the only place that can check the track glyph is **not** one of
+/// [`RAMP`]'s, which is what keeps the height channel free to mean "how much".
+/// Importing the renderer's constant would make that comparison true by
+/// construction.
+const TRACK: &str = "_";
+
 /// Every foreground a heat slice can take.
 ///
 /// One list, because adding a band to the theme should be one edit here rather
@@ -740,6 +749,15 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
                         'h'
                     } else if RAMP.contains(&sym) && fg == theme.spark.fg {
                         's'
+                    } else if sym == TRACK && fg == theme.spark_track.fg {
+                        // Its own class rather than folded into `s`. A track and
+                        // a bar occupy the same slot and must therefore compare
+                        // equal *positionally*, which they do because both are
+                        // read; but a row that lost its buckets and a row that
+                        // kept them are different screens, and collapsing the
+                        // two would make the non-vacuity check below unable to
+                        // tell them apart.
+                        't'
                     } else if sym.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                         'n'
                     } else {
@@ -835,9 +853,26 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
 
     // Non-vacuity: the gapped rows really did stop drawing those elements, or
     // the comparison above is between two identical screens.
+    //
+    // "Lost its sparkline" means lost its **buckets** since #78; the slot is
+    // still drawn, as the track. That is asserted here as well as in
+    // `a_worktree_already_dirty_at_launch_draws_a_track_on_every_row`, because
+    // this gate's own fixture is the one that turns a row's history off and it
+    // would otherwise be the place a silently blank column hid.
     assert!(
         before[1].contains('s') && !after[1].contains('s'),
-        "row 1 was supposed to lose its sparkline: {:?} then {:?}",
+        "row 1 was supposed to lose its sparkline buckets: {:?} then {:?}",
+        before[1],
+        after[1]
+    );
+    assert_eq!(
+        columns_of(&after[1], 't'),
+        columns_of(&before[1], 't')
+            .into_iter()
+            .chain(columns_of(&before[1], 's'))
+            .collect::<Vec<_>>(),
+        "row 1's buckets did not become track in the columns they occupied: \
+         {:?} then {:?}",
         before[1],
         after[1]
     );
@@ -2339,6 +2374,206 @@ fn blocks_of(backend: &TestBackend, y: u16, colour: ratatui::style::Color) -> Ve
         .collect()
 }
 
+/// Which columns of row `y` carry a sparkline track.
+///
+/// [`blocks_of`]'s twin, and matched on symbol **and** style for the reason that
+/// function gives, sharpened by what the track is drawn from: `_` is an ordinary
+/// character, and a `snake_case` path two columns to the left of the strip is
+/// full of them. Only `Theme::spark_track` separates the two.
+///
+/// Columns rather than glyphs, because every track cell carries the same glyph
+/// and what the gates below ask is *where* and *how many*.
+fn track_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .filter(|&x| {
+            let cell = &buffer[(x, y)];
+            cell.symbol() == TRACK && cell.style().fg == theme.spark_track.fg
+        })
+        .collect()
+}
+
+/// [`glancing`], on the frame a reader actually opens the pane to.
+///
+/// **The launch case, which nothing else here covers**: `SPEC.md` §5.1's history
+/// is fed from the watch, so a worktree that was already dirty when `vigia`
+/// started has no tick behind any of its files and every row's buckets are zero
+/// ([#78](https://github.com/breferrari/vigia/issues/78)). Every fixture in this
+/// suite drives ticks first, which is exactly why the state a reader sees first
+/// went two phases without a gate.
+///
+/// Every rung set to `Cold` as well as every bucket to zero, because the two are
+/// the same fact: `Recency::Cold` means *nothing is tracked for this path*, so a
+/// row that pulsed with an empty history would be a state the store cannot
+/// produce, and a fixture that draws one is the same defect as the picture that
+/// did.
+///
+/// `peak` is zero for the same reason, which also puts the `peak == 0` branch of
+/// the renderer's scaling under a gate rather than under an argument.
+fn launched() -> View {
+    let mut view = glancing();
+    for row in &mut view.rows {
+        if let Row::File(entry) = row {
+            entry.spark = [0; HISTORY_BUCKETS];
+            entry.recency = Recency::Cold;
+        }
+    }
+    view.peak = 0;
+    view
+}
+
+#[test]
+fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
+    // **The state a reader sees first, and it had no fixture.** The pane is
+    // opened *because* work is in progress, so the ordinary first frame is one
+    // where no file has been written since the watch opened. Before #78 the
+    // sparkline column was blank on every row of it, and the element `SPEC.md`
+    // §5 names as one of four differentiators was absent exactly when it
+    // mattered most.
+    let theme = Theme::default();
+    let spark = theme.spark.fg.expect("the sparkline has a colour");
+    let backend = screen(80, 5, &launched(), &chrome());
+
+    let mut starts = Vec::new();
+    for y in 1..=3u16 {
+        let track = track_at(&backend, y, &theme);
+        assert_eq!(
+            track.len(),
+            HISTORY_BUCKETS,
+            "row {y} drew {} track cells where the slot is {HISTORY_BUCKETS} \
+             wide, so a file with no history is still leaving part of its \
+             column blank: {track:?}",
+            track.len()
+        );
+        // Contiguous, or the cells counted above are not one strip. A path
+        // carrying an underscore cannot reach this, because `track_at` matches
+        // the style too, but a renderer that wrote the track into the wrong
+        // columns could.
+        assert!(
+            track.windows(2).all(|pair| pair[1] == pair[0] + 1),
+            "row {y}'s track is not one run of cells: {track:?}"
+        );
+        // **Nothing invented.** The track says "no churn in the window", and a
+        // single bar would be a number the store never recorded.
+        assert!(
+            blocks_of(&backend, y, spark).is_empty(),
+            "row {y} drew a sparkline bar for a file with no history, which is \
+             churn the store cannot have"
+        );
+        starts.push(track[0]);
+    }
+
+    // The columnar reading #77 landed, on the screen it is least able to give
+    // today: three tracks at one `x` are what makes three sparklines read as one
+    // small-multiples chart once the files start moving.
+    assert!(
+        starts.windows(2).all(|pair| pair[0] == pair[1]),
+        "the tracks start at different columns on different rows: {starts:?}"
+    );
+}
+
+#[test]
+fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
+    // **A guard that no test could fail is a wish, and this one was.** The
+    // renderer scales a bucket against `View::peak`, and a peak of zero beside a
+    // bucket that holds something is a view the store cannot produce: the peak
+    // is the maximum over every tracked path, so a non-zero bucket lifts it.
+    // Constructing one by hand is legal, though, and `SPEC.md` §11.1 rules that
+    // a monitor which dies on a file is the failure to avoid, so the division
+    // has to survive an inconsistent caller rather than assume a consistent one.
+    //
+    // Found by mutation: deleting the guard killed nothing, because every fixture
+    // that sets `peak` to zero also has every bucket empty and the loop skips the
+    // division before reaching it.
+    let mut view = launched();
+    if let Row::File(entry) = &mut view.rows[0] {
+        entry.spark = [3; HISTORY_BUCKETS];
+    }
+    assert_eq!(
+        view.peak, 0,
+        "the fixture stopped being the inconsistent one"
+    );
+
+    let theme = Theme::default();
+    let backend = screen(80, 5, &view, &chrome());
+    assert_eq!(
+        track_at(&backend, 1, &theme).len(),
+        HISTORY_BUCKETS,
+        "a bucket with no scale to measure it against drew something other than \
+         the track"
+    );
+}
+
+#[test]
+fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
+    // One rule rather than a special case for the cold file: the launch screen
+    // above is just the all-empty end of *this*. Row 2 of the mockup's own
+    // fixture holds `[0, 0, 0, 2, 1, 0, 0, 0]`, so it draws both kinds and the
+    // order has to survive.
+    let theme = Theme::default();
+    let spark = theme.spark.fg.expect("the sparkline has a colour");
+    let backend = screen(80, 5, &glancing(), &chrome());
+    let buffer = backend.buffer();
+
+    let bars: Vec<u16> = (0..buffer.area.width)
+        .filter(|&x| {
+            let cell = &buffer[(x, 2)];
+            RAMP.contains(&cell.symbol()) && cell.style().fg == Some(spark)
+        })
+        .collect();
+    let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
+        .into_iter()
+        .map(|x| (x, 't'))
+        .chain(bars.into_iter().map(|x| (x, 's')))
+        .collect();
+    slot.sort_unstable();
+
+    assert!(
+        slot.windows(2).all(|pair| pair[1].0 == pair[0].0 + 1),
+        "the sparkline slot has a hole in it, so some bucket drew neither a bar \
+         nor a track: {slot:?}"
+    );
+    let drawn: String = slot.iter().map(|&(_, class)| class).collect();
+    assert_eq!(
+        drawn, "tttssttt",
+        "`[0, 0, 0, 2, 1, 0, 0, 0]` drew {drawn:?}, so a bucket's emptiness is \
+         not where the store says it is"
+    );
+}
+
+#[test]
+fn the_track_is_never_the_shape_of_a_written_bucket() {
+    // **The gate on the height channel, and the reason the track is not `▁`.**
+    // The heat strip beside it may reuse `█` between a live slice and its track
+    // because colour is its only channel; a sparkline's channel is height, so a
+    // track drawn at the ramp's floor would make "one write" and "no writes" the
+    // same shape and leave colour alone carrying a distinction `SPEC.md` §11.1
+    // spends the lowest block to protect.
+    //
+    // Read off the drawn row rather than by comparing two constants, so it
+    // cannot be satisfied by restating the renderer: row 2 holds a bucket of 1
+    // against a screen peak of 12, which is exactly the ramp's floor.
+    let theme = Theme::default();
+    let spark = theme.spark.fg.expect("the sparkline has a colour");
+    let backend = screen(80, 5, &glancing(), &chrome());
+
+    let bars = blocks_of(&backend, 2, spark);
+    assert!(
+        bars.contains(&'▁'),
+        "the fixture no longer draws the ramp's floor, so this proves nothing \
+         about it: {bars:?}"
+    );
+    assert!(
+        !track_at(&backend, 2, &theme).is_empty(),
+        "the fixture drew no track, so this proves nothing about it"
+    );
+    assert_ne!(
+        TRACK, RAMP[0],
+        "the track is drawn at the ramp's floor, so a bucket holding one write \
+         and a bucket holding none are now the same shape"
+    );
+}
+
 /// Everything on row `y`, as the reader sees it.
 fn row_text(backend: &TestBackend, y: u16) -> String {
     let buffer = backend.buffer();
@@ -2445,11 +2680,21 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
         "the quieter file drew no bucket at all, so a bucket with something in \
          it is rounding down to nothing: {quieter:?}"
     );
-    // A file nothing has written since startup has no strip, rather than an
-    // empty one taking columns from its own path.
+    // A file nothing has written since startup draws no *bar*. It draws the
+    // track instead, which is #78's ruling and which
+    // `a_worktree_already_dirty_at_launch_draws_a_track_on_every_row` is the
+    // gate for. Stated as two halves rather than one, because the first alone
+    // was the whole assertion until then and it stays green against a renderer
+    // that draws nothing at all: `blocks_of` cannot see a track.
     assert!(
         blocks_of(&backend, 3, spark).is_empty(),
-        "a file with no churn drew a sparkline"
+        "a file with no churn drew a sparkline bar, which is churn the store \
+         cannot have"
+    );
+    assert_eq!(
+        track_at(&backend, 3, &Theme::default()).len(),
+        HISTORY_BUCKETS,
+        "a file with no churn drew no track either, so its column is blank"
     );
 }
 

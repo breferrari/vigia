@@ -155,10 +155,30 @@ const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', 
 
 /// A bucket nothing happened in.
 ///
-/// A space rather than the lowest block. `▁` would say "a little happened",
-/// which is a different claim from "nothing did", and over eight buckets the
-/// difference is what tells a settling file from a busy one.
-const SPARK_EMPTY: char = ' ';
+/// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
+/// the heat strip and [`BAR_TRACK`] the scrollbar, applied to the third of the
+/// four glance elements ([#78](https://github.com/breferrari/vigia/issues/78)).
+/// A file with no history at all is the *all*-empty case, so a worktree that was
+/// already dirty when `vigia` started draws a full track on every row, which is
+/// the ordinary first frame: history is fed from the watch, so nothing a reader
+/// opens the pane to look at has a tick behind it yet.
+///
+/// This used to be a space, and the sentence that argued for one still holds:
+/// `▁` would say "a little happened", which is a different claim from "nothing
+/// did", and over eight buckets that difference is what tells a settling file
+/// from a busy one. **So the track is not `▁` either.** The heat strip may reuse
+/// `█` between a live slice and its track because colour is its only channel; a
+/// sparkline's channel is *height*, and spending the ramp's floor on "no data"
+/// would leave colour alone carrying the one distinction this element exists to
+/// make.
+///
+/// `_` rather than `·`, which the hint bar already draws: a middle dot sits
+/// mid-cell, so an empty bucket would be drawn *higher* than a bucket holding
+/// one write, which is backwards for a thing read as a bar chart. `_` sits where
+/// a bar stands. It is also ASCII, so it adds nothing to the legacy-console
+/// question §10 leaves open, which [`SPARK_RAMP`] is already on the wrong side
+/// of.
+const SPARK_TRACK: char = '_';
 
 /// How many buckets a sparkline may show, widest rung first.
 ///
@@ -960,18 +980,6 @@ fn has_heat(buckets: &[HeatBucket; HEAT_BUCKETS]) -> bool {
     buckets.iter().any(|bucket| bucket.total() > 0)
 }
 
-/// Whether this file has any sparkline to draw at all.
-///
-/// [`has_heat`]'s twin, and named for the same reason: "has anything to draw" is
-/// one predicate wherever it is asked. Its own caller is [`spark_of`], whose
-/// first line this is, so the saving it once argued for (a boolean that did not
-/// run a `div_ceil` per bucket) is realised by nobody today. Kept as a name
-/// rather than a guard inlined into the producer, so the two spellings cannot
-/// drift.
-fn has_spark(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> bool {
-    peak != 0 && buckets.iter().any(|&count| count != 0)
-}
-
 /// Columns one half of the counts cell occupies, whatever that half says.
 ///
 /// **A constant, and that is the whole of [#77](https://github.com/breferrari/vigia/issues/77)'s
@@ -1352,18 +1360,32 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
         .collect()
 }
 
-/// A path's buckets as glyphs, or `None` when it has no churn to draw.
+/// A path's buckets as glyphs, every one of them drawn.
 ///
 /// `peak` is the busiest bucket **anywhere on the screen**, so two rows drawn
 /// side by side can be compared by height. A bucket with anything in it is never
 /// blank: it takes the lowest block, because "one write" and "no writes" are the
 /// distinction the strip exists to make and rounding the first down to nothing
-/// would erase it.
-fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> Option<[char; HISTORY_BUCKETS]> {
-    if !has_spark(buckets, peak) {
-        return None;
+/// would erase it. A bucket with nothing in it takes [`SPARK_TRACK`], which is
+/// what keeps that distinction a matter of *shape*.
+///
+/// **Total, where this returned an `Option` before
+/// [#78](https://github.com/breferrari/vigia/issues/78).** There is no longer a
+/// row that draws no strip, so there is no absence for a caller to handle, and
+/// the `has_spark` predicate that answered "is there anything here at all" went
+/// with it. What is left of that guard is the `peak == 0` line below, which is
+/// the one state where the ramp has no denominator: an empty store, which is
+/// every launch.
+fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [char; HISTORY_BUCKETS] {
+    let mut glyphs = [SPARK_TRACK; HISTORY_BUCKETS];
+    // Nothing anywhere on screen has been written, so every bucket is empty and
+    // the division below has no denominator. Returning here rather than guarding
+    // inside the loop, because the two say different things: this is "there is
+    // no scale yet", and the loop's `count == 0` is "this bucket is empty on a
+    // screen that has one".
+    if peak == 0 {
+        return glyphs;
     }
-    let mut glyphs = [SPARK_EMPTY; HISTORY_BUCKETS];
     for (glyph, &count) in glyphs.iter_mut().zip(buckets.iter()) {
         if count == 0 {
             continue;
@@ -1371,7 +1393,7 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> Option<[char; HISTOR
         let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
         *glyph = SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1];
     }
-    Some(glyphs)
+    glyphs
 }
 
 /// The widest rung of `ladder` that fits in `room`.
@@ -2678,17 +2700,36 @@ impl Painter<'_> {
         // ended. The strip drawn is the **tail** of the window: dropping buckets
         // means dropping the oldest, and the oldest are on the left.
         //
-        // Guarded where the heat strip below is not, because `spark_of` does
-        // real per-row work and `heat_at` opens by returning nothing.
+        // **Unconditional past the width check**, where this used to skip a row
+        // whose file had no history: since
+        // [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket
+        // draws the track, so the reserved slot is always filled and a launch
+        // into a worktree that was already dirty draws the column rather than a
+        // blank.
         if columns.spark > 0 {
-            if let Some(strip) = spark_of(heading.spark, peak) {
-                let tail: String = strip[HISTORY_BUCKETS - columns.spark..].iter().collect();
-                let field = Rect {
-                    x: right.x + right.width - columns.spark as u16,
-                    width: columns.spark as u16,
-                    ..right
+            // Cell by cell rather than as one string, for the reason the heat
+            // strip below gives and one more that the strip does not have: the
+            // style differs *per cell* now, so a single styled write could not
+            // draw this row anyway. It also drops the per-row `String` the tail
+            // used to collect into.
+            let strip = spark_of(heading.spark, peak);
+            let x = right.x + right.width - columns.spark as u16;
+            let mut glyph = [0u8; 4];
+            for (offset, bucket) in strip[HISTORY_BUCKETS - columns.spark..].iter().enumerate() {
+                // The track is the one glyph outside `SPARK_RAMP`, which is what
+                // makes reading the style back off it total rather than a guess.
+                let style = if *bucket == SPARK_TRACK {
+                    self.theme.spark_track
+                } else {
+                    self.theme.spark
                 };
-                self.put_right(field, &tail, self.theme.spark);
+                // `cell_mut` for `Painter::scrollbar`'s reason: `render`'s
+                // contract is that any area is legal, and a direct index would
+                // abort the whole paint on a strip wider than its buffer.
+                if let Some(cell) = self.buf.cell_mut((x + offset as u16, right.y)) {
+                    cell.set_symbol(bucket.encode_utf8(&mut glyph))
+                        .set_style(style);
+                }
             }
         }
         past(&mut right, columns.spark);

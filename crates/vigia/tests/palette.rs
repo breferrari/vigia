@@ -530,6 +530,36 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
     assert_eq!(indexed.len(), 3, "256 lost a stop: {indexed:?}");
 }
 
+#[test]
+fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
+    // The track and the bars land on the same eight columns of the same row, and
+    // the track is drawn from `_` where a bar is drawn from a block, so glyph
+    // already separates them for a reader. Colour is what separates them for a
+    // reader who is *glancing*, which is the whole of `SPEC.md` §5, and it has to
+    // survive the ladder rather than only the palette it was authored in.
+    //
+    // Against `chrome_dim` as well, because that is the one other style that
+    // draws a `·`-weight mark on a chrome line: two dim greys carrying two
+    // meanings is the collision `Theme::bar` records being hit twice already.
+    for (name, base) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
+            let theme = base.resolve(depth);
+            assert_ne!(
+                theme.spark_track.fg, theme.spark.fg,
+                "{name} at {depth:?} draws a track in the bucket's own colour"
+            );
+            assert_ne!(
+                theme.spark_track.fg, theme.chrome_dim.fg,
+                "{name} at {depth:?} draws the track in the chrome's dim grey"
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The theme file, which is how a palette is specified rather than what it draws.
 // ---------------------------------------------------------------------------
