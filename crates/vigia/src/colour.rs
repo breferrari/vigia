@@ -117,17 +117,24 @@ impl Depth {
     ///    their way to switch off. Below the override so that `VIGIA_COLOR` can
     ///    still ask for colour in one pane of a session that sets it globally.
     /// 3. **`TERM=dumb`**, which is a terminal saying it cannot do this.
-    /// 4. **`COLORTERM`** of `truecolor` or `24bit`. The only positive signal for
-    ///    24-bit that exists; there is no terminfo capability for it that is
-    ///    reliably present.
-    /// 5. **`TERM` containing `256color`**, which is terminfo's own spelling.
+    /// 4. **`COLORTERM`** of `truecolor` or `24bit`. The strongest positive signal
+    ///    for 24-bit, and the only one that is a convention rather than a name.
+    /// 5. **`TERM_PROGRAM`**, which is a terminal naming itself. See
+    ///    [`program_depth`] for why a name outranks the `TERM` entry under it, and
+    ///    why this is the rung that matters on macOS.
     /// 6. **Windows with `WT_SESSION`**, which is Windows Terminal identifying
-    ///    itself. It has done 24-bit since it shipped.
-    /// 7. **Windows otherwise**, at 256. This is §10's *"legacy conhost degrades"*
-    ///    written as a rung: conhost accepts 24-bit sequences and approximates them,
-    ///    so claiming truecolour there produces colours nobody chose.
-    /// 8. **Sixteen**, which is what the palette was before any of this existed and
-    ///    is the one answer that is never actively wrong.
+    ///    itself. It has done 24-bit since it shipped, and it is the same class of
+    ///    evidence the rung above is: a terminal that says which one it is.
+    /// 7. **`TERM` promising 24-bit**, either in terminfo's own `-direct` spelling
+    ///    or by naming a terminal that has only ever drawn it. See [`term_depth`].
+    /// 8. **`TERM` containing `256color`**, which is terminfo's spelling for the
+    ///    rung below.
+    /// 9. **Windows otherwise**, at 24-bit. This is §10's *"legacy conhost
+    ///    degrades"* aged out: every Windows console that can run this draws
+    ///    24-bit, and a reader on something genuinely older says so with
+    ///    `VIGIA_COLOR`.
+    /// 10. **Sixteen**, which is what the palette was before any of this existed
+    ///     and is the one answer that is never actively wrong.
     pub fn from_env(
         windows: bool,
         lookup: impl Fn(&str) -> Option<String>,
@@ -176,18 +183,31 @@ impl Depth {
         if colorterm == "truecolor" || colorterm == "24bit" {
             return Ok(Self::Truecolor);
         }
+
         // **Above `TERM`, and that order is the fix rather than a tidy-up.** Git
         // Bash and MSYS export `TERM=xterm-256color` on Windows, so reading `TERM`
         // first sent the most common shell for this repo to 256, where a subtle
         // wash has nowhere to land and quantises to a saturated primary. A
         // terminal that names itself is better evidence than a variable describing
         // a terminfo entry.
+        //
+        // That ruling was written for `WT_SESSION` and it generalises: the two
+        // rungs here are both a terminal saying which one it is, and `TERM` below
+        // them is a reader's `TERM` *setting*, which every layer in a session is
+        // free to rewrite and which several do.
+        if let Some(depth) = lookup("TERM_PROGRAM")
+            .as_deref()
+            .map(str::trim)
+            .and_then(program_depth)
+        {
+            return Ok(depth);
+        }
         if windows && lookup("WT_SESSION").is_some() {
             return Ok(Self::Truecolor);
         }
 
-        if term.contains("256color") {
-            return Ok(Self::Ansi256);
+        if let Some(depth) = term_depth(&term) {
+            return Ok(depth);
         }
         if windows {
             // **Truecolour, and this used to be 256.** The conservative answer was
@@ -257,6 +277,111 @@ impl Depth {
             },
         }
     }
+}
+
+/// What `TERM_PROGRAM` names, and what that terminal can draw.
+///
+/// **This is the rung that matters on macOS**, and it was missing for a phase.
+/// `COLORTERM` is the only convention for claiming 24-bit and nothing propagates
+/// it: `ssh` forwards `TERM` and not `COLORTERM`, and a multiplexer replaces `TERM`
+/// with its own entry. `tmux` at its default `default-terminal screen` is the
+/// ordinary case, and `screen` contains neither `256color` nor anything else the
+/// chain used to read, so a reader in the two-pane arrangement this whole tool is
+/// designed for landed on sixteen. Sixteen **drops backgrounds**, so `dark` drew
+/// every diff row unwashed and the tool looked like it was ignoring the palette.
+/// Reported from a real macOS pane, where the giveaway was the `@@` header: at
+/// sixteen the mockup's `#58a6ff` blue resolves to `LightCyan`, and it was cyan.
+///
+/// `TERM_PROGRAM` survives all of that, because it describes the process that owns
+/// the screen rather than the entry the innermost layer decided to advertise.
+///
+/// **Only positive answers.** A program not in this table returns nothing and falls
+/// through to `TERM`, rather than capping anything: the table is evidence about
+/// terminals someone checked, not a claim about the ones nobody has.
+///
+/// `Apple_Terminal` is the one entry that is **not** truecolour, and it is the
+/// reason this returns a rung rather than a bool. Terminal.app has never drawn
+/// 24-bit: it accepts the sequences and rounds them to its own palette, so
+/// claiming truecolour there is the over-claim [`Depth::Ansi16`]'s own doc warns
+/// about, where an under-claim only looks flatter than it had to.
+///
+/// A reader on a build older than its terminal's 24-bit support says so with
+/// `VIGIA_COLOR`, which is the same escape hatch the Windows rung leans on and
+/// exists for exactly the cases detection cannot see.
+fn program_depth(program: &str) -> Option<Depth> {
+    // Lowercased because the values are brand names and are spelled as such:
+    // `Apple_Terminal`, `iTerm.app`, `WezTerm`, `WarpTerminal`, `Hyper`, `Tabby`,
+    // beside a lowercase `vscode` and `ghostty`. Matching them as written is a
+    // table that is wrong the first time a vendor re-capitalises.
+    match program.to_ascii_lowercase().as_str() {
+        "apple_terminal" => Some(Depth::Ansi256),
+        "ghostty" | "hyper" | "iterm.app" | "rio" | "tabby" | "vscode" | "warpterminal"
+        | "wezterm" => Some(Depth::Truecolor),
+        _ => None,
+    }
+}
+
+/// What a `TERM` entry promises, or nothing when it promises neither rung.
+///
+/// Three readings, and the first two are the ones that were missing:
+///
+/// 1. **`-direct`** is terminfo's own spelling for direct colour, which is what
+///    24-bit is called by the database that has an opinion. `xterm-direct`,
+///    `tmux-direct`, `alacritty-direct`, and the numbered `xterm-direct2`. A reader
+///    who set one has said the thing `COLORTERM` says, in the vocabulary of the
+///    variable they were setting.
+/// 2. **A terminal naming itself.** `xterm-kitty`, `xterm-ghostty`, `alacritty`,
+///    `wezterm`, `foot`, `contour`, `rio` all ship their own entry and none of them
+///    contains `256color`, so every one of them fell to sixteen whenever
+///    `COLORTERM` had not survived. They have drawn 24-bit for their whole
+///    existence; there is no version of any of them where this is an over-claim.
+/// 3. **`256color`**, terminfo's spelling for the rung below, which is what this
+///    function read and all it read.
+///
+/// **Promotes only**, which is `SPEC.md` §11.1's standing rule for `TERM`: an entry
+/// that names none of these yields nothing and leaves the floor where it is.
+fn term_depth(term: &str) -> Option<Depth> {
+    let term = term.to_ascii_lowercase();
+    // `contains` rather than `ends_with`, for `xterm-direct2` and friends: the
+    // database numbers the direct entries by how many bits they hand each channel,
+    // and all of them are direct colour.
+    if term.contains("-direct") || term.contains("truecolor") {
+        return Some(Depth::Truecolor);
+    }
+    if TRUECOLOR_TERMS.iter().any(|name| names(&term, name)) {
+        return Some(Depth::Truecolor);
+    }
+    if term.contains("256color") {
+        return Some(Depth::Ansi256);
+    }
+    None
+}
+
+/// Terminals whose own terminfo entry is the whole signal, since none of them
+/// spells `256color` and all of them draw 24-bit.
+///
+/// Deliberately short. Every entry is a terminal that ships its own `TERM` and has
+/// never had a 16-colour era, which is what makes promoting on the name safe; a
+/// terminal that merely *usually* has truecolour belongs behind `COLORTERM` or
+/// `VIGIA_COLOR`, not here.
+const TRUECOLOR_TERMS: [&str; 7] = [
+    "alacritty",
+    "contour",
+    "foot",
+    "rio",
+    "wezterm",
+    "xterm-ghostty",
+    "xterm-kitty",
+];
+
+/// Whether `term` is `name` or one of its variants.
+///
+/// Entries are suffixed rather than substringed: `foot-extra` and `alacritty-direct`
+/// are the same terminal, and a bare `contains` would also match a `TERM` that
+/// merely has the word in it. The boundary is the `-` the database itself uses.
+fn names(term: &str, name: &str) -> bool {
+    term.strip_prefix(name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
 }
 
 /// The six levels each axis of the xterm colour cube can take.

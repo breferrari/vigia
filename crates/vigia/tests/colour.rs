@@ -96,6 +96,80 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             Depth::Truecolor,
         ),
         (
+            // A terminal naming itself outranks the entry the innermost layer of
+            // the session decided to advertise, which is the ruling `WT_SESSION`
+            // already stands on one rung down. It has to be the case where the
+            // two disagree, or it passes against an implementation that never
+            // reads the variable.
+            "TERM_PROGRAM outranks a TERM that only claims 256",
+            false,
+            &[("TERM_PROGRAM", "WezTerm"), ("TERM", "xterm-256color")],
+            Depth::Truecolor,
+        ),
+        (
+            // The one entry in the program table that is not truecolour, and the
+            // reason the table returns a rung rather than a bool. Terminal.app
+            // accepts 24-bit sequences and rounds them to its own palette, so
+            // claiming truecolour there paints colours nobody chose.
+            "Apple_Terminal names a terminal that has never drawn 24-bit",
+            false,
+            &[("TERM_PROGRAM", "Apple_Terminal"), ("TERM", "xterm-direct")],
+            Depth::Ansi256,
+        ),
+        (
+            // The table is evidence about terminals someone checked, not a claim
+            // about the ones nobody has. A program it does not know caps nothing.
+            "an unknown TERM_PROGRAM falls through rather than capping",
+            false,
+            &[("TERM_PROGRAM", "something-nobody-has"), ("TERM", "foot")],
+            Depth::Truecolor,
+        ),
+        (
+            "COLORTERM outranks a program name",
+            false,
+            &[
+                ("COLORTERM", "truecolor"),
+                ("TERM_PROGRAM", "Apple_Terminal"),
+            ],
+            Depth::Truecolor,
+        ),
+        (
+            // terminfo's own spelling for direct colour, which is the vocabulary
+            // of the variable being set. The numbered entries say how many bits
+            // each channel gets and are all direct colour.
+            "TERM's own spelling of direct colour",
+            false,
+            &[("TERM", "xterm-direct2")],
+            Depth::Truecolor,
+        ),
+        (
+            // None of these contains `256color`, so every one of them fell to
+            // sixteen whenever `COLORTERM` had not survived, which is the whole
+            // defect. Driven as a rung of the table rather than as its own test
+            // so an entry that stops promoting fails here.
+            "a terminal that ships its own entry and has never had a 16-colour era",
+            false,
+            &[("TERM", "xterm-ghostty")],
+            Depth::Truecolor,
+        ),
+        (
+            // Suffixed rather than substringed: the boundary is the `-` the
+            // database itself uses, so a variant is the same terminal.
+            "a variant of one of those entries is the same terminal",
+            false,
+            &[("TERM", "foot-extra")],
+            Depth::Truecolor,
+        ),
+        (
+            // `TERM` promotes only. `sixel` is not a colour claim and the entry
+            // names no terminal in the table, so the floor stays where it is
+            // rather than the substring rules reaching for it.
+            "a TERM that promises neither rung leaves the floor alone",
+            false,
+            &[("TERM", "xterm-sixel")],
+            Depth::Ansi16,
+        ),
+        (
             "TERM's own spelling of 256",
             false,
             &[("TERM", "screen-256color")],
@@ -283,6 +357,61 @@ fn a_background_is_dropped_a_rung_above_a_foreground() {
     // And dropped, not blanked. `None` inherits whatever the reader's pane is
     // painted in; `Reset` would impose the terminal's default over it.
     assert_ne!(Depth::Ansi16.resolve(style).bg, Some(Color::Reset));
+}
+
+#[test]
+fn a_terminal_that_can_draw_the_wash_is_detected_as_one_that_can() {
+    // **The two halves of this file, joined.** Detection and degradation were each
+    // correct alone, and the defect lived in the sentence they make together: a
+    // real macOS pane resolved to sixteen, sixteen drops backgrounds by the rule
+    // the test above pins, and `dark` therefore drew every changed row unwashed
+    // while colouring everything else. From the outside that reads as a palette
+    // being ignored, which is what it was reported as.
+    //
+    // Driven from the environment to the drawn style rather than from either end,
+    // because neither end is where it broke.
+    //
+    // `COLORTERM` is absent in every row on purpose. It is the only convention for
+    // claiming 24-bit and nothing propagates it: `ssh` forwards `TERM` alone, and a
+    // multiplexer replaces `TERM` with an entry of its own. Its presence is what
+    // made this invisible for a phase, so a row that sets it is a row that cannot
+    // fail.
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        // The reported screen: a macOS terminal, `tmux` at its default
+        // `default-terminal screen`. `screen` claims nothing at all, so before
+        // `TERM_PROGRAM` was read this was sixteen.
+        (
+            "a macOS pane inside tmux",
+            &[("TERM_PROGRAM", "iTerm.app"), ("TERM", "screen")],
+        ),
+        // The same arrangement under the terminals that ship their own entry, none
+        // of which spells `256color`.
+        ("Ghostty", &[("TERM", "xterm-ghostty")]),
+        ("kitty", &[("TERM", "xterm-kitty")]),
+        ("Alacritty", &[("TERM", "alacritty")]),
+        ("WezTerm", &[("TERM", "wezterm")]),
+        // Terminal.app cannot draw 24-bit and is not asked to. 256 keeps the wash,
+        // which is the property under test; that the tint is coarse there is
+        // `SPEC.md` §11.1's recorded cost of the rung, not a failure of this.
+        (
+            "Terminal.app, at the rung it actually has",
+            &[("TERM_PROGRAM", "Apple_Terminal"), ("TERM", "screen")],
+        ),
+    ];
+
+    for (why, pairs) in cases {
+        let depth = depth(false, pairs);
+        assert!(
+            depth >= Depth::Ansi256,
+            "{why}: detected {depth:?}, and a wash cannot be drawn below 256"
+        );
+        let theme = Theme::dark().resolve(depth);
+        assert!(
+            theme.added_row.bg.is_some() && theme.removed_row.bg.is_some(),
+            "{why}: `dark` at {depth:?} draws no row wash, so a changed line is \
+             the sigil alone"
+        );
+    }
 }
 
 #[test]
