@@ -148,10 +148,11 @@ palette! {
     /// them *written* buckets rather than track. There was no sparkline track in
     /// the file to read. (`#30363d` *is* in that file, as the window border's
     /// stroke, which is worth knowing because grepping the SVG for it finds a
-    /// hit that has nothing to do with this element.) So this was picked for the reason below and the picture
-    /// was then corrected to draw it, which is why the artifact and the shell
-    /// still agree: the cold row's eight bars are `#30363d` today, deliberately
-    /// **not** the `#21262d` the heat strip on that same row uses.
+    /// hit that has nothing to do with this element.) So this was picked for the
+    /// reason below and the picture was then corrected to draw it, which is why
+    /// the artifact and the shell still agree: the cold row's eight bars are
+    /// `#30363d` today, deliberately **not** the `#21262d` the heat strip on that
+    /// same row uses.
     ///
     /// **One step brighter than the other two tracks, because ink is not
     /// value.** [`Theme::heat_track`] argues `DarkGray` is right on the ground

@@ -318,38 +318,89 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
     // drawn as one stroke rather than a solid block, taking the colour this gate
     // exists to keep off anything a reader has to see, and no gate said a word.
     // Whether that value is right is [#60](https://github.com/breferrari/vigia/issues/60)'s
-    // question; that it was never a decision is this gate's, and the count below
-    // is what turns the next one into a decision.
+    // question; that it was never a decision is this gate's.
+    //
+    // **So the partition is made by the compiler.** Destructuring `Theme` with no
+    // `..` rest pattern means a new field cannot reach this gate unclassified.
+    // Verified by adding one: the three palette constructors fail first with
+    // `E0063: missing field`, and once those are filled in this file fails with
+    // `E0027: pattern does not mention field`, naming it. So the author is made
+    // to say which side it is on, after doing the work they had to do anyway.
+    //
+    // Strictly better than the field count this briefly used, which could be
+    // silenced by bumping a number, and available only because every field is
+    // `pub`. What is *not* available is walking the styles by key string:
+    // `Theme::KEYS` is public and the values behind those names are not, which is
+    // why this is a destructure rather than a loop.
     let ansi = Theme::ansi();
+    let Theme {
+        // Read by a reader, so none of these may be colour 8.
+        chrome,
+        chrome_dim,
+        path,
+        path_live,
+        path_cold,
+        kind,
+        hunk,
+        gutter,
+        context,
+        note,
+        alert,
+        comment,
 
-    // **A tripwire, because the partition cannot be derived.** `Theme::KEYS` is
-    // public and complete, but the styles behind the keys are not reachable by
-    // name from outside the crate, so a test cannot walk every field and ask its
-    // colour. What it can do is notice that the field *count* moved and refuse to
-    // pass until someone says which side the new one is on. Deliberately annoying
-    // exactly once per added field, which is the frequency this decision should
-    // be made at.
-    assert_eq!(
-        Theme::KEYS.len(),
-        40,
-        "a palette field was added or removed. Decide which side of this gate it \
-         is on: if a reader has to *read* it, put it in `readable` below, and if \
-         it is a block or a track that should sit just above the pane, say so \
-         here and update this count. Do not update the count alone"
-    );
-    let readable: [(&str, ratatui::style::Style); 12] = [
-        ("chrome", ansi.chrome),
-        ("chrome_dim", ansi.chrome_dim),
-        ("path", ansi.path),
-        ("path_live", ansi.path_live),
-        ("path_cold", ansi.path_cold),
-        ("gutter", ansi.gutter),
-        ("kind", ansi.kind),
-        ("hunk", ansi.hunk),
-        ("note", ansi.note),
-        ("alert", ansi.alert),
-        ("context", ansi.context),
-        ("comment", ansi.comment),
+        // Exempt: a track is not text. It is a mark that should sit just above
+        // the pane, which is what colour 8 is for. `spark_track` is the awkward
+        // one and says so in its own doc: it is a single stroke rather than a
+        // solid block, so the premise reaches it less well, and on this palette
+        // there is nothing between colour 8 and the weight content is drawn in.
+        heat_track: _,
+        bar_track: _,
+        spark_track: _,
+
+        // Exempt: marks and fills, none of them text, none of them colour 8.
+        pulse: _,
+        spark: _,
+        bar: _,
+        heat_added: _,
+        heat_added_warm: _,
+        heat_added_hot: _,
+        heat_removed: _,
+        heat_removed_warm: _,
+        heat_removed_hot: _,
+        heat_mixed: _,
+        heat_mixed_warm: _,
+        heat_mixed_hot: _,
+        added: _,
+        removed: _,
+        added_row: _,
+        removed_row: _,
+        added_bar: _,
+        removed_bar: _,
+
+        // Exempt: syntax classes. Read, but never in grey: they carry hue, and
+        // `a_ramp_that_survives_sixteen_colours_is_still_a_ramp` covers them.
+        keyword: _,
+        type_name: _,
+        function: _,
+        variable: _,
+        constant: _,
+        string: _,
+        number: _,
+    } = ansi;
+
+    let readable = [
+        ("chrome", chrome),
+        ("chrome_dim", chrome_dim),
+        ("path", path),
+        ("path_live", path_live),
+        ("path_cold", path_cold),
+        ("gutter", gutter),
+        ("kind", kind),
+        ("hunk", hunk),
+        ("note", note),
+        ("alert", alert),
+        ("context", context),
+        ("comment", comment),
     ];
 
     for (name, style) in readable {
@@ -759,7 +810,7 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
     let light = Theme::light().resolve(Depth::Ansi16);
     assert_eq!(
         light.spark_track.fg, light.path_cold.fg,
-        "`light` at sixteen colours no longer draws the track in `path_cold`'s          colour, so the skipped comparison above would now pass and the          `continue` should come out"
+        "`light` at sixteen colours no longer draws the track in `path_cold`'s \n         colour, so the skipped comparison above would now pass and the \n         `continue` should come out"
     );
 }
 
@@ -805,7 +856,7 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     });
     assert!(
         !path_has_underscore,
-        "the fixture's path carries an underscore, which this gate counts as a          track cell"
+        "the fixture's path carries an underscore, which this gate counts as a \n         track cell"
     );
 
     let bars = row.iter().filter(|s| "▁▂▃▄▅▆▇█".contains(**s)).count();
