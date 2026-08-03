@@ -2820,9 +2820,22 @@ impl Painter<'_> {
             // restoring the terminal: I8's failure reached by the one path that
             // skips its handler. The assert keeps the message a developer needs
             // and this keeps the promise a reader needs.
-            let take = columns.spark.min(HISTORY_BUCKETS);
+            //
+            // **Clamped to the room as well as to the window.** `Columns::plan`
+            // guarantees `right.width` exceeds every reserved slot, so the two
+            // clamps are the same number today. They are not the same *promise*:
+            // one says the strip fits the window, the other says it fits the
+            // rect it was handed, and `Painter::list` hands an area this function
+            // did not plan (it insets a caret column). A bare subtraction is the
+            // shape that has bitten this file before, and in release it does not
+            // even panic: `u16` wraps, `x` lands near the top of the range, and
+            // `x + offset` wraps back into the pane, so the strip would be drawn
+            // in the wrong column rather than not at all. Raised by review on
+            // the sparkline; the heat strip below has the identical expression
+            // and is left for a pass that can change both with one argument.
+            let take = columns.spark.min(HISTORY_BUCKETS).min(right.width as usize);
             let strip = spark_of(heading.spark, peak);
-            let x = right.x + right.width - take as u16;
+            let x = right.x + right.width.saturating_sub(take as u16);
             for (offset, bucket) in strip[HISTORY_BUCKETS - take..].iter().enumerate() {
                 // Both out of the one value, which is [`Bucket`]'s whole reason.
                 let (glyph, style) = bucket.drawn(self.theme);
