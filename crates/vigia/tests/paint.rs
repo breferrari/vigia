@@ -37,7 +37,7 @@ use vigia_core::{Highlighter, History};
 
 use support::{
     Scratch, WIDE_EXT, WIDE_UNIT_CHARS, WIDE_UNIT_COLUMNS, WIDE_UNITS, WIDE_UNPARSED_EXT,
-    wide_generated,
+    highlight_delta, wide_generated,
 };
 
 /// Files in the fixtures here. Small: these gates are about one row's cost, and
@@ -422,6 +422,20 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let rows = screen.diff;
         let mut buf = Buffer::empty(area);
         let mut total = PaintStats::default();
+
+        // **One frame before the gesture, because the shell has always had
+        // one.** `App::view` draws the first frame of a process plain, which is
+        // I7's fix (`Viewport::highlight`), and a reader flicking a trackpad is
+        // by definition past it. Without this the batched arm's single draw
+        // *is* the first frame, highlights nothing, and the non-vacuity guard
+        // below fires on a run that measured the wrong thing.
+        //
+        // Both arms pay it identically and the baseline is taken afterwards, so
+        // it adds nothing to either side of the comparison.
+        app.view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view");
+        let before = highlighter.stats();
+
         for at in 0..notches {
             app.apply(Action::Scroll(WHEEL_ROWS), &mut frame, rows)
                 .expect("scroll");
@@ -436,7 +450,11 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         // `App::view` writes the resolved top back as the position, and both
         // arms always draw on the last notch, so this is where the gesture ended
         // without carrying a `View` out of the loop to ask it.
-        (highlighter.stats().lines, total, app.position())
+        (
+            highlight_delta(before, highlighter.stats()).lines,
+            total,
+            app.position(),
+        )
     };
 
     let (each_lines, per_event, landed) = paint(false);

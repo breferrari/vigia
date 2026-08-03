@@ -160,6 +160,34 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
     };
+    // **The plain frame, and it is the whole of I7's fix.** `App::view` draws
+    // this one without parsing, because a grammar's patterns compile on first
+    // use at 74-362ms and this is the frame I7 gives 50ms to. Measured over the
+    // hundred-file fixture: 105.03ms before, 13.26ms now.
+    //
+    // What the reader gains is not a cheaper screen but an earlier one. The
+    // alternate screen is already taken by the line above, so the whole compile
+    // used to happen with nothing on it at all.
+    shell.draw(&mut frame, &worktree)?;
+
+    // Ahead of the second draw, so the two are compiling different files rather
+    // than the same one twice. It races the frame path and is allowed to lose:
+    // see `Highlighter::warm_ahead`, which upholds nothing by design.
+    //
+    // Detached by dropping the handle, like the two threads below and for a
+    // simpler reason: it ends by itself, and nothing waits for a result that
+    // only ever makes a later frame cheaper.
+    drop(shell.highlighter.warm_ahead(
+        worktree.workdir().to_path_buf(),
+        frame
+            .files()
+            .iter()
+            .map(|change| change.path.clone())
+            .collect(),
+    ));
+
+    // And the coloured one, immediately. This is the frame that pays the
+    // compile, and it pays it behind a screen that already has the diff on it.
     shell.draw(&mut frame, &worktree)?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore

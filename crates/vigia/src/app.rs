@@ -124,6 +124,25 @@ pub struct App {
     /// here, so `tests/budgets.rs` and `tests/soak.rs` measure the shipped
     /// screen rather than a screen with the readout taken out.
     frames: Samples,
+    /// Whether a frame has already been drawn, which is what lets the first one
+    /// be different.
+    ///
+    /// **The whole of I7's fix, and it is one bool because the rule is one
+    /// sentence:** the first frame of a process draws plain, every later one
+    /// colours. `syntect` compiles a grammar's patterns on first use at
+    /// 74-362ms, and I7 gives the whole of startup 50ms, so a first frame that
+    /// parsed was 105.03ms measured over the hundred-file fixture. The reader
+    /// spent all of it looking at a blank alternate screen, because
+    /// `Session::enter` runs before the draw.
+    ///
+    /// Here rather than in [`crate::run`]'s loop for the reason
+    /// [`Self::frames`] gives one field down: every caller that builds a view
+    /// gets the behaviour, so `tests/soak.rs` and the budget gates drive the
+    /// shipped first frame rather than one with the rule taken out.
+    ///
+    /// One direction only, and never reset. A second plain frame mid-session
+    /// would be a screen losing its colour for no reason a reader could see.
+    painted: bool,
     /// Resident set size as of the last frame that sampled it.
     ///
     /// A stored value rather than a read inside [`App::chrome`], because chrome
@@ -154,6 +173,9 @@ impl Default for App {
             list_rows: 0,
             newest: None,
             mode: Mode::default(),
+            // False, and unlike `following` this is genuinely the derived
+            // answer: a shell that has drawn nothing has drawn nothing.
+            painted: false,
             frames: Samples::new(FRAME_SAMPLES),
             memory: None,
         }
@@ -172,6 +194,26 @@ impl App {
         Self {
             following: true,
             ..Self::default()
+        }
+    }
+
+    /// A shell that has already drawn a frame, so the next one colours.
+    ///
+    /// **For a caller measuring the state a monitor spends all but one frame of
+    /// its life in.** [`App::new`] draws its first frame plain, which is I7's
+    /// fix and is the shipped behaviour; a gate that wants a *coloured* screen
+    /// out of a single [`App::view`] would otherwise be measuring the one frame
+    /// that deliberately does not parse.
+    ///
+    /// Not what [`crate::run`] uses, and the distinction is the whole point: the
+    /// product really does start unpainted. This exists so a test can hold the
+    /// frame **cold** — every file computed rather than reused — while the shell
+    /// is past its first paint, which are independent axes that a priming frame
+    /// would collapse into one.
+    pub fn repainted() -> Self {
+        Self {
+            painted: true,
+            ..Self::new()
         }
     }
 
@@ -587,8 +629,21 @@ impl App {
                 // `body_layout` already decided by giving the diff more than one
                 // row. A pane too short for a bar pays nothing.
                 measured: body.diff > 1,
+                // Read before the write below, so the first frame through here
+                // is the plain one and every later frame colours. See
+                // [`Self::painted`].
+                highlight: self.painted,
             },
         )?;
+        // Set here rather than by the caller, because this is the call that
+        // *is* a frame: a shell that painted without coming through here has
+        // not drawn a screen.
+        //
+        // **After the `?` on purpose.** A collect that failed drew nothing, so
+        // it was not the first paint and the next successful one still is. The
+        // shell redraws its previous screen on that path, which on the very
+        // first frame is the empty one.
+        self.painted = true;
         self.position = view.top;
         self.list_rows = body.list;
         // Stored back for the reason the position is: resolution happens once,

@@ -99,6 +99,13 @@ struct Screen {
 /// The frame is cold, so every file it touches is computed rather than reused.
 /// That is the measurement wanted here: a warm frame reads nothing at all, which
 /// would make the byte comparison pass without saying anything.
+///
+/// **The shell is not cold, and the two are independent.** `App::repainted`
+/// stands in for a monitor past its first frame, because `App::new`'s first
+/// [`App::view`] draws plain (`Viewport::highlight`, I7) and the highlighting
+/// half of this helper would then measure the one frame that deliberately parses
+/// nothing. Priming with an extra view instead would warm the *frame* too and
+/// take the reads with it, which is the comparison the other half is about.
 fn one_screen(name: &str, files: usize) -> Screen {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
@@ -110,7 +117,7 @@ fn one_screen(name: &str, files: usize) -> Screen {
         "fixture {name} is not {files} files"
     );
 
-    let mut app = App::new();
+    let mut app = App::repainted();
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let before = frame.stats();
