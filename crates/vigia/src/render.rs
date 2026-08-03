@@ -393,6 +393,24 @@ const CELL_GAP: &str = "  ";
 /// what they are looking at is live.
 const FOLLOWING: &str = "follow ▶";
 
+/// The marker inside [`FOLLOWING`], which is drawn green where the word beside
+/// it stays dim.
+///
+/// **The picture's own split, and it is not decoration.** `assets/preview.svg`
+/// draws `follow ` in `.dim` and this glyph in `.grn`, and §5.1's rule is that a
+/// published artifact answering a question is the answer. It earns the colour:
+/// the word names a mode and the mark says the mode is *on*, which is the one
+/// thing on the footer a reader checks at a glance rather than reads.
+///
+/// Restated as a `char` beside the string rather than composed into it, because
+/// `concat!` cannot take a `char`. Two spellings of one glyph can drift, and the
+/// drift is silent: the recolouring pass would find nothing and the mark would
+/// go back to grey. `the_follow_marker_is_the_last_character_of_the_state`
+/// catches a change to [`FOLLOWING`], and
+/// `the_follow_marker_is_green_where_the_word_beside_it_is_dim` catches a change
+/// to this, because it reads the colour this constant is what places.
+const FOLLOW_MARK: char = '▶';
+
 /// What joins two facts drawn on one line.
 ///
 /// Twice on screen: the header's worktree name and its changed-file count, and
@@ -2192,6 +2210,13 @@ impl Painter<'_> {
             ..area
         };
 
+        // Where `put_right` will place that string, and how much of its head the
+        // readouts occupy. Computed from the same two strings it is drawn from,
+        // so the tint below cannot address a column the text does not.
+        let placed =
+            bottom.x + bottom.width - width_of(&right).min(usize::from(bottom.width)) as u16;
+        let readouts = width_of(&footer.diagnostics);
+
         if footer.rows == 2 {
             // State above, hints below. The hints keep the bottom row they had
             // at eighty columns, so narrowing a pane moves the new line in
@@ -2207,9 +2232,98 @@ impl Painter<'_> {
                 &right,
                 self.theme.chrome_dim,
             );
+            self.tint_readouts(upper, placed, readouts);
             self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
         } else {
             self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
+            self.tint_readouts(bottom, placed, readouts);
+        }
+    }
+
+    /// Give the footer's right-hand side the three colours the picture draws.
+    ///
+    /// `assets/preview.svg` draws `0.8ms` and `24MiB` in `.cyn`, the word
+    /// `frame` beside them in `.dim`, and the follow marker in `.grn`. The
+    /// shipped footer drew all of it in one grey, so the two numbers a reader
+    /// checks at a glance and the mode marker looked like the words around them.
+    /// §5.1's rule is that a published artifact answering a question is the
+    /// answer.
+    ///
+    /// **A second pass over drawn cells rather than a second placement**, and
+    /// that is the load-bearing choice. Each of these is part of a token the
+    /// ladder picks *whole*: `0.8ms frame   19MiB` is one rung of
+    /// [`diagnostic_rungs`] and `follow ▶  1/3` is one rung of [`state_rungs`].
+    /// Splitting them to place each colour separately would mean the ladders no
+    /// longer decide what the row draws, and `Footer::plan`'s width arithmetic
+    /// would have to be told about colours to stay correct. Tinting after the
+    /// fact cannot move a column.
+    ///
+    /// **Bounded to the diagnostics' own columns** for the numbers, because the
+    /// state carries a number too and `1/3` is a position rather than a
+    /// measurement. The picture gives no colour for it, so it keeps its grey.
+    ///
+    /// The styles are reused rather than named anew: [`Theme::chrome`] is the
+    /// picture's `.cyn` and [`Theme::added`] its `.grn`, both to the byte on the
+    /// dark palette. A colour of their own would be a palette decision, which
+    /// stays [#11](https://github.com/breferrari/vigia/issues/11)'s, and it is
+    /// the same reuse the header's `not watching` makes of the footer's alert.
+    fn tint_readouts(&mut self, row: Rect, at: u16, readouts: usize) {
+        // A measurement and its unit: a run opening with a digit or the
+        // over-magnitude sigil, carried through the letters that name the unit.
+        // The label `frame` opens with a letter and so is never picked up.
+        //
+        // **The opening cell is consumed by the run whatever it says**, and that
+        // is a termination argument rather than a detail. `>` opens a run and
+        // carries nothing, so a loop that asked both questions of the same cell
+        // made no progress on `>1s` and spun forever with the pane frozen. Every
+        // pass of the outer loop now advances `x` by at least one column.
+        //
+        // **Clipped to the buffer, not to the area.** `render`'s contract is
+        // that any area is legal, and every other writer reaches the cells
+        // through `Buffer::set_stringn` or `set_style`, both of which clip. This
+        // walk indexes directly.
+        if row.y >= self.buf.area.bottom() {
+            return;
+        }
+        let edge = row.x.saturating_add(row.width).min(self.buf.area.right());
+        let end = at.saturating_add(readouts as u16).min(edge);
+        let opening = |c: char| c.is_ascii_digit() || c == '>';
+        let carrying = |c: char| c.is_ascii_digit() || c == '.' || c.is_ascii_alphabetic();
+        let mut x = at.min(edge);
+        while x < end {
+            let head = self.buf[(x, row.y)].symbol().chars().next();
+            if !head.is_some_and(opening) {
+                x += 1;
+                continue;
+            }
+            self.buf[(x, row.y)].set_style(self.theme.chrome);
+            x += 1;
+            while x < end
+                && self.buf[(x, row.y)]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(carrying)
+            {
+                self.buf[(x, row.y)].set_style(self.theme.chrome);
+                x += 1;
+            }
+        }
+
+        // **Bounded to the state's own columns**, which start where the
+        // diagnostics end. Scanning the whole row let a `▶` in the *notice* take
+        // the green: a notice is an error string carrying a path, `▶` is a legal
+        // filename character, and the first match won. That fabricated the one
+        // glyph on the footer a reader checks rather than reads, saying the view
+        // was live when it was not, and when follow really was on it lit the
+        // wrong glyph and left the real marker grey.
+        let mut glyph = [0u8; 4];
+        let glyph: &str = FOLLOW_MARK.encode_utf8(&mut glyph);
+        for x in end.min(edge)..edge {
+            if self.buf[(x, row.y)].symbol() == glyph {
+                self.buf[(x, row.y)].set_style(self.theme.added);
+                return;
+            }
         }
     }
 
