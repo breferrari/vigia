@@ -237,7 +237,12 @@ fn a_backed_up_body_holds_the_rows_its_own_position_names() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
 
-    let mut app = App::new();
+    // `past_first_paint` rather than `new`, because the oracle below is a
+    // `View::collect` and the two have to agree about everything, colour
+    // included. `App::new`'s first view draws plain (`Viewport::highlight`, I7)
+    // and this gate's subject is where the rows *land*, not what colour they
+    // are, so starting past the first paint compares like with like.
+    let mut app = App::past_first_paint();
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let height = body();

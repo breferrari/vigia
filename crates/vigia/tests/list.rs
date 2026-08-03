@@ -581,6 +581,11 @@ fn collect_resolves_every_degenerate_viewport() {
                                 list_rows,
                                 list_follows,
                                 measured: true,
+                                // This sweep is about where the two regions
+                                // land, which is decided before anything is
+                                // coloured. Highlighting on keeps it the same
+                                // collect the shell runs after its first frame.
+                                highlight: true,
                             },
                         )
                         .expect("collect");

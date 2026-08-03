@@ -20,12 +20,19 @@
 //! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
 //! proof for I5 and I6, and a test cannot import a `main.rs`.
 //!
-//! ## Why two threads and two repositories
+//! ## Why three threads and two repositories
 //!
 //! I1 says an idle monitor does no work, and the core delivers that by blocking:
 //! [`vigia_core::Watcher::next_tick`] waits on an untimed `recv`. `crossterm`
 //! reads input the same way. Two blocking sources need two threads and one
 //! channel, or a poll loop, and a poll loop is the timer I1 forbids.
+//!
+//! The third is [`vigia_core::Highlighter::warm_ahead`], and it is not on that
+//! channel at all: it sends no wake, so it cannot make an idle monitor do work
+//! and I1 never sees it. It compiles grammars ahead of the reader and ends by
+//! itself. That it reports nothing back is the design rather than a shortcut —
+//! there is no such thing as a warm grammar for the frame path to believe in,
+//! which `warm_ahead` documents in full.
 //!
 //! The watch thread opens its own [`vigia_core::Worktree`]. That is not
 //! duplication for its own sake: a [`vigia_core::Watcher`] borrows the
@@ -34,8 +41,9 @@
 //! second open costs one repository discovery, paid after first paint, off the
 //! path I7 measures.
 //!
-//! Both threads are detached rather than scoped. Quitting means main returning,
-//! and neither thread can be woken to be joined: `crossterm` has no portable
+//! All three are detached rather than scoped. Quitting means main returning,
+//! and none of them can be woken to be joined: the warmer ends by itself, and
+//! for the other two, `crossterm` has no portable
 //! interruptible read, and the one handle that unblocks the watcher makes its
 //! `next_tick` return `None` permanently, which is a shutdown and not a nudge.
 
@@ -138,10 +146,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
-        // Its 318µs of grammar loading lands before first paint, which is where
-        // it belongs: I7 gives startup 50ms and measures 20ms, so this is 1.5%
-        // of what starting already costs, and deferring it would only move it
-        // onto the first frame that draws something.
+        // Its 318µs of grammar *loading* lands before first paint, which is
+        // where it belongs: I7 gives startup 50ms, so this is well under one
+        // percent of it and deferring it would only move it onto the first frame
+        // that draws something.
+        //
+        // **Loading is not compiling, and only the small half is this line.**
+        // `syntect` hands each pattern to `fancy_regex` on first use, which is
+        // 74-362ms per grammar, and that is why the first frame below draws
+        // plain. The earlier version of this comment cited I7 "measuring 20ms",
+        // which was the core's frame path from an example that builds no
+        // highlighter at all; the shipped first paint measured 105.03ms.
         //
         // Not "before the screen is taken", which an earlier version of this
         // comment claimed: struct fields evaluate in written order and
@@ -160,6 +175,47 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
     };
+    // **For a screen with rows on it, so a clean worktree spawns nothing.**
+    // Starting a monitor on a tree nobody has touched is an ordinary way to
+    // start one, and there is no grammar to compile for an empty state.
+    //
+    // `take` before `map`, not after: `warm_ahead` considers at most
+    // `WARM_FILES` paths, so cloning the rest would be ten thousand `String`
+    // allocations at the scale
+    // [#48](https://github.com/breferrari/vigia/issues/48) contemplates, every
+    // one of them dropped unread.
+    //
+    // Detached by dropping the handle, like the two threads below and for a
+    // simpler reason: it ends by itself, and nothing waits for a result that
+    // only ever makes a later frame cheaper.
+    //
+    // **Above the draw, so it overlaps the frame that compiles.** Below it,
+    // the warm starts only once paint two has finished paying the 74-362ms
+    // for what is on screen, which turns `max(paint, warm)` into their sum
+    // and widens the window in which a first scroll below the fold meets a
+    // cold grammar. That window is the whole reason this thread exists.
+    if !frame.files().is_empty() {
+        shell.highlighter.warm_ahead(
+            worktree.workdir().to_path_buf(),
+            frame
+                .files()
+                .iter()
+                .take(vigia_core::WARM_FILES)
+                .map(|change| change.path.clone())
+                .collect(),
+        );
+    }
+
+    // **One call, two frames.** `Shell::draw` settles the repaint debt itself,
+    // so the opening is one mechanism rather than two statements in a row that a
+    // future edit can separate. `App::paint` records why that matters: deleting
+    // the second statement left the whole suite green while the product sat on a
+    // permanently uncoloured screen.
+    //
+    // The alternate screen is already taken by the line above, so before this
+    // the reader watched the whole 74-362ms grammar compile happen on a blank
+    // one. Measured over the hundred-file fixture: 105.03ms to first paint
+    // before, 13.26ms now.
     shell.draw(&mut frame, &worktree)?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore
@@ -430,8 +486,46 @@ impl Shell {
         self.regions
     }
 
-    /// Collect a screenful and paint it.
+    /// Collect a screenful and paint it, settling any repaint it leaves owed.
+    ///
+    /// **The opening two frames are one call, and that is the point.** The first
+    /// frame of a process draws plain, because a grammar's patterns compile on
+    /// first use at 74-362ms and I7 gives the whole of startup 50ms; the frame
+    /// after it colours. Written as two `draw` statements in [`run`] that held
+    /// only by statement order, deleting the second left the entire suite green
+    /// while the product sat on a permanently uncoloured screen for any tree
+    /// nobody was writing to — an I5 failure, since a monitor is meant to be
+    /// correct untouched. Found by mutation.
+    ///
+    /// So [`App::owes_repaint`] carries the debt and this collects it, which
+    /// makes the pair impossible to separate by editing one line. It costs one
+    /// extra frame once per process: measured at ~1.8ms on the hundred-file
+    /// fixture, against the 91.51ms compile it exists to hide.
+    ///
+    /// **At most one repaint, and the bound is structural rather than argued.**
+    /// Written as a `while` this spun forever: [`Self::paint`] swallows a failed
+    /// collect into [`App::warn`] and returns `Ok`, while [`App::view`] advances
+    /// its state only past the `?`, so a collect that keeps failing leaves the
+    /// debt standing and the condition can never clear — 100% CPU with the
+    /// alternate screen held and the quit key unreachable, which is the terminal
+    /// this shell refuses to leave a reader in. It is reachable rather than
+    /// exotic: `Frame::diff` re-reads any file written in the last two seconds,
+    /// so a `git checkout` landing between the two paints does it.
+    ///
+    /// An `if` cannot spin, and a debt that survives it is simply carried to the
+    /// next wake, where the reader is looking at the plain frame rather than at
+    /// nothing. That is the same "report and keep the previous screen" rule the
+    /// rest of the frame path already follows.
     fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+        self.paint(frame, worktree)?;
+        if self.app.owes_repaint() {
+            self.paint(frame, worktree)?;
+        }
+        Ok(())
+    }
+
+    /// One collect and one paint, with no view of what it leaves owed.
+    fn paint(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
         // Before the chrome, because the chrome carries it, and from the frame's
         // own file count so the read happens on exactly the frames that draw the
         // answer. That is the whole of I4 for this read.

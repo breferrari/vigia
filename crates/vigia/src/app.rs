@@ -46,6 +46,21 @@ fn scaled(at: u32, count: usize) -> usize {
     ((u64::from(at) * count as u64) / u64::from(crate::input::TRACK_SCALE)) as usize
 }
 
+/// How far a shell has got through its opening two frames.
+///
+/// See [`App::paint`]. The order is the lifecycle and the middle value is the
+/// one that carries work: it is a *debt*, and [`App::owes_repaint`] is what
+/// collects it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Paint {
+    /// Nothing drawn yet. The next frame draws plain, which is what I7 buys.
+    Never,
+    /// The plain frame is on screen and a coloured one is owed.
+    Plain,
+    /// Steady state: every frame from here parses.
+    Coloured,
+}
+
 /// The shell's state.
 #[derive(Debug, Clone)]
 pub struct App {
@@ -124,6 +139,32 @@ pub struct App {
     /// here, so `tests/budgets.rs` and `tests/soak.rs` measure the shipped
     /// screen rather than a screen with the readout taken out.
     frames: Samples,
+    /// How far this shell has got through its opening two frames.
+    ///
+    /// **The whole of I7's fix.** `syntect` compiles a grammar's patterns on
+    /// first use at 74-362ms, and I7 gives the whole of startup 50ms, so a first
+    /// frame that parsed was 105.03ms measured over the hundred-file fixture.
+    /// The reader spent all of it looking at a blank alternate screen, because
+    /// `Session::enter` runs before the draw. So the first frame draws plain and
+    /// the next one colours.
+    ///
+    /// **Three states rather than a bool, because the middle one is a debt.**
+    /// A bool can say "has drawn", which is enough to decide what *this* frame
+    /// does and not enough to say that another frame is owed. Without
+    /// [`Paint::Plain`] the second draw is a convention held up by statement
+    /// order in [`crate::run`], and deleting that statement left the entire
+    /// suite green while the product sat on a permanently uncoloured screen for
+    /// any tree nobody was writing to — an I5 failure, since a monitor is meant
+    /// to be correct untouched. Found by mutation.
+    ///
+    /// Here rather than in [`crate::run`]'s loop for the reason
+    /// [`Self::frames`] gives further up: every caller that builds a view gets
+    /// the behaviour, so `tests/soak.rs` and the budget gates drive the shipped
+    /// opening rather than one with the rule taken out.
+    ///
+    /// One direction only, and never reset. A second plain frame mid-session
+    /// would be a screen losing its colour for no reason a reader could see.
+    paint: Paint,
     /// Resident set size as of the last frame that sampled it.
     ///
     /// A stored value rather than a read inside [`App::chrome`], because chrome
@@ -154,6 +195,9 @@ impl Default for App {
             list_rows: 0,
             newest: None,
             mode: Mode::default(),
+            // Genuinely the derived answer, unlike `following`: a shell that
+            // has drawn nothing has drawn nothing.
+            paint: Paint::Never,
             frames: Samples::new(FRAME_SAMPLES),
             memory: None,
         }
@@ -173,6 +217,41 @@ impl App {
             following: true,
             ..Self::default()
         }
+    }
+
+    /// A shell already past its opening two frames, so the next one colours.
+    ///
+    /// **A test affordance, and `doc(hidden)` because it is one.** [`App::new`]
+    /// draws its first frame plain, which is I7's fix and is the shipped
+    /// behaviour; a gate that wants a *coloured* screen out of a single
+    /// [`App::view`] would otherwise be measuring the one frame that
+    /// deliberately does not parse.
+    ///
+    /// It exists so a test can hold the frame **cold** — every file computed
+    /// rather than reused — while the shell is past its first paint, which are
+    /// independent axes that a priming frame would collapse into one.
+    ///
+    /// **Never reach for this in [`crate::run`].** It puts the 105.03ms compile
+    /// back on the frame I7 gives 50ms to, and nothing would go red: the gate
+    /// that would notice constructs its own `App::new`. Named for what it *is*
+    /// rather than for what it is convenient for, so that misuse reads wrong at
+    /// the call site.
+    #[doc(hidden)]
+    pub fn past_first_paint() -> Self {
+        Self {
+            paint: Paint::Coloured,
+            ..Self::new()
+        }
+    }
+
+    /// Whether a coloured frame is owed for the plain one already on screen.
+    ///
+    /// **The debt `Self::paint` exists to carry.** `Shell::draw` is
+    /// the only caller and it settles it immediately, which is what keeps the
+    /// opening two frames one mechanism rather than two statements a future
+    /// edit can separate.
+    pub fn owes_repaint(&self) -> bool {
+        self.paint == Paint::Plain
     }
 
     /// Record what one whole frame cost, once it is on screen.
@@ -587,8 +666,24 @@ impl App {
                 // `body_layout` already decided by giving the diff more than one
                 // row. A pane too short for a bar pays nothing.
                 measured: body.diff > 1,
+                // Read before the advance below, so the first frame through
+                // here is the plain one and every later frame colours. See
+                // [`Self::paint`].
+                highlight: self.paint != Paint::Never,
             },
         )?;
+        // Advanced here rather than by the caller, because this is the call
+        // that *is* a frame: a shell that painted without coming through here
+        // has not drawn a screen.
+        //
+        // **After the `?` on purpose.** A collect that failed drew nothing, so
+        // it was not the first paint and the next successful one still is. The
+        // shell redraws its previous screen on that path, which on the very
+        // first frame is the empty one.
+        self.paint = match self.paint {
+            Paint::Never => Paint::Plain,
+            Paint::Plain | Paint::Coloured => Paint::Coloured,
+        };
         self.position = view.top;
         self.list_rows = body.list;
         // Stored back for the reason the position is: resolution happens once,

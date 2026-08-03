@@ -36,7 +36,8 @@ use vigia::{Action, App, Body, PaintStats, Row, Theme, WHEEL_ROWS, body_layout, 
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
 
 use support::{
-    Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, budget, delta, exclusively_timed, highlight_delta, settle,
+    Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta, exclusively_timed,
+    highlight_delta, settle, time, timed,
 };
 
 /// I9: steady-state frame time.
@@ -137,34 +138,6 @@ fn shell_frame(
     app.record_frame(began.elapsed());
 }
 
-/// Whether the absolute wall-clock gate should assert.
-///
-/// A debug build is several times slower than the one the budgets were set
-/// against. Reported rather than silently skipped.
-fn absolute_gates_apply() -> bool {
-    if cfg!(debug_assertions) {
-        eprintln!(
-            "note: the absolute budget gate is skipped in a debug build; \
-             run `cargo test --release --test budgets` to enforce it"
-        );
-        false
-    } else {
-        true
-    }
-}
-
-/// How long `work` took, for a stage whose result nothing downstream needs.
-fn time(work: impl FnOnce()) -> Duration {
-    timed(work).1
-}
-
-/// [`time`], for a stage that produces something the next stage needs.
-fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
-    let start = Instant::now();
-    let value = work();
-    (value, start.elapsed())
-}
-
 #[test]
 fn a_real_frame_with_highlighting_holds_the_frame_budget() {
     frame_budget_at_depth("shell-i9", 0);
@@ -243,7 +216,7 @@ fn the_memory_read_costs_a_fraction_of_the_frame_it_sits_in() {
     // orders of magnitude, not to track microseconds on a shared runner. A
     // tighter bound here would fail on contention and teach everyone to ignore
     // it.
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -343,7 +316,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
         assert_eq!(view.top.file, 0, "the scroll crossed into another file");
     }
 
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -505,7 +478,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
 
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -897,7 +870,7 @@ fn scroll(name: &str, motion: Motion, ext: &str) -> Option<Scrolled> {
         );
     }
 
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return None;
     }
 

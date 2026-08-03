@@ -237,7 +237,7 @@ pub struct Position {
 /// diff's position and the list's are two windows onto one file list, and a
 /// caller that could pass one without the other would be able to ask for a
 /// screen where the two disagree about which file exists.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Viewport {
     /// Where the diff's top row is, before resolving.
     pub position: Position,
@@ -272,6 +272,63 @@ pub struct Viewport {
     /// paying for it by default. `SPEC.md` §3's I4 is written around that
     /// distinction.
     pub measured: bool,
+    /// Whether this frame may parse for colour.
+    ///
+    /// **False on the first frame of a process, and true forever after.** A
+    /// grammar's `fancy_regex` patterns are compiled on first use, which costs
+    /// 74-362ms depending on the language, and until this existed that landed on
+    /// the one frame I7 gives 50ms to: measured at **105.03ms** over the
+    /// hundred-file fixture, 2.1x over budget, while the reader looked at a blank
+    /// alternate screen for the whole of it.
+    ///
+    /// So the first frame draws the diff plain and the next one colours it. What
+    /// that buys is not a cheaper screen, it is an **earlier** one: the same
+    /// content reaches the reader in a few milliseconds instead of a hundred, and
+    /// the compile happens behind a screen that already has the diff on it.
+    ///
+    /// A flag beside [`Self::measured`] rather than a rule this function could
+    /// work out, and for the same reason that field gives: whether a frame is the
+    /// first of its process is not recoverable from anything here.
+    /// [`crate::App`] holds it.
+    ///
+    /// The rows are still **built**, and that is the half worth guarding: a plain
+    /// frame that also drew fewer rows would satisfy I7 by showing the reader
+    /// less, which is why `tests/first_paint.rs` asserts the body is full before
+    /// it asserts the clock.
+    pub highlight: bool,
+}
+
+impl Default for Viewport {
+    /// Hand written for one field, and only that field.
+    ///
+    /// [`Self::highlight`] defaults to **true**, which `derive` cannot give and
+    /// which is the whole reason this impl exists. Every other field's derived
+    /// answer is the honest one: row zero, not anchored, no rows, no total.
+    /// `false` there means *this frame skips work*, and a caller who forgot the
+    /// field gets a cheaper frame that looks the same.
+    ///
+    /// `highlight` is not that kind of field. `false` means the screen comes out
+    /// **uncoloured**, so a caller writing `..Viewport::default()` would silently
+    /// ask for a plain diff and get one — a visible difference, from an omission,
+    /// with nothing to notice it. Two gates were caught by exactly that while
+    /// this field was being added, which is evidence enough that the derived
+    /// answer is a trap rather than a default.
+    ///
+    /// The unusual state is the one that has to be asked for, and there is
+    /// exactly one caller who wants it: the first frame of a process. See
+    /// [`crate::App::view`].
+    fn default() -> Self {
+        Self {
+            position: Position::default(),
+            anchored: false,
+            diff_rows: 0,
+            list_top: 0,
+            list_rows: 0,
+            list_follows: false,
+            measured: false,
+            highlight: true,
+        }
+    }
 }
 
 /// A screenful of rows, plus what the chrome needs to describe it.
@@ -557,6 +614,7 @@ impl View {
             list_rows,
             list_follows,
             measured,
+            highlight,
         } = viewport;
         // One pass, dropped at every exit including the `?`s below, which is
         // what keeps the highlight cache bounded by the viewport. The guard
@@ -700,7 +758,11 @@ impl View {
                         diff,
                         index,
                     },
-                    &mut highlighter,
+                    // The pass is taken whatever this frame does with it, so the
+                    // sweep in its `Drop` still runs and the cache stays bounded
+                    // the way I3 needs. What `highlight` decides is only whether
+                    // anything asks it for spans.
+                    highlight.then_some(&mut highlighter),
                     history,
                     skip,
                     height,
@@ -1037,7 +1099,7 @@ impl View {
     fn take_file(
         &mut self,
         file: Changed<'_>,
-        highlighter: &mut Pass<'_>,
+        mut highlighter: Option<&mut Pass<'_>>,
         history: &History,
         skip: usize,
         height: usize,
@@ -1120,9 +1182,14 @@ impl View {
                         kind: line.kind,
                         number,
                         text: line.text.clone(),
-                        spans: highlighter
-                            .spans(&diff.path, ordinal, hunk, within)
-                            .to_vec(),
+                        // `None` is the plain first frame, and empty spans are
+                        // already a legal, drawn state: it is what a file type
+                        // with no grammar produces, so the renderer needs no new
+                        // case for this. See `Viewport::highlight`.
+                        spans: match highlighter.as_deref_mut() {
+                            Some(pass) => pass.spans(&diff.path, ordinal, hunk, within).to_vec(),
+                            None => Vec::new(),
+                        },
                     });
                 }
                 n += 1;

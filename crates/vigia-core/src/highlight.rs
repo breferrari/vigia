@@ -60,10 +60,12 @@
 //! onto one of nine [`Class`]es and stops, because `SPEC.md` §6 puts no terminal
 //! in this crate and §11.1 leaves the palette to the shell.
 
-use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::io::Read as _;
 use std::path::Path;
+use std::sync::Arc;
 
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
@@ -522,7 +524,22 @@ impl Entry {
 /// # }
 /// ```
 pub struct Highlighter {
-    syntaxes: SyntaxSet,
+    /// The bundled grammars, shared rather than owned outright.
+    ///
+    /// `Arc` because a `SyntaxSet` compiles its `fancy_regex` patterns **lazily,
+    /// on first use, into `once_cell::sync::OnceCell`s it owns**. That makes the
+    /// compiled form a property of the set rather than of a parse, so a second
+    /// thread holding this same set can pay that cost where nothing is waiting
+    /// on it and the frame path gets the result for free. A clone of the set
+    /// instead of a handle to it would compile everything twice and share
+    /// nothing. See [`warm`].
+    ///
+    /// Costs one atomic refcount. `SyntaxSet` is `Send + Sync`, which the
+    /// **compiler proves** by accepting this `Arc` across the `thread::spawn` in
+    /// [`Highlighter::warm_ahead`]; the arrangement is void without it, and a
+    /// test asserting it would assert what the build already refuses to compile
+    /// without.
+    syntaxes: Arc<SyntaxSet>,
     /// [`CLASSES`] resolved once, because a [`Scope`] is an interned atom and
     /// building one from a string takes a lock on syntect's global repository.
     table: Vec<(Scope, Class)>,
@@ -559,9 +576,19 @@ impl Highlighter {
     /// Costs 318µs measured in release, which is why it is done up front rather
     /// than behind a lazy initialiser: I7 gives startup 50ms, and hiding this
     /// behind first use would only move it onto the first frame that draws.
+    ///
+    /// **Loading a grammar and compiling one are different costs, and only the
+    /// small one happens here.** `syntect` defers every pattern to
+    /// `fancy_regex` on first use, so the first parse under a grammar costs
+    /// **74-362ms** where this costs microseconds: Rust 93.11ms, Python 89.05ms,
+    /// JavaScript 103.27ms, Go 74.14ms and Markdown 361.74ms, measured in
+    /// release on the reference machine. That is the whole of
+    /// [#51](https://github.com/breferrari/vigia/issues/51), it is why the
+    /// shell's first frame draws plain, and it is what `warm` exists to move
+    /// off the path a reader is waiting on.
     pub fn new() -> Self {
         Self {
-            syntaxes: SyntaxSet::load_defaults_newlines(),
+            syntaxes: Arc::new(SyntaxSet::load_defaults_newlines()),
             table: CLASSES
                 .iter()
                 .filter_map(|(prefix, class)| Some((Scope::new(prefix).ok()?, *class)))
@@ -570,6 +597,176 @@ impl Highlighter {
             retired: VecDeque::with_capacity(RETAINED_HUNKS),
             stats: HighlightStats::default(),
         }
+    }
+
+    /// Compile grammars ahead of the reader, on a thread, and report how many
+    /// files it managed.
+    ///
+    /// **Best effort, and it upholds nothing.** Winning the race makes a later
+    /// frame cheaper; losing it costs only the work, because the frame path has
+    /// no idea this exists. A frame that reaches a pattern this thread is
+    /// mid-compile does *wait* on it, since `OnceCell::get_or_init` blocks, but
+    /// it waits for a compile it would otherwise have paid itself, so the total
+    /// is the same or better and never worse. That is the design rather than a
+    /// weakness: `warm` explains why a *guarantee* here is not available at
+    /// any price, and a frame path that believed one would be acting on a claim
+    /// that is false.
+    ///
+    /// What it buys is the case a reader actually meets: a diff of several files
+    /// where the second one entered costs 41ms under Rust and 95ms under
+    /// Markdown for patterns the first file never reached. Those are ruled cold
+    /// by `SPEC.md` §7 and are still the worst frames in a session.
+    ///
+    /// Reads raw bytes rather than going through the clean filter, because what
+    /// is wanted is representative *text* rather than a faithful diff side; a
+    /// CRLF file compiles the same patterns either way.
+    ///
+    /// The handle is returned rather than kept so a test can join it and assert
+    /// the policy; dropping it detaches, which is what [`crate::Highlighter`]'s
+    /// caller does. The thread ends on its own and holds nothing but an `Arc` to
+    /// the grammars.
+    ///
+    /// Bounded in every direction it can run away in: [`WARM_FILES`] paths
+    /// considered, [`WARM_TOTAL`] files parsed in all, [`WARM_PER_GRAMMAR`] of
+    /// them per language, and [`WARM_BYTES`] read from each. A monitor is left
+    /// open for days and I3 is what would notice an unbounded sweep of a
+    /// worktree.
+    ///
+    /// **A panic here takes the process with it**, because the workspace builds
+    /// with `panic = "abort"`, so `catch_unwind` is not available to make this
+    /// thread as detachable as its "upholds nothing" reads. What could panic is
+    /// `syntect`'s own `expect` on a pre-tested pattern and its poisonable
+    /// global scope repository, neither of which this code can guard. Recorded
+    /// rather than defended against, because the honest options are a spec
+    /// change to the panic strategy or nothing.
+    ///
+    /// The per-grammar cap is checked **before** the read, so a run over a
+    /// single-language changed set does three reads rather than sixty-four.
+    pub fn warm_ahead(
+        &self,
+        root: std::path::PathBuf,
+        paths: Vec<String>,
+    ) -> std::thread::JoinHandle<usize> {
+        let syntaxes = Arc::clone(&self.syntaxes);
+        std::thread::spawn(move || {
+            // Resolved once: every path below is checked against it, and a root
+            // that cannot be resolved is a worktree that has gone away, which is
+            // nothing to warm rather than something to guess at.
+            let Ok(canonical_root) = std::fs::canonicalize(&root) else {
+                return 0;
+            };
+            let mut warmed = 0usize;
+            let mut per_grammar: HashMap<Scope, usize> = HashMap::new();
+            for path in paths.into_iter().take(WARM_FILES) {
+                // **The total, which the per-grammar cap does not bound.** A
+                // polyglot changed set has as many budgets as it has languages:
+                // fifty distinct extensions warmed forty-three files in
+                // **3.93s** of held core before this line existed, against the
+                // 1.053s worst case the per-grammar cap was reasoned about with.
+                // No single-language fixture can see that, which is `SPEC.md`
+                // §7's ASCII-fixture rule one axis over.
+                if warmed >= WARM_TOTAL {
+                    break;
+                }
+
+                // Repository-relative, and refused otherwise. Status yields
+                // relative paths so this is unreachable from the shipped caller,
+                // but `warm_ahead` is public on a public type and `PathBuf::join`
+                // silently *discards* the root for an absolute path, so a caller
+                // one `Vec<String>` away from wrong would read anywhere on the
+                // disk.
+                //
+                // **A whitelist, because the blacklist it replaced had three
+                // holes on Windows.** `Path::is_absolute` there requires a prefix
+                // *and* a root, so `C:relative.rs`, `\\dir\\file.rs` and
+                // `/dir/file.rs` all passed it while `join` still discarded the
+                // worktree. Verified against the shipped `warm_ahead`: all three
+                // read the bait file, and the gate covering this was green only
+                // because it happened to use the two spellings the blacklist did
+                // catch. Naming what a path may contain has no such holes.
+                if !std::path::Path::new(&path).components().all(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::Normal(_) | std::path::Component::CurDir
+                    )
+                }) {
+                    continue;
+                }
+
+                // Looked up before anything is read, which is what makes the
+                // per-grammar cap save the I/O and not merely the parse. A path
+                // with no grammar is skipped here rather than read and thrown
+                // away, and it is the same answer `syntax_for` gives the frame
+                // path for a file type nothing recognises.
+                // Keyed on the grammar's `Scope`, which is what `syntect` itself
+                // treats as a syntax's identity and is a `Copy` bit-packed atom.
+                // The `name` is a display string, so keying on it would allocate
+                // per path including the ones the cap is about to skip.
+                let Some(grammar) = syntax_for(&syntaxes, &path).map(|s| s.scope) else {
+                    continue;
+                };
+                let seen = per_grammar.entry(grammar).or_insert(0);
+                if *seen >= WARM_PER_GRAMMAR {
+                    continue;
+                }
+
+                // **And where it actually lands, which the component check
+                // cannot know.** That one is lexical, so it stops `..` and every
+                // spelling of a rooted path and stops nothing that goes through
+                // a *link*: a symlinked directory inside the worktree reads
+                // wherever it points, and this crate already knows symlinks are
+                // followed rather than resolved
+                // ([#15](https://github.com/breferrari/vigia/issues/15)). Both
+                // checks are wanted rather than either: resolving alone would
+                // accept a `..` that happens to stay inside, and the lexical one
+                // alone leaves the claim these docs make untrue.
+                //
+                // Costs one `canonicalize` per candidate, bounded by
+                // [`WARM_TOTAL`], against a compile of 74-362ms. A path that
+                // cannot be resolved has vanished, which is the `continue` the
+                // open below would have taken anyway.
+                let Ok(target) = std::fs::canonicalize(root.join(&path)) else {
+                    continue;
+                };
+                if !target.starts_with(&canonical_root) {
+                    continue;
+                }
+
+                // Bounded at the read rather than after it: see `WARM_BYTES`.
+                // A file that vanished between status naming it and this thread
+                // reaching it is ordinary beside an agent, and so is one that is
+                // not text; both mean there is nothing here to compile with.
+                let Ok(file) = std::fs::File::open(&target) else {
+                    continue;
+                };
+                let mut buf = Vec::with_capacity(WARM_BYTES);
+                if file.take(WARM_BYTES as u64).read_to_end(&mut buf).is_err() {
+                    continue;
+                }
+                // A bounded read lands mid-codepoint on any file that is not
+                // ASCII, so the tail is trimmed to the last complete character
+                // rather than the read being widened to avoid it. `valid_up_to`
+                // is by construction the end of a run of valid UTF-8, so the
+                // inner call cannot fail; written as a fallback rather than a
+                // match arm nothing could ever reach.
+                let text = std::str::from_utf8(&buf)
+                    .unwrap_or_else(|e| std::str::from_utf8(&buf[..e.valid_up_to()]).unwrap_or(""));
+
+                // Nothing compiled means nothing spent, which is the rule a
+                // vanished path already follows. A file that is not text at all
+                // — a UTF-16 BOM is the ordinary case — trims to the empty
+                // string, parses zero lines, and would otherwise burn one of
+                // three per-grammar slots and be counted as a warm.
+                if text.is_empty() {
+                    continue;
+                }
+
+                warm(&syntaxes, &path, text);
+                *seen += 1;
+                warmed += 1;
+            }
+            warmed
+        })
     }
 
     /// Begin a frame, and hand back the only thing that can ask for spans.
@@ -812,6 +1009,114 @@ fn plain(len: usize) -> Vec<Span> {
             len,
             class: Class::Plain,
         }]
+    }
+}
+
+/// Paths [`Highlighter::warm_ahead`] will consider, at most.
+///
+/// The outer bound, and it counts paths *offered* rather than files read: a run
+/// where the first sixty-four have all vanished warms nothing and stops, which
+/// is the bounded answer. What decides how much work actually happens is
+/// [`WARM_PER_GRAMMAR`], not this.
+pub const WARM_FILES: usize = 64;
+
+/// Files [`Highlighter::warm_ahead`] will parse **per grammar**.
+///
+/// **The bound that matters, because the benefit is per grammar and the cost is
+/// per file.** Compiling a grammar is one file's work; every later file of the
+/// same language costs a flat parse and buys only the decaying residual, and a
+/// changed set is usually one language. Measured in release on real source
+/// truncated the way this thread truncates: 1 file 43.4ms, 2 files 62.7ms, 8
+/// files 154.9ms, 64 files **1.053s**. So a file cap alone spends about
+/// **96%** of a full run re-parsing under a grammar already compiled, while
+/// holding a core and touching `syntect`'s global scope-repository mutex next to
+/// the frame path.
+///
+/// Three, because the residual decays rather than vanishing: the first file
+/// compiles the grammar and the next two reach constructs it missed (a sibling
+/// `.rs` file still cost 41.41ms after one). Past that the curve is flat and the
+/// contention is not.
+pub const WARM_PER_GRAMMAR: usize = 3;
+
+/// Files [`Highlighter::warm_ahead`] will parse in total, whatever the mix.
+///
+/// **The per-grammar cap is per grammar, so a polyglot tree has as many budgets
+/// as it has languages.** Fifty changed files across fifty extensions warmed
+/// forty-three of them in **3.93s** of held core, against the 1.053s worst case
+/// [`WARM_PER_GRAMMAR`] was reasoned about; the ceiling without this is
+/// [`WARM_FILES`] compiles, five to six seconds. Twelve is four languages fully
+/// warmed, which covers a normal repository, and it is the number that makes the
+/// thread's cost bounded rather than merely shaped.
+pub const WARM_TOTAL: usize = 12;
+
+/// Bytes of each file [`Highlighter::warm_ahead`] will read and parse, at most.
+///
+/// Enough to reach the constructs a grammar is expensive for (strings, comments,
+/// nesting) without walking a generated file to its end.
+///
+/// **A bound on the read, not only on the parse**, and the distinction cost a
+/// rewrite: reading whole and truncating after is `read_to_string` on whatever
+/// the agent in the other pane happened to change, which for a lockfile, a
+/// minified bundle or a dataset is the whole thing. Measured on a 32.4 MB file
+/// with the page cache warm, **8.08ms against 0.166ms** for a bounded read, and
+/// far worse cold — plus a `String` the size of the largest changed file, which
+/// is an RSS spike I3 has no reason to absorb.
+pub const WARM_BYTES: usize = 64 * 1024;
+
+/// Compile the patterns `text` reaches under `path`'s grammar, so a later frame
+/// drawing that content does not.
+///
+/// A free function over `&SyntaxSet` rather than a method, because the caller is
+/// on another thread: it holds an [`Highlighter::warm_ahead`] handle and the
+/// compiled patterns land in the set both of them share. Nothing is returned and
+/// nothing is recorded, which is deliberate and is the whole subtlety here.
+///
+/// **There is no such thing as a warm grammar.** `fancy_regex` compiles per
+/// *pattern*, not per grammar, so warming on one file leaves a *different* file
+/// of the same language still paying. Measured in release, fresh `SyntaxSet` per
+/// case, warming on one document and then parsing another of the same language:
+///
+/// | | cold | after warming on a sibling | residual |
+/// |---|---|---|---|
+/// | `.rs` | 160.58ms | 120.23ms | **41.41ms** |
+/// | `.md` | 614.96ms | 583.91ms | **95.04ms** |
+/// | `.html` | 240.22ms | 38.88ms | **201.20ms** |
+/// | `.go` | 78.39ms | 93.74ms | 2.50ms |
+///
+/// A synthetic sample is worse than a real sibling (114ms residual on Markdown,
+/// 200ms on HTML), and a bare newline worse again (37.90ms on Rust). So a
+/// `warmed: HashSet<Grammar>` would be a **lie the frame path could act on**:
+/// it would report Rust warm and let the next file pay 41ms against I9's 16ms.
+/// This function therefore makes no claim, keeps no record, and callers must not
+/// build one on top of it.
+///
+/// What it *is* good for is running ahead of a reader over the content they are
+/// about to reach, where winning the race makes a later frame cheaper and losing
+/// it costs nothing but the work. `SPEC.md` §7 already puts a first parse on the
+/// cold path that I9 excludes by definition, so this narrows a ruled-cold cost
+/// rather than upholding a budget.
+///
+/// A path with no grammar is a no-op, which is ordinary: it is the same answer
+/// [`syntax_for`] gives the frame path for a file type nothing recognises.
+///
+/// Crate-private, and that is what keeps `syntect` out of `vigia`'s vocabulary:
+/// `SPEC.md` §6 puts the grammars in this crate, so a `&SyntaxSet` in the public
+/// API would make the shell name a type it has no dependency on.
+/// [`Highlighter::warm_ahead`] is the way in.
+fn warm(syntaxes: &SyntaxSet, path: &str, text: &str) {
+    let Some(syntax) = syntax_for(syntaxes, path) else {
+        return;
+    };
+    let mut state = ParseState::new(syntax);
+    // `split_inclusive` keeps the trailing newline each line was stored with,
+    // which is what `load_defaults_newlines` grammars expect; splitting it off
+    // would parse every line as though the file ended there.
+    for line in text.split_inclusive('\n') {
+        // A grammar that fails on a line stops the warm rather than the process.
+        // Nothing downstream depends on this having finished, by construction.
+        if state.parse_line(line, syntaxes).is_err() {
+            return;
+        }
     }
 }
 

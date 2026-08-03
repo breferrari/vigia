@@ -25,9 +25,11 @@
 
 mod support;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use support::{Scratch, budget, delta, highlight_delta, materialise, settle};
+use support::{
+    Scratch, absolute_gates_apply, budget, delta, highlight_delta, materialise, settle, time,
+};
 use vigia_core::{
     FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
     Worktree,
@@ -47,23 +49,6 @@ const I9_FRAME: Duration = Duration::from_millis(16);
 const FILES: usize = 100;
 const LINES: usize = 500;
 
-/// Whether the absolute wall-clock gates should assert.
-///
-/// A debug build is several times slower than the one the budgets were set
-/// against, so asserting there would fail for a reason that is not a
-/// regression. Reported rather than silently skipped.
-fn absolute_gates_apply() -> bool {
-    if cfg!(debug_assertions) {
-        eprintln!(
-            "note: absolute budget gates skipped in a debug build; \
-             run `cargo test --release --test budgets` to enforce them"
-        );
-        false
-    } else {
-        true
-    }
-}
-
 /// Best of `n`, which measures what the code can do rather than what the
 /// machine happened to be doing at the time.
 fn best_of(n: usize, mut measure: impl FnMut() -> Duration) -> Duration {
@@ -71,12 +56,6 @@ fn best_of(n: usize, mut measure: impl FnMut() -> Duration) -> Duration {
         .map(|_| measure())
         .min()
         .expect("at least one measurement")
-}
-
-fn time(mut work: impl FnMut()) -> Duration {
-    let start = Instant::now();
-    work();
-    start.elapsed()
 }
 
 fn changes_of(worktree: &Worktree) -> Vec<FileChange> {
@@ -303,7 +282,7 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
         "fixture is only {lines} changed lines, so it does not exercise the I4 budget"
     );
 
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
         return;
     }
 
@@ -392,7 +371,7 @@ fn a_real_frame_holds_the_frame_budget() {
     settle(&mut frame);
     assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
 
-    if !absolute_gates_apply() {
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
         return;
     }
 

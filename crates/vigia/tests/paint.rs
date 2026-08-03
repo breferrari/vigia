@@ -414,7 +414,12 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
     let paint = |batched: bool| -> (u64, PaintStats, vigia::Position) {
         let mut frame = worktree.frame();
         frame.advance().expect("advance");
-        let mut app = App::new();
+        // `past_first_paint` rather than `new`, matching `reads.rs` and
+        // `viewport.rs`: a reader flicking a trackpad is by definition past the
+        // plain opening frame (`Viewport::highlight`, I7), and the batched arm
+        // draws exactly once, so without this its single draw *is* that frame and
+        // the non-vacuity guard below fires on a run that measured nothing.
+        let mut app = App::past_first_paint();
         let mut highlighter = Highlighter::new();
         let history = History::new();
         let chrome = app.chrome("fixture", None);
@@ -422,6 +427,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let rows = screen.diff;
         let mut buf = Buffer::empty(area);
         let mut total = PaintStats::default();
+
         for at in 0..notches {
             app.apply(Action::Scroll(WHEEL_ROWS), &mut frame, rows)
                 .expect("scroll");
