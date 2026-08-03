@@ -502,3 +502,69 @@ fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
         head.len()
     );
 }
+
+/// Make `link` inside the worktree point at `target`, or report that this
+/// platform would not.
+///
+/// Windows needs `SeCreateSymbolicLinkPrivilege` or developer mode, so a
+/// hosted runner may refuse. Refusing is reported rather than silently turning
+/// the gate below into a pass, which is the shape `SPEC.md` §7 keeps naming.
+fn link_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_dir(target, link).is_ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, link);
+        false
+    }
+}
+
+#[test]
+fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
+    // The hole a lexical check cannot see, and the one Copilot's review found.
+    // Every component of `link/mod_0.rs` is `Normal`, so the whitelist passes
+    // it, and the read then lands wherever the link points. This crate already
+    // knows symlinks are followed rather than resolved
+    // ([#15](https://github.com/breferrari/vigia/issues/15)), so the warmer
+    // cannot assume otherwise.
+    let scratch = Scratch::large_diff("warm-symlink", 1, 4);
+    let bait = Scratch::large_diff("warm-symlink-bait", 1, 4);
+
+    let link = scratch.path_of("link");
+    if !link_dir(&bait.path_of("src"), &link) {
+        eprintln!(
+            "note: this platform would not create a directory symlink, so the \
+             symlink escape is unchecked here; it is checked wherever one can be \
+             made"
+        );
+        return;
+    }
+
+    // Non-vacuity: the link has to actually reach the bait, or `warmed == 0`
+    // below means "nothing there" rather than "refused".
+    assert!(
+        link.join("mod_0.rs").exists(),
+        "the symlink does not reach the bait, so this gate cannot fail"
+    );
+
+    let warmed = Highlighter::new()
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["link/mod_0.rs".to_owned()],
+        )
+        .join()
+        .expect("the warmer thread");
+
+    assert_eq!(
+        warmed, 0,
+        "the warmer read {warmed} files through a symlink pointing out of the \
+         worktree, so its bound is lexical and the docs claiming otherwise are \
+         wrong"
+    );
+}

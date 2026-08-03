@@ -649,6 +649,12 @@ impl Highlighter {
     ) -> std::thread::JoinHandle<usize> {
         let syntaxes = Arc::clone(&self.syntaxes);
         std::thread::spawn(move || {
+            // Resolved once: every path below is checked against it, and a root
+            // that cannot be resolved is a worktree that has gone away, which is
+            // nothing to warm rather than something to guess at.
+            let Ok(canonical_root) = std::fs::canonicalize(&root) else {
+                return 0;
+            };
             let mut warmed = 0usize;
             let mut per_grammar: HashMap<Scope, usize> = HashMap::new();
             for path in paths.into_iter().take(WARM_FILES) {
@@ -704,11 +710,33 @@ impl Highlighter {
                     continue;
                 }
 
+                // **And where it actually lands, which the component check
+                // cannot know.** That one is lexical, so it stops `..` and every
+                // spelling of a rooted path and stops nothing that goes through
+                // a *link*: a symlinked directory inside the worktree reads
+                // wherever it points, and this crate already knows symlinks are
+                // followed rather than resolved
+                // ([#15](https://github.com/breferrari/vigia/issues/15)). Both
+                // checks are wanted rather than either: resolving alone would
+                // accept a `..` that happens to stay inside, and the lexical one
+                // alone leaves the claim these docs make untrue.
+                //
+                // Costs one `canonicalize` per candidate, bounded by
+                // [`WARM_TOTAL`], against a compile of 74-362ms. A path that
+                // cannot be resolved has vanished, which is the `continue` the
+                // open below would have taken anyway.
+                let Ok(target) = std::fs::canonicalize(root.join(&path)) else {
+                    continue;
+                };
+                if !target.starts_with(&canonical_root) {
+                    continue;
+                }
+
                 // Bounded at the read rather than after it: see `WARM_BYTES`.
                 // A file that vanished between status naming it and this thread
                 // reaching it is ordinary beside an agent, and so is one that is
                 // not text; both mean there is nothing here to compile with.
-                let Ok(file) = std::fs::File::open(root.join(&path)) else {
+                let Ok(file) = std::fs::File::open(&target) else {
                     continue;
                 };
                 let mut buf = Vec::with_capacity(WARM_BYTES);
