@@ -99,7 +99,7 @@ The keys, which are every colour the shell draws with:
 |---|---|
 | Chrome | `chrome` `chrome_dim` |
 | Scrollbars | `bar` `bar_track` |
-| File rows | `path` `path_live` `path_cold` `pulse` `spark` `kind` |
+| File rows | `path` `path_live` `path_cold` `pulse` `spark` `spark_track` `kind` |
 | Heat strip | `heat_track`, and `heat_added` `heat_removed` `heat_mixed` each with a `_warm` and `_hot` twin |
 | Diff | `hunk` `gutter` `added` `removed` `context` `note` `alert` |
 | Row wash | `added_row` `removed_row` `added_bar` `removed_bar` |
