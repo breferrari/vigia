@@ -58,7 +58,16 @@ It shows the working tree against the index, untracked files included, and it fo
 
 ## ⚙️ Configure it
 
-There is one file and one variable, and which is which follows from what the setting is *about*. A palette is a preference about you, so it lives in a file and follows you into every shell. A colour depth is a fact about the terminal in front of you, and one machine can have a truecolour pane, an `ssh` into something ancient and a CI job at the same time, so it stays a variable.
+There are **two independent settings**, and most confusion here is the two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many of them your terminal can actually show. Both have to allow a thing before it appears on screen, so a palette that asks for a row wash still draws none on a terminal detected as 16-colour.
+
+Each has one place it belongs, and which is which follows from what the setting is *about*. A palette is a preference about you, so it lives in a file and follows you into every shell. A depth is a fact about the terminal in front of you, and one machine can have a truecolour pane, an `ssh` into something ancient and a CI job at the same time, so it stays a variable.
+
+| | What decides it, first answer wins |
+|---|---|
+| **Palette** | `VIGIA_THEME` (a built-in name, or a path) → `~/.config/vigia/theme` → `ansi` |
+| **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
+
+Nothing else is read. There is no flag for either, and no setting in one can change the other.
 
 ```
 ~/.config/vigia/theme
@@ -105,9 +114,39 @@ VIGIA_THEME=light   # the same design for a light terminal
 VIGIA_THEME=~/themes/mine
 ```
 
-**`ansi` is the default and draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. It is the only palette that is right on a background nothing has detected. The cost is the wash, and naming a theme buys it back.
+**`ansi` is the default and draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. It is the only palette that is right on a background nothing has detected. The cost is the wash.
 
-How many colours your terminal has is detected. `VIGIA_COLOR` overrides that with `never`, `16`, `256`, `truecolor` or `auto`, and `NO_COLOR` is honoured. Below 256 the row wash is dropped rather than approximated, because an ANSI background is a solid block and a block behind highlighted code destroys the colours on it.
+### Keeping your terminal's own colours and getting the wash too
+
+You do not have to choose. `base` starts from a palette and every line after it overrides one thing, so keep `ansi` for the sixteen names your scheme already defines and add the two backgrounds it declines to guess:
+
+```
+base        = ansi
+added_row   = on #1b3d29
+removed_row = on #45222a
+```
+
+Those two values are what `dark` uses. Pick your own if your pane is lighter or darker: the only rule is that they stay far enough from your background to read as bands, and far enough from each other that an addition never looks like a removal.
+
+### Depth
+
+How many colours your terminal has is detected, and the chain is in the table above. `VIGIA_COLOR` overrides it with `never`, `16`, `256`, `truecolor` or `auto`, and `NO_COLOR` is honoured.
+
+**The row wash needs 24-bit colour.** It is dropped at every rung below rather than approximated, because a quantised background is a solid block, and a block behind highlighted code destroys the colours on it. The 256-colour cube is the case worth naming: its two darkest levels per channel are 0 and 95, so `#1b3d29` lands on `#005f00`, and a newly added file draws as a screen of flat green rather than as a tint. Below 24-bit the diff signal is the `+` and `−` column, which is where it was before themes existed.
+
+If your rows are unwashed and you know your terminal draws 24-bit, it is nearly always detection: `COLORTERM` is the only convention for claiming it and **nothing propagates it**. `ssh` forwards `TERM` and not `COLORTERM`, and a multiplexer replaces `TERM` with an entry of its own.
+
+```sh
+VIGIA_COLOR=truecolor        # settles it, in the pane or in your rc
+```
+
+Inside `tmux`, that is only half of it: `tmux` has to pass 24-bit through rather than round it to its own palette.
+
+```sh
+# ~/.tmux.conf
+set -g  default-terminal "tmux-256color"
+set -ga terminal-overrides ",*:Tc"
+```
 
 **What is early about it.** There are no flags: one optional path, and the configuration above.
 

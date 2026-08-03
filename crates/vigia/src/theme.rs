@@ -196,8 +196,9 @@ palette! {
     ///
     /// `SPEC.md` §5.1's tinted row, and it is a **background**: a palette that
     /// leaves it unset draws no tint, which is what [`Theme::ansi`] does
-    /// deliberately. Dropped below [`Depth::Ansi256`], where an ANSI background is
-    /// a slab rather than a wash.
+    /// deliberately. Drawn only at [`Depth::Truecolor`], because every rung below it
+    /// turns a wash into a slab: see [`crate::colour`] for the arithmetic and for
+    /// why the grey ramp is not the way out.
     added_row,
     /// The same, behind a removed line.
     removed_row,
@@ -538,7 +539,7 @@ impl Theme {
             context: rgb(0xe6, 0xed, 0xf3),
             // The two rects the picture draws behind changed lines, and the two
             // bars at their left edge. Backgrounds, so the depth ladder drops them
-            // below 256 on its own.
+            // below 24-bit on its own and these are only ever drawn as authored.
             // **Stronger than the picture's, and that is a correction rather than
             // a liberty.** `assets/preview.svg` washes with `#0f2c1c` and
             // `#2d1416`, which it can, because it also paints its own background
