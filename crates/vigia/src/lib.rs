@@ -181,9 +181,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     //
     // `take` before `map`, not after: `warm_ahead` considers at most
     // `WARM_FILES` paths, so cloning the rest would be ten thousand `String`
-    // allocations at the scale [#48](https://github.com/breferrari/vigia/issues/48)
-    // contemplates, every one of them dropped
-    // unread.
+    // allocations at the scale
+    // [#48](https://github.com/breferrari/vigia/issues/48) contemplates, every
+    // one of them dropped unread.
     //
     // Detached by dropping the handle, like the two threads below and for a
     // simpler reason: it ends by itself, and nothing waits for a result that

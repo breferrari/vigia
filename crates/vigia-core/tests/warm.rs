@@ -25,12 +25,7 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
     // warmer walks whatever status named. Skipped **before** the read, which is
     // what makes an unknown file type free rather than merely harmless.
     let scratch = Scratch::large_diff("warm-no-grammar", 1, 4);
-    std::fs::write(
-        scratch.path_of("data.unknownext"),
-        "some bytes
-",
-    )
-    .expect("write");
+    std::fs::write(scratch.path_of("data.unknownext"), "some bytes\n").expect("write");
     let highlighter = Highlighter::new();
 
     let warmed = highlighter
@@ -43,7 +38,8 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
 
     assert_eq!(
         warmed, 0,
-        "the warmer counted a file `syntect` has no grammar for, so it read one it could not have compiled anything from"
+        "the warmer counted a file `syntect` has no grammar for, so it read \
+         one it could not have compiled anything from"
     );
 }
 
@@ -74,7 +70,8 @@ fn many_files_of_one_language_warm_only_a_few() {
 
     assert_eq!(
         warmed, WARM_PER_GRAMMAR,
-        "the warmer parsed {warmed} of {files} files that all share one grammar,          over the {WARM_PER_GRAMMAR} it is allowed"
+        "the warmer parsed {warmed} of {files} files that all share one \
+         grammar, over the {WARM_PER_GRAMMAR} it is allowed"
     );
 }
 
@@ -86,14 +83,7 @@ fn the_path_cap_stops_the_walk_before_a_language_it_has_not_reached() {
     // exactly `WARM_PER_GRAMMAR` parses, followed by a Markdown file that is
     // reachable only if the walk runs past its cap.
     let scratch = Scratch::large_diff("warm-path-cap", WARM_FILES, 4);
-    std::fs::write(
-        scratch.path_of("README.md"),
-        "# heading
-
-text
-",
-    )
-    .expect("write");
+    std::fs::write(scratch.path_of("README.md"), "# heading\n\ntext\n").expect("write");
     let highlighter = Highlighter::new();
 
     let mut paths: Vec<String> = (0..WARM_FILES).map(|n| format!("src/mod_{n}.rs")).collect();
@@ -106,7 +96,9 @@ text
 
     assert_eq!(
         warmed, WARM_PER_GRAMMAR,
-        "the warmer parsed {warmed} files, so it walked past the {WARM_FILES}          paths it is allowed and reached the Markdown file behind them"
+        "the warmer parsed {warmed} files, so it walked past the \
+         {WARM_FILES} paths it is allowed and reached the Markdown file behind \
+         them"
     );
 }
 
@@ -135,7 +127,8 @@ fn a_path_that_is_not_there_is_skipped_rather_than_fatal() {
 
     assert_eq!(
         warmed, 2,
-        "the warmer counted {warmed} files where two of the four exist, so a missing path is either fatal or is spending the per-grammar budget"
+        "the warmer counted {warmed} files where two of the four exist, so a \
+         missing path is either fatal or is spending the per-grammar budget"
     );
 }
 
