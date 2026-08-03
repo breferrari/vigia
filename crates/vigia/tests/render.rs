@@ -772,11 +772,17 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
 #[test]
 fn a_row_missing_a_glance_element_leaves_its_column_empty() {
     // The launch case, and the reason #77 is universal rather than occasional.
-    // `spark_of` yields nothing until a file has been written once, which is
-    // every file on the first frame (#78), and `heat_at` yields nothing for a
-    // file with no line diff. Under right-packing each absence let that row's
+    // `spark_of` used to yield nothing until a file had been written once, which
+    // is every file on the first frame, and `heat_at` yields nothing for a file
+    // with no line diff. Under right-packing each absence let that row's
     // remaining elements slide right into the space, so one quiet file pulled
     // its neighbours out of line.
+    //
+    // **[#78](https://github.com/breferrari/vigia/issues/78) closed the
+    // sparkline half**, so what this now drives is a row that draws *track*
+    // where its neighbours draw buckets. The property is unchanged and the
+    // fixture still produces it: a row may draw something different, and it may
+    // not move anything else.
     //
     // Asserted as "the *other* rows are unchanged", which is the property that
     // matters: a row may draw less, and it may not move anything else.
@@ -865,12 +871,21 @@ fn a_row_missing_a_glance_element_leaves_its_column_empty() {
         before[1],
         after[1]
     );
+    // **Sorted, or this asserts an ordering rather than a set.** `ragged_counts`
+    // happens to put its empty buckets to the left of its written ones, so a
+    // plain chain of "was track" then "was bar" comes out ascending today; a
+    // fixture with an interleaved gap would make the same correct renderer fail
+    // on the order. The sibling gate
+    // `an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar` sorts for
+    // exactly this reason, against a fixture that *is* interleaved.
+    let mut was_slot: Vec<usize> = columns_of(&before[1], 't')
+        .into_iter()
+        .chain(columns_of(&before[1], 's'))
+        .collect();
+    was_slot.sort_unstable();
     assert_eq!(
         columns_of(&after[1], 't'),
-        columns_of(&before[1], 't')
-            .into_iter()
-            .chain(columns_of(&before[1], 's'))
-            .collect::<Vec<_>>(),
+        was_slot,
         "row 1's buckets did not become track in the columns they occupied: \
          {:?} then {:?}",
         before[1],
@@ -2393,6 +2408,22 @@ fn track_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
         .collect()
 }
 
+/// Which columns of row `y` carry a sparkline **bucket**.
+///
+/// [`track_at`]'s twin, the way `has_heat` and `has_spark` were: the two halves
+/// of one slot, asked the same way, so a gate comparing them is comparing like
+/// with like. [`blocks_of`] answers a different question on the same cells and
+/// cannot stand in for this, because it returns the glyphs and drops the columns.
+fn bars_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .filter(|&x| {
+            let cell = &buffer[(x, y)];
+            RAMP.contains(&cell.symbol()) && cell.style().fg == theme.spark.fg
+        })
+        .collect()
+}
+
 /// [`glancing`], on the frame a reader actually opens the pane to.
 ///
 /// **The launch case, which nothing else here covers**: `SPEC.md` §5.1's history
@@ -2473,6 +2504,75 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
 }
 
 #[test]
+fn the_first_tick_after_launch_moves_no_column() {
+    // **The transition, which is the moment both #77 and #78 are actually for.**
+    // A reader opens the pane on a dirty worktree (every row track), the agent
+    // writes one file, and that row grows a bucket. `SPEC.md` §11.1 reserves the
+    // slot from the pane precisely so this frame does not reflow, and #78 is
+    // what makes the before-picture a drawn column rather than a blank one, so
+    // the two frames are comparable at all.
+    //
+    // Its own gate because `peak` was only ever fixtured at 0, 12 and `u16::MAX`
+    // in this suite: one is the launch, one is a settled screen and one is the
+    // saturation guard. **A peak of 1 is the first frame after launch**, and it
+    // is the only value at which the ramp's numerator and denominator are equal,
+    // so a single write draws the *top* of the ramp rather than its floor.
+    let theme = Theme::default();
+    let launch = screen(80, 5, &launched(), &chrome());
+
+    let mut view = launched();
+    if let Row::File(entry) = &mut view.rows[0] {
+        entry.spark[HISTORY_BUCKETS - 1] = 1;
+        entry.recency = Recency::Pulse;
+    }
+    view.peak = 1;
+    let after = screen(80, 5, &view, &chrome());
+
+    // The written file: seven track cells and one bucket, and the bucket is the
+    // top of the ramp because it is the busiest thing on screen.
+    assert_eq!(
+        track_at(&after, 1, &theme).len(),
+        HISTORY_BUCKETS - 1,
+        "the file that was just written did not keep the rest of its window as \
+         track"
+    );
+    assert_eq!(
+        blocks_of(&after, 1, theme.spark.fg.expect("a colour")),
+        vec!['█'],
+        "one write against a screen peak of one is not the top of the ramp"
+    );
+    // Every other file is still cold, and still says so.
+    for y in [2, 3] {
+        assert_eq!(
+            track_at(&after, y, &theme).len(),
+            HISTORY_BUCKETS,
+            "row {y} stopped drawing its track when a *different* file was \
+             written"
+        );
+    }
+
+    // **Nothing moved.** The whole slot occupies the same columns before and
+    // after, which is what the reserved-from-the-pane ruling promises and what a
+    // reader is most likely to be looking at when it is broken.
+    let slot = |backend: &TestBackend, y: u16| {
+        let mut columns: Vec<u16> = track_at(backend, y, &theme)
+            .into_iter()
+            .chain(bars_at(backend, y, &theme))
+            .collect();
+        columns.sort_unstable();
+        columns
+    };
+    for y in 1..=3u16 {
+        assert_eq!(
+            slot(&after, y),
+            slot(&launch, y),
+            "row {y}'s sparkline slot moved on the tick the first file was \
+             written"
+        );
+    }
+}
+
+#[test]
 fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
     // **A guard that no test could fail is a wish, and this one was.** The
     // renderer scales a bucket against `View::peak`, and a peak of zero beside a
@@ -2511,20 +2611,12 @@ fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
     // fixture holds `[0, 0, 0, 2, 1, 0, 0, 0]`, so it draws both kinds and the
     // order has to survive.
     let theme = Theme::default();
-    let spark = theme.spark.fg.expect("the sparkline has a colour");
     let backend = screen(80, 5, &glancing(), &chrome());
-    let buffer = backend.buffer();
 
-    let bars: Vec<u16> = (0..buffer.area.width)
-        .filter(|&x| {
-            let cell = &buffer[(x, 2)];
-            RAMP.contains(&cell.symbol()) && cell.style().fg == Some(spark)
-        })
-        .collect();
     let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
         .into_iter()
         .map(|x| (x, 't'))
-        .chain(bars.into_iter().map(|x| (x, 's')))
+        .chain(bars_at(&backend, 2, &theme).into_iter().map(|x| (x, 's')))
         .collect();
     slot.sort_unstable();
 

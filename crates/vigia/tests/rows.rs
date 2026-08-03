@@ -15,6 +15,8 @@
 //! arithmetic that produced them. A row's number is right when the line it names
 //! really is that line, on the side that line exists on.
 
+use std::time::Instant;
+
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
@@ -443,6 +445,79 @@ fn a_real_repository_draws() {
         })
         .expect("draw");
     insta::assert_snapshot!(terminal.backend());
+}
+
+#[test]
+fn a_recorded_tick_reaches_the_drawn_sparkline() {
+    // **The producer, not the decider.** `spark_of` and the painter are mutation
+    // tested from every side in `render.rs`, and every one of those fixtures
+    // hands `View` a `peak` by hand. Nothing drove a *recorded* one through
+    // `App::view`, so `View::peak = history.peak()` was untested: hardcoding it
+    // to zero passed the entire workspace suite, all 426 tests, while making
+    // every sparkline on every screen draw pure track forever.
+    //
+    // That failure is invisible in the worst possible way after
+    // [#78](https://github.com/breferrari/vigia/issues/78): a screen of pure
+    // track is exactly what a correct launch looks like, so the tool would look
+    // right and say nothing, which is the defect that issue exists to remove
+    // rather than a new one it introduced.
+    //
+    // Asserted through the drawn cells rather than off `view.peak`, so it covers
+    // the whole path a bucket takes from the store to the screen.
+    let scratch = Scratch::new("shell-rows-recorded-tick");
+    scratch.write("src/lib.rs", numbered(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
+
+    let now = Instant::now();
+    let mut history = History::starting_at(now);
+    history.record(["src/lib.rs"], now);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
+    let area = Rect::new(0, 0, 80, 12);
+    let split = body_layout(area, &app.chrome("fixture", None), frame.files().len());
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split)
+        .expect("view");
+
+    // Non-vacuity, and it is the assertion that would have caught the hardcode
+    // on its own: the store was asked and answered.
+    assert_eq!(
+        view.peak, 1,
+        "the recorded tick did not reach the view's shared scale"
+    );
+
+    let theme = Theme::default();
+    let chrome = app.chrome("fixture", None);
+    terminal
+        .draw(|f| {
+            let drawn = f.area();
+            render(f.buffer_mut(), drawn, &view, &theme, &chrome);
+        })
+        .expect("draw");
+
+    // A written file draws at least one bucket. Matched on symbol and colour
+    // together, because the heat strip on the same row draws the ramp's top
+    // glyph too.
+    let buffer = terminal.backend().buffer();
+    let bars = (0..buffer.area.height)
+        .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+        .filter(|&at| {
+            let cell = &buffer[at];
+            "▁▂▃▄▅▆▇█".contains(cell.symbol()) && cell.style().fg == theme.spark.fg
+        })
+        .count();
+    assert!(
+        bars > 0,
+        "a file with a recorded tick drew no sparkline bucket anywhere on \
+         screen, so the store's scale is not reaching the renderer"
+    );
 }
 
 #[test]

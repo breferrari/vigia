@@ -326,9 +326,15 @@ impl History {
     /// Rows share one scale rather than each being drawn against its own
     /// maximum, because the question a reader asks across a file list is which
     /// file is busiest, and per-file scaling draws every file at full height the
-    /// moment it is the busiest thing it has ever been. Zero when nothing is
-    /// tracked, which a caller must treat as "draw nothing" rather than dividing
-    /// by it.
+    /// moment it is the busiest thing it has ever been.
+    ///
+    /// **Zero when nothing is tracked, which is a scale a caller must not divide
+    /// by.** It used to say the caller must treat it as "draw nothing", and that
+    /// is no longer what the shell does: since
+    /// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
+    /// a track, so a peak of zero means every bucket is empty and every one of
+    /// them is still drawn. The constraint this states is arithmetic and belongs
+    /// here; what to draw is the shell's and belongs in `SPEC.md` §5.1.
     pub fn peak(&self) -> u16 {
         self.peak
     }

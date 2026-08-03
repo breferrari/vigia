@@ -1125,7 +1125,11 @@ fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
 /// thing a file *list* exists to be ([#77](https://github.com/breferrari/vigia/issues/77)).
 ///
 /// So the ladder runs **once for the region** and every row draws into the slots
-/// it produced, leaving a slot blank rather than letting its neighbours slide.
+/// it produced, keeping a slot a row cannot fill rather than letting its
+/// neighbours slide. The sparkline's unfillable slot is no longer blank when it
+/// gets there: [#78](https://github.com/breferrari/vigia/issues/78) fills it
+/// with the track. The heat strip's still is, and [`heat_at`] says why the two
+/// differ.
 ///
 /// **Decided from the pane and never from the contents**, which is the half a
 /// first attempt got wrong and which only running the tool showed. Sizing the
@@ -1360,7 +1364,43 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
         .collect()
 }
 
-/// A path's buckets as glyphs, every one of them drawn.
+/// One bucket of a drawn sparkline: what it says, before how it looks.
+///
+/// **[`Heat`]'s small private cousin, and private for the reason `Heat` is
+/// not.** `Theme::heat` resolves a kind-by-band cross product and is public API
+/// because the theme has to name every one of those styles; this is a single bit
+/// that never leaves this file, so an enum here costs no public surface and no
+/// allocation, being a fixed-size array on the stack either way.
+///
+/// What it buys is what [`Painter::scrollbar`] gets from its `filled` boolean:
+/// **the glyph and the style are chosen from one value, so they cannot
+/// disagree.** [`spark_of`] briefly returned bare `char`s and the painter read
+/// the style back off them by testing against [`SPARK_TRACK`], which worked only
+/// while that glyph stayed outside [`SPARK_RAMP`] — a convention a test defends
+/// rather than one the compiler does. It also had a live failure case: on the
+/// `peak == 0` path every bucket draws the track *whatever its count says*, so a
+/// painter branching on the count instead would have drawn a track glyph in the
+/// bar's colour. Neither spelling of "derive one from the other" is safe, and
+/// deriving both from a third thing is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bucket {
+    /// Nothing was written in this bucket's slice of the window.
+    Empty,
+    /// Written, at this rung of [`SPARK_RAMP`].
+    Written(char),
+}
+
+impl Bucket {
+    /// What this bucket draws and what it is drawn in, together.
+    fn drawn(self, theme: &Theme) -> (char, Style) {
+        match self {
+            Self::Empty => (SPARK_TRACK, theme.spark_track),
+            Self::Written(glyph) => (glyph, theme.spark),
+        }
+    }
+}
+
+/// A path's buckets, every one of them drawn.
 ///
 /// `peak` is the busiest bucket **anywhere on the screen**, so two rows drawn
 /// side by side can be compared by height. A bucket with anything in it is never
@@ -1376,24 +1416,24 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// with it. What is left of that guard is the `peak == 0` line below, which is
 /// the one state where the ramp has no denominator: an empty store, which is
 /// every launch.
-fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [char; HISTORY_BUCKETS] {
-    let mut glyphs = [SPARK_TRACK; HISTORY_BUCKETS];
+fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUCKETS] {
+    let mut drawn = [Bucket::Empty; HISTORY_BUCKETS];
     // Nothing anywhere on screen has been written, so every bucket is empty and
     // the division below has no denominator. Returning here rather than guarding
     // inside the loop, because the two say different things: this is "there is
     // no scale yet", and the loop's `count == 0` is "this bucket is empty on a
     // screen that has one".
     if peak == 0 {
-        return glyphs;
+        return drawn;
     }
-    for (glyph, &count) in glyphs.iter_mut().zip(buckets.iter()) {
+    for (bucket, &count) in drawn.iter_mut().zip(buckets.iter()) {
         if count == 0 {
             continue;
         }
         let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
-        *glyph = SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1];
+        *bucket = Bucket::Written(SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1]);
     }
-    glyphs
+    drawn
 }
 
 /// The widest rung of `ladder` that fits in `room`.
@@ -2663,9 +2703,15 @@ impl Painter<'_> {
         // ruling: a row without a sparkline used to
         // let its neighbours' elements slide right into the space, and a row
         // with a two-column-narrower counts cell moved everything outside it.
-        // Both are ordinary rather than exotic, since `spark_of` yields nothing
-        // until a file has been written once and `heat_at` yields nothing for a
+        // Both were ordinary rather than exotic, since `spark_of` yielded nothing
+        // until a file had been written once and `heat_at` yields nothing for a
         // file with no line diff.
+        //
+        // **The sparkline half of that is gone and the ruling is what survives
+        // it.** Since [#78](https://github.com/breferrari/vigia/issues/78)
+        // `spark_of` is total, so no row can fail to fill that slot; the strip's
+        // can still be empty, and reserving from the pane is what keeps the two
+        // cases from being visible to a reader as two different layouts.
         if columns.cell > 0 {
             // Each half right-anchored in its own sub-column, so the digits
             // change under a reader without moving anything beside them, and an
@@ -2714,21 +2760,20 @@ impl Painter<'_> {
             // used to collect into.
             let strip = spark_of(heading.spark, peak);
             let x = right.x + right.width - columns.spark as u16;
-            let mut glyph = [0u8; 4];
             for (offset, bucket) in strip[HISTORY_BUCKETS - columns.spark..].iter().enumerate() {
-                // The track is the one glyph outside `SPARK_RAMP`, which is what
-                // makes reading the style back off it total rather than a guess.
-                let style = if *bucket == SPARK_TRACK {
-                    self.theme.spark_track
-                } else {
-                    self.theme.spark
-                };
+                // Both out of the one value, which is [`Bucket`]'s whole reason.
+                let (glyph, style) = bucket.drawn(self.theme);
+                // `set_char` rather than an `encode_utf8` into a local buffer,
+                // which is what `Cell::set_char` does internally: the heat strip
+                // below can hoist its encode out of the loop because every slice
+                // is the same glyph, and this cannot, so the hand-rolled form
+                // here would be the library's own three lines written again.
+                //
                 // `cell_mut` for `Painter::scrollbar`'s reason: `render`'s
                 // contract is that any area is legal, and a direct index would
                 // abort the whole paint on a strip wider than its buffer.
                 if let Some(cell) = self.buf.cell_mut((x + offset as u16, right.y)) {
-                    cell.set_symbol(bucket.encode_utf8(&mut glyph))
-                        .set_style(style);
+                    cell.set_char(glyph).set_style(style);
                 }
             }
         }
