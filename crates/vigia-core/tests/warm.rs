@@ -295,6 +295,38 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
     );
 }
 
+/// The escape spelling this platform has that the others do not.
+///
+/// **A function per platform rather than a `cfg` block inside the test**, so the
+/// test body is the same on all three tier-1 targets. Written inline, the Unix
+/// build compiled the `push` away, left `let mut spellings` never mutated, and
+/// `-D warnings` turned that into a build failure on two of the three targets
+/// while passing locally on the third.
+///
+/// Windows is the platform with an extra spelling because `Path::is_absolute`
+/// there wants a prefix *and* a root, so stripping the drive leaves a path that
+/// fails that test and that `join` still resolves to the same real file. On Unix
+/// an absolute path has no prefix, so that case is the plain absolute one the
+/// caller already has and there is nothing to add.
+#[cfg(windows)]
+fn rooted_spelling(outside: &std::path::Path, root: &std::path::Path) -> Option<String> {
+    // Asserted to round-trip rather than assumed: `get(2..)` strips two bytes,
+    // not a prefix, so on a machine whose temp directory is a UNC share or a
+    // verbatim path it yields something the guard *accepts* and that joins to
+    // nothing under the worktree. The gate would then pass while asserting
+    // nothing, which is the failure it exists to prevent one level up.
+    outside
+        .to_string_lossy()
+        .get(2..)
+        .filter(|rooted| root.join(rooted) == outside)
+        .map(str::to_owned)
+}
+
+#[cfg(not(windows))]
+fn rooted_spelling(_outside: &std::path::Path, _root: &std::path::Path) -> Option<String> {
+    None
+}
+
 #[test]
 fn the_warmer_reads_nothing_outside_the_worktree() {
     // `PathBuf::join` silently discards the root for an absolute path. Not
@@ -340,18 +372,7 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     //
     // On Unix an absolute path has no prefix, so the case is already the one a
     // line above and there is nothing extra to spell.
-    //
-    // Asserted to round-trip rather than assumed: `get(2..)` strips two bytes,
-    // not a prefix, so on a machine whose temp directory is a UNC share or a
-    // verbatim path it yields something the guard *accepts* and that joins to
-    // nothing under the worktree. The gate would then pass while asserting
-    // nothing, which is the failure it exists to prevent one level up.
-    #[cfg(windows)]
-    if let Some(rooted) = outside.to_string_lossy().get(2..)
-        && scratch.root().join(rooted) == outside
-    {
-        spellings.push(rooted.to_owned());
-    }
+    spellings.extend(rooted_spelling(&outside, scratch.root()));
 
     let warmed = Highlighter::new()
         .warm_ahead(scratch.root().to_path_buf(), spellings)
