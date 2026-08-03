@@ -153,9 +153,11 @@ pub const HINT_SEPARATOR: &str = " · ";
 /// wrongly for three phases and `SPEC.md` §10 now records measured rather than
 /// assumed: `▄` and `█` are 0xDC and 0xDB in that code page, the other six are
 /// not there at all. So a legacy Windows console does not lose the sparkline, it
-/// loses its *resolution*: the top and half rungs still draw and everything
-/// between them does not, which is worse than losing the element, because a
-/// strip that renders some buckets and drops others is a shape that lies. The
+/// loses its *resolution*: the top and half rungs still draw and the other six
+/// do not, which is worse than losing the element, because a strip that renders
+/// some buckets and drops others is a shape that lies. Three of the six sit
+/// between the two survivors and three sit below them, so what is left is not
+/// even a coarser version of the same shape. The
 /// `▶` the footer has carried since I5 is genuinely outside, and so is the
 /// pulse's `●`.
 const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
@@ -163,7 +165,7 @@ const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', 
 /// A bucket nothing happened in.
 ///
 /// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
-/// the heat strip and [`BAR_TRACK`] the scrollbar, reaching the sparkline last
+/// the heat strip and [`Theme::bar_track`] the scrollbar, reaching it last
 /// though §5 lists it first
 /// ([#78](https://github.com/breferrari/vigia/issues/78)).
 /// A file with no history at all is the *all*-empty case, so a worktree that was
@@ -2826,6 +2828,13 @@ impl Painter<'_> {
                 }
             }
         }
+        // **`columns.spark` here and `take` above, deliberately.** They differ
+        // only in the impossible case the clamp exists for, and there the layout
+        // is what everything left of this must agree with: the slot was reserved
+        // at the planned width, so the cursor moves past the planned width or
+        // every element inside it shifts. A rung wider than the window would
+        // then draw eight cells in a wider slot and leave the remainder blank,
+        // which is a degraded row rather than a corrupted one.
         past(&mut right, columns.spark);
 
         // Unguarded, because `heat_at` opens by returning nothing for a zero

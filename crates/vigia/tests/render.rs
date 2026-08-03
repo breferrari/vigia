@@ -2419,9 +2419,11 @@ fn track_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
 
 /// Which columns of row `y` carry a sparkline **bucket**.
 ///
-/// [`track_at`]'s twin, the way `has_heat` and `has_spark` were: the two halves
-/// of one slot, asked the same way, so a gate comparing them is comparing like
-/// with like. [`blocks_of`] answers a different question on the same cells and
+/// [`track_at`]'s twin: the two halves of one slot, asked the same way, so a
+/// gate comparing them is comparing like with like. (`has_heat` and `has_spark`
+/// were the renderer's own pair of that shape until
+/// [#78](https://github.com/breferrari/vigia/issues/78) made `spark_of` total
+/// and deleted the second, so grepping for it now finds nothing.) [`blocks_of`] answers a different question on the same cells and
 /// cannot stand in for this, because it returns the glyphs and drops the columns.
 fn bars_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
     let buffer = backend.buffer();

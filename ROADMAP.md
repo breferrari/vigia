@@ -405,7 +405,6 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | I7 is measured without the highlighter, and the first parse costs 98ms | [#51](https://github.com/breferrari/vigia/issues/51) |
 | ⬜ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
 | ⬜ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
-| ⬜ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them | [#98](https://github.com/breferrari/vigia/issues/98) |
 | ⬜ | `G` leaves the pane short, and the first scroll yanks it back a screenful | [#62](https://github.com/breferrari/vigia/issues/62) |
 | ⬜ | The row wash drops a column under every wide glyph | [#63](https://github.com/breferrari/vigia/issues/63) |
 | ⬜ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
@@ -425,6 +424,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | `FrameStats::bytes` conflates bytes counted with bytes diffed | [#85](https://github.com/breferrari/vigia/issues/85) |
 | ⬜ | `Worktree::measure` has no test over a real repository | [#86](https://github.com/breferrari/vigia/issues/86) |
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
+| ⬜ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them | [#98](https://github.com/breferrari/vigia/issues/98) |
 
 **Two of the five findings closed on [#66](https://github.com/breferrari/vigia/issues/66)'s own branch rather than waiting for a phase**, which is the rule about fixing what the work surfaces rather than filing it away. [#79](https://github.com/breferrari/vigia/issues/79) is the pointer and the thumb, both of which are affordances that branch published; leaving a drawn thumb inert for a phase would have shipped the same aspirational-UX defect [#66](https://github.com/breferrari/vigia/issues/66) exists to remove. [#81](https://github.com/breferrari/vigia/issues/81) was filed undiagnosed and asked for a gate rather than a fix, so it cost one test: it is **green**, the wash stops where `with_bar` narrows the rect, and the mark in the report was the host terminal's own scrollbar.
 

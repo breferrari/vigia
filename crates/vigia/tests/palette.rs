@@ -643,18 +643,28 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
     // reader sees one dim underscore run where there are two things.
     //
     // **`light` at `Ansi16` is exempt, and enumerating why is the point.** That
-    // rung has exactly four greys and this palette has already spent all of them:
-    // `White` is the pane, `Black` is `path` and `path_live`, `Gray` is
-    // `path_cold` **and `gutter`**, `DarkGray` is `chrome_dim`. There is no fifth
-    // for a track to take, so the collision is arithmetic rather than a choice,
-    // and moving the track onto `DarkGray` only trades this collision for the
-    // `chrome_dim` one. Left where it is because the two are not equally bad: a
-    // path's underscores sit inside a word in the left column, the track is eight
+    // rung has exactly four greys and this palette has spent all of them. The
+    // occupants that matter here, since a `_` on a file row is what the track can
+    // be confused with: `White` is the pane, `Black` is `path` and `path_live`,
+    // `Gray` is `path_cold` **and `gutter`**, `DarkGray` is `chrome_dim`. There
+    // is no fifth for a track to take, so the collision is arithmetic rather than
+    // a choice, and moving the track onto `DarkGray` only trades it for the
+    // `chrome_dim` one.
+    //
+    // Not an exhaustive census of the rung and it does not need to be: `Black`
+    // also holds `context`, `DarkGray` also holds `bar` and `comment`, and
+    // `White` also holds `heat_track` and `bar_track`, which is
+    // [#98](https://github.com/breferrari/vigia/issues/98) showing up here of all
+    // places. None of those is drawn as a `_` on a file heading row, which is the
+    // only confusion this gate is about.
+    //
+    // Left where it is because the two collisions are not equally bad: a path's
+    // underscores sit inside a word in the left column, the track is eight
     // contiguous ones in a reserved slot, and nothing in the suite reads a track
     // under this palette (`Theme::default` is `ansi`, where the track is
     // `DarkGray` and `path_cold` is `Gray`).
     //
-    // `gutter` was missing from that list for one round, which mattered less for
+    // `gutter` was missing from the list for one round, which mattered less for
     // the count than for the staleness check below: keyed to `path_cold` alone it
     // would have called the exemption stale while `gutter` still held `Gray`.
     for (name, base) in [
@@ -663,15 +673,20 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
         ("light", Theme::light()),
     ] {
         for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
-            if name == "light" && depth == Depth::Ansi16 {
-                continue;
-            }
             let theme = base.resolve(depth);
             for (which, path) in [
                 ("path", theme.path),
                 ("path_live", theme.path_live),
                 ("path_cold", theme.path_cold),
             ] {
+                // **Only the comparison that actually collides is skipped.**
+                // Skipping the whole rung would take `path` and `path_live` with
+                // it, and both are `Black` there against a `Gray` track, so a
+                // future move of either onto the track's colour would go unseen
+                // behind an exemption that was never about them.
+                if name == "light" && depth == Depth::Ansi16 && which == "path_cold" {
+                    continue;
+                }
                 assert_ne!(
                     theme.spark_track.fg, path.fg,
                     "{name} at {depth:?} draws {which} in the track's own colour, \
@@ -688,6 +703,12 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
     // there. Keyed to `path_cold` alone, moving that one field would report the
     // exemption stale while `gutter` still held the colour and the collision was
     // still real.
+    //
+    // The disjunction cannot currently distinguish its two halves, because
+    // `path_cold` and `gutter` are the same literal in this palette. That is
+    // future-proofing rather than two independent readings, and saying so is the
+    // difference between a check that is ready for the split and one that looks
+    // stronger than it is.
     let light = Theme::light().resolve(Depth::Ansi16);
     assert!(
         light.spark_track.fg == light.path_cold.fg || light.spark_track.fg == light.gutter.fg,
@@ -727,6 +748,20 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     let row: Vec<&str> = (0..buffer.area.width)
         .map(|x| buffer[(x, HEADING)].symbol())
         .collect();
+    // Guard the fixture, the way `a_row_missing_a_glance_element_keeps_its_column`
+    // does for digits: at this depth colour is gone, so `_` is counted by symbol
+    // alone across the whole row, and an underscore in the path would be counted
+    // as a track cell. `three_kinds` draws `src/a.rs`; this fails loudly if that
+    // ever changes rather than quietly counting one cell too many.
+    let path_has_underscore = view.rows.iter().any(|row| match row {
+        Row::File(entry) => entry.path.contains('_'),
+        _ => false,
+    });
+    assert!(
+        !path_has_underscore,
+        "the fixture's path carries an underscore, which this gate counts as a          track cell"
+    );
+
     let bars = row.iter().filter(|s| "▁▂▃▄▅▆▇█".contains(**s)).count();
     let track = row.iter().filter(|s| **s == "_").count();
 

@@ -146,7 +146,9 @@ palette! {
     /// positions on all three rows, so nothing in it was ever absent — but its
     /// quiet buckets were `#1f6f3f`, the ramp's own floor colour, which makes
     /// them *written* buckets rather than track. There was no sparkline track in
-    /// the file to read. So this was picked for the reason below and the picture
+    /// the file to read. (`#30363d` *is* in that file, as the window border's
+    /// stroke, which is worth knowing because grepping the SVG for it finds a
+    /// hit that has nothing to do with this element.) So this was picked for the reason below and the picture
     /// was then corrected to draw it, which is why the artifact and the shell
     /// still agree: the cold row's eight bars are `#30363d` today, deliberately
     /// **not** the `#21262d` the heat strip on that same row uses.
@@ -166,9 +168,12 @@ palette! {
     /// risk [#60](https://github.com/breferrari/vigia/issues/60) is open on. That
     /// palette assumes no background, so it cannot be gated the way
     /// `tests/palette.rs` gates `dark` and `light` against the pane behind them;
-    /// what it gets instead is a named entry in
+    /// what it gets instead is a paragraph and a count tripwire in
     /// `nothing_a_reader_has_to_read_is_drawn_in_colour_eight`, so the exemption
-    /// is a decision on record rather than a field nobody added to a list.
+    /// is a decision on record rather than a field nobody added to a list. A
+    /// named entry is not available: the styles behind `Theme::KEYS` cannot be
+    /// reached by key from outside this crate, so a test cannot walk the fields
+    /// and ask each one its colour.
     ///
     /// **Its own key rather than [`Theme::heat_track`]'s**, which is what it
     /// started as and would still be sharing a value with in all three built-ins
@@ -550,11 +555,16 @@ impl Theme {
     ///
     /// Every value here is **read out of the picture** rather than chosen, per
     /// `SPEC.md` §5.1's rule that a published artifact answering an open question
-    /// is the answer. The picture's own class names map onto these directly:
+    /// is the answer. **[`Theme::spark_track`] is the one exception and says so
+    /// itself**: the picture had no sparkline track in it to read, so that value
+    /// was picked and the picture was corrected to draw it, which is the same
+    /// rule applied in the only direction available when the artifact is silent.
+    /// The picture's own class names map onto these directly:
     /// `.fg` `#e6edf3`, `.dim` `#7d8590`, `.faint` `#6e7681`, `.grn` `#3fb950`,
     /// `.red` `#f85149`, `.cyn` `#39c5cf`, `.kw` `#ff7b72`, `.fnn` `#d2a8ff`,
     /// `.typ` `#ffa657`, `.var` `#79c0ff`, `.con` `#e3b341`, with the row washes
-    /// `#0f2c1c` and `#2d1416` and the track `#21262d` taken from the rects.
+    /// `#0f2c1c` and `#2d1416` and the heat and scrollbar tracks' `#21262d` taken
+    /// from the rects.
     ///
     /// Where the picture ramps and we need a third stop it is interpolated in the
     /// picture's own direction: brighter is busier, which is what its sparkline
