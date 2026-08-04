@@ -111,8 +111,8 @@ pub struct FrameStats {
     /// worktree-sized one, exactly as [`Self::bytes`] is: a fixture that mixes
     /// the two cannot express a bound on either, and the gates that assert on
     /// this number pick a fixture where one of the two is zero
-    /// (`reads.rs::a_height_taken_from_a_diff_in_hand_costs_no_stat` is the
-    /// clearest, asserting **no** probe at all over a fully-diffed worktree).
+    /// (`a_height_taken_from_a_diff_in_hand_costs_no_stat` is the clearest,
+    /// asserting **no** probe at all over a fully-diffed worktree).
     /// Splitting it is the same open question
     /// [#85](https://github.com/breferrari/vigia/issues/85) already holds for
     /// `bytes`, one counter over.
@@ -189,9 +189,12 @@ struct Observed {
 /// **13.07ms p50, 14.31ms p99** against I9's 16ms, at 95 measures and 102 stats
 /// a tick. The lazy fingerprint in [`Frame::fill_span`] is what holds it to one
 /// `stat` per file rather than two, since an unsettled observation is refused
-/// before a fresh print is asked for.
-/// `crates/vigia/tests/budgets.rs::a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`
-/// is the gate at that intersection, and it is the tightest budget in the repo.
+/// before a fresh print is asked for. Two gates, because they catch different
+/// halves: `budgets.rs::a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`
+/// holds the wall clock at this intersection and is the tightest budget in the
+/// repo, and `reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
+/// holds the syscall count, which is the half a percentile with headroom cannot
+/// see.
 const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
@@ -251,7 +254,7 @@ impl Taken {
     }
 }
 
-/// Store `measured` under `path`, keeping the key the map already owns.
+/// Store `value` under `path`, keeping the key the map already owns.
 ///
 /// `HashMap::insert` keeps the existing key and drops the one handed to it, so
 /// the obvious `insert(path.clone(), …)` allocates a `String` per call and frees
@@ -477,6 +480,33 @@ impl<'w> Frame<'w> {
         // rules that no longer exist. See `Worktree::invalidate_filter`.
         self.worktree.invalidate_filter();
 
+        // **And what was computed under the old rules goes with it.**
+        // `invalidate_filter` makes the next *read* correct and does nothing for
+        // an answer already in hand, which is a fourth way a cached artefact can
+        // go stale and the one [`reusable`] cannot see: an attributes change
+        // moves neither the file, nor its length, nor its modification time, nor
+        // its index blob, so every term in the rule says "unchanged" while the
+        // bytes the diff would compare have changed underneath it.
+        //
+        // Measured over a file committed LF and held CRLF, on a `*.txt text
+        // eol=lf` written mid-session: the carried span reported **80 rows where
+        // a cold frame computes 8**, and never recovered, because nothing was
+        // going to touch that file again. That is [#65](https://github.com/breferrari/vigia/issues/65)'s
+        // own population, every text file on a default `core.autocrlf` checkout.
+        //
+        // Dropping both maps rather than adding a term to `reusable` is the
+        // deliberate choice: an attributes change is rare, a whole-worktree
+        // re-read is what the first frame already costs, and a *fifth* term in
+        // the reuse rule that no fingerprint can carry would be a rule about
+        // repository configuration living in a function about one file. What it
+        // does **not** cover is a change to `core.autocrlf` or to
+        // `.git/info/attributes`, neither of which the status walk reports;
+        // `SPEC.md` §10 records that residue rather than implying it away.
+        if files.iter().any(FileChange::rewrites_attributes) {
+            self.cached.clear();
+            self.spans.clear();
+        }
+
         // **Both caches are migrated, and neither is dropped.** A span used to be
         // cleared here, on the reasoning that it is derived from content and has
         // no freshness check of its own. Giving it one ([`Measured`]) is
@@ -556,16 +586,20 @@ impl<'w> Frame<'w> {
     ///
     /// **This is the one thing in the frame path that is not bounded by the
     /// window**, and it is here rather than refused because a scrollbar that
-    /// cannot say where the end is says nothing. `SPEC.md` §3's I4 carries the
-    /// rewording that admits it and the measurement it was admitted on.
+    /// cannot say where the end is says nothing. `SPEC.md` §3's I4 carries two
+    /// notes: the rewording that admits the walk, and the one that made it
+    /// incremental. Both carry the measurements they were decided on.
     ///
-    /// Three things keep it affordable. It counts through
+    /// Four things keep it affordable. It counts through
     /// [`Worktree::measure`], which reads the same bytes a diff would and skips
     /// the `String` per line that made the obvious version ten times slower than
     /// `git diff --numstat`. It reuses a [`FileDiff`] the frame already holds
-    /// rather than re-reading, so a file on screen is free. And it is cached
-    /// until the next [`Frame::advance`], so scrolling never pays: only a change
-    /// to the tree does.
+    /// rather than re-reading, so a file on screen is free. And a span is kept
+    /// once taken: within a tick because [`Measured::proven`] says it was proved
+    /// this one, and **across** ticks because [`Frame::advance`] migrates it and
+    /// [`reusable`] re-proves it for one `stat`. So scrolling never pays, and a
+    /// tick pays only for the files that moved
+    /// ([#101](https://github.com/breferrari/vigia/issues/101)).
     ///
     /// `rows_of` maps a file's span to the rows a caller draws for it, because
     /// what a conflict or a binary file occupies is the shell's ruling rather
@@ -604,7 +638,7 @@ impl<'w> Frame<'w> {
     /// live call sites happen to call `height` first. Nothing enforced that, and
     /// the cold path was an unbudgeted whole-file read on the scroll arithmetic.
     ///
-    /// Infallible on purpose; see the read-error rule in [`Frame::height`].
+    /// Infallible on purpose; the read-error rule is on [`Measured::taken`].
     ///
     /// **Three sources, cheapest first, and the order is the design.**
     ///
@@ -618,9 +652,9 @@ impl<'w> Frame<'w> {
     ///    passing.
     /// 2. A span carried from an earlier tick and *proved* still true, which
     ///    costs one `stat`. This is [#101](https://github.com/breferrari/vigia/issues/101):
-    ///    at a hundred changed files a stat each is **1.30ms** against **11.72ms**
-    ///    to read them all, and the ratio holds from 5.7x to 9x between 100 and
-    ///    2000 files.
+    ///    at a hundred changed files a stat each is **1.29ms** against **12.90ms**
+    ///    to read them all, and the ratio runs 6.8x at 2000 files to 10.0x at
+    ///    100.
     /// 3. A read, through [`Worktree::measure`], which skips the `String` per line
     ///    a full diff allocates.
     ///
@@ -634,8 +668,9 @@ impl<'w> Frame<'w> {
     /// Measured on `the_frame_budget_holds_through_a_bulk_rewrite`, where every
     /// file is rewritten at once and all hundred are in hand: **8.27ms p50 before,
     /// 11.12ms p50 with the stat first**, and the gate went from passing 4 of 4
-    /// runs to 2 of 4. `reads.rs::a_height_taken_from_a_diff_in_hand_costs_no_stat`
-    /// holds this order structurally so it cannot be reordered back by reading.
+    /// runs to 2 of 4. `a_height_taken_from_a_diff_in_hand_costs_no_stat`, in
+    /// this crate's own `tests/frame.rs`, holds that order structurally so it
+    /// cannot be reordered back by reading.
     ///
     /// A span from (2) is exactly as trustworthy as a diff from [`Frame::diff`]'s
     /// reuse branch, because it is the same [`reusable`] rule over the same

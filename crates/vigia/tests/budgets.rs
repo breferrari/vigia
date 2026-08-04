@@ -37,7 +37,7 @@ use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Sampl
 
 use support::{
     Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta, exclusively_timed,
-    highlight_delta, settle, settle_spans, time, timed,
+    generated, highlight_delta, settle, settle_spans, time, timed,
 };
 
 /// I9: steady-state frame time.
@@ -660,81 +660,130 @@ fn a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget() {
 
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
-    let mut round = 0usize;
-    let mut marker = String::new();
 
-    // **Rewritten every `REWRITE_EVERY` frames, and the frame right after a
-    // rewrite is untimed.** Both halves are the instrument rather than the
-    // subject. A whole-fixture write before *every* timed frame puts its own
-    // asynchronous write-back inside the next timer, which `SPEC.md` §7 records
-    // as measuring the harness; and the frame immediately after a 46 MiB rewrite
-    // is the one that absorbs it. Without that absorbing frame this gate read
-    // **29.26ms p99 against 13.13ms p50** — the unmistakable signature of the
-    // fixture rather than of the code, since no threshold separates those two
-    // numbers from a real regression. With it the distribution closes up.
+    // **Frames after a rewrite are untimed, and a rewrite never lands inside a
+    // timed one.** Both halves are the instrument rather than the subject, and
+    // the first version of this gate had neither: it read **16.56ms, 46.19ms and
+    // 227.33ms p99 across three of eight runs** against a p50 that never left
+    // 13.2ms, which `SPEC.md` §7 names as the signature of the fixture rather
+    // than of the code. NTFS write-back of a 1.7 MiB rewrite arrives over several
+    // frames, so discarding one is not enough.
     //
-    // Every sampled frame is still inside the margin, since a chunk of fifty
-    // runs in ~308ms against two seconds.
-    let mut next_frame = |at: usize,
-                          frame: &mut Frame,
-                          app: &mut App,
-                          highlighter: &mut Highlighter,
-                          history: &mut History|
-     -> Option<Duration> {
-        if at % REWRITE_EVERY == 0 {
-            round += 1;
-            scratch.rewrite_all(FILES, LINES, round);
-            marker = format!("line {} of {round}", LINES / 2);
-            // Untimed, and it is a real frame: it re-measures the whole changed
-            // set exactly as the timed ones do, so what it absorbs is the disk
-            // and not the work.
-            history.record([EDITED_PATH], Instant::now());
-            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
-            return None;
-        }
-        Some(time(|| {
-            history.record([EDITED_PATH], Instant::now());
-            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
-        }))
-    };
+    // **And the sampled frames are partitioned rather than assumed.** "Rewrite,
+    // then sample N frames, and they will all still be inside the two-second
+    // margin" is a property of the machine and not of the code: CI allows a
+    // runner three times slower (`VIGIA_BUDGET_SLACK: "3"`), where the tail of a
+    // chunk settles and stops being the event. So every frame is classified by
+    // what it actually did. A frame that re-measured the whole changed set is
+    // inside the margin and is this gate's subject; one that measured nothing has
+    // settled and belongs to the gate above. Only the first kind is asserted on,
+    // which is the same partition the scroll gates use for cold and warm frames.
+    const CYCLES: usize = 3;
+    const ABSORB: usize = 12;
+    const PER_CYCLE: usize = 90;
 
-    for at in 0..WARMUP_FRAMES {
-        next_frame(at, &mut frame, &mut app, &mut highlighter, &mut history);
-    }
-
+    let mut in_margin = Samples::new(CYCLES * PER_CYCLE);
+    let mut settled_frames = 0usize;
+    let mut measured_in_margin = 0u64;
     let before = frame.stats();
-    let mut frames = Samples::new(SAMPLED_FRAMES);
-    for at in 0..SAMPLED_FRAMES {
-        if let Some(cost) = next_frame(
-            at + WARMUP_FRAMES,
-            &mut frame,
-            &mut app,
-            &mut highlighter,
-            &mut history,
-        ) {
-            frames.push(cost);
+
+    for round in 1..=CYCLES {
+        scratch.rewrite_all(FILES, LINES, round);
+        for _ in 0..ABSORB {
+            history.record([EDITED_PATH], Instant::now());
+            shell_frame(
+                &mut frame,
+                &mut app,
+                &mut highlighter,
+                &history,
+                &mut buf,
+                &theme,
+                screen,
+            );
+        }
+        for _ in 0..PER_CYCLE {
+            let was = frame.stats().measured;
+            let cost = time(|| {
+                history.record([EDITED_PATH], Instant::now());
+                shell_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
+            });
+            // **Split on zero, not on `FILES`.** A frame inside the margin
+            // re-measures every changed file *except* the handful the viewport
+            // drew, because those have a diff in hand and take source (1) for
+            // free. So the in-margin count is a screenful short of a hundred and
+            // never equal to it, and a settled frame measures exactly nothing.
+            // Zero is the only value that separates the two without hard-coding
+            // how many files a screen happens to reach.
+            match frame.stats().measured - was {
+                0 => settled_frames += 1,
+                n => {
+                    measured_in_margin += n;
+                    in_margin.push(cost);
+                }
+            }
         }
     }
     let cost = delta(before, frame.stats());
+    // Every frame the loop drove, absorbing ones included, because `cost` is a
+    // delta across all of them. Dividing by the timed subset alone overstated the
+    // per-frame figures by the absorbers' share.
+    let drove = CYCLES * (ABSORB + PER_CYCLE);
 
     // Undrawn, for the reason the gate above gives at more length.
     let touchable = screen.list + screen.diff;
     assert!(
         frame.tracked() <= touchable,
-        "the frame holds {} diffs for a screen that can reach {touchable} files \
-         at most, so this run is not the undrawn case",
+        "the frame holds {} diffs for a screen that can reach {touchable} \
+         files at most, so this run is not the undrawn case",
         frame.tracked()
     );
 
-    // **And the rewrites have to have actually landed inside the margin**, or
-    // this is the cheap corner wearing the expensive one's name. A run where
-    // every span stayed provable would measure nothing this gate is about, so the
-    // walk must have re-measured over the sample.
+    // **The premise, and it is a count rather than a clock.** A run whose spans
+    // all stayed provable measured nothing this gate is about. Two thirds is
+    // generous on purpose: it has to survive a runner slow enough that the tail
+    // of a chunk settles, while still refusing a run that never entered the
+    // corner at all.
+    let wanted = CYCLES * PER_CYCLE * 2 / 3;
+    let timed = in_margin.len() + settled_frames;
     assert!(
-        cost.measured > 0,
-        "the sampled ticks measured nothing, so every carried span stayed \
-         provable and this gate never entered the corner it is named for"
+        in_margin.len() >= wanted,
+        "only {} of {timed} timed frames re-measured the changed set, under the \
+         {wanted} this gate needs, and {settled_frames} had settled. The margin \
+         is settling faster than a chunk runs, so shorten the chunk rather than \
+         widening the budget",
+        in_margin.len()
     );
+
+    // **And each of those frames re-measured nearly the whole changed set**, not
+    // a handful of it. Without this, a run where every chunk went settled after
+    // three frames would satisfy the count above and measure almost nothing,
+    // which is the runner-speed dependence the partition exists to remove.
+    let per_frame = measured_in_margin / in_margin.len() as u64;
+    let floor = (FILES - touchable) as u64;
+    assert!(
+        per_frame >= floor,
+        "an in-margin frame re-measured {per_frame} files on average, under \
+         the {floor} a screen leaves undrawn, so these frames were only \
+         part-way into the margin"
+    );
+
+    // And the rewrites have to have reached the diff, which no count of measures
+    // can see. The line is taken from the generator rather than written out, so
+    // it cannot drift from what `rewrite_all` actually wrote.
+    let written = generated(LINES, &format!("bulk{CYCLES}"));
+    let landed = written
+        .lines()
+        .nth(LINES / 2)
+        .expect("the generator produced that line");
+    the_edits_still_land(&mut frame, EDITED_PATH, landed);
 
     drew_a_full_screen(
         &mut app,
@@ -745,31 +794,33 @@ fn a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget() {
         height,
     );
 
-    let p99 = frames.percentile(0.99).expect("samples");
+    let p99 = in_margin.percentile(0.99).expect("samples");
 
     // Reported, not only asserted, for the reason `first_paint.rs` reports its
-    // second frame: this gate's whole subject is a cost that is *expected* to be
-    // near the budget, so a reader needs the distribution rather than a pass.
+    // second frame: this gate's subject is a cost expected to sit near the
+    // budget, so a reader needs the distribution rather than a pass.
     eprintln!(
-        "note: a bulk rewrite of {FILES} undrawn files, inside the margin: p50 \
-         {:?} p99 {p99:?} max {:?} over {} timed frames, {} measured and {} \
-         stats per tick",
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples"),
-        frames.len(),
-        cost.measured / frames.len() as u64,
-        cost.probes / frames.len() as u64,
+        "note: a bulk rewrite of {FILES} undrawn files, inside the margin: \
+         p50 {:?} p99 {p99:?} max {:?} over {} in-margin frames of {timed} \
+         timed ({settled_frames} settled), {} measured and {} stats per \
+         frame across all {drove} driven",
+        in_margin.percentile(0.50).expect("samples"),
+        in_margin.max().expect("samples"),
+        in_margin.len(),
+        cost.measured / drove as u64,
+        cost.probes / drove as u64,
     );
 
     assert!(
         p99 <= budget(I9_FRAME),
-        "I9: a tick inside the settle margin after every one of {FILES} undrawn \
-         files was rewritten at once was {p99:?} p99, over the {:?} budget (p50 \
-         {:?}, max {:?}; {} files measured, {} stats and {} bytes read across \
-         {SAMPLED_FRAMES} ticks). The last marker written was {marker:?}",
+        "I9: a tick inside the settle margin after every one of {FILES} \
+         undrawn files was rewritten at once was {p99:?} p99 over {} such \
+         frames, past the {:?} budget (p50 {:?}, max {:?}; {} files \
+         measured, {} stats and {} bytes read in total)",
+        in_margin.len(),
         budget(I9_FRAME),
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples"),
+        in_margin.percentile(0.50).expect("samples"),
+        in_margin.max().expect("samples"),
         cost.measured,
         cost.probes,
         cost.bytes
@@ -780,13 +831,13 @@ fn a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget() {
 fn the_frame_budget_holds_through_a_bulk_rewrite() {
     // The third position in this gate's input space, after "at the top" and "deep
     // in a hunk". Those two vary *where* the window is; this one varies *when*,
-    // and it is the axis `SPEC.md` §7 gained from this test existing: a gate that
+    // and it is the axis `SPEC.md` Â§7 gained from this test existing: a gate that
     // settles before it measures has measured the cheapest state.
     //
     // The event is a formatter, a branch switch or a multi-file agent edit. Every
     // file changes at once, so for the whole settle margin no file can be proved
     // unchanged and every one the shell asks for is recomputed rather than
-    // reused. §10 claimed that breaks I9 for about two seconds. It does over the
+    // reused. Â§10 claimed that breaks I9 for about two seconds. It does over the
     // core frame path, whose fixture materialises all hundred files: 98 of 182
     // frames over budget, 22.34ms p99. The shell recomputes only what it draws,
     // which is why this gate can exist at all, and `reads.rs` holds that half
@@ -840,7 +891,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     // under `--test-threads=1`.
     //
     // So the rewrite is periodic, and the one frame that pays for the harness's
-    // own write-back is spent untimed. `SPEC.md` §7 already puts the cold path
+    // own write-back is spent untimed. `SPEC.md` Â§7 already puts the cold path
     // outside I9 by definition, and this is that: the cost of a test fixture
     // hitting the disk is not a cost of the shell.
     let before = frame.stats();

@@ -62,4 +62,44 @@ impl FileChange {
     pub(crate) fn reads_worktree(&self) -> bool {
         self.is_diffable() && !matches!(self.kind, ChangeKind::Removed)
     }
+
+    /// Whether this change can alter what git's clean filter does to **other**
+    /// files.
+    ///
+    /// A `.gitattributes` decides `text`, `eol` and any filter driver for every
+    /// path under its directory, so writing one changes the bytes a diff of an
+    /// untouched file would compare, without moving that file's length,
+    /// modification time or index blob. Every term in
+    /// [`reusable`](crate::Frame) therefore reports "unchanged" while the answer
+    /// underneath has changed, which is why [`Frame::advance`](crate::Frame)
+    /// drops what it holds rather than trying to prove it.
+    ///
+    /// **Matched on the file name at any depth**, because attributes nest: a
+    /// `src/.gitattributes` governs `src/` and nothing else, but the frame keeps
+    /// one cache for the whole worktree and has no cheap way to ask which paths a
+    /// given attributes file reaches. Over-invalidating costs one worktree of
+    /// reads on a rare event; under-invalidating shows a diff that is wrong until
+    /// something else touches the file.
+    ///
+    /// Case-insensitively, because git resolves the name that way on Windows and
+    /// macOS and a `.GitAttributes` written there is the same file.
+    pub(crate) fn rewrites_attributes(&self) -> bool {
+        let name = |path: &str| {
+            path.rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(path)
+                .to_ascii_lowercase()
+        };
+        if name(&self.path) == ".gitattributes" {
+            return true;
+        }
+        // A rename moves the rules from where they were, which is the same event
+        // seen from the other end.
+        match &self.kind {
+            ChangeKind::Renamed { from } | ChangeKind::Copied { from } => {
+                name(from) == ".gitattributes"
+            }
+            _ => false,
+        }
+    }
 }

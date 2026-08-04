@@ -408,6 +408,19 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
     );
     assert_eq!(unchanged, before, "an idle tick changed the diff's height");
 
+    // **And it proved them with a `stat` each, which nothing else asserts.**
+    // Every other `probes` assertion in the repo covers `Frame::diff` or asserts
+    // zero, so deleting `fill_span`'s own `probes` accounting left the suite
+    // green — and `a_height_taken_from_a_diff_in_hand_costs_no_stat` is written
+    // as `probes == 0`, so it is hollowed out by exactly that deletion. Found by
+    // mutation.
+    assert_eq!(
+        idle.probes, FILES as u64,
+        "an idle tick took {} stat calls to re-prove {FILES} carried spans, \
+         so the walk is not counting the syscalls it makes",
+        idle.probes
+    );
+
     // Twice as many lines in a file the viewport never reached.
     scratch.rewrite_all(FILES, LINES * 2, 3);
 
@@ -523,7 +536,9 @@ fn a_failed_measure_is_asked_again_rather_than_carried() {
     // entry points at.
     let scratch = Scratch::new("frame-failed-measure");
     scratch.write(FIRST, support::numbered_lines(40));
-    scratch.write(SECOND, support::numbered_lines(40));
+    // Different content from FIRST on purpose: identical files share one
+    // blob object, and deleting that object below would break both.
+    scratch.write(SECOND, support::numbered_lines(25));
     scratch.commit_all("base");
 
     let blob = scratch.git(&["rev-parse", &format!("HEAD:{FIRST}")]);
