@@ -700,9 +700,17 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     // inside the margin and is this gate's subject; one that measured nothing has
     // settled and belongs to the gate above. Only the first kind is asserted on,
     // which is the same partition the scroll gates use for cold and warm frames.
-    const CYCLES: usize = 3;
-    const ABSORB: usize = 12;
-    const PER_CYCLE: usize = 90;
+    // **The chunk is short because the margin is a wall clock and the frame rate
+    // is not.** A cycle has to finish well inside `SETTLE_MARGIN`, or its tail
+    // settles and stops being the event, which is the same race `REWRITE_EVERY`
+    // records one gate over. Ninety frames was sized on this machine at ~13ms and
+    // failed on a macOS runner at 22ms: 149 of 270 sampled frames had settled by
+    // the time they ran. Thirty frames plus ten absorbers is ~880ms there against
+    // the two seconds, so the premise holds with better than twice to spare, and
+    // nine cycles keep the sample count where a p99 means something.
+    const CYCLES: usize = 9;
+    const ABSORB: usize = 10;
+    const PER_CYCLE: usize = 30;
 
     let mut in_margin = Samples::new(CYCLES * PER_CYCLE);
     let mut settled_frames = 0usize;
