@@ -147,14 +147,54 @@ const MIN_END: usize = 2;
 /// What a series of RSS samples did after it warmed up.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Drift {
-    /// Median of the first quarter after the warmup.
-    baseline: u64,
-    /// Median of the last quarter.
-    settled: u64,
+    /// Medians of a quarter's worth of samples at four positions, in order.
+    ///
+    /// The **ends are the gate** and the middle two are diagnostic, which is
+    /// why they are not sliced the obvious way. `quarters[0]` and `quarters[3]`
+    /// are exactly [`Drift::baseline`] and [`Drift::settled`], so taking the
+    /// four at `len * k / 4` would put `quarters[3]`'s left edge a sample
+    /// earlier on any series whose length is not a multiple of four — 259
+    /// post-warmup samples is the case a 288-sample run actually produces — and
+    /// the median I3 asserts on would then be taken over a different window.
+    /// So the middle pair is measured a quarter's width *inward from each end*
+    /// instead, leaving a gap of up to three samples in the centre that decides
+    /// nothing. `SPEC.md` §7 already says the middle half is free to wander.
+    ///
+    /// Four rather than two because a *shape* is what separates a plateau from
+    /// a trend: §10's four rise monotonically, 25.58, 25.86, 25.90 and 26.14
+    /// MiB, and no pair of endpoints can show that.
+    quarters: [u64; 4],
     /// `(settled - baseline) / baseline`, and never negative: a process that
     /// gave memory back has not drifted, and reporting that as a signed number
     /// invites a threshold that passes for the wrong reason.
     ratio: f64,
+    /// Least-squares gradient over the post-warmup series, in MiB per hour.
+    ///
+    /// **Signed, where [`Drift::ratio`] deliberately is not, and the asymmetry
+    /// is the point.** `ratio` is the gate, so it must not pass for the wrong
+    /// reason and a shrinking process reports zero. This is a *diagnostic*, and
+    /// its whole job is the sign: `SPEC.md` §10's open question is that one
+    /// hour of this code slopes **+0.92 MiB/h** and fifteen minutes of the same
+    /// code slopes **−0.70 MiB/h**, both about one percent of the +81.3 MiB/h
+    /// an injected 1 KiB-per-frame leak produced. A statistic that clamped the
+    /// negative away could not state that disagreement, let alone settle it.
+    ///
+    /// Never gated. A threshold on this would be a budget `SPEC.md` does not
+    /// name, and §10's rule for drift that crosses on variation rather than on
+    /// a leak is a measured warmup or a measured budget, never a wider one.
+    slope: f64,
+}
+
+impl Drift {
+    /// Median of the first quarter after the warmup.
+    fn baseline(&self) -> u64 {
+        self.quarters[0]
+    }
+
+    /// Median of the last quarter.
+    fn settled(&self) -> u64 {
+        self.quarters[3]
+    }
 }
 
 /// The nearest-rank median: a value that actually occurred, never an
@@ -184,9 +224,9 @@ fn median(values: &[u64]) -> Option<u64> {
 /// one, so a test that drives it with a series it built is the only gate that
 /// can exist. A leak in the harness that never leaked, and a plateau that never
 /// plateaued, are both reachable here in microseconds.
-fn drift(rss: &[u64]) -> Option<Drift> {
-    let warm = (rss.len() as f64 * WARMUP_FRACTION).ceil() as usize;
-    let rest = rss.get(warm..)?;
+fn drift(samples: &[(Duration, u64)]) -> Option<Drift> {
+    let warm = (samples.len() as f64 * WARMUP_FRACTION).ceil() as usize;
+    let rest = samples.get(warm..)?;
 
     // A quarter at each end, so the two never overlap however short the series
     // is and the middle half is free to wander without deciding anything.
@@ -195,19 +235,69 @@ fn drift(rss: &[u64]) -> Option<Drift> {
         return None;
     }
 
-    let baseline = median(&rest[..quarter])?;
-    let settled = median(&rest[rest.len() - quarter..])?;
+    let at = |window: &[(Duration, u64)]| {
+        median(&window.iter().map(|&(_, rss)| rss).collect::<Vec<u64>>())
+    };
+    let end = rest.len();
+    // Inward from each end rather than `end * k / 4`: see [`Drift::quarters`].
+    // The two never overlap, because `quarter` is a floor of a quarter, so
+    // `4 * quarter <= end` and therefore `2 * quarter <= end - 2 * quarter`.
+    let quarters = [
+        at(&rest[..quarter])?,
+        at(&rest[quarter..quarter * 2])?,
+        at(&rest[end - quarter * 2..end - quarter])?,
+        at(&rest[end - quarter..])?,
+    ];
     // A baseline of zero means the platform did not report RSS at all, and a
     // ratio against it would be an infinity that passes or fails by luck.
-    if baseline == 0 {
+    if quarters[0] == 0 {
         return None;
     }
 
     Some(Drift {
-        baseline,
-        settled,
-        ratio: settled.saturating_sub(baseline) as f64 / baseline as f64,
+        quarters,
+        ratio: quarters[3].saturating_sub(quarters[0]) as f64 / quarters[0] as f64,
+        // Over `rest`, not over `samples`: the warmup climb is not drift, and a
+        // gradient fitted through it would report the allocator plateau as a
+        // trend for exactly the reason the medians discard it.
+        slope: mib_per_hour(rest),
     })
+}
+
+/// The least-squares gradient of `samples`, in MiB per hour.
+///
+/// Ordinary linear regression of RSS against **elapsed time**, so the answer is
+/// in the units `SPEC.md` §10 states its open question in and is comparable
+/// between runs of different lengths. Fitting against the sample *index*
+/// instead would give a slope per sample, which is only a slope per hour while
+/// the loop keeps its cadence, and a day-long run that stalled would report a
+/// climb it did not have.
+///
+/// Least squares rather than first-against-last for the reason the medians
+/// exist: RSS jitters by a page between samples, and a fit uses all of them.
+/// Zero when there is nothing to fit through — one sample, or every sample at
+/// the same instant — because a division by a zero variance is an infinity that
+/// would read as a catastrophic leak.
+fn mib_per_hour(samples: &[(Duration, u64)]) -> f64 {
+    if samples.len() < 2 {
+        return 0.0;
+    }
+    let count = samples.len() as f64;
+    let mean_at = samples.iter().map(|(at, _)| at.as_secs_f64()).sum::<f64>() / count;
+    let mean_rss = samples.iter().map(|&(_, rss)| rss as f64).sum::<f64>() / count;
+
+    let (mut covariance, mut variance) = (0.0, 0.0);
+    for &(at, rss) in samples {
+        let offset = at.as_secs_f64() - mean_at;
+        covariance += offset * (rss as f64 - mean_rss);
+        variance += offset * offset;
+    }
+    if variance == 0.0 {
+        return 0.0;
+    }
+
+    // Bytes per second into MiB per hour, which is what the report prints.
+    covariance / variance * 3600.0 / (1024.0 * 1024.0)
 }
 
 /// Resident set size of this process, or `None` where the platform has no way
@@ -372,8 +462,19 @@ impl Report {
             .unwrap_or(0)
     }
 
-    fn rss(&self) -> Vec<u64> {
-        self.samples.iter().map(|s| s.rss).collect()
+    /// The RSS series against the elapsed time each sample was taken at.
+    ///
+    /// What [`drift`] needs, and it has to be the real elapsed [`Duration`]
+    /// rather than the sample index: the index is only a clock while the loop
+    /// keeps up, and a gradient in MiB *per hour* read off a stalled day-long
+    /// run would be wrong in exactly the direction that looks like a leak.
+    ///
+    /// The only accessor for it. A bare `Vec<u64>` sibling went with the move,
+    /// because the two remaining places that want values alone — the min and
+    /// max in [`Report::print`], and the printed curve — walk `samples`
+    /// directly rather than allocate one.
+    fn series(&self) -> Vec<(Duration, u64)> {
+        self.samples.iter().map(|s| (s.at, s.rss)).collect()
     }
 
     fn print(&self) {
@@ -389,17 +490,33 @@ impl Report {
             self.rounds,
             self.created
         );
-        match drift(&self.rss()) {
-            Some(drift) => println!(
-                "soak: rss baseline {:.1} MiB, settled {:.1} MiB, drift {:.2}% \
-                 (budget {:.0}%), min {:.1}, max {:.1}",
-                mb(drift.baseline),
-                mb(drift.settled),
-                drift.ratio * 100.0,
-                DRIFT_BUDGET * 100.0,
-                mb(self.samples.iter().map(|s| s.rss).min().unwrap_or(0)),
-                mb(self.samples.iter().map(|s| s.rss).max().unwrap_or(0)),
-            ),
+        match drift(&self.series()) {
+            Some(drift) => {
+                println!(
+                    "soak: rss baseline {:.1} MiB, settled {:.1} MiB, drift {:.2}% \
+                     (budget {:.0}%), min {:.1}, max {:.1}",
+                    mb(drift.baseline()),
+                    mb(drift.settled()),
+                    drift.ratio * 100.0,
+                    DRIFT_BUDGET * 100.0,
+                    mb(self.samples.iter().map(|s| s.rss).min().unwrap_or(0)),
+                    mb(self.samples.iter().map(|s| s.rss).max().unwrap_or(0)),
+                );
+                // The shape, and the gradient through it. `SPEC.md` §10's open
+                // question about I3 is a *sign* disagreement between two runs,
+                // and it was settled by hand off the series below the last time
+                // anyone asked. Printing both is what makes the next long run
+                // answer it from its own report.
+                println!(
+                    "soak: rss quarters {:.2}, {:.2}, {:.2}, {:.2} MiB, \
+                     slope {:+.2} MiB/h (reported, not gated)",
+                    mb(drift.quarters[0]),
+                    mb(drift.quarters[1]),
+                    mb(drift.quarters[2]),
+                    mb(drift.quarters[3]),
+                    drift.slope,
+                );
+            }
             None => println!(
                 "soak: rss has no verdict from {} samples",
                 self.samples.len()
@@ -1160,7 +1277,7 @@ impl Report {
 
     /// RSS drift, which is the half that has to be scheduled.
     fn gate_drift(&self) {
-        let series = self.rss();
+        let series = self.series();
         if self.window < GATED_WINDOW {
             println!(
                 "note: the drift gate is not applied to a {:?} window, which is \
@@ -1181,18 +1298,27 @@ impl Report {
             )
         });
         let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+        // The quarters and the gradient travel with the failure, because the
+        // first question asked of a breach is whether it was a trend or a step
+        // and neither is legible from a ratio.
         assert!(
             drift.ratio < DRIFT_BUDGET,
             "I3: RSS drifted {:.2}% over {:?}, over the {:.0}% budget: \
              {:.1} MiB after warmup against {:.1} MiB at the end, peak {:.1} MiB \
-             over {} frames",
+             over {} frames; quarters {:.2}, {:.2}, {:.2}, {:.2} MiB at \
+             {:+.2} MiB/h",
             drift.ratio * 100.0,
             self.window,
             DRIFT_BUDGET * 100.0,
-            mb(drift.baseline),
-            mb(drift.settled),
-            mb(series.iter().copied().max().unwrap_or(0)),
-            self.frames
+            mb(drift.baseline()),
+            mb(drift.settled()),
+            mb(series.iter().map(|&(_, rss)| rss).max().unwrap_or(0)),
+            self.frames,
+            mb(drift.quarters[0]),
+            mb(drift.quarters[1]),
+            mb(drift.quarters[2]),
+            mb(drift.quarters[3]),
+            drift.slope,
         );
     }
 }
@@ -1313,6 +1439,74 @@ fn soak_child() {
     report.gate();
 }
 
+/// The scheduled job must not kill the window its own input offers.
+///
+/// `.github/workflows/soak.yml` advertises `seconds: 86400` and then pinned
+/// `timeout-minutes: 330`, which is 5.5 hours: the dispatch that I3's day-long
+/// budget needs was terminated by *this repository's* timeout before the
+/// platform's six-hour cap was even reached, on an uncapped runner exactly as
+/// on a hosted one. Nothing caught it, and the only signal that it was wrong
+/// was a run that had already burned five and a half hours.
+///
+/// The obvious repair is to derive the timeout from the window, and **the
+/// expression language cannot**: `${{ fromJSON(inputs.seconds) / 60 + 90 }}` is
+/// rejected at parse time with `Unexpected symbol: '/'`, which fails the whole
+/// workflow rather than the one field, so the daily soak would simply have
+/// stopped running. So the two numbers stay independent, a step compares them
+/// before the checkout, and this asserts the three things that arrangement
+/// needs: neither number is a constant here, and both reach that step.
+///
+/// **What it does not prove**, stated because a gate whose limits are unwritten
+/// gets read as covering more than it does: nothing here parses YAML or
+/// evaluates a GitHub expression. A parser is a dependency `SPEC.md` does not
+/// name, and the expression language only exists on the runner. So a
+/// syntactically broken workflow still reaches CI; what cannot reach it is the
+/// timeout going back to a number, or the guard losing sight of either half.
+#[test]
+fn the_soak_workflow_cannot_kill_the_window_it_offers() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.github/workflows/soak.yml");
+    let workflow = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read the soak workflow at {}: {e}", path.display()));
+
+    // Comments carry these words too, and this is a claim about the settings.
+    let value = |key: &str| -> String {
+        workflow
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .find_map(|line| line.strip_prefix(key)?.trim().into())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{key} is not set anywhere in {}, so the timeout and the \
+                     window are no longer being compared before the job starts",
+                    path.display()
+                )
+            })
+    };
+
+    for (key, input) in [
+        // The window and the timeout, each from its own input rather than
+        // pinned. A constant timeout beside an 86400-second window is the
+        // defect this exists for.
+        ("VIGIA_SOAK_SECS:", "inputs.seconds"),
+        ("timeout-minutes:", "inputs.timeout_minutes"),
+        // And both handed to the guard step, which is what makes disagreeing
+        // fail in seconds instead of in hours.
+        ("SOAK_WINDOW:", "inputs.seconds"),
+        ("SOAK_TIMEOUT:", "inputs.timeout_minutes"),
+    ] {
+        let set_to = value(key);
+        assert!(
+            set_to.contains(input),
+            "`{key}` is {set_to:?}, which does not come from `{input}`. The \
+             86400-second window the `seconds` input advertises is only \
+             reachable while both numbers are inputs and the step before the \
+             checkout compares them"
+        );
+    }
+}
+
 mod statistic {
     //! The verdict, tested as the pure function it is.
 
@@ -1330,9 +1524,30 @@ mod statistic {
             .collect()
     }
 
+    /// The interval a full-length run samples at.
+    ///
+    /// 288 samples across 24 hours, which is `SPEC.md`'s "every 5 min" and the
+    /// cadence [`MAX_SAMPLES`] exists to hold. Using the real one means the
+    /// MiB/h figures below are the magnitudes a real report prints rather than
+    /// numbers scaled by whatever a test picked.
+    const SAMPLE: Duration = Duration::from_secs(300);
+
+    /// A bare RSS series against the clock it would have been sampled on.
+    ///
+    /// [`drift`] takes elapsed times because a gradient per *hour* needs them;
+    /// every series below is built as values first because that is the half
+    /// each test is about.
+    fn timed(series: &[u64]) -> Vec<(Duration, u64)> {
+        series
+            .iter()
+            .enumerate()
+            .map(|(at, &rss)| (SAMPLE * at as u32, rss))
+            .collect()
+    }
+
     #[test]
     fn a_flat_series_does_not_drift() {
-        let series = flat(288);
+        let series = timed(&flat(288));
         let drift = drift(&series).expect("288 samples is enough to have a verdict");
         assert!(
             drift.ratio < DRIFT_BUDGET,
@@ -1354,7 +1569,7 @@ mod statistic {
         let series: Vec<u64> = (0..288)
             .map(|at| mb(100.0 * (1.0 + 0.0005 * at as f64)))
             .collect();
-        let drift = drift(&series).expect("288 samples is enough to have a verdict");
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
         assert!(
             drift.ratio > DRIFT_BUDGET,
             "a series that grew 14% over the window reported {:.2}% drift, under \
@@ -1382,7 +1597,7 @@ mod statistic {
             })
             .collect();
 
-        let drift = drift(&series).expect("288 samples is enough to have a verdict");
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
         assert!(
             drift.ratio < DRIFT_BUDGET,
             "a process that reached its plateau in the first 8% of the window \
@@ -1398,7 +1613,7 @@ mod statistic {
     #[test]
     fn a_series_that_gave_memory_back_reports_no_drift_rather_than_a_negative_one() {
         let series: Vec<u64> = (0..288).map(|at| mb(200.0 - 0.2 * at as f64)).collect();
-        let drift = drift(&series).expect("288 samples is enough to have a verdict");
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
         assert_eq!(
             drift.ratio, 0.0,
             "a shrinking series reported {:?}, which is not a drift",
@@ -1412,7 +1627,7 @@ mod statistic {
     #[test]
     fn a_series_too_short_to_have_two_ends_reports_nothing() {
         for len in 0..=(MIN_END * 4) {
-            let series = flat(len);
+            let series = timed(&flat(len));
             assert_eq!(
                 drift(&series),
                 None,
@@ -1421,9 +1636,161 @@ mod statistic {
             );
         }
         assert!(
-            drift(&flat(MIN_END * 4 + 1)).is_some(),
+            drift(&timed(&flat(MIN_END * 4 + 1))).is_some(),
             "the shortest series that does have two ends of {MIN_END} was refused, \
              so the guard rejects series it should answer"
+        );
+    }
+
+    /// The gate's two numbers are the outer two quarters, and they are pinned
+    /// here against the rule rather than against the implementation.
+    ///
+    /// [`Drift::quarters`] carries four now, and the obvious way to cut four
+    /// out of a series — `len * k / 4` — puts the last one's left edge a sample
+    /// earlier on any length that is not a multiple of four. A 288-sample run
+    /// leaves 259 after the warmup, so that is the ordinary case rather than an
+    /// edge. This re-derives the ends from `SPEC.md` §7's rule — discard the
+    /// warmup, take the median of a quarter at each end — and compares.
+    ///
+    /// **The fixture needs an outlier at that boundary, and finding out why
+    /// cost a surviving mutant.** On a plain monotone ramp the two windows
+    /// report the *same* median: widening a 64-sample window to 65 moves the
+    /// nearest rank from index 31 to 32 at the same time as it prepends a
+    /// value, and on sorted data the two shifts cancel exactly. So the first
+    /// version of this test passed against both slicings and proved nothing. A
+    /// single spike just before the boundary breaks the cancellation, and it is
+    /// the honest shape to test: an outlier at the edge is precisely what a
+    /// median is chosen to tolerate, and which window it falls in is the thing
+    /// being decided here.
+    #[test]
+    fn the_gated_ends_are_the_first_and_last_quarter_medians() {
+        // Strictly increasing by a page, so no two samples share a value and a
+        // window that moved by one cannot report the same median by luck.
+        let mut series: Vec<u64> = (0..288).map(|at| mb(60.0) + at as u64 * 4096).collect();
+        // The sample the two slicings disagree about: post-warmup index 194,
+        // which `end * 3 / 4` includes in the last quarter and `end - quarter`
+        // does not.
+        series[223] = mb(500.0);
+
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
+
+        let warm = (series.len() as f64 * WARMUP_FRACTION).ceil() as usize;
+        let rest = &series[warm..];
+        let quarter = rest.len() / 4;
+        assert_eq!(
+            rest.len() % 4,
+            3,
+            "this fixture is meant to be a length the two slicings disagree on, \
+             and {} post-warmup samples divides evenly",
+            rest.len()
+        );
+
+        assert_eq!(
+            drift.quarters[0],
+            median(&rest[..quarter]).expect("a quarter of 259 samples"),
+            "the first quarter's median is not the baseline the gate compares from"
+        );
+        assert_eq!(
+            drift.quarters[3],
+            median(&rest[rest.len() - quarter..]).expect("a quarter of 259 samples"),
+            "the last quarter's median is not the settled figure the gate \
+             compares to, so adding the middle pair moved the number I3 gates on"
+        );
+        assert_eq!(
+            (drift.baseline(), drift.settled()),
+            (drift.quarters[0], drift.quarters[3]),
+            "the accessors and the array disagree, so the report and the gate \
+             can print different numbers for the same run"
+        );
+    }
+
+    /// The gradient, in the units the report prints and against a series whose
+    /// answer is known by construction.
+    ///
+    /// **Magnitude rather than sign**, because the question it exists to settle
+    /// is a magnitude: `SPEC.md` §10 has one hour of this code at +0.92 MiB/h
+    /// and fifteen minutes of it at −0.70, and a statistic that only got the
+    /// direction right could not tell either of those from the +81.3 an
+    /// injected leak produced.
+    #[test]
+    fn a_known_linear_climb_reports_its_slope_in_mib_per_hour() {
+        const RATE: f64 = 2.0;
+        let series: Vec<u64> = (0..288)
+            .map(|at| {
+                let hours = (SAMPLE * at as u32).as_secs_f64() / 3600.0;
+                mb(100.0 + RATE * hours)
+            })
+            .collect();
+
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
+        assert!(
+            (drift.slope - RATE).abs() < 0.01,
+            "a series climbing exactly {RATE:.2} MiB/h was reported at \
+             {:+.4} MiB/h, and the disagreement this statistic exists to settle \
+             is 1.62 MiB/h wide",
+            drift.slope
+        );
+    }
+
+    /// The sign the ratio deliberately throws away is the one the gradient has
+    /// to keep, and both halves are asserted in one place so the asymmetry is a
+    /// gate rather than a comment.
+    #[test]
+    fn a_series_that_gave_memory_back_reports_a_negative_slope_where_the_ratio_reports_zero() {
+        let series: Vec<u64> = (0..288).map(|at| mb(200.0 - 0.2 * at as f64)).collect();
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
+
+        assert_eq!(
+            drift.ratio, 0.0,
+            "a shrinking series reported {drift:?}, and the gate's ratio is \
+             clamped so that a process giving memory back cannot pass for the \
+             wrong reason"
+        );
+        assert!(
+            drift.slope < 0.0,
+            "the same shrinking series reported {:+.2} MiB/h, so the gradient is \
+             clamped too and `SPEC.md` §10's −0.70 could never have been stated",
+            drift.slope
+        );
+    }
+
+    /// A statistic that cannot report "no trend" has not been tested, which is
+    /// the same rule `SPEC.md` §7 applies to the drift gate itself.
+    #[test]
+    fn a_flat_series_reports_a_slope_of_about_zero() {
+        let drift = drift(&timed(&flat(288))).expect("288 samples is enough to have a verdict");
+        assert!(
+            drift.slope.abs() < 0.05,
+            "a series jittering by a page around a constant reported \
+             {:+.2} MiB/h, which is a fifteenth of the residual §10 could not \
+             call, so the instrument's own noise would swamp the answer",
+            drift.slope
+        );
+    }
+
+    /// The shape two endpoints round off.
+    ///
+    /// `SPEC.md` §10's hour reported 2.18% drift, comfortably inside a 5%
+    /// budget, and the thing that made it a question at all was that its four
+    /// quarter medians rose monotonically. A run reporting only the ends is
+    /// indistinguishable from one that stepped once and went flat.
+    #[test]
+    fn the_quarter_medians_show_a_climb_that_the_two_ends_alone_round_off() {
+        let series: Vec<u64> = (0..288).map(|at| mb(25.5 + 0.0025 * at as f64)).collect();
+        let drift = drift(&timed(&series)).expect("288 samples is enough to have a verdict");
+
+        assert!(
+            drift.ratio < DRIFT_BUDGET,
+            "this fixture is meant to pass the gate and still be a trend, and it \
+             reported {:.2}% against a {:.0}% budget",
+            drift.ratio * 100.0,
+            DRIFT_BUDGET * 100.0
+        );
+        assert!(
+            drift.quarters.windows(2).all(|pair| pair[0] < pair[1]),
+            "a monotonically climbing series reported quarters {:?}, so the \
+             middle pair is not being measured where the ends are",
+            drift.quarters
         );
     }
 }

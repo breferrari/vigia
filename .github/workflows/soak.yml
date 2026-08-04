@@ -16,8 +16,26 @@ on:
       seconds:
         description: >-
           Soak window in seconds. A GitHub-hosted job is terminated at six
-          hours, so 86400 only works on a runner without that cap.
+          hours, so 86400 needs `runner` set to one without that cap. Locally
+          it needs no runner at all: VIGIA_SOAK_SECS=86400 VIGIA_SOAK_FILES=100
+          VIGIA_SOAK_LINES=500 cargo test --release --test soak -- --nocapture
         default: "14400"
+      timeout_minutes:
+        description: >-
+          Job timeout in minutes, which must outlast `seconds` plus the build.
+          330 is the four-hour default window plus ninety minutes. The first
+          step below refuses in seconds when the two cannot both be true, which
+          is the whole reason this is an input rather than a constant: pinned at
+          330 it killed the 86400-second window the field above offers, at 5.5
+          hours, on an uncapped runner exactly as on a hosted one.
+        default: "330"
+      runner:
+        description: >-
+          One runner label to soak on, replacing the platform matrix. Empty
+          keeps the matrix. One label rather than a list, because the matrix
+          runs one job per entry and a two-label list would start two jobs on
+          the wrong runners: give a self-hosted runner a unique label instead.
+        default: ""
       files:
         description: "Fixture files."
         default: "100"
@@ -36,20 +54,68 @@ jobs:
   soak:
     name: soak (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Four hours plus the build, under the six-hour cap, so this timeout is the
-    # one that fires and says which run ran long rather than the platform's.
-    timeout-minutes: 330
+    # The window plus headroom for checkout, build and fixture, so this timeout
+    # is the one that fires and says which run ran long rather than the
+    # platform's. The default is 330, which is what it was pinned at before, so
+    # the scheduled runs are unchanged.
+    #
+    # **An input paired with a guard, rather than derived from `seconds`.**
+    # Pinned at 330 this killed the 86400-second window the `seconds` input
+    # advertises, at 5.5 hours, on an uncapped runner exactly as on a capped
+    # one, with nothing to say so but a run that had already burned 5.5 hours.
+    # Deriving it is the obvious repair and **the expression language cannot**:
+    # `${{ fromJSON(inputs.seconds) / 60 + 90 }}` is rejected at parse time with
+    # `Unexpected symbol: '/'`, which fails the whole file rather than the one
+    # field, so the daily soak would have stopped running. Arithmetic is absent
+    # from the documented operator list and absent from the implementation too;
+    # this was established by dispatching it, not by reading.
+    #
+    # So the two numbers stay independent and the first step below refuses when
+    # they disagree, in seconds instead of in hours. Gated by
+    # `crates/vigia/tests/soak.rs::the_soak_workflow_cannot_kill_the_window_it_offers`.
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '330') }}
     strategy:
       fail-fast: false
       matrix:
         # A job-level `if` cannot see `matrix`, so the daily and weekly runs
         # differ by building the matrix itself. Anything that is not the daily
         # cron - the weekly one, and every manual dispatch - gets all three.
+        #
+        # `runner` replaces the whole matrix when it is set, which is the only
+        # way I3's 24-hour window can be reached in CI: every hosted label is
+        # terminated at six hours whatever this file asks for.
         os: >-
-          ${{ fromJSON(github.event.schedule == '41 3 * * *'
+          ${{ fromJSON(inputs.runner && format('["{0}"]', inputs.runner)
+          || (github.event.schedule == '41 3 * * *'
           && '["ubuntu-latest"]'
-          || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+          || '["ubuntu-latest", "macos-latest", "windows-latest"]')) }}
     steps:
+      # First, and before the checkout, because its whole value is being cheap:
+      # the failure it replaces is the job being killed with the window most of
+      # the way through, and the answer was knowable at second zero.
+      #
+      # Through `env` rather than interpolated into the script, so a dispatch
+      # input is data the shell reads and never source it executes.
+      - name: the timeout must outlast the window
+        shell: bash
+        env:
+          SOAK_WINDOW: ${{ inputs.seconds || '14400' }}
+          SOAK_TIMEOUT: ${{ inputs.timeout_minutes || '330' }}
+        run: |
+          set -euo pipefail
+          case "$SOAK_WINDOW$SOAK_TIMEOUT" in
+            *[!0-9]*) echo "::error::window '$SOAK_WINDOW' and timeout '$SOAK_TIMEOUT' must both be whole numbers" >&2; exit 1 ;;
+          esac
+          headroom=$(( SOAK_TIMEOUT * 60 - SOAK_WINDOW ))
+          # Half an hour is the floor rather than the recommendation: a cold
+          # release build of this workspace plus the fixture is what has to fit,
+          # and the 330 default leaves ninety minutes for it.
+          if [ "$headroom" -lt 1800 ]; then
+            echo "::error::a ${SOAK_WINDOW}s window under a ${SOAK_TIMEOUT}min timeout leaves ${headroom}s for checkout, build and fixture, and the job would be killed with the soak still running" >&2
+            exit 1
+          fi
+          echo "${SOAK_WINDOW}s window under a ${SOAK_TIMEOUT}min timeout leaves ${headroom}s of headroom"
+
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
