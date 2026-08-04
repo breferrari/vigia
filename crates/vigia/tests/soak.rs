@@ -1638,14 +1638,38 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
     // soak's `timeout-minutes` with the plan job's `5` leaves both settings
     // present, the file scan green, and the daily soak killed after five
     // minutes. Which job carries which number is the entire claim.
-    for (job, block) in workflow_jobs(&source) {
-        let soaks = block.contains("needs: plan");
-        let timeouts = workflow_settings(&block, "timeout-minutes:");
+    // **An empty split passes a `for` loop, so the split is asserted first.**
+    // Round one's version scanned the whole file and could not go vacuous,
+    // because an empty list failed its `any`. Per-job resolution traded that
+    // away: a `jobs:` line with a trailing space, or a comment after it, or
+    // CRLF endings, and this finds nothing and asserts nothing. `plan_script`
+    // already sets the precedent by checking its own extraction landed.
+    let jobs = workflow_jobs(&source);
+    assert!(
+        !jobs.is_empty(),
+        "no jobs were found in {}, so everything below this line would pass \
+         without asserting anything",
+        path.display()
+    );
+
+    let mut soaking = 0;
+    for (job, block) in &jobs {
+        // Through the setting scan rather than `contains`, which would take
+        // the words out of a comment: a comment mentioning `needs: plan` in
+        // the plan job made this call that job the soak and fail accusing it.
+        let soaks = workflow_settings(block, "needs:")
+            .iter()
+            .any(|needs| needs == "plan");
+        soaking += usize::from(soaks);
+        let timeouts = workflow_settings(block, "timeout-minutes:");
         assert_eq!(
             timeouts.len(),
             1,
-            "job `{job}` in {} declares {} timeouts; one job, one timeout, or \
-             the one that fires is whichever the runner read first",
+            "job `{job}` in {} declares {} timeouts. None is worse than two \
+             here: a job with no `timeout-minutes` inherits GitHub's own 360 \
+             minutes, which is a pinned number nobody wrote down and is this \
+             issue exactly. Two, and the one that fires is whichever the \
+             runner read first",
             path.display(),
             timeouts.len()
         );
@@ -1664,14 +1688,25 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
                  86400-second dispatch the `seconds` input advertises at 5.5 \
                  hours"
             );
-            assert!(
-                workflow_settings(&block, "VIGIA_SOAK_SECS:")
-                    .iter()
-                    .any(|window| window.starts_with("${{")
-                        && window.contains("needs.plan.outputs.seconds")),
-                "job `{job}` reads the planned timeout but not the planned \
-                 window, so the two describe different numbers again"
-            );
+            // Every planned number, not only the timeout. The platform list is
+            // the third, and it is the one the `runner` input travels through:
+            // pinning `os:` back to a literal matrix leaves that input inert
+            // while the file stays valid and every other assertion here holds,
+            // and an inert `runner` is the one thing standing between this
+            // repository and I3's twenty-four hours.
+            for (key, output) in [
+                ("VIGIA_SOAK_SECS:", "needs.plan.outputs.seconds"),
+                ("os:", "needs.plan.outputs.os"),
+            ] {
+                assert!(
+                    workflow_settings(block, key)
+                        .iter()
+                        .any(|set_to| set_to.starts_with("${{") && set_to.contains(output)),
+                    "job `{job}` reads the planned timeout but its `{key}` does \
+                     not come from `{output}`, so the plan job and the job that \
+                     soaks have stopped describing the same run"
+                );
+            }
         } else {
             // Everything else may pin a literal, provided it is short enough
             // that it could not be holding a soak window.
@@ -1691,6 +1726,19 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
             );
         }
     }
+
+    // And exactly one job soaked, so the branch carrying every assertion above
+    // was actually taken. Without this, renaming `needs: plan` sends every job
+    // down the literal branch and the file passes as a workflow that soaks
+    // nothing.
+    assert_eq!(
+        soaking,
+        1,
+        "{soaking} of the {} jobs in {} declare `needs: plan`; the assertions \
+         above describe exactly one job that soaks",
+        jobs.len(),
+        path.display()
+    );
 }
 
 /// The plan job's shell script, taken out of the workflow by indentation.
@@ -1734,11 +1782,16 @@ struct Planned {
 /// first leaked one per run on any machine without `bash`, in the one file
 /// whose headline invariant is that nothing is retained.
 fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
+    // A counter rather than anything derived from the inputs: two labels of the
+    // same length would otherwise share a directory, and two of the hostile
+    // ones below are both thirteen characters.
+    static RUN: AtomicU64 = AtomicU64::new(0);
     let scratch = std::env::temp_dir().join(format!(
-        "vigia-plan-{}-{seconds}-{}",
+        "vigia-plan-{}-{}",
         std::process::id(),
-        runner.len()
+        RUN.fetch_add(1, Ordering::Relaxed)
     ));
+
     let out = scratch.join("output");
 
     let mut command = Command::new("bash");
@@ -1829,11 +1882,9 @@ fn a_runner_label_cannot_corrupt_the_plan_job_output() {
 
     // And every shape that could write outside its own value is refused, out
     // loud, before anything is emitted.
-    for hostile in ["ubuntu-latest\nx=y", "ubuntu\"], [\"x", "a b", ""] {
-        if hostile.is_empty() {
-            continue;
-        }
+    for hostile in ["ubuntu-latest\nx=y", "ubuntu\"], [\"x", "a b"] {
         let Some(bad) = run_plan(&script, "600", hostile) else {
+            no_bash("the plan job's refusal of a hostile runner label");
             return;
         };
         assert!(
@@ -2174,40 +2225,37 @@ mod statistic {
     /// A documented decision with nothing that fails when it is violated is
     /// what `CLAUDE.md` calls a wish.
     ///
-    /// **The spikes here are carried for symmetry, not because they are
-    /// load-bearing**, and the difference is worth stating in the one module
-    /// whose docs exist to record which fixtures carry weight. The ends need an
-    /// outlier because both of their edges move together: widening the last
-    /// quarter from 64 samples to 65 prepends a value *and* advances the
-    /// nearest rank, and on sorted data those cancel exactly. Each middle
-    /// window moves at only **one** edge, so there is nothing to cancel and a
-    /// plain ramp already separates the two slicings.
+    /// **A plain ramp is the right fixture here, and adding an outlier made
+    /// half of this test vacuous.** The ends need one because both of their
+    /// edges move together: widening the last quarter from 64 samples to 65
+    /// prepends a value *and* advances the nearest rank, and on sorted data
+    /// those cancel exactly. Each middle window moves at only **one** edge, so
+    /// there is nothing to cancel and a ramp separates the two slicings on its
+    /// own. A spike added here for symmetry landed inside the naive third
+    /// quarter and shifted its rank by exactly the sample the two windows
+    /// differ by, making `quarters[2]` identical under both and leaving one
+    /// live assertion where the doc claimed two.
     #[test]
     fn the_middle_quarters_are_measured_inward_from_the_ends() {
-        let mut series: Vec<u64> = (0..288).map(|at| mb(60.0) + at as u64 * 4096).collect();
+        // Strictly increasing by a page. No outlier: see above.
+        let series: Vec<u64> = (0..288).map(|at| mb(60.0) + at as u64 * 4096).collect();
         let warm = (series.len() as f64 * WARMUP_FRACTION).ceil() as usize;
         // **The same guard the ends test carries, and for a sharper reason.**
         // Where the post-warmup length divides by four, the inward cut and the
         // `end * k / 4` cut are the *same four windows*, so this test would
         // pass against the slicing it exists to reject. A change to
         // `WARMUP_FRACTION` or to the fixture length is all it would take.
+        let remainder = (series.len() - warm) % 4;
         assert_eq!(
-            (series.len() - warm) % 4,
+            remainder,
             3,
-            "this fixture leaves {} post-warmup samples, which divides by four, \
-             and the two slicings this test tells apart are identical there",
+            "this fixture leaves {} post-warmup samples, a remainder of \
+             {remainder}, and at a remainder of zero the two slicings this test \
+             tells apart are the same four windows",
             series.len() - warm
         );
-        // Derived rather than written as 29: the spikes have to land on the
-        // boundaries the slicings disagree about, and those move with the
-        // warmup. `quarter * 2` is the sample `[q..2q)` excludes and
-        // `[end/4..end/2)` includes; the other is just below the third
-        // quarter's left edge.
-        let quarter = (series.len() - warm) / 4;
-        let end = series.len() - warm;
-        series[warm + quarter * 2] = mb(500.0);
-        series[warm + end - quarter * 2 - 1] = mb(900.0);
 
+        let quarter = (series.len() - warm) / 4;
         let drift = verdict(&series);
         let rest = &series[warm..];
 
@@ -2218,6 +2266,7 @@ mod statistic {
              start, so the four are being cut at `end * k / 4` and the rule \
              `Drift::quarters` documents is not the rule running"
         );
+        let end = rest.len();
         assert_eq!(
             drift.quarters[2],
             median(&rest[end - quarter * 2..end - quarter]).expect("a quarter of the samples"),
