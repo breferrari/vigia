@@ -113,6 +113,37 @@ A regression past any budget **fails the build.**
 > `reads.rs::a_height_taken_from_a_diff_in_hand_costs_no_stat` is the structural
 > gate that keeps that order.
 >
+> **The three options #101 listed were all rejected, and the reason is the same
+> for all three: they were written against 93ms and the number is 12ms.** They
+> are recorded here rather than in the issue because the next person to find this
+> walk expensive will reach for them again.
+>
+> *Parallelise the walk.* It buys the read back and nothing else, so against a
+> 9x reduction already taken it is buying a second time. It costs a thread pool
+> or a hand-rolled scope on **every tick**, and I3 is a claim about a process
+> left open for days: a monitor that wakes several cores each time an agent saves
+> a file is a different product from the one §2 describes, whatever its p99 says.
+> Rejected on the product class first and the arithmetic second.
+>
+> *Stream the first paint.* It addresses a first-frame cost, and the first frame
+> is 14.9ms against I4's 100ms; there is nothing left here to stream away. It
+> also needs a wake on completion, which is a question about what I1 forbids, and
+> reopening that to buy nothing is the wrong trade. It stays where §10 already
+> keeps it, with the non-streaming walk in
+> [#48](https://github.com/breferrari/vigia/issues/48).
+>
+> *Approximate the total.* Refused outright, and #101 listed it to be refused
+> explicitly rather than forgotten. It is the design the narrowing above replaced:
+> a bar scaled from the current file's height vanished on a short file, ballooned
+> on a long one and never reached the bottom. It is the only one of the three that
+> costs a reader something, which makes it the one to keep saying no to.
+>
+> **What was taken instead is none of the three, and that is the finding.** The
+> walk did not need to be faster; it needed to stop repeating itself, which is
+> what I2a says about diffs and what nothing had yet said about heights. A cost
+> measured once and then re-derived every tick reads as an expensive computation
+> and is a missing cache.
+>
 > **What this does not fix**, so the boundary is a decision and not an oversight:
 > the height of a file whose diff *is* in hand is still taken by presence rather
 > than by proof, which is [#84](https://github.com/breferrari/vigia/issues/84).
