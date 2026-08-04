@@ -289,13 +289,20 @@ fn drift(samples: &[(Duration, u64)]) -> Option<Drift> {
 ///
 /// Least squares rather than first-against-last for the reason the medians
 /// exist: RSS jitters by a page between samples, and a fit uses all of them.
-/// Zero when there is nothing to fit through — one sample, or every sample at
-/// the same instant — because a division by a zero variance is an infinity that
-/// would read as a catastrophic leak.
+///
+/// **Zero when there is no line to fit** — no samples, one sample, or every
+/// sample at the same instant — because dividing by a zero variance gives an
+/// infinity that reads as a catastrophic leak. One guard covers all three, and
+/// it is the one below rather than a length check in front: with fewer than two
+/// samples the loop contributes nothing and `variance` is still zero, so a
+/// leading `samples.len() < 2` was a branch no mutation could kill. Verified by
+/// deleting it and watching the suite stay green, which is what
+/// [`statistic::a_series_with_nothing_to_fit_through_reports_no_gradient`] then
+/// had to be able to say about the survivor.
+///
+/// The empty case does compute `0.0 / 0.0` for the means. That `NaN` is never
+/// read: the loop does not run, so the return below is reached first.
 fn mib_per_hour(samples: &[(Duration, u64)]) -> f64 {
-    if samples.len() < 2 {
-        return 0.0;
-    }
     let count = samples.len() as f64;
     let mean_at = samples.iter().map(|(at, _)| at.as_secs_f64()).sum::<f64>() / count;
     let mean_rss = samples.iter().map(|&(_, rss)| rss as f64).sum::<f64>() / count;
@@ -1611,6 +1618,13 @@ mod statistic {
     /// The climb is over inside the first 8% of the window, so the warmup
     /// swallows it whole. This is the case that decides `WARMUP_FRACTION`: with
     /// no warmup at all, the same series drifts by 140%.
+    ///
+    /// **It is also the only fixture here that can tell where the gradient was
+    /// fitted**, and it did not always assert on one. Every other series in
+    /// this module is linear from end to end, so fitting through the warmup
+    /// and fitting past it give the same answer and a mutation swapping one
+    /// for the other survived them all. This one is a step followed by a
+    /// plateau: past the warmup it is flat, through it, steeply positive.
     #[test]
     fn growth_that_stops_inside_the_warmup_is_not_drift() {
         let climb = 288 * 8 / 100;
@@ -1631,6 +1645,13 @@ mod statistic {
              reported {:.2}% drift, so every soak fails for a reason that is not \
              a leak",
             drift.ratio * 100.0
+        );
+        assert!(
+            drift.slope.abs() < 0.05,
+            "the same plateau reported {:+.2} MiB/h, so the gradient was fitted \
+             through the warmup climb the medians discard and the report would \
+             call an allocator filling up a trend",
+            drift.slope
         );
     }
 
