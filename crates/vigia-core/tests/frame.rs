@@ -13,7 +13,7 @@
 
 mod support;
 
-use support::{Scratch, delta, materialise, settle};
+use support::{Scratch, delta, materialise, settle, settle_spans};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
 /// Small enough to reason about every count, more than one so "all" and "the
@@ -372,9 +372,10 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
     let mut frame = worktree.frame();
 
     // Settle without materialising: every span comes from a read, no file has a
-    // diff. `settle` would defeat this by diffing everything.
-    std::thread::sleep(std::time::Duration::from_millis(2_500));
-    frame.advance().expect("advance");
+    // diff. `settle` would defeat this by diffing everything. The shared helper
+    // rather than a sleep of its own, because the wait has to exceed the
+    // engine's `SETTLE_MARGIN` and a literal here would not move when that does.
+    let primed = settle_spans(&mut frame);
     let before = total_height(&mut frame);
     assert_eq!(
         frame.tracked(),
@@ -383,6 +384,29 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
          this test is not about a carried span at all",
         frame.tracked()
     );
+
+    // **The premise this test is named for, and without it the whole thing is
+    // vacuous.** Every assertion below is about a span that was *carried*, and a
+    // frame that carries nothing satisfies all of them: it re-measures, gets the
+    // right answer, and looks identical from the outside. So prove a carry
+    // happened first. An idle tick over files nothing touched must measure
+    // nothing, which it can only do by trusting what it kept.
+    assert_eq!(
+        primed, FILES as u64,
+        "priming measured {primed} of {FILES} files, so there was no walk here \
+         to carry anything across"
+    );
+    let idle = frame.stats();
+    frame.advance().expect("advance");
+    let unchanged = total_height(&mut frame);
+    let idle = delta(idle, frame.stats());
+    assert_eq!(
+        idle.measured, 0,
+        "an idle tick re-measured {} files, so no span is being carried and the \
+         assertions below cannot tell a carry from a re-read",
+        idle.measured
+    );
+    assert_eq!(unchanged, before, "an idle tick changed the diff's height");
 
     // Twice as many lines in a file the viewport never reached.
     scratch.rewrite_all(FILES, LINES * 2, 3);
@@ -404,6 +428,148 @@ fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
         after, truth,
         "the frame reports a {after}-row diff where a frame with no memory \
          computes {truth}, so a carried span is being trusted past its file"
+    );
+}
+
+#[test]
+fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
+    // **The order of `fill_span`'s three sources, held structurally.** A file
+    // whose diff the frame already holds needs no evidence: its height is a fold
+    // over hunks the frame owns, which is free and is what this cost before
+    // [#101](https://github.com/breferrari/vigia/issues/101) existed. Asking for
+    // a fingerprint first reads as "cheapest first" and is a syscall bought for
+    // nothing.
+    //
+    // **Written because the wrong order shipped and the wall clock nearly let it
+    // through.** With the stat first,
+    // `budgets.rs::the_frame_budget_holds_through_a_bulk_rewrite` went from
+    // 8.27ms p50 to 11.12ms and from passing 4 of 4 local runs to 2 of 4: a
+    // flake, which is the failure mode a percentile gate reports least clearly
+    // and which a hosted runner would have blamed on itself. A count cannot be
+    // flaky.
+    //
+    // The bulk rewrite is the shape that makes it visible: every print moves at
+    // once, so every carried span mismatches, and the mismatch repeats on every
+    // later frame because the span is rebuilt from the same stale diff each time.
+    //
+    // **In this crate rather than in the shell's `reads.rs`**, where it was first
+    // written. It touches no `App`, no `Highlighter`, no viewport and no paint,
+    // and its assertions are core counters over a core-private ordering. A gate
+    // that pins a `vigia-core` function has to be able to fail in
+    // `cargo test -p vigia-core`, or the crate can be reordered green. Its
+    // sibling `reads.rs::a_tick_re_measures_only_what_changed` stays there
+    // because it genuinely needs a drawn screen to make the drawn/undrawn split.
+    const REWRITTEN: usize = FILES;
+    let scratch = Scratch::large_diff("frame-inhand", REWRITTEN, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(
+        frame.tracked(),
+        REWRITTEN,
+        "settle left {} diffs for {REWRITTEN} files, so this fixture is not the \
+         diff-in-hand case at all",
+        frame.tracked()
+    );
+
+    // Every print moves, and no diff is recomputed: the frame is asked for the
+    // height and nothing else.
+    scratch.rewrite_all(REWRITTEN, LINES, 9);
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let first = delta(before, frame.stats());
+
+    // And again, so a per-tick proof cannot be mistaken for a per-frame one.
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let second = delta(before, frame.stats());
+
+    for (label, cost) in [("the tick after the rewrite", first), ("the next", second)] {
+        assert_eq!(
+            cost.probes, 0,
+            "{label} took {} stat calls to total the height of {REWRITTEN} files \
+             the frame already holds diffs for, so the walk is proving what it \
+             could have read for free",
+            cost.probes
+        );
+        assert_eq!(
+            cost.measured, 0,
+            "{label} measured {} files that were already in hand",
+            cost.measured
+        );
+    }
+}
+
+#[test]
+fn a_failed_measure_is_asked_again_rather_than_carried() {
+    // **The narrowest arm in `fill_span`, and the one where carrying is
+    // wrong.** A read that failed describes nothing, so its span is zero. Zero is
+    // the right answer for *this* tick — a file that vanished has no height — and
+    // the wrong thing to inherit.
+    //
+    // The hazard is specific to a change with **no working-tree side**. For every
+    // other kind the evidence refuses itself: `reusable` treats a missing
+    // fingerprint as unprovable. A `Removed` diff is computed from the index
+    // alone, so `reusable` answers on the kind and the blob and returns **true**,
+    // and a zero row-count would then be pinned for the life of the frame with no
+    // retry. `Measured::taken` is `None` on this path precisely to stop that.
+    //
+    // Reaching it needs an object the repository cannot read, which is
+    // `Error::MissingBlob`: legitimate during a `git gc` or over a partial clone,
+    // and reproducible here by deleting the loose object a removed file's index
+    // entry points at.
+    let scratch = Scratch::new("frame-failed-measure");
+    scratch.write(FIRST, support::numbered_lines(40));
+    scratch.write(SECOND, support::numbered_lines(40));
+    scratch.commit_all("base");
+
+    let blob = scratch.git(&["rev-parse", &format!("HEAD:{FIRST}")]);
+    let blob = blob.trim();
+    scratch.remove(FIRST);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let whole = total_height(&mut frame);
+    assert!(
+        whole > 0,
+        "the removed file contributes no rows even with its blob present, so \
+         this fixture cannot show the difference"
+    );
+
+    // Break it, and prove the premise: the walk now reports less.
+    let loose = scratch
+        .root()
+        .join(".git/objects")
+        .join(&blob[..2])
+        .join(&blob[2..]);
+    std::fs::remove_file(&loose).expect("delete the loose object");
+    let mut broken_frame = worktree.frame();
+    broken_frame.advance().expect("advance");
+    let broken = total_height(&mut broken_frame);
+    assert!(
+        broken < whole,
+        "deleting the blob changed nothing about the height ({broken} against \
+         {whole}), so the read did not fail and this test proves nothing"
+    );
+
+    // Now put the object back, exactly as a finished `git gc` or a filled-in
+    // partial clone would, and tick. A frame that carried the failure reports the
+    // broken height forever; one that asks again reports the whole diff.
+    scratch.write(FIRST, support::numbered_lines(40));
+    scratch.git(&["hash-object", "-w", "--", FIRST]);
+    scratch.remove(FIRST);
+    assert!(loose.exists(), "the loose object was not restored");
+
+    broken_frame.advance().expect("advance");
+    let after = total_height(&mut broken_frame);
+    assert_eq!(
+        after, whole,
+        "the blob is readable again and the frame still reports {after} of \
+         {whole} rows, so a failed measure was carried instead of retried"
     );
 }
 

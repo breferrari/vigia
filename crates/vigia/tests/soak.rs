@@ -1032,6 +1032,19 @@ impl Report {
              than the viewport"
         );
 
+        // **And the span bound above cannot be satisfied by an empty map.**
+        // `tracked_spans <= files` holds trivially against a frame that keeps no
+        // span at all, which is precisely what the pre-#101 code did: it cleared
+        // the map on every tick. A bound is only evidence when something reached
+        // it, which is the rule I10's own gate is written against one cache over.
+        assert!(
+            self.max_tracked_spans() > 0,
+            "I3: no sample held a single height across {} frames, so the span \
+             cache is being dropped rather than bounded and the bound above says \
+             nothing",
+            self.frames
+        );
+
         assert!(
             self.frame.evicted > 0 && self.highlight.evicted > 0,
             "I3: {} diffs and {} hunk parses were evicted, so nothing ever left \

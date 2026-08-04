@@ -103,15 +103,31 @@ A regression past any budget **fails the build.**
 > and the ratio runs 6.8x at 2000 files to 10x at 100. The tick above becomes
 > **9.40ms p50, 10.67ms p99**, with zero files measured across a hundred ticks.
 >
-> **Two costs, both stated rather than buried.** First paint pays one extra
+> **Three costs, all stated rather than buried.** First paint pays one extra
 > `stat` per changed file, since a span is only carryable if it was fingerprinted
 > when it was taken: **13.4-13.8ms before, 14.6-14.9ms after**, against I7's 50ms
-> and I4's 100ms. And the order of the sources matters more than it looks: a file
+> and I4's 100ms. The order of the sources matters more than it looks: a file
 > whose diff is already in hand needs no evidence at all, and asking for one
 > first took `the_frame_budget_holds_through_a_bulk_rewrite` from 8.27ms p50 to
 > 11.12ms and from passing four local runs of four to two.
-> `reads.rs::a_height_taken_from_a_diff_in_hand_costs_no_stat` is the structural
-> gate that keeps that order.
+> `a_height_taken_from_a_diff_in_hand_costs_no_stat` is the structural gate that
+> keeps that order.
+>
+> And the walk is incremental **outside** the settle margin and not inside it. A
+> bulk rewrite of files nothing has drawn leaves every carried span unsettled at
+> once, so none can be proved and the walk re-measures the whole changed set for
+> the two seconds the margin lasts. That is the pre-#101 cost, paid for a bounded
+> window rather than forever, plus one `stat` per file for the fingerprint that
+> will make the span carryable again once the margin passes. Measured over a
+> hundred undrawn files rewritten at once: **13.07ms p50, 14.31ms p99, 16.29ms
+> max**, against 16ms, so it holds without much room. An agent running a
+> formatter is exactly this workload, so it gets its own gate rather than a note:
+> `a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`.
+>
+> The **lazy** fingerprint is what keeps that corner at one `stat` per file
+> rather than two. `reusable` refuses an unsettled observation before it asks for
+> a fresh print, so the pre-check costs nothing there; taken eagerly it doubled
+> the syscalls in exactly the window that can least afford them.
 >
 > **The three options #101 listed were all rejected, and the reason is the same
 > for all three: they were written against 93ms and the number is 12ms.** They

@@ -44,6 +44,17 @@
 //!
 //! Content is never hashed to make this decision. Hashing is the read I2a
 //! exists to avoid.
+//!
+//! **The same three things decide a second artefact, and that is why the rule
+//! reads as [`reusable`] over a [`Taken`] rather than as a rule about diffs.**
+//! A [`FileSpan`] is a projection of the same two sides of the same file, so
+//! nothing can invalidate one without invalidating the other. Since
+//! [#101](https://github.com/breferrari/vigia/issues/101) the frame carries a
+//! span per **changed** file where it carries a diff per **drawn** one, and both
+//! are proved by these lines: without that, the height walk re-read every
+//! undrawn file on every tick, which is 94 files and 3.7 MiB over a hundred-file
+//! worktree and 18.36ms p99 against I9's 16ms. `SPEC.md` §3's I4 notes carry the
+//! numbers.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -88,9 +99,23 @@ pub struct FrameStats {
     pub bytes: u64,
     /// `stat` calls made, either to record a fingerprint or to check one.
     ///
-    /// One per file visited, and one more for each diff recomputed, which has to
-    /// be re-fingerprinted afterwards. The shape is the point: a reuse costs a
-    /// `stat`, never a read.
+    /// The shape is the point: a reuse costs a `stat`, never a read.
+    ///
+    /// **It totals two different populations, and a gate has to know which it is
+    /// bounding.** [`Frame::diff`] probes once per file a caller asked to draw,
+    /// plus once more for each diff it recomputed. Since
+    /// [#101](https://github.com/breferrari/vigia/issues/101),
+    /// [`Frame::height`] probes once per changed file whose span was carried and
+    /// is worth proving, which follows the **whole changed set** and not the
+    /// window. So `probes` is the sum of a window-sized term and a
+    /// worktree-sized one, exactly as [`Self::bytes`] is: a fixture that mixes
+    /// the two cannot express a bound on either, and the gates that assert on
+    /// this number pick a fixture where one of the two is zero
+    /// (`reads.rs::a_height_taken_from_a_diff_in_hand_costs_no_stat` is the
+    /// clearest, asserting **no** probe at all over a fully-diffed worktree).
+    /// Splitting it is the same open question
+    /// [#85](https://github.com/breferrari/vigia/issues/85) already holds for
+    /// `bytes`, one counter over.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     ///
@@ -155,6 +180,18 @@ struct Observed {
 /// the shell recomputes about one file a frame through a bulk rewrite rather than
 /// a hundred. Both tiers of `crates/vigia/tests` gate that, measuring *inside*
 /// this margin rather than after it. `SPEC.md` §10 holds the numbers.
+///
+/// **One thing this margin bounds is not window-sized, and it arrived with
+/// [#101](https://github.com/breferrari/vigia/issues/101).** [`Frame::height`]
+/// walks every changed file, so a bulk rewrite of files nothing has drawn leaves
+/// every carried span unsettled at once and the walk re-measures the whole
+/// changed set for the length of this margin. Measured over a hundred of them:
+/// **13.07ms p50, 14.31ms p99** against I9's 16ms, at 95 measures and 102 stats
+/// a tick. The lazy fingerprint in [`Frame::fill_span`] is what holds it to one
+/// `stat` per file rather than two, since an unsettled observation is refused
+/// before a fresh print is asked for.
+/// `crates/vigia/tests/budgets.rs::a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`
+/// is the gate at that intersection, and it is the tightest budget in the repo.
 const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
@@ -197,6 +234,38 @@ struct Taken {
     worktree: Option<Observed>,
 }
 
+impl Taken {
+    /// The evidence a change carries, plus what a read observed of its
+    /// working-tree side.
+    ///
+    /// A constructor rather than three field literals, because
+    /// [#16](https://github.com/breferrari/vigia/issues/16) adds a field here
+    /// and the literals differ only in their `worktree` argument: nothing would
+    /// tell you which of them you had missed.
+    fn of(change: &FileChange, worktree: Option<Observed>) -> Self {
+        Self {
+            kind: change.kind.clone(),
+            index_blob: change.index_blob,
+            worktree,
+        }
+    }
+}
+
+/// Store `measured` under `path`, keeping the key the map already owns.
+///
+/// `HashMap::insert` keeps the existing key and drops the one handed to it, so
+/// the obvious `insert(path.clone(), …)` allocates a `String` per call and frees
+/// it again on the common path, where [`Frame::advance`] has already migrated an
+/// entry for every changed file. Only a genuine miss needs a new key.
+fn put(spans: &mut HashMap<String, Measured>, path: &str, measured: Measured) {
+    match spans.get_mut(path) {
+        Some(slot) => *slot = measured,
+        None => {
+            spans.insert(path.to_owned(), measured);
+        }
+    }
+}
+
 /// One path's diff, with everything needed to know it is still true.
 struct Cached {
     taken: Taken,
@@ -218,17 +287,49 @@ struct Cached {
 /// map is migrated on [`Frame::advance`] and a path that stops being changed is
 /// dropped.
 struct Measured {
-    taken: Taken,
+    /// What this span was taken under, or `None` when the read that would have
+    /// produced it **failed**.
+    ///
+    /// **`None` is what stops a failure being cached forever, and the case that
+    /// needs it is narrower than it looks.** A failed measure contributes a zero
+    /// height for this tick, which is right: a file that vanished between status
+    /// naming it and the read has no height to report. What is not right is
+    /// carrying that zero. For a change with a working-tree side the evidence
+    /// alone would refuse it, since [`reusable`] treats a missing fingerprint as
+    /// unprovable. For a `Removed` one it would **not**: that diff is computed
+    /// from the index side alone, so `reusable` returns `true` on the kind and
+    /// the blob without asking anything else, and a `MissingBlob` on a pruned or
+    /// partially-cloned object would then pin a zero row-count for the life of
+    /// the frame with no retry.
+    ///
+    /// [`Frame::diff`] has no equivalent hazard because it propagates the error
+    /// with `?` and caches nothing. This is the infallible path's version of the
+    /// same rule: report zero now, and ask again next tick.
+    taken: Option<Taken>,
     span: FileSpan,
     /// Whether this span has been shown to describe the file **on this tick**.
     ///
     /// Set by whatever established it and cleared for every entry by
     /// [`Frame::advance`], so the proof is worth exactly one tick. Without it a
-    /// carried span is re-fingerprinted by every caller that asks: `height`
-    /// walks all of them and `rows_of` then asks again for each file above the
-    /// viewport, so a deep scroll would stat the same file twice a frame. The
-    /// contract callers are written against is *one* count per changed file per
-    /// tick, and this is what keeps it one.
+    /// carried span is re-examined by every caller that asks: `height` walks all
+    /// of them and `rows_of` then asks again for each file above the viewport.
+    /// The contract callers are written against is *one* count per changed file
+    /// per tick, and this is what keeps it one.
+    ///
+    /// **What that second examination costs is a read, not a `stat`, which is
+    /// worth stating because the cheaper number invites deleting this field.**
+    /// Inside the settle margin — the ordinary state while an agent is writing —
+    /// a span taken by a read is recorded unsettled, so [`reusable`] refuses it
+    /// and the second `fill_span` in the same tick falls all the way through to
+    /// [`Worktree::measure`]. This flag is load-bearing well past "it saves a
+    /// syscall".
+    ///
+    /// The failure modes are not symmetric: forgetting to **set** it costs work,
+    /// and forgetting to **clear** it on a future carry path would serve a stale
+    /// height silently and forever. `advance`'s migration is the only carry path
+    /// today and the clear sits inside it; a tick counter recorded per entry
+    /// would make that structural rather than local, and is the shape to reach
+    /// for if a second one is ever added.
     proven: bool,
 }
 
@@ -258,7 +359,20 @@ fn fingerprint(path: &Path) -> Option<Fingerprint> {
 /// Takes a [`Taken`] rather than a [`Cached`] so the diff cache and the span
 /// cache are governed by the same lines. Written against a `Cached` it read as a
 /// rule about diffs, and #101 needed the identical rule about spans.
-fn reusable(taken: &Taken, current: &FileChange, fresh: Option<Fingerprint>) -> bool {
+///
+/// **`fresh` is a closure, so the `stat` is the rule's decision rather than the
+/// caller's.** Three of the four ways to answer `false` here need no fingerprint
+/// at all, and the caller cannot know which applies without restating the rule.
+/// Taking it eagerly bought a syscall on every one of them, which
+/// [`Frame::fill_span`] pays over the whole changed set rather than over the
+/// drawn part of it. A second predicate beside this one would be the other way
+/// to fix that, and it would be free to drift into disagreeing with this
+/// function about whether a file changed.
+fn reusable(
+    taken: &Taken,
+    current: &FileChange,
+    fresh: impl FnOnce() -> Option<Fingerprint>,
+) -> bool {
     // A new blob for this path is a new diff even when the file on disk never
     // moved, and a new kind is a different diff outright.
     if taken.kind != current.kind || taken.index_blob != current.index_blob {
@@ -271,12 +385,14 @@ fn reusable(taken: &Taken, current: &FileChange, fresh: Option<Fingerprint>) -> 
         return true;
     }
 
-    match (taken.worktree, fresh) {
-        (Some(observed), Some(fresh)) => observed.settled && observed.print == fresh,
-        // Unfingerprintable then, or unfingerprintable now. Neither is a
-        // failure, and both forbid reuse: the alternative is drawing a diff we
-        // cannot vouch for.
-        _ => false,
+    // Unfingerprintable then, or unfingerprintable now. Neither is a failure,
+    // and both forbid reuse: the alternative is drawing a diff we cannot vouch
+    // for. `settled` is asked **first**, and that ordering is what makes the
+    // lazy `fresh` pay: an observation that was never proof cannot be rescued by
+    // a fresh fingerprint, so there is no reason to take one.
+    match taken.worktree {
+        Some(observed) => observed.settled && fresh().is_some_and(|fresh| observed.print == fresh),
+        None => false,
     }
 }
 
@@ -374,22 +490,21 @@ impl<'w> Frame<'w> {
         // current diff and not of the session, which is I3.
         let mut previous = std::mem::take(&mut self.cached);
         self.cached.reserve(files.len());
-        let mut stale_spans = std::mem::take(&mut self.spans);
+        let mut previous_spans = std::mem::take(&mut self.spans);
         self.spans.reserve(files.len());
         for change in &files {
-            if let Some(cached) = previous.remove(&change.path) {
-                self.cached.insert(change.path.clone(), cached);
+            // `remove_entry` rather than `remove`, so the key the old map owns
+            // is moved rather than cloned. With two maps that is up to 2N
+            // needless `String` allocations a tick, which on the hundred-file
+            // gate is two hundred.
+            if let Some((path, cached)) = previous.remove_entry(&change.path) {
+                self.cached.insert(path, cached);
             }
-            if let Some(measured) = stale_spans.remove(&change.path) {
+            if let Some((path, mut measured)) = previous_spans.remove_entry(&change.path) {
                 // Carried, and no longer proved. What it described was true of
                 // the previous tick, and `fill_span` is where it is asked again.
-                self.spans.insert(
-                    change.path.clone(),
-                    Measured {
-                        proven: false,
-                        ..measured
-                    },
-                );
+                measured.proven = false;
+                self.spans.insert(path, measured);
             }
         }
         // Whatever is left is a path that stopped being changed. Counted from
@@ -538,83 +653,83 @@ impl<'w> Frame<'w> {
         }
 
         // (1) A diff in hand. Free, and no syscall.
-        let from_diff = self.cached.get(&change.path).map(|cached| Measured {
-            taken: cached.taken.clone(),
-            span: FileSpan::from(&cached.diff),
-            proven: true,
-        });
-        if let Some(measured) = from_diff {
-            self.spans.insert(change.path.clone(), measured);
+        if let Some(cached) = self.cached.get(&change.path) {
+            let measured = Measured {
+                taken: Some(cached.taken.clone()),
+                span: FileSpan::from(&cached.diff),
+                proven: true,
+            };
+            put(&mut self.spans, &change.path, measured);
             return;
         }
 
         // (2) A span carried from an earlier tick, and the only thing standing
         // between this file and a whole-file read. `advance` migrated it without
         // asking whether the file moved, so this is where it is asked.
-        let change = &self.files[index];
-        if let Some(measured) = self.spans.get(&change.path) {
-            let fresh = if change.reads_worktree() {
-                self.stats.probes += 1;
-                fingerprint(&self.worktree.workdir().join(&change.path))
-            } else {
-                None
-            };
-            if reusable(&measured.taken, change, fresh) {
-                self.spans
-                    .get_mut(&change.path)
-                    .expect("the entry just read")
-                    .proven = true;
-                return;
-            }
+        //
+        // The fingerprint is taken **lazily**, because `reusable` refuses on
+        // several grounds that no `stat` can change: a new kind, a new index
+        // blob, evidence that was never settled, or no working-tree evidence at
+        // all. Passing it eagerly bought a syscall for every one of those, and
+        // this walk runs over every changed file rather than over the drawn
+        // ones. A closure keeps the decision inside the rule rather than
+        // restating half of it here, which is what a second predicate would do.
+        let path = self.worktree.workdir().join(&change.path);
+        let mut probed = false;
+        let mut proved = false;
+        if let Some(measured) = self.spans.get_mut(&change.path)
+            && let Some(taken) = measured.taken.as_ref()
+            && reusable(taken, change, || {
+                probed = true;
+                fingerprint(&path)
+            })
+        {
+            measured.proven = true;
+            proved = true;
+        }
+        // Counted from whether the closure ran, so `probes` stays a count of
+        // syscalls taken rather than of call sites reached.
+        self.stats.probes += u64::from(probed);
+        if proved {
+            return;
         }
 
-        // (3) A read.
-        let change = &self.files[index];
+        // (3) A read. Both arms yield the same shape, so `Taken`'s field list
+        // appears once: #16 adds a field to it, and two literals here would be
+        // two places to forget.
+        //
         // Timed from before the read starts, for the reason [`Frame::diff`]
         // gives: the window a write would have to land in to be missed is
         // over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        let measured = match self.worktree.measure(change) {
+        let (span, taken) = match self.worktree.measure(change) {
             Ok(span) => {
                 self.stats.measured += 1;
                 self.stats.bytes += span.bytes;
                 let worktree = if change.reads_worktree() {
                     self.stats.probes += 1;
-                    fingerprint(&self.worktree.workdir().join(&change.path)).map(|print| Observed {
+                    fingerprint(&path).map(|print| Observed {
                         print,
                         settled: settled(print.mtime, read_started),
                     })
                 } else {
                     None
                 };
-                Measured {
-                    taken: Taken {
-                        kind: change.kind.clone(),
-                        index_blob: change.index_blob,
-                        worktree,
-                    },
-                    span,
-                    proven: true,
-                }
+                (span, Some(Taken::of(change, worktree)))
             }
             // **A failed read describes nothing, so it is recorded with no
-            // working-tree evidence and `reusable` refuses to carry it.** A file
-            // can vanish between status naming it and this call; the height it
-            // contributes this tick is zero, and the next tick asks again rather
-            // than inheriting the answer. A change with no working-tree side
-            // cannot reach this arm, since `measure` returns early for one.
-            Err(_) => Measured {
-                taken: Taken {
-                    kind: change.kind.clone(),
-                    index_blob: change.index_blob,
-                    worktree: None,
-                },
-                span: FileSpan::default(),
-                proven: true,
-            },
+            // evidence at all** and [`Measured::taken`] carries why that matters.
+            // A file can vanish between status naming it and this call; the
+            // height it contributes this tick is zero, and the next tick asks
+            // again rather than inheriting the answer.
+            Err(_) => (FileSpan::default(), None),
         };
-        let change = &self.files[index];
-        self.spans.insert(change.path.clone(), measured);
+        let measured = Measured {
+            taken,
+            span,
+            proven: true,
+        };
+        put(&mut self.spans, &change.path, measured);
     }
 
     /// The change at `index` and its diff, computed now or reused from an
@@ -643,18 +758,18 @@ impl<'w> Frame<'w> {
         let change = &self.files[index];
         let path = self.worktree.workdir().join(&change.path);
 
+        // Lazily, for the reason [`reusable`] gives: a `stat` this answer will
+        // not read is a syscall bought for nothing, and `probes` should count
+        // the ones actually taken.
+        let mut probed = false;
         let reuse = match self.cached.get(&change.path) {
             None => false,
-            Some(cached) => {
-                let fresh = if change.reads_worktree() {
-                    self.stats.probes += 1;
-                    fingerprint(&path)
-                } else {
-                    None
-                };
-                reusable(&cached.taken, change, fresh)
-            }
+            Some(cached) => reusable(&cached.taken, change, || {
+                probed = true;
+                fingerprint(&path)
+            }),
         };
+        self.stats.probes += u64::from(probed);
 
         if reuse {
             self.stats.reused += 1;
@@ -687,11 +802,7 @@ impl<'w> Frame<'w> {
         self.cached.insert(
             change.path.clone(),
             Cached {
-                taken: Taken {
-                    kind: change.kind.clone(),
-                    index_blob: change.index_blob,
-                    worktree,
-                },
+                taken: Taken::of(change, worktree),
                 diff,
             },
         );
@@ -842,7 +953,7 @@ mod tests {
     fn an_unchanged_file_is_reusable() {
         let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
-        assert!(reusable(&entry, &now, Some(print(40, epoch(10)))));
+        assert!(reusable(&entry, &now, || Some(print(40, epoch(10)))));
     }
 
     #[test]
@@ -851,7 +962,7 @@ mod tests {
         // left-hand side of this diff. The bytes on disk are untouched.
         let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(2));
-        assert!(!reusable(&entry, &now, Some(print(40, epoch(10)))));
+        assert!(!reusable(&entry, &now, || Some(print(40, epoch(10)))));
     }
 
     #[test]
@@ -863,21 +974,21 @@ mod tests {
             },
             blob(1),
         );
-        assert!(!reusable(&entry, &now, Some(print(40, epoch(10)))));
+        assert!(!reusable(&entry, &now, || Some(print(40, epoch(10)))));
     }
 
     #[test]
     fn a_changed_length_invalidates() {
         let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
-        assert!(!reusable(&entry, &now, Some(print(41, epoch(10)))));
+        assert!(!reusable(&entry, &now, || Some(print(41, epoch(10)))));
     }
 
     #[test]
     fn a_changed_mtime_invalidates() {
         let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
-        assert!(!reusable(&entry, &now, Some(print(40, epoch(11)))));
+        assert!(!reusable(&entry, &now, || Some(print(40, epoch(11)))));
     }
 
     /// The racily-clean case, which is why `settled` exists.
@@ -896,21 +1007,21 @@ mod tests {
             }),
         );
         let now = change(ChangeKind::Modified, blob(1));
-        assert!(!reusable(&entry, &now, Some(print(40, epoch(10)))));
+        assert!(!reusable(&entry, &now, || Some(print(40, epoch(10)))));
     }
 
     #[test]
     fn a_file_that_cannot_be_fingerprinted_now_is_not_reusable() {
         let entry = taken(ChangeKind::Modified, blob(1), trusted(40, epoch(10)));
         let now = change(ChangeKind::Modified, blob(1));
-        assert!(!reusable(&entry, &now, None));
+        assert!(!reusable(&entry, &now, || None));
     }
 
     #[test]
     fn a_file_that_could_not_be_fingerprinted_then_is_not_reusable() {
         let entry = taken(ChangeKind::Modified, blob(1), None);
         let now = change(ChangeKind::Modified, blob(1));
-        assert!(!reusable(&entry, &now, Some(print(40, epoch(10)))));
+        assert!(!reusable(&entry, &now, || Some(print(40, epoch(10)))));
     }
 
     /// A removal is computed from the index side alone, so there is no
@@ -919,13 +1030,13 @@ mod tests {
     fn a_removal_is_reusable_with_no_fingerprint_at_all() {
         let entry = taken(ChangeKind::Removed, blob(1), None);
         let now = change(ChangeKind::Removed, blob(1));
-        assert!(reusable(&entry, &now, None));
+        assert!(reusable(&entry, &now, || None));
     }
 
     #[test]
     fn a_conflict_is_reusable_with_no_fingerprint_at_all() {
         let entry = taken(ChangeKind::Conflict, blob(1), None);
         let now = change(ChangeKind::Conflict, blob(1));
-        assert!(reusable(&entry, &now, None));
+        assert!(reusable(&entry, &now, || None));
     }
 }

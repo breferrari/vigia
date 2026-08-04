@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use vigia_core::{CONTEXT, FileChange, FileSpan, Frame, FrameStats, HighlightStats, Worktree};
+use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -220,19 +220,23 @@ pub fn settle(frame: &mut Frame) {
 /// launch, and the only one in which "re-measure everything" and "re-measure
 /// what changed" produce different numbers.
 ///
-/// `rows_of` is the caller's, for the reason [`Frame::height`] takes one: what a
-/// conflict or a binary file occupies is the shell's ruling.
+/// **Takes no `rows_of`, because one would be inert.** [`Frame::height`] takes
+/// one so that its *return value* can be a row count, and this discards the
+/// total: what it wants is the walk's side effect, which visits every changed
+/// file whatever the closure says. Threading a caller's real `rows_of` through
+/// would read as though the choice mattered here, and would put the shell's
+/// ruling about conflicts and binaries inside a helper that never consults it.
 ///
 /// **Asserts nothing about reuse, deliberately.** Whether a second tick
 /// re-measures is the thing under test, and a helper that panicked on it would
 /// report "no span is ever carried" from inside the setup instead of letting the
 /// gate report its own number. Returns what the priming tick measured so the
 /// caller can check its own premise.
-pub fn settle_spans(frame: &mut Frame, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> u64 {
+pub fn settle_spans(frame: &mut Frame) -> u64 {
     std::thread::sleep(SETTLE_WAIT);
     let before = frame.stats().measured;
     frame.advance().expect("advance");
-    frame.height(rows_of).expect("height");
+    frame.height(|_, _| 0).expect("height");
     frame.stats().measured - before
 }
 

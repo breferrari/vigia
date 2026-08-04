@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, PaintStats, Row, Theme, WHEEL_ROWS, body_layout, render};
+use vigia::{Action, App, Body, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render};
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
 
 use support::{
@@ -136,6 +136,62 @@ fn shell_frame(
     // `timed`, and the scroll gates wrap a whole motion. What the ring needs is
     // one frame's cost, and this is the only place that knows where one starts.
     app.record_frame(began.elapsed());
+}
+
+/// The screen has to have been full, or a frame that drew two rows is a cheap
+/// frame for a reason that is not the code.
+///
+/// One helper for the three tick gates rather than three copies, because it is
+/// the non-vacuity check every wall-clock assertion in this file rests on and a
+/// `height` term drifting out of step with `body(&app, files)` in one copy is
+/// invisible in the other two. Returns the view, which two of the callers go on
+/// to use.
+fn drew_a_full_screen(
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    history: &History,
+    screen: Body,
+    height: usize,
+) -> View {
+    let view = app.view(frame, highlighter, history, screen).expect("view");
+    assert_eq!(
+        view.rows.len(),
+        height,
+        "the body drew {} of {height} rows, so the frames above were not full \
+         screens",
+        view.rows.len()
+    );
+    view
+}
+
+/// The edits have to still be landing.
+///
+/// Checked against the frame's diff rather than against the screen, and the
+/// difference is the fixture: these rewrite every line, so a file's hunk is five
+/// hundred removals followed by five hundred additions and the newest line sits
+/// far below any viewport. A screen assertion here would fail while the code was
+/// perfect.
+///
+/// Shared for the reason the marker itself is not: each gate writes its own
+/// format (`fn edited_{n}` here, `fn bulk_edited_{n}` in the bulk gate), so the
+/// producer already varies and only the check is common. Two copies of the check
+/// would be two places to notice that a producer's format had moved.
+fn the_edits_still_land(frame: &mut Frame, path: &str, marker: &str) {
+    let at = frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .expect("the edited file is still a change");
+    let (_, diff) = frame.diff(at).expect("diff");
+    assert!(
+        diff.hunks.iter().any(|hunk| hunk
+            .lines
+            .iter()
+            .any(|line| line.kind == LineKind::Added && line.text == marker)),
+        "the diff for {path} does not contain {marker:?}, so the edits stopped \
+         reaching it"
+    );
 }
 
 #[test]
@@ -375,15 +431,13 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 
     // The screen has to have been full, or a frame that drew two rows would be
     // a cheap frame for a reason that is not the code.
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, screen)
-        .expect("view");
-    assert_eq!(
-        view.rows.len(),
+    drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
         height,
-        "the body drew {} of {height} rows, so the frames above were not full \
-         screens",
-        view.rows.len()
     );
 
     // And the edits have to be still landing. Checked against the frame's diff
@@ -391,21 +445,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // one rewrites every line, so a file's hunk is five hundred removals
     // followed by five hundred additions and the newest line sits far below any
     // viewport. A screen assertion here would fail while the code was perfect.
-    let last = marker.clone();
-    let shared = frame
-        .files()
-        .iter()
-        .position(|change| change.path == EDITED_PATH)
-        .expect("the edited file is still a change");
-    let (_, diff) = frame.diff(shared).expect("diff");
-    assert!(
-        diff.hunks.iter().any(|hunk| hunk
-            .lines
-            .iter()
-            .any(|line| line.kind == LineKind::Added && line.text == last)),
-        "the diff for {EDITED_PATH} does not contain {last:?}, so the edits \
-         stopped reaching it"
-    );
+    the_edits_still_land(&mut frame, EDITED_PATH, &marker);
 
     // The highlighter has to be re-parsing every frame, which is what says the
     // edits reach *it* and not merely the diff. One hunk is on screen and its
@@ -475,7 +515,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     let mut frame = worktree.frame();
 
     // Waits out the margin exactly as `settle` does, and diffs nothing.
-    let primed = settle_spans(&mut frame, vigia::rows_of);
+    let primed = settle_spans(&mut frame);
     assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
     assert_eq!(
         primed, FILES as u64,
@@ -531,43 +571,35 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     // materialise the worktree behind this gate's back: if anything in the frame
     // path started diffing every file, the walk would go free and this gate would
     // pass for the same reason `settle` made the others pass. So the *undrawn*
-    // half is asserted directly. A screenful is six files plus the pinned list,
-    // and the fixture is a hundred.
+    // half is asserted directly.
+    //
+    // **Bounded by the screen rather than by `< FILES`.** One fewer than a
+    // hundred is not "undrawn", it is "ninety-nine drawn", and the bound this
+    // gate needs is the one its own comment claims: a frame can touch at most one
+    // file per row it draws, list included, so that sum is the honest ceiling and
+    // it is derived from the layout rather than written down.
+    let touchable = screen.list + screen.diff;
     assert!(
-        frame.tracked() < FILES,
-        "the frame holds a diff for all {FILES} files, so the worktree has been \
-         materialised and the height walk this gate exists to time costs nothing"
+        frame.tracked() <= touchable,
+        "the frame holds {} diffs for a screen that can reach {touchable} files \
+         at most, so the worktree has been materialised behind this gate and the \
+         height walk it exists to time costs nothing",
+        frame.tracked()
     );
 
     // The screen has to have been full, or a frame that drew two rows is cheap
     // for a reason that is not the code.
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, screen)
-        .expect("view");
-    assert_eq!(
-        view.rows.len(),
+    drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
         height,
-        "the body drew {} of {height} rows, so the frames above were not full \
-         screens",
-        view.rows.len()
     );
 
     // And the edits have to still be landing.
-    let last = marker.clone();
-    let shared = frame
-        .files()
-        .iter()
-        .position(|change| change.path == EDITED_PATH)
-        .expect("the edited file is still a change");
-    let (_, diff) = frame.diff(shared).expect("diff");
-    assert!(
-        diff.hunks.iter().any(|hunk| hunk
-            .lines
-            .iter()
-            .any(|line| line.kind == LineKind::Added && line.text == last)),
-        "the diff for {EDITED_PATH} does not contain {last:?}, so the edits \
-         stopped reaching it"
-    );
+    the_edits_still_land(&mut frame, EDITED_PATH, &marker);
 
     let p99 = frames.percentile(0.99).expect("samples");
     assert!(
@@ -579,6 +611,167 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
         frames.percentile(0.50).expect("samples"),
         frames.max().expect("samples"),
         cost.measured,
+        cost.bytes
+    );
+}
+
+#[test]
+fn a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget() {
+    // **The cell where two of this repo's own rules intersect, and neither gate
+    // covered it.** `SPEC.md` §7 says a gate that settles first has measured the
+    // cheapest *state*, and [#101](https://github.com/breferrari/vigia/issues/101)
+    // added that a gate whose setup materialises has measured the cheapest *cache
+    // population*. `the_frame_budget_holds_through_a_bulk_rewrite` is inside the
+    // margin and fully materialised, so its walk is free;
+    // `ticking_over_an_undrawn_worktree_holds_the_frame_budget` is undrawn but
+    // edits one file at a time. Nothing was undrawn **and** bulk-rewritten.
+    //
+    // It is the expensive corner by construction: every carried span is unsettled
+    // at once, so none can be proved and the walk re-measures the whole changed
+    // set for the length of `SETTLE_MARGIN`. That is the pre-#101 cost, paid for
+    // two seconds rather than forever, and it is why the fingerprint in
+    // `fill_span` is lazy: an unsettled observation is refused without a `stat`,
+    // so this corner costs the read it always cost and not a syscall on top of it.
+    //
+    // The workload is not exotic. An agent running a formatter over a tree is
+    // exactly this, and it is the workload `SPEC.md` §2 describes.
+    let scratch = Scratch::large_diff("shell-i9-undrawn-bulk", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+    assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
+    assert_eq!(
+        primed, FILES as u64,
+        "priming measured {primed} of {FILES} files, so this fixture is already \
+         materialised and the walk it is meant to time has been deleted"
+    );
+
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let mut history = History::new();
+    let height = body(&app, FILES);
+    let screen = layout(&app, FILES);
+
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+
+    let _timed = exclusively_timed();
+
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+    let mut round = 0usize;
+    let mut marker = String::new();
+
+    // **Rewritten every `REWRITE_EVERY` frames, and the frame right after a
+    // rewrite is untimed.** Both halves are the instrument rather than the
+    // subject. A whole-fixture write before *every* timed frame puts its own
+    // asynchronous write-back inside the next timer, which `SPEC.md` §7 records
+    // as measuring the harness; and the frame immediately after a 46 MiB rewrite
+    // is the one that absorbs it. Without that absorbing frame this gate read
+    // **29.26ms p99 against 13.13ms p50** — the unmistakable signature of the
+    // fixture rather than of the code, since no threshold separates those two
+    // numbers from a real regression. With it the distribution closes up.
+    //
+    // Every sampled frame is still inside the margin, since a chunk of fifty
+    // runs in ~308ms against two seconds.
+    let mut next_frame = |at: usize,
+                          frame: &mut Frame,
+                          app: &mut App,
+                          highlighter: &mut Highlighter,
+                          history: &mut History|
+     -> Option<Duration> {
+        if at % REWRITE_EVERY == 0 {
+            round += 1;
+            scratch.rewrite_all(FILES, LINES, round);
+            marker = format!("line {} of {round}", LINES / 2);
+            // Untimed, and it is a real frame: it re-measures the whole changed
+            // set exactly as the timed ones do, so what it absorbs is the disk
+            // and not the work.
+            history.record([EDITED_PATH], Instant::now());
+            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
+            return None;
+        }
+        Some(time(|| {
+            history.record([EDITED_PATH], Instant::now());
+            shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
+        }))
+    };
+
+    for at in 0..WARMUP_FRAMES {
+        next_frame(at, &mut frame, &mut app, &mut highlighter, &mut history);
+    }
+
+    let before = frame.stats();
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for at in 0..SAMPLED_FRAMES {
+        if let Some(cost) = next_frame(
+            at + WARMUP_FRAMES,
+            &mut frame,
+            &mut app,
+            &mut highlighter,
+            &mut history,
+        ) {
+            frames.push(cost);
+        }
+    }
+    let cost = delta(before, frame.stats());
+
+    // Undrawn, for the reason the gate above gives at more length.
+    let touchable = screen.list + screen.diff;
+    assert!(
+        frame.tracked() <= touchable,
+        "the frame holds {} diffs for a screen that can reach {touchable} files \
+         at most, so this run is not the undrawn case",
+        frame.tracked()
+    );
+
+    // **And the rewrites have to have actually landed inside the margin**, or
+    // this is the cheap corner wearing the expensive one's name. A run where
+    // every span stayed provable would measure nothing this gate is about, so the
+    // walk must have re-measured over the sample.
+    assert!(
+        cost.measured > 0,
+        "the sampled ticks measured nothing, so every carried span stayed \
+         provable and this gate never entered the corner it is named for"
+    );
+
+    drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
+        height,
+    );
+
+    let p99 = frames.percentile(0.99).expect("samples");
+
+    // Reported, not only asserted, for the reason `first_paint.rs` reports its
+    // second frame: this gate's whole subject is a cost that is *expected* to be
+    // near the budget, so a reader needs the distribution rather than a pass.
+    eprintln!(
+        "note: a bulk rewrite of {FILES} undrawn files, inside the margin: p50 \
+         {:?} p99 {p99:?} max {:?} over {} timed frames, {} measured and {} \
+         stats per tick",
+        frames.percentile(0.50).expect("samples"),
+        frames.max().expect("samples"),
+        frames.len(),
+        cost.measured / frames.len() as u64,
+        cost.probes / frames.len() as u64,
+    );
+
+    assert!(
+        p99 <= budget(I9_FRAME),
+        "I9: a tick inside the settle margin after every one of {FILES} undrawn \
+         files was rewritten at once was {p99:?} p99, over the {:?} budget (p50 \
+         {:?}, max {:?}; {} files measured, {} stats and {} bytes read across \
+         {SAMPLED_FRAMES} ticks). The last marker written was {marker:?}",
+        budget(I9_FRAME),
+        frames.percentile(0.50).expect("samples"),
+        frames.max().expect("samples"),
+        cost.measured,
+        cost.probes,
         cost.bytes
     );
 }
@@ -718,15 +911,13 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     );
 
     // And the screen has to have been full, for the reason the gate above gives.
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, screen)
-        .expect("view");
-    assert_eq!(
-        view.rows.len(),
+    let view = drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
         height,
-        "the body drew {} of {height} rows, so the frames above were not full \
-         screens",
-        view.rows.len()
     );
 
     // Which also settles what the probe above assumed. It is named `undrawn` and
@@ -803,7 +994,7 @@ const UP_FILES: usize = 4;
 /// whole finding**, so it is a named type rather than a boolean. Both wait out
 /// the engine's settle margin; only one of them also diffs every file, and that
 /// one deletes the height walk from every measurement downstream of it.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum Prime {
     /// `settle`: the margin waited out **and every file diffed**. The steady
     /// state the wide gates are about, and the reason they could never see the
@@ -868,9 +1059,13 @@ struct Scrolled {
     /// for a number this run already has.
     height: usize,
     painted: PaintStats,
-    /// The setup this run was taken under, carried for the same reason `height`
-    /// is: the assertions are written in terms of it.
-    setup: Scroll,
+    /// Frames the run drove, warmup included.
+    ///
+    /// The number rather than the whole `Scroll` it came from, for the reason
+    /// `height` beside it is carried: one assertion is written in terms of it,
+    /// and keeping five fields to interpolate one of them reads as though the
+    /// others were load-bearing too.
+    frames: usize,
 }
 
 impl Scrolled {
@@ -1070,7 +1265,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
     match prime {
         Prime::Materialised => settle(&mut frame),
         Prime::Launched => {
-            let measured = settle_spans(&mut frame, vigia::rows_of);
+            let measured = settle_spans(&mut frame);
             assert_eq!(
                 measured, files as u64,
                 "priming measured {measured} of {files} files, so this run is \
@@ -1135,7 +1330,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
         body_rows: 0,
         height,
         painted: PaintStats::default(),
-        setup,
+        frames: warmup + SAMPLED_FRAMES,
     };
     let mut at_file = usize::MAX;
 
@@ -1224,7 +1419,7 @@ fn hold_the_scroll_budget(run: &Scrolled, what: &str) {
         "the viewport crossed {} file boundaries in {} frames, so this run never \
          entered a hunk it had not parsed",
         run.boundaries,
-        run.setup.warmup + SAMPLED_FRAMES
+        run.frames
     );
     assert!(
         !run.cold.is_empty() && !run.warm.is_empty(),
