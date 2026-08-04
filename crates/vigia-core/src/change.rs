@@ -63,14 +63,24 @@ pub struct FileChange {
     /// not resolve stays `true` and pays the `lstat`, because a wrong `false`
     /// reads a file where git reads a path and a wrong `true` costs one syscall.
     ///
-    /// One case is outside it, and it is recorded rather than implied: on a
-    /// checkout where git cannot detect a type change, a path committed as a
-    /// regular file and replaced by a symlink is reported `Modified` with an
-    /// index mode of `FILE`, so this says `false` and the read follows the link.
-    /// That is #15's defect surviving in a corner. It needs the index and the
-    /// working tree to disagree about a file's *type* while git calls it a
-    /// modification, it is no worse than the behaviour this field replaces, and
-    /// closing it costs the `lstat` on every read that this exists to avoid.
+    /// **What makes reading the index mode sound is that the two ways it can go
+    /// stale are not symmetric, and only one of them reaches a read.** Both are
+    /// measured rather than argued, by
+    /// `crates/vigia-core/tests/fidelity.rs::swapping_a_symlink_for_a_regular_file_and_back_agrees_with_git`:
+    ///
+    /// * A link replaced by a **regular file** keeps its `120000` index entry and
+    ///   git calls it a *modification*. This says `true`, the `lstat` finds a
+    ///   plain file, and the read is an ordinary one. The mode being stale costs
+    ///   a syscall and changes no answer.
+    /// * A regular file replaced by a **link** is what a stale `FILE` mode would
+    ///   get wrong, and it never arrives: git and `gix` both report it as a
+    ///   *type change*, which [`FileChange::is_diffable`] rejects before
+    ///   `Worktree::diff` consults the working tree at all.
+    ///
+    /// So the soundness rests on `gix`'s type-change detection rather than on
+    /// this field, and that test is what holds it: if a future `gix` reported
+    /// that second case as a modification, it goes red rather than quietly
+    /// reading a link's target through it.
     pub(crate) maybe_symlink: bool,
 }
 

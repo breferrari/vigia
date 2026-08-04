@@ -607,6 +607,91 @@ fn a_broken_symlink_diffs_as_its_target_path() {
 }
 
 #[test]
+fn swapping_a_symlink_for_a_regular_file_and_back_agrees_with_git() {
+    // **The boundary, and it is also the premise `FileChange::maybe_symlink`
+    // rests on**, which is why it asserts what git calls each direction rather
+    // than only what `vigia` does with it. The hint reads the *index* entry's
+    // mode, so it is only sound while a working tree that disagrees with the
+    // index about a file's **type** is something git reports as a type change
+    // rather than as a modification.
+    //
+    // Measured here rather than assumed, because the two directions are not
+    // symmetric and only one of them was obvious.
+    let scratch = Scratch::new("symlink-typechange");
+    scratch.write("target.txt", "AAAA\n");
+    scratch.write("swap.txt", "plain content\n");
+    if !made_link(&scratch, "target.txt", "link.txt") {
+        return;
+    }
+    scratch.commit_all("initial");
+    if !git_stored_a_symlink(&scratch, "link.txt") {
+        return;
+    }
+
+    // A link becomes a regular file. The index still says `120000`, so the hint
+    // says "maybe", the `lstat` finds a plain file, and the read is an ordinary
+    // one. git calls this a *modification*, which is the case the hint has to
+    // get right by asking rather than by trusting the mode.
+    scratch.remove("link.txt");
+    scratch.write("link.txt", "now a real file\n");
+
+    // A regular file becomes a link. git calls this a *type change*.
+    scratch.remove("swap.txt");
+    assert!(scratch.symlink_file("target.txt", "swap.txt"));
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let of = |path: &str| {
+        changes
+            .iter()
+            .find(|change| change.path == path)
+            .unwrap_or_else(|| panic!("{path} is not in {changes:#?}"))
+    };
+
+    // Direction one: git diffs the file's content against the link text it
+    // replaced, so `vigia` has to read the file rather than try to read a link
+    // that is no longer there.
+    assert_eq!(scratch.git_numstat("link.txt"), Numstat::Lines(1, 1));
+    let became_file = of("link.txt");
+    assert_eq!(
+        became_file.kind,
+        ChangeKind::Modified,
+        "git reports a link replaced by a regular file as a modification, and the \
+         hint's soundness depends on `gix` agreeing"
+    );
+    let diff = worktree.diff(became_file).expect("diff the replaced link");
+    assert_eq!(texts(&diff, LineKind::Removed), ["target.txt"]);
+    assert_eq!(
+        texts(&diff, LineKind::Added),
+        ["now a real file"],
+        "the read followed a link that is not there any more"
+    );
+
+    // Direction two, and this is the half that closes the hint's only gap. git
+    // reports `T` here, so it never reaches a read at all: `is_diffable` is
+    // false and `Worktree::diff` returns before consulting the worktree. The
+    // index mode being stale therefore cannot mislead anything.
+    let became_link = of("swap.txt");
+    assert_eq!(
+        became_link.kind,
+        ChangeKind::TypeChange,
+        "a regular file replaced by a symlink is not reported as a type change, \
+         so `maybe_symlink` reading the index mode would send this to an ordinary \
+         read and diff the link's target through it"
+    );
+    assert!(
+        !became_link.is_diffable(),
+        "a type change became diffable, so the early return #15 relies on is gone"
+    );
+    let diff = worktree.diff(became_link).expect("diff the type change");
+    assert!(
+        diff.hunks.is_empty(),
+        "a type change is a state, not a diff"
+    );
+    assert_eq!(diff.bytes, 0, "a type change read the worktree");
+}
+
+#[test]
 fn editing_a_symlinks_target_leaves_the_link_out_of_the_changed_set() {
     // **Named for what it holds rather than for the direction it was written
     // against**, which is `SPEC.md` §7's rule about a gate asserting the defect
