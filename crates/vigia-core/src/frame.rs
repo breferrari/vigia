@@ -834,10 +834,15 @@ impl<'w> Frame<'w> {
         // gives: the window a write would have to land in to be missed is
         // over-stated rather than under-stated.
         let read_started = SystemTime::now();
+        // Discarded first, so this frame is charged for its own read and nothing
+        // else. `Worktree::diff` and `Worktree::measure` are **public** and are
+        // called directly by benches, examples and several gates; a probe one of
+        // those spent would otherwise sit in the cell until the next frame
+        // drained it and be attributed there. See `Worktree::type_probes`.
+        self.worktree.take_type_probes();
         let measured = self.worktree.measure(change);
-        // Whatever the read spent deciding *how* to read, folded into the same
-        // counter as the fingerprints. Drained on both arms, because a failed
-        // read still took the probe. See `Worktree::type_probes`.
+        // Folded into the same counter as the fingerprints, on both arms:
+        // a failed read still took the probe.
         self.stats.probes += self.worktree.take_type_probes();
         let (span, taken) = match measured {
             Ok(span) => {
@@ -916,6 +921,9 @@ impl<'w> Frame<'w> {
         // Timed from before the read starts, so the window a write would have
         // to land in to be missed is over-stated rather than under-stated.
         let read_started = SystemTime::now();
+        // Discarded first, for the reason `fill_span` gives: this counter is
+        // charged for this frame's own read and nothing a direct caller spent.
+        self.worktree.take_type_probes();
         let computed = self.worktree.diff(change);
         // Before the `?`, so a failed read still reports the probe it took.
         self.stats.probes += self.worktree.take_type_probes();

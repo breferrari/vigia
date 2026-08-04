@@ -242,6 +242,14 @@ impl Worktree {
     /// it folds the result straight into
     /// [`FrameStats::probes`](crate::FrameStats): see
     /// [`Worktree::type_probes`] for why this crosses the layer at all.
+    ///
+    /// **[`Frame`] drains it twice per read, discarding the first**, because
+    /// [`Worktree::diff`] and [`Worktree::measure`] are public and are called
+    /// directly by benches, examples and several gates over the same `Worktree`.
+    /// A probe one of those spent would otherwise sit here until the next frame
+    /// drained it and be counted against a read that did not take it. Draining
+    /// to discard is one `Cell` swap and makes the attribution exact rather than
+    /// nearly always right.
     pub(crate) fn take_type_probes(&self) -> u64 {
         self.type_probes.replace(0)
     }
