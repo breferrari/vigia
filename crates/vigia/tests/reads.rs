@@ -394,7 +394,7 @@ fn a_tick_re_measures_only_what_changed() {
     // [#101](https://github.com/breferrari/vigia/issues/101) that is exactly what
     // every tick did. `Frame::advance` dropped the span cache whole, so each of
     // the ninety-four files this screen never draws was read from disk again,
-    // forever, at 11.72ms a tick on the reference machine.
+    // forever, at 12.90ms a tick on the reference machine.
     //
     // **Why eleven read-bounding gates were green over it.** Every one of them
     // opens with `settle`, and `settle` materialises: with a `FileDiff` cached
@@ -499,6 +499,82 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
          fingerprinted twice: once to ask a question the rule answers without \
          it, and once to record the observation",
         cost.probes
+    );
+}
+
+#[test]
+fn an_uncommitted_gitattributes_does_not_re_read_the_worktree_every_tick() {
+    // **A `.gitattributes` is a state, not an event, and the difference is
+    // #101's whole invariant.** An attributes change invalidates every cached
+    // artefact, because it changes what git's clean filter does to files it does
+    // not touch, so `Frame::advance` drops both caches when one arrives. Testing
+    // for *presence* rather than for *change* drops them on every tick instead,
+    // for as long as the file sits uncommitted in the changed set, which is the
+    // ordinary state of a repository being set up or of an agent that wrote one
+    // and kept working.
+    //
+    // Measured with the presence test in place, over this fixture: **95 files
+    // re-measured and 3.7 MiB read on every tick, 19.91ms p50 against 9.16ms**.
+    // That is the pre-#101 shape exactly, reintroduced by #101's own fix for a
+    // different defect and invisible to every gate here, because no fixture in
+    // the suite had ever ticked with an uncommitted `.gitattributes` in it:
+    // `Scratch::crlf_worktree` is the only family that writes one and it commits
+    // it in the same breath.
+    //
+    // **The third tick is the one that matters.** Two ticks cannot tell "cleared
+    // on arrival" from "cleared every time", which is one tick too few and is
+    // why the gate that shipped with the guard did not catch this.
+    let scratch = Scratch::large_diff("shell-reads-attrs", FILES, LINES);
+    scratch.write(".gitattributes", "*.rs text\n");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.path == ".gitattributes"),
+        "the fixture's `.gitattributes` is not in the changed set, so this gate \
+         is not looking at the state it names"
+    );
+    assert!(
+        primed >= FILES as u64,
+        "priming measured {primed} of at least {FILES} files, so there is no \
+         walk here to make incremental"
+    );
+
+    // Two idle ticks with nothing on disk moving. Both must be free: the first
+    // proves the guard is not firing on presence, the second that the first was
+    // not a one-off.
+    for tick in 1..=2 {
+        let before = frame.stats();
+        frame.advance().expect("advance");
+        frame.height(vigia::rows_of).expect("height");
+        let cost = delta(before, frame.stats());
+        assert_eq!(
+            cost.measured, 0,
+            "idle tick {tick} re-measured {} files with an uncommitted \
+             `.gitattributes` in the changed set, so the cache guard fires on \
+             the file being present rather than on it having changed, and every \
+             tick pays for the whole worktree",
+            cost.measured
+        );
+        assert_eq!(cost.bytes, 0, "idle tick {tick} read {} bytes", cost.bytes);
+    }
+
+    // And it still fires when the file actually changes, or the fix above has
+    // simply turned the guard off.
+    scratch.write(".gitattributes", "*.rs -text\n");
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    frame.height(vigia::rows_of).expect("height");
+    let cost = delta(before, frame.stats());
+    assert!(
+        cost.measured > 0,
+        "editing `.gitattributes` re-measured nothing, so the guard no longer \
+         notices an attributes change at all and every cached artefact is now \
+         computed under rules that may have moved"
     );
 }
 
@@ -1302,7 +1378,8 @@ fn what_a_row_exact_scrollbar_would_cost() {
         let cold = began.elapsed();
         let cold_cost = delta(before, frame.stats());
 
-        // Cached until the next advance, which is what makes scrolling free.
+        // Carried across ticks and re-proved by a `stat`, which is what makes
+        // scrolling free.
         let began = Instant::now();
         frame.height(vigia::rows_of).expect("height");
         let warm = began.elapsed();

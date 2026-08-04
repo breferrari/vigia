@@ -185,9 +185,11 @@ struct Observed {
 /// [#101](https://github.com/breferrari/vigia/issues/101).** [`Frame::height`]
 /// walks every changed file, so a bulk rewrite of files nothing has drawn leaves
 /// every carried span unsettled at once and the walk re-measures the whole
-/// changed set for the length of this margin. Measured over a hundred of them:
-/// **13.07ms p50, 14.31ms p99** against I9's 16ms, at 95 measures and 102 stats
-/// a tick. The lazy fingerprint in [`Frame::fill_span`] is what holds it to one
+/// changed set for the length of this margin. Measured over a hundred of them,
+/// across eight runs: **13.05ms p50 and a p99 between 13.83ms and 15.88ms**
+/// against I9's 16ms. The spread rather than the best run, because the gate was
+/// first written from a single lucky one and then failed three times in eight.
+/// The lazy fingerprint in [`Frame::fill_span`] is what holds it to one
 /// `stat` per file rather than two, since an unsettled observation is refused
 /// before a fresh print is asked for. Two gates, because they catch different
 /// halves: `budgets.rs::a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`
@@ -260,11 +262,14 @@ impl Taken {
 /// the obvious `insert(path.clone(), …)` allocates a `String` per call and frees
 /// it again on the common path, where [`Frame::advance`] has already migrated an
 /// entry for every changed file. Only a genuine miss needs a new key.
-fn put(spans: &mut HashMap<String, Measured>, path: &str, measured: Measured) {
-    match spans.get_mut(path) {
-        Some(slot) => *slot = measured,
+///
+/// Generic over the value because both caches want it: the span map pays it once
+/// per changed file, the diff map once per recompute.
+fn put<T>(map: &mut HashMap<String, T>, path: &str, value: T) {
+    match map.get_mut(path) {
+        Some(slot) => *slot = value,
         None => {
-            spans.insert(path.to_owned(), measured);
+            map.insert(path.to_owned(), value);
         }
     }
 }
@@ -430,6 +435,21 @@ pub struct Frame<'w> {
     /// under, and migrated so it is bounded by the changed set rather than by
     /// the session.
     spans: HashMap<String, Measured>,
+    /// The attributes files in the changed set, and what they looked like, as of
+    /// the last tick.
+    ///
+    /// **Because the guard below has to fire on a *change* and not on a
+    /// presence.** A `.gitattributes` that is written and not committed stays in
+    /// the changed set, so "clear the caches when one is present" clears them on
+    /// every tick for as long as it sits there, which is the ordinary state of a
+    /// repository being set up. Measured: with one uncommitted `.gitattributes`
+    /// in a 100-file worktree, every tick re-measured 95 files and read 3.7 MiB,
+    /// at **19.91ms p50 against 9.16ms** without it. That is #101's own defect,
+    /// reintroduced by #101's own fix for a different defect.
+    ///
+    /// Comparing this against the next tick's costs one `stat` per attributes
+    /// file, and a worktree has none of those in it almost always.
+    attributes: HashMap<String, Option<Fingerprint>>,
     stats: FrameStats,
 }
 
@@ -440,6 +460,7 @@ impl<'w> Frame<'w> {
             files: Vec::new(),
             cached: HashMap::new(),
             spans: HashMap::new(),
+            attributes: HashMap::new(),
             stats: FrameStats::default(),
         }
     }
@@ -494,6 +515,11 @@ impl<'w> Frame<'w> {
         // going to touch that file again. That is [#65](https://github.com/breferrari/vigia/issues/65)'s
         // own population, every text file on a default `core.autocrlf` checkout.
         //
+        // **Fired on a change rather than on a presence**, which is the whole of
+        // `Frame::attributes`: an uncommitted `.gitattributes` stays in the
+        // changed set, so testing for one clears both caches on *every* tick
+        // rather than on the tick it arrived, at 19.91ms p50 against 9.16ms.
+        //
         // Dropping both maps rather than adding a term to `reusable` is the
         // deliberate choice: an attributes change is rare, a whole-worktree
         // re-read is what the first frame already costs, and a *fifth* term in
@@ -502,10 +528,20 @@ impl<'w> Frame<'w> {
         // does **not** cover is a change to `core.autocrlf` or to
         // `.git/info/attributes`, neither of which the status walk reports;
         // `SPEC.md` §10 records that residue rather than implying it away.
-        if files.iter().any(FileChange::rewrites_attributes) {
+        let attributes: HashMap<String, Option<Fingerprint>> = files
+            .iter()
+            .filter(|change| change.rewrites_attributes())
+            .map(|change| {
+                let path = self.worktree.workdir().join(&change.path);
+                self.stats.probes += 1;
+                (change.path.clone(), fingerprint(&path))
+            })
+            .collect();
+        if attributes != self.attributes {
             self.cached.clear();
             self.spans.clear();
         }
+        self.attributes = attributes;
 
         // **Both caches are migrated, and neither is dropped.** A span used to be
         // cleared here, on the reasoning that it is derived from content and has
@@ -834,8 +870,9 @@ impl<'w> Frame<'w> {
         // half of #84 that is free. The half that is not is a file that changed
         // and has *not* been re-diffed, which needs a read to notice.
         self.spans.remove(&change.path);
-        self.cached.insert(
-            change.path.clone(),
+        put(
+            &mut self.cached,
+            &change.path,
             Cached {
                 taken: Taken::of(change, worktree),
                 diff,

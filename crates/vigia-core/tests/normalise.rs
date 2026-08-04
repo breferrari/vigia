@@ -16,7 +16,7 @@
 
 mod support;
 
-use support::{Numstat, Scratch, changes_sorted, numbered_lines};
+use support::{Numstat, Scratch, changes_sorted, delta, numbered_lines};
 use vigia_core::{Error, Frame, Worktree};
 
 /// The reported case: a CRLF worktree file over an LF blob, and no real edit.
@@ -309,16 +309,38 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     assert_eq!(primed, 1, "the fixture is not one changed file");
     let carried = rows(&mut frame);
 
+    // **And the diff cache is populated too, before anything changes.** Without
+    // this the diff half below is vacuous: nothing in `settle_spans` or
+    // `Frame::height` ever calls `Frame::diff`, so the first `diff` of the run
+    // would be the one *after* the attributes change and would compute fresh
+    // whether or not the cache had been dropped. Found by audit, in a test whose
+    // own comment claimed to cover both caches.
+    let at = frame
+        .files()
+        .iter()
+        .position(|c| c.path == "a.txt")
+        .expect("a.txt is changed");
+    let (_, diff) = frame.diff(at).expect("diff");
+    let stale = (diff.added, diff.removed);
+
     let before = frame.stats();
     frame.advance().expect("advance");
     let idle = rows(&mut frame);
+    let (_, diff) = frame.diff(at).expect("diff");
+    let idle_diff = (diff.added, diff.removed);
+    let cost = delta(before, frame.stats());
     assert_eq!(
-        frame.stats().measured - before.measured,
-        0,
-        "an idle tick re-measured, so nothing is carried and this test cannot \
-         tell a stale answer from a fresh one"
+        cost.measured, 0,
+        "an idle tick re-measured, so no span is carried and this test cannot \
+         tell a stale height from a fresh one"
+    );
+    assert_eq!(
+        cost.computed, 0,
+        "an idle tick recomputed the diff, so none is carried either and the \
+         diff half below cannot tell a dropped cache from a kept one"
     );
     assert_eq!(idle, carried, "an idle tick changed the height");
+    assert_eq!(idle_diff, stale, "an idle tick changed the diff");
 
     // The agent in the other pane marks the file binary. `a.txt` is untouched:
     // same length, same modification time, same index blob.
@@ -343,20 +365,23 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
          longer apply, and nothing will correct it until that file is touched"
     );
 
-    // And the diff cache with it, which is the same hole one artefact over.
-    let at = frame
-        .files()
-        .iter()
-        .position(|c| c.path == "a.txt")
-        .expect("a.txt is changed");
+    // And the diff cache with it, which is the same hole one artefact over. The
+    // diff asked for here was computed and cached before the attributes moved,
+    // so a frame that kept it answers with the stale pair.
     let (_, diff) = frame.diff(at).expect("diff");
     let (added, removed) = (diff.added, diff.removed);
     let mut cold = worktree.frame();
     cold.advance().expect("advance");
     let (_, fresh) = cold.diff(at).expect("diff");
+    let truth_diff = (fresh.added, fresh.removed);
+    assert_ne!(
+        truth_diff, stale,
+        "the control is wrong: the attributes change has to move the diff too, \
+         or the assertion below cannot tell a dropped cache from a kept one"
+    );
     assert_eq!(
         (added, removed),
-        (fresh.added, fresh.removed),
+        truth_diff,
         "the running frame drew +{added} −{removed} where a restart draws +{} \
          −{}, so a diff computed under the old attributes survived them",
         fresh.added,
