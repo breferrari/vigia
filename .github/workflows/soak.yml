@@ -16,8 +16,19 @@ on:
       seconds:
         description: >-
           Soak window in seconds. A GitHub-hosted job is terminated at six
-          hours, so 86400 only works on a runner without that cap.
+          hours, so 86400 needs `runner` set to one without that cap. Locally
+          it needs no runner at all: set VIGIA_SOAK_SECS=86400, VIGIA_SOAK_FILES=100
+          and VIGIA_SOAK_LINES=500, then `cargo test --release --test soak --
+          --nocapture`. The reference machine these numbers come from is Windows,
+          so that is three environment variables however your shell sets them.
         default: "14400"
+      runner:
+        description: >-
+          One runner label to soak on, replacing the platform matrix. Empty
+          keeps the matrix. One label rather than a list, because the matrix
+          runs one job per entry and a two-label list would start two jobs on
+          the wrong runners: give a self-hosted runner a unique label instead.
+        default: ""
       files:
         description: "Fixture files."
         default: "100"
@@ -33,22 +44,129 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The window, the timeout and the platform list, all computed in one place.
+  #
+  # **This job exists because `timeout-minutes` used to be pinned at 330 while
+  # the `seconds` input above advertised 86400.** 330 minutes is 5.5 hours, so
+  # the day-long window I3's budget names was killed by this repository's own
+  # timeout, on an uncapped runner exactly as on a hosted one, and the only
+  # thing that would have said so is a run that had already burned 5.5 hours.
+  #
+  # The obvious repair is to derive the timeout from the window in the field
+  # itself, and **the expression language cannot**:
+  # `${{ fromJSON(inputs.seconds) / 60 + 90 }}` is rejected at parse time with
+  # `Unexpected symbol: '/'`, which fails the *whole file* rather than the one
+  # field, so the daily soak would have stopped running altogether. Arithmetic
+  # is absent from the documented operator list and from the implementation
+  # too, and that was established by dispatching it rather than by reading.
+  #
+  # But that constrains the expression language, not the workflow. Arithmetic
+  # lives in `bash`, and `needs` is available to both `timeout-minutes` and
+  # `strategy`, so a job can compute the number and the soak can read it. That
+  # is the same move `flake-rate.yml` already makes for the same reason: its
+  # `plan` job builds a replica list the expression language could not.
+  #
+  # A second input carrying the timeout, with a step checking it against the
+  # window, was the shallower version of this and is what got replaced: two
+  # absolute numbers can always disagree, and a check that they have not is
+  # three artefacts standing in for one computation. Derived once, there is
+  # nothing to disagree.
+  plan:
+    name: plan the window
+    runs-on: ubuntu-latest
+    # Small and literal on purpose: this job runs one shell script and nothing
+    # else, so a number here is honest where a number on the soak below is the
+    # defect. The gate knows the difference.
+    timeout-minutes: 5
+    outputs:
+      seconds: ${{ steps.window.outputs.seconds }}
+      timeout: ${{ steps.window.outputs.timeout }}
+      os: ${{ steps.window.outputs.os }}
+    steps:
+      # Through `env` rather than interpolated into the script, so a dispatch
+      # input is data the shell reads and never source it executes.
+      - id: window
+        shell: bash
+        env:
+          SOAK_SECONDS: ${{ inputs.seconds || '14400' }}
+          SOAK_RUNNER: ${{ inputs.runner }}
+          # The daily cron takes Linux alone; every other trigger takes all
+          # three. Resolved here because a job-level `if` cannot see `matrix`.
+          SOAK_DAILY: ${{ github.event.schedule == '41 3 * * *' }}
+        run: |
+          set -euo pipefail
+          case "$SOAK_SECONDS" in
+            ''|*[!0-9]*)
+              echo "::error::seconds must be a whole number, got '$SOAK_SECONDS'"
+              exit 1
+              ;;
+          esac
+          # Bash arithmetic is 64-bit and wraps without saying so, so a fat
+          # finger on the dispatch form would otherwise reduce to a one-second
+          # window and only announce it after a full checkout and build.
+          # Eight digits is 3.17 years, which is past any window worth asking
+          # for and well inside the range that cannot wrap.
+          if [ "${#SOAK_SECONDS}" -gt 8 ]; then
+            echo "::error::seconds has ${#SOAK_SECONDS} digits, over the 8 this accepts: '$SOAK_SECONDS'"
+            exit 1
+          fi
+          # `10#` forces base ten. Bash reads a leading zero as octal, so a
+          # dispatch of 0330 would otherwise become 216 without saying so.
+          seconds=$(( 10#$SOAK_SECONDS ))
+          [ "$seconds" -ge 1 ] || { echo "::error::seconds must be at least 1, got '$SOAK_SECONDS'"; exit 1; }
+
+          # Ninety minutes over the window for checkout, build and fixture,
+          # which is the headroom the pinned 330 gave the four-hour default and
+          # is preserved rather than picked fresh.
+          timeout=$(( seconds / 60 + 90 ))
+
+          if [ -n "$SOAK_RUNNER" ]; then
+            # Validated rather than escaped, which is why there is no `jq` here.
+            # `$GITHUB_OUTPUT` is a line-oriented key=value file, so a label
+            # carrying a newline writes a second line under one key and the step
+            # dies with nothing naming the cause; a quote breaks the JSON the
+            # matrix parses. Escaping that correctly is what `jq` is for, and
+            # `flake-rate.yml` does use it, but a runner label is a name and
+            # every real one is already in this set. Refusing the rest is both
+            # safer and one fewer tool the local gate needs: `jq` ships on the
+            # hosted images and on neither stock macOS nor stock Git Bash, so
+            # requiring it here would fail `cargo test` on two of three tier-1
+            # targets.
+            case "$SOAK_RUNNER" in
+              *[!A-Za-z0-9._-]*)
+                echo "::error::runner must be one label of letters, digits, dot, dash or underscore, got '$SOAK_RUNNER'"
+                exit 1
+                ;;
+            esac
+            os="[\"$SOAK_RUNNER\"]"
+          elif [ "$SOAK_DAILY" = true ]; then
+            os='["ubuntu-latest"]'
+          else
+            os='["ubuntu-latest", "macos-latest", "windows-latest"]'
+          fi
+
+          {
+            echo "seconds=$seconds"
+            echo "timeout=$timeout"
+            echo "os=$os"
+          } >> "$GITHUB_OUTPUT"
+          echo "a ${seconds}s window under a ${timeout}min timeout, on $os"
+
   soak:
     name: soak (${{ matrix.os }})
+    needs: plan
     runs-on: ${{ matrix.os }}
-    # Four hours plus the build, under the six-hour cap, so this timeout is the
-    # one that fires and says which run ran long rather than the platform's.
-    timeout-minutes: 330
+    # Derived from the window by the job above, so the two cannot disagree.
+    # Gated by
+    # `crates/vigia/tests/soak.rs::the_soak_workflow_cannot_kill_the_window_it_offers`.
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout) }}
     strategy:
       fail-fast: false
       matrix:
-        # A job-level `if` cannot see `matrix`, so the daily and weekly runs
-        # differ by building the matrix itself. Anything that is not the daily
-        # cron - the weekly one, and every manual dispatch - gets all three.
-        os: >-
-          ${{ fromJSON(github.event.schedule == '41 3 * * *'
-          && '["ubuntu-latest"]'
-          || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+        # `runner` replaces this list entirely when it is set, which is the
+        # only way I3's 24-hour window is reachable in CI: every hosted label
+        # is terminated at six hours whatever this file asks for.
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -63,6 +181,6 @@ jobs:
       - name: soak
         run: cargo test --release --test soak -- --nocapture
         env:
-          VIGIA_SOAK_SECS: ${{ inputs.seconds || '14400' }}
+          VIGIA_SOAK_SECS: ${{ needs.plan.outputs.seconds }}
           VIGIA_SOAK_FILES: ${{ inputs.files || '100' }}
           VIGIA_SOAK_LINES: "500"

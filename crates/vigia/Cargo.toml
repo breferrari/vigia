@@ -28,5 +28,18 @@ windows-sys.workspace = true
 # `vigia-core/benches/engine.rs` does, so a shell test and an engine gate cannot
 # drift into measuring different repositories. That module shells out to real
 # `git`, which is also what keeps this list exactly what SPEC.md names.
+#
+# `tests/soak.rs` reaches one step further out, to `.github/workflows/soak.yml`
+# through `CARGO_MANIFEST_DIR`, so that a CI invariant with no other home is
+# enforced by `cargo test` rather than by a shell step that only ubuntu ever
+# runs. Of the four tests that read it, one holds everywhere; the three that
+# execute the workflow's own shell need a working `bash`, and print a skip
+# rather than passing quietly where none answers. That is Linux and macOS in
+# CI: a Windows runner's `bash` is WSL's launcher with no distribution behind
+# it, which starts and then fails, so those three skip there. Both escapes assume a checkout of
+# this repository: neither survives a packaged or vendored copy, where `.github`
+# is not in the `.crate` tarball at all. That is a constraint on SPEC.md section
+# 9's publish rather than a reason to weaken either gate, and the `#[path]` one
+# above breaks harder and earlier, at compile time.
 [dev-dependencies]
 insta.workspace = true
