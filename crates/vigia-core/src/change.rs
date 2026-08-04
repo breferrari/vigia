@@ -40,6 +40,38 @@ pub struct FileChange {
     ///
     /// `None` for additions, which have no index-side content.
     pub(crate) index_blob: Option<gix::ObjectId>,
+    /// Whether the working-tree side may be a symlink, as the status walk saw
+    /// it.
+    ///
+    /// **A hint that costs nothing, and it exists to keep a syscall off the read
+    /// path.** Git stores a symlink as a mode `120000` blob holding the target
+    /// path, so `Worktree::read_worktree` has to read the link rather than
+    /// through it ([#15](https://github.com/breferrari/vigia/issues/15)) and
+    /// therefore has to know which it is looking at. Asking the filesystem meant
+    /// an `lstat` before **every** working-tree read, which measured **+1.18ms
+    /// p50** over a hundred undrawn files inside the settle margin (13.45ms to
+    /// 14.63ms) and would have put a second `stat` per file on the one path
+    /// `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
+    /// exists to hold at one.
+    ///
+    /// The walk already knows. `gix` reports an index entry's mode and a dirwalk
+    /// entry's disk kind, and it has already paid for both, so this is the answer
+    /// carried forward rather than bought again.
+    ///
+    /// **Conservative, and named `maybe_` for that reason.** `false` is claimed
+    /// only where the walk positively reports a regular file; anything it does
+    /// not resolve stays `true` and pays the `lstat`, because a wrong `false`
+    /// reads a file where git reads a path and a wrong `true` costs one syscall.
+    ///
+    /// One case is outside it, and it is recorded rather than implied: on a
+    /// checkout where git cannot detect a type change, a path committed as a
+    /// regular file and replaced by a symlink is reported `Modified` with an
+    /// index mode of `FILE`, so this says `false` and the read follows the link.
+    /// That is #15's defect surviving in a corner. It needs the index and the
+    /// working tree to disagree about a file's *type* while git calls it a
+    /// modification, it is no worse than the behaviour this field replaces, and
+    /// closing it costs the `lstat` on every read that this exists to avoid.
+    pub(crate) maybe_symlink: bool,
 }
 
 impl FileChange {

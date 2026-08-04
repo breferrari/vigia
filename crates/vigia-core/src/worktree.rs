@@ -175,7 +175,7 @@ impl Worktree {
             None => Vec::new(),
         };
         let after = if change.reads_worktree() {
-            self.read_worktree(&change.path)?
+            self.read_worktree(change)?
         } else {
             Vec::new()
         };
@@ -198,7 +198,7 @@ impl Worktree {
             None => Vec::new(),
         };
         let after = if change.reads_worktree() {
-            self.read_worktree(&change.path)?
+            self.read_worktree(change)?
         } else {
             Vec::new()
         };
@@ -252,12 +252,16 @@ impl Worktree {
     /// git would store. See [`Worktree::link_target`] and
     /// [#15](https://github.com/breferrari/vigia/issues/15).
     ///
-    /// The `symlink_metadata` that decides between the two is one `lstat` on a
-    /// path this function is about to read in full, so it is small against the
-    /// read it precedes, and it is the *cheaper* answer on the one path that
-    /// reads nothing: a file deleted between status naming it and this call is
-    /// now reported empty without an `open`.
-    fn read_worktree(&self, rela_path: &str) -> Result<Vec<u8>> {
+    /// **Deciding between the two costs no syscall on the ordinary path**, which
+    /// is the whole reason [`FileChange::maybe_symlink`] exists: the status walk
+    /// has already seen the entry's mode, and asking the filesystem again put a
+    /// second `stat` per file on the path
+    /// `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
+    /// holds at one, for a measured **+1.18ms p50** over a hundred undrawn files
+    /// inside the settle margin. Only a change the walk could not resolve as a
+    /// plain file reaches the `lstat` below.
+    fn read_worktree(&self, change: &FileChange) -> Result<Vec<u8>> {
+        let rela_path = change.path.as_str();
         let full = self.workdir.join(rela_path);
 
         // The agent in the other pane can delete a file between the moment
@@ -267,26 +271,24 @@ impl Worktree {
         // Returned before the filter rather than through it, because there is
         // nothing to normalise and priming the attributes stack for a file that
         // no longer exists would be a read for no reader.
-        let meta = match std::fs::symlink_metadata(&full) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(Error::Read {
-                    path: rela_path.to_owned(),
-                    source,
-                });
+        if change.maybe_symlink {
+            match std::fs::symlink_metadata(&full) {
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Self::link_target(&full, rela_path);
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(source) => {
+                    return Err(Error::Read {
+                        path: rela_path.to_owned(),
+                        source,
+                    });
+                }
             }
-        };
-
-        if meta.file_type().is_symlink() {
-            return Self::link_target(&full, rela_path);
         }
 
         let raw = match std::fs::read(&full) {
             Ok(data) => data,
-            // Still reachable, and not redundant with the arm above: the two
-            // calls are separated by a window the agent next door can delete
-            // the file in.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(source) => {
                 return Err(Error::Read {
@@ -374,6 +376,38 @@ fn path_of(raw: &gix::bstr::BStr) -> String {
     raw.to_str_lossy().into_owned()
 }
 
+/// Whether this item's working-tree side may be a symlink.
+///
+/// See [`FileChange::maybe_symlink`] for why this is read off the walk rather
+/// than asked of the filesystem, and for the one case it does not cover.
+///
+/// **Every arm defaults to `true`**, so a `gix` version that grows an item shape
+/// or a disk kind this does not know about pays a syscall rather than reading a
+/// link as a file. The cost of being wrong is not symmetric, and this is where
+/// that asymmetry is spent.
+fn maybe_symlink(item: &Item) -> bool {
+    // A regular file, executable or not, is the only positive answer taken from
+    // an index entry. `SYMLINK` is obviously true; `DIR` and `COMMIT` are
+    // submodules and are not read through this path at all, so `true` costs
+    // nothing real and keeps the rule one line.
+    let not_a_plain_file = |mode: gix::index::entry::Mode| {
+        !matches!(
+            mode,
+            gix::index::entry::Mode::FILE | gix::index::entry::Mode::FILE_EXECUTABLE
+        )
+    };
+    let disk_is_not_a_file =
+        |kind: Option<gix::dir::entry::Kind>| !matches!(kind, Some(gix::dir::entry::Kind::File));
+
+    match item {
+        Item::Modification { entry, .. } => not_a_plain_file(entry.mode),
+        Item::DirectoryContents { entry, .. } => disk_is_not_a_file(entry.disk_kind),
+        // The *destination* of a rewrite is the working-tree side, and it is the
+        // dirwalk entry rather than the index one the source names.
+        Item::Rewrite { dirwalk_entry, .. } => disk_is_not_a_file(dirwalk_entry.disk_kind),
+    }
+}
+
 impl Iterator for Changes {
     type Item = Result<FileChange>;
 
@@ -439,6 +473,7 @@ impl Iterator for Changes {
                 path,
                 kind,
                 index_blob,
+                maybe_symlink: maybe_symlink(&item),
             }));
         }
     }

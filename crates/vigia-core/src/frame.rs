@@ -118,6 +118,18 @@ pub struct FrameStats {
     /// Splitting it is the same open question
     /// [#85](https://github.com/breferrari/vigia/issues/85) already holds for
     /// `bytes`, one counter over.
+    ///
+    /// **What it counts is the frame path's own `stat` calls, and keeping that
+    /// true is a live constraint rather than a description.**
+    /// [#15](https://github.com/breferrari/vigia/issues/15) needed to know
+    /// whether a file was a symlink before reading it, and the obvious `lstat` in
+    /// `Worktree::read_worktree` would have been a *fourth* population, invisible
+    /// here and therefore invisible to
+    /// `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`,
+    /// which is the one instrument that holds this corner as a count. Measured at
+    /// +1.18ms p50 over a hundred undrawn files. The answer was to take the
+    /// syscall out rather than to widen the counter or the gate: see
+    /// [`FileChange::maybe_symlink`](crate::FileChange).
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     ///
@@ -955,6 +967,9 @@ mod tests {
             path: "src/lib.rs".to_owned(),
             kind,
             index_blob,
+            // These unit tests are over [`reusable`], which does not consult it:
+            // the field decides how a file is *read*, and nothing here reads one.
+            maybe_symlink: false,
         }
     }
 
