@@ -1835,9 +1835,12 @@ struct Planned {
 
 /// Run the plan script with these inputs, or `None` where there is no `bash`.
 ///
-/// The scratch directory is created **after** the spawn succeeds. Creating it
-/// first leaked one per run on any machine without `bash`, in the one file
-/// whose headline invariant is that nothing is retained.
+/// The scratch directory is created **after the probe below answers and before
+/// the script runs**, which is the only ordering available: `$GITHUB_OUTPUT`
+/// has to exist before the script writes to it, so it cannot wait for that
+/// spawn. What it must not do is precede the probe, which is what it used to
+/// do: every run on a machine with no usable `bash` then leaked a directory, in
+/// the one file whose headline invariant is that nothing is retained.
 fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
     run_plan_on(script, seconds, runner, "false")
 }
