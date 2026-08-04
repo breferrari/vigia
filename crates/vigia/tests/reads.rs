@@ -27,7 +27,7 @@ use vigia::{
 };
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
-use support::{Scratch, delta, materialise, settle};
+use support::{Scratch, delta, materialise, settle, settle_spans};
 
 /// The wide fixture: enough files that reading all of them is unmistakable.
 const FILES: usize = 100;
@@ -384,6 +384,130 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
         many.cost.computed,
         many.cost.measured
     );
+}
+
+#[test]
+fn a_tick_re_measures_only_what_changed() {
+    // **I2a's rule, held over the height walk rather than over the diff.** I4's
+    // narrowing admits one count per changed file per tick; it does not admit
+    // *re-reading* a file that did not change, and until
+    // [#101](https://github.com/breferrari/vigia/issues/101) that is exactly what
+    // every tick did. `Frame::advance` dropped the span cache whole, so each of
+    // the ninety-four files this screen never draws was read from disk again,
+    // forever, at 11.72ms a tick on the reference machine.
+    //
+    // **Why eleven read-bounding gates were green over it.** Every one of them
+    // opens with `settle`, and `settle` materialises: with a `FileDiff` cached
+    // for every file the walk rebuilds every span from memory and reads nothing.
+    // The setup deleted the cost. `settle_spans` is the same wait without the
+    // materialisation, and it exists for this gate.
+    //
+    // Structural on purpose: a count, so it takes no slack and fails on any
+    // machine. The wall clock is
+    // `budgets.rs::ticking_over_an_undrawn_worktree_holds_the_frame_budget`.
+    let scratch = Scratch::large_diff("shell-reads-tick", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame, vigia::rows_of);
+
+    // The premise, in the direction that would make the assertion below vacuous:
+    // if the priming tick measured nothing, every file was already diffed and
+    // this fixture cannot tell "re-measure everything" from "re-measure what
+    // changed".
+    assert_eq!(
+        primed, FILES as u64,
+        "priming measured {primed} of {FILES} files, so the walk is not reading \
+         the worktree and there is no cost here to make incremental"
+    );
+
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // One file changes. It is the file the viewport is on, so the frame has to
+    // re-diff it and therefore has to re-measure it: one is the floor, not zero.
+    scratch.edit_line("src/mod_0.rs", 3, "// edited");
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    let cost = delta(before, frame.stats());
+
+    assert_eq!(view.rows.len(), body(), "the screen did not fill");
+    assert!(
+        cost.measured <= 1,
+        "a tick after one edit measured {} of {FILES} files, so the height walk \
+         re-reads the whole changed set on every tick rather than the files that \
+         changed. {} bytes were read",
+        cost.measured,
+        cost.bytes
+    );
+}
+
+#[test]
+fn a_height_taken_from_a_diff_in_hand_costs_no_stat() {
+    // **The order of `fill_span`'s three sources, held structurally.** A file
+    // whose diff the frame already holds needs no evidence: its height is a fold
+    // over hunks the frame owns, which is free and is what this cost before
+    // [#101](https://github.com/breferrari/vigia/issues/101) existed. Asking for
+    // a fingerprint first reads as "cheapest first" and is a syscall bought for
+    // nothing.
+    //
+    // **Written because the wrong order shipped and the wall clock nearly let it
+    // through.** With the stat first,
+    // `budgets.rs::the_frame_budget_holds_through_a_bulk_rewrite` went from
+    // 8.27ms p50 to 11.12ms and from passing 4 of 4 local runs to 2 of 4: a
+    // flake, which is the failure mode a percentile gate reports least clearly
+    // and which a hosted runner would have blamed on itself. A count cannot be
+    // flaky.
+    //
+    // The bulk rewrite is the shape that makes it visible: every print moves at
+    // once, so every carried span mismatches, and the mismatch repeats on every
+    // later frame because the span is rebuilt from the same stale diff each time.
+    const REWRITTEN: usize = FEW_FILES;
+    let scratch = Scratch::large_diff("shell-reads-inhand", REWRITTEN, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(
+        frame.tracked(),
+        REWRITTEN,
+        "settle left {} diffs for {REWRITTEN} files, so this fixture is not the \
+         diff-in-hand case at all",
+        frame.tracked()
+    );
+
+    // Every print moves, and no diff is recomputed: the frame is asked for the
+    // height and nothing else.
+    scratch.rewrite_all(REWRITTEN, LINES, 9);
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    frame.height(vigia::rows_of).expect("height");
+    let first = delta(before, frame.stats());
+
+    // And again, so a per-tick proof cannot be mistaken for a per-frame one.
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    frame.height(vigia::rows_of).expect("height");
+    let second = delta(before, frame.stats());
+
+    for (label, cost) in [("the tick after the rewrite", first), ("the next", second)] {
+        assert_eq!(
+            cost.probes, 0,
+            "{label} took {} stat calls to total the height of {REWRITTEN} files \
+             the frame already holds diffs for, so the walk is proving what it \
+             could have read for free",
+            cost.probes
+        );
+        assert_eq!(
+            cost.measured, 0,
+            "{label} measured {} files that were already in hand",
+            cost.measured
+        );
+    }
 }
 
 #[test]

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Worktree};
+use vigia_core::{CONTEXT, FileChange, FileSpan, Frame, FrameStats, HighlightStats, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -201,6 +201,39 @@ pub fn settle(frame: &mut Frame) {
         "the frame was still re-reading after {SETTLE_FRAMES} idle frames, \
          so nothing is ever being reused"
     );
+}
+
+/// Wait out the margin and fill every **span**, diffing nothing.
+///
+/// [`settle`]'s sibling, and the difference between them is the whole of
+/// [#101](https://github.com/breferrari/vigia/issues/101). `settle` proves the
+/// fixture is old by calling [`materialise`], which diffs *every* file, and a
+/// frame whose diffs are all cached rebuilds every span from a `FileDiff`
+/// already in hand and reads nothing. So a gate that opens with `settle` has
+/// deleted the cost of the height walk before timing anything, which is why the
+/// walk was re-reading the whole worktree on every tick for two phases with
+/// eleven read-bounding gates green over it.
+///
+/// This reaches the same settled state by the route the product takes: advance,
+/// then ask for the height, which measures the files nothing has drawn and
+/// leaves them **un-diffed**. That is the state a reader is in one second after
+/// launch, and the only one in which "re-measure everything" and "re-measure
+/// what changed" produce different numbers.
+///
+/// `rows_of` is the caller's, for the reason [`Frame::height`] takes one: what a
+/// conflict or a binary file occupies is the shell's ruling.
+///
+/// **Asserts nothing about reuse, deliberately.** Whether a second tick
+/// re-measures is the thing under test, and a helper that panicked on it would
+/// report "no span is ever carried" from inside the setup instead of letting the
+/// gate report its own number. Returns what the priming tick measured so the
+/// caller can check its own premise.
+pub fn settle_spans(frame: &mut Frame, rows_of: impl Fn(&FileChange, &FileSpan) -> usize) -> u64 {
+    std::thread::sleep(SETTLE_WAIT);
+    let before = frame.stats().measured;
+    frame.advance().expect("advance");
+    frame.height(rows_of).expect("height");
+    frame.stats().measured - before
 }
 
 /// What one frame cost the highlighter, as the difference between two readings.

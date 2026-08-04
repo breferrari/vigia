@@ -344,6 +344,107 @@ fn a_path_that_stops_changing_is_evicted() {
     );
 }
 
+/// Total rows over every changed file, from spans alone.
+///
+/// One row per diff line, which is the shape the shell's `rows_of` reduces to
+/// once chrome is taken out. It does not have to match what `vigia` draws; it
+/// has to be the *same* function on both sides of every comparison below.
+fn total_height(frame: &mut Frame) -> usize {
+    frame.height(|_, span| span.lines as usize).expect("height")
+}
+
+#[test]
+fn a_carried_span_does_not_survive_an_edit_the_viewport_never_saw() {
+    // **The too-eager direction of [#101](https://github.com/breferrari/vigia/issues/101).**
+    // Carrying a span across a tick makes the walk incremental, and the way to
+    // get that wrong is to carry one whose file has since been rewritten: the
+    // scrollbar is then scaled against a diff that no longer exists, silently,
+    // for as long as nothing else touches that file.
+    //
+    // The edit is to a file **nothing has diffed**, which is the only case where
+    // a carried span is the sole source of that file's height. A file on screen
+    // is re-diffed anyway and its span is rebuilt from the fresh diff.
+    //
+    // This is the shape the whole module doc describes: reusing too little is
+    // slow and loud, reusing too much is fast and wrong.
+    let scratch = Scratch::large_diff("frame-span-edit", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+
+    // Settle without materialising: every span comes from a read, no file has a
+    // diff. `settle` would defeat this by diffing everything.
+    std::thread::sleep(std::time::Duration::from_millis(2_500));
+    frame.advance().expect("advance");
+    let before = total_height(&mut frame);
+    assert_eq!(
+        frame.tracked(),
+        0,
+        "the frame holds {} diffs, so these spans did not come from reads and \
+         this test is not about a carried span at all",
+        frame.tracked()
+    );
+
+    // Twice as many lines in a file the viewport never reached.
+    scratch.rewrite_all(FILES, LINES * 2, 3);
+
+    frame.advance().expect("advance");
+    let after = total_height(&mut frame);
+
+    // The oracle: a frame with no memory at all, over the same worktree.
+    let mut cold = worktree.frame();
+    cold.advance().expect("advance");
+    let truth = total_height(&mut cold);
+
+    assert!(
+        after > before,
+        "the diff doubled and the height stayed at {before}, so a span survived \
+         the content it was taken from"
+    );
+    assert_eq!(
+        after, truth,
+        "the frame reports a {after}-row diff where a frame with no memory \
+         computes {truth}, so a carried span is being trusted past its file"
+    );
+}
+
+#[test]
+fn a_span_for_a_path_that_stops_changing_is_dropped() {
+    // I3's half of #101. Spans used to be cleared whole on every `advance`, so
+    // they could not accumulate; carrying them across ticks makes the map a
+    // **fourth** retained cache, and every retained cache in this repo has to be
+    // bounded by something and asserted rather than trusted.
+    //
+    // The bound is the changed set, exactly as it is for the diffs beside it.
+    let scratch = Scratch::large_diff("frame-span-evict", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    assert_eq!(
+        frame.tracked_spans(),
+        FILES,
+        "the walk left {} spans for {FILES} changed files",
+        frame.tracked_spans()
+    );
+
+    scratch.git(&["checkout", "--", SECOND]);
+    frame.advance().expect("advance");
+
+    assert_eq!(
+        frame.files().len(),
+        FILES - 1,
+        "the reverted file is still reported as changed"
+    );
+    assert_eq!(
+        frame.tracked_spans(),
+        FILES - 1,
+        "the frame still holds {} spans for {} changed files, so the span cache \
+         is bounded by the session rather than by the diff",
+        frame.tracked_spans(),
+        FILES - 1
+    );
+}
+
 #[test]
 fn staging_a_file_recomputes_the_files_still_changed() {
     // Staging rewrites the index, and the index is the left-hand side of every
