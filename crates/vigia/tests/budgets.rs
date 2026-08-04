@@ -832,17 +832,6 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         cost.measured / drove as u64,
         cost.probes / drove as u64,
     );
-
-    // Left as a floor rather than a budget: a frame here should never be
-    // *cheaper* than a settled one, and if it ever is, the partition above has
-    // stopped selecting the corner and every number printed is about something
-    // else. The 16ms line is reported against, never asserted, for the reason at
-    // the top of this test.
-    assert!(
-        in_margin.percentile(0.50).expect("samples") > Duration::from_millis(1),
-        "an in-margin frame ran in under a millisecond, so it is not re-measuring          a hundred files and this run is not the corner it reports on"
-    );
-    let _ = (p99, budget(I9_FRAME));
 }
 
 #[test]

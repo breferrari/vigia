@@ -134,8 +134,8 @@ A regression past any budget **fails the build.**
 > §7 names rather than a number to gate on.
 > `what_a_bulk_rewrite_of_undrawn_files_costs` therefore prints the distribution
 > and asserts only what is exact: that the corner was entered, that the worktree
-> stayed undrawn, and how many files and
-> syscalls a frame there costs. The same corner **is** gated, as a count, by
+> stayed undrawn, and how many files a frame
+> there re-measures. The syscall count is printed beside it. The same corner **is** gated, as a count, by
 > `a_tick_inside_the_settle_margin_stats_each_file_once` in `reads.rs`, which is the
 > tier that works on a shared machine. A gate that can only say "no regression"
 > on a quiet disk has not been tested, which is the rule the soak's drift gate

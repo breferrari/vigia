@@ -570,11 +570,18 @@ fn an_uncommitted_gitattributes_does_not_re_read_the_worktree_every_tick() {
     frame.advance().expect("advance");
     frame.height(vigia::rows_of).expect("height");
     let cost = delta(before, frame.stats());
+    // **At least the whole worktree, not merely "something".** `> 0` is satisfied
+    // by one file, and one file is what an edited `.gitattributes` re-measures on
+    // its *own* account: its span is invalidated by its own moved fingerprint
+    // whether or not the guard exists. Deleting the guard entirely left this at
+    // `measured == 1` and green; with the guard it is 101.
     assert!(
-        cost.measured > 0,
-        "editing `.gitattributes` re-measured nothing, so the guard no longer \
-         notices an attributes change at all and every cached artefact is now \
-         computed under rules that may have moved"
+        cost.measured >= FILES as u64,
+        "editing `.gitattributes` re-measured only {} files of {FILES}, which is \
+         what the attributes file's own span costs on its own. The guard is not \
+         dropping the caches, so every other artefact is still computed under \
+         rules that have moved",
+        cost.measured
     );
 }
 

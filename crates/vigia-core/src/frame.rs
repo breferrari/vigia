@@ -107,8 +107,10 @@ pub struct FrameStats {
     /// [#101](https://github.com/breferrari/vigia/issues/101),
     /// [`Frame::height`] probes once per changed file whose span was carried and
     /// is worth proving, which follows the **whole changed set** and not the
-    /// window. So `probes` is the sum of a window-sized term and a
-    /// worktree-sized one, exactly as [`Self::bytes`] is: a fixture that mixes
+    /// window. And [`Frame::advance`] probes once per `.gitattributes` in the
+    /// changed set, which is a third population again and is almost always
+    /// empty. So `probes` is the sum of a window-sized term, a worktree-sized one
+    /// and a rare one, exactly as [`Self::bytes`] mixes two: a fixture that mixes
     /// the two cannot express a bound on either, and the gates that assert on
     /// this number pick a fixture where one of the two is zero
     /// (`a_height_taken_from_a_diff_in_hand_costs_no_stat` is the clearest,
@@ -186,17 +188,18 @@ struct Observed {
 /// walks every changed file, so a bulk rewrite of files nothing has drawn leaves
 /// every carried span unsettled at once and the walk re-measures the whole
 /// changed set for the length of this margin. Measured over a hundred of them,
-/// across eight runs: **13.05ms p50 and a p99 between 13.83ms and 15.88ms**
-/// against I9's 16ms. The spread rather than the best run, because the gate was
-/// first written from a single lucky one and then failed three times in eight.
-/// The lazy fingerprint in [`Frame::fill_span`] is what holds it to one
-/// `stat` per file rather than two, since an unsettled observation is refused
-/// before a fresh print is asked for. Two gates, because they catch different
-/// halves: `budgets.rs::what_a_bulk_rewrite_of_undrawn_files_costs`
-/// holds the wall clock at this intersection and is the tightest budget in the
-/// repo, and `reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
-/// holds the syscall count, which is the half a percentile with headroom cannot
-/// see.
+/// across eight runs on a quiet machine: **p50 stable at 13.08-14.33ms and a p99
+/// ranging 15.49ms to 44.70ms**, which is a tail the fixture's own write-back
+/// dominates rather than a number to gate on. The lazy fingerprint in
+/// [`Frame::fill_span`] is what holds it to one `stat` per file rather than two,
+/// since an unsettled observation is refused before a fresh print is asked for.
+///
+/// Two tests, and only one of them is a gate.
+/// `budgets.rs::what_a_bulk_rewrite_of_undrawn_files_costs` **reports** that
+/// distribution and asserts only what is exact, for the reason `SPEC.md` §3's
+/// second I4 note gives; `reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
+/// is the gate, and it is a syscall count, which is the tier that works on a
+/// machine somebody else is also using.
 const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
@@ -528,6 +531,18 @@ impl<'w> Frame<'w> {
         // does **not** cover is a change to `core.autocrlf` or to
         // `.git/info/attributes`, neither of which the status walk reports;
         // `SPEC.md` §10 records that residue rather than implying it away.
+        //
+        // **And an unchanged fingerprint is not proof here either**, which is the
+        // hole comparing bare prints opened. A `.gitattributes` rewritten twice
+        // inside one modification-time granule to the same length is
+        // indistinguishable by `stat`, and 13 bytes of `a.txt binary` becoming 13
+        // bytes of `b.txt binary` is exactly that shape. It is the racily-clean
+        // case [`settled`] exists for, on the one file whose staleness invalidates
+        // every *other* file's answer, so it gets the same margin: while an
+        // attributes file cannot be proved unchanged, the caches are dropped. That
+        // costs a re-read per tick for the two seconds after one is written, and
+        // buys never diffing under rules that have moved.
+        let taken_at = SystemTime::now();
         let attributes: HashMap<String, Option<Fingerprint>> = files
             .iter()
             .filter(|change| change.rewrites_attributes())
@@ -537,7 +552,10 @@ impl<'w> Frame<'w> {
                 (change.path.clone(), fingerprint(&path))
             })
             .collect();
-        if attributes != self.attributes {
+        let provable = attributes
+            .values()
+            .all(|print| print.is_some_and(|print| settled(print.mtime, taken_at)));
+        if !provable || attributes != self.attributes {
             self.cached.clear();
             self.spans.clear();
         }
@@ -631,9 +649,9 @@ impl<'w> Frame<'w> {
     /// the `String` per line that made the obvious version ten times slower than
     /// `git diff --numstat`. It reuses a [`FileDiff`] the frame already holds
     /// rather than re-reading, so a file on screen is free. And a span is kept
-    /// once taken: within a tick because [`Measured::proven`] says it was proved
-    /// this one, and **across** ticks because [`Frame::advance`] migrates it and
-    /// [`reusable`] re-proves it for one `stat`. So scrolling never pays, and a
+    /// once taken: within a tick because it records that it was proved on this
+    /// one, and **across** ticks because [`Frame::advance`] migrates it and the
+    /// reuse rule re-proves it for one `stat`. So scrolling never pays, and a
     /// tick pays only for the files that moved
     /// ([#101](https://github.com/breferrari/vigia/issues/101)).
     ///

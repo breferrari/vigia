@@ -589,6 +589,84 @@ fn a_failed_measure_is_asked_again_rather_than_carried() {
 }
 
 #[test]
+fn an_attributes_file_rewritten_inside_one_granule_still_drops_the_caches() {
+    // **The racily-clean case, on the one file whose staleness invalidates every
+    // other file's answer.** Two writes of the same length inside one
+    // modification-time granule are indistinguishable by `stat`, which is what
+    // [`settled`] exists for, and 13 bytes of `a.txt binary` becoming 13 bytes of
+    // `b.txt binary` is exactly that shape. Comparing bare fingerprints calls the
+    // attributes unchanged and leaves every cached diff and span computed under
+    // rules that moved, permanently, because nothing will touch that file again.
+    //
+    // **Forced rather than raced.** The gap between two writes here is a few
+    // milliseconds and the granule observed on this volume is about one, so a
+    // natural attempt misses: the mutation that drops the `settled` term survived
+    // forty of forty tries. Stamping both writes with the same modification time
+    // makes the collision certain, which is what a one or two second granule
+    // (ext3, HFS+, FAT, exFAT) does on its own, and those are the volumes
+    // `SETTLE_MARGIN` is sized against.
+    //
+    // What is still uncovered is a writer that restores an *older* modification
+    // time, which is [#16](https://github.com/breferrari/vigia/issues/16) and is a
+    // limit of every reuse decision in this file rather than of this one.
+    let scratch = Scratch::large_diff("frame-attrs-granule", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+
+    // Settle the *files* first, so their spans are provable and any re-measure
+    // below is the guard's doing rather than the fixture's own youth.
+    let primed = settle_spans(&mut frame);
+    assert_eq!(
+        primed, FILES as u64,
+        "the fixture did not measure its files"
+    );
+
+    // The attributes arrive, stamped now. This tick drops the caches because a
+    // file written a moment ago cannot be proved unchanged, which is the correct
+    // and conservative half of the rule.
+    let stamp = std::time::SystemTime::now();
+    let path = scratch.path_of(".gitattributes");
+    stamp_write(
+        &path,
+        "a.txt binary
+",
+        stamp,
+    );
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+
+    // Now the collision: different content, the same length, and the same
+    // modification time. Nothing a `stat` returns has moved.
+    stamp_write(
+        &path,
+        "b.txt binary
+",
+        stamp,
+    );
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    total_height(&mut frame);
+    let cost = delta(before, frame.stats());
+    assert!(
+        cost.measured >= FILES as u64,
+        "the attributes changed inside one granule and only {} files of {FILES}          were re-measured, so the guard compared fingerprints, found them equal,          and kept every artefact computed under the old rules",
+        cost.measured
+    );
+}
+
+/// Write `contents` and force its modification time, so two writes can be made
+/// to collide the way one filesystem granule makes them collide.
+fn stamp_write(path: &std::path::Path, contents: &str, at: std::time::SystemTime) {
+    std::fs::write(path, contents).expect("write");
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("open")
+        .set_modified(at)
+        .expect("stamp");
+}
+
+#[test]
 fn a_span_for_a_path_that_stops_changing_is_dropped() {
     // I3's half of #101. Spans used to be cleared whole on every `advance`, so
     // they could not accumulate; carrying them across ticks makes the map a

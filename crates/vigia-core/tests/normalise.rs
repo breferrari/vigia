@@ -368,6 +368,16 @@ fn a_running_frame_drops_what_it_cached_when_attributes_change() {
     // And the diff cache with it, which is the same hole one artefact over. The
     // diff asked for here was computed and cached before the attributes moved,
     // so a frame that kept it answers with the stale pair.
+    //
+    // **Re-resolved, because the index moved.** Writing `.gitattributes` adds a
+    // changed file that sorts before `a.txt`, so the position taken above now
+    // names the attributes file: asking for it compared `.gitattributes` against
+    // itself, and the control below passed on a pair that was never the subject.
+    let at = frame
+        .files()
+        .iter()
+        .position(|c| c.path == "a.txt")
+        .expect("a.txt is still changed");
     let (_, diff) = frame.diff(at).expect("diff");
     let (added, removed) = (diff.added, diff.removed);
     let mut cold = worktree.frame();
