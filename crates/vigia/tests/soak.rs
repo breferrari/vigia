@@ -1865,13 +1865,24 @@ fn run_plan_on(script: &str, seconds: &str, runner: &str, daily: &str) -> Option
         .env("SOAK_DAILY", daily)
         .env("GITHUB_OUTPUT", &out);
 
-    // Probe for `bash` before building anything for it to write into.
-    if Command::new("bash")
+    // Probe before building anything for it to write into, and **probe for a
+    // `bash` that works rather than for one that exists**.
+    //
+    // Spawning is not the question. `windows-latest` puts WSL's launcher on
+    // `PATH` as `bash.exe`, which starts perfectly and then reports "Windows
+    // Subsystem for Linux has no installed distributions" and exits non-zero,
+    // so a probe that only asked whether the process started said yes and three
+    // tests then failed on the runner with WSL's setup instructions as their
+    // panic message. Locally the same three pass, because Git Bash comes first
+    // on `PATH` there. Checking the exit status covers both that and a missing
+    // `bash`, and a `bash` too broken to run `exit 0` is one these tests are
+    // right to skip.
+    let usable = Command::new("bash")
         .arg("-c")
         .arg("exit 0")
         .output()
-        .is_err()
-    {
+        .is_ok_and(|probe| probe.status.success());
+    if !usable {
         return None;
     }
     std::fs::create_dir_all(&scratch).expect("a scratch directory for GITHUB_OUTPUT");
@@ -1894,8 +1905,10 @@ fn run_plan_on(script: &str, seconds: &str, runner: &str, daily: &str) -> Option
 /// Printed once where `bash` is missing, rather than passing quietly.
 fn no_bash(what: &str) {
     println!(
-        "note: {what} is not gated here, because `bash` could not be run. It is \
-         gated on every tier-1 target that has one, and on CI."
+        "note: {what} is not gated here, because no working `bash` answered. It \
+         runs on Linux and macOS in CI, and locally wherever one is on PATH; on \
+         a Windows runner `bash` is WSL's launcher with no distribution behind \
+         it, so this skips there and the Linux leg is what holds it."
     );
 }
 
