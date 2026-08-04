@@ -203,6 +203,43 @@ pub fn settle(frame: &mut Frame) {
     );
 }
 
+/// Wait out the margin and fill every **span**, diffing nothing.
+///
+/// [`settle`]'s sibling, and the difference between them is the whole of
+/// [#101](https://github.com/breferrari/vigia/issues/101). `settle` proves the
+/// fixture is old by calling [`materialise`], which diffs *every* file, and a
+/// frame whose diffs are all cached rebuilds every span from a `FileDiff`
+/// already in hand and reads nothing. So a gate that opens with `settle` has
+/// deleted the cost of the height walk before timing anything, which is why the
+/// walk was re-reading the whole worktree on every tick for two phases with
+/// eleven read-bounding gates green over it.
+///
+/// This reaches the same settled state by the route the product takes: advance,
+/// then ask for the height, which measures the files nothing has drawn and
+/// leaves them **un-diffed**. That is the state a reader is in one second after
+/// launch, and the only one in which "re-measure everything" and "re-measure
+/// what changed" produce different numbers.
+///
+/// **Takes no `rows_of`, because one would be inert.** [`Frame::height`] takes
+/// one so that its *return value* can be a row count, and this discards the
+/// total: what it wants is the walk's side effect, which visits every changed
+/// file whatever the closure says. Threading a caller's real `rows_of` through
+/// would read as though the choice mattered here, and would put the shell's
+/// ruling about conflicts and binaries inside a helper that never consults it.
+///
+/// **Asserts nothing about reuse, deliberately.** Whether a second tick
+/// re-measures is the thing under test, and a helper that panicked on it would
+/// report "no span is ever carried" from inside the setup instead of letting the
+/// gate report its own number. Returns what the priming tick measured so the
+/// caller can check its own premise.
+pub fn settle_spans(frame: &mut Frame) -> u64 {
+    std::thread::sleep(SETTLE_WAIT);
+    let before = frame.stats().measured;
+    frame.advance().expect("advance");
+    frame.height(|_, _| 0).expect("height");
+    frame.stats().measured - before
+}
+
 /// What one frame cost the highlighter, as the difference between two readings.
 ///
 /// The same shape as [`delta`], and for the same reason: I2b is a claim about

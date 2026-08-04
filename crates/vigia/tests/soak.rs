@@ -270,6 +270,21 @@ struct Sample {
     fds: Option<usize>,
     /// Diffs [`vigia_core::Frame`] is holding between frames.
     tracked_diffs: usize,
+    /// Heights the same [`vigia_core::Frame`] is holding between frames.
+    ///
+    /// **A fourth retained cache, and it needs its own reading rather than the
+    /// diffs' one.** The two populations are not the same: a diff is kept only
+    /// for a file something has drawn, where a span is kept for every changed
+    /// file the moment anything totals the diff. So `tracked_diffs` is small
+    /// while this is the whole changed set, and a bound asserted over the first
+    /// says nothing at all about the second.
+    ///
+    /// It exists because [#101](https://github.com/breferrari/vigia/issues/101)
+    /// stopped clearing this map on every tick, which is what previously made it
+    /// unable to grow. What bounds it now is the migration in `Frame::advance`,
+    /// and this is where a soak can see that hold over hours of churn rather
+    /// than over one fixture.
+    tracked_spans: usize,
     /// Hunk parses [`vigia_core::Highlighter`] is holding between frames.
     tracked_hunks: usize,
     /// Paths [`vigia_core::History`] is holding, which is I10's own number.
@@ -333,6 +348,14 @@ impl Report {
             .unwrap_or(0)
     }
 
+    fn max_tracked_spans(&self) -> usize {
+        self.samples
+            .iter()
+            .map(|s| s.tracked_spans)
+            .max()
+            .unwrap_or(0)
+    }
+
     fn max_tracked_hunks(&self) -> usize {
         self.samples
             .iter()
@@ -383,9 +406,11 @@ impl Report {
             ),
         }
         println!(
-            "soak: tracked diffs max {} of {} files max; tracked hunks max {} of \
-             body {}, closest to its screen's own bound {:?}; paths ever changed {}",
+            "soak: tracked diffs max {} and heights max {} of {} files max; \
+             tracked hunks max {} of body {}, closest to its screen's own bound \
+             {:?}; paths ever changed {}",
             self.max_tracked_diffs(),
+            self.max_tracked_spans(),
             self.samples.iter().map(|s| s.files).max().unwrap_or(0),
             self.max_tracked_hunks(),
             self.samples.iter().map(|s| s.body).max().unwrap_or(0),
@@ -740,6 +765,7 @@ fn drive(
                 rss: rss_bytes().unwrap_or(0),
                 fds: open_files(),
                 tracked_diffs: frame.tracked(),
+                tracked_spans: frame.tracked_spans(),
                 tracked_hunks: highlighter.tracked(),
                 tracked_history: history.tracked(),
                 files: frame.files().len(),
@@ -958,11 +984,12 @@ impl Report {
             self.samples.len()
         );
 
-        // The three retained caches, each against the thing that is supposed to
-        // bound it. `Frame` is bounded by the current diff; `Highlighter` is
-        // bounded by the screen, which is the stronger claim; `History` is
-        // bounded by a fixed cap, which is I10 and is the only one of the three
-        // that has to keep holding a path *after* it has left the diff.
+        // The four retained caches, each against the thing that is supposed to
+        // bound it. `Frame` keeps two, both bounded by the current diff;
+        // `Highlighter` is bounded by the screen, which is the stronger claim;
+        // `History` is bounded by a fixed cap, which is I10 and is the only one
+        // of the four that has to keep holding a path *after* it has left the
+        // diff.
         for (at, sample) in self.samples.iter().enumerate() {
             assert!(
                 sample.tracked_diffs <= sample.files,
@@ -971,6 +998,16 @@ impl Report {
                  changed",
                 sample.at,
                 sample.tracked_diffs,
+                sample.files
+            );
+            assert!(
+                sample.tracked_spans <= sample.files,
+                "I3: sample {at} at {:?} held {} heights for {} changed files, so \
+                 the span cache is bounded by the session rather than by the \
+                 diff (#101 made it outlive the tick; the migration in \
+                 `Frame::advance` is what is supposed to bound it)",
+                sample.at,
+                sample.tracked_spans,
                 sample.files
             );
             assert!(
@@ -993,6 +1030,19 @@ impl Report {
             "I3: the highlight cache held {held} hunk parses on a screen that \
              could have asked for {bound}, so it is bounded by something other \
              than the viewport"
+        );
+
+        // **And the span bound above cannot be satisfied by an empty map.**
+        // `tracked_spans <= files` holds trivially against a frame that keeps no
+        // span at all, which is precisely what the pre-#101 code did: it cleared
+        // the map on every tick. A bound is only evidence when something reached
+        // it, which is the rule I10's own gate is written against one cache over.
+        assert!(
+            self.max_tracked_spans() > 0,
+            "I3: no sample held a single height across {} frames, so the span \
+             cache is being dropped rather than bounded and the bound above says \
+             nothing",
+            self.frames
         );
 
         assert!(

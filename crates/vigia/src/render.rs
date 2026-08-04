@@ -1999,7 +1999,7 @@ pub fn render(
         // `FileDiff` allocates a `String` per drawn line. Measured over a hundred
         // files of five hundred rewritten lines, totalling through full diffs is
         // **442.71ms** and counting is **8.76ms**, against `git diff --numstat`'s
-        // 46ms for the same work. `SPEC.md` §3's I4 carries the rewording that
+        // 46ms for the same work. `SPEC.md` §3's I4 notes carry the rewording that
         // admits the walk, and `what_a_row_exact_scrollbar_would_cost` is the
         // measurement it rests on.
         //

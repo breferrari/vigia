@@ -371,7 +371,7 @@ pub struct View {
     /// Rows the **whole** diff is, every changed file counted.
     ///
     /// What the diff's scrollbar is scaled against, and the one number here that
-    /// is not bounded by the window. `SPEC.md` §3's I4 carries the rewording that
+    /// is not bounded by the window. `SPEC.md` §3's I4 notes carry the rewording that
     /// admits it; the short version is that counting a file's height is not the
     /// same work as building it, and doing it the cheap way put the reference
     /// fixture at **8.76ms** where materialising every diff was 442.71ms.

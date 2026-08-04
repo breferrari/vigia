@@ -67,10 +67,12 @@ A regression past any budget **fails the build.**
 > the counting path is not merely cheaper than our own mistake, it is in the
 > range the tool everyone compares against occupies.
 >
-> What the narrowing costs, stated rather than buried: a tick now reads every
-> changed file's bytes, where before it read only the window's. It is **once per
-> tick and not once per frame** — the count is cached until the next
-> `Frame::advance`, so scrolling pays nothing and a redraw still reads zero.
+> What the narrowing costs, stated rather than buried, and **superseded on
+> 2026-08-04 by the note below**: a tick then read every changed file's bytes,
+> where before it read only the window's. It is **once per
+> tick and not once per frame** — the count *was* cached until the next
+> `Frame::advance` and dropped there, so scrolling paid nothing and a redraw
+> still read zero. The note below is where that dropping became the defect.
 > Diffs, highlighting and every allocation still follow the window, which is the
 > half of I4 that was doing the real work.
 >
@@ -81,6 +83,110 @@ A regression past any budget **fails the build.**
 > gate, which is the fourth time. `what_a_row_exact_scrollbar_would_cost` is the
 > diagnostic that holds the numbers above, so the next person re-runs them
 > instead of re-arguing this.
+
+> [!NOTE]
+> **The walk is incremental as of 2026-08-04, and it was re-reading the whole
+> worktree every tick until then**
+>
+> "Counted for every changed file once per tick" is what the narrowing above
+> admits, and it is not what shipped. `Frame::advance` dropped the span cache
+> whole, on the reasoning that a span is derived from content and had no
+> freshness check of its own, so every changed file the reader had **not**
+> scrolled to was read from disk again on **every tick**, for as long as the
+> process ran. Over the hundred-file fixture that is 94 files and 3.7 MiB a tick,
+> **16.98ms p50 and 18.36ms p99 against I9's 16ms**, in the state a reader is in
+> one second after launch.
+>
+> **The fix is I2a's own rule applied to the span**: give it the evidence a diff
+> already carries (`Taken`: kind, index blob, and a settled fingerprint) and
+> revalidate it with the same `reusable` function rather than a second copy of
+> the rule. A stat replaces a read. Measured on the reference machine, release:
+> a hundred stats is **1.29ms** against **12.90ms** to measure a hundred files,
+> and the ratio runs 6.8x at 2000 files to 10.0x at 100. The tick above becomes
+> **9.40ms p50, 10.67ms p99**, with zero files measured across a hundred ticks.
+>
+> **Three costs, all stated rather than buried.** First paint pays one extra
+> `stat` per changed file, since a span is only carryable if it was fingerprinted
+> when it was taken: **13.4-13.8ms before, 14.6-14.9ms after**, against I7's 50ms
+> and I4's 100ms. The order of the sources matters more than it looks: a file
+> whose diff is already in hand needs no evidence at all, and asking for one
+> first took `the_frame_budget_holds_through_a_bulk_rewrite` from 8.27ms p50 to
+> 11.12ms and from passing four local runs of four to two.
+> `a_height_taken_from_a_diff_in_hand_costs_no_stat` is the structural gate that
+> keeps that order.
+>
+> And the walk is incremental **outside** the settle margin and not inside it. A
+> bulk rewrite of files nothing has drawn leaves every carried span unsettled at
+> once, so none can be proved and the walk re-measures the whole changed set for
+> the two seconds the margin lasts. It is also the corner where a `.gitattributes`
+> is most likely to arrive, and a fourth staleness rule covers that: see below.
+> That is the pre-#101 cost, paid for a bounded
+> window rather than forever, plus one `stat` per file for the fingerprint that
+> will make the span carryable again once the margin passes. Measured over a
+> hundred undrawn files rewritten at once, over eight runs on a quiet machine:
+> **p50 stable at 13.08-14.33ms**, and a **p99 ranging 15.49ms to 44.70ms**.
+>
+> **That is reported and not asserted, and the refusal is the ruling.** Three
+> instruments were tried: rewriting before every timed frame, discarding one
+> frame after each rewrite, then discarding twelve and partitioning frames by
+> what they actually re-measured. None separated 1.7 MiB of fixture write-back
+> from the subject, and a stable p50 under a tail that moves 3x is the signature
+> §7 names rather than a number to gate on.
+> `what_a_bulk_rewrite_of_undrawn_files_costs` therefore prints the distribution
+> and asserts only what is exact: that the corner was entered, that the worktree
+> stayed undrawn, and how many files a frame
+> there re-measures. The syscall count is printed beside it. The same corner **is** gated, as a count, by
+> `a_tick_inside_the_settle_margin_stats_each_file_once` in `reads.rs`, which is the
+> tier that works on a shared machine. A gate that can only say "no regression"
+> on a quiet disk has not been tested, which is the rule the soak's drift gate
+> already follows one invariant over. An agent running a
+> formatter is exactly this workload, so it gets its own gate rather than a note:
+> `what_a_bulk_rewrite_of_undrawn_files_costs`.
+>
+> The **lazy** fingerprint is what keeps that corner at one `stat` per file
+> rather than two. `reusable` refuses an unsettled observation before it asks for
+> a fresh print, so the pre-check costs nothing there; taken eagerly it doubled
+> the syscalls in exactly the window that can least afford them. Held by a
+> count rather than by that p99, which has more headroom than the reorder costs:
+> `reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`.
+>
+> **The three options #101 listed were all rejected, and the reason is the same
+> for all three: they were written against 93ms and the number is 12ms.** They
+> are recorded here rather than in the issue because the next person to find this
+> walk expensive will reach for them again. The number they were written against
+> is 93.69ms; the walk measures **12.90ms** cold and **1.29ms** once incremental.
+>
+> *Parallelise the walk.* It buys the read back and nothing else, so against a
+> 10x reduction already taken it is buying a second time. It costs a thread pool
+> or a hand-rolled scope on **every tick**, and I3 is a claim about a process
+> left open for days: a monitor that wakes several cores each time an agent saves
+> a file is a different product from the one §2 describes, whatever its p99 says.
+> Rejected on the product class first and the arithmetic second.
+>
+> *Stream the first paint.* It addresses a first-frame cost, and the first frame
+> is 14.9ms against I4's 100ms; there is nothing left here to stream away. It
+> also needs a wake on completion, which is a question about what I1 forbids, and
+> reopening that to buy nothing is the wrong trade. It stays where §10 already
+> keeps it, with the non-streaming walk in
+> [#48](https://github.com/breferrari/vigia/issues/48).
+>
+> *Approximate the total.* Refused outright, and #101 listed it to be refused
+> explicitly rather than forgotten. It is the design the narrowing above replaced:
+> a bar scaled from the current file's height vanished on a short file, ballooned
+> on a long one and never reached the bottom. It is the only one of the three that
+> costs a reader something, which makes it the one to keep saying no to.
+>
+> **What was taken instead is none of the three, and that is the finding.** The
+> walk did not need to be faster; it needed to stop repeating itself, which is
+> what I2a says about diffs and what nothing had yet said about heights. A cost
+> measured once and then re-derived every tick reads as an expensive computation
+> and is a missing cache.
+>
+> **What this does not fix**, so the boundary is a decision and not an oversight:
+> the height of a file whose diff *is* in hand is still taken by presence rather
+> than by proof, which is [#84](https://github.com/breferrari/vigia/issues/84).
+> That branch is untouched, including the 20.71ms #84 records for proving it.
+> [#101](https://github.com/breferrari/vigia/issues/101).
 
 > [!NOTE]
 > **Why I2 is two numbers**
@@ -306,6 +412,7 @@ The rule that closes it has to account for **flooring**. A filesystem stamps a m
 - **A frame-time gate that never paints has timed half a frame.** The third along the same axis as the two above, and it went unnoticed longest because the omission is invisible from inside the gate: every budget gate in this repo timed `Frame::advance` plus `App::view` and stopped, so `render` was outside both tiers on both crates. That is where a row's *width* is decided, so the cost of drawing was measured by nothing at all. A row carrying **7.2x more line than pane** then passed a 16ms gate for two phases, and what found it was a reader scrolling a Japanese README rather than any test. The rule generalises past this instance: **a gate is written against the caller's whole frame, and any stage left outside it is a stage nothing can regress you on.** `crates/vigia/tests/paint.rs` holds the structural half, against a counter the renderer returns. [#45](https://github.com/breferrari/vigia/issues/45).
 - **A fixture over ASCII cannot tell a column bound from a character bound**, because over ASCII they are the same number. The budget fixtures are generated source, 34 columns of it a line, so *"a row costs the pane"* and *"a row costs the whole line"* produced identical counts across every gate in the suite. Anything measured in **rendered width** needs a fixture where width and length disagree: `Scratch::wide_lines` is 531 columns over 412 characters of Japanese, emoji and Latin. Same shape as the row-budget gate's hundred-file fixture, one axis over.
 - **A fixture population sitting on its tooling's default configuration cannot observe the code that exists for the non-default.** The same family as the line above, one axis further out: there the fixtures were uniform in their *content*, here they are uniform in how they were *built*. Every fixture in this repository is created by `Scratch`, which shells out to `git init` and sets `core.autocrlf false`, so both sides of every diff were always LF, git's clean filter never had anything to convert, and the code path that skipped it produced byte-identical output to the code path that runs it. Not one test was wrong and not one of them could have failed: [#65](https://github.com/breferrari/vigia/issues/65) drew a file `git diff` called unchanged as a 1,790-line rewrite while the suite was green, and what found it was pointing the tool at a real repository. **The tell is checkable and is the one to reach for: delete a normalisation, filter or conversion step and see whether anything goes red.** That is a mutation test with a specific target, "does any fixture make this branch's presence observable" rather than "is this branch covered". The answer is to **span** the axis rather than move along it, so `Scratch::crlf_worktree` stands beside `Scratch::new` instead of replacing it. Git alone offers `autocrlf`, `.gitattributes` filters, `core.symlinks`, `core.ignorecase` and sparse checkout; a fixture built by `mkdir` and `write` has silently taken the same position on all of them.
+- **A gate whose setup materialises every unit has measured the cheapest cache population.** The fourth along the same axis as the three above, and the one that hid longest because the helper responsible is *named* for the other thing it does. `settle()` exists to wait out the staleness margin, and the way it proves the wait worked is `materialise()`, which diffs **every** file. A frame holding a `FileDiff` for every changed file rebuilds every height from memory and reads nothing, so the walk I4's narrowing admits cost exactly zero in every gate that opened with `settle`, on both tiers, in both crates. The bug it hid was not small: the height walk re-read the whole undrawn changed set on **every tick**, 94 files and 3.7 MiB over the hundred-file fixture, 18.36ms p99 against 16ms, with eleven read-bounding gates green over it. The tell is that the setup and the subject share a resource: **if a gate's fixture setup populates the cache the gate is about, it has measured the case where that cache is full.** `settle_spans` is the same wait without the materialisation, and the two now stand beside each other rather than one replacing the other, which is the same "span the axis rather than move along it" answer the `crlf_worktree` rule above reaches. [#101](https://github.com/breferrari/vigia/issues/101), `crates/vigia/tests/reads.rs::a_tick_re_measures_only_what_changed` and `crates/vigia/tests/budgets.rs::ticking_over_an_undrawn_worktree_holds_the_frame_budget`.
 - **A gate that settles before it measures has measured the cheapest state.** The same mistake as the line above, along a different axis: time rather than position. `settle()` exists so a fixture written moments ago can be *proved* unchanged, and every structural gate in `crates/vigia/tests/reads.rs` calls it first, so the settle margin — the one window in which the frame path deliberately recomputes instead of reusing — was the one window nothing measured. §10's claim that the margin breaches I9 under a bulk rewrite therefore went two phases with no gate on either tier, in either direction: nothing would have caught the breach if it were real, and nothing showed that it was not. An invariant that governs a window needs a gate that runs *inside* it. [#32](https://github.com/breferrari/vigia/issues/32).
 - **A gate can assert the defect it was named against, and the tell is an exact small count where the rule is a bound.** `crates/vigia/tests/scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank` was written against a blank pane, said so in its name, said so again in its comment — *"an empty pane, which in a monitor is indistinguishable from a broken one"* — and then asserted `view.rows.len() == 1` against a twenty-two row body. Every word around it was right and the one line that runs pinned the failure in place. That is worse than the absent gate §7 already warns about, because a defect with a green gate over it is one nobody goes looking for: [#57](https://github.com/breferrari/vigia/issues/57) was found by a reader watching an agent run `git reset --hard`, two phases after the gate shipped. The signature is a **specific small number where the rule is about a bound** — "the screen is full" is `== height`, never `== 1` — and it is legible by reading the assertion against the test's own name, which is the cheapest review there is and was never done here.
 - **An invariant whose two failure modes are not symmetrical gets a gate for each.** I2a is the case that made this a rule. Reusing too *little* is slow and loud, and the budget gate catches it. Reusing too *much* is fast, passes every budget, and shows a diff that no longer exists, so `crates/vigia-core/tests/frame.rs` compares every reused frame against one computed with no memory at all. A budget gate alone would have called the second failure a success.
@@ -363,6 +470,8 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
   **First scheduled run, 900 seconds, 40 x 500, all three tier-1 targets, green:** Linux 17,804 frames at 2.56% drift, macOS 6,053 at 2.49%, Windows 20,427 at 0.00%. Every one hit the viewport bound at equality, and Linux reports **9 descriptors at the first sample and 9 at the most**, which is the first time that metric has been observed at all. The reference machine's own two runs were 0.17% and 2.18% over the same statistic. So the observed spread of a **healthy** process is roughly **0 to 2.6%** against a 5% budget, which is real headroom and not a lot of it: a longer window could cross the line on variation rather than on a leak, and the answer if it does is a measured warmup or a measured budget, never a wider one.
 
   Two narrower gaps travel with this one. File handles are only countable from `/proc`, so the descriptor gate has never run on the machine these numbers come from and is exercised for the first time by CI on Linux. And the measured window deliberately contains no index writes: the loop reaches mass eviction by reverting files instead, which is what keeps `git` out of the private temp directory the retained-file gate asserts on, so staging over a long run is soaked by nothing.
+- [ ] **An attributes change is a fourth way a cached artefact goes stale, and two of the three ways it can arrive are still invisible.** Writing a `.gitattributes` changes what git's clean filter does to files it does not touch, so a `FileDiff` or a `FileSpan` computed under the old rules describes bytes that are no longer the ones a diff would compare, while every term in the reuse rule reports "unchanged". `Frame::advance` therefore drops both caches when a `.gitattributes` is in the changed set, which is what an agent in the other pane writing one looks like. What that does **not** see is a change to `core.autocrlf` (configuration, not a file the status walk reports) or to `.git/info/attributes` (inside `.git`, which the walk does not enumerate). Both leave a stale diff on screen until something else touches the file, and neither has a gate, because reaching them from a test means changing configuration mid-session rather than writing a file. Measured before the guard existed: a file committed LF and held CRLF reported **80 rows where a cold frame computes 8**, indefinitely. `crates/vigia-core/tests/normalise.rs::a_running_frame_drops_what_it_cached_when_attributes_change` covers the file-shaped case on both caches, and mutation confirms it: clearing neither map, only the spans, or only the diffs each turns it red. The other two are tracked by [#111](https://github.com/breferrari/vigia/issues/111), which also holds the three ways they could be noticed and why picking between them is a change to how the frame path decides staleness rather than a line to add. Found by an adversarial audit on [#101](https://github.com/breferrari/vigia/issues/101), and the diff half of it predates that branch.
+- [ ] **The height walk is incremental now, and what remains is a syscall count rather than a read count.** [#101](https://github.com/breferrari/vigia/issues/101) took a tick over a hundred undrawn changed files from 16.98ms p50 to 9.40ms by replacing a read per file with a stat per file (§3's I4 note holds the numbers), and the term that is left grows the same way: **500 changed files is 501 stats a tick, 15.01ms p50 and 16.82ms p99**, which is *over* I9 rather than at it, and no gate runs at that scale, and 2000 is 26.06ms of stats before anything is drawn. That is [#19](https://github.com/breferrari/vigia/issues/19)'s finding reached from a second direction, which is worth saying plainly because #19 was filed against the *diff* path's revalidation and the fix landed on a different one: the wall is the same wall, it has moved from a hundred files to about a thousand, and it is a property of how many `stat` calls a tick can afford rather than of either caller. #19 already names the way out and it is not a faster stat: take the fingerprints from the walk `advance()` already performs. Left to #19 rather than absorbed here, because doing it means changing what `gix`'s status hands back and that is a wider change than the one this ruling needed.
 - [ ] The frame path walks status to completion before it reports a file list, so it does not stream the way the raw change iterator does. Two reasons it costs nothing today: rename tracking cannot stream either and is on by default, and a scrollbar needs the file count regardless of how few files are drawn. What is open is whether both hold at ten thousand changed files, where the walk itself could exceed I4. Revisit together with rename tracking above, since they stand or fall together. Tracked by [#48](https://github.com/breferrari/vigia/issues/48).
 - [x] ~~The header counts changed files and not changed lines. A repository-wide `+`/`-` total needs every file's diff, and I4 makes first paint independent of total diff size, so the two cannot both hold on the first frame. §5's counters are per-file and cost nothing extra, since a file has to be diffed to be drawn; only the total is affected. What is open is whether it is worth computing behind the frame and revealing when it arrives, which belongs with the rest of §5 in Phase 3.~~ **Ruled 2026-07-31: the header does not carry one, and the first reason is the product class rather than the cost.** [#49](https://github.com/breferrari/vigia/issues/49).
 

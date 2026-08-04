@@ -510,9 +510,9 @@ impl App {
             // under the pointer and the diff jumped to a heading or did not move
             // at all. Reported from use, which is the fifth time.
             //
-            // `Frame::height` is the count the bar already drew itself with and
-            // is cached until the next `advance`, so the walk below reads
-            // nothing that this frame has not read already.
+            // `Frame::height` is the count the bar already drew itself with, and
+            // every span it needs was proved earlier in this same tick, so the
+            // walk below reads nothing that this frame has not read already.
             Action::DiffTo(at) => {
                 self.anchored = false;
                 let total = frame.height(crate::view::rows_of)?;

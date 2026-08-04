@@ -27,7 +27,7 @@ use vigia::{
 };
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
-use support::{Scratch, delta, materialise, settle};
+use support::{Scratch, delta, materialise, settle, settle_spans};
 
 /// The wide fixture: enough files that reading all of them is unmistakable.
 const FILES: usize = 100;
@@ -384,6 +384,266 @@ fn a_screen_a_single_file_fills_reads_that_single_file() {
         many.cost.computed,
         many.cost.measured
     );
+}
+
+#[test]
+fn a_tick_re_measures_only_what_changed() {
+    // **I2a's rule, held over the height walk rather than over the diff.** I4's
+    // narrowing admits one count per changed file per tick; it does not admit
+    // *re-reading* a file that did not change, and until
+    // [#101](https://github.com/breferrari/vigia/issues/101) that is exactly what
+    // every tick did. `Frame::advance` dropped the span cache whole, so each of
+    // the ninety-four files this screen never draws was read from disk again,
+    // forever, at 12.90ms a tick on the reference machine.
+    //
+    // **Why eleven read-bounding gates were green over it.** Every one of them
+    // opens with `settle`, and `settle` materialises: with a `FileDiff` cached
+    // for every file the walk rebuilds every span from memory and reads nothing.
+    // The setup deleted the cost. `settle_spans` is the same wait without the
+    // materialisation, and it exists for this gate.
+    //
+    // Structural on purpose: a count, so it takes no slack and fails on any
+    // machine. The wall clock is
+    // `budgets.rs::ticking_over_an_undrawn_worktree_holds_the_frame_budget`.
+    let scratch = Scratch::large_diff("shell-reads-tick", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+
+    // The premise, in the direction that would make the assertion below vacuous:
+    // if the priming tick measured nothing, every file was already diffed and
+    // this fixture cannot tell "re-measure everything" from "re-measure what
+    // changed".
+    assert_eq!(
+        primed, FILES as u64,
+        "priming measured {primed} of {FILES} files, so the walk is not reading \
+         the worktree and there is no cost here to make incremental"
+    );
+
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // One file changes. It is the file the viewport is on, so the frame has to
+    // re-diff it and therefore has to re-measure it: one is the floor, not zero.
+    scratch.edit_line("src/mod_0.rs", 3, "// edited");
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    let cost = delta(before, frame.stats());
+
+    assert_eq!(view.rows.len(), body(), "the screen did not fill");
+    assert!(
+        cost.measured <= 1,
+        "a tick after one edit measured {} of {FILES} files, so the height walk \
+         re-reads the whole changed set on every tick rather than the files that \
+         changed. {} bytes were read",
+        cost.measured,
+        cost.bytes
+    );
+}
+
+#[test]
+fn a_tick_inside_the_settle_margin_stats_each_file_once() {
+    // **The lazy fingerprint, held as a count.** `reusable` refuses an unsettled
+    // observation *before* it asks for a fresh print, because no `stat` can
+    // rescue evidence that was never proof. Asking eagerly is the obvious way to
+    // write it and doubles the syscalls in the one window that can least afford
+    // them: a bulk rewrite of files nothing has drawn leaves every carried span
+    // unsettled at once, so every one of them would pay a pre-check stat that the
+    // rule then ignores, on top of the post-read stat it already pays.
+    //
+    // **Written because a mutation survived.** Reordering the two terms of that
+    // `&&` is invisible to every wall-clock gate here: it costs about 1.3ms over
+    // a hundred files and
+    // `budgets.rs::what_a_bulk_rewrite_of_undrawn_files_costs` has
+    // more headroom than that. A count does not care about headroom.
+    //
+    // The **second** tick after the rewrite is the one to measure. On the first,
+    // the carried evidence is still settled and its print really has moved, so a
+    // stat is genuinely needed to discover that; from the second onward the
+    // evidence is unsettled and the stat is pure waste.
+    let scratch = Scratch::large_diff("shell-reads-margin", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+    assert_eq!(
+        primed, FILES as u64,
+        "priming measured {primed} of {FILES} files, so there is no walk here"
+    );
+
+    // Every print moves at once, and nothing is drawn, so nothing can be proved.
+    scratch.rewrite_all(FILES, LINES, 4);
+    frame.advance().expect("advance");
+    frame.height(vigia::rows_of).expect("height");
+
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    frame.height(vigia::rows_of).expect("height");
+    let cost = delta(before, frame.stats());
+
+    // Non-vacuity: the tick has to have actually re-measured, or there was no
+    // stat to be lazy about.
+    assert_eq!(
+        cost.measured, FILES as u64,
+        "the tick measured {} of {FILES} files, so it is not inside the margin \
+         and this gate is not looking at the window it names",
+        cost.measured
+    );
+    assert!(
+        cost.probes <= FILES as u64,
+        "the tick took {} stat calls over {FILES} files, so each one is being \
+         fingerprinted twice: once to ask a question the rule answers without \
+         it, and once to record the observation",
+        cost.probes
+    );
+}
+
+#[test]
+fn an_uncommitted_gitattributes_does_not_re_read_the_worktree_every_tick() {
+    // **A `.gitattributes` is a state, not an event, and the difference is
+    // #101's whole invariant.** An attributes change invalidates every cached
+    // artefact, because it changes what git's clean filter does to files it does
+    // not touch, so `Frame::advance` drops both caches when one arrives. Testing
+    // for *presence* rather than for *change* drops them on every tick instead,
+    // for as long as the file sits uncommitted in the changed set, which is the
+    // ordinary state of a repository being set up or of an agent that wrote one
+    // and kept working.
+    //
+    // Measured with the presence test in place, over this fixture: **95 files
+    // re-measured and 3.7 MiB read on every tick, 19.91ms p50 against 9.16ms**.
+    // That is the pre-#101 shape exactly, reintroduced by #101's own fix for a
+    // different defect and invisible to every gate here, because no fixture in
+    // the suite had ever ticked with an uncommitted `.gitattributes` in it:
+    // `Scratch::crlf_worktree` is the only family that writes one and it commits
+    // it in the same breath.
+    //
+    // **The third tick is the one that matters.** Two ticks cannot tell "cleared
+    // on arrival" from "cleared every time", which is one tick too few and is
+    // why the gate that shipped with the guard did not catch this.
+    let scratch = Scratch::large_diff("shell-reads-attrs", FILES, LINES);
+    scratch.write(".gitattributes", "*.rs text\n");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.path == ".gitattributes"),
+        "the fixture's `.gitattributes` is not in the changed set, so this gate \
+         is not looking at the state it names"
+    );
+    assert!(
+        primed >= FILES as u64,
+        "priming measured {primed} of at least {FILES} files, so there is no \
+         walk here to make incremental"
+    );
+
+    // Two idle ticks with nothing on disk moving. Both must be free: the first
+    // proves the guard is not firing on presence, the second that the first was
+    // not a one-off.
+    for tick in 1..=2 {
+        let before = frame.stats();
+        frame.advance().expect("advance");
+        frame.height(vigia::rows_of).expect("height");
+        let cost = delta(before, frame.stats());
+        assert_eq!(
+            cost.measured, 0,
+            "idle tick {tick} re-measured {} files with an uncommitted \
+             `.gitattributes` in the changed set, so the cache guard fires on \
+             the file being present rather than on it having changed, and every \
+             tick pays for the whole worktree",
+            cost.measured
+        );
+        assert_eq!(cost.bytes, 0, "idle tick {tick} read {} bytes", cost.bytes);
+    }
+
+    // And it still fires when the file actually changes, or the fix above has
+    // simply turned the guard off.
+    scratch.write(".gitattributes", "*.rs -text\n");
+    let before = frame.stats();
+    frame.advance().expect("advance");
+    frame.height(vigia::rows_of).expect("height");
+    let cost = delta(before, frame.stats());
+    // **At least the whole worktree, not merely "something".** `> 0` is satisfied
+    // by one file, and one file is what an edited `.gitattributes` re-measures on
+    // its *own* account: its span is invalidated by its own moved fingerprint
+    // whether or not the guard exists. Deleting the guard entirely left this at
+    // `measured == 1` and green; with the guard it is 101.
+    assert!(
+        cost.measured >= FILES as u64,
+        "editing `.gitattributes` re-measured only {} files of {FILES}, which is \
+         what the attributes file's own span costs on its own. The guard is not \
+         dropping the caches, so every other artefact is still computed under \
+         rules that have moved",
+        cost.measured
+    );
+}
+
+#[test]
+fn a_deleted_gitattributes_does_not_re_read_the_worktree_every_tick() {
+    // **The removal case, which is the one that looks most like an attributes
+    // change and is the one the guard got wrong.** A deleted `.gitattributes` is
+    // in the changed set with no working-tree side, so `fingerprint` reports
+    // `None`. Reading that as "cannot be proved" holds the guard open for as long
+    // as the removal sits there, and every tick clears both caches: the presence
+    // test the guard was rewritten to remove, back again for the commonest way an
+    // attributes file changes.
+    //
+    // An absent file is not a racily-clean hazard, because there is no content to
+    // be stale about. Its absence *is* a change, and the map comparison sees that
+    // on the tick it happens and on no tick after.
+    //
+    // Found by review rather than by any gate here, which is worth recording: the
+    // sibling test one above covers a `.gitattributes` that is written and stays,
+    // and nothing covered one that goes.
+    let scratch = Scratch::large_diff("shell-reads-attrs-gone", FILES, LINES);
+    scratch.write(
+        ".gitattributes",
+        "*.rs text
+",
+    );
+    // Only the attributes file: `commit_all` would commit the hundred edits too
+    // and leave nothing changed for the walk to be incremental over.
+    scratch.git(&["add", ".gitattributes"]);
+    scratch.git(&["commit", "-q", "-m", "attributes"]);
+    scratch.remove(".gitattributes");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.path == ".gitattributes"),
+        "the deleted `.gitattributes` is not in the changed set, so this gate is          not looking at the state it names"
+    );
+    assert!(
+        primed >= FILES as u64,
+        "priming measured {primed} of at least {FILES} files, so there is \
+         no walk here to make incremental"
+    );
+
+    for tick in 1..=2 {
+        let before = frame.stats();
+        frame.advance().expect("advance");
+        frame.height(vigia::rows_of).expect("height");
+        let cost = delta(before, frame.stats());
+        assert_eq!(
+            cost.measured, 0,
+            "idle tick {tick} re-measured {} files with a deleted \
+         `.gitattributes` in the changed set, so an absent file is being \
+         read as an unprovable one and every tick pays for the whole \
+         worktree",
+            cost.measured
+        );
+    }
 }
 
 #[test]
@@ -1186,7 +1446,8 @@ fn what_a_row_exact_scrollbar_would_cost() {
         let cold = began.elapsed();
         let cold_cost = delta(before, frame.stats());
 
-        // Cached until the next advance, which is what makes scrolling free.
+        // Carried across ticks and re-proved by a `stat`, which is what makes
+        // scrolling free.
         let began = Instant::now();
         frame.height(vigia::rows_of).expect("height");
         let warm = began.elapsed();
