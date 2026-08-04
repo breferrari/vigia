@@ -108,8 +108,9 @@ const MIN_SAMPLES: usize = 12;
 /// Below this window the drift gate reports its numbers and does not assert.
 ///
 /// `SPEC.md` §7: a drift gate over a window shorter than its own warmup is
-/// measuring warmup. Ten minutes leaves a minute of warmup and about four
-/// minutes at each end of the comparison.
+/// measuring warmup. Ten minutes leaves a minute of warmup and about two and a
+/// quarter minutes at each end of the comparison: 288 samples at 2.08s, 29
+/// discarded, 64 in each quarter.
 const GATED_WINDOW: Duration = Duration::from_secs(600);
 
 /// File descriptors a sample may exceed the baseline by.
@@ -159,9 +160,10 @@ fn mib(bytes: u64) -> f64 {
 
 /// An elapsed time, in whichever unit puts a significant figure on the page.
 ///
-/// `{:.2}h` alone renders every window under thirty-six seconds as `0.00h`,
-/// which is the whole band [`Drift::span`] exists to explain: `+903 MiB/h over
-/// 0.00h` reads as a division by zero rather than as a very short lever arm.
+/// `{:.2}h` alone renders every span under **eighteen seconds** as `0.00h`,
+/// which covers the whole band [`Drift::span`] exists to explain: `+903 MiB/h
+/// over 0.00h` reads as a division by zero rather than as a very short lever
+/// arm.
 fn span(elapsed: Duration) -> String {
     let seconds = elapsed.as_secs_f64();
     if seconds < SECS_PER_HOUR {
@@ -216,11 +218,15 @@ struct Drift {
     /// comparing them is exactly what §10 asks a reader to do.** For one fixed
     /// amount of RSS wander the reported MiB/h goes as the *reciprocal* of the
     /// window, because the same rise is divided by a longer and longer base.
-    /// Measured on the reference machine, same code, same statistic, five
-    /// windows: 15s reports **+364.71 MiB/h**, 600s **+7.89**, 900s **−0.70**
-    /// and **+1.94**, 3600s **+0.92**. Nothing is wrong with any of those
-    /// numbers; the 15-second one is a fifth of a minute of lever arm and says
-    /// so once this is printed beside it.
+    /// Reference machine, by window, and the provenance is not uniform so
+    /// `SPEC.md` §7 keeps the split rather than flattening it. From this
+    /// instrument: **+364.71 MiB/h** at 15s, **+7.89** and **+2.74** at 600s,
+    /// the first three over the default 20 x 200 fixture, and **+1.94** at 900s
+    /// over 100 x 500. From hand arithmetic off the printed series, on code
+    /// that predates the retained span map and the grammar warmer: **−0.70** at
+    /// 900s and **+0.92** at 3600s. Nothing is wrong with any of them; the
+    /// 15-second one is eleven seconds of lever arm and says so once this is
+    /// printed beside it.
     ///
     /// So the statistic only becomes readable somewhere around the window I3's
     /// budget names, which is an argument for running that window rather than
@@ -1654,12 +1660,17 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
 
     let mut soaking = 0;
     for (job, block) in &jobs {
-        // Through the setting scan rather than `contains`, which would take
-        // the words out of a comment: a comment mentioning `needs: plan` in
-        // the plan job made this call that job the soak and fail accusing it.
-        let soaks = workflow_settings(block, "needs:")
-            .iter()
-            .any(|needs| needs == "plan");
+        // **The job that soaks is the one that runs the soak**, which is a
+        // property of what it does rather than of what it depends on. Keying
+        // on `needs: plan` instead reads as the same thing and is not: it
+        // misses the equally valid `needs: [plan]` and then reports the miss
+        // as a bad timeout, and it would force a future summary job that also
+        // depends on `plan` down a branch demanding it carry a soak window.
+        // Through the setting scan rather than a raw `contains` either, so a
+        // comment mentioning the key could not be read as the key. No comment
+        // in this file does today; the scan costs nothing and the raw form was
+        // demonstrated to misfire on one.
+        let soaks = !workflow_settings(block, "VIGIA_SOAK_SECS:").is_empty();
         soaking += usize::from(soaks);
         let timeouts = workflow_settings(block, "timeout-minutes:");
         assert_eq!(
@@ -1688,6 +1699,21 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
                  86400-second dispatch the `seconds` input advertises at 5.5 \
                  hours"
             );
+            // It reads three of that job's outputs, so it has to declare the
+            // dependency: without `needs:`, `needs.plan.outputs.*` resolves
+            // empty and `fromJSON('')` throws on the runner, which is a
+            // failure nothing here would have predicted. Both YAML spellings,
+            // because `needs: [plan]` is as valid as `needs: plan`.
+            let needs = workflow_settings(block, "needs:");
+            assert!(
+                needs
+                    .iter()
+                    .any(|on| on == "plan" || on == "[plan]" || on == "[ plan ]"),
+                "job `{job}` reads `needs.plan.outputs` and declares `needs: \
+                 {needs:?}`, so the outputs it reads resolve to nothing and the \
+                 run fails on the runner rather than here"
+            );
+
             // Every planned number, not only the timeout. The platform list is
             // the third, and it is the one the `runner` input travels through:
             // pinning `os:` back to a literal matrix leaves that input inert
@@ -1728,14 +1754,17 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
     }
 
     // And exactly one job soaked, so the branch carrying every assertion above
-    // was actually taken. Without this, renaming `needs: plan` sends every job
-    // down the literal branch and the file passes as a workflow that soaks
-    // nothing.
+    // was actually taken. Without it, renaming the environment variable sends
+    // every job down the literal branch and the file passes as a workflow that
+    // soaks nothing. Exactly one rather than at least one, because the
+    // concurrency group at the top of this workflow exists to stop two soaks
+    // sharing a runner's memory pressure, and two soaking jobs inside one
+    // workflow would be that same mistake a level up.
     assert_eq!(
         soaking,
         1,
-        "{soaking} of the {} jobs in {} declare `needs: plan`; the assertions \
-         above describe exactly one job that soaks",
+        "{soaking} of the {} jobs in {} run a soak; the assertions above \
+         describe exactly one",
         jobs.len(),
         path.display()
     );
@@ -1782,6 +1811,11 @@ struct Planned {
 /// first leaked one per run on any machine without `bash`, in the one file
 /// whose headline invariant is that nothing is retained.
 fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
+    run_plan_on(script, seconds, runner, "false")
+}
+
+/// The same, with the daily cron's flag under the caller's control.
+fn run_plan_on(script: &str, seconds: &str, runner: &str, daily: &str) -> Option<Planned> {
     // A counter rather than anything derived from the inputs: two labels of the
     // same length would otherwise share a directory, and two of the hostile
     // ones below are both thirteen characters.
@@ -1800,7 +1834,7 @@ fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
         .arg(script)
         .env("SOAK_SECONDS", seconds)
         .env("SOAK_RUNNER", runner)
-        .env("SOAK_DAILY", "false")
+        .env("SOAK_DAILY", daily)
         .env("GITHUB_OUTPUT", &out);
 
     // Probe for `bash` before building anything for it to write into.
@@ -1906,6 +1940,71 @@ fn a_runner_label_cannot_corrupt_the_plan_job_output() {
             bad.said
         );
     }
+}
+
+/// Which platforms each trigger soaks on, run rather than read.
+///
+/// **The producer side of the same hole three audit rounds closed on the
+/// consumer side.** The soak job is now gated into reading
+/// `needs.plan.outputs.os`, so pinning a literal matrix there fails. Nothing
+/// looked at what the plan job *puts* in that output: narrowing the default
+/// list to one label deletes macOS and Windows from every weekly run and every
+/// manual dispatch, with the whole suite green and the workflow valid.
+///
+/// `SPEC.md` §7 is what this holds in place: "the soak is two tiers, like every
+/// other budget here", weekly on all three tier-1 targets, and a leak is
+/// usually not platform-specific but that is a reason to sample all three
+/// rarely rather than one of them often.
+#[test]
+fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
+    let (path, source) = workflow();
+    let script = plan_script(&path, &source);
+
+    let platforms = |planned: &Planned| -> String {
+        planned
+            .emitted
+            .lines()
+            .find_map(|line| line.strip_prefix("os="))
+            .unwrap_or_else(|| panic!("no `os=` in the plan output:\n{}", planned.emitted))
+            .to_owned()
+    };
+
+    // The daily cron: Linux alone, because three hosted runners every day is
+    // not a proportionate way to find a leak that is rarely platform-specific.
+    let Some(daily) = run_plan_on(&script, "14400", "", "true") else {
+        no_bash("the plan job's platform list");
+        return;
+    };
+    assert!(daily.ok, "the daily plan failed:\n{}", daily.said);
+    assert_eq!(
+        platforms(&daily),
+        "[\"ubuntu-latest\"]",
+        "the daily cron no longer soaks Linux alone"
+    );
+
+    // Everything else, which is the weekly cron and every manual dispatch: all
+    // three tier-1 targets.
+    let weekly = run_plan_on(&script, "14400", "", "false").expect("bash was there a moment ago");
+    assert!(weekly.ok, "the weekly plan failed:\n{}", weekly.said);
+    for target in ["ubuntu-latest", "macos-latest", "windows-latest"] {
+        assert!(
+            platforms(&weekly).contains(target),
+            "the weekly run no longer soaks {target}, and it is a tier-1 \
+             target: {}",
+            platforms(&weekly)
+        );
+    }
+
+    // And a named runner replaces the list rather than joining it, or the
+    // uncapped machine I3's day needs would soak beside two capped ones.
+    let named =
+        run_plan_on(&script, "14400", "self-hosted", "false").expect("bash was there a moment ago");
+    assert!(named.ok, "the named-runner plan failed:\n{}", named.said);
+    assert_eq!(
+        platforms(&named),
+        "[\"self-hosted\"]",
+        "a named runner did not replace the platform matrix"
+    );
 }
 
 /// The plan job's arithmetic, run rather than read.
