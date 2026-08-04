@@ -552,9 +552,23 @@ impl<'w> Frame<'w> {
                 (change.path.clone(), fingerprint(&path))
             })
             .collect();
+        // **Only the files that have a fingerprint have to prove it.** A
+        // `.gitattributes` that was *deleted* is in the changed set with no
+        // working-tree side, so `fingerprint` reports `None`, and reading that as
+        // "cannot be proved" left `provable` false for as long as the removal sat
+        // there: every tick cleared both caches, which is the presence test this
+        // guard was rewritten to remove, reintroduced for the one case that looks
+        // most like an attributes change.
+        //
+        // An absent file is not a racily-clean hazard, because there is no
+        // content to be stale about. What its absence *is* is a change, and the
+        // map comparison below sees that: the entry moves from `Some(print)` to
+        // `None` on the tick it goes, and is equal on every tick after.
         let provable = attributes
             .values()
-            .all(|print| print.is_some_and(|print| settled(print.mtime, taken_at)));
+            .copied()
+            .flatten()
+            .all(|print| settled(print.mtime, taken_at));
         if !provable || attributes != self.attributes {
             self.cached.clear();
             self.spans.clear();

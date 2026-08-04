@@ -649,7 +649,10 @@ fn an_attributes_file_rewritten_inside_one_granule_still_drops_the_caches() {
     let cost = delta(before, frame.stats());
     assert!(
         cost.measured >= FILES as u64,
-        "the attributes changed inside one granule and only {} files of {FILES}          were re-measured, so the guard compared fingerprints, found them equal,          and kept every artefact computed under the old rules",
+        "the attributes changed inside one granule and only {} files of \
+         {FILES} were re-measured, so the guard compared fingerprints, \
+         found them equal, and kept every artefact computed under the old \
+         rules",
         cost.measured
     );
 }

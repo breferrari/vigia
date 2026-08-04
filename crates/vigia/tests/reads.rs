@@ -586,6 +586,67 @@ fn an_uncommitted_gitattributes_does_not_re_read_the_worktree_every_tick() {
 }
 
 #[test]
+fn a_deleted_gitattributes_does_not_re_read_the_worktree_every_tick() {
+    // **The removal case, which is the one that looks most like an attributes
+    // change and is the one the guard got wrong.** A deleted `.gitattributes` is
+    // in the changed set with no working-tree side, so `fingerprint` reports
+    // `None`. Reading that as "cannot be proved" holds the guard open for as long
+    // as the removal sits there, and every tick clears both caches: the presence
+    // test the guard was rewritten to remove, back again for the commonest way an
+    // attributes file changes.
+    //
+    // An absent file is not a racily-clean hazard, because there is no content to
+    // be stale about. Its absence *is* a change, and the map comparison sees that
+    // on the tick it happens and on no tick after.
+    //
+    // Found by review rather than by any gate here, which is worth recording: the
+    // sibling test one above covers a `.gitattributes` that is written and stays,
+    // and nothing covered one that goes.
+    let scratch = Scratch::large_diff("shell-reads-attrs-gone", FILES, LINES);
+    scratch.write(
+        ".gitattributes",
+        "*.rs text
+",
+    );
+    // Only the attributes file: `commit_all` would commit the hundred edits too
+    // and leave nothing changed for the walk to be incremental over.
+    scratch.git(&["add", ".gitattributes"]);
+    scratch.git(&["commit", "-q", "-m", "attributes"]);
+    scratch.remove(".gitattributes");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let primed = settle_spans(&mut frame);
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.path == ".gitattributes"),
+        "the deleted `.gitattributes` is not in the changed set, so this gate is          not looking at the state it names"
+    );
+    assert!(
+        primed >= FILES as u64,
+        "priming measured {primed} of at least {FILES} files, so there is \
+         no walk here to make incremental"
+    );
+
+    for tick in 1..=2 {
+        let before = frame.stats();
+        frame.advance().expect("advance");
+        frame.height(vigia::rows_of).expect("height");
+        let cost = delta(before, frame.stats());
+        assert_eq!(
+            cost.measured, 0,
+            "idle tick {tick} re-measured {} files with a deleted \
+         `.gitattributes` in the changed set, so an absent file is being \
+         read as an unprovable one and every tick pays for the whole \
+         worktree",
+            cost.measured
+        );
+    }
+}
+
+#[test]
 fn a_redraw_with_nothing_changed_reads_nothing() {
     // The shell's half of I2a. The core can hold a diff between frames, and a
     // renderer that fetched content its own way would waste that entirely. The

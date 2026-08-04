@@ -69,10 +69,11 @@ impl FileChange {
     /// A `.gitattributes` decides `text`, `eol` and any filter driver for every
     /// path under its directory, so writing one changes the bytes a diff of an
     /// untouched file would compare, without moving that file's length,
-    /// modification time or index blob. Every term in
-    /// [`reusable`](crate::Frame) therefore reports "unchanged" while the answer
-    /// underneath has changed, which is why [`Frame::advance`](crate::Frame)
-    /// drops what it holds rather than trying to prove it.
+    /// modification time or index blob. Every term the reuse rule behind
+    /// [`Frame::diff`](crate::Frame::diff) consults therefore reports
+    /// "unchanged" while the answer underneath has changed, which is why
+    /// [`Frame::advance`](crate::Frame::advance) drops what it holds rather than
+    /// trying to prove it.
     ///
     /// **Matched on the file name at any depth**, because attributes nest: a
     /// `src/.gitattributes` governs `src/` and nothing else, but the frame keeps
