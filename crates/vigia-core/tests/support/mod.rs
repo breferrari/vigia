@@ -140,6 +140,47 @@ pub enum Numstat {
     Lines(u32, u32),
 }
 
+/// Make `link` point at `target`, or say why this platform is not checking it.
+///
+/// Refusing is reported rather than silently turning the gate that follows into
+/// a pass, which is the shape `SPEC.md` §7 keeps naming. Windows needs
+/// `SeCreateSymbolicLinkPrivilege` or developer mode, so a hosted runner may
+/// decline; Linux and macOS never do, so
+/// [#15](https://github.com/breferrari/vigia/issues/15)'s gates run on every
+/// push whatever this machine does.
+///
+/// Here rather than in one test binary because two of them need it and the note
+/// is the part that must not drift: a skip that stops explaining itself is a
+/// silent pass again.
+pub fn made_link(scratch: &Scratch, target: &str, link: &str) -> bool {
+    if scratch.symlink_file(target, link) {
+        return true;
+    }
+    eprintln!(
+        "note: this platform would not create the file symlink {link} -> {target}, \
+         so #15's reading is unchecked here; it is checked wherever one can be made"
+    );
+    false
+}
+
+/// The other half of non-vacuity: git has to have stored a symlink.
+///
+/// Creating a link the platform accepts is not the same as git recording one.
+/// With `core.symlinks=false` git writes and stores a plain file holding the
+/// target path, and a fixture git itself sees no symlink in cannot fail a test
+/// about symlinks however the code behaves.
+pub fn git_stored_a_symlink(scratch: &Scratch, link: &str) -> bool {
+    let mode = scratch.index_mode(link);
+    if mode == "120000" {
+        return true;
+    }
+    eprintln!(
+        "note: git recorded {link} as mode {mode} rather than 120000, so this \
+         fixture holds no symlink and #15's reading is unchecked here"
+    );
+    false
+}
+
 /// Every change, sorted by path so assertions do not depend on walk order.
 ///
 /// Named for the sort rather than for the call, because that is the property
@@ -541,6 +582,60 @@ impl Scratch {
     /// Delete a file.
     pub fn remove(&self, rela: &str) {
         std::fs::remove_file(self.path.join(rela)).expect("remove fixture file");
+    }
+
+    /// Point `link` at `target`, both worktree-relative, replacing any link
+    /// already there. `false` means this platform would not make one.
+    ///
+    /// Windows needs `SeCreateSymbolicLinkPrivilege` or developer mode, so a
+    /// hosted runner may refuse. Every caller reports the refusal rather than
+    /// letting it turn a gate into a silent pass, which is the shape `SPEC.md`
+    /// §7 keeps naming.
+    ///
+    /// `target` is taken as a `&str` and passed through unchanged rather than
+    /// being joined onto the root, because the *text* is what git stores and
+    /// what the diff compares. Joining would make every fixture absolute and
+    /// test a target no repository holds.
+    ///
+    /// **Deliberately not folded with `warm.rs::link_dir`.** They look like one
+    /// policy in two copies and are not: Windows has separate `symlink_file` and
+    /// `symlink_dir` calls with different semantics, and `link_dir` points
+    /// *outside* the scratch on purpose, where this is worktree-relative by
+    /// construction.
+    pub fn symlink_file(&self, target: &str, link: &str) -> bool {
+        let full = self.path.join(link);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).expect("create parent dir");
+        }
+        // Repointing is remove-then-create on every platform here, which is
+        // also what `ln -sfn` does. Ignored rather than asserted: the common
+        // case is that there is nothing to remove.
+        let _ = std::fs::remove_file(&full);
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(target, &full).is_ok()
+        }
+        #[cfg(windows)]
+        {
+            std::os::windows::fs::symlink_file(target, &full).is_ok()
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = target;
+            false
+        }
+    }
+
+    /// The index mode git recorded for one path, as the six digits it prints.
+    ///
+    /// The non-vacuity half of every symlink gate here. A platform can create a
+    /// link that git then stores as a regular file (`core.symlinks=false` is the
+    /// documented way), and a fixture where git itself sees no symlink cannot
+    /// fail a test about symlinks however the code behaves.
+    pub fn index_mode(&self, rela: &str) -> String {
+        let out = self.git(&["ls-files", "-s", "--", rela]);
+        out.split_whitespace().next().unwrap_or_default().to_owned()
     }
 
     /// Replace one line of a file, leaving every other byte alone.

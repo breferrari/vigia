@@ -13,7 +13,7 @@
 
 mod support;
 
-use support::{Scratch, delta, materialise, settle, settle_spans};
+use support::{Scratch, delta, git_stored_a_symlink, made_link, materialise, settle, settle_spans};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
 /// Small enough to reason about every count, more than one so "all" and "the
@@ -935,5 +935,152 @@ fn a_same_length_edit_that_changes_the_line_count_is_not_reused() {
         1,
         "the frame still reports {} lines for a file that is now one line long",
         edited(&after)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Symlinks: the half of [#15](https://github.com/breferrari/vigia/issues/15)
+// that lives here rather than in `fidelity.rs`.
+//
+// The read and the fingerprint had to move together. `Worktree::read_worktree`
+// now takes a link's content from `read_link`, so a `fingerprint` that still
+// followed the link would fingerprint one file and diff another, and the
+// staleness rule would be reading a term that has nothing to do with what it
+// governs. Neither direction of that is visible in a diff's *contents* with the
+// read already fixed, which is why both gates below read `FrameStats` instead:
+// what changed is whether the frame recomputed, not what it computed.
+// ---------------------------------------------------------------------------
+
+/// A worktree whose link target is **ignored**, so editing it never enters the
+/// changed set.
+///
+/// That is what makes `computed` an exact per-file number in the gates below
+/// rather than a total two files contribute to. Returns `None` when the platform
+/// or git declines to hold a symlink, already having said so.
+fn ignored_target_link(name: &str, target: &str) -> Option<Scratch> {
+    let scratch = Scratch::new(name);
+    scratch.write(".gitignore", "blob/\n");
+    scratch.write("blob/a.txt", "AAAA\n");
+    scratch.write("blob/b.txt", "BBBB\n");
+    if !made_link(&scratch, target, "link.txt") {
+        return None;
+    }
+    scratch.commit_all("initial");
+    if !git_stored_a_symlink(&scratch, "link.txt") {
+        return None;
+    }
+    Some(scratch)
+}
+
+#[test]
+fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
+    // **Mutation-sensitive on all three tier-1 targets, and for two different
+    // reasons, which is worth recording rather than leaving to be rediscovered.**
+    // Restore the following `fs::metadata` and on Linux and macOS this fails at
+    // its own assertion: the old fingerprint resolved the link, found an
+    // untouched file, and reused a diff that no longer described anything.
+    //
+    // On **Windows** it fails earlier and louder, inside `settle`, with "the
+    // frame was still re-reading after 8 idle frames". That is not this test
+    // being flaky, it is a second defect the same line carried: Windows refuses
+    // to resolve a symlink whose stored target uses forward slashes, and forward
+    // slashes are exactly what git stores. So `fs::metadata` returned `Err`, the
+    // fingerprint was `None`, and **every symlink in a Windows worktree was
+    // re-diffed on every frame, indefinitely** (I2a). Nothing measured that,
+    // because no fixture in this repository held a symlink until now, which is
+    // `SPEC.md` §7's fixture-axis rule naming `core.symlinks` and then this being
+    // what was behind it.
+    let Some(scratch) = ignored_target_link("frame-symlink-repoint", "blob/a.txt") else {
+        return;
+    };
+
+    // Two spellings of **one file**, so the followed metadata is byte-identical
+    // by construction. Two genuinely different targets would differ in mtime by
+    // microseconds and a fingerprint that followed the link would invalidate by
+    // accident, which makes the gate flaky rather than red: it would pass for
+    // the wrong reason on a slow machine and fail to reproduce on a fast one.
+    assert!(scratch.symlink_file("blob/b.txt", "link.txt"));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let before = diffs(&mut frame);
+
+    // Stat the target **directly** rather than through the link. It is the same
+    // number a following fingerprint would have taken, and it is the only
+    // spelling of that question that works everywhere: Windows refuses to
+    // resolve a symlink whose stored target uses forward slashes at all
+    // (`ERROR_INVALID_NAME`), and forward slashes are what git stores.
+    let target = |scratch: &Scratch| {
+        let meta = std::fs::metadata(scratch.path_of("blob/b.txt")).expect("stat the target");
+        (meta.len(), meta.modified().expect("mtime"))
+    };
+    let resolved_before = target(&scratch);
+
+    assert!(scratch.symlink_file("blob/../blob/b.txt", "link.txt"));
+
+    // The non-vacuity that makes this gate about the fingerprint and nothing
+    // else: the file both spellings name did not move. A frame path that still
+    // followed has no term left that could tell these two apart, so if the
+    // assertion below passes it is because the link's own metadata was read.
+    assert_eq!(
+        resolved_before,
+        target(&scratch),
+        "the two spellings do not name one unchanged file, so a fingerprint that \
+         followed the link could notice this repoint and the gate proves nothing"
+    );
+
+    let after = diffs(&mut frame);
+    assert!(
+        before != after,
+        "a repointed symlink was reused: the frame is still showing the old \
+         target path, because its fingerprint followed the link to a file that \
+         did not change"
+    );
+    assert_same(&after, &fresh(&worktree), "after a symlink was repointed");
+}
+
+#[test]
+fn editing_a_symlinks_target_does_not_invalidate_the_links_diff() {
+    // The other direction, and `SPEC.md` §7 asks for it by name: an invariant
+    // whose two failure modes are not symmetrical gets a gate for each. Reusing
+    // too little is the cheap failure here, and it is still a failure, because a
+    // fingerprint that moves when git reports no change is a term that does not
+    // mean what the rule reads as. `fidelity.rs` holds the walk's half of this;
+    // this is the frame's.
+    let Some(scratch) = ignored_target_link("frame-symlink-target-edit", "blob/a.txt") else {
+        return;
+    };
+
+    assert!(scratch.symlink_file("blob/b.txt", "link.txt"));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    assert_eq!(
+        frame.files().len(),
+        1,
+        "the changed set is not the link alone, so `computed` below is a total \
+         rather than this file's number"
+    );
+
+    // Ignored, so this never joins the changed set. It is also the file the link
+    // resolves to, which is the whole point.
+    scratch.write("blob/b.txt", "EDITED, AND LONGER THAN BEFORE\n");
+
+    let before = frame.stats();
+    materialise(&mut frame);
+    let cost = delta(before, frame.stats());
+
+    assert_eq!(
+        cost.computed, 0,
+        "editing a link's *target* made the frame recompute the link's diff, so \
+         the fingerprint is still following the link to a file git reports no \
+         change to"
+    );
+    assert_eq!(
+        cost.reused, 1,
+        "the frame did not visit the link at all, so nothing above was tested"
     );
 }

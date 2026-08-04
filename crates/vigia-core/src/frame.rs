@@ -346,15 +346,26 @@ struct Measured {
 
 /// Fingerprint a working-tree file, or `None` when it cannot be.
 ///
-/// Follows symlinks, because the content side of a diff is read with
-/// `fs::read`, which follows them too. Fingerprinting anything other than the
-/// bytes actually compared would be measuring the wrong file.
+/// **Does not follow symlinks**, because the content side of a diff no longer
+/// does either. The rule is unchanged and only its answer moved: fingerprint the
+/// thing whose bytes are compared. `Worktree::read_worktree` takes a link's
+/// content from `read_link`, so following here would fingerprint one file and
+/// diff another, which is the half of
+/// [#15](https://github.com/breferrari/vigia/issues/15) that has to land in the
+/// same change as the read. Following was consistent while the read followed
+/// too: the frame faithfully cached a wrong answer rather than adding one.
+///
+/// It is a no-op on anything that is not a link, since `symlink_metadata` and
+/// `metadata` agree on every other file type, and it corrects **both** failure
+/// directions on one that is: a repoint between two equal-sized targets used to
+/// read as unchanged, and editing a link's target used to invalidate a diff git
+/// reports no change to.
 ///
 /// `None` is not an error. A file can vanish between status naming it and this
 /// call, and a platform can decline to report a modification time. Both mean
 /// the same thing here: no fingerprint, so no reuse.
 fn fingerprint(path: &Path) -> Option<Fingerprint> {
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = std::fs::symlink_metadata(path).ok()?;
     Some(Fingerprint {
         len: meta.len(),
         mtime: meta.modified().ok()?,

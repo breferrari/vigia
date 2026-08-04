@@ -242,16 +242,51 @@ impl Worktree {
     /// LF. Skipping the filter makes every line of every such file differ from
     /// its stored form: see `filter.rs` and
     /// [#65](https://github.com/breferrari/vigia/issues/65).
+    ///
+    /// **A symlink is stored by content too, and its content is the target
+    /// path.** Git keeps one as a mode `120000` blob holding the target verbatim,
+    /// so `fs::read` is the wrong primitive for it twice over: it follows the
+    /// link, and it therefore compares the *target file's* bytes against a blob
+    /// holding a path. Reading the link itself is the same rule this function
+    /// already applies to a text file, not an exception to it: compare the bytes
+    /// git would store. See [`Worktree::link_target`] and
+    /// [#15](https://github.com/breferrari/vigia/issues/15).
+    ///
+    /// The `symlink_metadata` that decides between the two is one `lstat` on a
+    /// path this function is about to read in full, so it is small against the
+    /// read it precedes, and it is the *cheaper* answer on the one path that
+    /// reads nothing: a file deleted between status naming it and this call is
+    /// now reported empty without an `open`.
     fn read_worktree(&self, rela_path: &str) -> Result<Vec<u8>> {
-        let raw = match std::fs::read(self.workdir.join(rela_path)) {
+        let full = self.workdir.join(rela_path);
+
+        // The agent in the other pane can delete a file between the moment
+        // status named it and the moment we read it. That is ordinary, not a
+        // failure: report it as empty and let the next frame correct us.
+        //
+        // Returned before the filter rather than through it, because there is
+        // nothing to normalise and priming the attributes stack for a file that
+        // no longer exists would be a read for no reader.
+        let meta = match std::fs::symlink_metadata(&full) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(Error::Read {
+                    path: rela_path.to_owned(),
+                    source,
+                });
+            }
+        };
+
+        if meta.file_type().is_symlink() {
+            return Self::link_target(&full, rela_path);
+        }
+
+        let raw = match std::fs::read(&full) {
             Ok(data) => data,
-            // The agent in the other pane can delete a file between the moment
-            // status named it and the moment we read it. That is ordinary, not
-            // a failure: report it as empty and let the next frame correct us.
-            //
-            // Returned before the filter rather than through it, because there
-            // is nothing to normalise and priming the attributes stack for a
-            // file that no longer exists would be a read for no reader.
+            // Still reachable, and not redundant with the arm above: the two
+            // calls are separated by a window the agent next door can delete
+            // the file in.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(source) => {
                 return Err(Error::Read {
@@ -267,6 +302,63 @@ impl Worktree {
             None => filter.insert(Filter::new(&self.repo)?),
         };
         filter.convert_to_git(rela_path, raw)
+    }
+
+    /// The bytes git stores for a symlink: its target path, and nothing else.
+    ///
+    /// **No terminator and no clean filter**, which is what the blob on the
+    /// other side of the diff holds. Git appends no newline to a link target and
+    /// runs no conversion over one, so a `\ No newline at end of file` on both
+    /// sides is the correct answer rather than a defect: `git diff` prints
+    /// exactly that for a repointed link. Running the filter here would be the
+    /// mistake [#65](https://github.com/breferrari/vigia/issues/65) made in
+    /// reverse, normalising something git never normalised.
+    ///
+    /// **The filter half of that is correct by construction and no gate can hold
+    /// it, which is said here so nobody concludes it is merely untested.**
+    /// Mutation-tested: wrapping this in `convert_to_git` leaves all 40 tests in
+    /// `fidelity.rs` and `frame.rs` green, and it has to. That filter is a
+    /// line-ending conversion, and a link target contains no line ending, so both
+    /// paths emit identical bytes and no fixture can separate them. What the
+    /// bypass actually buys is the *cost*: priming the attributes stack for a
+    /// path whose answer could not depend on it.
+    ///
+    /// Reads through `OsString::into_encoded_bytes` rather than through `str`,
+    /// because a target is a path and a path is not required to be UTF-8. That
+    /// is the one half of [#17](https://github.com/breferrari/vigia/issues/17)
+    /// this touches: the *target* is byte-exact here, while `FileChange::path`
+    /// remains lossy and remains #17's.
+    fn link_target(full: &Path, rela_path: &str) -> Result<Vec<u8>> {
+        let target = match std::fs::read_link(full) {
+            Ok(target) => target,
+            // A link can go the same way a file can, in the same window.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(Error::Read {
+                    path: rela_path.to_owned(),
+                    source,
+                });
+            }
+        };
+
+        let bytes = target.into_os_string().into_encoded_bytes();
+
+        // A reparse point stores `dir\target.txt` where git stores
+        // `dir/target.txt`, so without this a nested link reads as changed on
+        // Windows and unchanged everywhere else. Git's own `readlink` does the
+        // same substitution on this platform and only on this platform.
+        //
+        // Byte-level is safe: `\` is 0x5C, which never appears inside a
+        // multi-byte UTF-8 or WTF-8 sequence. `cfg`'d rather than unconditional
+        // because a backslash is a legal character in a Unix filename, so
+        // converting there would corrupt a legitimate target.
+        #[cfg(windows)]
+        let bytes = bytes
+            .into_iter()
+            .map(|byte| if byte == b'\\' { b'/' } else { byte })
+            .collect();
+
+        Ok(bytes)
     }
 }
 
