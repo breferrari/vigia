@@ -459,7 +459,7 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
     // **Written because a mutation survived.** Reordering the two terms of that
     // `&&` is invisible to every wall-clock gate here: it costs about 1.3ms over
     // a hundred files and
-    // `budgets.rs::a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget` has
+    // `budgets.rs::what_a_bulk_rewrite_of_undrawn_files_costs` has
     // more headroom than that. A count does not care about headroom.
     //
     // The **second** tick after the rewrite is the one to measure. On the first,

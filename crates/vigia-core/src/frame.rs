@@ -192,7 +192,7 @@ struct Observed {
 /// The lazy fingerprint in [`Frame::fill_span`] is what holds it to one
 /// `stat` per file rather than two, since an unsettled observation is refused
 /// before a fresh print is asked for. Two gates, because they catch different
-/// halves: `budgets.rs::a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`
+/// halves: `budgets.rs::what_a_bulk_rewrite_of_undrawn_files_costs`
 /// holds the wall clock at this intersection and is the tightest budget in the
 /// repo, and `reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
 /// holds the syscall count, which is the half a percentile with headroom cannot

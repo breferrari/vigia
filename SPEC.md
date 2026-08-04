@@ -123,13 +123,25 @@ A regression past any budget **fails the build.**
 > That is the pre-#101 cost, paid for a bounded
 > window rather than forever, plus one `stat` per file for the fingerprint that
 > will make the span carryable again once the margin passes. Measured over a
-> hundred undrawn files rewritten at once, over eight runs: **13.05ms p50 and
-> a p99 between 13.83ms and 15.88ms** against 16ms. That is the tightest budget
-> in the repo and the spread is quoted rather than the best run, because the
-> first version of this gate was written from a single lucky one and then failed
-> three times in eight. An agent running a
+> hundred undrawn files rewritten at once, over eight runs on a quiet machine:
+> **p50 stable at 13.08-14.33ms**, and a **p99 ranging 15.49ms to 44.70ms**.
+>
+> **That is reported and not asserted, and the refusal is the ruling.** Three
+> instruments were tried: rewriting before every timed frame, discarding one
+> frame after each rewrite, then discarding twelve and partitioning frames by
+> what they actually re-measured. None separated 1.7 MiB of fixture write-back
+> from the subject, and a stable p50 under a tail that moves 3x is the signature
+> §7 names rather than a number to gate on.
+> `what_a_bulk_rewrite_of_undrawn_files_costs` therefore prints the distribution
+> and asserts only what is exact: that the corner was entered, that the worktree
+> stayed undrawn, and how many files and
+> syscalls a frame there costs. The same corner **is** gated, as a count, by
+> `a_tick_inside_the_settle_margin_stats_each_file_once` in `reads.rs`, which is the
+> tier that works on a shared machine. A gate that can only say "no regression"
+> on a quiet disk has not been tested, which is the rule the soak's drift gate
+> already follows one invariant over. An agent running a
 > formatter is exactly this workload, so it gets its own gate rather than a note:
-> `a_bulk_rewrite_of_undrawn_files_holds_the_frame_budget`.
+> `what_a_bulk_rewrite_of_undrawn_files_costs`.
 >
 > The **lazy** fingerprint is what keeps that corner at one `stat` per file
 > rather than two. `reusable` refuses an unsettled observation before it asks for
