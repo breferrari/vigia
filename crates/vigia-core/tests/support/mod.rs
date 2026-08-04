@@ -174,11 +174,42 @@ pub fn git_stored_a_symlink(scratch: &Scratch, link: &str) -> bool {
     if mode == "120000" {
         return true;
     }
+    // **An empty mode is the caller's bug, not the platform's, so it panics
+    // rather than skipping.** `index_mode` shells out to `git ls-files -s`,
+    // which reports nothing at all for a path that is not in the index, so
+    // asking before `commit_all` returns `""` here. That is indistinguishable
+    // from "this checkout does not do symlinks" at the call site, and it would
+    // print the note and skip: a green test that ran no assertion, which is the
+    // exact failure both these helpers exist to prevent. Six hand-written copies
+    // of the link/commit/verify order made that a live risk; `committed_link`
+    // now owns the order, and this is what catches the seventh site that does
+    // not use it.
+    assert!(
+        !mode.is_empty(),
+        "{link} is not in the index, so this fixture was checked before it was \
+         committed and the skip below would have been silent"
+    );
     eprintln!(
         "note: git recorded {link} as mode {mode} rather than 120000, so this \
          fixture holds no symlink and #15's reading is unchecked here"
     );
     false
+}
+
+/// Link, commit, and confirm git recorded mode `120000`.
+///
+/// `false` means this platform or this checkout is not holding a symlink and the
+/// caller should return; both halves have already printed why.
+///
+/// **The order is the point.** [`git_stored_a_symlink`] reads the *index*, so it
+/// is meaningless before the commit, and a caller that got the order wrong used
+/// to skip silently. This is that protocol written once instead of six times.
+pub fn committed_link(scratch: &Scratch, target: &str, link: &str) -> bool {
+    if !made_link(scratch, target, link) {
+        return false;
+    }
+    scratch.commit_all("initial");
+    git_stored_a_symlink(scratch, link)
 }
 
 /// Every change, sorted by path so assertions do not depend on walk order.

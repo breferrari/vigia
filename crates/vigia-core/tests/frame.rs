@@ -13,7 +13,7 @@
 
 mod support;
 
-use support::{Scratch, delta, git_stored_a_symlink, made_link, materialise, settle, settle_spans};
+use support::{Scratch, committed_link, delta, materialise, settle, settle_spans};
 use vigia_core::{ChangeKind, FileDiff, Frame, Worktree};
 
 /// Small enough to reason about every count, more than one so "all" and "the
@@ -962,14 +962,7 @@ fn ignored_target_link(name: &str, target: &str) -> Option<Scratch> {
     scratch.write(".gitignore", "blob/\n");
     scratch.write("blob/a.txt", "AAAA\n");
     scratch.write("blob/b.txt", "BBBB\n");
-    if !made_link(&scratch, target, "link.txt") {
-        return None;
-    }
-    scratch.commit_all("initial");
-    if !git_stored_a_symlink(&scratch, "link.txt") {
-        return None;
-    }
-    Some(scratch)
+    committed_link(&scratch, target, "link.txt").then_some(scratch)
 }
 
 #[test]
@@ -1011,11 +1004,11 @@ fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
     // spelling of that question that works everywhere: Windows refuses to
     // resolve a symlink whose stored target uses forward slashes at all
     // (`ERROR_INVALID_NAME`), and forward slashes are what git stores.
-    let target = |scratch: &Scratch| {
+    let target = || {
         let meta = std::fs::metadata(scratch.path_of("blob/b.txt")).expect("stat the target");
         (meta.len(), meta.modified().expect("mtime"))
     };
-    let resolved_before = target(&scratch);
+    let resolved_before = target();
 
     assert!(scratch.symlink_file("blob/../blob/b.txt", "link.txt"));
 
@@ -1025,7 +1018,7 @@ fn a_repointed_symlink_is_not_reused_from_the_targets_fingerprint() {
     // assertion below passes it is because the link's own metadata was read.
     assert_eq!(
         resolved_before,
-        target(&scratch),
+        target(),
         "the two spellings do not name one unchanged file, so a fingerprint that \
          followed the link could notice this repoint and the gate proves nothing"
     );

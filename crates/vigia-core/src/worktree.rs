@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
 use gix::bstr::{BString, ByteSlice};
@@ -57,6 +57,27 @@ pub struct Worktree {
     /// is `Send` and not `Sync`, so each thread already opens its own
     /// `Worktree` rather than sharing one.
     filter: RefCell<Option<Filter>>,
+    /// `lstat` calls [`Worktree::read_worktree`] made to decide *how* to read a
+    /// file, waiting to be drained into [`FrameStats::probes`].
+    ///
+    /// **Here because the syscall is here and the counter is one layer up, and
+    /// leaving that gap open is what made this branch's own optimisation
+    /// untestable.** `FrameStats::probes` bounds the `stat` calls a tick costs,
+    /// and `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
+    /// asserts one per file. A type probe taken down here and counted nowhere
+    /// meant [`FileChange::maybe_symlink`] could be deleted, the `lstat` made
+    /// unconditional, and **every test in the repository would still pass** while
+    /// the settle-margin corner cost +1.18ms p50 again. Draining it into the same
+    /// counter is what turns that gate red instead.
+    ///
+    /// Completing a counter's population is not the same act as widening a gate
+    /// to admit a regression, which `SPEC.md` §7 refuses: the resource is
+    /// unchanged and one term of it had simply never been counted.
+    ///
+    /// A `Cell` rather than an argument because `Worktree::diff` and
+    /// `Worktree::measure` are the public surface and neither should grow a
+    /// syscall ledger in its signature to serve one caller.
+    type_probes: Cell<u64>,
 }
 
 impl Worktree {
@@ -68,6 +89,7 @@ impl Worktree {
             repo,
             workdir,
             filter: RefCell::new(None),
+            type_probes: Cell::new(0),
         })
     }
 
@@ -213,6 +235,17 @@ impl Worktree {
         Ok(object.into_blob().take_data())
     }
 
+    /// Take the type probes spent since the last call, leaving zero behind.
+    ///
+    /// Draining rather than reporting a running total, so a caller cannot
+    /// double-count by forgetting to subtract. [`Frame`] is the only caller and
+    /// it folds the result straight into
+    /// [`FrameStats::probes`](crate::FrameStats): see
+    /// [`Worktree::type_probes`] for why this crosses the layer at all.
+    pub(crate) fn take_type_probes(&self) -> u64 {
+        self.type_probes.replace(0)
+    }
+
     /// Drop the cached clean filter, so the next read rebuilds it.
     ///
     /// Called once per [`Frame::advance`], which is what bounds how stale the
@@ -260,42 +293,50 @@ impl Worktree {
     /// holds at one, for a measured **+1.18ms p50** over a hundred undrawn files
     /// inside the settle margin. Only a change the walk could not resolve as a
     /// plain file reaches the `lstat` below.
+    ///
+    /// **`gix`'s own blob pipeline is the obvious alternative and it is refused,
+    /// which is recorded here because it is the first thing a reader will
+    /// propose.** `gix_diff::blob::pipeline::Pipeline::convert_to_diffable` does
+    /// handle `EntryKind::Link`, and three things make it the wrong call: it
+    /// performs **no separator conversion**, so it reproduces on Windows exactly
+    /// the defect [#15](https://github.com/breferrari/vigia/issues/15) fixed; it
+    /// can spawn a `binary_to_text_command` external driver, which `filter.rs`
+    /// rejects outright as a process per file per frame; and its own
+    /// documentation warns that it leaks temporary files without a
+    /// `gix_tempfile` signal handler, against I3's zero-retained-temp-files gate.
+    /// It also takes the entry mode as a **trusted** input, which is the same
+    /// ruling [`FileChange::maybe_symlink`] makes and a less conservative one.
     fn read_worktree(&self, change: &FileChange) -> Result<Vec<u8>> {
         let rela_path = change.path.as_str();
         let full = self.workdir.join(rela_path);
 
-        // The agent in the other pane can delete a file between the moment
-        // status named it and the moment we read it. That is ordinary, not a
-        // failure: report it as empty and let the next frame correct us.
+        // **Counted, and that is what gives this branch a failing test.** See
+        // [`Worktree::type_probes`]: uncounted, deleting
+        // [`FileChange::maybe_symlink`] and making this `lstat` unconditional
+        // left the whole suite green.
         //
-        // Returned before the filter rather than through it, because there is
-        // nothing to normalise and priming the attributes stack for a file that
-        // no longer exists would be a read for no reader.
+        // Anything the probe cannot positively call a link falls through to the
+        // plain read, which reaches the same answers one line later: a file that
+        // vanished reads empty there, and an unreadable one produces the same
+        // `Error::Read`. Only the link arm is load-bearing.
         if change.maybe_symlink {
-            match std::fs::symlink_metadata(&full) {
-                Ok(meta) if meta.file_type().is_symlink() => {
-                    return Self::link_target(&full, rela_path);
-                }
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-                Err(source) => {
-                    return Err(Error::Read {
-                        path: rela_path.to_owned(),
-                        source,
-                    });
-                }
+            self.type_probes.set(self.type_probes.get() + 1);
+            if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                return Self::link_target(&full, rela_path);
             }
         }
 
         let raw = match std::fs::read(&full) {
             Ok(data) => data,
+            // The agent in the other pane can delete a file between the moment
+            // status named it and the moment we read it. That is ordinary, not
+            // a failure: report it as empty and let the next frame correct us.
+            //
+            // Returned before the filter rather than through it, because there
+            // is nothing to normalise and priming the attributes stack for a
+            // file that no longer exists would be a read for no reader.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(Error::Read {
-                    path: rela_path.to_owned(),
-                    source,
-                });
-            }
+            Err(source) => return Err(Error::read(rela_path, source)),
         };
 
         let mut filter = self.filter.borrow_mut();
@@ -335,33 +376,51 @@ impl Worktree {
             Ok(target) => target,
             // A link can go the same way a file can, in the same window.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(Error::Read {
-                    path: rela_path.to_owned(),
-                    source,
-                });
-            }
+            Err(source) => return Err(Error::read(rela_path, source)),
         };
 
-        let bytes = target.into_os_string().into_encoded_bytes();
-
-        // A reparse point stores `dir\target.txt` where git stores
-        // `dir/target.txt`, so without this a nested link reads as changed on
-        // Windows and unchanged everywhere else. Git's own `readlink` does the
-        // same substitution on this platform and only on this platform.
-        //
-        // Byte-level is safe: `\` is 0x5C, which never appears inside a
-        // multi-byte UTF-8 or WTF-8 sequence. `cfg`'d rather than unconditional
-        // because a backslash is a legal character in a Unix filename, so
-        // converting there would corrupt a legitimate target.
-        #[cfg(windows)]
-        let bytes = bytes
-            .into_iter()
-            .map(|byte| if byte == b'\\' { b'/' } else { byte })
-            .collect();
-
-        Ok(bytes)
+        Ok(git_separators(target.into_os_string().into_encoded_bytes()))
     }
+}
+
+/// A link target spelled the way git stores it, whatever this platform hands
+/// back.
+///
+/// A Windows reparse point stores `dir\target.txt` where git stores
+/// `dir/target.txt`, so without this a nested link reads as changed on Windows
+/// and unchanged everywhere else, which is
+/// [#65](https://github.com/breferrari/vigia/issues/65)'s class of defect one
+/// file type over. Git's own `readlink` does the same substitution on this
+/// platform and only on this platform.
+///
+/// **`cfg!` rather than `#[cfg]`, so the body type-checks and lints on all three
+/// targets.** The lint leg of `ci.yml` runs on Linux alone, so a `#[cfg(windows)]`
+/// body is compiled by nothing that gates a pull request. `cfg!` is a
+/// compile-time constant, so Unix still emits no loop.
+///
+/// **Separate and unit-tested because the integration gate over it is vacuous on
+/// two of three tier-1 targets.** `fidelity.rs::a_symlink_to_a_nested_path_reports_forward_slashes`
+/// asserts the right thing, and on Linux and macOS `read_link` already returns
+/// `dir/other.txt`, so it passes whether this function exists or not. That is
+/// exactly the shape `SPEC.md` §7 names about fixtures on a tooling default, so
+/// the rule gets a test that runs everywhere instead.
+///
+/// Byte-level, and safe: `\` is `0x5C`, which never appears inside a multi-byte
+/// UTF-8 or WTF-8 sequence, so this cannot corrupt a non-UTF-8 target. Windows
+/// only, because a backslash is a legal character in a **Unix** filename and
+/// converting there would corrupt a target that is perfectly valid. `watch.rs`'s
+/// `followable` states that same hazard and answers it by joining components,
+/// which is the right answer for a path and the wrong one here: this value is
+/// opaque bytes git compares verbatim, not a path this process resolves.
+fn git_separators(mut bytes: Vec<u8>) -> Vec<u8> {
+    if cfg!(windows) {
+        for byte in &mut bytes {
+            if *byte == b'\\' {
+                *byte = b'/';
+            }
+        }
+    }
+    bytes
 }
 
 /// Iterator over working-tree-vs-index changes.
@@ -387,9 +446,15 @@ fn path_of(raw: &gix::bstr::BStr) -> String {
 /// that asymmetry is spent.
 fn maybe_symlink(item: &Item) -> bool {
     // A regular file, executable or not, is the only positive answer taken from
-    // an index entry. `SYMLINK` is obviously true; `DIR` and `COMMIT` are
-    // submodules and are not read through this path at all, so `true` costs
-    // nothing real and keeps the rule one line.
+    // an index entry. `SYMLINK` is obviously true.
+    //
+    // `DIR` and `COMMIT` say `true` as well, and **that is a cost rather than a
+    // no-op**, which an earlier version of this comment got wrong by claiming
+    // they never reach a read. A modified submodule is neither a conflict nor a
+    // type change nor a removal, so it satisfies both `is_diffable` and
+    // `reads_worktree` and does arrive here, where it spends one probe and then
+    // fails its `fs::read` exactly as it does on `main`. Rare enough to leave
+    // alone; counted, so it is not invisible if it stops being rare.
     let not_a_plain_file = |mode: gix::index::entry::Mode| {
         !matches!(
             mode,
@@ -476,5 +541,57 @@ impl Iterator for Changes {
                 maybe_symlink: maybe_symlink(&item),
             }));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::git_separators;
+
+    /// The separator rule, on every platform rather than on one.
+    ///
+    /// **This exists because the integration gate over it is vacuous on two of
+    /// three tier-1 targets.** `fidelity.rs::a_symlink_to_a_nested_path_reports_forward_slashes`
+    /// asserts the right thing, and on Linux and macOS `read_link` already hands
+    /// back `dir/other.txt`, so it passes whether the conversion exists or not.
+    /// Only Windows can fail it. That is `SPEC.md` §7's "a fixture on its
+    /// tooling's default cannot observe the code that exists for the
+    /// non-default", one axis over, so the rule is asserted here as a pure
+    /// function where both branches are reachable from any host.
+    #[test]
+    fn a_link_target_is_spelled_the_way_git_stores_it() {
+        let converted = git_separators(br"dir\other.txt".to_vec());
+        if cfg!(windows) {
+            assert_eq!(
+                converted, b"dir/other.txt",
+                "a reparse point's separators reached the diff unconverted, so a \
+                 nested link reads as changed here and unchanged everywhere else"
+            );
+        } else {
+            assert_eq!(
+                converted, br"dir\other.txt",
+                "a backslash is a legal character in a Unix filename, and \
+                 converting it corrupts a target that is perfectly valid"
+            );
+        }
+    }
+
+    /// Nothing to convert is left exactly alone, on both platforms.
+    #[test]
+    fn a_target_with_no_separator_to_fix_is_unchanged() {
+        assert_eq!(git_separators(b"dir/other.txt".to_vec()), b"dir/other.txt");
+        assert_eq!(git_separators(Vec::new()), b"");
+    }
+
+    /// A target that is not UTF-8 survives byte for byte.
+    ///
+    /// `read_link` hands back an `OsString`, which is not required to be UTF-8 on
+    /// Unix, and `0x5C` never appears inside a multi-byte UTF-8 or WTF-8
+    /// sequence. So the conversion cannot corrupt one, and this is the assertion
+    /// that says so rather than the comment claiming it.
+    #[test]
+    fn a_target_that_is_not_utf8_is_not_corrupted() {
+        let raw = vec![0xff, 0xfe, b'a', 0x80, b'b'];
+        assert_eq!(git_separators(raw.clone()), raw);
     }
 }

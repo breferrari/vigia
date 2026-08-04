@@ -6,7 +6,7 @@
 
 mod support;
 
-use support::{Numstat, Scratch, changes_sorted, git_stored_a_symlink, made_link, numbered_lines};
+use support::{Numstat, Scratch, changes_sorted, committed_link, made_link, numbered_lines};
 use vigia_core::{ChangeKind, ChangeOptions, LineKind};
 
 #[test]
@@ -484,11 +484,7 @@ fn a_repointed_symlink_diffs_as_its_target_path_not_its_target_contents() {
     let scratch = Scratch::new("symlink-repoint");
     scratch.write("target_a.txt", "AAAAAAAA\n");
     scratch.write("target_b.txt", binary_target());
-    if !made_link(&scratch, "target_a.txt", "link.txt") {
-        return;
-    }
-    scratch.commit_all("initial");
-    if !git_stored_a_symlink(&scratch, "link.txt") {
+    if !committed_link(&scratch, "target_a.txt", "link.txt") {
         return;
     }
 
@@ -539,11 +535,7 @@ fn a_symlink_to_a_nested_path_reports_forward_slashes() {
     let scratch = Scratch::new("symlink-nested");
     scratch.write("dir/target.txt", "X\n");
     scratch.write("dir/other.txt", "Y\n");
-    if !made_link(&scratch, "dir/target.txt", "nested.txt") {
-        return;
-    }
-    scratch.commit_all("initial");
-    if !git_stored_a_symlink(&scratch, "nested.txt") {
+    if !committed_link(&scratch, "dir/target.txt", "nested.txt") {
         return;
     }
 
@@ -573,11 +565,7 @@ fn a_symlink_to_a_nested_path_reports_forward_slashes() {
 fn a_broken_symlink_diffs_as_its_target_path() {
     let scratch = Scratch::new("symlink-broken");
     scratch.write("target_a.txt", "AAAAAAAA\n");
-    if !made_link(&scratch, "target_a.txt", "link.txt") {
-        return;
-    }
-    scratch.commit_all("initial");
-    if !git_stored_a_symlink(&scratch, "link.txt") {
+    if !committed_link(&scratch, "target_a.txt", "link.txt") {
         return;
     }
 
@@ -607,6 +595,53 @@ fn a_broken_symlink_diffs_as_its_target_path() {
 }
 
 #[test]
+fn an_untracked_symlink_is_added_as_its_target_path() {
+    // **The second of `maybe_symlink`'s three arms**, and until this it was
+    // unexercised: every other symlink gate here commits the link first, so all
+    // of them arrive as `Item::Modification` and are classified off the *index*
+    // entry's mode. An untracked link has no index entry at all and is
+    // classified off the dirwalk entry's `disk_kind` instead, which is a
+    // different `gix` field on a different code path.
+    //
+    // Not a hypothetical population: a link an agent has just created is exactly
+    // what a monitor is pointed at.
+    let scratch = Scratch::new("symlink-untracked");
+    scratch.write("keep.txt", "tracked\n");
+    scratch.write("target_b.txt", binary_target());
+    scratch.commit_all("initial");
+
+    if !made_link(&scratch, "target_b.txt", "fresh.txt") {
+        return;
+    }
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    assert_eq!(
+        changes.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["fresh.txt"],
+        "the untracked link is not the only change, so the diff below is not it"
+    );
+    assert_eq!(changes[0].kind, ChangeKind::Added);
+
+    let diff = worktree.diff(&changes[0]).expect("diff the untracked link");
+    assert!(
+        !diff.binary,
+        "the diff sniffed binary, so an untracked link was read through to its \
+         4 KiB target: `disk_kind` did not classify it"
+    );
+    assert_eq!(
+        texts(&diff, LineKind::Added),
+        ["target_b.txt"],
+        "an untracked link was added as its target's contents"
+    );
+
+    // The oracle, taken after the measurement so staging cannot affect it: git
+    // stores this link as a mode 120000 blob, and its content is the path above.
+    scratch.git(&["add", "fresh.txt"]);
+    assert_eq!(scratch.index_mode("fresh.txt"), "120000");
+}
+
+#[test]
 fn swapping_a_symlink_for_a_regular_file_and_back_agrees_with_git() {
     // **The boundary, and it is also the premise `FileChange::maybe_symlink`
     // rests on**, which is why it asserts what git calls each direction rather
@@ -620,11 +655,7 @@ fn swapping_a_symlink_for_a_regular_file_and_back_agrees_with_git() {
     let scratch = Scratch::new("symlink-typechange");
     scratch.write("target.txt", "AAAA\n");
     scratch.write("swap.txt", "plain content\n");
-    if !made_link(&scratch, "target.txt", "link.txt") {
-        return;
-    }
-    scratch.commit_all("initial");
-    if !git_stored_a_symlink(&scratch, "link.txt") {
+    if !committed_link(&scratch, "target.txt", "link.txt") {
         return;
     }
 
@@ -707,11 +738,7 @@ fn editing_a_symlinks_target_leaves_the_link_out_of_the_changed_set() {
     // fingerprint side, and it is only observable through `FrameStats`.
     let scratch = Scratch::new("symlink-target-edit");
     scratch.write("target_a.txt", "AAAAAAAA\n");
-    if !made_link(&scratch, "target_a.txt", "link.txt") {
-        return;
-    }
-    scratch.commit_all("initial");
-    if !git_stored_a_symlink(&scratch, "link.txt") {
+    if !committed_link(&scratch, "target_a.txt", "link.txt") {
         return;
     }
 

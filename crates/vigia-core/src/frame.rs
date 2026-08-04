@@ -119,17 +119,23 @@ pub struct FrameStats {
     /// [#85](https://github.com/breferrari/vigia/issues/85) already holds for
     /// `bytes`, one counter over.
     ///
-    /// **What it counts is the frame path's own `stat` calls, and keeping that
-    /// true is a live constraint rather than a description.**
-    /// [#15](https://github.com/breferrari/vigia/issues/15) needed to know
-    /// whether a file was a symlink before reading it, and the obvious `lstat` in
-    /// `Worktree::read_worktree` would have been a *fourth* population, invisible
-    /// here and therefore invisible to
-    /// `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`,
-    /// which is the one instrument that holds this corner as a count. Measured at
-    /// +1.18ms p50 over a hundred undrawn files. The answer was to take the
-    /// syscall out rather than to widen the counter or the gate: see
-    /// [`FileChange::maybe_symlink`](crate::FileChange).
+    /// **A fourth population joined it, and the reason is worth more than the
+    /// number.** [#15](https://github.com/breferrari/vigia/issues/15) needed a
+    /// file's type before reading it, and `Worktree::read_worktree` takes an
+    /// `lstat` for that. Left in `Worktree` and counted nowhere, it was a `stat`
+    /// per file that the one gate over this corner
+    /// (`crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`,
+    /// `probes <= FILES`) could not see in either direction: the cost when it was
+    /// unconditional, **or** the saving when it stopped being. Measured at
+    /// +1.18ms p50 over a hundred undrawn files, and invisible to every tier.
+    ///
+    /// So the syscall is drained across the layer into this counter
+    /// (`Worktree::take_type_probes`). That is **completing a population this
+    /// number already claimed**, not widening a gate to admit a regression: the
+    /// resource is the same `stat` calls a tick costs, and one term of it had
+    /// never been counted. What it buys is a failing test for
+    /// [`FileChange::maybe_symlink`](crate::FileChange), which otherwise could be
+    /// deleted with the whole suite staying green.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     ///
@@ -828,7 +834,12 @@ impl<'w> Frame<'w> {
         // gives: the window a write would have to land in to be missed is
         // over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        let (span, taken) = match self.worktree.measure(change) {
+        let measured = self.worktree.measure(change);
+        // Whatever the read spent deciding *how* to read, folded into the same
+        // counter as the fingerprints. Drained on both arms, because a failed
+        // read still took the probe. See `Worktree::type_probes`.
+        self.stats.probes += self.worktree.take_type_probes();
+        let (span, taken) = match measured {
             Ok(span) => {
                 self.stats.measured += 1;
                 self.stats.bytes += span.bytes;
@@ -905,7 +916,10 @@ impl<'w> Frame<'w> {
         // Timed from before the read starts, so the window a write would have
         // to land in to be missed is over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        let diff = self.worktree.diff(change)?;
+        let computed = self.worktree.diff(change);
+        // Before the `?`, so a failed read still reports the probe it took.
+        self.stats.probes += self.worktree.take_type_probes();
+        let diff = computed?;
         let worktree = if change.reads_worktree() {
             self.stats.probes += 1;
             fingerprint(&path).map(|print| Observed {
