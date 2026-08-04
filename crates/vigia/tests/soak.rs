@@ -157,6 +157,20 @@ fn mib(bytes: u64) -> f64 {
     bytes as f64 / MIB
 }
 
+/// An elapsed time, in whichever unit puts a significant figure on the page.
+///
+/// `{:.2}h` alone renders every window under thirty-six seconds as `0.00h`,
+/// which is the whole band [`Drift::span`] exists to explain: `+903 MiB/h over
+/// 0.00h` reads as a division by zero rather than as a very short lever arm.
+fn span(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs_f64();
+    if seconds < SECS_PER_HOUR {
+        format!("{seconds:.1}s")
+    } else {
+        format!("{:.2}h", seconds / SECS_PER_HOUR)
+    }
+}
+
 /// What a series of RSS samples did after it warmed up.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Drift {
@@ -516,11 +530,13 @@ impl Report {
     /// The only accessor for it. A bare `Vec<u64>` sibling went with the move,
     /// because the three remaining places that want values alone — the min and
     /// max in [`Report::print`], the peak in [`Report::gate_drift`], and the
-    /// printed curve — read `samples` directly instead. Both are report-time and so is this: nothing here runs
-    /// while the process is still being measured, which is the rule
-    /// [`Report::paths`] states and the only reason any of it may allocate at
-    /// all. (The curve is much the larger allocation of the two, a `String` per
-    /// sample; it is equally harmless for the same reason.)
+    /// printed curve — read `samples` directly instead.
+    ///
+    /// All three are report-time and so is this: nothing here runs while the
+    /// process is still being measured, which is the rule [`Report::paths`]
+    /// states and the only reason any of it may allocate at all. The curve is
+    /// much the largest allocation of the four, a `String` per sample, and is
+    /// equally harmless for the same reason.
     fn series(&self) -> Vec<(Duration, u64)> {
         self.samples.iter().map(|s| (s.at, s.rss)).collect()
     }
@@ -565,13 +581,13 @@ impl Report {
                 // lever-arm and a reader has no other cue on this line.
                 println!(
                     "soak: rss quarters {:.2}, {:.2}, {:.2}, {:.2} MiB, \
-                     slope {:+.2} MiB/h over {:.2}h (reported, not gated){}",
+                     slope {:+.2} MiB/h over {} (reported, not gated){}",
                     mb(drift.quarters[0]),
                     mb(drift.quarters[1]),
                     mb(drift.quarters[2]),
                     mb(drift.quarters[3]),
                     drift.slope,
-                    drift.span.as_secs_f64() / SECS_PER_HOUR,
+                    span(drift.span),
                     if self.window < GATED_WINDOW {
                         ", over too short a span to compare against another run"
                     } else {
@@ -1433,6 +1449,20 @@ fn resources_are_flat_and_nothing_is_retained() {
         "the soak failed ({}):\n{report}",
         output.status
     );
+    // **What the report says is an invariant too, and the parent is the only
+    // place that can hold it.** `SPEC.md` §7 states in bold that the four
+    // quarter medians and the gradient with its span are carried beside the
+    // ratio, and nothing read this string until now: deleting either from
+    // `Report::print` left the whole suite green, which is the shape
+    // `CLAUDE.md` calls a wish. The statistic is gated by `mod statistic`; this
+    // is the line that says it reaches a reader.
+    for expected in ["soak: rss quarters ", " MiB/h over ", "soak: rss baseline "] {
+        assert!(
+            report.contains(expected),
+            "the soak's report carries no {expected:?}, so a number \
+             `SPEC.md` §7 says is printed is not being printed:\n{report}"
+        );
+    }
     // Only on the way out, so a passing run in `cargo test` says its numbers
     // once rather than interleaved with every other test in the workspace.
     println!("{report}");
@@ -1529,6 +1559,36 @@ fn workflow_settings(source: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
+/// The workflow's jobs, by name, each with the block of text that is its own.
+///
+/// A job starts at two spaces of indent under `jobs:` and runs until the next
+/// one. Enough structure to say *which* job a setting belongs to, which is the
+/// difference between "the derived timeout is in this file somewhere" and "the
+/// job that soaks uses it".
+fn workflow_jobs(source: &str) -> Vec<(String, String)> {
+    let after = match source.split_once("\njobs:\n") {
+        Some((_, after)) => after,
+        None => return Vec::new(),
+    };
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    for line in after.lines() {
+        let named = line
+            .strip_prefix("  ")
+            .filter(|rest| !rest.starts_with(' ') && !rest.starts_with('#'))
+            .and_then(|rest| rest.strip_suffix(':'));
+        match named {
+            Some(name) => jobs.push((name.to_owned(), String::new())),
+            None => {
+                if let Some((_, block)) = jobs.last_mut() {
+                    block.push_str(line);
+                    block.push('\n');
+                }
+            }
+        }
+    }
+    jobs
+}
+
 /// The workflow's text, and the path it came from.
 fn workflow() -> (PathBuf, String) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(WORKFLOW);
@@ -1572,49 +1632,64 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
     // The window and the timeout each read the output that carries it, rather
     // than merely reading *some* output: swapping the two is a mutation the
     // weaker form could not see.
-    for (key, output) in [
-        ("VIGIA_SOAK_SECS:", "needs.plan.outputs.seconds"),
-        ("timeout-minutes:", "needs.plan.outputs.timeout"),
-    ] {
-        let settings = workflow_settings(&source, key);
-        // `starts_with`, not `contains`: a value has to *be* the expression,
-        // not merely mention it somewhere.
-        assert!(
-            settings
-                .iter()
-                .any(|set_to| set_to.starts_with("${{") && set_to.contains(output)),
-            "no `{key}` in {} is an expression reading `{output}`; they are \
-             {settings:?}. The 86400-second window the `seconds` input \
-             advertises is only reachable while the timeout is the number that \
-             job computed from it, rather than a second number standing beside \
-             it",
-            path.display()
+    //
+    // **Per job, not per file.** Asserting that the derived expression appears
+    // *somewhere* is satisfied by it appearing on the wrong job: swapping the
+    // soak's `timeout-minutes` with the plan job's `5` leaves both settings
+    // present, the file scan green, and the daily soak killed after five
+    // minutes. Which job carries which number is the entire claim.
+    for (job, block) in workflow_jobs(&source) {
+        let soaks = block.contains("needs: plan");
+        let timeouts = workflow_settings(&block, "timeout-minutes:");
+        assert_eq!(
+            timeouts.len(),
+            1,
+            "job `{job}` in {} declares {} timeouts; one job, one timeout, or \
+             the one that fires is whichever the runner read first",
+            path.display(),
+            timeouts.len()
         );
-    }
+        let set_to = &timeouts[0];
 
-    // And every *other* timeout is a literal small enough to be honest about
-    // itself. Without this a second job carrying `timeout-minutes: 330` would
-    // satisfy the loop above, which is exactly the shape of the original
-    // defect one copy over.
-    for set_to in workflow_settings(&source, "timeout-minutes:") {
-        if set_to.starts_with("${{") && set_to.contains("needs.plan.outputs.timeout") {
-            continue;
+        if soaks {
+            // `starts_with`, not `contains`: the value has to *be* the
+            // expression, not merely mention it. A trailing comment naming the
+            // output satisfied the weaker form.
+            assert!(
+                set_to.starts_with("${{") && set_to.contains("needs.plan.outputs.timeout"),
+                "job `{job}` soaks and its `timeout-minutes` is {set_to:?}, \
+                 which is not the timeout the plan job computed from the \
+                 window. That is the whole of this issue: a pinned timeout \
+                 beside a window it never heard about, which killed the \
+                 86400-second dispatch the `seconds` input advertises at 5.5 \
+                 hours"
+            );
+            assert!(
+                workflow_settings(&block, "VIGIA_SOAK_SECS:")
+                    .iter()
+                    .any(|window| window.starts_with("${{")
+                        && window.contains("needs.plan.outputs.seconds")),
+                "job `{job}` reads the planned timeout but not the planned \
+                 window, so the two describe different numbers again"
+            );
+        } else {
+            // Everything else may pin a literal, provided it is short enough
+            // that it could not be holding a soak window.
+            let minutes: u64 = set_to.parse().unwrap_or_else(|_| {
+                panic!(
+                    "job `{job}` does not soak and its `timeout-minutes` is \
+                     {set_to:?}, which is neither a plain number nor anything \
+                     this gate knows how to judge"
+                )
+            });
+            assert!(
+                minutes <= 30,
+                "job `{job}` does not soak and pins `timeout-minutes: \
+                 {minutes}`, which is long enough to be holding a soak window. \
+                 A job that only runs a shell script may pin a small number; \
+                 anything larger belongs on the job that soaks, derived"
+            );
         }
-        let minutes: u64 = set_to.parse().unwrap_or_else(|_| {
-            panic!(
-                "`timeout-minutes: {set_to}` in {} is neither the derived \
-                 timeout nor a plain number",
-                path.display()
-            )
-        });
-        assert!(
-            minutes <= 30,
-            "`timeout-minutes: {minutes}` is a pinned timeout long enough to \
-             hold a soak window, and a pinned timeout beside a window it never \
-             heard about is the whole of this issue. A job that only runs a \
-             shell script may pin a small one; a job that soaks may not pin \
-             any"
-        );
     }
 }
 
@@ -1641,31 +1716,64 @@ fn plan_script(path: &Path, source: &str) -> String {
     script
 }
 
-/// Run the plan script with these inputs, returning what it wrote and whether
-/// it succeeded, or `None` where there is no `bash` to run it with.
-fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<(bool, String)> {
+/// What the plan script did: whether it succeeded, what it wrote to
+/// `$GITHUB_OUTPUT`, and what it said.
+struct Planned {
+    ok: bool,
+    emitted: String,
+    /// **Both streams.** The script writes its refusals to stdout, because a
+    /// `::error::` workflow command has to go there to become an annotation,
+    /// which is also what `ci.yml` does. An assertion printing only stderr
+    /// therefore printed nothing for every refusal the script can produce.
+    said: String,
+}
+
+/// Run the plan script with these inputs, or `None` where there is no `bash`.
+///
+/// The scratch directory is created **after** the spawn succeeds. Creating it
+/// first leaked one per run on any machine without `bash`, in the one file
+/// whose headline invariant is that nothing is retained.
+fn run_plan(script: &str, seconds: &str, runner: &str) -> Option<Planned> {
     let scratch = std::env::temp_dir().join(format!(
         "vigia-plan-{}-{seconds}-{}",
         std::process::id(),
         runner.len()
     ));
-    std::fs::create_dir_all(&scratch).expect("a scratch directory for GITHUB_OUTPUT");
     let out = scratch.join("output");
-    std::fs::write(&out, "").expect("an empty GITHUB_OUTPUT");
 
-    let run = Command::new("bash")
+    let mut command = Command::new("bash");
+    command
         .arg("-c")
         .arg(script)
         .env("SOAK_SECONDS", seconds)
         .env("SOAK_RUNNER", runner)
         .env("SOAK_DAILY", "false")
-        .env("GITHUB_OUTPUT", &out)
-        .output()
-        .ok()?;
+        .env("GITHUB_OUTPUT", &out);
 
-    let emitted = std::fs::read_to_string(&out).expect("read back GITHUB_OUTPUT");
+    // Probe for `bash` before building anything for it to write into.
+    if Command::new("bash")
+        .arg("-c")
+        .arg("exit 0")
+        .output()
+        .is_err()
+    {
+        return None;
+    }
+    std::fs::create_dir_all(&scratch).expect("a scratch directory for GITHUB_OUTPUT");
+    std::fs::write(&out, "").expect("an empty GITHUB_OUTPUT");
+
+    let run = command.output();
+    let planned = run.ok().map(|run| Planned {
+        ok: run.status.success(),
+        emitted: std::fs::read_to_string(&out).expect("read back GITHUB_OUTPUT"),
+        said: format!(
+            "{}{}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        ),
+    });
     let _ = std::fs::remove_dir_all(&scratch);
-    Some((run.status.success(), emitted))
+    planned
 }
 
 /// Printed once where `bash` is missing, rather than passing quietly.
@@ -1680,36 +1788,73 @@ fn no_bash(what: &str) {
 ///
 /// `$GITHUB_OUTPUT` is a line-oriented `key=value` file, so **anything that
 /// puts a second line under one key breaks the step**, and the runner's error
-/// for that names nothing useful. The `runner` label is the one free-form
-/// value here, and `jq -Rc` reads its input *per line*: a two-line label
-/// emitted one array per line, which either truncated the label silently (when
-/// the trailing line happened to contain `=`) or failed the step opaquely.
-/// `-s` slurps the whole value into one JSON string instead.
+/// for that names nothing useful. The `runner` label is the one free-form value
+/// in the job, so it is the one that has to be handled.
 ///
-/// Availability rather than escalation, and worth stating: no value can inject
-/// a `timeout=` or `os=` key, because every line `jq` emits begins `["`.
+/// It is **validated rather than escaped**, and the reason is portability
+/// rather than taste. Escaping arbitrary text into JSON correctly is what `jq`
+/// is for, and `jq` ships on the hosted images but on neither stock macOS nor
+/// stock Git Bash. Requiring it here would have failed `cargo test --workspace`
+/// on two of three tier-1 targets, which is a steep price for accepting a
+/// runner label nobody would ever type. Every real label is letters, digits,
+/// dot, dash and underscore.
 #[test]
 fn a_runner_label_cannot_corrupt_the_plan_job_output() {
     let (path, source) = workflow();
     let script = plan_script(&path, &source);
 
-    let Some((ok, emitted)) = run_plan(&script, "600", "ubuntu-latest\nx=y") else {
-        no_bash("the plan job's handling of a hostile runner label");
+    // An ordinary label plans normally.
+    let Some(good) = run_plan(&script, "600", "ubuntu-latest") else {
+        no_bash("the plan job's handling of a runner label");
         return;
     };
-    assert!(ok, "the plan script failed outright on a two-line label");
+    assert!(
+        good.ok,
+        "the plan script refused an ordinary runner label:\n{}",
+        good.said
+    );
     assert_eq!(
-        emitted.lines().count(),
+        good.emitted.lines().count(),
         3,
-        "a two-line runner label produced {} lines of GITHUB_OUTPUT rather than \
-         the three keys the job declares, so a label is writing outside its own \
-         value:\n{emitted}",
-        emitted.lines().count()
+        "an ordinary runner label produced {} lines of GITHUB_OUTPUT rather \
+         than the three keys the job declares:\n{}",
+        good.emitted.lines().count(),
+        good.emitted
     );
     assert!(
-        emitted.lines().any(|line| line.starts_with("os=[\"")),
-        "the platform list is no longer a single-line JSON array:\n{emitted}"
+        good.emitted.contains("os=[\"ubuntu-latest\"]"),
+        "the platform list is not the single label it was given:\n{}",
+        good.emitted
     );
+
+    // And every shape that could write outside its own value is refused, out
+    // loud, before anything is emitted.
+    for hostile in ["ubuntu-latest\nx=y", "ubuntu\"], [\"x", "a b", ""] {
+        if hostile.is_empty() {
+            continue;
+        }
+        let Some(bad) = run_plan(&script, "600", hostile) else {
+            return;
+        };
+        assert!(
+            !bad.ok,
+            "the plan script accepted the runner label {hostile:?} and wrote:\n{}",
+            bad.emitted
+        );
+        assert!(
+            bad.emitted.trim().is_empty(),
+            "the plan script refused the runner label {hostile:?} and still \
+             wrote to GITHUB_OUTPUT, so a refusal is not the same as writing \
+             nothing:\n{}",
+            bad.emitted
+        );
+        assert!(
+            bad.said.contains("::error::"),
+            "the plan script refused the runner label {hostile:?} without an \
+             annotation anyone would see:\n{}",
+            bad.said
+        );
+    }
 }
 
 /// The plan job's arithmetic, run rather than read.
@@ -1736,39 +1881,20 @@ fn the_plan_job_gives_every_window_room_to_finish() {
 
     let script = plan_script(&path, &source);
 
-    let scratch = std::env::temp_dir().join(format!("vigia-plan-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::create_dir_all(&scratch).expect("a scratch directory for GITHUB_OUTPUT");
-
     // Every window a reader might reasonably dispatch, including the two the
     // file names in prose and the one I3's budget is written against.
     for seconds in [1u64, 600, 900, 14400, 86400] {
-        let out = scratch.join(format!("output-{seconds}"));
-        std::fs::write(&out, "").expect("an empty GITHUB_OUTPUT");
-
-        let run = Command::new("bash")
-            .arg("-c")
-            .arg(&script)
-            .env("SOAK_SECONDS", seconds.to_string())
-            .env("SOAK_RUNNER", "")
-            .env("SOAK_DAILY", "false")
-            .env("GITHUB_OUTPUT", &out)
-            .output();
-        let Ok(run) = run else {
-            println!(
-                "note: the plan job's arithmetic is not gated here, because \
-                 `bash` could not be run. It is gated on every tier-1 target \
-                 that has one, and on CI."
-            );
+        let Some(planned) = run_plan(&script, &seconds.to_string(), "") else {
+            no_bash("the plan job's arithmetic");
             return;
         };
         assert!(
-            run.status.success(),
+            planned.ok,
             "the plan script refused a {seconds}s window:\n{}",
-            String::from_utf8_lossy(&run.stderr)
+            planned.said
         );
 
-        let emitted = std::fs::read_to_string(&out).expect("read back GITHUB_OUTPUT");
+        let emitted = planned.emitted;
         let value = |key: &str| -> u64 {
             emitted
                 .lines()
@@ -1802,8 +1928,6 @@ fn the_plan_job_gives_every_window_room_to_finish() {
             timeout.saturating_sub(seconds)
         );
     }
-
-    let _ = std::fs::remove_dir_all(&scratch);
 }
 
 mod statistic {
@@ -1943,19 +2067,6 @@ mod statistic {
         );
     }
 
-    /// A shrinking process has not drifted, and the ratio has to say so without
-    /// going negative: a signed number under a `<` threshold passes for the
-    /// wrong reason.
-    #[test]
-    fn a_series_that_gave_memory_back_reports_no_drift_rather_than_a_negative_one() {
-        let drift = verdict(&shrinking());
-        assert_eq!(
-            drift.ratio, 0.0,
-            "a shrinking series reported {:?}, which is not a drift",
-            drift
-        );
-    }
-
     /// Too short to have two ends is not a pass. A gate that answers "fine" from
     /// four samples is worse than one that is absent, because it looks like
     /// coverage.
@@ -2063,22 +2174,42 @@ mod statistic {
     /// A documented decision with nothing that fails when it is violated is
     /// what `CLAUDE.md` calls a wish.
     ///
-    /// Same spike trick as the ends, at the two boundaries the middle pair
-    /// disagrees about.
+    /// **The spikes here are carried for symmetry, not because they are
+    /// load-bearing**, and the difference is worth stating in the one module
+    /// whose docs exist to record which fixtures carry weight. The ends need an
+    /// outlier because both of their edges move together: widening the last
+    /// quarter from 64 samples to 65 prepends a value *and* advances the
+    /// nearest rank, and on sorted data those cancel exactly. Each middle
+    /// window moves at only **one** edge, so there is nothing to cancel and a
+    /// plain ramp already separates the two slicings.
     #[test]
     fn the_middle_quarters_are_measured_inward_from_the_ends() {
         let mut series: Vec<u64> = (0..288).map(|at| mb(60.0) + at as u64 * 4096).collect();
-        // Post-warmup index 128 is `quarter * 2`, the sample `[q..2q)` excludes
-        // and `[end/4..end/2)` includes; 194 is the one the last quarter
-        // disagrees about and therefore also moves `[end/2..3end/4)`.
-        series[29 + 128] = mb(500.0);
-        series[29 + 194] = mb(900.0);
+        let warm = (series.len() as f64 * WARMUP_FRACTION).ceil() as usize;
+        // **The same guard the ends test carries, and for a sharper reason.**
+        // Where the post-warmup length divides by four, the inward cut and the
+        // `end * k / 4` cut are the *same four windows*, so this test would
+        // pass against the slicing it exists to reject. A change to
+        // `WARMUP_FRACTION` or to the fixture length is all it would take.
+        assert_eq!(
+            (series.len() - warm) % 4,
+            3,
+            "this fixture leaves {} post-warmup samples, which divides by four, \
+             and the two slicings this test tells apart are identical there",
+            series.len() - warm
+        );
+        // Derived rather than written as 29: the spikes have to land on the
+        // boundaries the slicings disagree about, and those move with the
+        // warmup. `quarter * 2` is the sample `[q..2q)` excludes and
+        // `[end/4..end/2)` includes; the other is just below the third
+        // quarter's left edge.
+        let quarter = (series.len() - warm) / 4;
+        let end = series.len() - warm;
+        series[warm + quarter * 2] = mb(500.0);
+        series[warm + end - quarter * 2 - 1] = mb(900.0);
 
         let drift = verdict(&series);
-        let warm = (series.len() as f64 * WARMUP_FRACTION).ceil() as usize;
         let rest = &series[warm..];
-        let quarter = rest.len() / 4;
-        let end = rest.len();
 
         assert_eq!(
             drift.quarters[1],
@@ -2096,21 +2227,27 @@ mod statistic {
         );
     }
 
-    /// The divisor every number in the report is quoted through.
+    /// The divisor every number in the report is quoted through is a mebibyte.
     ///
     /// One line, because without it nothing can catch a wrong one: this
     /// module's [`mb`] multiplies by `MIB` and the file's [`mib`] divides by
     /// it, so the two cancel and every MiB assertion here passes for *any*
-    /// value of the constant, including one that disagrees with the `19MiB`
-    /// cell on the shell's own status bar. That divergence is the exact thing
-    /// [`MIB`]'s doc says it exists to prevent.
+    /// value of the constant.
+    ///
+    /// **It pins this file's divisor and not the shell's**, which is worth
+    /// saying because the name first put on it claimed otherwise. The status
+    /// bar keeps a private `MIB` of its own in `crates/vigia/src/render.rs` and
+    /// an integration test cannot reach it, so the divergence [`MIB`]'s doc
+    /// worries about is half covered: a wrong constant *here* now fails, and a
+    /// wrong constant *there* still would not. Saying so beats a name that
+    /// implies both.
     #[test]
-    fn a_mebibyte_is_the_mebibyte_the_status_bar_uses() {
+    fn the_report_is_quoted_in_mebibytes() {
         assert_eq!(
             mib(1024 * 1024),
             1.0,
             "MIB is not 2^20, so every RSS figure in this report is quoted in \
-             units the shell's own readout does not share"
+             units nothing else uses"
         );
     }
 
@@ -2162,6 +2299,13 @@ mod statistic {
     /// The sign the ratio deliberately throws away is the one the gradient has
     /// to keep, and both halves are asserted in one place so the asymmetry is a
     /// gate rather than a comment.
+    ///
+    /// **The ratio half is here rather than in a test of its own**, which it
+    /// used to have: `a_series_that_gave_memory_back_reports_no_drift_rather_
+    /// than_a_negative_one` opened with this exact assertion over this exact
+    /// fixture, so once this test existed the older one could not fail while
+    /// this one passed. A gate that is a strict subset of another is a gate
+    /// nobody will maintain and everybody will count.
     #[test]
     fn a_series_that_gave_memory_back_reports_a_negative_slope_where_the_ratio_reports_zero() {
         let drift = verdict(&shrinking());

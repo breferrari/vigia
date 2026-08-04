@@ -121,14 +121,24 @@ jobs:
           timeout=$(( seconds / 60 + 90 ))
 
           if [ -n "$SOAK_RUNNER" ]; then
-            # `-s` slurps, so a label spanning lines becomes one JSON string
-            # rather than one array per line: `jq -Rc` would write a second
-            # line under the same key and the runner rejects the whole file
-            # command with nothing that names the cause. `flake-rate.yml` uses
-            # the slurping form for the same reason. A label with a quote or a
-            # newline in it now matches no runner instead of corrupting the
-            # output.
-            os=$(printf '%s' "$SOAK_RUNNER" | jq -Rsc '[.]')
+            # Validated rather than escaped, which is why there is no `jq` here.
+            # `$GITHUB_OUTPUT` is a line-oriented key=value file, so a label
+            # carrying a newline writes a second line under one key and the step
+            # dies with nothing naming the cause; a quote breaks the JSON the
+            # matrix parses. Escaping that correctly is what `jq` is for, and
+            # `flake-rate.yml` does use it, but a runner label is a name and
+            # every real one is already in this set. Refusing the rest is both
+            # safer and one fewer tool the local gate needs: `jq` ships on the
+            # hosted images and on neither stock macOS nor stock Git Bash, so
+            # requiring it here would fail `cargo test` on two of three tier-1
+            # targets.
+            case "$SOAK_RUNNER" in
+              *[!A-Za-z0-9._-]*)
+                echo "::error::runner must be one label of letters, digits, dot, dash or underscore, got '$SOAK_RUNNER'"
+                exit 1
+                ;;
+            esac
+            os="[\"$SOAK_RUNNER\"]"
           elif [ "$SOAK_DAILY" = true ]; then
             os='["ubuntu-latest"]'
           else
