@@ -32,9 +32,9 @@ windows-sys.workspace = true
 # `tests/soak.rs` reaches one step further out, to `.github/workflows/soak.yml`
 # through `CARGO_MANIFEST_DIR`, so that a CI invariant with no other home is
 # enforced by `cargo test` rather than by a shell step that only ubuntu ever
-# runs. One of those three tests reads the file and holds everywhere; the two
-# that execute the workflow's own shell need a `bash`, and print a skip where
-# there is none rather than passing quietly. Both escapes assume a checkout of
+# runs. Of the four tests that read it, one holds everywhere; the three that
+# execute the workflow's own shell need a `bash`, and print a skip where there
+# is none rather than passing quietly. Both escapes assume a checkout of
 # this repository: neither survives a packaged or vendored copy, where `.github`
 # is not in the `.crate` tarball at all. That is a constraint on SPEC.md section
 # 9's publish rather than a reason to weaken either gate, and the `#[path]` one

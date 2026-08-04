@@ -1595,6 +1595,38 @@ fn workflow_jobs(source: &str) -> Vec<(String, String)> {
     jobs
 }
 
+/// Whether a job block declares a dependency on `job`.
+///
+/// **Every spelling YAML allows, because the point is what the runner will do
+/// and the runner accepts all of them.** `needs: plan`, `needs: [plan]`,
+/// `needs: [plan, build]`, `needs: ["plan"]` and the block sequence
+/// (`needs:` then `  - plan`) are one declaration written five ways. The first
+/// version of this check listed three of them literally and would have gone red
+/// the first time a second dependency was added, reporting it as a missing one:
+/// the same mistake, one level down, that keying the soak job on `needs: plan`
+/// made in the first place.
+fn declares_need(block: &str, job: &str) -> bool {
+    let inline = workflow_settings(block, "needs:").into_iter().any(|on| {
+        on.trim_matches(['[', ']'].as_slice())
+            .split(',')
+            .any(|name| name.trim().trim_matches(['"', '\''].as_slice()) == job)
+    });
+    // The block-sequence form leaves the key's own value empty and puts the
+    // names on the lines under it.
+    let sequence = block
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| *line != "needs:")
+        .skip(1)
+        .take_while(|line| line.starts_with("- "))
+        .any(|line| {
+            line.trim_start_matches("- ")
+                .trim_matches(['"', '\''].as_slice())
+                == job
+        });
+    inline || sequence
+}
+
 /// The workflow's text, and the path it came from.
 fn workflow() -> (PathBuf, String) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(WORKFLOW);
@@ -1701,17 +1733,13 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
             );
             // It reads three of that job's outputs, so it has to declare the
             // dependency: without `needs:`, `needs.plan.outputs.*` resolves
-            // empty and `fromJSON('')` throws on the runner, which is a
-            // failure nothing here would have predicted. Both YAML spellings,
-            // because `needs: [plan]` is as valid as `needs: plan`.
-            let needs = workflow_settings(block, "needs:");
+            // empty and `fromJSON('')` throws on the runner, which is a failure
+            // nothing here would have predicted.
             assert!(
-                needs
-                    .iter()
-                    .any(|on| on == "plan" || on == "[plan]" || on == "[ plan ]"),
-                "job `{job}` reads `needs.plan.outputs` and declares `needs: \
-                 {needs:?}`, so the outputs it reads resolve to nothing and the \
-                 run fails on the runner rather than here"
+                declares_need(block, "plan"),
+                "job `{job}` reads `needs.plan.outputs` and does not declare \
+                 `needs: plan`, so the outputs it reads resolve to nothing and \
+                 the run fails on the runner rather than here"
             );
 
             // Every planned number, not only the timeout. The platform list is
@@ -1754,9 +1782,9 @@ fn the_soak_workflow_cannot_kill_the_window_it_offers() {
     }
 
     // And exactly one job soaked, so the branch carrying every assertion above
-    // was actually taken. Without it, renaming the environment variable sends
-    // every job down the literal branch and the file passes as a workflow that
-    // soaks nothing. Exactly one rather than at least one, because the
+    // was actually taken: with none, every job takes the literal branch and the
+    // file passes as a workflow that soaks nothing. Exactly one rather than at
+    // least one, because the
     // concurrency group at the top of this workflow exists to stop two soaks
     // sharing a runner's memory pressure, and two soaking jobs inside one
     // workflow would be that same mistake a level up.
@@ -1969,6 +1997,25 @@ fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
             .to_owned()
     };
 
+    // **The flag has to name a cron this workflow actually runs on.** The three
+    // legs below drive `SOAK_DAILY` directly, so they gate the script's
+    // branches and not the trigger that sets the flag: change either the
+    // schedule or the string it is compared against, and the daily cron takes
+    // the weekly leg with everything here still green.
+    let daily_cron = workflow_settings(&source, "SOAK_DAILY:")
+        .into_iter()
+        .next()
+        .expect("the plan job sets SOAK_DAILY");
+    let schedules = workflow_settings(&source, "- cron:");
+    assert!(
+        schedules
+            .iter()
+            .any(|cron| daily_cron.contains(cron.trim_matches('"'))),
+        "`SOAK_DAILY` is {daily_cron:?}, which compares against no cron this \
+         workflow is scheduled on ({schedules:?}), so the branch below fires \
+         for no trigger or for every one"
+    );
+
     // The daily cron: Linux alone, because three hosted runners every day is
     // not a proportionate way to find a leak that is rarely platform-specific.
     let Some(daily) = run_plan_on(&script, "14400", "", "true") else {
@@ -2009,8 +2056,8 @@ fn the_plan_job_soaks_the_platforms_each_trigger_asks_for() {
 
 /// The plan job's arithmetic, run rather than read.
 ///
-/// **The sibling gate above checks the plumbing and cannot see this**, which is
-/// the whole reason there are two: with only the plumbing asserted, writing
+/// **[`the_soak_workflow_cannot_kill_the_window_it_offers`] checks the plumbing
+/// and cannot see this**, which is the whole reason they are separate: with only the plumbing asserted, writing
 /// `timeout=330` straight into the plan script restores the original defect
 /// verbatim and the suite stays green. So do the one thing that settles it and
 /// execute the script, with `GITHUB_OUTPUT` pointed at a scratch file, then
