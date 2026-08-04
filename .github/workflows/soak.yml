@@ -17,8 +17,10 @@ on:
         description: >-
           Soak window in seconds. A GitHub-hosted job is terminated at six
           hours, so 86400 needs `runner` set to one without that cap. Locally
-          it needs no runner at all: VIGIA_SOAK_SECS=86400 VIGIA_SOAK_FILES=100
-          VIGIA_SOAK_LINES=500 cargo test --release --test soak -- --nocapture
+          it needs no runner at all: set VIGIA_SOAK_SECS=86400, VIGIA_SOAK_FILES=100
+          and VIGIA_SOAK_LINES=500, then `cargo test --release --test soak --
+          --nocapture`. The reference machine these numbers come from is Windows,
+          so that is three environment variables however your shell sets them.
         default: "14400"
       runner:
         description: >-
@@ -48,7 +50,7 @@ jobs:
   # the `seconds` input above advertised 86400.** 330 minutes is 5.5 hours, so
   # the day-long window I3's budget names was killed by this repository's own
   # timeout, on an uncapped runner exactly as on a hosted one, and the only
-  # thing that ever said so was a run that had already burned 5.5 hours.
+  # thing that would have said so is a run that had already burned 5.5 hours.
   #
   # The obvious repair is to derive the timeout from the window in the field
   # itself, and **the expression language cannot**:
@@ -72,6 +74,10 @@ jobs:
   plan:
     name: plan the window
     runs-on: ubuntu-latest
+    # Small and literal on purpose: this job runs one shell script and nothing
+    # else, so a number here is honest where a number on the soak below is the
+    # defect. The gate knows the difference.
+    timeout-minutes: 5
     outputs:
       seconds: ${{ steps.window.outputs.seconds }}
       timeout: ${{ steps.window.outputs.timeout }}
@@ -91,14 +97,23 @@ jobs:
           set -euo pipefail
           case "$SOAK_SECONDS" in
             ''|*[!0-9]*)
-              echo "::error::seconds must be a whole number, got '$SOAK_SECONDS'" >&2
+              echo "::error::seconds must be a whole number, got '$SOAK_SECONDS'"
               exit 1
               ;;
           esac
+          # Bash arithmetic is 64-bit and wraps without saying so, so a fat
+          # finger on the dispatch form would otherwise reduce to a one-second
+          # window and only announce it after a full checkout and build.
+          # Eight digits is 3.17 years, which is past any window worth asking
+          # for and well inside the range that cannot wrap.
+          if [ "${#SOAK_SECONDS}" -gt 8 ]; then
+            echo "::error::seconds has ${#SOAK_SECONDS} digits, over the 8 this accepts: '$SOAK_SECONDS'"
+            exit 1
+          fi
           # `10#` forces base ten. Bash reads a leading zero as octal, so a
           # dispatch of 0330 would otherwise become 216 without saying so.
           seconds=$(( 10#$SOAK_SECONDS ))
-          [ "$seconds" -ge 1 ] || { echo "::error::seconds must be at least 1" >&2; exit 1; }
+          [ "$seconds" -ge 1 ] || { echo "::error::seconds must be at least 1, got '$SOAK_SECONDS'"; exit 1; }
 
           # Ninety minutes over the window for checkout, build and fixture,
           # which is the headroom the pinned 330 gave the four-hour default and
@@ -106,9 +121,14 @@ jobs:
           timeout=$(( seconds / 60 + 90 ))
 
           if [ -n "$SOAK_RUNNER" ]; then
-            # `jq -Rc '[.]'` so a label with a quote in it cannot break the
-            # JSON the matrix parses.
-            os=$(printf '%s' "$SOAK_RUNNER" | jq -Rc '[.]')
+            # `-s` slurps, so a label spanning lines becomes one JSON string
+            # rather than one array per line: `jq -Rc` would write a second
+            # line under the same key and the runner rejects the whole file
+            # command with nothing that names the cause. `flake-rate.yml` uses
+            # the slurping form for the same reason. A label with a quote or a
+            # newline in it now matches no runner instead of corrupting the
+            # output.
+            os=$(printf '%s' "$SOAK_RUNNER" | jq -Rsc '[.]')
           elif [ "$SOAK_DAILY" = true ]; then
             os='["ubuntu-latest"]'
           else
