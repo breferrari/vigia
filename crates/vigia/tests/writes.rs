@@ -67,7 +67,7 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Row, Theme, body_layout, render};
+use vigia::{Action, App, PaintStats, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
 use support::{Scratch, made_link};
@@ -253,7 +253,8 @@ fn drive(root: &Path) -> Driven {
         buf: Buffer::empty(area()),
         frames: 0,
         body_rows: 0,
-        content_rows: 0,
+        painted: PaintStats::default(),
+        leanest_frame: u64::MAX,
     };
     rig.frame.advance().expect("advance");
 
@@ -332,7 +333,8 @@ fn drive(root: &Path) -> Driven {
     Driven {
         frames: rig.frames,
         body_rows: rig.body_rows,
-        content_rows: rig.content_rows,
+        content_rows: rig.painted.rows,
+        leanest_frame: rig.leanest_frame,
         warmed: warmer.join().expect("the warmer finished"),
         events: watcher.delivered(),
     }
@@ -345,9 +347,16 @@ fn drive(root: &Path) -> Driven {
 /// is satisfied perfectly by a `drive` that does nothing at all, so every
 /// assertion in this file would survive gutting the function it is about. That is
 /// the shape §7 records twice over, and `first_paint.rs` answers it the same way:
-/// it asserts the body is full **before** it asserts the clock. These four
-/// numbers are that assertion, moved to the caller so they sit beside the
-/// comparison they qualify rather than inside the code they describe.
+/// it asserts the body is full **before** it asserts the clock. These numbers are
+/// that assertion, moved to the caller so they sit beside the comparison they
+/// qualify rather than inside the code they describe.
+///
+/// Not all of them are asserted on, and the split is deliberate rather than
+/// untidy: `frames`, `leanest_frame` and `warmed` are the guards, and `body_rows`,
+/// `content_rows` and `events` are there so a failure says which of several very
+/// different things went wrong. The number of each is left out of this sentence on
+/// purpose, because it has been wrong twice: it said three, then four, and the
+/// count moved again when a redundant assertion came out.
 struct Driven {
     /// Frames painted. Eight: a first paint, six actions and the second tick.
     frames: usize,
@@ -364,16 +373,42 @@ struct Driven {
     /// list and drew more headings instead", and it is why that gate asserts the
     /// body is **full** rather than non-empty.
     ///
-    /// So this counts `Row::Line` specifically. A run that drew nothing but
-    /// headings reports zero here, and the assertion that reads it says the thing
-    /// its message claims.
+    /// So this counts content specifically, and it takes the count from
+    /// **`PaintStats.rows`**, which the renderer returns and which is documented as
+    /// exactly this: rows of file content drawn, with headings, hunk headers and
+    /// notes excluded. `budgets.rs` and `paint.rs` already treat it as the
+    /// authoritative figure.
+    ///
+    /// **Reusing it rather than filtering `view.rows` is not only tidier, it is the
+    /// stronger instrument, and `PaintStats`'s own doc says why**: a counter over
+    /// the *output* is true by construction, where that struct counts where the walk
+    /// happens. The first version of this field re-derived the same statistic by
+    /// matching `Row::Line` over the collected rows, which measured what `collect`
+    /// planned rather than what `render` drew.
     ///
     /// **Mutated to prove the difference rather than argued.** With `View::collect`
     /// stopped from pushing any content line, the run draws **15 rows over 8
     /// frames** and `body_rows > 0` is satisfied by every one of them; this counter
-    /// reports zero and fails. The two guards are not degrees of one, and that is
-    /// the number that says so.
-    content_rows: usize,
+    /// reports zero and fails. The two are not degrees of one, and that is the
+    /// number that says so.
+    content_rows: u64,
+    /// Content rows in the **leanest** frame, which is the statistic that bites.
+    ///
+    /// **A maximum was the wrong choice and it is the one §7 warns about twice.**
+    /// Taking the largest content count across the eight frames means one frame
+    /// carries the whole guard: a regression that blanks the pane on a single action
+    /// leaves the first paint's content intact and the gate green. That is
+    /// "a budget measured at one position is measured at its cheapest one" applied
+    /// to a counter instead of a clock, and it is the same defect shape §7 records
+    /// against `scroll.rs`, where a gate named for a blank pane asserted a number
+    /// only the blank pane could satisfy.
+    ///
+    /// A minimum says *every* frame drew content. It is affordable here because the
+    /// fixture is controlled: eight files of forty lines, fully rewritten, in a
+    /// 24-row pane, so every position the six actions reach has content under it.
+    /// Run ten times consecutively before being trusted, since a guard that flakes
+    /// is worse than the weak one it replaced.
+    leanest_frame: u64,
     /// Files the warmer compiled, which is the one stage that spawns a thread.
     ///
     /// **Asserted as "more than none" and not as a count, which the symlink is the
@@ -429,7 +464,8 @@ struct Rig<'w> {
     buf: Buffer,
     frames: usize,
     body_rows: usize,
-    content_rows: usize,
+    painted: PaintStats,
+    leanest_frame: u64,
 }
 
 impl Rig<'_> {
@@ -448,15 +484,11 @@ impl Rig<'_> {
             .app
             .view(&mut self.frame, &mut self.highlighter, &self.history, body)
             .expect("collect a view");
-        render(&mut self.buf, area(), &view, &self.theme, &chrome);
+        let painted = render(&mut self.buf, area(), &view, &self.theme, &chrome);
         self.frames += 1;
         self.body_rows = self.body_rows.max(view.rows.len());
-        let content = view
-            .rows
-            .iter()
-            .filter(|row| matches!(row, Row::Line { .. }))
-            .count();
-        self.content_rows = self.content_rows.max(content);
+        self.painted += painted;
+        self.leanest_frame = self.leanest_frame.min(painted.rows);
         body.diff
     }
 }
@@ -501,17 +533,17 @@ fn the_monitor_writes_nothing_while_it_runs() {
     }
     assert!(
         before.len() > FILES,
-        "the fixture stamped {} entries, which is fewer than its own files, so \
-         the walk is not seeing the tree",
+        "the fixture stamped {} entries, which is no more than its own file count, \
+         so the walk is not seeing the tree",
         before.len()
     );
 
     let driven = drive(&root);
 
     // **Before the filesystem is compared, not after.** "Nothing was written" is
-    // satisfied perfectly by a run that did nothing, so these three are what stop
-    // the gate below passing against a `drive` somebody gutted. Same order
-    // `first_paint.rs` uses: assert the frame was real, then assert the property.
+    // satisfied perfectly by a run that did nothing, so these are what stop the gate
+    // below passing against a `drive` somebody gutted. Same order `first_paint.rs`
+    // uses: assert the frame was real, then assert the property.
     assert_eq!(
         driven.frames, 8,
         "the drive painted {} frames rather than the first paint, six actions and \
@@ -519,22 +551,26 @@ fn the_monitor_writes_nothing_while_it_runs() {
          describes",
         driven.frames
     );
+    // **A heading is pushed per changed file before any hunk is reached**, so a body
+    // with rows in it proves only that the fixture had files. Content is what a
+    // build with its line-drawing deleted stops producing, which is the mutation
+    // `first_paint.rs` names in its own comment.
+    //
+    // There is no separate `body_rows > 0` assertion above this one, and there was
+    // until round 3 of the audit pointed out that it cannot fail on its own: content
+    // rows are a subset of all rows, so a frame with no rows has no content either
+    // and this fires first. An assertion whose failure mode is unreachable is one
+    // the next reader has to reason about for nothing. The field stays, because the
+    // message below is worth more when it can say "rows were drawn and none of them
+    // were content" than when it can only say "no content".
     assert!(
-        driven.body_rows > 0,
-        "every frame drew an empty body, so the run this gate calls clean never \
-         put anything on screen"
-    );
-    // **The stricter half, and the one that says what the message above cannot.**
-    // A heading is pushed per changed file before any hunk is reached, so a body
-    // with rows in it proves only that the fixture had files. Content lines are
-    // what a build with its line-drawing deleted would stop producing, which is
-    // the mutation `first_paint.rs` names in its own comment.
-    assert!(
-        driven.content_rows > 0,
-        "the {} frames drew {} rows and not one was a line of diff, so this ran \
-         over headings alone and the tree it found clean was never really read",
+        driven.leanest_frame > 0,
+        "the leanest of {} frames drew no content at all, over {} rows total and {} \
+         content rows across the run, so at least one position drew nothing but \
+         headings and the tree this gate found clean was not really read there",
         driven.frames,
-        driven.body_rows
+        driven.body_rows,
+        driven.content_rows
     );
     assert!(
         driven.warmed > 0,
@@ -567,6 +603,11 @@ fn the_snapshot_sees_a_write_that_does_happen() {
     // would be. Growing the file takes the comparison off that axis entirely.
     scratch.write("src/mod_0.rs", "one line\n".repeat(LINES * 2));
     scratch.write("untracked.txt", "and a file that was not there before\n");
+    // The third direction, and it had no case here until round 3 of the audit said
+    // so. `difference` reports removals, and a comparator with one of its three arms
+    // undriven is two thirds tested: a `before` key that vanishes is how a deleted
+    // file, a rename's old side, and a temp file cleaned up after itself all look.
+    scratch.remove("src/mod_1.rs");
 
     let moved = difference(&before, &snapshot(&root));
     assert!(
@@ -578,5 +619,12 @@ fn the_snapshot_sees_a_write_that_does_happen() {
         moved.iter().any(|line| line.contains("untracked.txt")),
         "a created file was not reported, so the gate above cannot see a new \
          file: {moved:?}"
+    );
+    assert!(
+        moved
+            .iter()
+            .any(|line| line.contains("mod_1.rs") && line.contains("was removed")),
+        "a removed file was not reported as removed, so the gate above cannot see a \
+         deletion: {moved:?}"
     );
 }
