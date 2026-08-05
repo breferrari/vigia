@@ -345,7 +345,7 @@ fn drive(root: &Path) -> Driven {
 /// is satisfied perfectly by a `drive` that does nothing at all, so every
 /// assertion in this file would survive gutting the function it is about. That is
 /// the shape §7 records twice over, and `first_paint.rs` answers it the same way:
-/// it asserts the body is full **before** it asserts the clock. These three
+/// it asserts the body is full **before** it asserts the clock. These four
 /// numbers are that assertion, moved to the caller so they sit beside the
 /// comparison they qualify rather than inside the code they describe.
 struct Driven {
@@ -367,6 +367,12 @@ struct Driven {
     /// So this counts `Row::Line` specifically. A run that drew nothing but
     /// headings reports zero here, and the assertion that reads it says the thing
     /// its message claims.
+    ///
+    /// **Mutated to prove the difference rather than argued.** With `View::collect`
+    /// stopped from pushing any content line, the run draws **15 rows over 8
+    /// frames** and `body_rows > 0` is satisfied by every one of them; this counter
+    /// reports zero and fails. The two guards are not degrees of one, and that is
+    /// the number that says so.
     content_rows: usize,
     /// Files the warmer compiled, which is the one stage that spawns a thread.
     warmed: usize,
@@ -466,6 +472,13 @@ fn the_monitor_writes_nothing_while_it_runs() {
     // Windows refuses to resolve. `made_link` prints its own note and returns false
     // where the platform will not make one, which is this repo's skip-with-a-reason
     // shape rather than a silent pass.
+    //
+    // **The axis cannot go missing from the whole matrix**, which is the question a
+    // conditional assertion invites. Windows is the only tier-1 target that can
+    // refuse a link, and `ci.yml` runs `cargo test --workspace` on ubuntu and macos
+    // too, where an unprivileged symlink always succeeds. So the skip narrows
+    // coverage on at most one leg of three, by construction rather than by hope,
+    // which is why nothing here watches for it.
     let linked = made_link(&scratch, "src/mod_0.rs", "link_to_mod_0.rs");
 
     let before = snapshot(&root);

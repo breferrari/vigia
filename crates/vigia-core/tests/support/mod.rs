@@ -422,9 +422,19 @@ impl Scratch {
         // `core.fsmonitor` on, a `git add` spawns a `git-fsmonitor--daemon` that
         // outlives the command and keeps writing inside `.git`, including a
         // `cookies/` directory it creates and deletes to synchronise with clients.
-        // `core.untrackedCache` writes into the index for the same family of
-        // reason. Neither is exotic: both are documented performance settings a
-        // developer may well have on globally.
+        //
+        // **`core.untrackedCache` is a milder case and the two are not the same
+        // hazard**, which bundling them as one originally implied. Its extra write
+        // goes into the index *synchronously*, inside the `git` command that
+        // triggered it, and every `git` call a fixture makes has returned before the
+        // gate takes its first reading. So it cannot write inside the compared
+        // window the way a surviving daemon can. It is off here because a fixture
+        // whose index gains content from a developer's global setting is a fixture
+        // that measures something slightly different per machine, which is the
+        // reason the five lines above exist.
+        //
+        // Neither is exotic: both are documented performance settings a developer
+        // may well have on globally.
         //
         // What that would cost is worse than a flake. An external writer inside
         // `.git` during the compared window makes the gate accuse the product of a
