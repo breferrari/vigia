@@ -229,6 +229,26 @@ Length is not the bar; **concreteness** is. Every promise has to be checkable la
 
 Scale it to the diff. A two-line fix gets a short plan; it still names the file, the assertion, and the test. A phase gets a long one.
 
+### The work has to fit one fresh context, and this is where you find out
+
+The section above sizes the *plan*. This one sizes the *work*, and it is the check this skill was missing.
+
+**Before the plan is approved, ask: could a fresh session hold this whole issue — the spec sections it touches, the files it changes, the tests it adds — and still have room left to reason about it?** Not "can it be described in one plan", which is always yes. Can it be *held*.
+
+If the honest answer is no, the issue is two issues. Say so now and split the **issue**. *The unit is the issue* still holds — one issue, one branch, one PR — because you are splitting the unit, not fragmenting one unit across PRs. Give each child a complete path through spec, code and gates that is verifiable on its own, and name the one it is blocked by.
+
+**This is not a style preference.** One week in this repo:
+
+| Day | PRs merged | avg additions |
+|---|---|---|
+| 08-01 | 2 | 2394 |
+| 08-02 | 2 | 3379 |
+| 08-03 — the day [#77](https://github.com/breferrari/vigia/issues/77) was split in three | **11** | **531** |
+
+Five times the throughput at a sixth of the size, same standard, same gates. And #77 is what finding out late costs: its audit went 22 findings then 23, flat, which `/harden` reads as *the scope is wrong, not the rigor*. The split was correct, and it came after two full rounds had been spent auditing a diff that was never going to converge. **The audit is a bad place to learn the scope was wrong, because by then the rounds are already paid for.**
+
+**A wide refactor is the exception.** One mechanical change whose blast radius fans across the codebase — retyping a shared symbol, renaming a field every module names — cannot be cut into slices that each land green, because the first slice breaks every call site. Sequence it **expand then contract**: add the new form beside the old so nothing breaks, migrate call sites in batches sized by blast radius (per crate, per module) with each batch its own issue blocked by the expand, then delete the old form in a final issue blocked by every batch. CI stays green batch to batch because the old form still exists. Do not force that shape onto ordinary work, and do not use it as a licence to skip the test above.
+
 ### The plan has to outlive the session
 
 **Comment it on the issue before implementing.** The issue is the only durable surface that exists at planning time — the PR does not exist yet, since there are no commits to open it from, so "put it in the PR body" is unexecutable here and quietly becomes "keep it in my head". Carry it into the PR body at PR time as well, where the reviewer and `/harden`'s fidelity phase will both look for it.
