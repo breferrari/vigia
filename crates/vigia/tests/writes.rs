@@ -375,6 +375,16 @@ struct Driven {
     /// the number that says so.
     content_rows: usize,
     /// Files the warmer compiled, which is the one stage that spawns a thread.
+    ///
+    /// **Asserted as "more than none" and not as a count, which the symlink is the
+    /// reason to say out loud.** `gix`'s status sorts `link_to_mod_0.rs` ahead of
+    /// `src/`, so the link is offered to the warmer first. On Windows its
+    /// forward-slash target fails `canonicalize` and is skipped before
+    /// `WARM_PER_GRAMMAR` is touched at all; on Linux and macOS it resolves and
+    /// consumes one of the three Rust slots, so real `.rs` files warm twice rather
+    /// than three times. Harmless to this gate and invisible to `> 0`, and the note
+    /// is here because tightening this to `>= 3` would then fail on two platforms
+    /// out of three for a reason nothing on the line would explain.
     warmed: usize,
     /// Raw events the armed watch was handed, **reported and not gated.**
     ///
