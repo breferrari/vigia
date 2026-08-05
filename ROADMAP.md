@@ -391,7 +391,12 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
+| ⬜ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
+| ⬜ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |
+| ⬜ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
+
+**The three UI rows are here under the same reading of the filter as #24**: what the binary looks and feels like in a first user's hands is part of what distribution hands them. [#119](https://github.com/breferrari/vigia/issues/119) is artifact-truth work besides — the shipped screen departs from the published mockup in a way §5.1 never recorded — and it sits first of the three because it changes layout boundaries that [#121](https://github.com/breferrari/vigia/issues/121)'s hint rung and any later width work would otherwise re-derive twice.
 
 **[#24](https://github.com/breferrari/vigia/issues/24) is here because the filter includes what the binary does in those hands.** A pane closing sends the signal nobody at the keyboard typed, a tool that lives in panes will be killed that way routinely, and a first-run user whose terminal comes back wrecked does not file an issue, they uninstall. The other two shelf entries that read like release blockers by title were re-examined 2026-08-05 and stay shelved on their own recorded triage: [#91](https://github.com/breferrari/vigia/issues/91)'s panic is unreachable from the binary (an API-contract gap), and [#63](https://github.com/breferrari/vigia/issues/63)'s hole is real in the buffer and unreachable on the screen.
 
