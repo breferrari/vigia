@@ -42,6 +42,38 @@ jq -r '.[] | "\(.number)\t\(.state)\t\(.milestone.title // "NONE")\t\(.title)"' 
 grep -oE '^\| \*\*I[0-9]+[a-z]?\*\*' "$tmp/spec.md" | grep -oE 'I[0-9]+[a-z]?' | sort -u > "$tmp/spec-invariants.txt"
 B='(^|[^A-Za-z0-9])'; A='([^A-Za-z0-9]|$)'
 
+# 0. Machine state. A measurement window in flight on this machine means two
+# instruments would measure each other — the soak workflow's own concurrency
+# rule, applied locally. A soak log touched in the last ten minutes is the
+# cheapest evidence of one; this fires rarely and loudly, and it is advisory
+# because it is not tracker drift: the pass decides what to defer (release-tier
+# timing runs, above all), the check only makes the claim visible. It exists
+# because a 24-hour window was once recorded only in a commit message, and a
+# parallel session ruled the same run unauthorised while it was in flight.
+# Every worktree's target/ is swept, not this one's: sessions run in per-issue
+# worktrees, a soak runs in whichever one launched it, and a check that only
+# looked beside itself would miss the one machine-level fact it exists to see.
+# The signal is the PROCESS, not a log's mtime. The first version watched for a
+# soak log touched in the last ten minutes, and the real soak falsified it
+# within the hour: libtest prints its over-60-seconds notice once and then the
+# log sits silent for the whole window, so a 24-hour run in flight showed a
+# 69-minute-old file while its test process had 1,336 CPU-seconds on the clock.
+# A check that can say "ok" while the window runs is worse than none. The test
+# binary is named soak-<hash>, which is what both probes match.
+say "0. machine state:"
+soak_proc=""
+if command -v tasklist >/dev/null 2>&1; then
+  tasklist 2>/dev/null | grep -qiE '^soak-' && soak_proc="yes"
+elif command -v pgrep >/dev/null 2>&1; then
+  pgrep -f '[/\\]soak-[0-9a-f]' >/dev/null 2>&1 && soak_proc="yes"
+fi
+if [ -n "$soak_proc" ]; then
+  say "  CLAIMED a soak test process is running on this machine."
+  say "          Defer release-tier timing runs; check the window's issue for when it ends."
+else
+  say "  ok    no measurement window in flight"
+fi
+
 say "1. untracked — spec invariants no issue title names:"
 found=0
 while IFS= read -r inv; do
