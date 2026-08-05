@@ -209,7 +209,7 @@ search   the decision you are about to touch
 recall   accumulated constraints — empty early, and empty is not evidence of none
 ```
 
-**Consulting the vault is deliberate, not reflexive.** Reaching for it when the answer is in `SPEC.md` wastes a call; reaching for it out of habit while writing a *public* commit message loads strategic context that must never land in one. That direction is the one with a hook guarding it, because a squash commit merged to a public `main` stays reachable by SHA forever. Know which of the three you are asking for before you ask.
+**Consulting the vault is deliberate, not reflexive.** Reaching for it when the answer is in `SPEC.md` wastes a call; reaching for it out of habit while writing a *public* commit message loads strategic context that must never land in one. This repo's own PreToolUse hook (`.claude/scripts/leak-guard.mjs`) blocks a `gh` publish whose body carries a session artifact, but **commit messages have no automatic guard here** — that discipline is yours, and a squash commit merged to a public `main` stays reachable by SHA forever. Know which of the three you are asking for before you ask.
 
 ## 3. Plan it, in plan mode, before touching code
 
@@ -458,6 +458,17 @@ Skipping any of these is how the next session loses time.
 4. **The vault**, through the MCP:
    - `record_work` for what happened here: changes, decisions, what was learned, what is still open, how it was verified.
    - `remember` for anything that would help someone on a **different** project. A `gix` limitation that would bite any Rust project is a `remember`. "Landed the watch engine" is a `record_work`. Both, when both are true.
+
+   **This is the loop's least reliable step, so it carries a fallback and a check.**
+   The write guard has refused a legitimate record nine calls running (the #15
+   record was filed by hand), and one record returned success while writing its
+   sections into the note as raw tool markup, which sat corrupted for two days.
+   So: if `record_work` refuses or errors after a couple of honest rephrasings,
+   **file the note by hand** in the vault (`projects/vigia/notes/`, matching the
+   dated-note shape) and say so in the report — the record is the requirement,
+   the tool is only the route. And after any success, **read the note back**
+   (`search` for it) and confirm the sections landed as markdown; a success
+   return is not evidence of a clean write.
 
 ## 9. Report
 
