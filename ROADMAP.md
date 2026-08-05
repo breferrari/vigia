@@ -414,7 +414,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | File-granular navigation: `n`/`p`, digits jump to a listed file | [#122](https://github.com/breferrari/vigia/issues/122) |
 | ⬜ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
 | ⬜ | decision: hover highlight — modern feel priced against I1 | [#123](https://github.com/breferrari/vigia/issues/123) |
-| ⬜ | decision: the rule learns to speak — border-embedded headings | [#124](https://github.com/breferrari/vigia/issues/124) |
+| ⬜ | decision: the rule learns to speak — headings in the border line | [#124](https://github.com/breferrari/vigia/issues/124) |
+| ⬜ | The pane rewards space: density scaling, the churn graph, side-by-side regions | [#125](https://github.com/breferrari/vigia/issues/125) |
 
 **After distribution on purpose.** The minimal real thing ships first — a crates.io name is claimed by publishing, and their own doctrine says the first publish is the smallest real one — and polish lands as visible post-release momentum, guided by the [#72](https://github.com/breferrari/vigia/issues/72) week's real-use data instead of ahead of it. [#119](https://github.com/breferrari/vigia/issues/119) sits first because it moves layout boundaries the other rows would otherwise re-derive twice; the three decisions carry both branches in their bodies and can be ruled in one sitting, each unblocking a small build. `SPEC.md` §5.3 is the design language these rows are derived from; a feel improvement that costs an invariant a sentence is a `decision` here, one that costs nothing is a row.
 
