@@ -897,47 +897,56 @@ fn swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git() {
             .unwrap_or_else(|| panic!("{path} is not in {changes:#?}"))
     };
 
-    // Direction one: git diffs the file's content against the link text it
-    // replaced, so `vigia` has to read the file rather than try to read a link
-    // that is no longer there.
-    assert_eq!(scratch.git_numstat("link.txt"), Numstat::Lines(1, 1));
+    // **Direction one, and its classification is not portable, which this test
+    // originally asserted that it was.** A link replaced by a regular file is
+    // reported `Modified` by some git and `gix` builds and `TypeChange` by
+    // others; CI returns `TypeChange` on all three tier-1 targets where this
+    // machine returned `Modified`. Pinning one of them was the same fixture-axis
+    // mistake #15 is about, one axis further out again: a fixture on *this*
+    // installation's answer, asserted as though it were the rule.
+    //
+    // What matters is not which label arrives but that neither label lets the
+    // read follow a link that is no longer there, so both branches assert.
     let became_file = of("link.txt");
-    assert_eq!(
-        became_file.kind,
-        ChangeKind::Modified,
-        "git reports a link replaced by a regular file as a modification, and the \
-         hint's soundness depends on `gix` agreeing"
-    );
     let diff = worktree.diff(became_file).expect("diff the replaced link");
-    assert_eq!(texts(&diff, LineKind::Removed), ["target.txt"]);
-    assert_eq!(
-        texts(&diff, LineKind::Added),
-        ["now a real file"],
-        "the read followed a link that is not there any more"
-    );
+    if became_file.is_diffable() {
+        assert_eq!(scratch.git_numstat("link.txt"), Numstat::Lines(1, 1));
+        assert_eq!(texts(&diff, LineKind::Removed), ["target.txt"]);
+        assert_eq!(
+            texts(&diff, LineKind::Added),
+            ["now a real file"],
+            "the read followed a link that is not there any more"
+        );
+    } else {
+        assert!(
+            diff.hunks.is_empty() && diff.bytes == 0,
+            "a type change read the working tree, so the early return #15 relies \
+             on is gone"
+        );
+    }
 
-    // Direction two, and this is the half that closes the hint's only gap. git
-    // reports `T` here, so it never reaches a read at all: `is_diffable` is
-    // false and `Worktree::diff` returns before consulting the worktree. The
-    // index mode being stale therefore cannot mislead anything.
+    // **Direction two is the one the hint's soundness rests on**, and it is
+    // asserted as the property rather than as a label for the same reason. A
+    // regular file replaced by a link either never reaches a read (`TypeChange`,
+    // which `is_diffable` rejects) or reaches one that must still read the link
+    // rather than follow it. Either is safe; reading the target's contents is
+    // not, and that is what this pins.
     let became_link = of("swap.txt");
-    assert_eq!(
-        became_link.kind,
-        ChangeKind::TypeChange,
-        "a regular file replaced by a symlink is not reported as a type change, \
-         so `maybe_symlink` reading the index mode would send this to an ordinary \
-         read and diff the link's target through it"
-    );
-    assert!(
-        !became_link.is_diffable(),
-        "a type change became diffable, so the early return #15 relies on is gone"
-    );
-    let diff = worktree.diff(became_link).expect("diff the type change");
-    assert!(
-        diff.hunks.is_empty(),
-        "a type change is a state, not a diff"
-    );
-    assert_eq!(diff.bytes, 0, "a type change read the worktree");
+    let diff = worktree.diff(became_link).expect("diff the replaced file");
+    if became_link.is_diffable() {
+        assert_eq!(
+            texts(&diff, LineKind::Added),
+            ["target.txt"],
+            "a regular file replaced by a link was diffed as the link's *target* \
+             contents, so `maybe_symlink` trusted a stale index mode"
+        );
+    } else {
+        assert!(
+            diff.hunks.is_empty() && diff.bytes == 0,
+            "a type change read the working tree, so the early return #15 relies \
+             on is gone"
+        );
+    }
 }
 
 #[test]

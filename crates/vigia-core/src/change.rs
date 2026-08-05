@@ -76,14 +76,22 @@ pub struct FileChange {
     /// measured rather than argued, by
     /// `crates/vigia-core/tests/fidelity.rs::swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git`:
     ///
-    /// * A link replaced by a **regular file** keeps its `120000` index entry and
-    ///   git calls it a *modification*. This says `true`, the `lstat` finds a
-    ///   plain file, and the read is an ordinary one. The mode being stale costs
-    ///   a syscall and changes no answer.
+    /// * A link replaced by a **regular file** keeps its `120000` index entry.
+    ///   Whichever label arrives, this says `true`, the `lstat` finds a plain
+    ///   file, and the read is an ordinary one. The mode being stale costs a
+    ///   syscall and changes no answer.
     /// * A **`100644`** file replaced by a link is what a stale mode would get
-    ///   wrong, and it never arrives: git and `gix` both report it as a *type
-    ///   change*, which [`FileChange::is_diffable`] rejects before
+    ///   wrong, and it does not arrive as a modification: it is reported as a
+    ///   *type change*, which [`FileChange::is_diffable`] rejects before
     ///   `Worktree::diff` consults the working tree at all.
+    ///
+    /// **Which of the two labels either direction gets is not portable**, and an
+    /// earlier version of this argument named one as though it were. CI reports
+    /// `TypeChange` for the first case on all three tier-1 targets where the
+    /// reference machine reports `Modified`. The gate therefore asserts the
+    /// property both labels have to satisfy rather than the label, and the
+    /// property is the one that matters: neither may end in a read that follows
+    /// the link.
     ///
     /// So the soundness rests on `gix`'s type-change detection rather than on
     /// this field, and that test is what holds it: if a future `gix` reported
