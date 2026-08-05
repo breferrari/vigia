@@ -288,16 +288,23 @@ fn drive(root: &Path) -> Driven {
             .map(|change| change.path.clone())
             .collect(),
     );
-    let driven = Driven {
+    // **The watch is read here and torn down by going out of scope**, which is what
+    // puts its teardown inside the window: `drive` returns before the caller takes
+    // the second reading. An earlier version called `watcher.stopper().stop()`
+    // first and said in a comment that this ordered the teardown. It did not.
+    // `Stop::stop` is `let _ = tx.send(Message::Stop)`, nothing here ever calls
+    // `next_tick`, so the message was never read and the call had no observable
+    // effect at all; what actually stops the OS watch is dropping `_backend`, which
+    // that field's own doc in `watch.rs` says. It was not the product's shutdown
+    // path either, which was the other half of the excuse: `vigia::run` never calls
+    // `stopper` or `stop`. A line doing nothing under a comment claiming it does
+    // something is worse than no line, so it is gone.
+    Driven {
         frames: shell.frames,
         body_rows: shell.body_rows,
         warmed: warmer.join().expect("the warmer finished"),
         events: watcher.delivered(),
-    };
-    // Stopped explicitly rather than by dropping the binding, so the teardown is
-    // ordered where it can be read instead of falling out of scope order.
-    watcher.stopper().stop();
-    driven
+    }
 }
 
 /// What the drive actually did, for the caller to check before it checks the
