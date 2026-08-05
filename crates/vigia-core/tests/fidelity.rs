@@ -726,8 +726,19 @@ fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
         .find(|c| c.path == "exe.sh")
         .unwrap_or_else(|| panic!("exe.sh is not in {changes:#?}"));
 
-    // Whatever kind `gix` assigns, the read must not follow the link.
+    // **Whatever kind `gix` assigns, the read must not follow the link**, and
+    // both branches assert rather than one returning quietly. A bare `return`
+    // here would make this inert on any platform where `gix` *does* call this a
+    // type change, and that is Linux and macOS, where the executable bit is
+    // real and `100755` is the common case: the gate would be silent on exactly
+    // the population it was written for.
     if !change.is_diffable() {
+        let diff = worktree.diff(change).expect("diff the type change");
+        assert!(
+            diff.hunks.is_empty() && diff.bytes == 0,
+            "a type change read the working tree, so the early return #15 relies \
+             on is gone"
+        );
         return;
     }
     let diff = worktree.diff(change).expect("diff the replaced executable");
