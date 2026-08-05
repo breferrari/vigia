@@ -180,6 +180,20 @@ Take the **topmost unstarted task in the earliest *eligible* phase** — eligibl
 
 If a task is already `🔨 in progress`, check `git status` and the open PRs before starting anything: another session may be mid-flight, and two sessions on one task is worse than one session idle.
 
+### A `decision` issue is done when the ruling is written, not when code lands
+
+Check the label before planning. An issue labelled **`decision`** is one whose acceptance is **a ruling recorded in `SPEC.md`**, not a diff. Three exist today ([#74](https://github.com/breferrari/vigia/issues/74), [#50](https://github.com/breferrari/vigia/issues/50), [#89](https://github.com/breferrari/vigia/issues/89)) and they were already written that way — #74's exit criteria read *"a ruling: build the seam, or record that direct consumption is accepted"*, and *"if declined: a line in `SPEC.md` §6 saying so, so the next reviewer finds a decision instead of an omission."*
+
+**They had no route, which is the actual defect.** Every step below assumes a diff: plan a build, ship it, scope the checks to the changed files, prove it with gates. Handed a `decision` issue, this skill plans a build for something whose answer might be *"do not build it"* — and #50 sits in a phase that gets **taken in sequence**, so this is reachable rather than hypothetical.
+
+When the issue is labelled `decision`:
+
+- **The deliverable is the ruling and its reasoning**, written where the next reader will hit it — the `SPEC.md` section the issue names, plus its §10 bullet closed. A ruling filed only in the issue is not filed: the issue closes and `SPEC.md` still reads as an omission.
+- **Both branches get written.** *"Declined"* is a result, and the case for the road not taken is recorded rather than dropped, because it will be raised again. #50 says this in its own acceptance and it is the general rule.
+- **Code is allowed but it is not the point.** If the ruling is *build the seam*, the build is a **separate issue** the ruling unblocks. Do not fold it in: the ruling is what the next session needs and it should not wait behind an implementation.
+- **The gate is different.** There is no diff to scope checks to and nothing for `/harden` to audit, so step 5's docs-vs-code split resolves to docs and the fidelity check in step 6 runs against the *plan's promises about the ruling*: every question the issue asked is answered, and each answer names what it rests on.
+- **A ruling that cannot be made is a finding, not a failure.** If it needs a measurement nobody has run or a week of use nobody has had, say so, record what would settle it, and leave the issue open with that written down. #50 needs exactly that, and pretending otherwise produces a guess wearing a ruling's clothes.
+
 ## 2. Load the why before touching code
 
 **Read the repo first.** The issue carries acceptance criteria, `SPEC.md` carries the contract, and — unusually for a repo — a great deal of the *reasoning* is here too: §10's open questions carry their measurements, the invariant callouts explain why they split, and the commit messages argue rather than announce. Most "why did we do it this way" questions are answered inside the checkout.
