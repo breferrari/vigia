@@ -394,6 +394,9 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 | ⬜ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
 | ⬜ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |
 | ⬜ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
+| ⬜ | File-granular navigation: `n`/`p`, digits jump to a listed file | [#122](https://github.com/breferrari/vigia/issues/122) |
+| ⬜ | decision: hover highlight — modern feel priced against I1 | [#123](https://github.com/breferrari/vigia/issues/123) |
+| ⬜ | decision: the rule learns to speak — border-embedded headings | [#124](https://github.com/breferrari/vigia/issues/124) |
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
 
 **The three UI rows are here under the same reading of the filter as #24**: what the binary looks and feels like in a first user's hands is part of what distribution hands them. [#119](https://github.com/breferrari/vigia/issues/119) is artifact-truth work besides — the shipped screen departs from the published mockup in a way §5.1 never recorded — and it sits first of the three because it changes layout boundaries that [#121](https://github.com/breferrari/vigia/issues/121)'s hint rung and any later width work would otherwise re-derive twice.
