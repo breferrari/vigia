@@ -408,6 +408,16 @@ struct Driven {
     /// 24-row pane, so every position the six actions reach has content under it.
     /// Run ten times consecutively before being trusted, since a guard that flakes
     /// is worse than the weak one it replaced.
+    ///
+    /// **And the difference is measured, not argued.** With `take_file` drawing
+    /// content for the first changed file only, so that the frame after
+    /// `Action::Bottom` lands on a file that draws headings alone, the run reports
+    /// **8 frames, 15 rows, 5 content rows, leanest 0**. A total or a maximum is
+    /// satisfied by that 5 and passes; this fires. That is the whole case for the
+    /// statistic, and the first mutation aimed at it **survived** and had to be
+    /// re-aimed: gating on `skip` changed nothing, because `skip` is an offset within
+    /// the file being drawn and is zero on every frame here. A survivor that proves
+    /// the mutation was wrong is not a gate that is weak.
     leanest_frame: u64,
     /// Files the warmer compiled, which is the one stage that spawns a thread.
     ///
