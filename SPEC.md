@@ -301,7 +301,7 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
 
 **Phase 7 — distribution.** `cargo-dist`, crates.io publish, personal Homebrew tap, prebuilt binaries on GitHub releases.
 
-**Phase 5 — deferred findings**, the shelf: work found mid-phase and consciously shelved, taken only by deliberate choice, never "next". Listed after 6 and 7 because that is its milestone number, and the number is not the order — the shelf holds no place in the sequence at all.
+**The Shelf** (milestone `Shelf`, titled "Phase 5" until 2026-08-06): work found mid-phase and consciously shelved, taken only by deliberate choice, never "next". It holds no place in the sequence at all, which is why the phase number was retired — a number claims a place.
 
 *(This list said "Phase 4 — distribution, Phase 5 — deferred items" until 2026-08-05, a whole phase-numbering behind the roadmap it defers to. The pre-flight cannot see this file's own phase prose — it compares invariant tokens and milestone titles — so the drift sat here across two renumberings. This section is the shape; `ROADMAP.md` is the state and the authority on numbering.)*
 

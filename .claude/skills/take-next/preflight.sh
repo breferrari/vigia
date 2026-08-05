@@ -128,7 +128,13 @@ if [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
   done < "$tmp/order.txt"
   if [ "$step1" = "$roadmap_says" ]; then ok "step 1 and the roadmap agree: ${step1:-<no eligible work>}"
   else hit "step 1 says '${step1:-<empty>}', roadmap section order says '${roadmap_says:-<empty>}'"; fi
-  LC_ALL=C sort "$tmp/withwork.txt" > "$tmp/ww.s"; LC_ALL=C sort "$tmp/order.txt" > "$tmp/or.s"
+  # Shelved milestones are exempt from the section check: a shelf holds no
+  # place in the take-order, so it owes the file no `## Phase <n>` section —
+  # the Shelf milestone (titled "Phase 5" until 2026-08-06) is the standing case.
+  LC_ALL=C sort "$tmp/withwork.txt" > "$tmp/ww.all"
+  LC_ALL=C sort "$tmp/shelved.txt" > "$tmp/sh.s"
+  LC_ALL=C comm -23 "$tmp/ww.all" "$tmp/sh.s" > "$tmp/ww.s"
+  LC_ALL=C sort "$tmp/order.txt" > "$tmp/or.s"
   LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/or.s" > "$tmp/ms-orphans.out"
   if [ -s "$tmp/ms-orphans.out" ]; then
     sed 's/^/  DRIFT milestone with work and no roadmap section: /' "$tmp/ms-orphans.out"
