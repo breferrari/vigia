@@ -327,6 +327,12 @@ struct Driven {
     /// place in the failure message below, where "the tree moved and the watch saw
     /// N events" and "the tree moved and the watch saw none" point at different
     /// culprits.
+    ///
+    /// **It also happens to be the proof that the watch is not decorative**, which
+    /// arming one without ever reading from it badly needs. Reference machine: the
+    /// clean run reports **0**, and the mutation that writes a file inside the
+    /// window reports **5**. So the thing being armed is delivering, and a future
+    /// edit that armed nothing would show as a zero the mutation could not move.
     events: u64,
 }
 
