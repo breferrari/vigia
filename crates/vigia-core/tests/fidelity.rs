@@ -726,12 +726,20 @@ fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
         .find(|c| c.path == "exe.sh")
         .unwrap_or_else(|| panic!("exe.sh is not in {changes:#?}"));
 
-    // **Whatever kind `gix` assigns, the read must not follow the link**, and
-    // both branches assert rather than one returning quietly. A bare `return`
-    // here would make this inert on any platform where `gix` *does* call this a
-    // type change, and that is Linux and macOS, where the executable bit is
-    // real and `100755` is the common case: the gate would be silent on exactly
-    // the population it was written for.
+    // **Whatever kind `gix` assigns, the read must not follow the link.**
+    //
+    // The type-change branch is defensive and **unreachable on all three tier-1
+    // targets today**, which is worth stating precisely because an earlier
+    // version of this comment claimed the opposite. `change_to_match_fs_with_values`
+    // reaches `ExecutableBit` on Linux and macOS (their `is_executable` requires
+    // `S_IFREG`, and an `lstat` of a link gives `S_IFLNK`) and falls to no change
+    // at all on Windows, where the executable bit is not tracked. Both routes end
+    // at `Modified`, so the diffable branch below is the one that runs everywhere.
+    //
+    // It still asserts rather than returning bare: if a future `gix` grows the
+    // `FILE_EXECUTABLE` arm it is missing, this becomes live, and a bare `return`
+    // would turn the gate silent on the platform where `100755` is the common
+    // case instead of telling anyone.
     if !change.is_diffable() {
         let diff = worktree.diff(change).expect("diff the type change");
         assert!(

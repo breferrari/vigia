@@ -63,6 +63,14 @@ pub struct FileChange {
     /// not resolve stays `true` and pays the `lstat`, because a wrong `false`
     /// reads a file where git reads a path and a wrong `true` costs one syscall.
     ///
+    /// **It is a walk-time answer read at read-time**, so a path that was a
+    /// regular file when the status walk classified it and is a symlink by the
+    /// time the diff reads it gets `false` and is followed. That window is one
+    /// tick wide and the next frame reclassifies, which makes it the same shape
+    /// as every other staleness this file path already tolerates rather than a
+    /// new one. It is the only remaining way `false` can be wrong: an audit
+    /// enumerated the rest and closed them.
+    ///
     /// **What makes reading the index mode sound is that the two ways it can go
     /// stale are not symmetric, and only one of them reaches a read.** Both are
     /// measured rather than argued, by
