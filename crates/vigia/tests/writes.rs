@@ -239,10 +239,16 @@ fn drive(root: &Path) -> Driven {
 
     // **A real watch, armed for the length of the run.** `Frame::advance` called by
     // hand is not what "while it runs" means: `vigia::run` arms a `notify` watch and
-    // so does the soak, and the watcher opens the repository a *second* time to read
-    // `.git/index` and the gitignore rules the filter needs. That is a second reader
-    // of the same repository, which is the most plausible place for a write nobody
-    // intended, and calling `advance` directly walks straight past it.
+    // so does the soak. `Watcher::new` reads `.git/index` and the gitignore rules
+    // the filter needs, and then arms `notify` over the whole worktree, which is
+    // both a second reader of the repository's own files and the one stage that
+    // registers with the OS. Calling `advance` directly walks past all of it.
+    //
+    // What this does *not* reproduce is the second `Worktree` §6 describes: `run`
+    // opens one inside the watch thread, because `gix::Repository` is `Send` and not
+    // `Sync` so a borrow cannot cross the boundary. Here the watcher borrows the
+    // worktree this function already has, on this thread. One repository discovery
+    // rather than two, and it is a difference worth naming rather than implying.
     //
     // Held to the end of the function rather than dropped here, so arming and
     // teardown are both inside the compared window. Nothing calls `next_tick`: it
