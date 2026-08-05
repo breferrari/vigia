@@ -334,12 +334,18 @@ fn drive(root: &Path) -> Driven {
         frames: rig.frames,
         body_rows: rig.body_rows,
         content_rows: rig.painted.rows,
-        // **Collapsed to zero when no frame ran, so this guard does not depend on
-        // another one firing first.** The running minimum starts at `u64::MAX`, and a
-        // `drive` that painted nothing would carry that value into a `> 0` check and
-        // pass it. `frames == 8` is asserted before it and would catch that today,
-        // which is exactly the kind of protection that evaporates when someone
-        // reorders two assertions for readability.
+        // **Collapsed to zero when no frame ran, so the guard rests on its own
+        // evidence.** The running minimum starts at `u64::MAX` and a `drive` that
+        // painted nothing would carry that into a `> 0` check and pass it.
+        //
+        // Belt and braces rather than a fix, and the round-4 audit is what
+        // established which: `frames` and the minimum are written in the same two
+        // lines of `Rig::paint`, so `frames == 8` cannot hold while the minimum is
+        // still `u64::MAX`. The hole was structurally unreachable, not merely
+        // guarded by the order the assertions happen to sit in. This line stays
+        // because it costs nothing and removes a step the next reader would
+        // otherwise have to redo, but it was not a live defect and saying so is the
+        // difference between a record and a story.
         leanest_frame: if rig.frames == 0 {
             0
         } else {
@@ -372,7 +378,14 @@ struct Driven {
     frames: usize,
     /// The tallest body any of them drew, so a blank pane cannot pass as a run.
     body_rows: usize,
-    /// Rows of **content** in the tallest of them, which is the stricter half.
+    /// Rows of **content**, summed across the whole run.
+    ///
+    /// A sum and not a maximum, which is worth saying because the field beside it is
+    /// a maximum and this doc said "the tallest of them" until round 4 of the audit
+    /// caught it. The two statistics are deliberately different: a total is the right
+    /// shape for "was anything ever drawn", and [`Self::leanest_frame`] below is what
+    /// carries "was something drawn *every* time". Mixing them up in a failure
+    /// message is the trap, so the message names which is which.
     ///
     /// **`body_rows` alone is weaker than it reads, and this is what the round-2
     /// audit caught.** `View::collect` pushes a `Row::File` heading for every
@@ -585,9 +598,10 @@ fn the_monitor_writes_nothing_while_it_runs() {
     // were content" than when it can only say "no content".
     assert!(
         driven.leanest_frame > 0,
-        "the leanest of {} frames drew no content at all, over {} rows total and {} \
-         content rows across the run, so at least one position drew nothing but \
-         headings and the tree this gate found clean was not really read there",
+        "the leanest of {} frames drew no content at all, against a tallest body of \
+         {} rows in any one frame and {} content rows summed across the run, so at \
+         least one position drew nothing but headings and the tree this gate found \
+         clean was not really read there",
         driven.frames,
         driven.body_rows,
         driven.content_rows
