@@ -391,24 +391,32 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 | | Task | Issue |
 |---|---|---|
 | ⬜ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
-| ⬜ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
-| ⬜ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |
-| ⬜ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
-| ⬜ | File-granular navigation: `n`/`p`, digits jump to a listed file | [#122](https://github.com/breferrari/vigia/issues/122) |
-| ⬜ | decision: hover highlight — modern feel priced against I1 | [#123](https://github.com/breferrari/vigia/issues/123) |
-| ⬜ | decision: the rule learns to speak — border-embedded headings | [#124](https://github.com/breferrari/vigia/issues/124) |
 | ⬜ | `cargo-dist`, crates.io, Homebrew tap | [#12](https://github.com/breferrari/vigia/issues/12) |
-
-**The three UI rows are here under the same reading of the filter as #24**: what the binary looks and feels like in a first user's hands is part of what distribution hands them. [#119](https://github.com/breferrari/vigia/issues/119) is artifact-truth work besides — the shipped screen departs from the published mockup in a way §5.1 never recorded — and it sits first of the three because it changes layout boundaries that [#121](https://github.com/breferrari/vigia/issues/121)'s hint rung and any later width work would otherwise re-derive twice.
 
 **[#24](https://github.com/breferrari/vigia/issues/24) is here because the filter includes what the binary does in those hands.** A pane closing sends the signal nobody at the keyboard typed, a tool that lives in panes will be killed that way routinely, and a first-run user whose terminal comes back wrecked does not file an issue, they uninstall. The other two shelf entries that read like release blockers by title were re-examined 2026-08-05 and stay shelved on their own recorded triage: [#91](https://github.com/breferrari/vigia/issues/91)'s panic is unreachable from the binary (an API-contract gap), and [#63](https://github.com/breferrari/vigia/issues/63)'s hole is real in the buffer and unreachable on the screen.
 
 **The release itself has a smoke checklist, [`RELEASE-SMOKE.md`](RELEASE-SMOKE.md)**, run against the built artifact at the release SHA before any publish — because a sibling project shipped two consecutive CI-green patches that broke the flagship install on day one, and a crates.io publish is permanent in a way theirs was not.
 
-**Last on purpose, and the ordering argument survives the re-housing intact.** Every claim in Phase 4 and every unmeasured budget in Phase 6 is survivable while the only reader is the author, and becomes a support burden the moment this phase hands them an audience — a registry page and a README that people arrive at cold, having seen the picture before they have seen the tool.
+**Last on purpose among the release phases, and the ordering argument survives the re-housing intact.** Every claim in Phase 4 and every unmeasured budget in Phase 6 is survivable while the only reader is the author, and becomes a support burden the moment this phase hands them an audience — a registry page and a README that people arrive at cold, having seen the picture before they have seen the tool.
 
-That is a *sequencing* claim, which is what this paragraph is for. It is not a reason for that work to live in this milestone, which is the mistake the note under Phase 4 records.
+That is a *sequencing* claim, which is what this paragraph is for. It is not a reason for that work to live in this milestone, which is the mistake the note under Phase 4 records — made once more the day Phase 8 was created: six look-and-feel rows sat here for an evening under a stretched reading of the filter ("what the binary feels like in a first user's hands"), and the stretch is exactly how a filter dies. A row belongs here if a user cannot *get* the binary without it, not if the binary is nicer once they have it.
 
+## Phase 8 — look and feel
+
+Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
+
+**Filter: does it change what the pane looks or feels like in the first minute of use?** Shape, colour, and input.
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
+| ⬜ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |
+| ⬜ | File-granular navigation: `n`/`p`, digits jump to a listed file | [#122](https://github.com/breferrari/vigia/issues/122) |
+| ⬜ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
+| ⬜ | decision: hover highlight — modern feel priced against I1 | [#123](https://github.com/breferrari/vigia/issues/123) |
+| ⬜ | decision: the rule learns to speak — border-embedded headings | [#124](https://github.com/breferrari/vigia/issues/124) |
+
+**After distribution on purpose.** The minimal real thing ships first — a crates.io name is claimed by publishing, and their own doctrine says the first publish is the smallest real one — and polish lands as visible post-release momentum, guided by the [#72](https://github.com/breferrari/vigia/issues/72) week's real-use data instead of ahead of it. [#119](https://github.com/breferrari/vigia/issues/119) sits first because it moves layout boundaries the other rows would otherwise re-derive twice; the three decisions carry both branches in their bodies and can be ruled in one sitting, each unblocking a small build. `SPEC.md` §5.3 is the design language these rows are derived from; a feel improvement that costs an invariant a sentence is a `decision` here, one that costs nothing is a row.
 
 ## Phase 5 — deferred findings
 
@@ -416,7 +424,7 @@ Milestone: [Phase 5](https://github.com/breferrari/vigia/milestone/5)
 
 Everything on the deferral shelf below has a milestone here, so shelved work is still reachable by a milestone-filtered query rather than only readable in prose. The shelf carries the *reason*; this table carries the *state*.
 
-**This one sits last in the file although it is numbered fifth, and that is deliberate.** It is not a phase in the sequence — it is a shelf, permanently open, never "next". The sections above run 4 → 6 → 7 in the order they are meant to be taken, and putting a shelf between two of them would read as a step. The number is kept because [#19](https://github.com/breferrari/vigia/issues/19), [#34](https://github.com/breferrari/vigia/issues/34), [#51](https://github.com/breferrari/vigia/issues/51) and a dozen shelf entries cite "Phase 5" by name, and renumbering to tidy the file would silently repoint every one of them — the same argument §11.2 gives for leaving a ruled item's number behind.
+**This one sits last in the file although it is numbered fifth, and that is deliberate.** It is not a phase in the sequence — it is a shelf, permanently open, never "next". The sections above run 4 → 6 → 7 → 8 in the order they are meant to be taken, and putting a shelf between two of them would read as a step. The number is kept because [#19](https://github.com/breferrari/vigia/issues/19), [#34](https://github.com/breferrari/vigia/issues/34), [#51](https://github.com/breferrari/vigia/issues/51) and a dozen shelf entries cite "Phase 5" by name, and renumbering to tidy the file would silently repoint every one of them — the same argument §11.2 gives for leaving a ruled item's number behind.
 
 **If a second shelf is ever created, its milestone description must begin `Shelf:`.** Until [#83](https://github.com/breferrari/vigia/issues/83) the never-next rule lived only in this paragraph, which is prose, and `take-next` step 1 is a query: it read the milestone list, saw three peers, and offered the shelf as the next phase. The marker is what a query can read, and this paragraph is where whoever creates the next one is standing, so it is stated here rather than only in the skill. Comparison 6 of that skill's pre-flight is the check that fires when the two disagree.
 

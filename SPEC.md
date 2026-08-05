@@ -187,6 +187,24 @@ Three of these are corrections rather than gaps:
 
 **Confirmed by building the first one.** [#38](https://github.com/breferrari/vigia/issues/38) landed the sparkline, the recency gradient and the pulse, and the diff was mostly `vigia-core`: a new bounded store, a change to what a `Tick` carries, a new invariant with its own budget, and a soak assertion. The drawing was a bucket ladder and a three-step ramp. This section predicted that split and it was right, which is worth recording because the alternative reading — that Phase 3 is where the shell gets prettier — was the one both §5 and [#10](https://github.com/breferrari/vigia/issues/10) originally invited.
 
+### 5.3 The design language
+
+The principles the individual rulings keep deriving, stated once so a new question starts here instead of re-arguing an old answer. Each names where it already bit; the laws themselves live where they always did (§5.1 for the picture, §11.1 for behaviour) and are not restated.
+
+**The picture is the spec, and the snapshots are the picture at every width and state.** One canonical mockup, corrected in the same pass as any ruling that changes what it draws — never redrawn ahead of a ruling, because a picture answering an open question *is* the answer and must not arrive by ambush (B4), and never left behind one, because that is drift (§5.1's departure table is the complete list of licensed disagreements). The snapshot suite carries what one picture cannot: the empty state, every ladder rung, both footer heights.
+
+**Furniture runs full-bleed; text is inset.** The mockup draws washes and rules to the pane edge and glyphs one to three cells in, and the two roles must not swap: a wash that stops short reads as a misaligned highlight, text at column 0 reads as squeezed ([#119](https://github.com/breferrari/vigia/issues/119)). Chrome is the third role and never grows for a transient thing (§11.1's notice rule).
+
+**Snap, never ease.** A monitor's premium feel is the state change that lands whole in one frame. Animation needs a clock, a clock needs the timer I1 forbids, and the refusal is not a sacrifice: easing tells a reader the tool is doing something, and this tool's whole claim is that it already did it. The same reasoning retired the pulse decay (§11.1) and the frozen-clock header words (§5.1) — anything drawn as *elapsing* lies the moment nothing wakes.
+
+**Acknowledgment before action, priced honestly.** Every act the shell accepts answers on the same frame — a click lands, a drag tracks, a digit teleports. Extending that to *intent* (hover) costs a wake class I1 currently never pays, which is why it is a ruling ([#123](https://github.com/breferrari/vigia/issues/123)) and not an accretion. The pattern generalises: a feel improvement that costs an invariant a sentence gets a decision issue; one that costs nothing (inset, half-page keys, file-granular jumps) gets a row.
+
+**Colour is spent by role, and the diff's is inviolable.** Green and red mean added and removed, may never collapse at any rung that has colour (the depth ladder's one absolute), and are loaned out only where they restate the same fact (the footer's follow marker, the counters). Cyan marks structure and instrument. Intensity is the recency ladder and nothing else — dim is a *meaning*, not a style. A new element gets a colour only by taking a role, never by being distinct.
+
+**Shape carries signal; words are read.** The four glance elements are shape-and-colour precisely so the eye takes them without reading (§5), which is why the pulse lost its label and why a hint is dropped whole rather than abbreviated — half a word is a *reading* task on a surface built to avoid one. Text on screen is either content, a name, or advice, and each has its own degradation law (§11.1).
+
+**btop is the reference, read selectively.** Adopted from its grammar: padding inside regions, digits as direct jumps ([#122](https://github.com/breferrari/vigia/issues/122)), and — pending its ruling — the border that speaks ([#124](https://github.com/breferrari/vigia/issues/124)). Refused from it: the box-per-subject wall (two regions do not need six borders), meters for their own sake, and any element that exists to be configured. The reference is for what monitor-class *feels* like, not for how much ink it spends.
+
 ## 6. Architecture
 
 Cargo workspace, two crates:
