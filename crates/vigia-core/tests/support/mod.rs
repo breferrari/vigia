@@ -417,6 +417,29 @@ impl Scratch {
         scratch.git(&["config", "user.email", "test@example.invalid"]);
         scratch.git(&["config", "user.name", "vigia tests"]);
         scratch.git(&["config", "commit.gpgsign", "false"]);
+        // **These two are here for `crates/vigia/tests/writes.rs`, which asserts
+        // that nothing under the worktree moves while `vigia` runs.** With
+        // `core.fsmonitor` on, a `git add` spawns a `git-fsmonitor--daemon` that
+        // outlives the command and keeps writing inside `.git`, including a
+        // `cookies/` directory it creates and deletes to synchronise with clients.
+        // `core.untrackedCache` writes into the index for the same family of
+        // reason. Neither is exotic: both are documented performance settings a
+        // developer may well have on globally.
+        //
+        // What that would cost is worse than a flake. An external writer inside
+        // `.git` during the compared window makes the gate accuse the product of a
+        // write the product did not make, and the accusation looks exactly like a
+        // real finding. Nothing in that gate shells out to `git`, so no daemon is
+        // started inside its window today; this is the fixture refusing to depend
+        // on that staying true.
+        //
+        // **Unproven by mutation, deliberately, and that is the honest note.** The
+        // failure needs `core.fsmonitor` set in a *global* config, and setting one
+        // to watch a test go red would be editing the machine's own git
+        // configuration. So these are hardening by precedence, like the five lines
+        // above them, rather than lines with a red behind them.
+        scratch.git(&["config", "core.fsmonitor", "false"]);
+        scratch.git(&["config", "core.untrackedCache", "false"]);
         scratch
     }
 

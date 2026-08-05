@@ -89,8 +89,15 @@ fn area() -> Rect {
 /// rather than as whatever it points at. That matters here for the reason §7
 /// records against [#15](https://github.com/breferrari/vigia/issues/15): on
 /// Windows a link whose stored target uses forward slashes does not resolve at
-/// all, and a stamp that returned `None` for every link would compare equal to a
-/// stamp that returned `None` for every link, which is agreement about nothing.
+/// all.
+///
+/// **Mutation-verified, and only after the fixture gained a link.** This paragraph
+/// argued the point for a while over a fixture with no symlink under it, which made
+/// it unfalsifiable: with nothing to resolve, `metadata` and `symlink_metadata`
+/// agree everywhere. With one present, swapping to `metadata` fails the walk
+/// outright on that entry: `Os { code: 123, kind: InvalidFilename }`, which is
+/// Windows refusing the forward-slash target and is #15's reading reproduced by a
+/// gate rather than asserted in a comment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Stamp {
     /// Directories are stamped too, which is what catches a file created **and
@@ -105,9 +112,16 @@ struct Stamp {
     /// recording, because 3,816,902 of Windows' 100ns intervals was read off as
     /// 3.8ms and is 382ms. It is elapsed test time, not a granularity figure.
     ///
-    /// NTFS, and the limit is the one §6 already documents: a create and delete
-    /// inside a single timestamp granule would leave both maps agreeing, so this
-    /// is a strong catch rather than a proof.
+    /// NTFS, and the limit is the one §6 already documents, stated at its real
+    /// width rather than the narrower version this comment carried first: **any
+    /// change that leaves a length identical and lands inside one modification-time
+    /// granule** is invisible here. A create and delete is one instance and needs
+    /// the parent's entry list to settle back; a same-length rewrite of a file that
+    /// already existed is another and touches no directory at all. Unreachable by
+    /// hand on NTFS, ext4 or APFS, where granules are sub-millisecond. Real on the
+    /// 1s and 2s granules of HFS+, FAT and exFAT that §6's own table names, and
+    /// there is no fix for it in a `stat`-shaped instrument: content hashing is the
+    /// only thing that closes it, and that is a different gate at a different cost.
     dir: bool,
     len: u64,
     /// `None` where the platform refuses one, which is a value like any other:
