@@ -689,6 +689,99 @@ fn an_untracked_symlink_is_added_as_its_target_path() {
 }
 
 #[test]
+fn an_executable_replaced_by_a_symlink_diffs_as_its_target_path() {
+    // **The mode the type-change argument does not cover, found by the round 3
+    // adversarial pass.** `FileChange::maybe_symlink` is sound because a regular
+    // file replaced by a link is reported as a *type change* and never reaches a
+    // read. That holds for `100644` and **not** for `100755`: `gix`'s
+    // `change_to_match_fs_with_values` has a `Mode::FILE if !is_file` arm and no
+    // `Mode::FILE_EXECUTABLE` equivalent, so an executable replaced by a link
+    // falls through to `ExecutableBit` or to no change at all, and arrives as
+    // `Modified` with the index still saying `100755`.
+    //
+    // Treating `FILE_EXECUTABLE` as a positive "plain file" answer therefore sent
+    // it to an ordinary read, through the link. Not an exotic population: a
+    // committed `bin/` wrapper or a hook replaced by a link is ordinary, and
+    // `100755` entries are everywhere on Linux and macOS.
+    let scratch = Scratch::new("symlink-executable");
+    scratch.write("target_b.txt", binary_target());
+    scratch.write("exe.sh", "#!/bin/sh\necho hi\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["update-index", "--chmod=+x", "exe.sh"]);
+    scratch.git(&["commit", "-qm", "initial"]);
+    assert!(
+        scratch.index_mode("exe.sh").starts_with("100755"),
+        "the entry is not executable, so this fixture is not the case it names"
+    );
+
+    scratch.remove("exe.sh");
+    if !made_link(&scratch, "target_b.txt", "exe.sh") {
+        return;
+    }
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "exe.sh")
+        .unwrap_or_else(|| panic!("exe.sh is not in {changes:#?}"));
+
+    // Whatever kind `gix` assigns, the read must not follow the link.
+    if !change.is_diffable() {
+        return;
+    }
+    let diff = worktree.diff(change).expect("diff the replaced executable");
+    assert!(
+        !diff.binary,
+        "the diff sniffed binary, so an executable replaced by a link was read \
+         through to its 4 KiB target: `FILE_EXECUTABLE` was trusted as a plain \
+         file where `gix` reports no type change"
+    );
+    assert_eq!(
+        texts(&diff, LineKind::Added),
+        ["target_b.txt"],
+        "the added side is the target's contents rather than its path"
+    );
+}
+
+#[test]
+fn a_renamed_symlink_diffs_as_its_target_path() {
+    // **The third arm of `maybe_symlink`**, which nothing exercised: a rename
+    // arrives as `Item::Rewrite` and is classified off the *destination* dirwalk
+    // entry rather than off the source index entry. Rename tracking is on by
+    // default (`ChangeOptions::default`), so this is a live path, and mutating
+    // the arm to `false` left the entire crate suite green.
+    let scratch = Scratch::new("symlink-renamed");
+    scratch.write("target_b.txt", binary_target());
+    if !committed_link(&scratch, "target_b.txt", "old-link.txt") {
+        return;
+    }
+
+    scratch.git(&["mv", "old-link.txt", "new-link.txt"]);
+    // `git mv` stages the move; the monitor watches the worktree, so unstage it.
+    scratch.git(&["reset", "-q"]);
+
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let renamed = changes
+        .iter()
+        .find(|c| matches!(c.kind, ChangeKind::Renamed { .. }))
+        .unwrap_or_else(|| panic!("expected a rename, got {changes:#?}"));
+
+    let diff = worktree.diff(renamed).expect("diff the renamed link");
+    assert!(
+        !diff.binary,
+        "a renamed link was read through to its 4 KiB target, so the rewrite arm \
+         classified off the wrong side"
+    );
+    assert_eq!(
+        diff.bytes,
+        2 * "target_b.txt".len() as u64,
+        "the byte count follows the target file rather than the link text"
+    );
+}
+
+#[test]
 fn an_intent_to_add_path_that_became_a_symlink_diffs_as_its_target_path() {
     // **The population `maybe_symlink` got wrong, found by the round 2
     // adversarial pass.** `git add -N` stakes a claim on a path with the empty

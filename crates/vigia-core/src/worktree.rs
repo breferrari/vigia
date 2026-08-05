@@ -468,12 +468,21 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
     // `reads_worktree` and does arrive here, where it spends one probe and then
     // fails its `fs::read` exactly as it does on `main`. Rare enough to leave
     // alone; counted, so it is not invisible if it stops being rare.
-    let not_a_plain_file = |mode: gix::index::entry::Mode| {
-        !matches!(
-            mode,
-            gix::index::entry::Mode::FILE | gix::index::entry::Mode::FILE_EXECUTABLE
-        )
-    };
+    // **`FILE` and not `FILE_EXECUTABLE`, and the asymmetry is `gix`'s rather
+    // than a nicety here.** `change_to_match_fs_with_values` carries an arm
+    // `Mode::FILE if !is_file => Change::Type` and **no** `FILE_EXECUTABLE`
+    // equivalent, so a `100755` entry whose worktree side became a link falls
+    // through to `ExecutableBit` or to no change at all and arrives as
+    // `Modified` with the index still reading `100755`. Trusting that mode sent
+    // it to an ordinary read, through the link: #15's own defect, on every
+    // committed executable. `100644` is the one mode whose type change `gix`
+    // reliably reports, so it is the only one taken as evidence.
+    //
+    // Gated by
+    // `fidelity.rs::an_executable_replaced_by_a_symlink_diffs_as_its_target_path`.
+    // Costs one `lstat` per executable actually read.
+    let not_a_plain_file =
+        |mode: gix::index::entry::Mode| !matches!(mode, gix::index::entry::Mode::FILE);
     let disk_is_not_a_file =
         |kind: Option<gix::dir::entry::Kind>| !matches!(kind, Some(gix::dir::entry::Kind::File));
 

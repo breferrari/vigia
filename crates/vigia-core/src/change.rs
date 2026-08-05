@@ -72,15 +72,27 @@ pub struct FileChange {
     ///   git calls it a *modification*. This says `true`, the `lstat` finds a
     ///   plain file, and the read is an ordinary one. The mode being stale costs
     ///   a syscall and changes no answer.
-    /// * A regular file replaced by a **link** is what a stale `FILE` mode would
-    ///   get wrong, and it never arrives: git and `gix` both report it as a
-    ///   *type change*, which [`FileChange::is_diffable`] rejects before
+    /// * A **`100644`** file replaced by a link is what a stale mode would get
+    ///   wrong, and it never arrives: git and `gix` both report it as a *type
+    ///   change*, which [`FileChange::is_diffable`] rejects before
     ///   `Worktree::diff` consults the working tree at all.
     ///
     /// So the soundness rests on `gix`'s type-change detection rather than on
     /// this field, and that test is what holds it: if a future `gix` reported
     /// that second case as a modification, it goes red rather than quietly
     /// reading a link's target through it.
+    ///
+    /// **That argument held for one mode and was written as though it held for
+    /// all of them.** `gix`'s `change_to_match_fs_with_values` has an arm for
+    /// `Mode::FILE` and none for `Mode::FILE_EXECUTABLE`, so a `100755` entry
+    /// replaced by a link arrives as a **modification** with the index still
+    /// reading `100755`, and reading the mode as "plain file" sent it straight
+    /// through the link. Found by an adversarial pass, not by the argument. Only
+    /// `FILE` is taken as evidence now, and
+    /// `fidelity.rs::an_executable_replaced_by_a_symlink_diffs_as_its_target_path`
+    /// is what keeps that honest. The lesson generalises past the instance: a
+    /// dependency's *behaviour* is only as uniform as its match arms, and this
+    /// field reads one of those.
     pub(crate) maybe_symlink: bool,
 }
 
