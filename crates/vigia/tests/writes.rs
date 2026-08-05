@@ -373,6 +373,14 @@ fn drive(root: &Path) -> Driven {
 /// different things went wrong. The number of each is left out of this sentence on
 /// purpose, because it has been wrong twice: it said three, then four, and the
 /// count moved again when a redundant assertion came out.
+///
+/// **What a healthy run reports**, reference machine, so the next reader can tell a
+/// marginal guard from one with room: `frames=8 body_rows=15 content_rows=98
+/// leanest_frame=11 warmed=3 events=0`. The two worth reading together are the last
+/// two guards: `leanest_frame` clears its bound by **11**, not by one, which is what
+/// makes a per-frame minimum affordable rather than a flake waiting for a slower
+/// machine; and `warmed=3` is `WARM_PER_GRAMMAR` exactly, which is the symlink being
+/// skipped before the budget is touched, as this struct's `warmed` doc predicts.
 struct Driven {
     /// Frames painted. Eight: a first paint, six actions and the second tick.
     frames: usize,
