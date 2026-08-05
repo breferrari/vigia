@@ -26,14 +26,19 @@
 //! **What it does not, named rather than left to be discovered.** Three things,
 //! and the first was written here as covered when it is not:
 //!
-//! * **The terminal takeover.** `Session::enter` needs a tty, which is the
-//!   carve-out §7 already names for `budgets.rs`, `soak.rs` and `first_paint.rs`.
-//!   An earlier draft of this docblock said *"I8 is what covers that path"*, and
-//!   that is false: I8 is about the terminal being **restored** on every exit the
-//!   process controls, which is a different claim from writing nothing. Nothing
-//!   covers writes there. `crates/vigia/src/terminal.rs` makes no filesystem call
-//!   today and no test says so, and a panic-hook crash dump is exactly the kind of
-//!   good-faith addition I8's own panic requirement invites.
+//! * **The terminal takeover.** `Session::enter` needs a tty. §7 names that
+//!   carve-out for the **soak** specifically, in the bullet listing what the soak
+//!   leaves out, and `first_paint.rs`'s own docblock is where it is named for
+//!   `budgets.rs` and `first_paint.rs`.
+//!
+//!   Two drafts of this bullet got that wrong in the same place. The first said
+//!   *"I8 is what covers that path"*, which is false: I8 is about the terminal
+//!   being **restored** on every exit the process controls, a different claim from
+//!   writing nothing. The second credited §7 with naming the carve-out for all
+//!   three files, which §7 does not say. So: nothing covers writes on that path.
+//!   `crates/vigia/src/terminal.rs` makes no filesystem call today and no test
+//!   says so, and a panic-hook crash dump is exactly the kind of good-faith
+//!   addition I8's own panic requirement invites.
 //! * **The event path.** The watch is armed for the length of the run, so the
 //!   watcher's own construction, which reads `.git/index` and the gitignore rules,
 //!   and its teardown are both inside the window. No event is *delivered*, because
@@ -65,7 +70,7 @@ use ratatui::layout::Rect;
 use vigia::{Action, App, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
-use support::Scratch;
+use support::{Scratch, made_link};
 
 /// Small on purpose. This gate counts filesystem entries rather than
 /// milliseconds, so the hundred-file fixture the budget gates share would buy it
@@ -225,7 +230,7 @@ fn difference(before: &BTreeMap<PathBuf, Stamp>, after: &BTreeMap<PathBuf, Stamp
 /// A gate that painted once would never reach it.
 fn drive(root: &Path) -> Driven {
     let worktree = Worktree::discover(root).expect("discover");
-    let mut shell = Shell {
+    let mut rig = Rig {
         app: App::new(),
         frame: worktree.frame(),
         highlighter: Highlighter::new(),
@@ -235,7 +240,7 @@ fn drive(root: &Path) -> Driven {
         frames: 0,
         body_rows: 0,
     };
-    shell.frame.advance().expect("advance");
+    rig.frame.advance().expect("advance");
 
     // **A real watch, armed for the length of the run.** `Frame::advance` called by
     // hand is not what "while it runs" means: `vigia::run` arms a `notify` watch and
@@ -259,7 +264,13 @@ fn drive(root: &Path) -> Driven {
         .watch(WatchOptions::default())
         .expect("arm a real watch");
 
-    let height = shell.paint();
+    // **The height comes from the frame before each action, not from the first
+    // one.** `Action::Page` is measured in the diff's rows, and the diff's rows are
+    // what is left after `Footer::plan`, which depends on the follow state that
+    // `Action::ToggleFollow` moves three actions in. Carrying the first paint's
+    // number through all six would page by a step the screen stopped having, which
+    // is a defect a gate about writes would never fail on and a reader would copy.
+    let mut height = rig.paint();
     for action in [
         Action::Scroll(12),
         Action::Page(1),
@@ -268,15 +279,14 @@ fn drive(root: &Path) -> Driven {
         Action::ToggleFollow,
         Action::ScrollList(3),
     ] {
-        shell
-            .app
-            .apply(action, &mut shell.frame, height)
+        rig.app
+            .apply(action, &mut rig.frame, height)
             .expect("apply a reader action");
-        shell.paint();
+        height = rig.paint();
     }
 
-    shell.frame.advance().expect("advance a second time");
-    shell.paint();
+    rig.frame.advance().expect("advance a second time");
+    rig.paint();
 
     // **Joined rather than detached, which is the opposite of what `run` does and
     // is right here.** `run` drops the handle because nothing needs the result;
@@ -284,10 +294,9 @@ fn drive(root: &Path) -> Driven {
     // write it made would land after the comparison and the gate would pass by
     // racing. It is the one stage that both spawns a thread and touches the
     // filesystem, so it is the last place a write could hide.
-    let warmer = shell.highlighter.warm_ahead(
+    let warmer = rig.highlighter.warm_ahead(
         worktree.workdir().to_path_buf(),
-        shell
-            .frame
+        rig.frame
             .files()
             .iter()
             .take(WARM_FILES)
@@ -306,8 +315,8 @@ fn drive(root: &Path) -> Driven {
     // `stopper` or `stop`. A line doing nothing under a comment claiming it does
     // something is worse than no line, so it is gone.
     Driven {
-        frames: shell.frames,
-        body_rows: shell.body_rows,
+        frames: rig.frames,
+        body_rows: rig.body_rows,
         warmed: warmer.join().expect("the warmer finished"),
         events: watcher.delivered(),
     }
@@ -351,6 +360,11 @@ struct Driven {
 
 /// The shell's parts, held together so one can be borrowed while another paints.
 ///
+/// `Rig` and not `Shell`, which is what it was called first: `crates/vigia/src`
+/// already has a private `Shell`, with different fields and a session in it, and
+/// two types one word apart in a repository this size is a reader's problem even
+/// when it is not the compiler's.
+///
 /// A struct rather than a closure taking `app`, `frame` and `highlighter` as three
 /// `&mut` parameters, which is what this was. The closure form is what the borrow
 /// checker forces *for a closure*: capturing them would hold the borrows across
@@ -359,7 +373,7 @@ struct Driven {
 /// constraint instead of satisfying it, and eight call sites stop repeating the
 /// same three reborrows in the same order. Found by `/simplify`, and it is what
 /// makes [`Driven`]'s counters affordable: fields rather than two more arguments.
-struct Shell<'w> {
+struct Rig<'w> {
     app: App,
     frame: Frame<'w>,
     highlighter: Highlighter,
@@ -370,7 +384,7 @@ struct Shell<'w> {
     body_rows: usize,
 }
 
-impl Shell<'_> {
+impl Rig<'_> {
     /// One whole frame: chrome, layout, collect, paint. Returns the diff's rows,
     /// which is what an `Action::Page` step is measured in.
     ///
@@ -398,7 +412,32 @@ fn the_monitor_writes_nothing_while_it_runs() {
     let scratch = Scratch::large_diff("writes-nothing", FILES, LINES);
     let root = scratch.root().to_path_buf();
 
+    // **A symlink, because [`Stamp`] argues about links at length and no fixture
+    // here had one.** §7's rule is that an axis named as unspanned is a prediction,
+    // and this file was making the prediction in a doc comment: the reason given for
+    // `symlink_metadata` over `metadata` could not fail, because nothing under the
+    // root was a link. With one present the choice becomes load bearing rather than
+    // argued, and mutation says so: swapped to `metadata`, the walk panics on this
+    // entry, which is #15's Windows reading exactly.
+    //
+    // `made_link` and not `checkout_link`, which is the stronger fixture and would
+    // destroy this one: it composes `committed_link`, which runs `commit_all`, and
+    // committing here would commit the rewritten files and leave the fixture with no
+    // diff in it at all. The target is spelled with a forward slash deliberately,
+    // since the OS is handed it verbatim, and a forward-slash target is the form
+    // Windows refuses to resolve. `made_link` prints its own note and returns false
+    // where the platform will not make one, which is this repo's skip-with-a-reason
+    // shape rather than a silent pass.
+    let linked = made_link(&scratch, "src/mod_0.rs", "link_to_mod_0.rs");
+
     let before = snapshot(&root);
+    if linked {
+        assert!(
+            before.contains_key(Path::new("link_to_mod_0.rs")),
+            "the walk did not stamp the symlink it was given, so the link is not in \
+             the window this gate compares"
+        );
+    }
     assert!(
         before.len() > FILES,
         "the fixture stamped {} entries, which is fewer than its own files, so \

@@ -719,7 +719,7 @@ Detection is a precedence chain, first answer wins: `VIGIA_COLOR`, then `NO_COLO
 
 ### 11.2 Undecided
 
-Each carries a recommendation marked **(proposed)**. None is settled until ruled on, and none may contradict §3 — if one does, §3 wins and the recommendation is wrong. A ruled item moves to §11.1 and leaves its number behind here, because the numbers are cited elsewhere and renumbering would silently repoint those citations.
+Each carries a recommendation marked **(proposed)**, except one ruled in the same change that gave it a number, which has no earlier recommendation to carry: B7 is the first and says so where it sits. None is settled until ruled on, and none may contradict §3 — if one does, §3 wins and the recommendation is wrong. A ruled item moves to §11.1 and leaves its number behind here, because the numbers are cited elsewhere and renumbering would silently repoint those citations.
 
 > [!NOTE]
 > **This heading used to read "these gate Phase 2"**
