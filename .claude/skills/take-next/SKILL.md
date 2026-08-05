@@ -215,6 +215,30 @@ Name, in the plan itself:
 
 Consultation at step 2 alone fires exactly once, at the moment you know least about what you will need. Naming the result here moves it to the moment you commit. A choice re-derived from scratch that contradicts a recorded one is the most expensive mistake available in this repo, and the plan is the only place it is visible while it still costs nothing.
 
+### The plan names its premises, and settles the load-bearing ones itself
+
+The section above records what the plan **stands on**: decisions already written down. This one is about what it **assumes**, which is the part nothing has ever checked.
+
+A premise is a claim that must be true for this to be the right plan at all. It is not a decision, because nobody made it — it is what everyone took for granted. Write them as a short ledger before the plan body:
+
+- **What must be true** for this approach to be correct.
+- **How it would be falsified** — the observation that would end the plan.
+- **The answer and where it came from**: measured, read in the dependency's source, recorded in `SPEC.md`, or *assumed*.
+
+**A premise the plan is load-bearing on is not allowed to stay `assumed`. Go and find out.** Finding facts is this session's job and never Brenno's: read the source, write the throwaway probe, take the measurement. A question a probe can answer is not a question for the report, and it is certainly not one to leave for an empty room at 3am.
+
+Work them in dependency order. A premise whose answer depends on another still-open one is a *later* question, not a parallel one — settle the first, then ask the second with the answer in hand.
+
+**Why this exists**, three occasions from this repo's own notes:
+
+- A row-exact scrollbar was refused as unaffordable, citing I4 and a prior issue as precedent. Brenno pushed back twice and asked for it to be investigated anyway. The invariant was real and had been applied to the wrong operation — counting is not building — and the correct path measured **442.71ms to 8.76ms**. The premise, *"a total requires every file diffed"*, was never written down as a premise, so nothing was in a position to challenge it.
+- An issue's entire premise was wrong in a useful direction, and the note records it as **the third time** an expensive-looking property turned out to be cheap.
+- The measurement that mattered most turned out to be for the implementation that was **not** chosen. Nothing asked for it; it surfaced by accident.
+
+Each was cheap to check before the work and expensive after. **A plan that cannot be wrong about anything has not named its premises.**
+
+Only a genuinely open **decision** — a judgement about what the product should be, which no probe can settle — goes to Brenno, and it goes *in the plan*, where it is free. That is the same line the header already draws between *what* and *how*.
+
 ### The plan must be diffable
 
 Length is not the bar; **concreteness** is. Every promise has to be checkable later by reading, so write nouns, not intentions:
