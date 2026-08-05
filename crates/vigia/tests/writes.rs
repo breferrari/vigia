@@ -334,7 +334,17 @@ fn drive(root: &Path) -> Driven {
         frames: rig.frames,
         body_rows: rig.body_rows,
         content_rows: rig.painted.rows,
-        leanest_frame: rig.leanest_frame,
+        // **Collapsed to zero when no frame ran, so this guard does not depend on
+        // another one firing first.** The running minimum starts at `u64::MAX`, and a
+        // `drive` that painted nothing would carry that value into a `> 0` check and
+        // pass it. `frames == 8` is asserted before it and would catch that today,
+        // which is exactly the kind of protection that evaporates when someone
+        // reorders two assertions for readability.
+        leanest_frame: if rig.frames == 0 {
+            0
+        } else {
+            rig.leanest_frame
+        },
         warmed: warmer.join().expect("the warmer finished"),
         events: watcher.delivered(),
     }
