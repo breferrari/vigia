@@ -53,6 +53,21 @@ pub enum Error {
 }
 
 impl Error {
+    /// A working-tree path could not be read.
+    ///
+    /// A constructor rather than a struct literal because
+    /// [`Worktree::read_worktree`](crate::Worktree) now reaches the filesystem by
+    /// three primitives and **two of them report through this variant**:
+    /// `fs::read` and `read_link` (`symlink_metadata`'s failure is folded into
+    /// the read that follows it). Both have to name the path in the same shape,
+    /// and [#18](https://github.com/breferrari/vigia/issues/18) adds a third.
+    pub(crate) fn read(path: &str, source: std::io::Error) -> Self {
+        Error::Read {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
     /// One path's conversion failed.
     pub(crate) fn filter(
         path: &str,

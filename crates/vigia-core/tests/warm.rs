@@ -529,10 +529,12 @@ fn link_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
 fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
     // The hole a lexical check cannot see, and the one Copilot's review found.
     // Every component of `link/mod_0.rs` is `Normal`, so the whitelist passes
-    // it, and the read then lands wherever the link points. This crate already
-    // knows symlinks are followed rather than resolved
-    // ([#15](https://github.com/breferrari/vigia/issues/15)), so the warmer
-    // cannot assume otherwise.
+    // it, and the read then lands wherever the link points, because the warmer
+    // reads with `fs::read` and `fs::read` follows a link. Note that
+    // `Worktree::read_worktree` stopped following one in
+    // [#15](https://github.com/breferrari/vigia/issues/15): the diff path and
+    // the warmer answer different questions about a link, so this gate cannot
+    // be retired on the strength of that change.
     let scratch = Scratch::large_diff("warm-symlink", 1, 4);
     let bait = Scratch::large_diff("warm-symlink-bait", 1, 4);
 

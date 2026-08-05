@@ -496,8 +496,11 @@ fn a_tick_inside_the_settle_margin_stats_each_file_once() {
     assert!(
         cost.probes <= FILES as u64,
         "the tick took {} stat calls over {FILES} files, so each one is being \
-         fingerprinted twice: once to ask a question the rule answers without \
-         it, and once to record the observation",
+         stat'd twice. Two causes reach this and the message used to name only \
+         the first: a pre-check fingerprint the rule would have answered without \
+         one, or a type probe taken for a file the status walk had already \
+         classified (`FileChange::maybe_symlink`, #15). This fixture is all \
+         regular files, so the second should contribute nothing",
         cost.probes
     );
 }

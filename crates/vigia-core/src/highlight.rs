@@ -714,9 +714,11 @@ impl Highlighter {
                 // cannot know.** That one is lexical, so it stops `..` and every
                 // spelling of a rooted path and stops nothing that goes through
                 // a *link*: a symlinked directory inside the worktree reads
-                // wherever it points, and this crate already knows symlinks are
-                // followed rather than resolved
-                // ([#15](https://github.com/breferrari/vigia/issues/15)). Both
+                // wherever it points, because `fs::read` follows one. That is
+                // the OS behaviour rather than a policy this crate holds, and
+                // `Worktree::read_worktree` deliberately does **not** follow a
+                // link since [#15](https://github.com/breferrari/vigia/issues/15),
+                // so the warmer cannot borrow its answer. Both
                 // checks are wanted rather than either: resolving alone would
                 // accept a `..` that happens to stay inside, and the lexical one
                 // alone leaves the claim these docs make untrue.

@@ -101,13 +101,13 @@ pub struct FrameStats {
     ///
     /// The shape is the point: a reuse costs a `stat`, never a read.
     ///
-    /// **It totals two different populations, and a gate has to know which it is
-    /// bounding.** [`Frame::diff`] probes once per file a caller asked to draw,
+    /// **It totals several distinct populations, and a gate has to know which it
+    /// is bounding.** [`Frame::diff`] probes once per file a caller asked to draw,
     /// plus once more for each diff it recomputed. Since
     /// [#101](https://github.com/breferrari/vigia/issues/101),
     /// [`Frame::height`] probes once per changed file whose span was carried and
-    /// is worth proving, which follows the **whole changed set** and not the
-    /// window. And [`Frame::advance`] probes once per `.gitattributes` in the
+    /// is worth proving, **plus once more for each span it re-measured**, both of
+    /// which follow the **whole changed set** and not the window. And [`Frame::advance`] probes once per `.gitattributes` in the
     /// changed set, which is a third population again and is almost always
     /// empty. So `probes` is the sum of a window-sized term, a worktree-sized one
     /// and a rare one, exactly as [`Self::bytes`] mixes two: a fixture that mixes
@@ -118,6 +118,30 @@ pub struct FrameStats {
     /// Splitting it is the same open question
     /// [#85](https://github.com/breferrari/vigia/issues/85) already holds for
     /// `bytes`, one counter over.
+    ///
+    /// **A fourth population joined it, and the reason is worth more than the
+    /// number.** [#15](https://github.com/breferrari/vigia/issues/15) needed a
+    /// file's type before reading it, and `Worktree::read_worktree` takes an
+    /// `lstat` for that. Left in `Worktree` and counted nowhere, it was a `stat`
+    /// per file that the one gate over this corner
+    /// (`crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`,
+    /// `probes <= FILES`) could not see in either direction: the cost when it was
+    /// unconditional, **or** the saving when it stopped being. Measured at
+    /// +1.18ms p50 over a hundred undrawn files, and invisible to every tier.
+    ///
+    /// So the read reports its own count upward (`Worktree::diff_counted`) and it
+    /// is added here. That is **completing a population this number already
+    /// claimed**, not widening a gate to admit a regression: the resource is the
+    /// same `stat` calls a tick costs, and one term of it had never been counted.
+    /// What it buys is a failing test for
+    /// [`FileChange::maybe_symlink`](crate::FileChange), which otherwise could be
+    /// deleted with the whole suite staying green.
+    ///
+    /// **Every fixture that asserts on this number is built from regular files**,
+    /// where the new term is identically zero, so the counting needed a gate of
+    /// its own or it was as untested as what it protects:
+    /// `crates/vigia-core/tests/frame.rs::a_symlink_read_reports_the_type_probe_it_spent`
+    /// is the only fixture here that can hold it.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     ///
@@ -346,15 +370,40 @@ struct Measured {
 
 /// Fingerprint a working-tree file, or `None` when it cannot be.
 ///
-/// Follows symlinks, because the content side of a diff is read with
-/// `fs::read`, which follows them too. Fingerprinting anything other than the
-/// bytes actually compared would be measuring the wrong file.
+/// **Does not follow symlinks**, because the content side of a diff no longer
+/// does either. The rule is unchanged and only its answer moved: fingerprint the
+/// thing whose bytes are compared. `Worktree::read_worktree` takes a link's
+/// content from `read_link`, so following here would fingerprint one file and
+/// diff another, which is the half of
+/// [#15](https://github.com/breferrari/vigia/issues/15) that has to land in the
+/// same change as the read. Following was consistent while the read followed
+/// too: the frame faithfully cached a wrong answer rather than adding one.
+///
+/// It is a no-op on anything that is not a link, since `symlink_metadata` and
+/// `metadata` agree on every other file type, and it corrects **both** failure
+/// directions on one that is: a repoint between two equal-sized targets used to
+/// read as unchanged, and editing a link's target used to invalidate a diff git
+/// reports no change to.
+///
+/// **On Windows the length term is dead for a link**, which is worth stating
+/// because the sentence above is Unix-shaped: a symlink there reports length
+/// `0` whatever its target, so "two equal-sized targets" is *every* pair and the
+/// modification time carries the discrimination alone. Still sound, for the
+/// reason [`settled`] gives: a repoint is remove-then-create on every platform
+/// here, so it stamps a fresh time, and a granule that has not closed is refused
+/// rather than trusted.
+///
+/// **[`Frame::advance`]'s attributes guard is a second consumer**, and it
+/// inherits the change: a `.gitattributes` that is itself a symlink is now
+/// fingerprinted as the link rather than as its target. Editing that target
+/// leaves this print unmoved where following would have caught it. Exotic enough
+/// to leave, named rather than implied.
 ///
 /// `None` is not an error. A file can vanish between status naming it and this
 /// call, and a platform can decline to report a modification time. Both mean
 /// the same thing here: no fingerprint, so no reuse.
 fn fingerprint(path: &Path) -> Option<Fingerprint> {
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = std::fs::symlink_metadata(path).ok()?;
     Some(Fingerprint {
         len: meta.len(),
         mtime: meta.modified().ok()?,
@@ -805,7 +854,13 @@ impl<'w> Frame<'w> {
         // gives: the window a write would have to land in to be missed is
         // over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        let (span, taken) = match self.worktree.measure(change) {
+        // The read reports what it spent deciding *how* to read, and it is
+        // folded into the same counter as the fingerprints. Added before the
+        // `match`, so a failed read still reports the probe it took.
+        let mut probes = 0;
+        let measured = self.worktree.measure_counted(change, &mut probes);
+        self.stats.probes += probes;
+        let (span, taken) = match measured {
             Ok(span) => {
                 self.stats.measured += 1;
                 self.stats.bytes += span.bytes;
@@ -882,7 +937,12 @@ impl<'w> Frame<'w> {
         // Timed from before the read starts, so the window a write would have
         // to land in to be missed is over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        let diff = self.worktree.diff(change)?;
+        // Counted before the `?`, so a failed read still reports the probe it
+        // took. See `Worktree::diff_counted`.
+        let mut probes = 0;
+        let computed = self.worktree.diff_counted(change, &mut probes);
+        self.stats.probes += probes;
+        let diff = computed?;
         let worktree = if change.reads_worktree() {
             self.stats.probes += 1;
             fingerprint(&path).map(|print| Observed {
@@ -944,6 +1004,9 @@ mod tests {
             path: "src/lib.rs".to_owned(),
             kind,
             index_blob,
+            // These unit tests are over [`reusable`], which does not consult it:
+            // the field decides how a file is *read*, and nothing here reads one.
+            maybe_symlink: false,
         }
     }
 
