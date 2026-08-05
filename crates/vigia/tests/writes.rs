@@ -82,7 +82,7 @@ struct Stamp {
 ///
 /// Iterative rather than recursive so a deep tree cannot end this in a stack
 /// overflow that reads as a filesystem finding.
-fn stamps(root: &Path) -> BTreeMap<PathBuf, Stamp> {
+fn snapshot(root: &Path) -> BTreeMap<PathBuf, Stamp> {
     let mut found = BTreeMap::new();
     // **The root is stamped as well, and it was not until the mutation run said
     // so.** Every directory below it is reached as an entry of its parent, so the
@@ -230,7 +230,7 @@ fn the_monitor_writes_nothing_while_it_runs() {
     let scratch = Scratch::large_diff("writes-nothing", FILES, LINES);
     let root = scratch.root().to_path_buf();
 
-    let before = stamps(&root);
+    let before = snapshot(&root);
     assert!(
         before.len() > FILES,
         "the fixture stamped {} entries, which is fewer than its own files, so \
@@ -240,7 +240,7 @@ fn the_monitor_writes_nothing_while_it_runs() {
 
     drive(&root);
 
-    let moved = difference(&before, &stamps(&root));
+    let moved = difference(&before, &snapshot(&root));
     assert!(
         moved.is_empty(),
         "SPEC.md §11.1: the monitor writes nothing, and this run moved {} \
@@ -251,11 +251,11 @@ fn the_monitor_writes_nothing_while_it_runs() {
 }
 
 #[test]
-fn the_stamp_sees_a_write_that_does_happen() {
+fn the_snapshot_sees_a_write_that_does_happen() {
     let scratch = Scratch::large_diff("writes-detected", FILES, LINES);
     let root = scratch.root().to_path_buf();
 
-    let before = stamps(&root);
+    let before = snapshot(&root);
 
     // **A different length, deliberately.** Two writes of the same length inside
     // one modification-time granule are indistinguishable by `stat`, which is
@@ -264,7 +264,7 @@ fn the_stamp_sees_a_write_that_does_happen() {
     scratch.write("src/mod_0.rs", "one line\n".repeat(LINES * 2));
     scratch.write("untracked.txt", "and a file that was not there before\n");
 
-    let moved = difference(&before, &stamps(&root));
+    let moved = difference(&before, &snapshot(&root));
     assert!(
         moved.iter().any(|line| line.contains("mod_0.rs")),
         "a rewritten file was not reported, so the gate above cannot see a \
