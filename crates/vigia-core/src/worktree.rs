@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use gix::bstr::{BString, ByteSlice};
@@ -57,27 +57,6 @@ pub struct Worktree {
     /// is `Send` and not `Sync`, so each thread already opens its own
     /// `Worktree` rather than sharing one.
     filter: RefCell<Option<Filter>>,
-    /// `lstat` calls [`Worktree::read_worktree`] made to decide *how* to read a
-    /// file, waiting to be drained into [`FrameStats::probes`].
-    ///
-    /// **Here because the syscall is here and the counter is one layer up, and
-    /// leaving that gap open is what made this branch's own optimisation
-    /// untestable.** `FrameStats::probes` bounds the `stat` calls a tick costs,
-    /// and `crates/vigia/tests/reads.rs::a_tick_inside_the_settle_margin_stats_each_file_once`
-    /// asserts one per file. A type probe taken down here and counted nowhere
-    /// meant [`FileChange::maybe_symlink`] could be deleted, the `lstat` made
-    /// unconditional, and **every test in the repository would still pass** while
-    /// the settle-margin corner cost +1.18ms p50 again. Draining it into the same
-    /// counter is what turns that gate red instead.
-    ///
-    /// Completing a counter's population is not the same act as widening a gate
-    /// to admit a regression, which `SPEC.md` §7 refuses: the resource is
-    /// unchanged and one term of it had simply never been counted.
-    ///
-    /// A `Cell` rather than an argument because `Worktree::diff` and
-    /// `Worktree::measure` are the public surface and neither should grow a
-    /// syscall ledger in its signature to serve one caller.
-    type_probes: Cell<u64>,
 }
 
 impl Worktree {
@@ -89,7 +68,6 @@ impl Worktree {
             repo,
             workdir,
             filter: RefCell::new(None),
-            type_probes: Cell::new(0),
         })
     }
 
@@ -176,6 +154,21 @@ impl Worktree {
     /// [`Frame`], which is what stops a redraw paying for files that did not
     /// change (I2a).
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
+        self.diff_counted(change, &mut 0)
+    }
+
+    /// [`Worktree::diff`], reporting the type probes it spent.
+    ///
+    /// The counted spelling exists so [`Frame`] can fold this read's syscalls
+    /// into [`FrameStats::probes`](crate::FrameStats) **by construction rather
+    /// than by protocol**. The first version of this counting used a `Cell` on
+    /// `Worktree` that the caller drained, which meant the rule "drain the
+    /// counter around your own call, and discard whatever a direct caller left"
+    /// was enforced by a doc comment and nothing else: deleting either drain
+    /// left the suite green and misattributed a probe to the wrong frame.
+    /// Threading it out cannot be got wrong, and `Worktree` keeps no counter
+    /// state at all.
+    pub(crate) fn diff_counted(&self, change: &FileChange, probes: &mut u64) -> Result<FileDiff> {
         if !change.is_diffable() {
             return Ok(FileDiff {
                 path: change.path.clone(),
@@ -197,7 +190,7 @@ impl Worktree {
             None => Vec::new(),
         };
         let after = if change.reads_worktree() {
-            self.read_worktree(change)?
+            self.read_worktree(change, probes)?
         } else {
             Vec::new()
         };
@@ -211,6 +204,18 @@ impl Worktree {
     /// instead of materialising. That is the whole saving: the reads are the same
     /// bytes, and what it skips is a `String` per drawn line.
     pub fn measure(&self, change: &FileChange) -> Result<hunk::FileSpan> {
+        self.measure_counted(change, &mut 0)
+    }
+
+    /// [`Worktree::measure`], reporting the type probes it spent.
+    ///
+    /// See [`Worktree::diff_counted`] for why the count is threaded rather than
+    /// accumulated.
+    pub(crate) fn measure_counted(
+        &self,
+        change: &FileChange,
+        probes: &mut u64,
+    ) -> Result<hunk::FileSpan> {
         if !change.is_diffable() {
             return Ok(hunk::FileSpan::default());
         }
@@ -220,7 +225,7 @@ impl Worktree {
             None => Vec::new(),
         };
         let after = if change.reads_worktree() {
-            self.read_worktree(change)?
+            self.read_worktree(change, probes)?
         } else {
             Vec::new()
         };
@@ -233,25 +238,6 @@ impl Worktree {
             path: path.to_owned(),
         })?;
         Ok(object.into_blob().take_data())
-    }
-
-    /// Take the type probes spent since the last call, leaving zero behind.
-    ///
-    /// Draining rather than reporting a running total, so a caller cannot
-    /// double-count by forgetting to subtract. [`Frame`] is the only caller and
-    /// it folds the result straight into
-    /// [`FrameStats::probes`](crate::FrameStats): see
-    /// [`Worktree::type_probes`] for why this crosses the layer at all.
-    ///
-    /// **[`Frame`] drains it twice per read, discarding the first**, because
-    /// [`Worktree::diff`] and [`Worktree::measure`] are public and are called
-    /// directly by benches, examples and several gates over the same `Worktree`.
-    /// A probe one of those spent would otherwise sit here until the next frame
-    /// drained it and be counted against a read that did not take it. Draining
-    /// to discard is one `Cell` swap and makes the attribution exact rather than
-    /// nearly always right.
-    pub(crate) fn take_type_probes(&self) -> u64 {
-        self.type_probes.replace(0)
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
@@ -314,21 +300,23 @@ impl Worktree {
     /// `gix_tempfile` signal handler, against I3's zero-retained-temp-files gate.
     /// It also takes the entry mode as a **trusted** input, which is the same
     /// ruling [`FileChange::maybe_symlink`] makes and a less conservative one.
-    fn read_worktree(&self, change: &FileChange) -> Result<Vec<u8>> {
+    fn read_worktree(&self, change: &FileChange, probes: &mut u64) -> Result<Vec<u8>> {
         let rela_path = change.path.as_str();
         let full = self.workdir.join(rela_path);
 
-        // **Counted, and that is what gives this branch a failing test.** See
-        // [`Worktree::type_probes`]: uncounted, deleting
-        // [`FileChange::maybe_symlink`] and making this `lstat` unconditional
-        // left the whole suite green.
+        // **Counted, and that is what gives this branch a failing test.**
+        // Uncounted, deleting [`FileChange::maybe_symlink`] and making this
+        // `lstat` unconditional left the whole suite green: the syscall is here
+        // and `FrameStats::probes` is one layer up, so the gate that holds this
+        // corner at one stat per file could see neither the cost nor the saving.
+        // See [`Worktree::diff_counted`].
         //
         // Anything the probe cannot positively call a link falls through to the
         // plain read, which reaches the same answers one line later: a file that
         // vanished reads empty there, and an unreadable one produces the same
         // `Error::Read`. Only the link arm is load-bearing.
         if change.maybe_symlink {
-            self.type_probes.set(self.type_probes.get() + 1);
+            *probes += 1;
             if std::fs::symlink_metadata(&full).is_ok_and(|meta| meta.file_type().is_symlink()) {
                 return Self::link_target(&full, rela_path);
             }
@@ -367,7 +355,7 @@ impl Worktree {
     ///
     /// **The filter half of that is correct by construction and no gate can hold
     /// it, which is said here so nobody concludes it is merely untested.**
-    /// Mutation-tested: wrapping this in `convert_to_git` leaves all 40 tests in
+    /// Mutation-tested: wrapping this in `convert_to_git` leaves every test in
     /// `fidelity.rs` and `frame.rs` green, and it has to. That filter is a
     /// line-ending conversion, and a link target contains no line ending, so both
     /// paths emit identical bytes and no fixture can separate them. What the
@@ -446,13 +434,30 @@ fn path_of(raw: &gix::bstr::BStr) -> String {
 /// Whether this item's working-tree side may be a symlink.
 ///
 /// See [`FileChange::maybe_symlink`] for why this is read off the walk rather
-/// than asked of the filesystem, and for the one case it does not cover.
+/// than asked of the filesystem, and for the two directions its soundness rests
+/// on.
 ///
 /// **Every arm defaults to `true`**, so a `gix` version that grows an item shape
 /// or a disk kind this does not know about pays a syscall rather than reading a
 /// link as a file. The cost of being wrong is not symmetric, and this is where
 /// that asymmetry is spent.
-fn maybe_symlink(item: &Item) -> bool {
+fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
+    // **An intent-to-add entry's mode describes nothing**, and trusting it was a
+    // live instance of exactly the defect this whole field guards against.
+    // `git add -N` stakes a claim on a path with the empty blob and mode
+    // `100644`, whatever is on disk; replace that path with a symlink and `gix`
+    // reports `IntentToAdd` rather than a type change, so the index says "plain
+    // file", `is_diffable` and `reads_worktree` are both true, and the read
+    // followed the link. Measured: git says `+target.txt`, `vigia` said the
+    // target's contents, and on Windows a link whose target holds a `/` failed
+    // `fs::read` outright and re-failed on every tick.
+    //
+    // So this arm is the conservative default the rest of the function already
+    // takes, applied to the one summary whose mode is not evidence.
+    if matches!(summary, Summary::IntentToAdd) {
+        return true;
+    }
+
     // A regular file, executable or not, is the only positive answer taken from
     // an index entry. `SYMLINK` is obviously true.
     //
@@ -546,7 +551,7 @@ impl Iterator for Changes {
                 path,
                 kind,
                 index_blob,
-                maybe_symlink: maybe_symlink(&item),
+                maybe_symlink: maybe_symlink(&item, &summary),
             }));
         }
     }
@@ -591,15 +596,30 @@ mod tests {
         assert_eq!(git_separators(Vec::new()), b"");
     }
 
-    /// A target that is not UTF-8 survives byte for byte.
+    /// A target that is not UTF-8 loses its separator and nothing else.
     ///
     /// `read_link` hands back an `OsString`, which is not required to be UTF-8 on
     /// Unix, and `0x5C` never appears inside a multi-byte UTF-8 or WTF-8
-    /// sequence. So the conversion cannot corrupt one, and this is the assertion
-    /// that says so rather than the comment claiming it.
+    /// sequence, so the conversion cannot corrupt one.
+    ///
+    /// **The fixture has to contain a `0x5C` for that to be the claim under
+    /// test.** Without one the loop rewrites nothing, the assertion reduces to
+    /// `raw == raw`, and it passes with the whole conversion deleted on every
+    /// platform, leaving the continuation-byte argument as a comment rather than
+    /// a gate. The bytes on either side of the separator here are an invalid
+    /// leading byte and an orphaned continuation byte.
     #[test]
-    fn a_target_that_is_not_utf8_is_not_corrupted() {
-        let raw = vec![0xff, 0xfe, b'a', 0x80, b'b'];
-        assert_eq!(git_separators(raw.clone()), raw);
+    fn a_target_that_is_not_utf8_keeps_every_byte_but_the_separator() {
+        let raw = vec![0xff, b'd', 0x5C, 0x80, b'x'];
+        let converted = git_separators(raw.clone());
+        if cfg!(windows) {
+            assert_eq!(
+                converted,
+                vec![0xff, b'd', b'/', 0x80, b'x'],
+                "either the separator did not move, or something moved with it"
+            );
+        } else {
+            assert_eq!(converted, raw);
+        }
     }
 }

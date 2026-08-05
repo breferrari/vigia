@@ -149,9 +149,9 @@ pub enum Numstat {
 /// [#15](https://github.com/breferrari/vigia/issues/15)'s gates run on every
 /// push whatever this machine does.
 ///
-/// Here rather than in one test binary because two of them need it and the note
-/// is the part that must not drift: a skip that stops explaining itself is a
-/// silent pass again.
+/// Here rather than in one test binary because `committed_link` below composes
+/// it for both of them, and the note is the part that must not drift: a skip
+/// that stops explaining itself is a silent pass again.
 pub fn made_link(scratch: &Scratch, target: &str, link: &str) -> bool {
     if scratch.symlink_file(target, link) {
         return true;
@@ -192,6 +192,47 @@ pub fn git_stored_a_symlink(scratch: &Scratch, link: &str) -> bool {
     eprintln!(
         "note: git recorded {link} as mode {mode} rather than 120000, so this \
          fixture holds no symlink and #15's reading is unchecked here"
+    );
+    false
+}
+
+/// Commit `link` as a mode `120000` blob and then let **git** write the
+/// working-tree side.
+///
+/// **The axis every other symlink fixture here sits on the default of.**
+/// `Scratch::symlink_file` hands the target string to the OS verbatim, so
+/// `read_link` gives it straight back and a fixture written `dir/other.txt`
+/// reads `dir/other.txt` on every platform. A link **git** checks out on Windows
+/// reads back `dir\other.txt`. So the harness-made fixture cannot observe
+/// `git_separators` at all, on any target, and the gate over it was vacuous
+/// everywhere rather than on two of three: deleting the conversion left every
+/// integration test green while producing a wrong diff line on a real checkout.
+/// `SPEC.md` §7's fixture-axis rule, one notch further out than #15 found it.
+///
+/// `false` means this platform or this checkout is not holding a symlink; the
+/// halves it composes have already said why.
+pub fn checkout_link(scratch: &Scratch, target: &str, link: &str) -> bool {
+    // Set for the same reason `Scratch::new` sets `core.autocrlf`: a developer's
+    // global config decides this, and on Windows it is commonly off, which would
+    // make git write a plain file and skip the one gate this fixture exists for.
+    // Asking for it is not the same as getting it, so the check below stays.
+    scratch.git(&["config", "core.symlinks", "true"]);
+    if !committed_link(scratch, target, link) {
+        return false;
+    }
+    // Remove the harness's link and have git write its own from the index.
+    std::fs::remove_file(scratch.path_of(link)).expect("remove the harness link");
+    scratch.git(&["checkout-index", "-f", "--", link]);
+    if scratch
+        .path_of(link)
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.file_type().is_symlink())
+    {
+        return true;
+    }
+    eprintln!(
+        "note: git checked {link} out as a regular file rather than a symlink \
+         (core.symlinks off), so the separator conversion is unchecked here"
     );
     false
 }

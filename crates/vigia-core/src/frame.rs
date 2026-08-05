@@ -101,13 +101,13 @@ pub struct FrameStats {
     ///
     /// The shape is the point: a reuse costs a `stat`, never a read.
     ///
-    /// **It totals two different populations, and a gate has to know which it is
-    /// bounding.** [`Frame::diff`] probes once per file a caller asked to draw,
+    /// **It totals several distinct populations, and a gate has to know which it
+    /// is bounding.** [`Frame::diff`] probes once per file a caller asked to draw,
     /// plus once more for each diff it recomputed. Since
     /// [#101](https://github.com/breferrari/vigia/issues/101),
     /// [`Frame::height`] probes once per changed file whose span was carried and
-    /// is worth proving, which follows the **whole changed set** and not the
-    /// window. And [`Frame::advance`] probes once per `.gitattributes` in the
+    /// is worth proving, **plus once more for each span it re-measured**, both of
+    /// which follow the **whole changed set** and not the window. And [`Frame::advance`] probes once per `.gitattributes` in the
     /// changed set, which is a third population again and is almost always
     /// empty. So `probes` is the sum of a window-sized term, a worktree-sized one
     /// and a rare one, exactly as [`Self::bytes`] mixes two: a fixture that mixes
@@ -129,13 +129,19 @@ pub struct FrameStats {
     /// unconditional, **or** the saving when it stopped being. Measured at
     /// +1.18ms p50 over a hundred undrawn files, and invisible to every tier.
     ///
-    /// So the syscall is drained across the layer into this counter
-    /// (`Worktree::take_type_probes`). That is **completing a population this
-    /// number already claimed**, not widening a gate to admit a regression: the
-    /// resource is the same `stat` calls a tick costs, and one term of it had
-    /// never been counted. What it buys is a failing test for
+    /// So the read reports its own count upward (`Worktree::diff_counted`) and it
+    /// is added here. That is **completing a population this number already
+    /// claimed**, not widening a gate to admit a regression: the resource is the
+    /// same `stat` calls a tick costs, and one term of it had never been counted.
+    /// What it buys is a failing test for
     /// [`FileChange::maybe_symlink`](crate::FileChange), which otherwise could be
     /// deleted with the whole suite staying green.
+    ///
+    /// **Every fixture that asserts on this number is built from regular files**,
+    /// where the new term is identically zero, so the counting needed a gate of
+    /// its own or it was as untested as what it protects:
+    /// `crates/vigia-core/tests/frame.rs::a_symlink_read_reports_the_type_probe_it_spent`
+    /// is the only fixture here that can hold it.
     pub probes: u64,
     /// Cached diffs dropped because their path stopped being changed.
     ///
@@ -378,6 +384,20 @@ struct Measured {
 /// directions on one that is: a repoint between two equal-sized targets used to
 /// read as unchanged, and editing a link's target used to invalidate a diff git
 /// reports no change to.
+///
+/// **On Windows the length term is dead for a link**, which is worth stating
+/// because the sentence above is Unix-shaped: a symlink there reports length
+/// `0` whatever its target, so "two equal-sized targets" is *every* pair and the
+/// modification time carries the discrimination alone. Still sound, for the
+/// reason [`settled`] gives: a repoint is remove-then-create on every platform
+/// here, so it stamps a fresh time, and a granule that has not closed is refused
+/// rather than trusted.
+///
+/// **[`Frame::advance`]'s attributes guard is a second consumer**, and it
+/// inherits the change: a `.gitattributes` that is itself a symlink is now
+/// fingerprinted as the link rather than as its target. Editing that target
+/// leaves this print unmoved where following would have caught it. Exotic enough
+/// to leave, named rather than implied.
 ///
 /// `None` is not an error. A file can vanish between status naming it and this
 /// call, and a platform can decline to report a modification time. Both mean
@@ -834,16 +854,12 @@ impl<'w> Frame<'w> {
         // gives: the window a write would have to land in to be missed is
         // over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        // Discarded first, so this frame is charged for its own read and nothing
-        // else. `Worktree::diff` and `Worktree::measure` are **public** and are
-        // called directly by benches, examples and several gates; a probe one of
-        // those spent would otherwise sit in the cell until the next frame
-        // drained it and be attributed there. See `Worktree::type_probes`.
-        self.worktree.take_type_probes();
-        let measured = self.worktree.measure(change);
-        // Folded into the same counter as the fingerprints, on both arms:
-        // a failed read still took the probe.
-        self.stats.probes += self.worktree.take_type_probes();
+        // The read reports what it spent deciding *how* to read, and it is
+        // folded into the same counter as the fingerprints. Added before the
+        // `match`, so a failed read still reports the probe it took.
+        let mut probes = 0;
+        let measured = self.worktree.measure_counted(change, &mut probes);
+        self.stats.probes += probes;
         let (span, taken) = match measured {
             Ok(span) => {
                 self.stats.measured += 1;
@@ -921,12 +937,11 @@ impl<'w> Frame<'w> {
         // Timed from before the read starts, so the window a write would have
         // to land in to be missed is over-stated rather than under-stated.
         let read_started = SystemTime::now();
-        // Discarded first, for the reason `fill_span` gives: this counter is
-        // charged for this frame's own read and nothing a direct caller spent.
-        self.worktree.take_type_probes();
-        let computed = self.worktree.diff(change);
-        // Before the `?`, so a failed read still reports the probe it took.
-        self.stats.probes += self.worktree.take_type_probes();
+        // Counted before the `?`, so a failed read still reports the probe it
+        // took. See `Worktree::diff_counted`.
+        let mut probes = 0;
+        let computed = self.worktree.diff_counted(change, &mut probes);
+        self.stats.probes += probes;
         let diff = computed?;
         let worktree = if change.reads_worktree() {
             self.stats.probes += 1;

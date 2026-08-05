@@ -66,7 +66,7 @@ pub struct FileChange {
     /// **What makes reading the index mode sound is that the two ways it can go
     /// stale are not symmetric, and only one of them reaches a read.** Both are
     /// measured rather than argued, by
-    /// `crates/vigia-core/tests/fidelity.rs::swapping_a_symlink_for_a_regular_file_and_back_agrees_with_git`:
+    /// `crates/vigia-core/tests/fidelity.rs::swapping_a_symlink_and_a_regular_file_in_both_directions_agrees_with_git`:
     ///
     /// * A link replaced by a **regular file** keeps its `120000` index entry and
     ///   git calls it a *modification*. This says `true`, the `lstat` finds a

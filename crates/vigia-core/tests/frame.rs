@@ -1077,3 +1077,73 @@ fn editing_a_symlinks_target_does_not_invalidate_the_links_diff() {
         "the frame did not visit the link at all, so nothing above was tested"
     );
 }
+
+#[test]
+fn a_symlink_read_reports_the_type_probe_it_spent() {
+    // **The gate over the counting itself, and without it the counting has no
+    // failing test of its own.** Round 1 of this branch's audit found that a
+    // type probe taken in `Worktree` and counted nowhere made
+    // `FileChange::maybe_symlink` deletable with the whole suite green. Round 2
+    // found the same criticism one level down: every fixture that asserts on
+    // `probes` is built from *regular files*, so the new term is identically
+    // zero in all of them and deleting the counting is green too.
+    //
+    // A symlink is what makes the term non-zero, so this is the only fixture in
+    // the repository that can hold it. Delete the `*probes += 1` in
+    // `read_worktree`, or the `stats.probes += probes` in either `Frame::diff`
+    // or `Frame::fill_span`, and this goes red on its own.
+    let Some(scratch) = ignored_target_link("frame-symlink-probe", "blob/a.txt") else {
+        return;
+    };
+    assert!(scratch.symlink_file("blob/b.txt", "link.txt"));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        1,
+        "the changed set is not the link alone, so the counts below are totals"
+    );
+
+    // A cold first diff: one type probe to decide how to read, and one
+    // fingerprint to record what was read. The reuse pre-check does not run,
+    // because nothing is cached yet.
+    let before = frame.stats();
+    frame.diff(0).expect("diff the link");
+    let cold = delta(before, frame.stats());
+
+    assert_eq!(
+        cold.computed, 1,
+        "the link was not computed, so no read happened and no probe was due"
+    );
+    assert_eq!(
+        cold.probes, 2,
+        "a cold symlink read reported {} stats where two are due: one type probe \
+         to choose `read_link` over `read`, and one fingerprint over the link. \
+         One means the type probe is taken and not counted, which is what let \
+         `maybe_symlink` be deleted with the suite green",
+        cold.probes
+    );
+
+    // And the same read through the height walk, which reaches
+    // `Worktree::measure` rather than `Worktree::diff`: a second call site that
+    // has to report its own probe.
+    let mut fresh_frame = worktree.frame();
+    fresh_frame.advance().expect("advance");
+    let before = fresh_frame.stats();
+    fresh_frame.height(|_, _| 0).expect("height");
+    let walked = delta(before, fresh_frame.stats());
+
+    assert_eq!(
+        walked.measured, 1,
+        "the walk measured {} files, so it did not read the link",
+        walked.measured
+    );
+    assert_eq!(
+        walked.probes, 2,
+        "the height walk reported {} stats over one symlink where two are due, \
+         so `measure`'s type probe is uncounted even though `diff`'s is",
+        walked.probes
+    );
+}
