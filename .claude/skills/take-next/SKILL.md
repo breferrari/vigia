@@ -77,7 +77,9 @@ Three rules, so that the next milestone added inherits them rather than the acci
 
 That rule is right and nothing enforced it, so drift was only ever caught by someone happening to read both. It went wrong in **both** directions inside one hour: an issue described a design the spec had already moved past, and an issue sat open after the work it tracked had shipped.
 
-Run this before taking a task. Three commands gather the state; you do the comparing.
+**One command runs it: `sh .claude/skills/take-next/preflight.sh`.** It performs comparisons 1–4, 6 and 7 mechanically, prints §10's open bullets for the judgment in 5, and exits non-zero on any mechanical hit. Every session used to do this by hand from the blocks below, which is the intention-triggered shape that decays; the blocks stay because the **why** is what a session needs when a finding fires, and the script carries the same traps in code (explicit ref, `tr -d '\r'`, character-class boundaries, no `--paginate`). Mutation-tested in both directions before it was trusted — including one mutation that survived because the *mutation* was wrong (it flipped a row with no issue link, which comparison 3 rightly ignores), which is itself the lesson §7 teaches about instruments.
+
+The seven, by hand if the script is unavailable — three commands gather the state; you do the comparing:
 
 ```sh
 git fetch -q origin
@@ -118,7 +120,7 @@ git show origin/main:SPEC.md \
 > closed — it returns the settle-margin bullet, the exact prerequisite that hid
 > for two phases. Widen it only with the same two runs.
 
-Then six comparisons. Any hit is a finding to fix **in this pass**, not a note:
+Then seven comparisons. Any hit is a finding to fix **in this pass**, not a note:
 
 1. **Untracked** — an invariant the spec declares that no issue title names.
 2. **Orphan** — an issue naming an `I<n>` token the spec no longer declares. This is what catches a rename or a split that left the tracker behind.
@@ -162,7 +164,9 @@ LC_ALL=C comm -23 /tmp/withwork.sorted /tmp/order.sorted
 > Comparing uncommitted state is occasionally what you want. It has to be asked
 > for out loud, never the default.
 
-Only the first two directions are cheap to eyeball; run all six anyway. A check that nags forever gets ignored exactly like one that stays silent, so if a finding is a false positive, fix the *check* here rather than learning to skip it.
+7. **Missing row** — an issue, any state, that `ROADMAP.md` never mentions at all. The 2026-08-03 sweep found four gaps in exactly this direction while the five comparisons then existing ran clean over the same data: a drift check has a direction, chosen by whichever collection it iterates, and this is the one that iterates the tracker against the roadmap rather than the reverse.
+
+Only the first two directions are cheap to eyeball; run all seven anyway — which is what `preflight.sh` is for. A check that nags forever gets ignored exactly like one that stays silent, so if a finding is a false positive, fix the *check* here rather than learning to skip it.
 
 **Three traps if you match these with `jq`. The first two made the first run report every invariant as drifting in both directions at once; the third silently halves a comparison rather than breaking it:**
 
@@ -305,6 +309,7 @@ At the end of the pass, diff the shipment against the plan and report the result
 
 ## 4. Ship it
 
+- **The tool watches its own build when anyone is at the keyboard.** If Brenno is present, `vigia` runs in a side pane on this worktree for the duration of the pass — the workload [#72](https://github.com/breferrari/vigia/issues/72) says has never been measured is exactly this session, and six of this repo's defects were found by a reader looking at the screen within the hour while eleven green gates sat over one of them. Costs nothing on an unattended overnight pass; the report line in step 9 says which kind this was.
 - **The unit is the issue.** One issue, one branch, one PR. Splitting one issue across several PRs fragments review and reads as progress theatre. If the issue is genuinely two things, say so and split the *issue* first.
 - **Open the PR as a draft, and open it early.** `gh pr create --draft` the moment there is a branch worth pushing, and carry the step 3 plan into the body. A draft is the cheap place to work: `ci.yml` skips every job while `draft == true`, so pushes cost nothing, and Copilot does not review one. Marking it ready is the expensive event and step 7 owns it. Iterating on a non-draft PR is how one branch here spent **nine CI runs** converging.
 - **Never defer a finding into a new issue to get the PR closed.** If work surfaces something inside the scope of the task, fix it here. A new issue is for something genuinely out of scope, and it needs **all three** of a milestone, a `ROADMAP.md` row, and a shelf entry giving the reason it moved. Miss the milestone and the issue is **invisible**, not deprioritised: the query in step 1 filters by milestone and will never return it. Seven accumulated that way before anyone noticed, so file it in one command rather than intending to come back:
@@ -475,6 +480,8 @@ Skipping any of these is how the next session loses time.
 What was taken, what shipped, the numbers, what moved on the roadmap, and what the next task is. Then stop. Do not start it.
 
 Name the **review outcome** too: whether Copilot commented, how many, and what happened to each. A review whose result nobody states is one nobody can tell you skipped — the same reason step 6's plan diff has to be said out loud.
+
+And a **`vigia observations`** line: anything the pane showed that read wrong while this pass ran, or `none`, or `pane not open — unattended pass`. This is [#72](https://github.com/breferrari/vigia/issues/72)'s instrument, one line at a time; an observation that changes nothing goes to the issue anyway, because the workload evidence is the accumulation and not any single line.
 
 And list **every decision taken without asking**, under its own heading, with the branch chosen and the one not taken. That is where the questions this pass did not stop for go, and it is the half that makes not stopping safe rather than merely faster: an unattended pass that finishes silently has decided things nobody can see. One line each is enough — it is a list to disagree with, not a justification.
 
