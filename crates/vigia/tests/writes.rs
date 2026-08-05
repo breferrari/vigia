@@ -67,7 +67,7 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Theme, body_layout, render};
+use vigia::{Action, App, Row, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
 use support::{Scratch, made_link};
@@ -253,6 +253,7 @@ fn drive(root: &Path) -> Driven {
         buf: Buffer::empty(area()),
         frames: 0,
         body_rows: 0,
+        content_rows: 0,
     };
     rig.frame.advance().expect("advance");
 
@@ -331,6 +332,7 @@ fn drive(root: &Path) -> Driven {
     Driven {
         frames: rig.frames,
         body_rows: rig.body_rows,
+        content_rows: rig.content_rows,
         warmed: warmer.join().expect("the warmer finished"),
         events: watcher.delivered(),
     }
@@ -351,6 +353,21 @@ struct Driven {
     frames: usize,
     /// The tallest body any of them drew, so a blank pane cannot pass as a run.
     body_rows: usize,
+    /// Rows of **content** in the tallest of them, which is the stricter half.
+    ///
+    /// **`body_rows` alone is weaker than it reads, and this is what the round-2
+    /// audit caught.** `View::collect` pushes a `Row::File` heading for every
+    /// changed file before it reaches a single hunk, so `body_rows > 0` is
+    /// guaranteed by the fixture having files in it and would stay green against a
+    /// build whose line-drawing was deleted outright. That is the *exact* mutation
+    /// `first_paint.rs` names when it says a frame "reached further down the file
+    /// list and drew more headings instead", and it is why that gate asserts the
+    /// body is **full** rather than non-empty.
+    ///
+    /// So this counts `Row::Line` specifically. A run that drew nothing but
+    /// headings reports zero here, and the assertion that reads it says the thing
+    /// its message claims.
+    content_rows: usize,
     /// Files the warmer compiled, which is the one stage that spawns a thread.
     warmed: usize,
     /// Raw events the armed watch was handed, **reported and not gated.**
@@ -396,6 +413,7 @@ struct Rig<'w> {
     buf: Buffer,
     frames: usize,
     body_rows: usize,
+    content_rows: usize,
 }
 
 impl Rig<'_> {
@@ -417,6 +435,12 @@ impl Rig<'_> {
         render(&mut self.buf, area(), &view, &self.theme, &chrome);
         self.frames += 1;
         self.body_rows = self.body_rows.max(view.rows.len());
+        let content = view
+            .rows
+            .iter()
+            .filter(|row| matches!(row, Row::Line { .. }))
+            .count();
+        self.content_rows = self.content_rows.max(content);
         body.diff
     }
 }
@@ -475,7 +499,19 @@ fn the_monitor_writes_nothing_while_it_runs() {
     assert!(
         driven.body_rows > 0,
         "every frame drew an empty body, so the run this gate calls clean never \
-         put a diff on screen"
+         put anything on screen"
+    );
+    // **The stricter half, and the one that says what the message above cannot.**
+    // A heading is pushed per changed file before any hunk is reached, so a body
+    // with rows in it proves only that the fixture had files. Content lines are
+    // what a build with its line-drawing deleted would stop producing, which is
+    // the mutation `first_paint.rs` names in its own comment.
+    assert!(
+        driven.content_rows > 0,
+        "the {} frames drew {} rows and not one was a line of diff, so this ran \
+         over headings alone and the tree it found clean was never really read",
+        driven.frames,
+        driven.body_rows
     );
     assert!(
         driven.warmed > 0,
