@@ -539,13 +539,19 @@ fn warmup(values: &[u64]) -> (usize, Baseline) {
     // taking it here makes "the same width the gate trusts" structural instead
     // of a claim two expressions have to keep agreeing on, which is the
     // argument [`quarter_medians`] already makes for itself. `None` is a series
-    // too short to have two ends and zero is a platform that never answered;
-    // there is nothing to measure against in either case, and [`drift`] refuses
-    // on the second a few lines later anyway.
-    let Some(level) = quarter_medians(values)
-        .map(|whole| whole[3])
-        .filter(|&level| level > 0)
-    else {
+    // too short to have two ends, and there is nothing to measure against.
+    //
+    // **A zero level is not guarded here, and that is deliberate.** It reads
+    // like an oversight, so: a filter for it was written, and a mutation showed
+    // it could never fire. At `level == 0` the division below is an infinity or
+    // a `NaN`, both of which compare false, so `settled` is false at every
+    // position, the walk stops where it started, and the ceiling refuses. The
+    // outcome is the floor either way. Guarding it would be a branch no
+    // mutation can kill, which is what `mib_per_hour`'s doc deletes one for.
+    // The refusal a zero series actually needs belongs to [`drift`], which
+    // checks *both* ends because clamping a fall to zero makes a vanished
+    // series read as the flattest one ever measured.
+    let Some(level) = quarter_medians(values).map(|whole| whole[3]) else {
         return (floor, Baseline::Floor);
     };
 
@@ -625,9 +631,15 @@ fn drift(samples: &[(Duration, u64)]) -> Option<Drift> {
             quarter_medians(&values[floor..])?,
         ),
     };
-    // A baseline of zero means the platform did not report RSS at all, and a
-    // ratio against it would be an infinity that passes or fails by luck.
-    if quarters[0] == 0 {
+    // A zero at either end means the platform stopped reporting RSS, and
+    // neither end may be one. A zero *baseline* makes the ratio an infinity that
+    // passes or fails by luck. A zero *settled* figure is worse, because it
+    // passes quietly: `ends_ratio` clamps a fall to zero, so a run whose reads
+    // vanish half way through reports 0.00% drift and looks like the flattest
+    // process ever measured. Only the first was guarded until a mutation showed
+    // [`warmup`]'s own `level > 0` filter could never fire, which is the same
+    // hole one function further in.
+    if quarters[0] == 0 || quarters[3] == 0 {
         return None;
     }
 
@@ -3333,6 +3345,14 @@ mod statistic {
                 "a platform that answered zero until the last quarter",
                 (0..288)
                     .map(|at| if at < 216 { 0 } else { mb(100.0) })
+                    .collect::<Vec<u64>>(),
+            ),
+            // The one that passes rather than refusing, if only the baseline is
+            // guarded: a fall is clamped to zero, so this reported 0.00% drift.
+            (
+                "a platform that stopped answering half way through",
+                (0..288)
+                    .map(|at| if at < 144 { mb(100.0) } else { 0 })
                     .collect::<Vec<u64>>(),
             ),
         ] {
