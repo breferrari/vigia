@@ -368,7 +368,8 @@ Milestone: [Phase 6](https://github.com/breferrari/vigia/milestone/6)
 | | Task | Issue |
 |---|---|---|
 | ✅ | The soak could not report the slope §10 needs, and the workflow killed the window it offers | [#112](https://github.com/breferrari/vigia/issues/112) |
-| ⬜ | I3's window has never run, so the day-long claim is a gate | [#47](https://github.com/breferrari/vigia/issues/47) |
+| 🔨 | I3's window **has run** — reading on the issue; open until the gate is re-derived over it | [#47](https://github.com/breferrari/vigia/issues/47) |
+| ⬜ | The drift gate's warmup is a window fraction; the 24h run measured the plateau at ~7.5h | [#126](https://github.com/breferrari/vigia/issues/126) |
 | ⬜ | Every number here comes from a fixture, and the thesis is about a workload | [#72](https://github.com/breferrari/vigia/issues/72) |
 | ✅ | The height walk re-read every undrawn file on every tick, and every wall-clock gate materialised past it | [#101](https://github.com/breferrari/vigia/issues/101) |
 | ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
