@@ -192,7 +192,7 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Stamp> {
 /// manufactures a failure in the direction that looks like a real finding: three
 /// `.git` directories moving during a run that wrote nothing.
 fn stamp_of(path: &Path) -> Stamp {
-    let meta = std::fs::symlink_metadata(path).expect("stamp a fixture entry");
+    let meta = std::fs::metadata(path).expect("stamp a fixture entry");
     Stamp {
         dir: meta.is_dir(),
         len: meta.len(),
@@ -598,12 +598,15 @@ fn the_monitor_writes_nothing_while_it_runs() {
     // `first_paint.rs` names in its own comment.
     //
     // There is no separate `body_rows > 0` assertion above this one, and there was
-    // until round 3 of the audit pointed out that it cannot fail on its own: content
-    // rows are a subset of all rows, so a frame with no rows has no content either
-    // and this fires first. An assertion whose failure mode is unreachable is one
-    // the next reader has to reason about for nothing. The field stays, because the
-    // message below is worth more when it can say "rows were drawn and none of them
-    // were content" than when it can only say "no content".
+    // until round 3 of the audit pointed out that it cannot fail on its own. The
+    // argument needs one step more than it first looks, because the two fields are
+    // different statistics: `body_rows` is the **largest** row count any frame drew
+    // and `leanest_frame` is the **smallest** content count any frame drew. If the
+    // largest is zero then every frame drew nothing, so every frame drew no content,
+    // so the smallest is zero and this fires. An assertion whose failure mode is
+    // unreachable is one the next reader has to reason about for nothing. The field
+    // stays, because the message below is worth more when it can say "rows were
+    // drawn and none of them were content" than when it can only say "no content".
     assert!(
         driven.leanest_frame > 0,
         "the leanest of {} frames drew no content at all, against a tallest body of \
