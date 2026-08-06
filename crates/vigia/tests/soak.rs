@@ -169,18 +169,49 @@ const FD_WARMUP_FRACTION: f64 = 0.10;
 /// that shipped before it. Too loose and the plateau is called early, which
 /// weakens the gate. So the conservative direction is down, and 1% is on a
 /// smooth part of the curve rather than a cliff: over the recorded 288-sample
-/// day (`statistic::DAY_LONG`) a band of 0.5% places the baseline at sample 135,
-/// 0.75% at 101, 1% at 97, 1.25% at 88, 1.5% at 86 and 2% at 76.
+/// day (`statistic::DAY_LONG`) the walk reaches sample 135 at a band of 0.5%,
+/// 101 at 0.75%, 97 at 1%, 88 at 1.25%, 86 at 1.5% and 76 at 2%. Those are the
+/// walk's positions and not all of them become baselines: at 0.5% the lag
+/// carries 135 past the ceiling and the floor stands, which is the tightening
+/// direction behaving as this doc says it does.
 const PLATEAU_BAND: f64 = 0.01;
+
+/// The share of a run's whole climb that has to happen in its first quarter
+/// before the prefix counts as a warmup: see [`rose_from_the_start`].
+///
+/// A sixteenth, chosen against a measured separation rather than picked: the
+/// recorded day's share is **24.2%**, about four times this, and the one-page
+/// attack that defeated a bare "did it rise" test is **0.013%**, about five
+/// hundred times under it. Anything between roughly a thousandth and a quarter
+/// separates those two, so the exact value is not load bearing and the margin
+/// on both sides is.
+const RISE_SHARE: u64 = 16;
 
 /// Most of a run the warmup may ever consume.
 ///
 /// Past it [`warmup`] reports [`Baseline::Unsettled`] and hands the gate the
-/// whole window from the floor, so a process that has not settled by half its
-/// own run is measured rather than trusted. **A leak looks exactly like this**,
-/// which is the point: the alternative — believing a late-arriving plateau — is
-/// a detector that adapts to a slow leak and hides it.
-const WARMUP_CEILING: f64 = 0.50;
+/// whole window from the floor, so a process that has not settled by this much
+/// of its own run is measured rather than trusted. **A leak looks exactly like
+/// this**, which is the point: the alternative — believing a late-arriving
+/// plateau — is a detector that adapts to a slow leak and hides it.
+///
+/// **Three fifths and not a half, because a half is where the one real workload
+/// on record actually sits.** The recorded day's rolling median comes inside the
+/// band at sample 97 of 288, and the walk lags the true settle point by half its
+/// own width, so that day genuinely warms up for about **46%** of itself. At a
+/// half the clearance is eleven samples, and an audit round showed that adding
+/// less noise than the series' own jitter crossed it on **93 of 300 seeds**: a
+/// gate whose only real fixture is that close to its own cliff fails on the
+/// weather. At three fifths the same day clears by 39 samples, which
+/// `statistic::the_recorded_day_clears_the_ceiling_under_its_own_jitter` holds
+/// as a number rather than as a hope.
+///
+/// It is a real loosening and worth saying so: it permits a warmup of three
+/// fifths of a run, leaving two fifths for the comparison. That is still 115
+/// samples at the full count and four quarters of 28, and the alternative is a
+/// constant tuned so tightly to one measurement that the measurement itself only
+/// just passes.
+const WARMUP_CEILING: f64 = 0.60;
 
 /// I3's budget: RSS drift over the window.
 ///
@@ -253,7 +284,7 @@ struct Drift {
     /// Samples discarded before [`Drift::baseline`]. See [`warmup`].
     warm: usize,
     /// Which rule discarded them, which is the half a sample count cannot
-    /// carry: four of the five discard exactly the floor and mean four
+    /// carry: five of the six discard exactly the floor and mean five
     /// different things. [`warmup`] chooses all but [`Baseline::TooShort`] and
     /// [`Baseline::Trough`], which [`drift`] owns because each needs something
     /// `warmup` cannot see: the slicing's arity, and the floor's own answer.
@@ -382,8 +413,8 @@ fn warmup_floor(len: usize) -> usize {
 
 /// Which rule placed the baseline, so a report and a failure can say.
 ///
-/// **Five outcomes where a sample count carries one**, and four of them discard
-/// exactly [`WARMUP_FRACTION`]'s floor for four different reasons. A reader who
+/// **Six outcomes where a sample count carries one**, and five of them discard
+/// exactly [`WARMUP_FRACTION`]'s floor for five different reasons. A reader who
 /// is told only "29 samples" cannot tell a process that was already flat from
 /// one that never settled, from one whose rise started too late to be a warmup,
 /// from one where moving the baseline made the drift worse. Those want different
@@ -470,29 +501,40 @@ enum Baseline {
 /// warmup is still climbing across them, and a run that was flat at its start
 /// shows no rise at all.
 ///
-/// **Strictly greater, with no tolerance band, and a band is what the first
-/// version got wrong.** Requiring a rise of [`PLATEAU_BAND`] between the two
-/// medians rejected this module's own ramp fixtures, which climb 5.6% across the
-/// whole run and only **0.67%** between those two eighths: a genuine warmup may
-/// be slow, and a rule demanding a fast one calls it a leak. What is asked here
-/// is the *direction*; the size question belongs to [`WARMUP_CEILING`].
+/// **The rise is measured against the climb it is part of, and a bare "did it go
+/// up at all" is what two earlier versions got wrong in opposite directions.**
+/// A fixed band of [`PLATEAU_BAND`] rejected this module's own ramp fixtures,
+/// which rise only 0.70% across the cut: a genuine warmup may be slow. Strictly
+/// greater then admitted **one 4 KiB page**, which is how an audit round got a
+/// 29.5% leak to pass at 4.77%: prepend a single-page step to a flat head and
+/// the whole prefix reads as a climb. Neither absolute test can work, because
+/// the same rise is decisive on a series that climbs 6 MiB and meaningless on
+/// one that climbs 30.
 ///
-/// Jitter cannot decide the sign either, which is why no band is needed: a
-/// series flat enough for a page of noise to set it never reaches this branch,
-/// because a flat series settles by the floor and returns [`Baseline::Floor`]
-/// two arms earlier.
+/// So the question is what **share** of the climb happened in the first quarter,
+/// and [`RISE_SHARE`] is the fraction it must be. Measured, and the separation
+/// is four orders of magnitude wide: the recorded day rises 1.441 MiB across the
+/// cut against a 5.945 MiB climb, a share of **24.2%**, and the one-page attack
+/// rises 0.0039 MiB against 29.5 MiB, a share of **0.013%**.
 ///
-/// Measured on the recorded day: 29.9 MiB against 31.3, comfortably a warmup. On
-/// the flat-then-rise-then-flat series this exists to reject: 100 MiB against
-/// 100, no rise at all.
-fn rose_from_the_start(values: &[u64], quarter: usize) -> bool {
+/// It is still a threshold and it still has a boundary, which is worth stating
+/// rather than hiding: a rise that begins near it flips between this and the
+/// floor. That is tolerable here and would not be anywhere else, because the two
+/// sides are not pass and fail. Refusing gives [`Baseline::RoseLate`] and the
+/// floor, which is the gate that shipped before any of this and always the safer
+/// answer, so the boundary separates "measured" from "conservative" rather than
+/// "green" from "red".
+fn rose_from_the_start(values: &[u64], quarter: usize, level: u64) -> bool {
     let eighth = quarter / 2;
-    match (median(&values[..eighth]), median(&values[eighth..quarter])) {
-        (Some(first), Some(second)) => second > first,
-        // Too short to have two eighths. The floor is what runs at these
-        // lengths anyway, so there is no baseline to move and nothing to refuse.
-        _ => true,
-    }
+    let (Some(first), Some(second)) = (median(&values[..eighth]), median(&values[eighth..quarter]))
+    else {
+        // Unreachable: [`quarter_medians`] answered `Some` before this is
+        // called, so `quarter >= MIN_END` and `eighth >= 1`, and neither slice
+        // is empty. `false` rather than `true` all the same, because an
+        // unreachable branch should still fail towards the floor.
+        return false;
+    };
+    second.saturating_sub(first) >= level.saturating_sub(first) / RISE_SHARE
 }
 
 /// Samples to discard before the baseline, and the rule that chose them.
@@ -577,7 +619,8 @@ fn warmup(values: &[u64]) -> (usize, Baseline) {
     // `at` names a position half a window *earlier* than where the series
     // actually flattened. Comparing `at` alone against the ceiling therefore
     // bounds the warmup at 64% of the run while `WARMUP_CEILING` says 50%:
-    // measured, a climb ending at 64% was still `Measured` and only 65% flipped.
+    // measured, a climb ending at 63% was still `Measured`, against an
+    // analytic bound of 62.5%.
     // A budget that holds at a different number from the one it documents is
     // the shape `SPEC.md` §7 exists to refuse, so the lag is added back.
     let ceiling = (values.len() as f64 * WARMUP_CEILING) as usize;
@@ -588,7 +631,7 @@ fn warmup(values: &[u64]) -> (usize, Baseline) {
     // no warmup to measure however early the rise afterwards finished, so asking
     // about its length first would answer the wrong question and report a leak
     // as a window too short for its own warmup.
-    } else if !rose_from_the_start(values, quarter) {
+    } else if !rose_from_the_start(values, quarter, level) {
         (floor, Baseline::RoseLate)
     } else if at + quarter / 2 > ceiling {
         (floor, Baseline::Unsettled)
@@ -3272,12 +3315,12 @@ mod statistic {
     /// once and then holds, which is a monitor allocating something it never
     /// frees.
     ///
-    /// It holds because the window is a **median** a quarter wide: it only
-    /// reaches the settled level once half of it is past the step, which leaves
-    /// the pre-step samples inside the gated region for the ends-ratio to see.
-    /// So this asserts the same figure the fraction rule reports rather than
-    /// merely "over budget" — a step must be *unchanged* by the measured
-    /// baseline, not just survive it.
+    /// It holds because a step is flat before it, so [`rose_from_the_start`]
+    /// refuses to measure at all and the floor stands. The rolling median's own
+    /// lag helps too and is not what carries it: the lag covers a step and fails
+    /// for a rise wider than half the window. So this asserts the same figure
+    /// the fraction reports rather than merely "over budget" — a step must be
+    /// *unchanged* by the measured baseline, not just survive it.
     #[test]
     fn a_step_that_never_comes_back_is_not_warmup() {
         // **The rule each case exercises is named, because they are not all the
@@ -3330,10 +3373,11 @@ mod statistic {
     /// A platform that never reported RSS gets no verdict, rather than a ratio
     /// against nothing.
     ///
-    /// **Both guards, because each survives the other's deletion.** `drift`
-    /// refuses when the gated baseline is zero, and [`warmup`] refuses to look
-    /// for a plateau against a settled level of zero; deleting either one alone
-    /// left the whole suite green before this test existed. A ratio whose
+    /// **Both ends, because guarding one alone leaves the other open.** `drift`
+    /// refuses when either the gated baseline or the settled figure is zero.
+    /// Only the baseline was guarded until a mutation showed the settled end
+    /// mattered more: `ends_ratio` clamps a fall to zero, so a vanished series
+    /// read as the flattest process ever measured. A ratio whose
     /// denominator is zero is an infinity that passes or fails by luck, and
     /// `SPEC.md` §7's rule is that a gate which cannot say "no drift" has not
     /// been tested.
@@ -3407,8 +3451,11 @@ mod statistic {
     /// day-long run.
     ///
     /// Both repros are the shipped rule's own measurements before
-    /// [`rose_from_the_start`] existed, and the second is the worst found: it
-    /// passed at 4.99% while the whole window read 36.96%.
+    /// [`rose_from_the_start`] existed. The second is the worst *shape* found and
+    /// it is a near miss rather than a breach: it reported 5.00% against a 5%
+    /// budget where the whole window read 37.00%, so it fired by four
+    /// ten-thousandths. The one that genuinely passed is
+    /// [`a_page_of_noise_in_a_flat_head_does_not_buy_a_warmup`], at 4.77%.
     #[test]
     fn a_rise_after_the_process_settled_is_not_warmup() {
         for (flat_until, rise_over, to) in [(86, 86, 120.0), (60, 102, 137.0)] {
@@ -3442,6 +3489,115 @@ mod statistic {
                 to - 100.0
             );
         }
+    }
+
+    /// A page of drift in the flat head does not make the rest of a leak a
+    /// warmup.
+    ///
+    /// **The attack that defeated a bare "did it rise at all" test**, and the
+    /// reason [`RISE_SHARE`] measures a share rather than a direction. Prepend a
+    /// single 4 KiB step to the flat head of the leak that
+    /// [`a_rise_after_the_process_settled_is_not_warmup`] rejects, and the whole
+    /// prefix reads as a climb: the baseline moved to sample 83 and a **29.5%**
+    /// leak reported **4.77%** against a 5% budget, which is worse than the rule
+    /// this one replaced. One page in 288 samples is the smallest change a
+    /// series can express.
+    ///
+    /// Both spellings run, so the fixture cannot quietly stop being an attack:
+    /// without the step it must be refused, with it it must still be refused,
+    /// and the two must report the same figure.
+    #[test]
+    fn a_page_of_noise_in_a_flat_head_does_not_buy_a_warmup() {
+        for step in [0, 4096] {
+            let series: Vec<u64> = (0..288)
+                .map(|at| match at {
+                    at if at < 36 => mb(100.0),
+                    at if at < 60 => mb(100.0) + step,
+                    at if at < 120 => {
+                        mb(100.0) + step + (29.5 * MIB) as u64 * (at - 60) as u64 / 60
+                    }
+                    _ => mb(129.5) + step,
+                })
+                .collect();
+            let drift = verdict(&series);
+
+            assert_eq!(
+                (drift.warm, drift.baseline_rule),
+                (warmup_floor(series.len()), Baseline::RoseLate),
+                "a {step}-byte step in the flat head moved the baseline to \
+                 sample {} by {:?}, so a leak bought itself a warmup with the \
+                 smallest change a series can express",
+                drift.warm,
+                drift.baseline_rule
+            );
+            assert!(
+                drift.ratio >= DRIFT_BUDGET,
+                "the same 29.5% leak reported {:.2}% with a {step}-byte step in \
+                 its head, inside the {:.0}% budget",
+                drift.ratio * 100.0,
+                DRIFT_BUDGET * 100.0
+            );
+        }
+    }
+
+    /// The recorded day clears the ceiling by more than its own jitter.
+    ///
+    /// **A margin asserted as a number, because a margin nobody measured is how
+    /// this gate would fail on the weather.** The day's baseline lands at 97 and
+    /// the ceiling refuses past 136, so the clearance is 39 samples. At the 50%
+    /// ceiling this rule first shipped with it was **eleven**, and an audit round
+    /// found that adding less noise than the series' own sample-to-sample jitter
+    /// crossed it on 93 of 300 seeds: the flagship fixture was a third of a coin
+    /// flip away from a red build, and nothing said so.
+    ///
+    /// Deterministic noise rather than a random source, for the reason
+    /// [`workload`] gives about its own counter: a failing seed has to be
+    /// repeatable. The amplitude is half a mebibyte, against a series whose
+    /// neighbouring samples differ by more than two.
+    #[test]
+    fn the_recorded_day_clears_the_ceiling_under_its_own_jitter() {
+        let day = day_long();
+        let quarter = day.len() / 4;
+        let ceiling = (day.len() as f64 * WARMUP_CEILING) as usize;
+
+        for seed in 0..64u64 {
+            // A cheap deterministic hash, so every seed shakes the series
+            // differently and any failure names the seed that produced it.
+            let noisy: Vec<u64> = day
+                .iter()
+                .enumerate()
+                .map(|(at, &rss)| {
+                    let mixed = (at as u64)
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(seed);
+                    let swing = ((mixed >> 33) % (MIB as u64)) as i64 - (MIB as i64 / 2);
+                    rss.saturating_add_signed(swing)
+                })
+                .collect();
+            let (at, rule) = warmup(&noisy);
+            assert_eq!(
+                rule,
+                Baseline::Measured,
+                "seed {seed} shook the recorded day by half a mebibyte and its \
+                 baseline was placed by {rule:?} at {at} rather than measured, \
+                 so the flagship fixture sits on a cliff edge"
+            );
+            assert!(
+                at + quarter / 2 <= ceiling,
+                "seed {seed} put the day's baseline at {at}, and with the \
+                 rolling median's lag that is {} against a ceiling of {ceiling}",
+                at + quarter / 2
+            );
+        }
+
+        let clean = warmup(&day).0;
+        assert!(
+            ceiling - (clean + quarter / 2) >= quarter / 2,
+            "the recorded day clears the ceiling by {} samples, under the half \
+             window of lag the walk itself carries: a margin thinner than the \
+             instrument's own resolution is not a margin",
+            ceiling - (clean + quarter / 2)
+        );
     }
 
     /// A measured baseline never reports more drift than the whole window.
@@ -3516,7 +3672,7 @@ mod statistic {
         );
     }
 
-    /// The warmup may never take more than half the run.
+    /// The warmup may never take more of the run than [`WARMUP_CEILING`].
     ///
     /// A plateau that only arrives late is not evidence the climb before it was
     /// warmup; it is a window shorter than its own warmup, which `SPEC.md` §7
@@ -3525,14 +3681,18 @@ mod statistic {
     ///
     /// **Swept rather than sampled, and the sweep is what caught the ceiling
     /// bounding a different number from the one it documents.** A single 70%
-    /// fixture passed while a climb ending anywhere from 51% to 64% was still
+    /// fixture passed while a climb ending anywhere from 51% to 63% was still
     /// `Measured`: the rolling median lags the true settle point by half its own
     /// width, so `at` names a position 12.5% of the run earlier than where the
-    /// series flattened, and comparing `at` alone against the ceiling bought 64%
-    /// under a constant that says 50%. `warmup` adds the lag back; this asserts
-    /// the boundary is where [`WARMUP_CEILING`] puts it, on both sides.
+    /// series flattened, and comparing `at` alone bought 63% under a constant
+    /// that then said 50%. `warmup` adds the lag back.
+    ///
+    /// **Both sides of the boundary, at the boundary**, because a sweep that
+    /// starts well past it is passed by a rule that refuses everything, and one
+    /// that stops well before it is passed by a rule that believes everything.
+    /// The pair below sits either side of [`WARMUP_CEILING`] exactly.
     #[test]
-    fn a_plateau_that_arrives_past_half_the_window_is_not_believed() {
+    fn a_plateau_that_arrives_past_the_ceiling_is_not_believed() {
         let climbing_until = |pct: usize| -> Vec<u64> {
             let late = 288 * pct / 100;
             (0..288)
@@ -3546,7 +3706,8 @@ mod statistic {
                 .collect()
         };
 
-        for pct in 51..=75 {
+        let ceiling_pct = (WARMUP_CEILING * 100.0) as usize;
+        for pct in (ceiling_pct + 1)..=(ceiling_pct + 15) {
             let series = climbing_until(pct);
             let drift = verdict(&series);
             assert_eq!(
@@ -3565,15 +3726,17 @@ mod statistic {
             );
         }
 
-        // And the other side of the boundary, or "refuses everything" would
-        // satisfy every line above.
-        let drift = verdict(&climbing_until(40));
+        // And the sample immediately under it, or "refuses everything" would
+        // satisfy every line above. At the boundary rather than comfortably
+        // inside it: a fixture at 40% is passed by any ceiling from 41 upwards
+        // and so pins nothing about where this one is.
+        let drift = verdict(&climbing_until(ceiling_pct));
         assert_eq!(
             drift.baseline_rule,
             Baseline::Measured,
-            "a climb finishing at 40% of the window was refused too, so the \
-             ceiling is not a boundary and this test would pass against a rule \
-             that never measures anything"
+            "a climb finishing at exactly the {ceiling_pct}% ceiling was refused \
+             too, so the ceiling is not a boundary and every assertion above \
+             would hold against a rule that never measures anything"
         );
     }
 
