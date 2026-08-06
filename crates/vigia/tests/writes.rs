@@ -192,7 +192,8 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Stamp> {
 /// manufactures a failure in the direction that looks like a real finding: three
 /// `.git` directories moving during a run that wrote nothing.
 fn stamp_of(path: &Path) -> Stamp {
-    let meta = std::fs::metadata(path).expect("stamp a fixture entry");
+    let meta = std::fs::symlink_metadata(path)
+        .unwrap_or_else(|e| panic!("stamp the fixture entry {}: {e}", path.display()));
     Stamp {
         dir: meta.is_dir(),
         len: meta.len(),
