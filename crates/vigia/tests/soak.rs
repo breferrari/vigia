@@ -219,7 +219,8 @@ struct Drift {
     /// are exactly [`Drift::baseline`] and [`Drift::settled`], so taking the
     /// four at `len * k / 4` would put `quarters[3]`'s left edge a sample
     /// earlier on any series whose length is not a multiple of four — 259
-    /// post-warmup samples is the case a 288-sample run actually produces — and
+    /// post-warmup samples is what a 288-sample run leaves at the floor, and
+    /// 191 is what the recorded day leaves at its measured plateau — and
     /// the median I3 asserts on would then be taken over a different window.
     /// So the middle pair is measured a quarter's width *inward from each end*
     /// instead, leaving a gap of up to three samples in the centre that decides
@@ -2474,6 +2475,15 @@ mod statistic {
     /// 288 samples growing 0.05% each is 14.4% end to end. The warmup discards
     /// 29, so the baseline is the median of samples 29..93 and the settled
     /// figure is the median of 224..288, which is about 9.5% apart.
+    ///
+    /// **29 is [`WARMUP_FRACTION`]'s floor rather than [`warmup`]'s plateau, and
+    /// the difference matters to a reader of this test.** A series climbing to
+    /// its last sample never settles, so the detector reports
+    /// [`Baseline::Unsettled`] and hands the gate the whole window. That the
+    /// figure above survived #126 unchanged is the point rather than a
+    /// coincidence, and
+    /// [`a_series_that_never_settles_keeps_the_fraction_floor`] is what asserts
+    /// the mechanism behind it.
     #[test]
     fn a_linear_leak_is_caught() {
         let series: Vec<u64> = (0..288)
@@ -2493,7 +2503,10 @@ mod statistic {
     ///
     /// The climb is over inside the first 8% of the window, so the warmup
     /// swallows it whole. This is the case that decides `WARMUP_FRACTION`: with
-    /// no warmup at all, the same series drifts by 140%.
+    /// no warmup at all, the same series drifts by 140%. It still decides it,
+    /// because a series already at its level by the floor has nothing for
+    /// [`warmup`] to measure and takes the floor:
+    /// [`a_series_flat_from_the_floor_takes_the_floor`] asserts that half.
     ///
     /// **It is also the only fixture here that can tell where the gradient was
     /// fitted**, and it did not always assert on one. Every other series in
@@ -2740,20 +2753,61 @@ mod statistic {
         );
     }
 
-    /// A gradient carries the span it was divided by.
+    /// A gradient carries the span it was divided by, and the span follows the
+    /// baseline that was actually used.
     ///
     /// See [`Drift::span`]. Without it the four figures `SPEC.md` §10 asks a
     /// reader to compare are not comparable, because the same wander reads
     /// +364 MiB/h over fifteen seconds and +0.92 over an hour.
+    ///
+    /// **Two fixtures, because one of them cannot see half the claim.** A flat
+    /// series takes the floor, so on it the floor and the measured baseline are
+    /// the same number and a gradient still fitted from the floor would pass.
+    /// The recorded day is the case where they differ by 68 samples: fitting
+    /// past the fraction rather than past the plateau puts nearly six hours of
+    /// climb back into a slope printed as the settled one, which is the figure
+    /// §10 asks a reader to compare between runs.
     #[test]
     fn the_gradient_is_reported_with_the_span_it_was_fitted_over() {
-        let drift = verdict(&flat(288));
-        let rest = 288 - (288.0 * WARMUP_FRACTION).ceil() as usize;
-        assert_eq!(
-            drift.span,
-            SAMPLE * (rest as u32 - 1),
-            "the span is not the post-warmup elapsed time, so it describes a \
-             different window from the gradient it is printed beside"
+        for (shape, series) in [
+            ("a flat series", flat(288)),
+            ("the recorded day", day_long()),
+        ] {
+            let drift = verdict(&series);
+            assert_eq!(
+                drift.span,
+                SAMPLE * (series.len() - drift.warm) as u32 - SAMPLE,
+                "over {shape}, the span is not the elapsed time past the \
+                 baseline the gate used, so it describes a different window \
+                 from the gradient it is printed beside"
+            );
+            // **And the gradient itself, not only its span.** The two are
+            // separate expressions over what is meant to be one slice, so a
+            // slope fitted from the fraction while the span is taken from the
+            // plateau leaves both fields present, plausible, and describing
+            // different windows. Mutation confirmed it: pointing `slope` at
+            // the floor left the whole suite green until this line existed.
+            //
+            // A least-squares gradient is invariant to shifting its clock, so
+            // re-sampling the tail from zero is the same fit the report did.
+            assert_eq!(
+                drift.slope,
+                mib_per_hour(&sampled(&series[drift.warm..])),
+                "over {shape}, the gradient is not fitted past the baseline the \
+                 gate used"
+            );
+        }
+
+        // And the two fixtures above genuinely disagree, or the second one is
+        // saying no more than the first.
+        let day = day_long();
+        let measured = verdict(&day);
+        assert_ne!(
+            measured.warm,
+            warmup_floor(day.len()),
+            "the recorded day now takes the floor, so both fixtures here are \
+             floor cases and neither can tell a gradient fitted from the \
+             fraction from one fitted past the plateau"
         );
     }
 
@@ -3162,22 +3216,53 @@ mod statistic {
     /// Driven over every length the sampler can produce a verdict near, and over
     /// prefixes of the real day, because a synthetic series is exactly the thing
     /// that would be built to have a plateau in the right place.
+    ///
+    /// **A climbing shape is here because the two tame ones missed it.** A flat
+    /// series and the day's own opening both settle by the floor at these
+    /// lengths, so the clamp is never reached and deleting it left this test
+    /// green while the real fifteen-second soak went red: 12 samples climbing
+    /// from 20.9 to 28 MiB is what the per-commit run actually produces, and
+    /// that is the shape that detects late enough to lose its ends. A pure
+    /// function whose only failing witness is a fifteen-second integration run
+    /// is the case `SPEC.md` §7 says the pure test has to cover.
     #[test]
     fn a_measured_warmup_never_turns_a_verdict_into_a_refusal() {
         let day = day_long();
-        let lengths = (0..=64).chain([96, 144, 192, 288]);
-        for len in lengths {
-            for (shape, series) in [
-                ("a flat series", flat(len)),
-                ("the recorded day", day[..len.min(day.len())].to_vec()),
-            ] {
-                let floored = quarter_medians(&series[warmup_floor(series.len()).min(len)..]);
-                let measured = drift(&sampled(&series));
-                assert_eq!(
-                    measured.is_some(),
-                    floored.is_some_and(|quarters| quarters[0] != 0),
-                    "over {len} samples of {shape}, a measured baseline and the \
-                     floor disagree about whether there is a verdict at all"
+        let agree = |shape: &str, series: &[u64]| {
+            let floored = quarter_medians(&series[warmup_floor(series.len())..]);
+            assert_eq!(
+                drift(&sampled(series)).is_some(),
+                floored.is_some_and(|quarters| quarters[0] != 0),
+                "over {} samples of {shape}, a measured baseline and the floor \
+                 disagree about whether there is a verdict at all",
+                series.len()
+            );
+        };
+
+        for len in (0..=64).chain([96, 144, 192, 288]) {
+            agree("a flat series", &flat(len));
+            agree("the recorded day", &day[..len.min(day.len())]);
+        }
+
+        // **And every place the plateau could land, at every short length.**
+        // Guessing a shape does not work here: the clamp is only reachable in a
+        // narrow band, where the detection sits at or under half the run *and*
+        // leaves under `4 * MIN_END` samples behind it, which needs a run under
+        // sixteen samples whose plateau starts around 40% in. A hand-picked
+        // climbing series missed it, and the fifteen-second integration soak
+        // caught it **once and then did not**, because its series is whatever
+        // the machine produced that minute. So sweep the space instead of
+        // sampling it: 33 lengths by every plateau position is a second of
+        // arithmetic and does not depend on anyone's intuition about where the
+        // edge is.
+        for len in 8..=40 {
+            for plateau in 0..len {
+                let series: Vec<u64> = (0..len)
+                    .map(|at| mb(20.0 + 8.0 * at.min(plateau) as f64 / plateau.max(1) as f64))
+                    .collect();
+                agree(
+                    &format!("a climb plateauing at {plateau} of {len}"),
+                    &series,
                 );
             }
         }
