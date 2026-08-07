@@ -689,7 +689,14 @@ fn drift(samples: &[(Duration, u64)]) -> Option<Drift> {
     // The floor's own answer, which is both the printed comparison and the
     // clamp below. Taken through the same cut, so the two cannot describe
     // different windows.
-    let floor_ends = quarter_medians(&values[floor..]).filter(|ends| ends[0] != 0);
+    // **Both ends, exactly as the refusal above.** Filtering only `ends[0]` let
+    // the clamp below reinstate the defect that refusal exists to stop, one arm
+    // later: a run whose reads vanish for a window has a nonzero measured last
+    // quarter, so it survives the refusal, and then the floor's own last quarter
+    // *is* zero, `ends_ratio` clamps its fall to 0.00%, that beats any real
+    // ratio, and `Trough` installs a verdict of zero drift on a leaking process.
+    // Measured at 5.86% before the clamp and 0.00% after it.
+    let floor_ends = quarter_medians(&values[floor..]).filter(|ends| ends[0] != 0 && ends[3] != 0);
     let from_floor = floor_ends.map_or_else(|| ends_ratio(quarters), ends_ratio);
 
     // **A measured baseline may only ever reduce the measured drift**, which is
@@ -3407,6 +3414,35 @@ mod statistic {
                  a baseline of zero"
             );
         }
+
+        // **And a gap rather than a tail, which is the shape that got past the
+        // refusal above by going round it.** A window of dead reads leaves the
+        // *measured* last quarter nonzero, so nothing refuses; the floor's last
+        // quarter is the zeros, its ratio clamps to 0.00%, and the trough clamp
+        // then installs that as the verdict. Measured on a leaking series at
+        // 5.86% before the clamp and 0.00% after.
+        let gapped: Vec<u64> = (0..288)
+            .map(|at| match at {
+                at if (222..256).contains(&at) => 0,
+                at if at < 48 => mb(100.0),
+                at if at < 73 => mb(100.0 + 30.0 * (at - 48) as f64 / 25.0),
+                _ => mb(130.0),
+            })
+            .collect();
+        let drift = verdict(&gapped);
+        assert_ne!(
+            drift.settled(),
+            0,
+            "a run whose reads vanished for a window reached a verdict with a \
+             settled figure of zero, by {:?} at {}",
+            drift.baseline_rule,
+            drift.warm
+        );
+        assert!(
+            drift.ratio >= DRIFT_BUDGET,
+            "a 30% leak with a window of dead reads in it reported {:.2}%",
+            drift.ratio * 100.0
+        );
     }
 
     /// A series that never settles keeps the floor, and therefore keeps the gate
