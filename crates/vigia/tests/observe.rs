@@ -92,15 +92,6 @@ const DEFAULT_SECS: u64 = 120;
 const MAX_SAMPLES: usize = 288;
 const MIN_SAMPLES: usize = 12;
 
-/// Frames below which a percentile is not a percentile.
-///
-/// `SPEC.md` §7: *"at 30 samples a nearest-rank p99 is just the maximum."*
-/// Unlike the soak, which drives its own writer, this floor is genuinely
-/// reachable here, because a real session over a real repository can be very
-/// quiet. Reaching it is a legitimate result and the report says so rather than
-/// quoting a percentile over nine frames.
-const MIN_FRAMES: u64 = 40;
-
 /// Upper bounds of the frame-time histogram, in microseconds.
 ///
 /// **16000 is an exact edge, and that is the whole reason this is a histogram
@@ -239,6 +230,27 @@ impl Histogram {
             }
         }
         None
+    }
+
+    /// Whether a percentile at this count is just the maximum wearing a
+    /// percentile's name.
+    ///
+    /// **Found by running the instrument rather than by writing it**, which is
+    /// the reason this is a derived check and not a constant. The first real
+    /// window drew 55 frames, cleared a 40-frame floor that looked generous, and
+    /// printed a p99 of `>=100ms` that was the single 591.74ms frame in the run
+    /// and nothing else. §7 already names the shape — *"at 30 samples a
+    /// nearest-rank p99 is just the maximum"* — and it names it as one of the
+    /// two flaws that were invisible to reading.
+    ///
+    /// The arithmetic decides it rather than taste: a nearest-rank p99 is
+    /// `ceil(0.99n)`, so it stops being the top sample at **n = 100**, where it
+    /// is rank 99 and one outlier is excluded. That is the same reasoning §5.1
+    /// gives for the shell's own 128-frame ring. Below it the report prints the
+    /// budget count and the maximum, which are exact at any count, and says
+    /// there is no percentile rather than quoting one.
+    fn rank_is_max(&self, fraction: f64) -> bool {
+        self.total > 0 && ((fraction * self.total as f64).ceil() as u64).max(1) >= self.total
     }
 
     fn mean(&self) -> Option<u64> {
@@ -431,15 +443,15 @@ fn disagreements(ours: &[Row], theirs: &[Row]) -> Vec<String> {
     for (path, row) in &mine {
         match yours.get(path) {
             None => out.push(format!("{path}: vigia has it, git does not")),
-            Some(other) if other.added != row.added || other.removed != row.removed => out.push(
-                format!(
+            Some(other) if other.added != row.added || other.removed != row.removed => {
+                out.push(format!(
                     "{path}: vigia +{} -{}, git +{} -{}",
                     count(row.added),
                     count(row.removed),
                     count(other.added),
                     count(other.removed)
-                ),
-            ),
+                ))
+            }
             Some(_) => {}
         }
     }
@@ -515,6 +527,14 @@ struct Sample {
 struct Report {
     tree: String,
     window: Duration,
+    /// The interval the run *planned* to sample at.
+    ///
+    /// Carried rather than recomputed from the window and the samples taken.
+    /// A run stopped early has fewer samples than it planned, so dividing the
+    /// window by what arrived reported a 847-second nominal cadence beside a
+    /// 50-second actual gap on the first real window, which reads as a stall and
+    /// was the report dividing by the wrong denominator.
+    step: Duration,
     elapsed: Duration,
     stopped_early: bool,
     samples: Vec<Sample>,
@@ -592,39 +612,38 @@ impl Report {
         {
             Some(widest) => println!(
                 "observe: sample cadence nominal {:?}, widest actual gap {:?}",
-                self.window / self.samples.len().max(1) as u32,
-                widest
+                self.step, widest
             ),
             None => println!("observe: sample cadence has one sample or none"),
         }
 
-        // The budget count first, because it is the question. A count and never
-        // a percentile, for the reason `EDGES` gives.
-        match self.hist.at_or_over(BUDGET_US) {
-            Some(over) if self.frames >= MIN_FRAMES => {
-                println!(
-                    "observe: frames at or over I9's {:.0}ms budget: {} of {} ({:.3}%)",
-                    ms(BUDGET_US),
-                    over,
-                    self.hist.total,
-                    100.0 * over as f64 / self.hist.total.max(1) as f64,
-                );
-                println!(
-                    "observe: frame p50 {}, p99 {}, mean {:.2}ms, max {:.2}ms \
-                     (reported, not gated)",
-                    interval(self.hist.rank(0.50)),
-                    interval(self.hist.rank(0.99)),
-                    self.hist.mean().map(ms).unwrap_or(0.0),
-                    ms(self.hist.max),
-                );
-            }
-            _ => println!(
-                "observe: {} frames is under the {MIN_FRAMES}-frame floor, so there is no \
-                 percentile here; max {:.2}ms, {:?} at or over budget",
-                self.frames,
-                ms(self.hist.max),
-                self.hist.at_or_over(BUDGET_US),
-            ),
+        // The budget count first, because it is the question, and it is exact at
+        // any frame count: a count over a declared edge needs no percentile.
+        println!(
+            "observe: frames at or over I9's {:.0}ms budget: {} of {}, max {:.2}ms, \
+             mean {:.2}ms",
+            ms(BUDGET_US),
+            self.hist
+                .at_or_over(BUDGET_US)
+                .map(|over| over.to_string())
+                .unwrap_or_else(|| "?".to_owned()),
+            self.hist.total,
+            ms(self.hist.max),
+            self.hist.mean().map(ms).unwrap_or(0.0),
+        );
+        // The percentiles, only where they are percentiles. See `rank_is_max`.
+        if self.hist.rank_is_max(0.99) {
+            println!(
+                "observe: {} frames is too few for a p99, which at this count is the \
+                 maximum above; no percentile is quoted",
+                self.hist.total,
+            );
+        } else {
+            println!(
+                "observe: frame p50 {}, p99 {} (reported, not gated)",
+                interval(self.hist.rank(0.50)),
+                interval(self.hist.rank(0.99)),
+            );
         }
         println!("observe: frame curve {}", self.hist.curve());
 
@@ -898,6 +917,7 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
     Report {
         tree: name,
         window,
+        step,
         elapsed: started.elapsed(),
         stopped_early,
         samples,
@@ -919,10 +939,24 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
 /// #72 items 1 to 3: what a real session costs the process a reader leaves open.
 ///
 /// `#[ignore]` because it watches for minutes or hours against a tree the
-/// environment names, and because it asserts nothing. Run it as the **built test
-/// binary** rather than through `cargo test`: a cargo process holds the
-/// `target/` lock for its whole life, and the workload being measured is a
-/// session that needs to keep building.
+/// environment names, and because it asserts nothing.
+///
+/// **Run it as the built test binary, copied out of `target/` first.** Two
+/// separate frictions, and the second cost a window before it was understood.
+/// Through `cargo test` a cargo process holds the `target/` lock for its whole
+/// life, so the session being measured cannot build. And a running executable
+/// is open, so leaving it *in* `target/` makes the next `cargo test --release`
+/// fail to link over it (`LNK1104` on Windows, `ETXTBSY` on Linux) with an error
+/// that names the linker rather than the run. Copy it somewhere else and point
+/// the environment at the tree:
+///
+/// ```sh
+/// cargo test --release --test observe --no-run
+/// cp target/release/deps/observe-*.exe /somewhere/else/
+/// VIGIA_OBSERVE_TREE=/path/to/worktree VIGIA_OBSERVE_SECS=7200 \
+///   VIGIA_OBSERVE_STOP=/somewhere/else/stop /somewhere/else/observe.exe \
+///   --ignored --nocapture observe_a_working_session
+/// ```
 #[test]
 #[ignore = "an instrument: it watches a real worktree for as long as it is asked to"]
 fn observe_a_working_session() {
@@ -1150,6 +1184,28 @@ mod statistic {
             "the top rank is the bucket the outlier fell in"
         );
         assert_eq!(hist_of(&[]).rank(0.99), None, "no frames, no percentile");
+    }
+
+    #[test]
+    fn a_p99_is_the_maximum_below_a_hundred_frames_and_the_report_is_told_so() {
+        // The boundary is arithmetic, not taste: `ceil(0.99n)` reaches `n` for
+        // every count under 100 and is 99 at 100, where exactly one outlier is
+        // excluded. This is the check the first real window needed and did not
+        // have: 55 frames cleared a 40-frame floor and printed a p99 that was
+        // the run's single 591.74ms frame.
+        assert!(hist_of(&[800; 99]).rank_is_max(0.99), "99 frames");
+        assert!(!hist_of(&[800; 100]).rank_is_max(0.99), "100 frames");
+        assert!(
+            hist_of(&[800; 55]).rank_is_max(0.99),
+            "the window that found it"
+        );
+        assert!(
+            !hist_of(&[]).rank_is_max(0.99),
+            "no frames is not a maximum"
+        );
+        // A p50 is a percentile long before a p99 is, and conflating the two
+        // would suppress the one figure a quiet session does have.
+        assert!(!hist_of(&[800; 55]).rank_is_max(0.50));
     }
 
     #[test]
