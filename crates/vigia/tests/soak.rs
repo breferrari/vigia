@@ -1600,7 +1600,7 @@ impl Report {
         // is what #126 cost.
         assert!(
             drift.ratio < DRIFT_BUDGET,
-            "I3: RSS drifted {:.2}% over {:?}, over the {:.0}% budget: quarters              {:.2}, {:.2}, {:.2}, {:.2} MiB at {:+.2} MiB/h, peak {:.2} MiB over              {} frames, from the {:.0}% baseline at sample {}. {}",
+            "I3: RSS drifted {:.2}% over {:?}, over the {:.0}% budget: quarters {:.2}, {:.2}, {:.2}, {:.2} MiB at {:+.2} MiB/h, peak {:.2} MiB over {} frames, from the {:.0}% baseline at sample {}. {}",
             drift.ratio * 100.0,
             self.window,
             DRIFT_BUDGET * 100.0,
@@ -2978,7 +2978,7 @@ mod statistic {
 
         assert!(
             drift.ratio >= DRIFT_BUDGET,
-            "the recorded day reported {:.2}% from the {:.0}% floor, inside the              {:.0}% budget, so the breach this whole issue exists to explain is              not in this fixture and nothing below proves anything",
+            "the recorded day reported {:.2}% from the {:.0}% floor, inside the {:.0}% budget, so the breach this whole issue exists to explain is not in this fixture and nothing below proves anything",
             drift.ratio * 100.0,
             WARMUP_FRACTION * 100.0,
             DRIFT_BUDGET * 100.0
@@ -2986,23 +2986,23 @@ mod statistic {
         assert_eq!(
             drift.warm,
             warmup_floor(series.len()),
-            "the gate's baseline moved off the fraction, which is the one thing              #126's ruling says it must not do"
+            "the gate's baseline moved off the fraction, which is the one thing #126's ruling says it must not do"
         );
 
         let (Some(at), Some(settled)) = (drift.settled, drift.settled_ratio) else {
             panic!(
-                "the recorded day reports no plateau at all, so a reader of its                  breach gets the 13.26% and nothing to read it against"
+                "the recorded day reports no plateau at all, so a reader of its breach gets the 13.26% and nothing to read it against"
             );
         };
         assert!(
             settled < DRIFT_BUDGET,
-            "the recorded day settles at sample {at} and reports {:.2}% from              there, over the {:.0}% budget: the annotation is supposed to be              what shows the breach is a baseline on a warmup ramp rather than a              leak, and this one shows nothing",
+            "the recorded day settles at sample {at} and reports {:.2}% from there, over the {:.0}% budget: the annotation is supposed to be what shows the breach is a baseline on a warmup ramp rather than a leak, and this one shows nothing",
             settled * 100.0,
             DRIFT_BUDGET * 100.0
         );
         assert!(
             at > drift.warm,
-            "the plateau is reported at sample {at}, at or before the gate's              own baseline at {}, so the two figures describe the same window              and the annotation is empty",
+            "the plateau is reported at sample {at}, at or before the gate's own baseline at {}, so the two figures describe the same window and the annotation is empty",
             drift.warm
         );
     }
@@ -3038,7 +3038,7 @@ mod statistic {
 
             assert!(
                 drift.ratio >= DRIFT_BUDGET,
-                "a step to {after:.1} MiB at sample {at} reported {:.2}% drift                  from the {:.0}% floor, inside the {:.0}% budget, so the gate                  this issue leaves untouched has stopped catching a step",
+                "a step to {after:.1} MiB at sample {at} reported {:.2}% drift from the {:.0}% floor, inside the {:.0}% budget, so the gate this issue leaves untouched has stopped catching a step",
                 drift.ratio * 100.0,
                 WARMUP_FRACTION * 100.0,
                 DRIFT_BUDGET * 100.0
@@ -3046,7 +3046,7 @@ mod statistic {
             if let Some(settled) = drift.settled_ratio {
                 assert!(
                     settled >= DRIFT_BUDGET,
-                    "a step to {after:.1} MiB at sample {at} breaches at {:.2}%                      and the report annotates it with {:.2}% from its plateau,                      inside the budget: a reader is being told a step is a                      warmup artifact, which is the one thing this annotation                      must never say",
+                    "a step to {after:.1} MiB at sample {at} breaches at {:.2}% and the report annotates it with {:.2}% from its plateau, inside the budget: a reader is being told a step is a warmup artifact, which is the one thing this annotation must never say",
                     drift.ratio * 100.0,
                     settled * 100.0
                 );
