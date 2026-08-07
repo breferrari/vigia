@@ -54,6 +54,16 @@
 //! pure function either one draws a conclusion from, because a number nobody can
 //! check is worse than no number at all.
 
+/// The fixture builder, reached the way `soak.rs` reaches it.
+///
+/// `SPEC.md` §9 names this escape: a published `.crate` does not carry the
+/// sibling crate's test tree, so `cargo test` inside an unpacked copy fails
+/// where it passes in a checkout, and the fix at publish time is to exclude the
+/// tests from the package rather than to weaken a gate. This is the second file
+/// to make it and §9 counts them.
+#[path = "../../vigia-core/tests/support/mod.rs"]
+mod support;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -62,7 +72,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Theme, View, body_layout, render};
+use vigia::{App, Body, Theme, View, body_layout, branch_for, regions, render};
 use vigia_core::{
     ChangeKind, FrameStats, HISTORY_PATHS, HighlightStats, Highlighter, History, HistoryStats,
     WARM_FILES, WatchOptions, WatchStats, Worktree,
@@ -146,13 +156,26 @@ fn tree() -> PathBuf {
 }
 
 /// What the header would draw on the left, which is the worktree's own name.
+///
+/// **`vigia::run`'s `short_name` in the same order, and the order is the whole
+/// of it.** That function is private to the `vigia` crate and not re-exported,
+/// so this cannot call it and has to agree with it by construction instead: the
+/// last component first, the canonicalised last component second, and the path
+/// itself rather than a placeholder when a worktree sits at a filesystem root
+/// and has no last component by either route. An earlier version canonicalised
+/// first and fell back to the literal `"worktree"`, which would have made the
+/// report name a tree the header would have named something else, on exactly
+/// the paths where the two routes disagree.
 fn tree_name(tree: &Path) -> String {
-    tree.canonicalize()
-        .ok()
-        .as_deref()
-        .and_then(Path::file_name)
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "worktree".to_owned())
+    if let Some(name) = tree.file_name() {
+        return name.to_string_lossy().into_owned();
+    }
+    if let Ok(resolved) = tree.canonicalize()
+        && let Some(name) = resolved.file_name()
+    {
+        return name.to_string_lossy().into_owned();
+    }
+    tree.display().to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +500,19 @@ fn missing(ours: &BTreeSet<String>, theirs: &BTreeSet<String>, what: &str) -> Ve
     out
 }
 
+/// Rows with the excluded paths dropped.
+///
+/// One function rather than the same predicate written twice, because it is
+/// applied to **both** sides of the comparison and the two have to stay
+/// identical: an exclusion that reached one side alone would turn a legitimate
+/// asymmetry into a disagreement, or hide a real one.
+fn excluding(rows: &[Row], excluded: &BTreeSet<String>) -> Vec<Row> {
+    rows.iter()
+        .filter(|row| !excluded.contains(&row.path))
+        .cloned()
+        .collect()
+}
+
 fn count(n: Option<u32>) -> String {
     match n {
         Some(n) => n.to_string(),
@@ -775,11 +811,9 @@ impl Report {
                 None => String::new(),
             }
         ));
-        let curve: Vec<String> = self
-            .samples
-            .iter()
-            .map(|s| (s.rss / 1024).to_string())
-            .collect();
+        // From the series already in hand rather than from a second walk of
+        // `samples`: one traversal, one meaning.
+        let curve: Vec<String> = rss.iter().map(|bytes| (bytes / 1024).to_string()).collect();
         out.push(format!("observe: rss KiB = {}", curve.join(",")));
         let files: Vec<String> = self.samples.iter().map(|s| s.files.to_string()).collect();
         out.push(format!("observe: changed files = {}", files.join(",")));
@@ -793,6 +827,153 @@ impl Report {
     }
 }
 
+/// Everything the shell holds between frames, which `vigia::run` calls `Shell`.
+///
+/// A struct rather than a dozen locals threaded through a paint function, for
+/// the reason the product has one: a paint reads and writes most of it, and the
+/// alternative is a thirteen-parameter call that nothing can keep in agreement
+/// with the loop around it.
+struct Pane<'w> {
+    app: App,
+    frame: vigia_core::Frame<'w>,
+    highlighter: Highlighter,
+    history: History,
+    theme: Theme,
+    area: Rect,
+    buffer: Buffer,
+    view: View,
+    body: Body,
+    /// What the header draws on the left. See [`tree_name`].
+    name: String,
+    /// The branch, when the empty state is the thing being drawn.
+    branch: Option<String>,
+    failed: u64,
+    last_error: Option<String>,
+}
+
+impl Pane<'_> {
+    /// `Shell::draw`: one paint, and a second when the first left a debt.
+    ///
+    /// **The debt is I7's whole mechanism.** The first frame draws plain and
+    /// owes its colour to the frame after it, because a grammar's patterns
+    /// compile on first use at 74-362ms and that is not a cost to put on the
+    /// frame a reader is waiting for (§6, §3's I7 row). A harness that painted
+    /// once would time the plain half of a frame the reader sees painted twice,
+    /// and would report the cheaper half as the frame.
+    fn draw(&mut self, worktree: &Worktree) {
+        self.paint(worktree);
+        if self.app.owes_repaint() {
+            self.paint(worktree);
+        }
+    }
+
+    /// One collect and one paint, in the order `Shell::paint` performs them.
+    ///
+    /// Three stages here are ones an earlier version of this file left out, and
+    /// each of them is a cost the report would otherwise have under-stated.
+    /// §7's own rule is that a gate is written against the caller's **whole**
+    /// frame and any stage left outside it is a stage nothing can regress you
+    /// on; the same arithmetic applies to an instrument, one step further along,
+    /// because a number is only comparable to the product's if it was taken over
+    /// the product's frame.
+    ///
+    /// - [`branch_for`], which reads `.git/HEAD` on exactly the frames that draw
+    ///   the empty state. Over the recorded sessions the tree was clean about
+    ///   half the time, so this is not a rare path here.
+    /// - The **second** `chrome`, rebuilt after the collect so a notice raised
+    ///   during it reaches this frame rather than the next one.
+    /// - [`regions`], which resolves the clickable areas from the drawn frame.
+    ///   It is inside the product's own draw closure and so inside its timed
+    ///   region.
+    ///
+    /// What stays out, named rather than discovered later: the terminal
+    /// takeover and the real `ratatui` terminal, which need a tty and are I8's;
+    /// and the input thread, because there is no reader. The buffer is a real
+    /// one and `render` writes into it.
+    fn paint(&mut self, worktree: &Worktree) {
+        self.branch = branch_for(&self.frame, || worktree.branch());
+        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
+        self.body = body_layout(self.area, &chrome, self.frame.files().len());
+        match self.app.view(
+            &mut self.frame,
+            &mut self.highlighter,
+            &self.history,
+            self.body,
+        ) {
+            Ok(fresh) => self.view = fresh,
+            Err(e) => {
+                self.failed += 1;
+                self.last_error = Some(e.to_string());
+                // The product warns rather than dies, and the notice it raises
+                // is what the rebuilt chrome below exists to carry.
+                self.app.warn(e.to_string());
+            }
+        }
+        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
+        let _regions = regions(self.area, &chrome, &self.view);
+        render(
+            &mut self.buffer,
+            self.area,
+            &self.view,
+            &self.theme,
+            &chrome,
+        );
+    }
+
+    /// The status bar's own p99 readout, as a reader glancing at the pane would
+    /// see it.
+    fn readout(&self) -> Option<Duration> {
+        self.app.chrome(&self.name, self.branch.as_deref()).frame
+    }
+}
+
+impl<'w> Pane<'w> {
+    /// Everything `vigia::run` builds before its first wake.
+    ///
+    /// An associated function rather than the body of [`drive`], so that
+    /// [`wiring`] can construct exactly what a session runs and drive one frame
+    /// through it without a watch, a window or a writer.
+    fn open(worktree: &'w Worktree, name: String) -> Self {
+        let mut frame = worktree.frame();
+        frame.advance().expect("the first walk");
+
+        let highlighter = Highlighter::new();
+        // The warmer, because `run` spawns one and this claims to be `run` with
+        // the terminal taken out. Joined rather than detached, so a one-off
+        // startup cost cannot land inside the first sample. The soak gives the
+        // same reason.
+        highlighter
+            .warm_ahead(
+                worktree.workdir().to_path_buf(),
+                frame
+                    .files()
+                    .iter()
+                    .take(WARM_FILES)
+                    .map(|change| change.path.clone())
+                    .collect(),
+            )
+            .join()
+            .expect("the warmer thread");
+
+        let area = Rect::new(0, 0, AREA.0, AREA.1);
+        Self {
+            app: App::new(),
+            frame,
+            highlighter,
+            history: History::new(),
+            theme: Theme::default(),
+            area,
+            buffer: Buffer::empty(area),
+            view: View::default(),
+            body: Body::default(),
+            name,
+            branch: None,
+            failed: 0,
+            last_error: None,
+        }
+    }
+}
+
 /// The loop, which is `vigia::run` with the terminal and the reader taken out.
 ///
 /// Everything the shell does between waking and drawing, in the order it does
@@ -802,33 +983,7 @@ impl Report {
 fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Report {
     let name = tree_name(tree);
     let worktree = Worktree::discover(tree).expect("discover the worktree under observation");
-    let mut frame = worktree.frame();
-    frame.advance().expect("the first walk");
-
-    let mut app = App::new();
-    let mut highlighter = Highlighter::new();
-    // The warmer, because `run` spawns one and this claims to be `run` with the
-    // terminal taken out. Joined rather than detached, so a one-off startup cost
-    // cannot land inside the first sample. The soak gives the same reason.
-    highlighter
-        .warm_ahead(
-            worktree.workdir().to_path_buf(),
-            frame
-                .files()
-                .iter()
-                .take(WARM_FILES)
-                .map(|change| change.path.clone())
-                .collect(),
-        )
-        .join()
-        .expect("the warmer thread");
-
-    let mut history = History::new();
-    let theme = Theme::default();
-    let area = Rect::new(0, 0, AREA.0, AREA.1);
-    let mut buffer = Buffer::empty(area);
-    let mut view = View::default();
-    let mut body = Body::default();
+    let mut pane = Pane::open(&worktree, name.clone());
 
     let stop = std::env::var(STOP).ok().map(PathBuf::from);
     let count = samples_for(window);
@@ -836,8 +991,7 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
     let started = Instant::now();
 
     let mut samples = Vec::with_capacity(count);
-    let (mut frames, mut ticks, mut idle_waits, mut failed) = (0u64, 0u64, 0u64, 0u64);
-    let mut last_error = None;
+    let (mut frames, mut ticks, mut idle_waits) = (0u64, 0u64, 0u64);
     let mut hist = Histogram::default();
     let mut worst: Vec<Worst> = Vec::with_capacity(WORST + 1);
     let mut stopped_early = false;
@@ -849,13 +1003,13 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
             samples.push(Sample {
                 at: started.elapsed(),
                 rss: vigia::memory::resident().unwrap_or(0),
-                readout: app.chrome(&name, None).frame,
-                files: frame.files().len(),
-                tracked_diffs: frame.tracked(),
-                tracked_spans: frame.tracked_spans(),
-                tracked_hunks: highlighter.tracked(),
-                tracked_history: history.tracked(),
-                body: body.diff,
+                readout: pane.readout(),
+                files: pane.frame.files().len(),
+                tracked_diffs: pane.frame.tracked(),
+                tracked_spans: pane.frame.tracked_spans(),
+                tracked_hunks: pane.highlighter.tracked(),
+                tracked_history: pane.history.tracked(),
+                body: pane.body.diff,
             });
             // Once per sample, never per frame: see `STOP`.
             if stop.as_deref().is_some_and(Path::exists) {
@@ -875,26 +1029,28 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
             // prove a point about the watch would be the wrong trade. The report
             // carries it as the last error and `ticks` says how far it got.
             Err(RecvTimeoutError::Disconnected) => {
-                last_error = Some("the watch thread ended before the window did".to_owned());
+                pane.last_error = Some("the watch thread ended before the window did".to_owned());
                 break;
             }
             Ok(paths) => {
                 ticks += 1;
                 // Sampled on the wake, before the walk, exactly where
                 // `vigia::run` samples it.
-                history.record(paths.iter().map(String::as_str), Instant::now());
+                pane.history
+                    .record(paths.iter().map(String::as_str), Instant::now());
                 // Advance first, follow second: the path is looked up in the
                 // file list, and before the walk that list is the previous
                 // frame's.
-                match frame.advance() {
+                match pane.frame.advance() {
                     Ok(()) => {
                         if let Some(path) = paths.last() {
-                            app.follow(path, &frame);
+                            let followed = path.clone();
+                            pane.app.follow(&followed, &pane.frame);
                         }
                     }
                     Err(e) => {
-                        failed += 1;
-                        last_error = Some(e.to_string());
+                        pane.failed += 1;
+                        pane.last_error = Some(e.to_string());
                     }
                 }
                 paths.len()
@@ -902,27 +1058,21 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
         };
 
         let began = Instant::now();
-        app.sample_memory();
-        let chrome = app.chrome(&name, None);
-        body = body_layout(area, &chrome, frame.files().len());
-        match app.view(&mut frame, &mut highlighter, &history, body) {
-            Ok(fresh) => view = fresh,
-            Err(e) => {
-                failed += 1;
-                last_error = Some(e.to_string());
-            }
-        }
-        render(&mut buffer, area, &view, &theme, &chrome);
+        // Before the paint and inside the timed region, exactly where
+        // `vigia::run` puts it: a readout measured outside the thing it reports
+        // is the omission §7 names.
+        pane.app.sample_memory();
+        pane.draw(&worktree);
         let cost = began.elapsed();
-        app.record_frame(cost);
+        pane.app.record_frame(cost);
         hist.record(cost);
         offer(
             &mut worst,
             Worst {
                 cost,
                 at: started.elapsed(),
-                files: frame.files().len(),
-                rows: view.rows.len(),
+                files: pane.frame.files().len(),
+                rows: pane.view.rows.len(),
                 tick_paths,
                 after: frames,
             },
@@ -940,15 +1090,15 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
         frames,
         ticks,
         idle_waits,
-        failed,
-        last_error,
+        failed: pane.failed,
+        last_error: pane.last_error,
         hist,
         worst,
         // Filled by the caller, which is the only place the watcher lives.
         watch: WatchStats::default(),
-        frame: frame.stats(),
-        highlight: highlighter.stats(),
-        history: history.stats(),
+        frame: pane.frame.stats(),
+        highlight: pane.highlighter.stats(),
+        history: pane.history.stats(),
     }
 }
 
@@ -1080,16 +1230,8 @@ fn observe_the_diff_against_git() {
         .cloned()
         .chain(undiffable.iter().cloned())
         .collect();
-    let mine: Vec<Row> = ours
-        .iter()
-        .filter(|row| !excluded.contains(&row.path))
-        .cloned()
-        .collect();
-    let theirs: Vec<Row> = numstat
-        .iter()
-        .filter(|row| !excluded.contains(&row.path))
-        .cloned()
-        .collect();
+    let mine = excluding(&ours, &excluded);
+    let theirs = excluding(&numstat, &excluded);
 
     let counts = disagreements(&mine, &theirs);
     let listed_paths: BTreeSet<String> = listed.iter().map(|(path, _)| path.clone()).collect();
@@ -1118,6 +1260,104 @@ fn observe_the_diff_against_git() {
 // ---------------------------------------------------------------------------
 // What `cargo test` carries
 // ---------------------------------------------------------------------------
+
+/// The one gate that is not over a pure function, because the one mechanism in
+/// this file that is not a pure function had nothing holding it.
+///
+/// [`Pane::draw`] settles the repaint debt I7 leaves after a plain first frame,
+/// and `SPEC.md` §7 records what that mechanism is worth: in the product,
+/// *"deleting the second statement left the whole suite green"*. This file
+/// copied the sequence a second time and got it **wrong** on the first attempt,
+/// which is the strongest possible argument for the gate: without the repaint,
+/// the harness timed the plain half of a frame the reader sees painted twice,
+/// and displaced its colour onto the next tick. Measured on the probe fixture
+/// before and after: a first frame of 5.52ms became **558.83ms**, which is the
+/// grammar compile arriving where the reader actually pays it.
+///
+/// Deliberately not over the watch, the window or a writer. A gate that waited
+/// for a filesystem event inside a one-second window would be timing-dependent
+/// on a loaded machine, and [#36](https://github.com/breferrari/vigia/issues/36)
+/// is this repository's open record of what that costs. One `draw` over a real
+/// worktree needs none of it.
+mod wiring {
+    use super::*;
+    use support::Scratch;
+
+    #[test]
+    fn one_draw_settles_the_repaint_debt_and_colours_the_frame() {
+        let scratch = Scratch::new("observe-wiring");
+        scratch.write("src/main.rs", "fn main() {\n    let x = 1;\n}\n");
+        scratch.commit_all("base");
+        scratch.write(
+            "src/main.rs",
+            "fn main() {\n    let x = 2;\n    let y = 3;\n}\n",
+        );
+
+        let worktree = scratch.worktree();
+        let mut pane = Pane::open(&worktree, "observe-wiring".to_owned());
+        assert!(
+            !pane.app.owes_repaint(),
+            "nothing is owed before the first collect"
+        );
+
+        pane.draw(&worktree);
+
+        assert_eq!(pane.failed, 0, "the draw failed: {:?}", pane.last_error);
+        assert!(
+            !pane.app.owes_repaint(),
+            "one draw must settle the debt it raises, or the harness times the \
+             plain half of a frame the reader sees painted twice"
+        );
+        assert!(
+            pane.highlighter.stats().lines > 0,
+            "the coloured pass never ran, so this frame is the plain one and the \
+             grammar compile landed on some later frame instead"
+        );
+        assert!(
+            !pane.view.rows.is_empty(),
+            "a frame over a changed file drew nothing, so what the two \
+             assertions above measured was an empty screen"
+        );
+    }
+
+    /// The other half, and it exists because a mutation survived the one above.
+    ///
+    /// `branch_for` reads `.git/HEAD` on **exactly** the frames that draw the
+    /// empty state, so over a worktree with a changed file in it the read never
+    /// happens and deleting it entirely leaves the gate above green. That is not
+    /// a rare corner here: the recorded sessions had a clean tree about half the
+    /// time, and a clean tree is the state `SPEC.md` §11.2 B3 calls *"the state
+    /// the tool sits in most of the time"*. So the cost this harness has to
+    /// measure includes a file read per frame that the dirty fixture cannot
+    /// reach, and it takes a second fixture to hold it. The same "span the axis
+    /// rather than move along it" answer §7 reaches twice.
+    #[test]
+    fn a_clean_tree_draws_its_branch_because_the_empty_state_names_it() {
+        let scratch = Scratch::new("observe-wiring-clean");
+        scratch.write("src/main.rs", "fn main() {}\n");
+        scratch.commit_all("base");
+
+        let worktree = scratch.worktree();
+        let mut pane = Pane::open(&worktree, "observe-wiring-clean".to_owned());
+        assert!(pane.frame.files().is_empty(), "the fixture is not clean");
+
+        pane.draw(&worktree);
+
+        assert_eq!(pane.failed, 0, "the draw failed: {:?}", pane.last_error);
+        assert_eq!(
+            pane.branch,
+            worktree.branch(),
+            "the empty state names the branch, so the frame that draws it pays \
+             the read, and a harness that skipped it would under-measure every \
+             frame over a clean tree"
+        );
+        assert!(
+            pane.branch.is_some(),
+            "the fixture has a commit on a named branch, so a `None` here means \
+             the assertion above compared two nothings"
+        );
+    }
+}
 
 /// Gates over the pure functions the two instruments draw their conclusions
 /// from.
