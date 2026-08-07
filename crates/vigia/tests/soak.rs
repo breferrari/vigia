@@ -109,8 +109,8 @@ const MIN_SAMPLES: usize = 12;
 ///
 /// `SPEC.md` §7: a drift gate over a window shorter than its own warmup is
 /// measuring warmup. Ten minutes leaves a minute of warmup and about two and a
-/// quarter minutes at each end of the comparison: 288 samples at 2.08s, 29
-/// discarded, 64 in each quarter.
+/// quarter minutes at each end of the comparison: 288 samples at 2.08s, at
+/// least 29 discarded, and a quarter of what is left at each end.
 const GATED_WINDOW: Duration = Duration::from_secs(600);
 
 /// File descriptors a sample may exceed the baseline by.
@@ -122,13 +122,63 @@ const GATED_WINDOW: Duration = Duration::from_secs(600);
 /// than passing quietly.
 const FD_HEADROOM: usize = 16;
 
-/// Fraction of the samples discarded before the baseline is taken.
+/// Samples discarded before the baseline the gate compares from, as a fraction
+/// of the run.
 ///
 /// Every process climbs to an allocator plateau before it is flat, and that
 /// climb is not a leak. Measuring from the first sample would read it as one,
 /// and the threshold needed to tolerate it would be wide enough to wave a real
 /// leak through.
+///
+/// **This prefix is workload-dependent and the gate uses it anyway, which is a
+/// ruling rather than an oversight.** A fraction of the *window* is
+/// window-independent, which is what it was chosen for, and it is not
+/// *workload*-independent: RSS reaches its plateau in about **thirty seconds**
+/// over the default 20 x 200 fixture and in about **eight hours** over the
+/// 100 x 500 one, so a tenth of a 24-hour run discards 2.4 hours of a climb
+/// that takes eight, and the first full window reported **13.26%** against a 5%
+/// budget on a process that moved 0.33 MiB across the sixteen hours past its
+/// plateau. That reading is a known instrument artifact, not a leak.
+///
+/// [#126](https://github.com/breferrari/vigia/issues/126) ruled that the answer
+/// is to **say so in the report** rather than to move this baseline: three
+/// detector formulations were built against it and each fell to a real
+/// leak-laundering shape, each defect inside the previous fix. The measured
+/// plateau is printed beside the verdict by [`settled_at`], and this fraction
+/// stays the gate. A gate that is wrong only in the loud direction, with the
+/// annotation a reader needs beside it, beats one that can be quietly wrong.
+///
+/// This is the RSS baseline's fraction and nothing else. Descriptors have their
+/// own, [`FD_WARMUP_FRACTION`], which is the same number for a different reason.
 const WARMUP_FRACTION: f64 = 0.10;
+
+/// Samples [`Report::gate_descriptors`] discards before its baseline.
+///
+/// **Equal to [`WARMUP_FRACTION`] and deliberately not the same constant**, and
+/// what separates them is that only one of the two is a floor. RSS climbs for
+/// hours at some fixtures, so its prefix is a lower bound under a measured
+/// plateau; descriptors are a small bounded integer that reaches its level in
+/// seconds, so there is no ramp for a detector to find and this fraction is the
+/// whole rule. Retuning the RSS floor is a change to where a 5% budget is
+/// measured from, and it must not silently move a handle-leak baseline as well:
+/// one number serving two rules is a number that is right for at most one of
+/// them the first time either moves.
+///
+/// The gate it feeds takes a **maximum** over the prefix rather than a median,
+/// which is why it can afford a coarse prefix: [`FD_HEADROOM`] is wide enough
+/// that the exact cut does not decide the verdict.
+const FD_WARMUP_FRACTION: f64 = 0.10;
+
+/// How close a rolling quarter median sits to the settled level before the
+/// series counts as plateaued.
+///
+/// A fifth of [`DRIFT_BUDGET`], and **nothing is gated on it**, which is what
+/// makes it affordable: [`settled_at`] only ever feeds the report, so a band a
+/// little tight or a little loose moves a printed number rather than a verdict.
+/// It sits on a smooth part of the curve rather than a cliff. Over the recorded
+/// 288-sample day (`statistic::DAY_LONG`) the walk reaches sample 135 at a band
+/// of 0.5%, 101 at 0.75%, 97 at 1%, 88 at 1.25%, 86 at 1.5% and 76 at 2%.
+const PLATEAU_BAND: f64 = 0.01;
 
 /// I3's budget: RSS drift over the window.
 ///
@@ -183,7 +233,8 @@ struct Drift {
     /// are exactly [`Drift::baseline`] and [`Drift::settled`], so taking the
     /// four at `len * k / 4` would put `quarters[3]`'s left edge a sample
     /// earlier on any series whose length is not a multiple of four — 259
-    /// post-warmup samples is the case a 288-sample run actually produces — and
+    /// post-warmup samples is what a 288-sample run leaves at the floor, and
+    /// 191 is what the recorded day leaves at its measured plateau — and
     /// the median I3 asserts on would then be taken over a different window.
     /// So the middle pair is measured a quarter's width *inward from each end*
     /// instead, leaving a gap of up to three samples in the centre that decides
@@ -197,6 +248,28 @@ struct Drift {
     /// gave memory back has not drifted, and reporting that as a signed number
     /// invites a threshold that passes for the wrong reason.
     ratio: f64,
+    /// Samples discarded before [`Drift::baseline`], which is always
+    /// [`WARMUP_FRACTION`]'s prefix: see [`settled_at`].
+    warm: usize,
+    /// Where the series settled, in samples, or `None` for a run that never
+    /// came inside the band. **Reported, never gated**: [`settled_at`].
+    settled: Option<usize>,
+    /// The same position as an elapsed time.
+    ///
+    /// Carried rather than derived, for the reason [`Drift::span`] gives about
+    /// the gradient: a position quoted in *samples* is only a duration while
+    /// the cadence is known, and the whole point of this number is that a
+    /// plateau is a property of the workload rather than of the window.
+    settled_at: Option<Duration>,
+    /// The same ends-ratio taken from [`Drift::settled`] instead of the floor.
+    /// **Reported, never gated.**
+    ///
+    /// The other half of the annotation, and the half that makes it useful: a
+    /// reader of a red day-long run sees the gate's 13.26% beside this 1.85%
+    /// and knows the first is a baseline sitting on a warmup ramp rather than a
+    /// leak. Taken through [`quarter_medians`], the same cut the gate uses, so
+    /// the two are one statistic over two baselines rather than two statistics.
+    settled_ratio: Option<f64>,
     /// Least-squares gradient over the post-warmup series, in MiB per hour.
     ///
     /// **Signed, where [`Drift::ratio`] deliberately is not, and the asymmetry
@@ -263,6 +336,105 @@ fn median(values: &[u64]) -> Option<u64> {
     Some(sorted[rank.saturating_sub(1).min(sorted.len() - 1)])
 }
 
+/// The four quarter medians of an already-warm series, or `None` when it is too
+/// short to have two ends.
+///
+/// Split out of [`drift`] because the gate needs the same slicing twice: once at
+/// the measured baseline, which is the number it asserts on, and once at
+/// [`Drift::settled`] for the plateau it prints beside that. Two spellings of
+/// one cut would be two answers to one question.
+fn quarter_medians(values: &[u64]) -> Option<[u64; 4]> {
+    // A quarter at each end, so the two never overlap however short the series
+    // is and the middle half is free to wander without deciding anything.
+    let quarter = values.len() / 4;
+    if quarter < MIN_END {
+        return None;
+    }
+    let end = values.len();
+    // Inward from each end rather than `end * k / 4`: see [`Drift::quarters`].
+    // The two never overlap, because `quarter` is a floor of a quarter, so
+    // `4 * quarter <= end` and therefore `2 * quarter <= end - 2 * quarter`.
+    Some([
+        median(&values[..quarter])?,
+        median(&values[quarter..quarter * 2])?,
+        median(&values[end - quarter * 2..end - quarter])?,
+        median(&values[end - quarter..])?,
+    ])
+}
+
+/// The gate's own statistic over four quarter medians: see [`Drift::ratio`].
+///
+/// The caller has checked `quarters[0]` is not zero; a baseline of zero is a
+/// platform that never answered rather than a process that used nothing.
+fn ends_ratio(quarters: [u64; 4]) -> f64 {
+    quarters[3].saturating_sub(quarters[0]) as f64 / quarters[0] as f64
+}
+
+/// The least a run may discard before its baseline: see [`WARMUP_FRACTION`].
+fn warmup_floor(len: usize) -> usize {
+    (len as f64 * WARMUP_FRACTION).ceil() as usize
+}
+
+/// Where the series settled, as a **reported** diagnostic and never as a gate.
+///
+/// **The gate's baseline is [`WARMUP_FRACTION`] and this does not move it.**
+/// That separation is the ruling on
+/// [#126](https://github.com/breferrari/vigia/issues/126) rather than an
+/// accident, and it is worth the paragraph because the alternative was tried
+/// three times.
+///
+/// The problem is real: a warmup prefix sized as a fraction of the *window* is
+/// window-independent, which is what it was chosen for, and it is not
+/// *workload*-independent. RSS reaches its plateau in about **thirty seconds**
+/// over the default 20 x 200 fixture and in about **eight hours** over the
+/// 100 x 500 one, where allocator arenas and four retained caches accrete
+/// toward their bounds for a third of a day-long run. A tenth of a 24-hour run
+/// therefore discards 2.4 hours of an 8-hour climb, the first quarter's median
+/// sits on the ramp, and the ends-ratio measures climb-to-plateau: the first
+/// full window reported **13.26%** against a 5% budget on a process that moved
+/// 0.33 MiB across the sixteen hours past its plateau.
+///
+/// **What was tried and does not work is placing the gate's baseline here.**
+/// Three formulations each fell to a real shape, each defect living inside the
+/// previous fix: a leak between two plateaus absorbed as warmup (4.24% against
+/// a 20.00% window), then one 4 KiB page defeating the clause added to stop
+/// that (4.77% against 29.50%), then a warmup followed by a flat stretch
+/// followed by a leak through the same clause again (4.99% against 25.00%). The
+/// shared root is that a walk finds a plateau's **end** and a gate would need
+/// its whole **shape**, which is change-point detection and is a discipline
+/// rather than a patch. `SPEC.md` §7 carries the ruling.
+///
+/// So the number is printed instead. A reader of a red day-long run gets the
+/// gate's figure and this one together and judges with both in hand, which is
+/// the same division `SPEC.md` §7 already draws between the ratio it asserts
+/// and the quarters and gradient it only reports.
+///
+/// The walk itself: the settled **level** is the median of the last quarter of
+/// the series, and a rolling window of that same quarter width steps back from
+/// the end while its median stays within [`PLATEAU_BAND`] of the level. `None`
+/// is a run that never came inside the band before its own final window, which
+/// is what a leak and a window shorter than its own warmup both look like.
+fn settled_at(values: &[u64]) -> Option<usize> {
+    let quarter = values.len() / 4;
+    let level = quarter_medians(values).map(|whole| whole[3])?;
+    if level == 0 {
+        return None;
+    }
+
+    let settled = |at: usize| {
+        median(&values[at..at + quarter])
+            .is_some_and(|m| m.abs_diff(level) as f64 / (level as f64) < PLATEAU_BAND)
+    };
+    let last = values.len() - quarter;
+    let mut at = last;
+    while at > 0 && settled(at - 1) {
+        at -= 1;
+    }
+    // Nothing before the final window was ever in band, so there is no plateau
+    // to report rather than one that happens to sit at the end.
+    (at < last).then_some(at)
+}
+
 /// What `rss` drifted by, or `None` when the series cannot answer.
 ///
 /// Medians at both ends rather than first-against-last, because RSS jitters by
@@ -275,39 +447,45 @@ fn median(values: &[u64]) -> Option<u64> {
 /// can exist. A leak in the harness that never leaked, and a plateau that never
 /// plateaued, are both reachable here in microseconds.
 fn drift(samples: &[(Duration, u64)]) -> Option<Drift> {
-    let warm = (samples.len() as f64 * WARMUP_FRACTION).ceil() as usize;
-    let rest = samples.get(warm..)?;
-
-    // A quarter at each end, so the two never overlap however short the series
-    // is and the middle half is free to wander without deciding anything.
-    let quarter = rest.len() / 4;
-    if quarter < MIN_END {
-        return None;
-    }
-
-    // Projected once, so the four windows are slices of one buffer rather than
-    // four throwaway copies, and so `median` keeps the `&[u64]` signature its
+    // Projected once, so every window below is a slice of one buffer rather
+    // than a throwaway copy, and so `median` keeps the `&[u64]` signature its
     // own tests call it through.
-    let values: Vec<u64> = rest.iter().map(|&(_, rss)| rss).collect();
-    let end = values.len();
-    // Inward from each end rather than `end * k / 4`: see [`Drift::quarters`].
-    // The two never overlap, because `quarter` is a floor of a quarter, so
-    // `4 * quarter <= end` and therefore `2 * quarter <= end - 2 * quarter`.
-    let quarters = [
-        median(&values[..quarter])?,
-        median(&values[quarter..quarter * 2])?,
-        median(&values[end - quarter * 2..end - quarter])?,
-        median(&values[end - quarter..])?,
-    ];
-    // A baseline of zero means the platform did not report RSS at all, and a
-    // ratio against it would be an infinity that passes or fails by luck.
-    if quarters[0] == 0 {
+    let values: Vec<u64> = samples.iter().map(|&(_, rss)| rss).collect();
+
+    // **The gate's baseline, and the only one it has.** See [`settled_at`] for
+    // why the measured plateau below is printed and never substituted here.
+    let warm = warmup_floor(values.len());
+    let rest = samples.get(warm..)?;
+    let quarters = quarter_medians(&values[warm..])?;
+
+    // A zero at either end means the platform stopped reporting RSS, and
+    // neither end may be one. A zero *baseline* makes the ratio an infinity
+    // that passes or fails by luck. A zero *settled* figure is worse, because
+    // it passes quietly: [`ends_ratio`] clamps a fall to zero, so a run whose
+    // reads vanish half way through reported 0.00% drift and looked like the
+    // flattest process ever measured. Only the baseline was guarded until a
+    // mutation went looking for the other end.
+    if quarters[0] == 0 || quarters[3] == 0 {
         return None;
     }
+
+    // The plateau, reported beside the verdict and never inside it. Its own
+    // drift is taken through the same cut the gate uses, so the two figures a
+    // reader compares are the same statistic over two baselines rather than two
+    // statistics.
+    let settled = settled_at(&values);
+    let settled_ratio = settled
+        .and_then(|at| quarter_medians(&values[at..]))
+        .filter(|ends| ends[0] != 0)
+        .map(ends_ratio);
 
     Some(Drift {
         quarters,
-        ratio: quarters[3].saturating_sub(quarters[0]) as f64 / quarters[0] as f64,
+        ratio: ends_ratio(quarters),
+        warm,
+        settled,
+        settled_at: settled.and_then(|at| samples.get(at).map(|&(at, _)| at)),
+        settled_ratio,
         // Over `rest`, not over `samples`: the warmup climb is not drift, and a
         // gradient fitted through it would report the allocator plateau as a
         // trend for exactly the reason the medians discard it.
@@ -572,6 +750,33 @@ impl Report {
                     mb(self.samples.iter().map(|s| s.rss).min().unwrap_or(0)),
                     mb(self.samples.iter().map(|s| s.rss).max().unwrap_or(0)),
                 );
+                // The measured plateau, printed beside the gate's own figure
+                // and never inside it.
+                //
+                // **This is the annotation a red day-long run needs.** The gate
+                // compares from `WARMUP_FRACTION`'s prefix, which at a fixture
+                // whose plateau takes a third of the run leaves its baseline on
+                // the ramp; the number below is what the same statistic says
+                // from where the series actually settled. A reader with both in
+                // hand can tell a baseline artifact from a leak, which is the
+                // whole of what #126 asked for. See [`settled_at`] for why it
+                // is printed rather than substituted.
+                match (drift.settled, drift.settled_at, drift.settled_ratio) {
+                    (Some(at), Some(elapsed), Some(ratio)) => println!(
+                        "soak: rss plateau: settled at sample {} of {} ({} in), drift from there {:.2}% (reported, not gated)",
+                        at,
+                        self.samples.len(),
+                        span(elapsed),
+                        ratio * 100.0,
+                    ),
+                    // One prefix across both, because the parent asserts this
+                    // line reaches a reader and an assertion that only matches
+                    // the settled case would be satisfied by every long window
+                    // and silently absent from every short one.
+                    _ => {
+                        println!("soak: rss plateau: none inside this window (reported, not gated)")
+                    }
+                }
                 // The shape, and the gradient through it. `SPEC.md` §10's open
                 // question about I3 is a *sign* disagreement between two runs,
                 // and it was settled by hand off the series below the last time
@@ -1299,7 +1504,9 @@ impl Report {
             return;
         }
 
-        let warm = ((counts.len() as f64 * WARMUP_FRACTION).ceil() as usize).max(1);
+        // Its own fraction rather than the RSS baseline's, and the reason both
+        // exist is on [`FD_WARMUP_FRACTION`].
+        let warm = (((counts.len() as f64 * FD_WARMUP_FRACTION).ceil()) as usize).max(1);
         let baseline = counts[..warm].iter().copied().max().unwrap_or(0);
         let peak = counts[warm..].iter().copied().max().unwrap_or(0);
         assert!(
@@ -1384,11 +1591,16 @@ impl Report {
         // first question asked of a breach is whether it was a trend or a step
         // and neither is legible from a ratio. The ends are `quarters[0]` and
         // `quarters[3]`, so they are stated once rather than twice.
+        //
+        // **And the measured plateau travels with it**, because the second
+        // question is whether the comparison started on a ramp. The day-long
+        // window failed at 13.26% on a process that moved 0.33 MiB across the
+        // sixteen hours past its plateau, and a breach that does not carry that
+        // annotation sends the next reader to the series to work it out, which
+        // is what #126 cost.
         assert!(
             drift.ratio < DRIFT_BUDGET,
-            "I3: RSS drifted {:.2}% over {:?}, over the {:.0}% budget: quarters \
-             {:.2}, {:.2}, {:.2}, {:.2} MiB at {:+.2} MiB/h, peak {:.2} MiB over \
-             {} frames",
+            "I3: RSS drifted {:.2}% over {:?}, over the {:.0}% budget: quarters {:.2}, {:.2}, {:.2}, {:.2} MiB at {:+.2} MiB/h, peak {:.2} MiB over {} frames, from the {:.0}% baseline at sample {}. {}",
             drift.ratio * 100.0,
             self.window,
             DRIFT_BUDGET * 100.0,
@@ -1399,6 +1611,16 @@ impl Report {
             drift.slope,
             mib(self.samples.iter().map(|s| s.rss).max().unwrap_or(0)),
             self.frames,
+            WARMUP_FRACTION * 100.0,
+            drift.warm,
+            match (drift.settled, drift.settled_ratio) {
+                (Some(at), Some(ratio)) => format!(
+                    "The series settled at sample {at} and drifts {:.2}% from there, so read this breach against that before calling it a leak",
+                    ratio * 100.0
+                ),
+                _ => "The series never settled inside this window, so there is no plateau to read the breach against"
+                    .to_owned(),
+            },
         );
     }
 }
@@ -1462,7 +1684,15 @@ fn resources_are_flat_and_nothing_is_retained() {
     // `Report::print` left the whole suite green, which is the shape
     // `CLAUDE.md` calls a wish. The statistic is gated by `mod statistic`; this
     // is the line that says it reaches a reader.
-    for expected in ["soak: rss quarters ", " MiB/h over ", "soak: rss baseline "] {
+    for expected in [
+        "soak: rss quarters ",
+        " MiB/h over ",
+        "soak: rss baseline ",
+        // The measured plateau, which `SPEC.md` §7 says is printed beside the
+        // gate's own figure. A number nobody can see is the same wish the
+        // quarters were before this loop existed.
+        "soak: rss plateau: ",
+    ] {
         assert!(
             report.contains(expected),
             "the soak's report carries no {expected:?}, so a number \
@@ -1531,6 +1761,66 @@ fn soak_child() {
     let report = soak(&scratch, files, lines, window);
     report.print();
     report.gate();
+}
+
+/// No message this file prints carries a run of collapsed indentation.
+///
+/// **A mechanical defect caught by review rather than by a gate, so it gets a
+/// gate.** A `\` continuation inside a string literal strips the newline *and*
+/// the indentation that follows it, which is the idiom every long message here
+/// uses. Rewrite one of those literals onto a single line and the continuation
+/// goes with it, leaving the indentation behind as real spaces: the 600-second
+/// run printed `settled at sample 85 of 288 (179.2s in),` followed by
+/// twenty-six of them. Seven literals had it at once, because they were all
+/// inserted the same way.
+///
+/// Reading this file's own source is the same move
+/// [`the_soak_workflow_cannot_kill_the_window_it_offers`] makes on the workflow
+/// and for the same reason: the property is about the text, so the text is what
+/// the gate reads. Three spaces rather than two, so ordinary sentence spacing
+/// and an aligned `{:.2}` cannot trip it.
+///
+/// The workflow scan's own literals are exempt by name: their interior spacing
+/// is what they match on, so squashing it would break what they are for.
+#[test]
+fn no_message_in_this_file_prints_collapsed_indentation() {
+    // `CARGO_MANIFEST_DIR` rather than `file!()`, which is relative to the
+    // workspace root while a test runs from the crate: the same join
+    // [`workflow`] already makes for the same reason.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/soak.rs");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read this file's own source at {}: {e}", path.display()));
+    let exempt = ["run: |", "strip_prefix", "starts_with("];
+    // Built rather than written, or this line is its own first offender.
+    let run = " ".repeat(3);
+
+    let offenders: Vec<(usize, &str)> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !exempt.iter().any(|k| line.contains(k)))
+        .filter(|(_, line)| {
+            // Between the first and last quote on the line, which is coarse and
+            // enough: the literals this catches are all message text.
+            match (line.find('"'), line.rfind('"')) {
+                (Some(open), Some(close)) if close > open => line[open..close].contains(&run),
+                _ => false,
+            }
+        })
+        .map(|(at, line)| (at + 1, line.trim()))
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "{} message(s) in this file carry a run of three or more spaces, which is what a backslash continuation leaves behind when its literal is rewritten onto one line:
+{}",
+        offenders.len(),
+        offenders
+            .iter()
+            .map(|(at, line)| format!("  {at}: {}", &line[..line.len().min(120)]))
+            .collect::<Vec<_>>()
+            .join("
+")
+    );
 }
 
 /// The soak workflow, at `.github/workflows/soak.yml`.
@@ -2169,6 +2459,51 @@ mod statistic {
         (0..288).map(|at| mb(200.0 - 0.2 * at as f64)).collect()
     }
 
+    /// The leak the gate is calibrated on, sized just over the budget rather
+    /// than absurdly over it.
+    ///
+    /// 288 samples growing 0.05% each is 14.4% end to end. **0.05% is the
+    /// calibration**, which is the reason this is a function and not a literal
+    /// in two tests: [`a_linear_leak_is_caught`] owns the verdict and
+    /// [`a_series_that_never_settles_keeps_the_fraction_floor`] owns where the
+    /// baseline came from, and a rate retuned in one of them and not the other
+    /// would leave two tests disagreeing about what "just over budget" means.
+    fn leaking() -> Vec<u64> {
+        (0..288)
+            .map(|at| mb(100.0 * (1.0 + 0.0005 * at as f64)))
+            .collect()
+    }
+
+    /// A process that climbs hard and reaches its plateau inside the floor.
+    ///
+    /// The allocator's own shape, and the case that decides [`WARMUP_FRACTION`]:
+    /// first sample to last it climbs 140%. Shared by the
+    /// test that says it is not drift and the report line that shows where it
+    /// settled, which are two claims about one series.
+    fn plateaus_early() -> Vec<u64> {
+        let climb = 288 * 8 / 100;
+        (0..288)
+            .map(|at| {
+                if at < climb {
+                    mb(50.0 + 70.0 * (at as f64 / climb as f64))
+                } else {
+                    mb(120.0)
+                }
+            })
+            .collect()
+    }
+
+    /// A strictly increasing series, so no two samples share a value.
+    ///
+    /// `step` is a parameter of one function rather than a literal in each of
+    /// the two callers, so the value they have to agree on lives once.
+    fn ramp(step: u64) -> Vec<u64> {
+        (0..288).map(|at| mb(60.0) + at as u64 * step).collect()
+    }
+
+    /// The step this module's ramps take: see [`ramp`].
+    const RAMP_STEP: u64 = 12288;
+
     /// The interval a full-length run samples at.
     ///
     /// 288 samples across 24 hours, which is `SPEC.md`'s "every 5 min" and the
@@ -2223,12 +2558,17 @@ mod statistic {
     /// 288 samples growing 0.05% each is 14.4% end to end. The warmup discards
     /// 29, so the baseline is the median of samples 29..93 and the settled
     /// figure is the median of 224..288, which is about 9.5% apart.
+    ///
+    /// **This is the calibration, and it is the reason the gate keeps
+    /// [`WARMUP_FRACTION`]'s baseline.** A leak of this shape is caught from the
+    /// fraction, unchanged by everything
+    /// [#126](https://github.com/breferrari/vigia/issues/126) looked at, which
+    /// is what makes it affordable to leave the measured plateau out of the gate
+    /// path entirely: the gate's one real duty is already discharged here, and
+    /// a second time by the structural tier.
     #[test]
     fn a_linear_leak_is_caught() {
-        let series: Vec<u64> = (0..288)
-            .map(|at| mb(100.0 * (1.0 + 0.0005 * at as f64)))
-            .collect();
-        let drift = verdict(&series);
+        let drift = verdict(&leaking());
         assert!(
             drift.ratio > DRIFT_BUDGET,
             "a series that grew 14% over the window reported {:.2}% drift, under \
@@ -2242,7 +2582,8 @@ mod statistic {
     ///
     /// The climb is over inside the first 8% of the window, so the warmup
     /// swallows it whole. This is the case that decides `WARMUP_FRACTION`: with
-    /// no warmup at all, the same series drifts by 140%.
+    /// no warmup at all, the same series climbs 140% from its first sample to its
+    /// last.
     ///
     /// **It is also the only fixture here that can tell where the gradient was
     /// fitted**, and it did not always assert on one. Every other series in
@@ -2252,18 +2593,7 @@ mod statistic {
     /// plateau: past the warmup it is flat, through it, steeply positive.
     #[test]
     fn growth_that_stops_inside_the_warmup_is_not_drift() {
-        let climb = 288 * 8 / 100;
-        let series: Vec<u64> = (0..288)
-            .map(|at| {
-                if at < climb {
-                    mb(50.0 + 70.0 * (at as f64 / climb as f64))
-                } else {
-                    mb(120.0)
-                }
-            })
-            .collect();
-
-        let drift = verdict(&series);
+        let drift = verdict(&plateaus_early());
         assert!(
             drift.ratio < DRIFT_BUDGET,
             "a process that reached its plateau in the first 8% of the window \
@@ -2325,10 +2655,10 @@ mod statistic {
     /// same rank however the window shifts under it. So both shapes run, and
     /// each end is re-derived from `SPEC.md` §7's rule rather than from the
     /// code under test.
+    ///
     #[test]
     fn the_gated_ends_are_the_first_and_last_quarter_medians() {
-        // Strictly increasing by a page, so no two samples share a value.
-        let ramp: Vec<u64> = (0..288).map(|at| mb(60.0) + at as u64 * 4096).collect();
+        let ramp = ramp(RAMP_STEP);
         // The same, plus an outlier at post-warmup index 194: the sample
         // `end * 3 / 4` includes in the last quarter and `end - quarter` does
         // not.
@@ -2341,7 +2671,7 @@ mod statistic {
         for (shape, series) in [("a ramp", &ramp), ("a ramp with an outlier", &spiked)] {
             let drift = verdict(series);
 
-            let warm = (series.len() as f64 * WARMUP_FRACTION).ceil() as usize;
+            let warm = warmup_floor(series.len());
             let rest = &series[warm..];
             let quarter = rest.len() / 4;
             assert_eq!(
@@ -2397,11 +2727,12 @@ mod statistic {
     /// quarter and shifted its rank by exactly the sample the two windows
     /// differ by, making `quarters[2]` identical under both and leaving one
     /// live assertion where the doc claimed two.
+    ///
     #[test]
     fn the_middle_quarters_are_measured_inward_from_the_ends() {
-        // Strictly increasing by a page. No outlier: see above.
-        let series: Vec<u64> = (0..288).map(|at| mb(60.0) + at as u64 * 4096).collect();
-        let warm = (series.len() as f64 * WARMUP_FRACTION).ceil() as usize;
+        // No outlier: see above.
+        let series = ramp(RAMP_STEP);
+        let warm = warmup_floor(series.len());
         // **The same guard the ends test carries, and for a sharper reason.**
         // Where the post-warmup length divides by four, the inward cut and the
         // `end * k / 4` cut are the *same four windows*, so this test would
@@ -2462,21 +2793,50 @@ mod statistic {
         );
     }
 
-    /// A gradient carries the span it was divided by.
+    /// A gradient carries the span it was divided by, and the span follows the
+    /// baseline that was actually used.
     ///
     /// See [`Drift::span`]. Without it the four figures `SPEC.md` §10 asks a
     /// reader to compare are not comparable, because the same wander reads
     /// +364 MiB/h over fifteen seconds and +0.92 over an hour.
+    ///
+    /// **Two fixtures, because one of them cannot see half the claim.** A flat
+    /// series takes the floor, so on it the floor and the measured baseline are
+    /// the same number and a gradient still fitted from the floor would pass.
+    /// The recorded day is the case where they differ by 68 samples: fitting
+    /// past the fraction rather than past the plateau puts nearly six hours of
+    /// climb back into a slope printed as the settled one, which is the figure
+    /// §10 asks a reader to compare between runs.
     #[test]
     fn the_gradient_is_reported_with_the_span_it_was_fitted_over() {
-        let drift = verdict(&flat(288));
-        let rest = 288 - (288.0 * WARMUP_FRACTION).ceil() as usize;
-        assert_eq!(
-            drift.span,
-            SAMPLE * (rest as u32 - 1),
-            "the span is not the post-warmup elapsed time, so it describes a \
-             different window from the gradient it is printed beside"
-        );
+        for (shape, series) in [
+            ("a flat series", flat(288)),
+            ("the recorded day", day_long()),
+        ] {
+            let drift = verdict(&series);
+            assert_eq!(
+                drift.span,
+                SAMPLE * (series.len() - drift.warm) as u32 - SAMPLE,
+                "over {shape}, the span is not the elapsed time past the \
+                 baseline the gate used, so it describes a different window \
+                 from the gradient it is printed beside"
+            );
+            // **And the gradient itself, not only its span.** The two are
+            // separate expressions over what is meant to be one slice, so a
+            // slope fitted from the fraction while the span is taken from the
+            // plateau leaves both fields present, plausible, and describing
+            // different windows. Mutation confirmed it: pointing `slope` at
+            // the floor left the whole suite green until this line existed.
+            //
+            // A least-squares gradient is invariant to shifting its clock, so
+            // re-sampling the tail from zero is the same fit the report did.
+            assert_eq!(
+                drift.slope,
+                mib_per_hour(&sampled(&series[drift.warm..])),
+                "over {shape}, the gradient is not fitted past the baseline the \
+                 gate used"
+            );
+        }
     }
 
     /// The gradient, in the units the report prints and against a series whose
@@ -2605,5 +2965,191 @@ mod statistic {
              middle pair is not being measured where the ends are",
             drift.quarters
         );
+    }
+
+    /// The RSS series of the first full-window soak, in KiB, in sample order.
+    ///
+    /// Reference machine, release, 100 x 500 fixture, **86,400 seconds** from
+    /// 2026-08-05 22:22, 288 samples at a five-minute cadence, 1,850,935 frames.
+    /// The reading is on [#47](https://github.com/breferrari/vigia/issues/47) and
+    /// the series is preserved on
+    /// [#126](https://github.com/breferrari/vigia/issues/126); both were checked
+    /// byte for byte against `target/soak-24h-2026-08-05.log` before this was
+    /// copied out of it, and that log lives in a gitignored directory one
+    /// `cargo clean` from gone, which is why it is here.
+    ///
+    /// **It is the only fixture in this module that was not invented**, and that
+    /// is its whole value: every other series here is a shape someone chose,
+    /// which means every one of them can be chosen to agree with the code. This
+    /// one was produced by the process the gate is about, and the gate failed on
+    /// it.
+    const DAY_LONG: [u32; 288] = [
+        28768, 28552, 29140, 28488, 26764, 28256, 28672, 28864, 29288, 28916, 28068, 27308, 27056,
+        29632, 30732, 29816, 29888, 29068, 30100, 30488, 30596, 31136, 30668, 32016, 31012, 30448,
+        29872, 31252, 32696, 28848, 31332, 30132, 31540, 31084, 31368, 31696, 31348, 31784, 32696,
+        30448, 31324, 31592, 32828, 32048, 29752, 30696, 31556, 30748, 30932, 31528, 31056, 30984,
+        32724, 31028, 30712, 28772, 31752, 31188, 31736, 32148, 30976, 30984, 32660, 30796, 33064,
+        32380, 31908, 30280, 31216, 31788, 33104, 32684, 32536, 32688, 31976, 31420, 31304, 32088,
+        32812, 31608, 32448, 31916, 32468, 32056, 31840, 32344, 32364, 32248, 32876, 31436, 34124,
+        35520, 34568, 34464, 35256, 35456, 35208, 34664, 35756, 36176, 34944, 34676, 35352, 35336,
+        34844, 35304, 36092, 34604, 34552, 34432, 34404, 35272, 33128, 35004, 36316, 35992, 35580,
+        36252, 35048, 35400, 34872, 34820, 35884, 34880, 35812, 34840, 36448, 34820, 35640, 36736,
+        35960, 35808, 34912, 36236, 35420, 35592, 35592, 35564, 36016, 36920, 36792, 35832, 35324,
+        37036, 36344, 35740, 36288, 36016, 34724, 35964, 35908, 35152, 35532, 35748, 35976, 36420,
+        36520, 35792, 35260, 35828, 35708, 36272, 35088, 36480, 34752, 36312, 36712, 34764, 35712,
+        36676, 35304, 35828, 36100, 35960, 34892, 35368, 35708, 35448, 35420, 35948, 35404, 35332,
+        34728, 36384, 36060, 35068, 35208, 34580, 35192, 36280, 35408, 36044, 35288, 35592, 33524,
+        35784, 35236, 36532, 35900, 36060, 36388, 35608, 34544, 36280, 36420, 36608, 36436, 36036,
+        36052, 35464, 35864, 36120, 35136, 35860, 35664, 36180, 36128, 36540, 36496, 36380, 35172,
+        36148, 35960, 36556, 34980, 35900, 35536, 36964, 34376, 36300, 36240, 34576, 35380, 35612,
+        35520, 35716, 36564, 35968, 36120, 34736, 35804, 36272, 35312, 36344, 35616, 36416, 35488,
+        35572, 35452, 35648, 36236, 37188, 35112, 36104, 37132, 35948, 36172, 35852, 36476, 36288,
+        33876, 35892, 35668, 36252, 34608, 35860, 36792, 36556, 36288, 36240, 37124, 37096, 35476,
+        37100, 35912, 35708, 36656, 35816, 37192, 36496, 36076, 33888, 35748, 35532, 35800, 36232,
+        35332, 36232,
+    ];
+
+    /// [`DAY_LONG`] as the byte counts the statistic takes.
+    fn day_long() -> Vec<u64> {
+        DAY_LONG.iter().map(|&kib| u64::from(kib) * 1024).collect()
+    }
+
+    /// The recorded day, re-derived: it breached through a window fraction and
+    /// does not through a measured plateau.
+    ///
+    /// **Both halves, because either alone is satisfiable by a mistake.** A test
+    /// asserting only that the day passes now is passed by deleting the gate;
+    /// one asserting only that the fraction failed is passed by any code at all,
+    /// since the fraction is not what runs. Together they say the thing
+    /// [#126](https://github.com/breferrari/vigia/issues/126) claims: that one
+    /// series, unchanged, is a breach under one baseline rule and is not under
+    /// the other, so what changed is where the comparison starts and not what it
+    /// tolerates.
+    ///
+    /// This is also the re-derivation
+    /// [#47](https://github.com/breferrari/vigia/issues/47) is waiting on, which
+    /// is why it is a test rather than a paragraph: the run does not need
+    /// repeating to re-derive its own statistic, and a number recovered by hand
+    /// off a printed series is a number nobody can check again.
+    #[test]
+    fn the_recorded_day_breaches_the_gate_and_the_report_explains_why() {
+        let series = day_long();
+        let drift = verdict(&series);
+
+        assert!(
+            drift.ratio >= DRIFT_BUDGET,
+            "the recorded day reported {:.2}% from the {:.0}% floor, inside the {:.0}% budget, so the breach this whole issue exists to explain is not in this fixture and nothing below proves anything",
+            drift.ratio * 100.0,
+            WARMUP_FRACTION * 100.0,
+            DRIFT_BUDGET * 100.0
+        );
+        assert_eq!(
+            drift.warm,
+            warmup_floor(series.len()),
+            "the gate's baseline moved off the fraction, which is the one thing #126's ruling says it must not do"
+        );
+
+        let (Some(at), Some(settled)) = (drift.settled, drift.settled_ratio) else {
+            panic!(
+                "the recorded day reports no plateau at all, so a reader of its breach gets the 13.26% and nothing to read it against"
+            );
+        };
+        assert!(
+            settled < DRIFT_BUDGET,
+            "the recorded day settles at sample {at} and reports {:.2}% from there, over the {:.0}% budget: the annotation is supposed to be what shows the breach is a baseline on a warmup ramp rather than a leak, and this one shows nothing",
+            settled * 100.0,
+            DRIFT_BUDGET * 100.0
+        );
+        assert!(
+            at > drift.warm,
+            "the plateau is reported at sample {at}, at or before the gate's own baseline at {}, so the two figures describe the same window and the annotation is empty",
+            drift.warm
+        );
+    }
+
+    /// The annotation must never talk a step down.
+    ///
+    /// **The report's own safety property, and the reason the plateau is
+    /// printed rather than gated.** [`settled_at`] walks back to where a series
+    /// stopped moving, and a step that never comes back stops moving the sample
+    /// after it: the walk will happily report a plateau just past a leak. That
+    /// is harmless while the number is an annotation and would not be if it were
+    /// the verdict, which is the whole of
+    /// [#126](https://github.com/breferrari/vigia/issues/126)'s ruling in one
+    /// fixture.
+    ///
+    /// So two things are asserted. The gate still catches every step from
+    /// [`WARMUP_FRACTION`]'s baseline, unchanged by any of this. And where the
+    /// report does offer a plateau, its figure is over budget too, so a reader
+    /// is never told that a step is a warmup artifact.
+    #[test]
+    fn the_report_never_annotates_a_step_away() {
+        for (at, after) in [
+            (72, 36.0),
+            (100, 36.0),
+            (144, 36.0),
+            (200, 36.0),
+            (100, 31.8),
+        ] {
+            let series: Vec<u64> = (0..288)
+                .map(|sample| if sample < at { mb(30.0) } else { mb(after) })
+                .collect();
+            let drift = verdict(&series);
+
+            assert!(
+                drift.ratio >= DRIFT_BUDGET,
+                "a step to {after:.1} MiB at sample {at} reported {:.2}% drift from the {:.0}% floor, inside the {:.0}% budget, so the gate this issue leaves untouched has stopped catching a step",
+                drift.ratio * 100.0,
+                WARMUP_FRACTION * 100.0,
+                DRIFT_BUDGET * 100.0
+            );
+            if let Some(settled) = drift.settled_ratio {
+                assert!(
+                    settled >= DRIFT_BUDGET,
+                    "a step to {after:.1} MiB at sample {at} breaches at {:.2}% and the report annotates it with {:.2}% from its plateau, inside the budget: a reader is being told a step is a warmup artifact, which is the one thing this annotation must never say",
+                    drift.ratio * 100.0,
+                    settled * 100.0
+                );
+            }
+        }
+    }
+
+    /// A platform that never reported RSS gets no verdict, rather than a ratio
+    /// against nothing.
+    ///
+    /// **Both ends, because guarding one alone leaves the other open.** `drift`
+    /// refuses when either the gated baseline or the settled figure is zero.
+    /// Only the baseline was guarded until a mutation showed the settled end
+    /// mattered more: `ends_ratio` clamps a fall to zero, so a vanished series
+    /// read as the flattest process ever measured. A ratio whose
+    /// denominator is zero is an infinity that passes or fails by luck, and
+    /// `SPEC.md` §7's rule is that a gate which cannot say "no drift" has not
+    /// been tested.
+    #[test]
+    fn a_series_that_reported_no_memory_has_no_verdict() {
+        for (shape, series) in [
+            ("a platform that answered zero throughout", vec![0u64; 288]),
+            (
+                "a platform that answered zero until the last quarter",
+                (0..288)
+                    .map(|at| if at < 216 { 0 } else { mb(100.0) })
+                    .collect::<Vec<u64>>(),
+            ),
+            // The one that passes rather than refusing, if only the baseline is
+            // guarded: a fall is clamped to zero, so this reported 0.00% drift.
+            (
+                "a platform that stopped answering half way through",
+                (0..288)
+                    .map(|at| if at < 144 { mb(100.0) } else { 0 })
+                    .collect::<Vec<u64>>(),
+            ),
+        ] {
+            assert_eq!(
+                drift(&sampled(&series)),
+                None,
+                "{shape} produced a verdict, and the ratio behind it divides by \
+                 a baseline of zero"
+            );
+        }
     }
 }
