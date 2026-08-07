@@ -321,6 +321,7 @@ At the end of the pass, diff the shipment against the plan and report the result
   ```
 
   That milestone is named literally because it is the shelf that exists today. **The shelf is a class, not a name** — step 1's rule 2 identifies one by a description beginning `Shelf:` — so if a second is ever added, file against the right one rather than against this string.
+- **A finding about the process files to the Shelf, and instrument work is takeable only when a product pass is blocked by it.** An audit that surfaces a defect in a gate, a check, a skill, or a workflow has found something real and not something *next*: it goes to the Shelf with its dated reason like any deferral, never into a phase. The instruments generate findings faster than the product generates users, and a queue that serves both equally serves the mirror — adopted 2026-08-07, the morning after a night of the machine's best work went to a memory meter's baseline while seven look-and-feel rows sat unbuilt. A product pass genuinely blocked by an instrument defect takes the unblock inside its own pass, sized to the blockage, and says so in the report.
 - **An invariant is not landed until a test fails when it is violated.** Write the failing test first, watch it fail, then make it pass. A test that passes against broken code is worse than no test.
 - **Budgets are tests.** If the task touches the frame path, the budget gate runs.
 - **Do not add a dependency `SPEC.md` does not name.** Propose it into the spec, in its own commit, then use it.
@@ -381,6 +382,7 @@ Then polish, and let the **diff** pick the instrument rather than your appetite.
 
 - **Under ~200 lines across ≤3 files** — `/simplify` alone. A full audit workflow on a small diff is theatre. (`/harden` states this floor itself and will decline; the number lives there, so if the two ever disagree, harden wins.)
 - **Anything larger, or anything the rest of the system stands on** — `/harden` **until dry**. It runs `/simplify` as one of its own phases, so do not run one first and then the other. It also carries its own plan-fidelity phase: tell it the diff above was already done, so it records the result instead of repeating it.
+- **The surface picks the bar, the way the diff picks the instrument.** Engine and invariant work hardens until dry — that rigor earned its keep in the frame path and it stays. Look-and-feel work (the Phase 8 class: layout, colour, keys, chrome) defaults to `/simplify` plus snapshot review plus **a screenshot in the PR**, because the judge of feel is a human eye and it rules in five seconds; a three-agent audit loop on an inset spends a night where a look decides. The escalation is one-way: feel work that touches the frame path, the watch, or any invariant's surface takes the engine bar for that part.
 
 Whichever runs, pass the docs carve-out into the invocation, because `/simplify` reduces and the comments explaining *why* something works are the ones nobody can reconstruct from the code:
 

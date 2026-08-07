@@ -393,6 +393,8 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 
 **Filter: does this put the binary in someone else's hands?**
 
+**v0.1 ships by 2026-08-09, and exactly two things gate it**: [#24](https://github.com/breferrari/vigia/issues/24), and a [`RELEASE-SMOKE.md`](RELEASE-SMOKE.md) run against the built artifact. Nothing else — not an open decision, not a shelf row, not a red instrument whose report already explains itself. A date is a filter; "when it is ready" is a horizon, and this repository has watched its own machinery prove that the horizon recedes at exactly the speed of approach. The README's claims are trimmed to what the evidence holds at ship time (the smoke checklist's own step 4), which is what makes shipping bare honest rather than early.
+
 | | Task | Issue |
 |---|---|---|
 | ⬜ | An external kill leaves the terminal in raw mode | [#24](https://github.com/breferrari/vigia/issues/24) |
@@ -423,6 +425,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | The pane rewards space: density scaling, the churn graph, side-by-side regions | [#125](https://github.com/breferrari/vigia/issues/125) |
 
 **After distribution on purpose.** The minimal real thing ships first — a crates.io name is claimed by publishing, and their own doctrine says the first publish is the smallest real one — and polish lands as visible post-release momentum, guided by the [#72](https://github.com/breferrari/vigia/issues/72) week's real-use data instead of ahead of it. [#119](https://github.com/breferrari/vigia/issues/119) sits first because it moves layout boundaries the other rows would otherwise re-derive twice; the three decisions carry both branches in their bodies and can be ruled in one sitting, each unblocking a small build. `SPEC.md` §5.3 is the design language these rows are derived from; a feel improvement that costs an invariant a sentence is a `decision` here, one that costs nothing is a row.
+
+**Every PR in this phase carries a screenshot, and the bar is sized to the surface.** Feel is vetoed by eyes in five seconds, not argued in prose — a PR without a picture of what changed is not a Phase 8 PR. The pass discipline for this class is `/simplify` plus snapshot review, per `take-next` step 6's surface rule; the full audit loop is reserved for the parts that touch the frame path or an invariant, because a night of adversarial agents on an inset buys less than one human look.
 
 ## Shelf
 
