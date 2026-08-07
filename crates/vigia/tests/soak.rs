@@ -1763,6 +1763,66 @@ fn soak_child() {
     report.gate();
 }
 
+/// No message this file prints carries a run of collapsed indentation.
+///
+/// **A mechanical defect caught by review rather than by a gate, so it gets a
+/// gate.** A `\` continuation inside a string literal strips the newline *and*
+/// the indentation that follows it, which is the idiom every long message here
+/// uses. Rewrite one of those literals onto a single line and the continuation
+/// goes with it, leaving the indentation behind as real spaces: the 600-second
+/// run printed `settled at sample 85 of 288 (179.2s in),` followed by
+/// twenty-six of them. Seven literals had it at once, because they were all
+/// inserted the same way.
+///
+/// Reading this file's own source is the same move
+/// [`the_soak_workflow_cannot_kill_the_window_it_offers`] makes on the workflow
+/// and for the same reason: the property is about the text, so the text is what
+/// the gate reads. Three spaces rather than two, so ordinary sentence spacing
+/// and an aligned `{:.2}` cannot trip it.
+///
+/// The workflow scan's own literals are exempt by name: their interior spacing
+/// is what they match on, so squashing it would break what they are for.
+#[test]
+fn no_message_in_this_file_prints_collapsed_indentation() {
+    // `CARGO_MANIFEST_DIR` rather than `file!()`, which is relative to the
+    // workspace root while a test runs from the crate: the same join
+    // [`workflow`] already makes for the same reason.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/soak.rs");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read this file's own source at {}: {e}", path.display()));
+    let exempt = ["run: |", "strip_prefix", "starts_with("];
+    // Built rather than written, or this line is its own first offender.
+    let run = " ".repeat(3);
+
+    let offenders: Vec<(usize, &str)> = source
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !exempt.iter().any(|k| line.contains(k)))
+        .filter(|(_, line)| {
+            // Between the first and last quote on the line, which is coarse and
+            // enough: the literals this catches are all message text.
+            match (line.find('"'), line.rfind('"')) {
+                (Some(open), Some(close)) if close > open => line[open..close].contains(&run),
+                _ => false,
+            }
+        })
+        .map(|(at, line)| (at + 1, line.trim()))
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "{} message(s) in this file carry a run of three or more spaces, which is what a backslash continuation leaves behind when its literal is rewritten onto one line:
+{}",
+        offenders.len(),
+        offenders
+            .iter()
+            .map(|(at, line)| format!("  {at}: {}", &line[..line.len().min(120)]))
+            .collect::<Vec<_>>()
+            .join("
+")
+    );
+}
+
 /// The soak workflow, at `.github/workflows/soak.yml`.
 const WORKFLOW: &str = "../../.github/workflows/soak.yml";
 
