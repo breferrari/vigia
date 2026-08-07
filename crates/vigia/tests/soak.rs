@@ -763,7 +763,7 @@ impl Report {
                 // is printed rather than substituted.
                 match (drift.settled, drift.settled_at, drift.settled_ratio) {
                     (Some(at), Some(elapsed), Some(ratio)) => println!(
-                        "soak: rss plateau: settled at sample {} of {} ({} in),                          drift from there {:.2}% (reported, not gated)",
+                        "soak: rss plateau: settled at sample {} of {} ({} in), drift from there {:.2}% (reported, not gated)",
                         at,
                         self.samples.len(),
                         span(elapsed),
@@ -773,9 +773,9 @@ impl Report {
                     // line reaches a reader and an assertion that only matches
                     // the settled case would be satisfied by every long window
                     // and silently absent from every short one.
-                    _ => println!(
-                        "soak: rss plateau: none inside this window, so there is                          nothing to read the drift above against (reported, not                          gated)"
-                    ),
+                    _ => {
+                        println!("soak: rss plateau: none inside this window (reported, not gated)")
+                    }
                 }
                 // The shape, and the gradient through it. `SPEC.md` §10's open
                 // question about I3 is a *sign* disagreement between two runs,
@@ -1615,10 +1615,10 @@ impl Report {
             drift.warm,
             match (drift.settled, drift.settled_ratio) {
                 (Some(at), Some(ratio)) => format!(
-                    "The series settled at sample {at} and drifts {:.2}% from                      there, so read this breach against that before calling it                      a leak: a baseline sitting on a warmup ramp is what #126                      found and is not gated away",
+                    "The series settled at sample {at} and drifts {:.2}% from there, so read this breach against that before calling it a leak",
                     ratio * 100.0
                 ),
-                _ => "The series never settled inside this window, so there is                       no plateau to read the breach against"
+                _ => "The series never settled inside this window, so there is no plateau to read the breach against"
                     .to_owned(),
             },
         );
