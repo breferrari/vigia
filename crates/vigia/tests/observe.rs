@@ -582,8 +582,17 @@ impl Report {
         self.samples.iter().map(|s| s.rss).collect()
     }
 
-    fn print(&self) {
-        println!(
+    /// Every line of the report, built rather than printed.
+    ///
+    /// Built, because the report is the entire output of an instrument that
+    /// asserts nothing else, which makes it the one thing about a run that *can*
+    /// be gated. That is what the plan asked for and what the quiet-session gate
+    /// below spends: a run that measured almost nothing has to reach a reader as
+    /// "no percentile here" rather than as a percentile over six frames, and
+    /// that is a property of the text rather than of the histogram.
+    fn lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        out.push(format!(
             "observe: tree {}, window {:?}, ran {:?}{}, {} samples, {} frames, {} ticks, \
              {} idle waits",
             self.tree,
@@ -598,7 +607,7 @@ impl Report {
             self.frames,
             self.ticks,
             self.idle_waits,
-        );
+        ));
         // Whether the series below is evenly spaced, which nothing else on this
         // page says. The soak learned the same thing one statistic over: a
         // sample index is only a clock while the loop keeps up, and a series
@@ -610,16 +619,16 @@ impl Report {
             .map(|pair| pair[1].at.saturating_sub(pair[0].at))
             .max()
         {
-            Some(widest) => println!(
+            Some(widest) => out.push(format!(
                 "observe: sample cadence nominal {:?}, widest actual gap {:?}",
                 self.step, widest
-            ),
-            None => println!("observe: sample cadence has one sample or none"),
+            )),
+            None => out.push("observe: sample cadence has one sample or none".to_owned()),
         }
 
         // The budget count first, because it is the question, and it is exact at
         // any frame count: a count over a declared edge needs no percentile.
-        println!(
+        out.push(format!(
             "observe: frames at or over I9's {:.0}ms budget: {} of {}, max {:.2}ms, \
              mean {:.2}ms",
             ms(BUDGET_US),
@@ -630,22 +639,22 @@ impl Report {
             self.hist.total,
             ms(self.hist.max),
             self.hist.mean().map(ms).unwrap_or(0.0),
-        );
+        ));
         // The percentiles, only where they are percentiles. See `rank_is_max`.
         if self.hist.rank_is_max(0.99) {
-            println!(
+            out.push(format!(
                 "observe: {} frames is too few for a p99, which at this count is the \
                  maximum above; no percentile is quoted",
                 self.hist.total,
-            );
+            ));
         } else {
-            println!(
+            out.push(format!(
                 "observe: frame p50 {}, p99 {} (reported, not gated)",
                 interval(self.hist.rank(0.50)),
                 interval(self.hist.rank(0.99)),
-            );
+            ));
         }
-        println!("observe: frame curve {}", self.hist.curve());
+        out.push(format!("observe: frame curve {}", self.hist.curve()));
 
         // The readout a reader would actually have caught.
         let readouts: Vec<u64> = self
@@ -655,17 +664,17 @@ impl Report {
             .map(|d| d.as_micros() as u64)
             .collect();
         match (readouts.iter().max(), median(&readouts)) {
-            (Some(&worst), Some(mid)) => println!(
+            (Some(&worst), Some(mid)) => out.push(format!(
                 "observe: status-bar p99 readout worst {:.2}ms, median {:.2}ms, over {} samples",
                 ms(worst),
                 ms(mid),
                 readouts.len()
-            ),
-            _ => println!("observe: status-bar p99 readout never populated"),
+            )),
+            _ => out.push("observe: status-bar p99 readout never populated".to_owned()),
         }
 
         for (rank, worst) in self.worst.iter().enumerate() {
-            println!(
+            out.push(format!(
                 "observe: worst frame {}: {:.2}ms at {:?}, {} changed files, {} rows, \
                  {} paths in the tick, after {} frames",
                 rank + 1,
@@ -675,13 +684,13 @@ impl Report {
                 worst.rows,
                 worst.tick_paths,
                 worst.after,
-            );
+            ));
         }
 
         // The level, never a drift verdict. See `quarters`.
         let rss = self.rss();
         match (rss.first(), rss.iter().max(), quarters(&rss)) {
-            (Some(&first), Some(&peak), Some(q)) => println!(
+            (Some(&first), Some(&peak), Some(q)) => out.push(format!(
                 "observe: rss first {:.2} MiB, peak {:.2}, quarters {:.2}, {:.2}, {:.2}, \
                  {:.2} MiB (level only: drift is the soak's gate, over the soak's window)",
                 mib(first),
@@ -690,20 +699,20 @@ impl Report {
                 mib(q[1]),
                 mib(q[2]),
                 mib(q[3]),
-            ),
-            _ => println!(
+            )),
+            _ => out.push(format!(
                 "observe: rss from {} samples is too few for a level",
                 rss.len()
-            ),
+            )),
         }
 
-        println!(
+        out.push(format!(
             "observe: changed files min {}, max {}; body rows max {}",
             self.samples.iter().map(|s| s.files).min().unwrap_or(0),
             self.samples.iter().map(|s| s.files).max().unwrap_or(0),
             self.samples.iter().map(|s| s.body).max().unwrap_or(0),
-        );
-        println!(
+        ));
+        out.push(format!(
             "observe: tracked diffs max {}, heights max {}, hunks max {}, history max {} of {}",
             self.samples
                 .iter()
@@ -726,38 +735,38 @@ impl Report {
                 .max()
                 .unwrap_or(0),
             HISTORY_PATHS,
-        );
+        ));
         // I1's own counters over a real tree, and `filtered` is the figure with
         // no fixture behind it anywhere: a synthetic worktree has no `target/`
         // in it, so nothing in this repository has ever measured what an ignored
         // subtree under a running build costs the watch.
-        println!(
+        out.push(format!(
             "observe: watch wakeups {}, filtered {}, ticks {} ({:.1}% of wakeups filtered)",
             self.watch.wakeups,
             self.watch.filtered,
             self.watch.ticks,
             100.0 * self.watch.filtered as f64 / self.watch.wakeups.max(1) as f64,
-        );
-        println!(
+        ));
+        out.push(format!(
             "observe: frame computed {}, reused {}, measured {}, probes {}, {:.2} MiB compared",
             self.frame.computed,
             self.frame.reused,
             self.frame.measured,
             self.frame.probes,
             mib(self.frame.bytes),
-        );
-        println!(
+        ));
+        out.push(format!(
             "observe: highlight parsed {}, reused {}, evicted {}, {} lines",
             self.highlight.parsed,
             self.highlight.reused,
             self.highlight.evicted,
             self.highlight.lines,
-        );
-        println!(
+        ));
+        out.push(format!(
             "observe: history recorded {}, evicted {} by cap and {} by window",
             self.history.recorded, self.history.evicted_by_cap, self.history.evicted_by_window,
-        );
-        println!(
+        ));
+        out.push(format!(
             "observe: failed frames {} of {}{}",
             self.failed,
             self.frames,
@@ -765,15 +774,22 @@ impl Report {
                 Some(e) => format!(", last: {e}"),
                 None => String::new(),
             }
-        );
+        ));
         let curve: Vec<String> = self
             .samples
             .iter()
             .map(|s| (s.rss / 1024).to_string())
             .collect();
-        println!("observe: rss KiB = {}", curve.join(","));
+        out.push(format!("observe: rss KiB = {}", curve.join(",")));
         let files: Vec<String> = self.samples.iter().map(|s| s.files.to_string()).collect();
-        println!("observe: changed files = {}", files.join(","));
+        out.push(format!("observe: changed files = {}", files.join(",")));
+        out
+    }
+
+    fn print(&self) {
+        for line in self.lines() {
+            println!("{line}");
+        }
     }
 }
 
@@ -960,16 +976,22 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
 #[test]
 #[ignore = "an instrument: it watches a real worktree for as long as it is asked to"]
 fn observe_a_working_session() {
-    let tree = tree();
-    let window = Duration::from_secs(env_var(SECS, DEFAULT_SECS));
+    observe(&tree(), Duration::from_secs(env_var(SECS, DEFAULT_SECS))).print();
+}
+
+/// The watch, the loop, and the counters that only the watcher has.
+///
+/// Separate from the test above so that what a run *is* has one name, and
+/// separate from [`drive`] because the watcher is the one part that has to live
+/// on its own thread: `gix::Repository` is `Send` and not `Sync`, so a borrow of
+/// one cannot cross a thread boundary. `vigia::run` and the soak both take the
+/// same shape for the same reason.
+fn observe(tree: &Path, window: Duration) -> Report {
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let (armed, arming) = mpsc::channel();
     let (counted, counting) = mpsc::channel();
-    let root = tree.clone();
+    let root = tree.to_path_buf();
 
-    // The product's own shape: the watcher owns its repository on its own
-    // thread, because `gix::Repository` is `Send` and not `Sync`. See
-    // `vigia::run` and the soak.
     let watch = std::thread::spawn(move || {
         let worktree = Worktree::discover(&root).expect("discover for the watch thread");
         let mut watcher = worktree
@@ -988,11 +1010,11 @@ fn observe_a_working_session() {
     });
 
     let stopper = arming.recv().expect("the watch arms before it ticks");
-    let mut report = drive(&tree, window, &rx);
+    let mut report = drive(tree, window, &rx);
     stopper.stop();
     watch.join().expect("the watch thread");
     report.watch = counting.recv().unwrap_or_default();
-    report.print();
+    report
 }
 
 /// #72 item 4: any disagreement with `git diff`.
@@ -1362,6 +1384,86 @@ mod statistic {
         );
         let paths: BTreeSet<String> = ["a".to_owned(), "b".to_owned()].into();
         assert!(missing(&paths, &paths, "git status").is_empty());
+    }
+
+    /// A report over a run that measured almost nothing.
+    ///
+    /// Six frames and four samples, which is the shape the second real window
+    /// actually had: a quiet session is the ordinary case here, not an edge, so
+    /// it is the case the report has to survive.
+    fn thin_report() -> Report {
+        Report {
+            tree: "vigia.a".to_owned(),
+            window: Duration::from_secs(7200),
+            step: Duration::from_secs(25),
+            elapsed: Duration::from_secs(650),
+            stopped_early: true,
+            samples: (0..4)
+                .map(|n| Sample {
+                    at: Duration::from_secs(25 * n),
+                    rss: 46_000_000 + n * 1024,
+                    readout: Some(Duration::from_micros(1_600)),
+                    files: 2,
+                    tracked_diffs: 2,
+                    tracked_spans: 2,
+                    tracked_hunks: 3,
+                    tracked_history: 4,
+                    body: 20,
+                })
+                .collect(),
+            frames: 6,
+            ticks: 6,
+            idle_waits: 26,
+            failed: 0,
+            last_error: None,
+            hist: hist_of(&[1_600, 7_200, 9_890, 12_130, 53_010, 93_090]),
+            worst: Vec::new(),
+            watch: WatchStats {
+                wakeups: 14_470,
+                filtered: 14_435,
+                ticks: 6,
+            },
+            frame: FrameStats::default(),
+            highlight: HighlightStats::default(),
+            history: HistoryStats::default(),
+        }
+    }
+
+    #[test]
+    fn a_run_that_measured_nothing_says_so_rather_than_printing_a_percentile() {
+        let lines = thin_report().lines();
+        let page = lines.join("\n");
+        assert!(
+            page.contains("too few for a p99"),
+            "six frames must reach a reader as no percentile: {page}"
+        );
+        assert!(
+            !page.contains("frame p50"),
+            "and the percentile line must not also be there: {page}"
+        );
+        // The two figures that are exact at any count still have to arrive, or
+        // refusing the percentile has cost the reader the answer as well as the
+        // estimate.
+        assert!(page.contains("at or over I9's 16ms budget: 2 of 6"));
+        assert!(page.contains("max 93.09ms"));
+        // And the cadence comes from the planned step, not from the samples that
+        // happened to arrive before the run was stopped.
+        assert!(
+            page.contains("nominal 25s"),
+            "a run stopped early still knows what it planned: {page}"
+        );
+    }
+
+    #[test]
+    fn a_report_with_frames_to_spare_does_quote_its_percentile() {
+        // The positive control for the gate above: a report that suppressed the
+        // percentile unconditionally would pass it.
+        let mut report = thin_report();
+        report.hist = hist_of(&[800; 200]);
+        report.frames = 200;
+        let page = report.lines().join("\n");
+        assert!(page.contains("frame p50"), "{page}");
+        assert!(!page.contains("too few for a p99"), "{page}");
     }
 
     #[test]
