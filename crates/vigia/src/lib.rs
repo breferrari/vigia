@@ -166,6 +166,16 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// the split that file's own module docblock describes. What stays over there is
 /// the dispatch: which stream each answer is written to, and the exit code, both
 /// of which `tests/cli.rs` reaches by running the built binary.
+///
+/// **Deliberately not `#[non_exhaustive]`, and it was tried.** The argument for
+/// it is that this crate is about to be published permanently and §11.1 leaves
+/// `--help` open, so answering it adds a variant and breaks every downstream
+/// `match`. Two things make it the wrong trade here. `main.rs` is a separate
+/// crate from this library, so the attribute reaches it too and forces a `_`
+/// arm on the one match that must never silently ignore a new variant, which is
+/// exactly the exhaustiveness this enum exists to get. And at `0.x` the
+/// protection is worth nothing anyway: cargo already treats every `0.x` minor
+/// bump as breaking, so adding a variant costs `0.2.0` either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Request {
     /// Watch the argument as a path.

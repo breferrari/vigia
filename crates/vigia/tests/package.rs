@@ -126,11 +126,22 @@ fn escaping_tests() -> Vec<String> {
         .map(|(name, _)| name)
         .collect();
 
-    assert!(
-        escaping.len() >= 13,
-        "expected at least the thirteen files SPEC.md §9 counts, found {}: \
-         {escaping:?}. If that is genuinely correct, §9 needs the edit rather \
-         than this line",
+    // **Exactly thirteen, not at least.** A floor was the first spelling and it
+    // reopens the very defect this file exists to close: adding a fourteenth
+    // escaping test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml`
+    // and `RELEASE-SMOKE.md` all go on saying "thirteen" with nothing red. The
+    // whole point is that a count in prose cannot notice a new test, and a
+    // floor is a count that cannot notice one either.
+    //
+    // The cost is that adding a test which escapes now requires editing this
+    // number, which is the intended cost: it is one line, and it is attached to
+    // the three documents that have to change with it.
+    assert_eq!(
+        escaping.len(),
+        13,
+        "SPEC.md §9, crates/vigia/Cargo.toml and RELEASE-SMOKE.md all say \
+         thirteen files read outside this package. Found {}: {escaping:?}. \
+         Update all four together",
         escaping.len()
     );
     // This file must be among them, which is the check with the sharpest teeth:
@@ -209,8 +220,16 @@ fn registry_unreachable(stderr: &str) -> bool {
         "could not connect",
         "could not resolve",
     ];
+    // **Only the lines cargo failed on.** A network blip that cargo *recovers*
+    // from prints `warning: spurious network error` and then carries on, so
+    // matching the whole stderr would let a recovered blip vouch for a run that
+    // went on to fail for an unrelated reason, skipping the gate on a broken
+    // manifest. The failure is what is being classified, not the transcript.
     let lowered = stderr.to_lowercase();
-    MARKERS.iter().any(|marker| lowered.contains(marker))
+    lowered
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("warning:"))
+        .any(|line| MARKERS.iter().any(|marker| line.contains(marker)))
 }
 
 /// Text with its `#` comments removed, so a `contains` check cannot be
@@ -360,15 +379,47 @@ fn the_unreachable_registry_is_told_apart_from_a_broken_manifest() {
 
     // The capitalised forms, since cargo does not capitalise consistently and
     // the match is case-insensitive for that reason rather than by habit.
-    assert!(registry_unreachable("Could not connect to server"));
-    assert!(registry_unreachable(
-        "Caused by: [5] Could not resolve proxy name"
-    ));
+    assert!(
+        registry_unreachable("Could not connect to server"),
+        "cargo capitalises this one mid-sentence"
+    );
+    assert!(
+        registry_unreachable("Caused by: [5] Could not resolve proxy name"),
+        "the proxy shape is a resolution failure too"
+    );
 
     // And an unrelated failure is not swallowed.
-    assert!(!registry_unreachable(
-        "error: failed to parse manifest at `Cargo.toml`"
-    ));
+    assert!(
+        !registry_unreachable("error: failed to parse manifest at `Cargo.toml`"),
+        "a manifest parse error is the gate firing, not the gate being \
+         unavailable"
+    );
+
+    // Every marker is exercised, because a marker nobody has ever matched is
+    // the thing this whole function was rewritten to stop being. Four of the
+    // seven were unreached by the cases above, which is the same "prose wearing
+    // a const" the docblock complains about, one level in.
+    for marker in [
+        "error: failed to fetch `https://github.com/rust-lang/crates.io-index`",
+        "error: failed to download from `https://crates.io/api/v1/crates/gix`",
+        "Caused by: network failure seems to have happened",
+        "error: spurious network error (3 tries remaining)",
+    ] {
+        assert!(
+            registry_unreachable(marker),
+            "{marker:?} should read as an unreachable registry"
+        );
+    }
+
+    // A *recovered* blip must not vouch for a later, unrelated failure. Cargo
+    // prints the warning and carries on, so this transcript ends in a broken
+    // manifest and has to fire the gate despite the network line above it.
+    let recovered_then_broken = "warning: spurious network error (3 tries remaining)\n\
+         error: readme `READMEE.md` does not appear to exist";
+    assert!(
+        !registry_unreachable(recovered_then_broken),
+        "a warning cargo recovered from must not excuse the error it then hit"
+    );
 }
 
 /// The internal dependency's pinned version is the workspace version.
@@ -412,16 +463,17 @@ fn the_internal_dependency_tracks_the_workspace_version() {
         .map(|value| value.trim().trim_matches('"').to_owned())
         .expect("[workspace.package] declares a version");
 
+    // Taken to the next `"` rather than to the end of the line, because the keys
+    // inside an inline table have no required order: writing
+    // `{ version = "0.1.0", path = … }` is equally valid TOML and the
+    // end-of-line form read it as `0.1.0", path = "crates/vigia-core`, which
+    // reports a stale pin that is not stale.
     let pinned = clean
         .lines()
         .find(|line| line.trim_start().starts_with("vigia-core = {"))
-        .and_then(|line| line.split("version = ").nth(1))
-        .map(|rest| {
-            rest.trim()
-                .trim_end_matches(&['}', ' '][..])
-                .trim_matches('"')
-                .to_owned()
-        })
+        .and_then(|line| line.split_once("version = \""))
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(version, _)| version.to_owned())
         .expect("[workspace.dependencies] pins vigia-core by version");
 
     assert_eq!(
@@ -475,6 +527,17 @@ fn nothing_excluded_has_since_stopped_existing() {
         "the literal arm is exact"
     );
     assert!(!covers("benches/**", "soak.rs"), "a glob elsewhere misses");
+
+    // And the third arm, the one that refuses to guess. `covers` panics rather
+    // than answering "no" for a pattern shape it does not understand, because a
+    // silent no here reads as a finding, and that arm was unexercised while the
+    // comment above claimed both arms were covered.
+    let unknown = std::panic::catch_unwind(|| covers("tests/*.rs", "soak.rs"));
+    assert!(
+        unknown.is_err(),
+        "a mid-string glob must be refused loudly, not answered `no`, or a \
+         pattern this gate cannot evaluate reads as an escape it has caught"
+    );
 
     // Only patterns aimed at `tests/` are checked against test names. This gate
     // is about the exclusion that keeps escaping tests out of the tarball; an
@@ -589,10 +652,16 @@ fn the_release_pipeline_publishes_to_the_registry() {
     // something else entirely, and that is a plausible edit rather than a
     // contrived one, because it is what somebody writes while debugging a
     // failed release. So the search is scoped to the command lines.
+    // Both `run: <command>` and the indented body of a `run: |` block, because
+    // the block form is what anybody writes the moment a step needs two lines
+    // or a `set -euo pipefail`, and the two steps above this one in that file
+    // already use it. Reading only the inline form turned that ordinary edit
+    // into a false red claiming no publish command existed.
     let commands: Vec<&str> = job
         .lines()
         .map(str::trim)
-        .filter_map(|line| line.strip_prefix("run: "))
+        .filter(|line| !line.is_empty())
+        .map(|line| line.strip_prefix("run: ").unwrap_or(line))
         .collect();
     let publishes: Vec<&&str> = commands
         .iter()
@@ -617,6 +686,17 @@ fn the_release_pipeline_publishes_to_the_registry() {
         "{publish:?} must publish with `--locked`, or the published crates are \
          built against whatever the registry offers on the day rather than the \
          resolution this repository tested"
+    );
+
+    // **The one flag that makes this whole job a no-op.** Every assertion above
+    // passes with `--dry-run` appended, and so does the release: binaries build,
+    // the tap is written, the announcement goes out, and the name is never
+    // claimed. It is also the likeliest edit anybody makes, because it is what
+    // you add to test the workflow and the easiest thing to forget to remove.
+    assert!(
+        !publish.contains("--dry-run"),
+        "{publish:?} carries --dry-run, so the release would do everything \
+         except the publish and report success"
     );
 
     // `--workspace` publishes every member, so what the workspace *holds* is
@@ -682,6 +762,16 @@ fn the_release_pipeline_publishes_to_the_registry() {
          the registry job and the documented cost of that ordering is wrong in \
          four places. Better behaviour, but it has to be written down \
          deliberately rather than become true by accident: {gh_release_line}"
+    );
+    // The flag can also arrive through a variable, which is exactly how the
+    // prerelease flag on that same line is passed, so reading the literal alone
+    // is defeated by dist's own idiom. Any `DRAFT` in the generated file means
+    // the assumption above needs re-reading rather than trusting.
+    assert!(
+        !release.to_uppercase().contains("DRAFT"),
+        "release.yml mentions a draft somewhere, and the ordering documented \
+         in publish-crates-io.yml and SPEC.md §9 assumes the GitHub release is \
+         public the moment `host` finishes"
     );
 
     // And the registry job genuinely waits for the artifacts, which is the

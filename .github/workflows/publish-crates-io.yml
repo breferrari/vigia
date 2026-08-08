@@ -20,9 +20,11 @@
 # fails to build its own announcement.
 #
 # What that costs, stated rather than designed away: if this job fails, the
-# binaries are public and the crate name is unclaimed. That is recoverable by
-# re-running the job, and `RELEASE-SMOKE.md` §5 checks it directly instead of
-# inferring it from a green workflow.
+# binaries are public and the crate name is unclaimed. `RELEASE-SMOKE.md` §5
+# checks that directly instead of inferring it from a green workflow, and
+# carries the recovery, which is **not** simply "re-run" in both cases:
+# publishing an already-published version is an error, so once `vigia-core` has
+# been accepted a re-run fails on it and never reaches `vigia`.
 #
 # dist guards the call for prereleases, so nothing here needs to.
 #

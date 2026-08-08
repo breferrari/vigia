@@ -114,7 +114,28 @@ jobs:
       # the exact shape §7 keeps recording, arrived at through the test
       # *selector* rather than through the gate: green, and about nothing.
       - name: budgets
-        run: cargo test --release --test budgets --test first_paint
+        run: cargo test --release --test budgets
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
+      # **A separate invocation, not `--test budgets --test first_paint`.** That
+      # was the first spelling and it is subtly worse: cargo runs test binaries
+      # one at a time but in its own order, and locally that order put
+      # `first_paint` *between* the two `budgets` binaries. `first_paint` does
+      # three cold starts over a 100 x 500 fixture, so the shell's budgets now
+      # ran immediately after a burst of exactly the disk and allocator work
+      # that an absolute wall-clock gate is most sensitive to. Two flakes landed
+      # in the two runs after that change, on gates that had been green,
+      # which is weak evidence on its own and points at a mechanism that did not
+      # exist before.
+      #
+      # Splitting the step costs one extra cargo startup and restores the
+      # ordering the budget gates have always run in, which makes this addition
+      # additive rather than a change to what the other gates measure.
+      # [#36](https://github.com/breferrari/vigia/issues/36) tracks the
+      # underlying flakiness of these gates on hosted runners.
+      - name: first paint, which is I7 and is not in budgets.rs
+        run: cargo test --release --test first_paint
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -258,7 +279,16 @@ jobs:
         run: >
           cargo test -p vigia --release
           --target x86_64-unknown-linux-musl
-          --test budgets --test first_paint
-          -- --nocapture
+          --test budgets -- --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
+      # Separate for the reason the `test` job above gives at length: sharing an
+      # invocation lets cargo interleave this between the budget binaries.
+      - name: first paint, against the binary Linux actually ships
+        run: >
+          cargo test -p vigia --release
+          --target x86_64-unknown-linux-musl
+          --test first_paint -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"

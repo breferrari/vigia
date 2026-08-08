@@ -130,12 +130,17 @@ The publish is a CI job now, so these verify rather than perform.
 - [ ] `cargo install vigia` from crates.io, on one machine that has never built
       this repo. The true cold path.
 - [ ] If the registry job failed while the release went public, that is the
-      documented half-failure and not a mystery: re-run the job. If it failed
-      *after* `vigia-core` was accepted and before `vigia` was, `vigia-core`
-      0.1.0 is spent permanently, so the re-run must not bump only one of the
-      two. Publishing an already-published version is an error, not a silent
-      no-op, so a re-run of a fully successful publish also fails and that is
-      expected.
+      documented half-failure. **Which recovery depends on how far it got, and
+      re-running the job is only right for one of the two cases**, because
+      publishing an already-published version is an error rather than a silent
+      no-op:
+      - Nothing was accepted: re-run the job.
+      - `vigia-core` was accepted and `vigia` was not: a plain re-run fails on
+        `vigia-core` and never reaches `vigia`. Publish the second by hand,
+        `cargo publish -p vigia --locked`, from the tagged commit.
+
+      Either way `vigia-core` 0.1.0 is spent permanently once it is accepted, so
+      the fix is never to bump one crate and not the other.
 - [ ] `brew install breferrari/tap/vigia`, and the formula in the tap names the
       tag that was just pushed.
 - [ ] The GitHub release carries the artifacts `cargo-dist` built, not a
