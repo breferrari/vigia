@@ -42,7 +42,7 @@ Budgets are **absolute** and chosen to be defensible on their own terms, not rel
 | **I5** | **Correct with zero interaction.** Auto-follows the newest change and scrolls to it, untouched. | — | Scripted edit sequence, snapshot the frame, no input given |
 | **I6** | **Legible at 40 columns.** No horizontal overflow, no truncated-to-useless labels. | — | Snapshots at 40 / 80 / 120 columns, plus structural gates in `crates/vigia/tests/legibility.rs` sweeping every width from 1 to 120: no row over-occupies, no hint is cut in half, and every label that lost characters says so |
 | **I7** | Startup to first paint is imperceptible. **The first frame draws the diff without colour**, because a grammar's patterns compile on first use at 74-362ms and the frame after it is where that belongs; the reader gets content rather than a blank alternate screen. | **< 50ms** | `crates/vigia/tests/first_paint.rs`, over the **shell's** first paint rather than the core's, asserting the body is full and that nothing was parsed before it asserts the clock. `criterion` does **not** track this shape: `benches/engine.rs`'s `open_and_first_paint` builds no `Highlighter`, which is the core-only measurement §10 corrects |
-| **I8** | Terminal restored on **every exit the process controls**: the quit key (Ctrl-C included), an error return, and a panic under `panic = "abort"`. An externally delivered signal is not covered — see [#24](https://github.com/breferrari/vigia/issues/24). | — | Takeover order and its exact inverse; the partial-failure unwinding; a panic-hook test; escape sequences against DEC's own numbers |
+| **I8** | Terminal restored on **every exit the process can observe**: the quit key (Ctrl-C included), an error return, a panic under `panic = "abort"`, and an externally delivered termination — `SIGINT`, `SIGTERM` or `SIGHUP` on Unix, a `CTRL_C`, `CTRL_BREAK` or `CTRL_CLOSE` console event on Windows. **`SIGKILL` and `TerminateProcess` (`taskkill /F`) are outside it on both**, because neither runs any code the process owns, and that is the whole of what "can observe" excludes. A caught signal leaves the way the quit key does, exit **0** and no message. | — | Takeover order and its exact inverse; the partial-failure unwinding; a panic-hook test; escape sequences against DEC's own numbers; and a two-process gate that signals a child and reads back what its guard wrote |
 | **I9** | Steady-state frame time holds 60fps under continuous edits. | **< 16ms** p99 | Gated over the **frame path**, not the primitives: a settled frame, one line rewritten before each frame, every file materialised. The caller-side gate **paints as well as collects**, for the reason §7 gives. `criterion` tracks the same shape |
 | **I10** | **Glanceability history is bounded.** Churn history is bounded by a fixed window and a fixed cap on tracked paths, independent of how many files the session changed. A path that ages out of the window is dropped entirely. | **≤ 256 paths**, **≤ 120s**, whatever the session changed | Structural, in `crates/vigia-core/tests/history.rs`: a fixture recording **10,000** distinct paths asserts the store sits *at* the cap and that eviction actually ran, and a window of silence empties it. The soak asserts the same over the real process, and **refuses to assert** in a window that reached neither rule. Not in `tests/budgets.rs`: every gate there is a ratio or a duration, and this is a count |
 
@@ -68,9 +68,16 @@ A regression past any budget **fails the build.**
 >   re-highlighting (`syntect`, Phase 2) have different dependencies and phases;
 >   the 18.58ms-vs-3.27ms measurement that forced the split is there.
 > - **I8** stopped saying `SIGINT` because raw mode makes Ctrl-C a key event,
->   never a signal; the uncovered case is an externally delivered signal, which
->   is a dependency decision tracked as
->   [#24](https://github.com/breferrari/vigia/issues/24).
+>   never a signal, and the externally delivered signal it was narrowed to
+>   exclude is **covered since 2026-08-08**
+>   ([#24](https://github.com/breferrari/vigia/issues/24)). The ruling worth
+>   keeping is the one about *shape*: it was taken symmetrically, on both tier-1
+>   platforms in one issue, because the single-task version was Unix-only and
+>   [#16](https://github.com/breferrari/vigia/issues/16) had already rejected a
+>   guarantee that means different things on different targets. What made that
+>   affordable was measurement rather than principle — neither half adds a crate
+>   to any graph — and the row's exclusions are now the same sentence on both
+>   platforms rather than two different promises.
 > - **I3**'s scheduled window is shorter than 24h because a GitHub-hosted job is
 >   terminated at six hours; the full window runs by `workflow_dispatch` or
 >   locally, the sample count is fixed so the statistic is computed identically,
@@ -754,6 +761,8 @@ Detection is a precedence chain, first answer wins: `VIGIA_COLOR`, then `NO_COLO
 **A theme that does not parse is reported before the screen is taken**, which is the rule B5 already states for a path that is not a repository and holds here for the same reason: an error painted inside a TUI that then hands the terminal back is an error nobody sees. An unknown key is **refused rather than ignored**, with the line it was found on, because a silently dropped key is a theme that does nothing and "it was discarded" is the one explanation a reader cannot arrive at by looking at their screen.
 
 **A path that is not a repository exits before the screen is taken.** That is the first half of B5, and it shipped with the shell rather than being ruled first: `Worktree::discover` and the opening walk both run ahead of `Session::enter`, so the failure reaches a terminal the reader can still read. An error painted inside a TUI that then hands the terminal back is an error nobody sees. Recorded 2026-07-31, when [#40](https://github.com/breferrari/vigia/issues/40) found §11.2 still calling it proposed, which is this section's warning box in miniature.
+
+**A signal from outside leaves the way the quit key does: the terminal goes back, nothing is printed, and the exit status is 0.** Ruled 2026-08-08 with [#24](https://github.com/breferrari/vigia/issues/24) rather than left to fall out of the code, because it is the one part of that work a reader can observe from outside the process. Nothing failed, so there is nothing to report, and a message printed after the terminal has already come back would arrive on a shell prompt the sender was not looking at. **What this deliberately does not do is re-raise the signal** so that a parent's `wait` reports *killed by SIGTERM* rather than *exited 0*. That is the conventional POSIX ending and it is the honest one for a shell script reading the status, but it needs `libc` on every Unix target to restore the default disposition and raise again, which is a dependency for an exit-status nicety, and §3 names no exit-code taxonomy beyond success and failure for it to fit into. Recorded as a limit rather than as an accident: if a script ever needs to tell "quit" from "killed", this is the line that has to change first.
 
 ### 11.2 Undecided
 

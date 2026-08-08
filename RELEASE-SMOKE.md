@@ -39,9 +39,18 @@ that a claim without a failing-capable check is a wish.
 - [ ] Edit a file while it watches: the change lands without input, follow
       works, `f` re-engages after a scroll.
 - [ ] Quit with `q` AND with Ctrl-C: terminal restored both times, no raw-mode
-      residue. ([#24](https://github.com/breferrari/vigia/issues/24) covers the
-      external kill; until it lands, the release notes say what is and is not
-      covered rather than implying more.)
+      residue.
+- [ ] Kill it from outside and look at the terminal it was in. Unix:
+      `kill <pid>` from another pane. Windows: Ctrl+Break in the pane it is
+      running in. Prompt, echo and cursor all back, and no mouse-report
+      garbage when the pointer moves.
+      ([#24](https://github.com/breferrari/vigia/issues/24) landed this and its
+      gate signals a child process, so what is left here is the half a gate
+      cannot reach: a real terminal, and on Windows a real key, which is the
+      one delivery path #24 could not measure.)
+- [ ] `kill -9` and `taskkill /F` are **not** on this list. They are outside I8
+      on both platforms because neither runs any code the process owns, and the
+      release notes say that rather than implying more.
 - [ ] A non-repository path: one-line error before the alternate screen, exit
       non-zero.
 
