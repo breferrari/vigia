@@ -173,7 +173,7 @@ These are budgets, not hopes. Each one gets a test that fails when it is missed,
 | 🎞️ **60fps** | Frame time under 16ms at p99, while files are being written |
 | 🧘 **Correct untouched** | Follows the newest change and scrolls to it with no input |
 | 📐 **Narrow panes** | Legible at 40 columns, because half a laptop screen is the point |
-| 🚪 **Clean exit** | Terminal restored on every exit it can observe: the quit key, Ctrl+C, an error, a panic, or a kill from another pane |
+| 🚪 **Clean exit** | Terminal restored on every exit it can observe: the quit key, Ctrl+C, an error, a panic, or a kill from outside the program |
 
 ## 🧱 Built with
 

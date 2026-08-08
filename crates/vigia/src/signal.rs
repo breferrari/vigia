@@ -223,9 +223,9 @@ pub(crate) fn forward(tx: Sender<Wake>) -> io::Result<()> {
 /// array is what decides which of them it answers for.
 ///
 /// `CTRL_LOGOFF_EVENT` and `CTRL_SHUTDOWN_EVENT` are excluded. They reach
-/// services rather than a console application, and the handler below deliberately
-/// does not return, which is a thing to do to a closing console and not a thing
-/// to do to a machine that is shutting down.
+/// services rather than a console application, and answering TRUE to one would
+/// tell Windows this process has handled a shutdown it cannot actually handle.
+/// Leaving them out is what hands them to the default handler intact.
 #[cfg(windows)]
 const CAUGHT: [u32; 3] = [
     windows_sys::Win32::System::Console::CTRL_C_EVENT,
@@ -273,33 +273,60 @@ fn holds_the_grace_period(kind: u32) -> bool {
 /// the one the module exists to fix.
 #[cfg(windows)]
 unsafe extern "system" fn on_ctrl(kind: u32) -> windows_sys::core::BOOL {
+    match reply(kind, SHELL.get(), &ASKED) {
+        Reply::HandOn => 0,
+        Reply::Handled => 1,
+        Reply::Wait => loop {
+            std::thread::park();
+        },
+    }
+}
+
+/// What answering a control event comes to, short of the waiting itself.
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reply {
+    /// FALSE: not answered here, so the default handler gets it.
+    HandOn,
+    /// TRUE: the wake is delivered and this thread is done.
+    Handled,
+    /// TRUE eventually, by never returning, which holds the grace period open.
+    Wait,
+}
+
+/// Decide what to do with a control event.
+///
+/// Split out of [`on_ctrl`] and taking its state as parameters, the way [`claim`]
+/// takes its slot and `terminal::install_hook_in` takes its `Once`. The handler
+/// itself cannot be driven from a test at all: for a claimed event it deliberately
+/// never returns, and it reads two process-global statics that a test cannot
+/// unset. Every decision it makes is here instead, where all five are asserted.
+#[cfg(windows)]
+fn reply(kind: u32, shell: Option<&Sender<Wake>>, asked: &std::sync::atomic::AtomicBool) -> Reply {
     if !CAUGHT.contains(&kind) {
         // Not ours. Claiming an event this module has no answer for would
         // silently disable it.
-        return 0;
+        return Reply::HandOn;
     }
-    let Some(tx) = SHELL.get() else {
+    let Some(tx) = shell else {
         // Armed but with nowhere to send, which should be impossible and is not
         // worth becoming unkillable over.
-        return 0;
+        return Reply::HandOn;
     };
-    if answer(ASKED.swap(true, std::sync::atomic::Ordering::SeqCst)) == Answer::Escalate {
+    if answer(asked.swap(true, std::sync::atomic::Ordering::SeqCst)) == Answer::Escalate {
         // The second ask. FALSE reaches the default handler, which ends the
         // process: see `Answer`.
-        return 0;
+        return Reply::HandOn;
     }
     if tx.send(Wake::Signalled).is_err() {
         // `run` has already returned and dropped the receiver, so nobody is
         // listening and the default disposition is the honest answer.
-        return 0;
+        return Reply::HandOn;
     }
-    if !holds_the_grace_period(kind) {
-        // TRUE: handled. The loop has the wake and will leave under its own
-        // power, and this thread has nothing left to do.
-        return 1;
-    }
-    loop {
-        std::thread::park();
+    if holds_the_grace_period(kind) {
+        Reply::Wait
+    } else {
+        Reply::Handled
     }
 }
 
@@ -590,32 +617,99 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[test]
-    fn an_event_this_does_not_claim_is_handed_on() {
-        // The **real handler**, which is callable for exactly these events and no
-        // others: an unclaimed kind returns before it reads `SHELL` or parks. That
-        // is what makes the pass-through branch assertable at all, and it only
-        // became so once the handler stopped parking on everything.
-        //
-        // SAFETY: `on_ctrl` performs no unsafe operation, and for a kind outside
-        // `CAUGHT` it returns on its first line.
-        for kind in [5, 6] {
-            assert_eq!(
-                unsafe { on_ctrl(kind) },
-                0,
-                "control event {kind} was absorbed instead of handed on"
+    mod answering {
+        //! Every decision the console handler makes, against slots of this test's
+        //! own rather than the process statics. The handler itself never returns
+        //! for an event it claims, so this is the only way any of it is reachable.
+
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+
+        use super::*;
+
+        /// 0, 1 and 2 are `CTRL_C`, `CTRL_BREAK` and `CTRL_CLOSE`.
+        const C: u32 = 0;
+        const BREAK: u32 = 1;
+        const CLOSE: u32 = 2;
+
+        #[test]
+        fn an_event_this_does_not_claim_is_handed_on() {
+            let (tx, _rx) = mpsc::channel();
+            let asked = AtomicBool::new(false);
+
+            // 5 is `CTRL_LOGOFF_EVENT` and 6 is `CTRL_SHUTDOWN_EVENT`. Answering
+            // either would tell Windows this process handled a shutdown it cannot.
+            for kind in [5, 6] {
+                assert_eq!(
+                    reply(kind, Some(&tx), &asked),
+                    Reply::HandOn,
+                    "control event {kind} was absorbed instead of handed on"
+                );
+            }
+            assert!(
+                !asked.load(std::sync::atomic::Ordering::SeqCst),
+                "an event this module does not claim consumed the one graceful ask"
             );
         }
-    }
 
-    #[cfg(windows)]
-    #[test]
-    fn only_the_closing_console_is_waited_out() {
-        // `CTRL_CLOSE_EVENT` is 2. Waiting on the other two would leave a parked
-        // thread per delivery for the life of the process, and not waiting on this
-        // one would end the process mid-restore.
-        assert!(holds_the_grace_period(2));
-        assert!(!holds_the_grace_period(0));
-        assert!(!holds_the_grace_period(1));
+        #[test]
+        fn a_first_ask_is_answered_and_lets_its_thread_go() {
+            let (tx, rx) = mpsc::channel();
+            let asked = AtomicBool::new(false);
+
+            for kind in [C, BREAK] {
+                let asked = AtomicBool::new(false);
+                assert_eq!(reply(kind, Some(&tx), &asked), Reply::Handled);
+            }
+            // Parking on these would leave one OS thread per delivery for the life
+            // of a process meant to stay open for days.
+            assert_eq!(reply(C, Some(&tx), &asked), Reply::Handled);
+            assert!(matches!(rx.try_recv(), Ok(Wake::Signalled)));
+        }
+
+        #[test]
+        fn a_closing_console_is_waited_out_instead() {
+            let (tx, rx) = mpsc::channel();
+            let asked = AtomicBool::new(false);
+
+            assert_eq!(reply(CLOSE, Some(&tx), &asked), Reply::Wait);
+            assert!(
+                matches!(rx.try_recv(), Ok(Wake::Signalled)),
+                "the wake was not delivered before the wait began"
+            );
+        }
+
+        #[test]
+        fn a_second_ask_is_handed_to_the_default_handler() {
+            // The Windows half of the escalation, which is what keeps a wedged
+            // monitor killable. Only reachable with an injected slot: the real one
+            // is a process static no test can unset.
+            let (tx, _rx) = mpsc::channel();
+            let asked = AtomicBool::new(false);
+
+            assert_eq!(reply(BREAK, Some(&tx), &asked), Reply::Handled);
+            assert_eq!(
+                reply(BREAK, Some(&tx), &asked),
+                Reply::HandOn,
+                "the second ask was answered again instead of escalating"
+            );
+        }
+
+        #[test]
+        fn an_event_with_nobody_to_tell_is_handed_on() {
+            let asked = AtomicBool::new(false);
+            assert_eq!(reply(BREAK, None, &asked), Reply::HandOn);
+
+            // And a shell that has already hung up, which is `run` having returned.
+            let (tx, rx) = mpsc::channel();
+            drop(rx);
+            let asked = AtomicBool::new(false);
+            assert_eq!(
+                reply(BREAK, Some(&tx), &asked),
+                Reply::HandOn,
+                "an event was claimed with nobody listening, which is how a process \
+                 becomes unkillable"
+            );
+        }
     }
 }

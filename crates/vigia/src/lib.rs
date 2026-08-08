@@ -168,30 +168,32 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
 
-    // **Out of the struct literal below, so that "the moment the screen is taken"
-    // is a place in this function rather than an approximation.** The safety net
-    // for a signal has to cover the window between taking a terminal and being
-    // able to give it back, which is the same rule `Session::enter` follows when
-    // it installs the panic hook before its first step. Left inside the literal,
-    // the arming sat after `Highlighter::new`'s 318µs grammar load and after
-    // `short_name`'s `canonicalize`, because fields evaluate in written order:
-    // a real window, and one the comment above the highlighter already warns
-    // about having got wrong once.
-    let session = Session::enter()?;
-
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
-    // sees it. Built here because the handler on it is armed on the next line and
-    // the other two senders are armed after the first paint.
+    // sees it. Built here because the handler on it is armed on the next line,
+    // before the terminal is taken, and the other two senders are armed after the
+    // first paint.
     let (tx, rx) = mpsc::channel();
 
+    // **Before the terminal is taken, which is the whole point of it being here.**
+    // `Session::enter` installs the panic hook before its first step for exactly
+    // this reason: the window a safety net has to cover starts at the *first* step
+    // of the takeover, not after the fourth. Armed afterwards, a signal arriving
+    // between raw mode and the cursor was still an uncaught kill, and two earlier
+    // versions of this line got that wrong in two different ways: inside the
+    // struct literal it also sat after `Highlighter::new`'s 318µs grammar load,
+    // because fields evaluate in written order.
+    //
+    // A signal that arrives before the loop exists is not lost. It waits in the
+    // channel, and the first `recv` below acts on it, by which point there is a
+    // `Session` to drop and a terminal to give back.
+    //
     // Reported rather than fatal. A monitor that refused to open because it could
     // not arm a safety net would be a worse answer than one that opens and says
-    // so, so the outcome is carried past the shell being built and warned about
-    // below, where there is an `App` to warn through.
+    // so, so the outcome is carried to where there is an `App` to warn through.
     let armed = signal::forward(tx.clone());
 
     let mut shell = Shell {
-        session,
+        session: Session::enter()?,
         app: App::new(),
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
@@ -206,13 +208,15 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // highlighter at all; the shipped first paint measured 105.03ms.
         //
         // Not "before the screen is taken", which an earlier version of this
-        // comment claimed: `Session::enter` runs above this literal, so the
-        // alternate screen is already ours by the time this line does anything.
-        // The placement is right and the reason was wrong. It used to rest on
-        // struct fields evaluating in written order, which was true and is no
-        // longer the reason: the session is taken above the literal now, so the
-        // signal handler could be armed at the moment the screen becomes ours
-        // rather than after this load.
+        // comment claimed: struct fields evaluate in written order and
+        // `Session::enter` is written above, so the alternate screen is already
+        // ours by the time this runs. The placement is right and the reason was
+        // wrong.
+        //
+        // That same evaluation order is why the signal handler is armed *above*
+        // this literal rather than as a field beside `session`: a field here
+        // would run after this load, and the window it exists to cover opens
+        // before the takeover's first step.
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws
         // cold until something writes to it. That is the honest first frame: a
@@ -959,5 +963,51 @@ mod tests {
         let mut batch = Vec::new();
         drain(&mut batch, tick(0), &rx, DRAIN_CAP);
         assert_eq!(batch.len(), 2, "the queued wake was lost with the sender");
+    }
+
+    /// Two properties of `run` that no test can execute, because `run` owns a
+    /// terminal, and that are load bearing enough to gate by reading the source.
+    ///
+    /// This is the shape `no_exit_path_in_the_shell_skips_the_destructors` already
+    /// uses in `terminal`, and it is a weak instrument used deliberately: both
+    /// properties are single lines whose *position* and *form* are the whole of
+    /// their correctness, and a mutation of either passes the entire suite. A gate
+    /// that reads the file is worth more than a paragraph nobody re-checks.
+    #[test]
+    fn the_signal_arming_covers_the_takeover_and_the_wake_ends_the_loop() {
+        // Only what ships, so the strings below cannot match this test itself.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        assert!(
+            shipped.len() > 200,
+            "lib.rs was not read, so scanning it proves nothing"
+        );
+
+        // **Order.** The handler has to be armed before the first step of the
+        // takeover, not after the fourth: a signal arriving mid-takeover is
+        // otherwise still an uncaught kill. Two earlier versions of this line were
+        // in the wrong place, one of them after a 318µs grammar load.
+        let arming = shipped
+            .find("signal::forward(")
+            .expect("`run` no longer arms the signal handler at all");
+        let takeover = shipped
+            .find("Session::enter()")
+            .expect("`run` no longer takes the terminal");
+        assert!(
+            arming < takeover,
+            "the signal handler is armed after the terminal is taken, so a signal \
+             arriving during the takeover is uncaught"
+        );
+
+        // **Form.** `signal`'s escalation latches after one ask: the second goes to
+        // the default disposition and kills the process. That is only safe because
+        // this arm leaves the loop unconditionally, so one ask is always enough. An
+        // arm that merely continued would make the first signal a no-op and the
+        // second a hard kill, which is worse than either alone.
+        assert!(
+            shipped.contains("Wake::Signalled => break 'awake"),
+            "the signalled wake no longer unconditionally leaves the loop, which is \
+             what makes `signal`'s one-way escalation latch safe"
+        );
     }
 }

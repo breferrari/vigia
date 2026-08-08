@@ -48,9 +48,14 @@ that a claim without a failing-capable check is a wish.
       gate signals a child process, so what is left here is the half a gate
       cannot reach: a real terminal, and on Windows a real key, which is the
       one delivery path #24 could not measure.)
-- [ ] `kill -9` and `taskkill /F` are **not** on this list. They are outside I8
-      on both platforms because neither runs any code the process owns, and the
-      release notes say that rather than implying more.
+- [ ] Kill it a **second** time while it is still up, if the first appears to do
+      nothing. The process must die. It is allowed to leave the terminal as it
+      was on that second ask, which is the floor under the graceful path: see
+      SPEC.md section 11.1. `reset` after this one is expected.
+
+`kill -9` and `taskkill /F` are deliberately not on this list. They are outside
+I8 on both platforms because neither runs any code the process owns, and the
+release notes say that rather than implying more.
 - [ ] A non-repository path: one-line error before the alternate screen, exit
       non-zero.
 

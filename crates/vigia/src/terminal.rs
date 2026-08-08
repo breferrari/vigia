@@ -870,6 +870,13 @@ mod tests {
     /// The child, by the name the harness selects it with.
     const CHILD_TEST: &str = "terminal::tests::signal_child";
 
+    /// Tells the child to take the wake and then do nothing with it.
+    ///
+    /// A shell wedged for any reason, which is the case the second ask exists for
+    /// and the only way to observe it: a shell that behaves swallows one signal and
+    /// leaves, so nothing else can produce a second delivery that matters.
+    const WEDGE: &str = "VIGIA_SIGNAL_WEDGE";
+
     /// The child gets a process group of its own, so a control event addressed
     /// to its process id reaches it and nothing else, above all not the runner.
     ///
@@ -964,6 +971,16 @@ mod tests {
                 Ok(_) => panic!("the forwarder sent a wake that was not the signal"),
                 Err(e) => panic!("the forwarder hung up before any signal arrived: {e}"),
             }
+
+            if std::env::var_os(WEDGE).is_some() {
+                std::fs::write(dir.join("woke"), b"and did nothing").expect("write woke");
+                // Never leaves this scope, so the guard never drops and the
+                // terminal is never given back. Exactly the shell the second ask
+                // is the floor under.
+                loop {
+                    std::thread::park();
+                }
+            }
         }
 
         // Reachable only once the guard above has dropped, which is what makes
@@ -982,13 +999,20 @@ mod tests {
         // its parent had at the moment it started. A process with none can be
         // sent no control event, and neither can anything it spawns.
         //
-        // Held in a guard rather than freed at the end, because there are three
-        // ways out of this test below it: a skip, a failing assert, and the
-        // ordinary end. A cleanup written at the bottom runs on one of them. This
-        // module is about exactly that mistake, so making it here would be a poor
-        // joke.
+        // **Never freed, and that is the second answer to this question.** A guard
+        // that freed it on every way out was the obvious fix to a cleanup line
+        // three of four exits skipped, and it was worse: `crossterm` memoises
+        // whether the takeover is ANSI from the real stdout handle, so freeing the
+        // console changes that answer for every other test in this binary, and
+        // `the_real_console_gives_back_every_mode_it_set` would fail its own
+        // non-vacuity assert. It only fires where `AllocConsole` actually acts,
+        // which is a runner with no console, which is CI and not here.
+        //
+        // A console this process had to allocate dies with the process
+        // milliseconds later, and nothing outside the process can see it. Leaking
+        // it is the cheaper of the two mistakes.
         #[cfg(windows)]
-        let _console = Allocated(ensure_console());
+        ensure_console();
 
         let exe = std::env::current_exe().expect("this test binary's own path");
         let mut command = std::process::Command::new(&exe);
@@ -1039,9 +1063,14 @@ mod tests {
         // call putting the bits back would be the global mutation layer 3
         // refuses.
 
+        // Both facts in one message, in this order and deliberately. A child that
+        // panicked has no `dropped` marker *and* a failing status, and reporting
+        // only the missing marker would say "it never left its loop" about a
+        // process that left rather noisily.
         assert!(
             dropped,
-            "the child was signalled and never left its loop, so the guard never dropped"
+            "the child was signalled and left no marker, so the guard never dropped. \
+             It exited {status}, which says whether it hung or failed on its way out"
         );
         assert!(
             status.success(),
@@ -1071,25 +1100,105 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Frees a console this test had to allocate, on every way out.
-    ///
-    /// `false` when the process already had one, in which case there is nothing
-    /// to give back and this does nothing.
-    #[cfg(windows)]
-    struct Allocated(bool);
+    #[test]
+    fn a_second_external_signal_kills_a_shell_that_ignored_the_first() {
+        // **The failing test I8's new by-choice exclusion needs.** `SPEC.md` §11.1
+        // rules that the second ask takes the default disposition: it kills the
+        // process and restores nothing. Without a gate that is a paragraph, and the
+        // property it protects is the one that keeps the graceful path honest,
+        // because an armed handler is what took the sender's guarantee away.
+        let dir = std::env::temp_dir().join(format!("vigia-wedged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the child's directory");
 
-    #[cfg(windows)]
-    impl Drop for Allocated {
-        fn drop(&mut self) {
-            if self.0 {
-                // SAFETY: an FFI call taking nothing. Only reached when this
-                // process had no console until a moment ago, so nothing of ours
-                // is attached to the one being freed.
-                unsafe {
-                    windows_sys::Win32::System::Console::FreeConsole();
-                }
+        #[cfg(windows)]
+        ensure_console();
+
+        let exe = std::env::current_exe().expect("this test binary's own path");
+        let mut command = std::process::Command::new(&exe);
+        command
+            .args([CHILD_TEST, "--exact", "--ignored", "--nocapture"])
+            .args(["--test-threads", "1"])
+            .env(CHILD, &dir)
+            .env(WEDGE, "1");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+        let mut child = command.spawn().expect("spawn the wedged child");
+
+        if !wait_for(&dir.join("ready")) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the child never armed, so nothing could be delivered to it");
+        }
+
+        if let Err(why) = deliver(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("skipped: {why}");
+            return;
+        }
+
+        // The first ask has to be *consumed* before the second is sent, or this
+        // measures two racing first asks rather than an escalation.
+        if !wait_for(&dir.join("woke")) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the child never took the first wake, so there was nothing to ignore");
+        }
+
+        if let Err(why) = deliver(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("skipped on the second ask: {why}");
+            return;
+        }
+
+        // Bounded, because a process that ignores the escalation is the defect this
+        // is looking for and `wait()` has no timeout to catch it with.
+        let died = wait_for_exit(&mut child);
+        if !died {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "the child survived a second delivery, so an armed `vigia` is \
+                 unkillable short of SIGKILL and the escalation is not working"
+            );
+        }
+
+        let status = child.wait().expect("wait for the wedged child");
+        assert!(
+            !status.success(),
+            "the child exited cleanly ({status}), so the second ask was answered \
+             gracefully rather than taken to the default disposition"
+        );
+        assert!(
+            !dir.join("dropped").exists(),
+            "the wedged child restored the terminal, which means it left its loop \
+             after all and this test proved nothing about the escalation"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Whether the child is gone, within the same bound [`wait_for`] uses.
+    ///
+    /// `Child::wait` has no timeout, and the failure this guards against is a
+    /// process that will not die: waiting for it would hang the run rather than
+    /// report the defect.
+    fn wait_for_exit(child: &mut std::process::Child) -> bool {
+        for _ in 0..600 {
+            match child.try_wait() {
+                Ok(Some(_)) => return true,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(_) => return false,
             }
         }
+        false
     }
 
     /// Wait for a marker the child writes.
