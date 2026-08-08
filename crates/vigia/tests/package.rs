@@ -210,10 +210,13 @@ fn toml_array(source: &str, key: &str) -> Vec<String> {
 /// while the command beneath it did something else. That second failure is the
 /// one the gate was written to catch in the first place.
 ///
-/// Three shapes, which is all GitHub Actions offers and all this needs:
+/// The shapes it reads:
 ///
-/// - `run: cargo publish …` on one line.
-/// - `run: |` (or `run: >`) with an indented body, joined into one string.
+/// - `run: cargo publish …` on one line, with or without the list dash.
+/// - A block scalar with an indented body, joined into one string. `|` and `>`,
+///   and either carrying a chomping indicator or an indentation digit, since
+///   `|-` is ordinary YAML and reading only the bare form turned a legitimate
+///   rewrite into a red claiming the file had no publish command at all.
 /// - Either of those with `\` continuations, joined, because a flag on a
 ///   continued line is invisible to anything working line by line and
 ///   `--dry-run` is exactly the flag someone would put there.
@@ -230,17 +233,33 @@ fn run_commands(yaml: &str) -> Vec<String> {
         let trimmed = line.trim_start();
         // `- run:` as well as `run:`, since the first step of a list carries the
         // dash on the same line as its first key.
-        let Some(rest) = trimmed
-            .strip_prefix("- run:")
-            .or_else(|| trimmed.strip_prefix("run:"))
-        else {
+        // The dash form carries the key on the same line as the list marker, so
+        // the indent that bounds a block body is the **key's**, not the dash's.
+        // Measuring from the dash makes the body look two columns wider than it
+        // is, and the scan then swallows the step's sibling `env:` and `if:`
+        // keys into the command.
+        let (rest, indent) = if let Some(rest) = trimmed.strip_prefix("- run:") {
+            (rest, line.len() - trimmed.len() + 2)
+        } else if let Some(rest) = trimmed.strip_prefix("run:") {
+            (rest, line.len() - trimmed.len())
+        } else {
             index += 1;
             continue;
         };
-        let indent = line.len() - trimmed.len();
         let rest = rest.trim();
 
-        let mut body = if rest == "|" || rest == ">" || rest.is_empty() {
+        // `|`, `>`, and either with a chomping indicator (`|-`, `|+`, `>-`) or
+        // an explicit indentation digit. All are ordinary YAML and `|-` in
+        // particular is what a formatter or a careful author writes, so reading
+        // only the bare forms turned a legitimate rewrite into a red claiming
+        // the file had no publish command.
+        let is_block = rest.is_empty()
+            || (rest.starts_with(['|', '>'])
+                && rest[1..]
+                    .chars()
+                    .all(|c| matches!(c, '-' | '+' | '0'..='9')));
+
+        let mut body = if is_block {
             // A block scalar: every following line indented past the key.
             let mut collected = Vec::new();
             index += 1;
@@ -436,18 +455,34 @@ fn the_spec_names_every_test_that_escapes_the_package() {
     // it by hand is the same defect with a smaller radius: bumping the constant
     // for a fourteenth escaping test would otherwise leave all three saying
     // "thirteen", green.
-    for (path, text) in [
-        ("SPEC.md", spec.as_str()),
+    // Each document's own sentence, not the bare numeral. `contains("thirteen")`
+    // was the first spelling and it proves nothing even today, being satisfied
+    // twice over by "thirteen**th**" in the manifest. Worse, the *next* bump
+    // finds "fourteen" already sitting in SPEC.md about column widths and in the
+    // manifest about "a fourteenth escape", so two of the three would pass
+    // untouched while still saying thirteen. A count assertion an unrelated
+    // numeral satisfies is the same failure as a count in prose.
+    for (path, text, phrase) in [
+        (
+            "SPEC.md",
+            spec.as_str(),
+            format!("{ESCAPING_FILES_SPELLED} of `vigia`'s test files"),
+        ),
         (
             "crates/vigia/Cargo.toml",
             &read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")),
+            format!("counts {ESCAPING_FILES_SPELLED} *files*"),
         ),
-        ("RELEASE-SMOKE.md", &repo_file("RELEASE-SMOKE.md")),
+        (
+            "RELEASE-SMOKE.md",
+            &repo_file("RELEASE-SMOKE.md"),
+            format!("{ESCAPING_FILES_SPELLED} test files that read"),
+        ),
     ] {
         assert!(
-            text.contains(ESCAPING_FILES_SPELLED),
-            "{path} should say `{ESCAPING_FILES_SPELLED}` files read outside \
-             the package, matching the {ESCAPING_FILES} counted from disk"
+            text.contains(&phrase),
+            "{path} should say {phrase:?}, matching the {ESCAPING_FILES} \
+             counted from disk. All three move together"
         );
     }
 }
@@ -496,6 +531,26 @@ fn only_the_commands_a_workflow_runs_are_read_as_commands() {
         continued,
         vec!["cargo publish --workspace --locked --dry-run"],
         "a `\\` continuation joins, or a flag on the next line is invisible"
+    );
+
+    // A chomping indicator is still a block scalar. Reading `|-` as the command
+    // itself dropped the body and reported the file had no publish in it.
+    let chomped = run_commands("        run: |-\n          cargo publish --workspace --locked\n");
+    assert_eq!(
+        chomped,
+        vec!["cargo publish --workspace --locked"],
+        "`|-` is ordinary YAML and must read as a block, not as a command"
+    );
+
+    // The dash form bounds its body by the *key's* column, not the dash's.
+    // Measuring from the dash swallowed the step's sibling keys.
+    let dashed = run_commands(
+        "      - run: |\n          cargo publish --workspace\n        env:\n          TOKEN: x\n",
+    );
+    assert_eq!(
+        dashed,
+        vec!["cargo publish --workspace"],
+        "`env:` is a sibling key of `run:`, not part of the command"
     );
 
     // And the real file yields exactly one command containing a publish.
