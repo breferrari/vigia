@@ -12,7 +12,7 @@
 //! one change, which is I1's, and the policy stays there because that is where
 //! it is testable. `run` below coalesces **paints**: how many frames one burst
 //! of wakes is worth, which is I9's, and it can only live here because a paint
-//! is the shell's and because one of the two wake sources is the terminal. It
+//! is the shell's and because one of the three wake sources is the terminal. It
 //! decides nothing about which events are real, which is what the sentence
 //! above is protecting.
 //!
@@ -20,12 +20,12 @@
 //! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
 //! proof for I5 and I6, and a test cannot import a `main.rs`.
 //!
-//! ## Why three threads and two repositories
+//! ## Why four threads and two repositories
 //!
 //! I1 says an idle monitor does no work, and the core delivers that by blocking:
 //! [`vigia_core::Watcher::next_tick`] waits on an untimed `recv`. `crossterm`
-//! reads input the same way. Two blocking sources need two threads and one
-//! channel, or a poll loop, and a poll loop is the timer I1 forbids.
+//! reads input the same way. **The first two** blocking sources need two threads
+//! and one channel, or a poll loop, and a poll loop is the timer I1 forbids.
 //!
 //! The third is [`vigia_core::Highlighter::warm_ahead`], and it is not on that
 //! channel at all: it sends no wake, so it cannot make an idle monitor do work
@@ -34,6 +34,14 @@
 //! there is no such thing as a warm grammar for the frame path to believe in,
 //! which `warm_ahead` documents in full.
 //!
+//! The fourth is [`signal`]'s, and it is a **third wake source on the same
+//! channel** rather than a new mechanism: an externally delivered signal ends
+//! the loop, and the ordinary `Drop` restores the terminal (I8). It blocks the
+//! way the first two do, on a self-pipe `signal-hook` drains, so it costs an idle
+//! monitor nothing either. **On Windows it does not exist**: console control
+//! events arrive on a thread the OS makes for the handler, and only while the
+//! process is leaving, so there is nothing of ours to spawn.
+//!
 //! The watch thread opens its own [`vigia_core::Worktree`]. That is not
 //! duplication for its own sake: a [`vigia_core::Watcher`] borrows the
 //! `gix::Repository` it filters gitignore rules through, and `gix::Repository` is
@@ -41,11 +49,13 @@
 //! second open costs one repository discovery, paid after first paint, off the
 //! path I7 measures.
 //!
-//! All three are detached rather than scoped. Quitting means main returning,
+//! All of them are detached rather than scoped. Quitting means main returning,
 //! and none of them can be woken to be joined: the warmer ends by itself, and
-//! for the other two, `crossterm` has no portable
-//! interruptible read, and the one handle that unblocks the watcher makes its
-//! `next_tick` return `None` permanently, which is a shutdown and not a nudge.
+//! for the rest, `crossterm` has no portable
+//! interruptible read, the one handle that unblocks the watcher makes its
+//! `next_tick` return `None` permanently, which is a shutdown and not a nudge,
+//! and there is no portable way to interrupt a blocked read of a self-pipe
+//! either.
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -53,13 +63,14 @@
 mod app;
 mod colour;
 mod input;
-/// Public where its five siblings are private, and for one reason: `soak.rs` is
+/// Public where its seven siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
 /// harness needs the same reader the shell uses. Two implementations of "read
 /// this process's RSS" that could disagree is exactly what one of them existing
 /// is meant to prevent.
 pub mod memory;
 mod render;
+mod signal;
 mod terminal;
 /// Public for the same reason [`memory`] is: a theme file is parsed by a pure
 /// function over a string, `tests/palette.rs` is an integration test and can only
@@ -114,13 +125,27 @@ enum Wake {
     WatchLost(String),
     /// Terminal input stopped, so nothing can reach the shell any more.
     ///
-    /// Fatal, and it is the one wake-up that is. In raw mode every way out is a
-    /// key event: the terminal does not turn Ctrl-C into a signal, and there is
-    /// no handler that would catch one. So a shell that kept drawing after this
-    /// would hold the alternate screen with no way to leave it, and the only
-    /// remaining exit is a kill, which runs neither the guard nor the panic hook
-    /// and hands back a terminal in raw mode. Leaving is the smaller failure.
+    /// Fatal, and it is the one wake-up that is. In raw mode every way out from
+    /// this keyboard is a key event, because the terminal does not turn Ctrl-C
+    /// into a signal. So a shell that kept drawing after this would hold the
+    /// alternate screen with nothing the reader in front of it could do about
+    /// it, and leaving is the smaller failure.
+    ///
+    /// **What changed with [`Signalled`](Wake::Signalled) is the consequence,
+    /// not the ruling.** This used to say the only remaining exit was a kill,
+    /// which ran neither the guard nor the panic hook and handed back a terminal
+    /// in raw mode. A kill is caught now and restores like any other exit, so the
+    /// cost of staying is no longer a wrecked terminal. It is still a pane that
+    /// cannot be closed from the pane, which is reason enough.
     InputLost,
+    /// Something outside this process asked it to stop.
+    ///
+    /// The quit key's arm, reached without a key. It carries nothing because
+    /// there is nothing left to decide: whichever signal it was, the answer is
+    /// to leave, and the terminal goes back the way it does on every other exit,
+    /// through the `Drop` on the way out. [`signal`] is where the reasoning
+    /// lives, above all why the handler must restore nothing itself.
+    Signalled,
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
@@ -143,6 +168,30 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
 
+    // Inert until something sends: it costs nothing, wakes nobody, and I1 never
+    // sees it. Built here because the handler on it is armed on the next line,
+    // before the terminal is taken, and the other two senders are armed after the
+    // first paint.
+    let (tx, rx) = mpsc::channel();
+
+    // **Before the terminal is taken, which is the whole point of it being here.**
+    // `Session::enter` installs the panic hook before its first step for exactly
+    // this reason: the window a safety net has to cover starts at the *first* step
+    // of the takeover, not after the fourth. Armed afterwards, a signal arriving
+    // between raw mode and the cursor was still an uncaught kill, and two earlier
+    // versions of this line got that wrong in two different ways: inside the
+    // struct literal it also sat after `Highlighter::new`'s 318µs grammar load,
+    // because fields evaluate in written order.
+    //
+    // A signal that arrives before the loop exists is not lost. It waits in the
+    // channel, and the first `recv` below acts on it, by which point there is a
+    // `Session` to drop and a terminal to give back.
+    //
+    // Reported rather than fatal. A monitor that refused to open because it could
+    // not arm a safety net would be a worse answer than one that opens and says
+    // so, so the outcome is carried to where there is an `App` to warn through.
+    let armed = signal::forward(tx.clone());
+
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
@@ -163,6 +212,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // `Session::enter` is written above, so the alternate screen is already
         // ours by the time this runs. The placement is right and the reason was
         // wrong.
+        //
+        // That same evaluation order is why the signal handler is armed *above*
+        // this literal rather than as a field beside `session`: a field here
+        // would run after this load, and the window it exists to cover opens
+        // before the takeover's first step.
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws
         // cold until something writes to it. That is the honest first frame: a
@@ -175,6 +229,27 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
     };
+
+    // The arming from above, reported now that there is somewhere to report it. A
+    // signal that arrived before this point is not lost: it waits in the channel
+    // and the first `recv` below handles it.
+    //
+    // **A notice rather than the durable header mode `WatchLost` also sets**, and
+    // the two are not the same shape. A lost watch changes what every later frame
+    // *is*, so a reader looking at a stale diff has to keep being told. An
+    // unarmed handler changes nothing on screen and matters only at the moment
+    // somebody kills the process, so being told once, on the first frame, is
+    // being told. Stated here because the transience is a choice.
+    //
+    // The wording says *stop* rather than *signal*, because I8 is one guarantee
+    // over two mechanisms and half the readers of this line are on a platform
+    // with no signals at all.
+    if let Err(e) = armed {
+        shell.app.warn(format!(
+            "not catching an external stop, so a kill may not restore the terminal: {e}"
+        ));
+    }
+
     // **For a screen with rows on it, so a clean worktree spawns nothing.**
     // Starting a monitor on a tree nobody has touched is an ordinary way to
     // start one, and there is no grammar to compile for an empty state.
@@ -221,8 +296,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and
     // FSEvents both report reads and attribute touches, so the shell would wake
-    // itself up once for free at startup.
-    let (tx, rx) = mpsc::channel();
+    // itself up once for free at startup. The channel they send on is older than
+    // they are: the signal handler above shares it, and has the opposite
+    // requirement about when it is armed.
     spawn_watch(path.to_path_buf(), tx.clone());
     spawn_input(tx);
 
@@ -249,6 +325,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 Wake::InputLost => {
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
+                // The quit key's arm without the key, so `break` and not
+                // `return`: nothing failed, and a message printed after the
+                // terminal came back would be a message the sender did not ask
+                // for. Breaking drops `shell`, which drops `Session`, which is
+                // what puts the terminal back — the same three steps every other
+                // exit takes, which is the whole reason the handler in `signal`
+                // restores nothing itself.
+                Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
                     // **The regions the last paint actually drew.** A pointer is
                     // told what it is over by asking the same function `render`
@@ -879,5 +963,63 @@ mod tests {
         let mut batch = Vec::new();
         drain(&mut batch, tick(0), &rx, DRAIN_CAP);
         assert_eq!(batch.len(), 2, "the queued wake was lost with the sender");
+    }
+
+    /// Two properties of `run` that no test can execute, because `run` owns a
+    /// terminal, and that are load bearing enough to gate by reading the source.
+    ///
+    /// This is the shape `no_exit_path_in_the_shell_skips_the_destructors` already
+    /// uses in `terminal`, and it is a weak instrument used deliberately: both
+    /// properties are single lines whose *position* and *form* are the whole of
+    /// their correctness, and a mutation of either passes the entire suite. A gate
+    /// that reads the file is worth more than a paragraph nobody re-checks.
+    #[test]
+    fn the_signal_arming_covers_the_takeover_and_the_wake_ends_the_loop() {
+        // Only what ships, so the strings below cannot match this test itself.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        assert!(
+            shipped.len() > 200,
+            "lib.rs was not read, so scanning it proves nothing"
+        );
+
+        // **Comments stripped, because both names appear in prose in this file and
+        // a check that reads prose is a check on prose.** Every comment above the
+        // arming discusses `Session::enter`, so one sentence moved earlier would
+        // either fail this test against correct code or pass it against wrong code,
+        // depending on which name it mentioned. Both failure directions are the
+        // gate proving nothing, which is the whole thing this test exists against.
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // **Order.** The handler has to be armed before the first step of the
+        // takeover, not after the fourth: a signal arriving mid-takeover is
+        // otherwise still an uncaught kill. Two earlier versions of this line were
+        // in the wrong place, one of them after a 318µs grammar load.
+        let arming = code
+            .find("signal::forward(")
+            .expect("`run` no longer arms the signal handler at all");
+        let takeover = code
+            .find("Session::enter()")
+            .expect("`run` no longer takes the terminal");
+        assert!(
+            arming < takeover,
+            "the signal handler is armed after the terminal is taken, so a signal \
+             arriving during the takeover is uncaught"
+        );
+
+        // **Form.** `signal`'s escalation latches after one ask: the second goes to
+        // the default disposition and kills the process. That is only safe because
+        // this arm leaves the loop unconditionally, so one ask is always enough. An
+        // arm that merely continued would make the first signal a no-op and the
+        // second a hard kill, which is worse than either alone.
+        assert!(
+            code.contains("Wake::Signalled => break 'awake"),
+            "the signalled wake no longer unconditionally leaves the loop, which is \
+             what makes `signal`'s one-way escalation latch safe"
+        );
     }
 }

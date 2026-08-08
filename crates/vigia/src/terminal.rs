@@ -41,11 +41,20 @@
 //! sink, and the ANSI table beside it checks the commands against DEC's own mode
 //! numbers rather than against crossterm restating itself.
 //!
-//! **Not covered, deliberately:** an externally delivered signal. Raw mode means
-//! Ctrl-C is a key event and not a signal, so there is nothing to catch on the
-//! path a reader uses; a `kill` from elsewhere runs neither the guard nor the
-//! hook, and closing that needs a dependency `SPEC.md` does not name. See I8 and
-//! [#24](https://github.com/breferrari/vigia/issues/24).
+//! **A third way in, and deliberately not a third mechanism.** An externally
+//! delivered signal used to be uncovered here: raw mode makes Ctrl-C a key event
+//! and never a signal, so there is nothing to catch on the path a reader uses,
+//! and a `kill` from elsewhere ran neither the guard nor the hook.
+//! [`signal`](crate::signal) closes that
+//! ([#24](https://github.com/breferrari/vigia/issues/24)) while adding nothing
+//! to this module: the handler restores nothing, it ends the loop, and the guard
+//! above then does what it already did. The number of ways to leave went up by
+//! one and the number of ways to restore did not, which is the property worth
+//! having: the three test layers below are unchanged, and what they gained is a
+//! section beside them rather than among them.
+//!
+//! What is still out of reach is `SIGKILL` and `TerminateProcess`, on the same
+//! footing on both platforms, because neither runs any code the process owns.
 
 use std::io::{self, IsTerminal, Stdout, Write, stdout};
 use std::sync::Once;
@@ -338,6 +347,14 @@ mod tests {
     //!    `Step::AlternateScreen` is wired to `LeaveAlternateScreen` rather than
     //!    to `EnterAlternateScreen`. Layers 1 and 2 would both pass with that
     //!    wire crossed.
+    //!
+    //! A fourth section follows them and is deliberately **not** a fourth layer.
+    //! The three above prove the restore *policy*, each from an angle the others
+    //! cannot see. What section 4 proves is that an externally delivered signal
+    //! reaches that policy at all: it needs a second process, and it asserts over
+    //! the real bytes a real guard wrote on its way out. Adding a way to *leave*
+    //! did not add a way to *restore*, which is why the three layers are
+    //! unchanged and why the new section sits beside them rather than among them.
 
     use std::sync::{Arc, Mutex};
 
@@ -771,7 +788,7 @@ mod tests {
         // reader back in raw mode with no message and nothing to report.
         //
         // `main` returns an `ExitCode` for exactly this reason.
-        const SOURCES: [(&str, &str); 10] = [
+        const SOURCES: [(&str, &str); 11] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
             ("app.rs", include_str!("app.rs")),
@@ -779,6 +796,7 @@ mod tests {
             ("input.rs", include_str!("input.rs")),
             ("memory.rs", include_str!("memory.rs")),
             ("render.rs", include_str!("render.rs")),
+            ("signal.rs", include_str!("signal.rs")),
             ("terminal.rs", include_str!("terminal.rs")),
             ("theme.rs", include_str!("theme.rs")),
             ("view.rs", include_str!("view.rs")),
@@ -835,6 +853,443 @@ mod tests {
                     "{name} calls {skips}, which skips the Drop that restores the terminal"
                 );
             }
+        }
+    }
+
+    // ---- Beside the layers: the signal, end to end ------------------------
+    //
+    // The one thing here that needs two processes. A signal cannot be delivered
+    // to the process that would have to observe it arriving, a console control
+    // handler cannot be uninstalled once a test is over, and the wake has to
+    // cross a real blocked `recv` rather than a fake one. So the shape is the
+    // `soak.rs` shape: this binary re-invokes itself by name.
+
+    /// Where the parent tells the child to leave its evidence.
+    const CHILD: &str = "VIGIA_SIGNAL_DIR";
+
+    /// The child, by the name the harness selects it with.
+    const CHILD_TEST: &str = "terminal::tests::signal_child";
+
+    /// Tells the child to take the wake and then do nothing with it.
+    ///
+    /// A shell wedged for any reason, which is the case the second ask exists for
+    /// and the only way to observe it: a shell that behaves swallows one signal and
+    /// leaves, so nothing else can produce a second delivery that matters.
+    const WEDGE: &str = "VIGIA_SIGNAL_WEDGE";
+
+    /// The child gets a process group of its own, so a control event addressed
+    /// to its process id reaches it and nothing else, above all not the runner.
+    ///
+    /// It is also what decides which event the parent sends: a process created
+    /// this way starts with Ctrl-C disabled, and `CTRL_BREAK` is the one a fresh
+    /// group can always be given.
+    #[cfg(windows)]
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+
+    /// A process that arms the real handler, blocks the way the shell blocks, and
+    /// leaves the real guard to restore.
+    ///
+    /// Ignored because it is meaningless on its own, and it **fails** rather than
+    /// returning green when run directly. That is `soak_child`'s rule and the
+    /// right one: a test reporting `ok` having armed nothing is the green tick
+    /// over a check that did not run, which is what the parent below refuses two
+    /// screens further down. The assert fires before anything blocks, so running
+    /// this directly reports rather than hangs.
+    #[test]
+    #[ignore = "the parent process delivers the signal this waits for"]
+    fn signal_child() {
+        let dir = std::env::var(CHILD).unwrap_or_else(|_| {
+            panic!(
+                "{CHILD} is not set, so this was run directly. It is the body of \
+                 `an_external_signal_ends_the_loop_and_the_terminal_goes_back`, which \
+                 delivers the signal it waits for; run that instead."
+            )
+        });
+        let dir = std::path::PathBuf::from(dir);
+
+        // The real adapter over a real file, so what lands in it is whatever this
+        // platform actually emits rather than what a recorder was told to expect.
+        let sink = std::fs::File::create(dir.join("restored")).expect("create the restore sink");
+
+        // **The expectation is derived here, in the child, and that placement is
+        // the whole of it.** `crossterm` decides once per process whether the
+        // takeover is ANSI or console-API calls, and caches the answer. The parent
+        // may have decided *before* the console this fixture allocates existed and
+        // the child *after*, in which case a parent-side expectation is a
+        // different platform's answer: zero bytes against real escape sequences,
+        // reported as I8 having broken. Same process, same answer, no straddle.
+        let mut owed = Crossterm { out: Vec::new() };
+        give_back_all(&mut owed, TAKEOVER.len());
+
+        // Non-vacuity, asserted where the fact lives rather than inferred across a
+        // process boundary. This is layer 3's rule (`the_real_console_gives_back_
+        // every_mode_it_set`) applied in the process that is about to be measured:
+        // if this console emits nothing, the sink below can prove nothing and
+        // saying so is the only honest outcome.
+        assert!(
+            !owed.out.is_empty(),
+            "this console emits no escape sequences for the takeover, so the sink \
+             would prove nothing"
+        );
+        std::fs::write(dir.join("owed"), &owed.out).expect("write what is owed");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        crate::signal::forward(tx).expect("arm the signal handler");
+
+        {
+            // **Built rather than taken**, and that is the one departure from the
+            // production path. `Takeover::take` would enable raw mode on the
+            // console running this test, which layer 3 above rules out in so many
+            // words. Giving it back is the direction under test and the safe one:
+            // `disable_raw_mode` does nothing on Unix when this process never
+            // stored a prior mode, and on Windows it ORs the ordinary bits back
+            // on, which is a restoration and never a takeover.
+            let _takeover = Takeover {
+                console: Crossterm { out: sink },
+                taken: TAKEOVER.len(),
+            };
+
+            // Last of all, so the parent can never signal a process that is not
+            // listening yet, and after the guard exists so that what the signal
+            // finds is a terminal already owed back.
+            std::fs::write(dir.join("ready"), b"armed").expect("write the ready marker");
+
+            // What this borrows from `run`'s loop, and all it borrows: block on
+            // the channel, recognise the wake, leave. Everything else there is
+            // about frames, and `run` owns a terminal so no test can drive the
+            // real one. Said out loud because a copy nobody names is a copy that
+            // drifts.
+            //
+            // One `recv` rather than a loop, because `signal::forward` owns the
+            // only sender on this channel and sends one kind of wake. The other
+            // two arms are the ways this test could otherwise pass for the wrong
+            // reason: a `recv` that ended because the forwarder died would drop
+            // the guard exactly as a signal does, so what ended the wait is
+            // checked rather than assumed.
+            match rx.recv() {
+                Ok(crate::Wake::Signalled) => {}
+                Ok(_) => panic!("the forwarder sent a wake that was not the signal"),
+                Err(e) => panic!("the forwarder hung up before any signal arrived: {e}"),
+            }
+
+            if std::env::var_os(WEDGE).is_some() {
+                std::fs::write(dir.join("woke"), b"and did nothing").expect("write woke");
+                // Never leaves this scope, so the guard never drops and the
+                // terminal is never given back. Exactly the shell the second ask
+                // is the floor under.
+                loop {
+                    std::thread::park();
+                }
+            }
+        }
+
+        // Reachable only once the guard above has dropped, which is what makes
+        // this marker evidence about the *restore* rather than about a signal
+        // merely arriving.
+        std::fs::write(dir.join("dropped"), b"the takeover dropped").expect("write the marker");
+    }
+
+    #[test]
+    fn an_external_signal_ends_the_loop_and_the_terminal_goes_back() {
+        let dir = std::env::temp_dir().join(format!("vigia-signal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the child's directory");
+
+        // Before the child is spawned, because a child inherits whatever console
+        // its parent had at the moment it started. A process with none can be
+        // sent no control event, and neither can anything it spawns.
+        //
+        // **Never freed, and the reason took three goes to state correctly.** A
+        // guard that freed it on every way out was the obvious fix to a cleanup
+        // line three exits skipped. Then the revert claimed freeing would break
+        // `the_real_console_gives_back_every_mode_it_set` on a console-less
+        // runner, which was an unmeasured guess and self-refuting: that test is on
+        // `main`, where nothing allocates a console, so if a runner had none it
+        // would already be failing there.
+        //
+        // What is actually true, read out of `crossterm`'s `ansi_support.rs`:
+        // `supports_ansi()` is `enable_vt_processing().is_ok() || TERM is set and
+        // not "dumb"`, memoised **once per process** through `CONOUT$`. Two things
+        // follow. Windows CI must already have a console or a `TERM`, or that test
+        // would be red on `main`, so `AllocConsole` almost certainly never acts
+        // anywhere and this call is a fallback for the genuinely console-less case
+        // a probe had to simulate. And the asymmetry is real: allocating can only
+        // turn a not-yet-memoised `false` into `true`, which no test minds, while
+        // **freeing** can turn it into `false` for all forty-eight tests in this binary,
+        // depending on which ran first.
+        //
+        // So the leak is not a concession. A console this process allocated dies
+        // with the process milliseconds later and nothing outside can see it,
+        // where freeing one is order-dependent damage to everything else here.
+        #[cfg(windows)]
+        ensure_console();
+
+        let exe = std::env::current_exe().expect("this test binary's own path");
+        let mut command = std::process::Command::new(&exe);
+        command
+            .args([CHILD_TEST, "--exact", "--ignored", "--nocapture"])
+            .args(["--test-threads", "1"])
+            .env(CHILD, &dir);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+        let mut child = command.spawn().expect("spawn the signal child");
+
+        if !wait_for(&dir.join("ready")) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the child never armed its handler, so nothing could have been delivered to it");
+        }
+
+        if let Err(why) = deliver(child.id()) {
+            // A printed skip rather than a pass. On a runner with no console at
+            // all there is no way to deliver a control event, and a green tick
+            // over a check that did not run is the shape `SPEC.md` §7 exists to
+            // refuse.
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("skipped: {why}");
+            return;
+        }
+
+        // Bounded, rather than `child.wait()` straight away, which has no
+        // timeout: a defect that stopped the wake from ever arriving would leave
+        // the child blocked on its `recv` forever and **hang** this test instead
+        // of failing it, and a hang reports the runner rather than the defect.
+        // The marker is written after the guard's `Drop` has returned, so once it
+        // exists the sink beside it is complete too.
+        let dropped = wait_for(&dir.join("dropped"));
+        if !dropped {
+            let _ = child.kill();
+        }
+        let status = child.wait().expect("wait for the signal child");
+
+        // Nothing to undo here, and that is worth one line rather than a
+        // defensive `disable_raw_mode()`: the child *builds* its guard instead of
+        // taking one, so no process in this test ever enables raw mode, and a
+        // call putting the bits back would be the global mutation layer 3
+        // refuses.
+
+        // Both facts in one message, in this order and deliberately. A child that
+        // panicked has no `dropped` marker *and* a failing status, and reporting
+        // only the missing marker would say "it never left its loop" about a
+        // process that left rather noisily.
+        assert!(
+            dropped,
+            "the child was signalled and left no marker, so the guard never dropped. \
+             It exited {status}, which says whether it hung or failed on its way out"
+        );
+        assert!(
+            status.success(),
+            "the signal child exited {status}, so it did not reach the end of its restore"
+        );
+
+        // Both sides from the child, for the reason it states where it writes
+        // them: the parent is a different process and `crossterm` answers this
+        // question once per process.
+        let owed = std::fs::read(dir.join("owed")).expect("read what the child owed");
+        let written = std::fs::read(dir.join("restored")).expect("read the restore sink");
+
+        // The child refuses to run at all on a console that emits nothing, so an
+        // empty pair here is a walk that stopped walking rather than a platform
+        // that never wrote.
+        assert!(
+            !owed.is_empty(),
+            "the child recorded nothing owed, which it should have refused to do"
+        );
+        assert_eq!(
+            written, owed,
+            "the terminal was not given back the way every other exit gives it back"
+        );
+
+        // Left behind on failure on purpose, the way `soak.rs` leaves its
+        // worktree: the markers and the sink are the evidence.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_external_signal_kills_a_shell_that_ignored_the_first() {
+        // **The failing test I8's new by-choice exclusion needs.** `SPEC.md` §11.1
+        // rules that the second ask takes the default disposition: it kills the
+        // process and restores nothing. Without a gate that is a paragraph, and the
+        // property it protects is the one that keeps the graceful path honest,
+        // because an armed handler is what took the sender's guarantee away.
+        let dir = std::env::temp_dir().join(format!("vigia-wedged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the child's directory");
+
+        #[cfg(windows)]
+        ensure_console();
+
+        let exe = std::env::current_exe().expect("this test binary's own path");
+        let mut command = std::process::Command::new(&exe);
+        command
+            .args([CHILD_TEST, "--exact", "--ignored", "--nocapture"])
+            .args(["--test-threads", "1"])
+            .env(CHILD, &dir)
+            .env(WEDGE, "1");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+        let mut child = command.spawn().expect("spawn the wedged child");
+
+        if !wait_for(&dir.join("ready")) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the child never armed, so nothing could be delivered to it");
+        }
+
+        if let Err(why) = deliver(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("skipped: {why}");
+            return;
+        }
+
+        // The first ask has to be *consumed* before the second is sent, or this
+        // measures two racing first asks rather than an escalation.
+        if !wait_for(&dir.join("woke")) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the child never took the first wake, so there was nothing to ignore");
+        }
+
+        if let Err(why) = deliver(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("skipped on the second ask: {why}");
+            return;
+        }
+
+        // Bounded, because a process that ignores the escalation is the defect this
+        // is looking for and `wait()` has no timeout to catch it with.
+        let died = wait_for_exit(&mut child);
+        if !died {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "the child survived a second delivery, so an armed `vigia` is \
+                 unkillable short of SIGKILL and the escalation is not working"
+            );
+        }
+
+        let status = child.wait().expect("wait for the wedged child");
+        assert!(
+            !status.success(),
+            "the child exited cleanly ({status}), so the second ask was answered \
+             gracefully rather than taken to the default disposition"
+        );
+        assert!(
+            !dir.join("dropped").exists(),
+            "the wedged child restored the terminal, which means it left its loop \
+             after all and this test proved nothing about the escalation"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Whether the child is gone, within the same bound [`wait_for`] uses.
+    ///
+    /// `Child::wait` has no timeout, and the failure this guards against is a
+    /// process that will not die: waiting for it would hang the run rather than
+    /// report the defect.
+    fn wait_for_exit(child: &mut std::process::Child) -> bool {
+        for _ in 0..600 {
+            match child.try_wait() {
+                Ok(Some(_)) => return true,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+
+    /// Wait for a marker the child writes.
+    ///
+    /// Polling because the two processes share nothing else, and generous because
+    /// a cold `cargo test` on a shared runner can take seconds to reach the
+    /// child's first line. Slowness is not the failure this is guarding against.
+    fn wait_for(marker: &std::path::Path) -> bool {
+        for _ in 0..600 {
+            if marker.exists() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        marker.exists()
+    }
+
+    /// Deliver the signal, or say why it could not be.
+    #[cfg(unix)]
+    fn deliver(pid: u32) -> Result<(), String> {
+        // Shelling out rather than taking `libc` as a dev-dependency, the same
+        // choice the fixtures make with `git`, and for the same reason: it keeps
+        // the dependency list exactly what `SPEC.md` names.
+        let out = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output()
+            .map_err(|e| format!("`kill` could not be run: {e}"))?;
+
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "`kill -TERM {pid}` failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))
+        }
+    }
+
+    /// Deliver the signal, or say why it could not be.
+    #[cfg(windows)]
+    fn deliver(pid: u32) -> Result<(), String> {
+        // SAFETY: an FFI call taking two integers. `pid` is a process group id
+        // here because the child was created as a group of its own.
+        let sent = unsafe {
+            windows_sys::Win32::System::Console::GenerateConsoleCtrlEvent(
+                windows_sys::Win32::System::Console::CTRL_BREAK_EVENT,
+                pid,
+            )
+        };
+
+        if sent != 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "GenerateConsoleCtrlEvent could not reach process group {pid}: {}",
+                std::io::Error::last_os_error()
+            ))
+        }
+    }
+
+    /// Make sure this process has a console.
+    ///
+    /// Reports nothing, because neither caller has anything to do with the answer:
+    /// the console is deliberately never freed, for the reasons written where it is
+    /// called.
+    ///
+    /// Unconditional rather than detected, which is measured rather than lazy:
+    /// `GetConsoleWindow` returns null in an ordinary redirected `cargo test` that
+    /// delivers control events perfectly well, so there is no cheap question to
+    /// ask first. `AllocConsole` answers it by doing. With a console already
+    /// attached it fails with `ERROR_ACCESS_DENIED` and changes nothing; with none
+    /// it makes one, which is what a runner started by a service needs. The three
+    /// standard handles were measured unchanged across it, so cargo keeps
+    /// capturing this test's output either way.
+    #[cfg(windows)]
+    fn ensure_console() {
+        // SAFETY: an FFI call taking nothing. Failure is the ordinary case and
+        // means a console was already attached.
+        unsafe {
+            windows_sys::Win32::System::Console::AllocConsole();
         }
     }
 }
