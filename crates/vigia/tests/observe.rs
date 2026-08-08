@@ -888,8 +888,9 @@ impl Pane<'_> {
     ///
     /// What stays out, named rather than discovered later: the terminal
     /// takeover and the real `ratatui` terminal, which need a tty and are I8's;
-    /// and the input thread, because there is no reader. The buffer is a real
-    /// one and `render` writes into it.
+    /// the input thread, because there is no reader; and the signal handler,
+    /// which is process-global and would arm this harness rather than a shell.
+    /// The buffer is a real one and `render` writes into it.
     fn paint(&mut self, worktree: &Worktree) {
         self.branch = branch_for(&self.frame, || worktree.branch());
         let chrome = self.app.chrome(&self.name, self.branch.as_deref());

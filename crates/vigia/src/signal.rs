@@ -36,7 +36,7 @@
 //!
 //! **The shapes differ because the platforms hand you different things, and only
 //! there.** Unix hands you a self-pipe somebody has to drain, so there is a
-//! thread of ours and a loop, and the loop is [`pump`]. Windows hands you a
+//! thread of ours and a loop, and the loop is `pump`. Windows hands you a
 //! thread of its own making and calls the handler on it once per event, so there
 //! is no loop to write and nothing of ours to spawn: the handler sends the wake
 //! itself. Writing a Unix-shaped relay on Windows anyway would have cost a
@@ -46,6 +46,12 @@
 //! What neither can catch is also the same on both. `SIGKILL` and
 //! `TerminateProcess` (`taskkill /F`) end a process without running any code it
 //! owns, so no design reaches them, and I8 says so rather than implying more.
+//!
+//! **`pump` is deliberately not a doc link anywhere above**, and the reason is
+//! worth a line: it does not exist on Windows, so a link to it is unresolvable
+//! there while resolving perfectly on Unix. `#![deny(rustdoc::broken_intra_doc_links)]`
+//! turns that into an error on one platform out of three. A `#[cfg]` item is a
+//! thing to name in prose, not to link to.
 
 use std::io;
 use std::sync::OnceLock;
@@ -54,7 +60,41 @@ use std::sync::mpsc::Sender;
 use crate::Wake;
 
 /// The process-wide right to arm, claimed once.
+#[cfg(any(unix, windows))]
 static ARMED: OnceLock<()> = OnceLock::new();
+
+/// What a delivery is answered with, given whether one came before it.
+///
+/// **Arming a handler takes the sender's guarantee away, and this is what gives
+/// it back.** Before this module, one `kill` ended the process, because nothing
+/// caught it. After it, a `kill` is a wake for a loop, and a loop that is wedged
+/// for any reason would swallow every further one: the process would be
+/// unkillable by anything short of `SIGKILL`, and reaching for that is how a
+/// reader ends up with the wrecked terminal this whole module exists to prevent.
+/// So the *first* ask is graceful and the *second* is the disposition the sender
+/// would have got if nothing were armed at all.
+///
+/// Data rather than a branch inside each platform, so the rule is assertable:
+/// what [`Answer::Escalate`] names ends the process, and no test can call that.
+#[cfg(any(unix, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answer {
+    /// Wake the shell and let it leave under its own power, restoring on the way.
+    Wake,
+    /// Hand this one to the default disposition. The shell was asked already and
+    /// is still here.
+    Escalate,
+}
+
+/// Answer one delivery.
+#[cfg(any(unix, windows))]
+fn answer(asked_already: bool) -> Answer {
+    if asked_already {
+        Answer::Escalate
+    } else {
+        Answer::Wake
+    }
+}
 
 /// Claim that right, or refuse, and only then arm.
 ///
@@ -73,6 +113,7 @@ static ARMED: OnceLock<()> = OnceLock::new();
 /// A failed arming consumes the claim rather than releasing it. Nothing retries,
 /// and a second attempt after a failure would be a second attempt at whatever
 /// just failed.
+#[cfg(any(unix, windows))]
 fn claim(armed: &OnceLock<()>, arm: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
     armed
         .set(())
@@ -104,16 +145,42 @@ const CAUGHT: [i32; 3] = [
 /// module header says which platform hands you which; a copy of this on the
 /// Windows path would have been a loop with nothing to iterate.
 ///
-/// **Every delivery, not the first.** A second signal after the first is not
-/// swallowed, because the reason a second one arrives is that the first did not
-/// appear to work, and a monitor that ignored it would be the process a reader
-/// cannot get rid of. Sending again is free: the loop has already broken by
-/// then, and the send fails, which is what ends this.
+/// **The second delivery is not a repeat of the first, it is a harder ask**, and
+/// [`Answer`] is where that rule lives. The first wakes the shell. The second
+/// goes to the default disposition, which for all three of [`CAUGHT`] ends the
+/// process, so a reader whose first `kill` appeared to do nothing is never left
+/// arguing with a process that cannot be stopped.
+///
+/// It takes the signal *number* for exactly that reason: escalating means
+/// restoring the disposition of the signal that actually arrived, so this is the
+/// one place the number is load bearing rather than decorative.
+///
+/// A send that fails is the other ending, and it is not an escalation. It means
+/// `run` has already returned and dropped the receiver, so the process is on its
+/// way out under its own power and killing it here would interrupt its own exit.
+///
+/// **`escalate` is a parameter for the same reason [`Console`](crate::terminal)
+/// is a trait**: what it does in production is end the process, so a test driving
+/// this function with the real one would kill the test runner rather than report.
+/// Passing it in is what makes the escalation rule observable instead of merely
+/// reasoned about, and it is how the signal number is checked to be the one that
+/// actually arrived rather than the one before it.
 #[cfg(unix)]
-fn pump(source: impl Iterator<Item = ()>, tx: &Sender<Wake>) {
-    for _ in source {
-        if tx.send(Wake::Signalled).is_err() {
-            break;
+fn pump(source: impl Iterator<Item = i32>, tx: &Sender<Wake>, escalate: impl Fn(i32)) {
+    let mut asked = false;
+    for signal in source {
+        match answer(asked) {
+            // In production this does not return: it restores the default
+            // disposition and re-raises, so the process dies inside the call. The
+            // terminal may be left as it was, which is precisely the trade the
+            // second ask is asking for.
+            Answer::Escalate => escalate(signal),
+            Answer::Wake => {
+                if tx.send(Wake::Signalled).is_err() {
+                    break;
+                }
+                asked = true;
+            }
         }
     }
 }
@@ -121,20 +188,29 @@ fn pump(source: impl Iterator<Item = ()>, tx: &Sender<Wake>) {
 /// Wake the shell for every signal that arrives, until it stops listening.
 ///
 /// The thread is detached like the watch and the input threads, and for the same
-/// reason `SPEC.md` §6 gives for those: quitting means main returning, and there
-/// is no portable way to interrupt a blocked signal read to join it.
+/// reason the crate header's *"Why four threads"* gives for those: quitting means
+/// main returning, and there is no portable way to interrupt a blocked signal
+/// read to join it.
 ///
 /// Fallible because arming can fail, and the caller reports rather than refuses:
 /// a monitor that will not open because it could not arm a safety net is a worse
-/// outcome than one that opens without it and says so.
+/// outcome than one that opens without it and says so. The error names the call
+/// that failed, because the reader sees it on a footer with no other context.
 #[cfg(unix)]
 pub(crate) fn forward(tx: Sender<Wake>) -> io::Result<()> {
     claim(&ARMED, || {
         // Owns a dedicated thread reading a self-pipe, which is what makes the
         // forwarding below ordinary safe code. The handler it installs writes one
         // byte, which is all a signal context may do.
-        let mut signals = signal_hook::iterator::Signals::new(CAUGHT)?;
-        std::thread::spawn(move || pump(signals.forever().map(|_| ()), &tx));
+        let mut signals = signal_hook::iterator::Signals::new(CAUGHT)
+            .map_err(|e| io::Error::other(format!("registering {CAUGHT:?}: {e}")))?;
+        std::thread::spawn(move || {
+            pump(signals.forever(), &tx, |signal| {
+                // The only call site of the real thing, and the reason `pump`
+                // takes it rather than calling it: this ends the process.
+                let _ = signal_hook::low_level::emulate_default_handler(signal);
+            });
+        });
         Ok(())
     })
 }
@@ -165,29 +241,62 @@ const CAUGHT: [u32; 3] = [
 #[cfg(windows)]
 static SHELL: OnceLock<Sender<Wake>> = OnceLock::new();
 
+/// Whether the shell has been asked to leave already.
+///
+/// A static for the reason [`SHELL`] is one, and swapped rather than loaded so
+/// that two control events arriving at once cannot both count as the first.
+#[cfg(windows)]
+static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether answering this event means holding the grace period open.
+///
+/// Only `CTRL_CLOSE_EVENT` has one. Returning from its handler tells Windows the
+/// process has finished cleaning up and it is killed at that moment, so the
+/// handler has to stay inside the call for as long as the exit takes. The other
+/// two are ordinary: the wake has been delivered, the loop will act on it, and
+/// answering TRUE lets this thread go rather than leaving one parked for the life
+/// of the process.
+#[cfg(windows)]
+fn holds_the_grace_period(kind: u32) -> bool {
+    kind == windows_sys::Win32::System::Console::CTRL_CLOSE_EVENT
+}
+
 /// The console control handler.
 ///
 /// Runs on a thread Windows creates for it, which is an ordinary thread and not
 /// a POSIX signal context, so the send below is allowed to be a send.
 ///
-/// **It never returns for an event it claims, and that is the point.** Returning
-/// from a `CTRL_CLOSE_EVENT` handler tells Windows the process is finished
-/// cleaning up, and the process is killed at that moment. The wake above has just
-/// asked the shell to leave under its own power, and it needs those milliseconds
-/// to drop the session and put the terminal back. Parking holds the grace period
-/// open for exactly as long as the exit takes; the process leaving is what ends
-/// this thread. Windows kills the process anyway if the exit never comes, which is
-/// the same outcome as not having a handler at all.
+/// **Every path that does not deliver a wake answers FALSE**, which hands the
+/// event to the next handler and ultimately to the default one. That is the whole
+/// of the care needed here: claiming an event and then not acting on it would
+/// make this process the one a reader cannot close, which is a worse failure than
+/// the one the module exists to fix.
 #[cfg(windows)]
 unsafe extern "system" fn on_ctrl(kind: u32) -> windows_sys::core::BOOL {
     if !CAUGHT.contains(&kind) {
-        // FALSE, so the event goes to the next handler in the process's list and
-        // ultimately to the default one. Claiming an event this module has no
-        // answer for would silently disable it.
+        // Not ours. Claiming an event this module has no answer for would
+        // silently disable it.
         return 0;
     }
-    if let Some(tx) = SHELL.get() {
-        let _ = tx.send(Wake::Signalled);
+    let Some(tx) = SHELL.get() else {
+        // Armed but with nowhere to send, which should be impossible and is not
+        // worth becoming unkillable over.
+        return 0;
+    };
+    if answer(ASKED.swap(true, std::sync::atomic::Ordering::SeqCst)) == Answer::Escalate {
+        // The second ask. FALSE reaches the default handler, which ends the
+        // process: see `Answer`.
+        return 0;
+    }
+    if tx.send(Wake::Signalled).is_err() {
+        // `run` has already returned and dropped the receiver, so nobody is
+        // listening and the default disposition is the honest answer.
+        return 0;
+    }
+    if !holds_the_grace_period(kind) {
+        // TRUE: handled. The loop has the wake and will leave under its own
+        // power, and this thread has nothing left to do.
+        return 1;
     }
     loop {
         std::thread::park();
@@ -208,12 +317,18 @@ pub(crate) fn forward(tx: Sender<Wake>) -> io::Result<()> {
         let _ = SHELL.set(tx);
 
         // SAFETY: `on_ctrl` is a valid `PHANDLER_ROUTINE`, and the only state it
-        // touches is `SHELL`, which is set above and never unset. The second
+        // touches is `SHELL` and `ASKED`, both of which outlive it. The second
         // argument is TRUE, which adds the handler rather than removing one.
         if unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(on_ctrl), 1) }
             == 0
         {
-            return Err(io::Error::last_os_error());
+            // Named, because the reader sees this on a footer with no other
+            // context and `Access is denied. (os error 5)` alone says nothing
+            // about which arming failed.
+            return Err(io::Error::other(format!(
+                "SetConsoleCtrlHandler: {}",
+                io::Error::last_os_error()
+            )));
         }
         Ok(())
     })
@@ -263,6 +378,83 @@ mod tests {
 
         assert!(again.is_err(), "a second arming was allowed");
         assert_eq!(arms, 1, "the refused arming ran anyway");
+
+        // The message reaches a footer with nothing else on it, so it has to say
+        // why on its own. `check_drawable`'s test holds the same line.
+        let message = again.expect_err("refused").to_string();
+        assert!(
+            message.contains("already armed"),
+            "the refusal does not say why: {message}"
+        );
+    }
+
+    #[test]
+    fn a_failed_arming_keeps_the_claim() {
+        // The doc says a failure consumes the claim rather than releasing it, and
+        // nothing held that. It matters because the alternative reads more
+        // forgiving and is worse: a retry would be a second attempt at whatever
+        // just failed, on a platform that has already installed half of it.
+        let armed = OnceLock::new();
+
+        let first = claim(&armed, || Err(io::Error::other("the arming failed")));
+        assert!(first.is_err(), "the failure was swallowed");
+
+        let again = claim(&armed, || Ok(()));
+        let message = again.expect_err("the claim was released").to_string();
+        assert!(
+            message.contains("already armed"),
+            "the second attempt failed for a different reason: {message}"
+        );
+    }
+
+    #[test]
+    fn only_one_of_two_racing_arms_wins() {
+        // `forward` is called once by `run`, so this is about the rule rather than
+        // about a reachable path today. `OnceLock::set` is what makes it true, and
+        // a future edit to something more forgiving would pass every test above.
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let armed = Arc::new(OnceLock::new());
+        let arms = Arc::new(AtomicUsize::new(0));
+        let wins = Arc::new(AtomicUsize::new(0));
+
+        let racers: Vec<_> = (0..8)
+            .map(|_| {
+                let armed = Arc::clone(&armed);
+                let arms = Arc::clone(&arms);
+                let wins = Arc::clone(&wins);
+                std::thread::spawn(move || {
+                    let outcome = claim(&armed, || {
+                        arms.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    });
+                    if outcome.is_ok() {
+                        wins.fetch_add(1, Ordering::SeqCst);
+                    }
+                })
+            })
+            .collect();
+        for racer in racers {
+            racer.join().expect("a racer panicked");
+        }
+
+        assert_eq!(wins.load(Ordering::SeqCst), 1, "not exactly one claim won");
+        assert_eq!(
+            arms.load(Ordering::SeqCst),
+            1,
+            "the arming ran more than once"
+        );
+    }
+
+    #[test]
+    fn the_second_ask_goes_to_the_default_disposition() {
+        // The rule `pump` and `on_ctrl` both run on, asserted here because what
+        // `Escalate` names ends the process and no test can call it. Without this
+        // the escalation exists only in prose, and a monitor whose loop is wedged
+        // is a process that cannot be stopped.
+        assert_eq!(answer(false), Answer::Wake);
+        assert_eq!(answer(true), Answer::Escalate);
     }
 
     #[cfg(unix)]
@@ -270,15 +462,27 @@ mod tests {
         //! Unix only, because [`pump`] is. Windows has no drain loop, and its
         //! handler is covered by the two-process test named above.
 
+        use std::cell::RefCell;
         use std::sync::mpsc;
 
         use super::*;
 
+        /// Deliveries are signal numbers, so the fixtures name real ones: 15 is
+        /// `SIGTERM` and 1 is `SIGHUP`. Escalating restores the disposition of
+        /// whichever one arrived, which is why the number is carried at all.
+        const TERM: i32 = 15;
+        const HUP: i32 = 1;
+
+        // Each test builds its own `seen` and closure inline rather than sharing a
+        // helper: a helper returning both cannot own the cell and lend it at once,
+        // and the borrow checker is right about that.
+
         #[test]
         fn one_delivery_is_one_wake() {
             let (tx, rx) = mpsc::channel();
+            let seen = RefCell::new(Vec::new());
 
-            pump(std::iter::once(()), &tx);
+            pump(std::iter::once(TERM), &tx, |s| seen.borrow_mut().push(s));
             drop(tx);
 
             let wakes: Vec<_> = rx.into_iter().collect();
@@ -287,19 +491,37 @@ mod tests {
                 matches!(wakes[0], Wake::Signalled),
                 "the wake was not the one the loop leaves on"
             );
+            assert!(
+                seen.borrow().is_empty(),
+                "the first ask escalated instead of asking politely"
+            );
         }
 
         #[test]
-        fn every_delivery_is_forwarded() {
-            // Not one and then silence. A reader who sends a second signal is
-            // saying the first did not work, and swallowing it is how a process
-            // becomes the one you cannot get rid of.
+        fn the_second_delivery_escalates_instead_of_waking() {
+            // The rule that keeps a wedged monitor killable. The first ask is a
+            // wake; the second is the disposition the sender would have had if
+            // nothing were armed. Swallowing it, which is what this did before the
+            // audit, is how a process becomes the one you cannot get rid of.
             let (tx, rx) = mpsc::channel();
+            let seen = RefCell::new(Vec::new());
 
-            pump(std::iter::repeat_n((), 3), &tx);
+            pump([TERM, HUP].into_iter(), &tx, |s| seen.borrow_mut().push(s));
             drop(tx);
 
-            assert_eq!(rx.into_iter().count(), 3, "a repeated signal was swallowed");
+            assert_eq!(
+                rx.into_iter().count(),
+                1,
+                "the second delivery was forwarded as a wake as well"
+            );
+            // The signal that *arrived*, not the one before it. Escalating means
+            // restoring one particular disposition, so carrying the wrong number
+            // would restore the wrong one.
+            assert_eq!(
+                *seen.borrow(),
+                vec![HUP],
+                "the escalation did not name the signal that arrived"
+            );
         }
 
         #[test]
@@ -309,6 +531,7 @@ mod tests {
             // channel for the rest of the process's life.
             let (tx, rx) = mpsc::channel();
             drop(rx);
+            let seen = RefCell::new(Vec::new());
 
             // Bounded rather than endless on purpose. An unbounded source would
             // make a broken `pump` hang instead of fail, and a test that hangs
@@ -317,14 +540,21 @@ mod tests {
             pump(
                 std::iter::from_fn(|| {
                     pulled += 1;
-                    (pulled <= 1024).then_some(())
+                    (pulled <= 1024).then_some(TERM)
                 }),
                 &tx,
+                |s| seen.borrow_mut().push(s),
             );
 
             assert_eq!(
                 pulled, 1,
                 "the pump kept pulling after the shell had hung up"
+            );
+            // A hung-up shell is a process already leaving under its own power.
+            // Escalating there would interrupt its own exit.
+            assert!(
+                seen.borrow().is_empty(),
+                "a hung-up shell was escalated over instead of let go"
             );
         }
     }
@@ -357,5 +587,35 @@ mod tests {
         // them out is what hands them to the default handler.
         assert!(!CAUGHT.contains(&5));
         assert!(!CAUGHT.contains(&6));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_event_this_does_not_claim_is_handed_on() {
+        // The **real handler**, which is callable for exactly these events and no
+        // others: an unclaimed kind returns before it reads `SHELL` or parks. That
+        // is what makes the pass-through branch assertable at all, and it only
+        // became so once the handler stopped parking on everything.
+        //
+        // SAFETY: `on_ctrl` performs no unsafe operation, and for a kind outside
+        // `CAUGHT` it returns on its first line.
+        for kind in [5, 6] {
+            assert_eq!(
+                unsafe { on_ctrl(kind) },
+                0,
+                "control event {kind} was absorbed instead of handed on"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_the_closing_console_is_waited_out() {
+        // `CTRL_CLOSE_EVENT` is 2. Waiting on the other two would leave a parked
+        // thread per delivery for the life of the process, and not waiting on this
+        // one would end the process mid-restore.
+        assert!(holds_the_grace_period(2));
+        assert!(!holds_the_grace_period(0));
+        assert!(!holds_the_grace_period(1));
     }
 }

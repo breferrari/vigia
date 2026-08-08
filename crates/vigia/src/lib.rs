@@ -24,16 +24,8 @@
 //!
 //! I1 says an idle monitor does no work, and the core delivers that by blocking:
 //! [`vigia_core::Watcher::next_tick`] waits on an untimed `recv`. `crossterm`
-//! reads input the same way. Two blocking sources need two threads and one
-//! channel, or a poll loop, and a poll loop is the timer I1 forbids.
-//!
-//! The fourth is [`signal`]'s, and it is a **third wake source on the same
-//! channel** rather than a new mechanism: an externally delivered signal ends
-//! the loop, and the ordinary `Drop` restores the terminal (I8). It blocks the
-//! same way the other two do, on a self-pipe `signal-hook` drains, so it costs
-//! an idle monitor nothing either. **On Windows it does not exist**: console
-//! control events arrive on a thread the OS makes for the handler, and only
-//! while the process is leaving, so there is nothing of ours to spawn.
+//! reads input the same way. **The first two** blocking sources need two threads
+//! and one channel, or a poll loop, and a poll loop is the timer I1 forbids.
 //!
 //! The third is [`vigia_core::Highlighter::warm_ahead`], and it is not on that
 //! channel at all: it sends no wake, so it cannot make an idle monitor do work
@@ -41,6 +33,14 @@
 //! itself. That it reports nothing back is the design rather than a shortcut —
 //! there is no such thing as a warm grammar for the frame path to believe in,
 //! which `warm_ahead` documents in full.
+//!
+//! The fourth is [`signal`]'s, and it is a **third wake source on the same
+//! channel** rather than a new mechanism: an externally delivered signal ends
+//! the loop, and the ordinary `Drop` restores the terminal (I8). It blocks the
+//! way the first two do, on a self-pipe `signal-hook` drains, so it costs an idle
+//! monitor nothing either. **On Windows it does not exist**: console control
+//! events arrive on a thread the OS makes for the handler, and only while the
+//! process is leaving, so there is nothing of ours to spawn.
 //!
 //! The watch thread opens its own [`vigia_core::Worktree`]. That is not
 //! duplication for its own sake: a [`vigia_core::Watcher`] borrows the
@@ -168,8 +168,30 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
 
+    // **Out of the struct literal below, so that "the moment the screen is taken"
+    // is a place in this function rather than an approximation.** The safety net
+    // for a signal has to cover the window between taking a terminal and being
+    // able to give it back, which is the same rule `Session::enter` follows when
+    // it installs the panic hook before its first step. Left inside the literal,
+    // the arming sat after `Highlighter::new`'s 318µs grammar load and after
+    // `short_name`'s `canonicalize`, because fields evaluate in written order:
+    // a real window, and one the comment above the highlighter already warns
+    // about having got wrong once.
+    let session = Session::enter()?;
+
+    // Inert until something sends: it costs nothing, wakes nobody, and I1 never
+    // sees it. Built here because the handler on it is armed on the next line and
+    // the other two senders are armed after the first paint.
+    let (tx, rx) = mpsc::channel();
+
+    // Reported rather than fatal. A monitor that refused to open because it could
+    // not arm a safety net would be a worse answer than one that opens and says
+    // so, so the outcome is carried past the shell being built and warned about
+    // below, where there is an `App` to warn through.
+    let armed = signal::forward(tx.clone());
+
     let mut shell = Shell {
-        session: Session::enter()?,
+        session,
         app: App::new(),
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
@@ -184,10 +206,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // highlighter at all; the shipped first paint measured 105.03ms.
         //
         // Not "before the screen is taken", which an earlier version of this
-        // comment claimed: struct fields evaluate in written order and
-        // `Session::enter` is written above, so the alternate screen is already
-        // ours by the time this runs. The placement is right and the reason was
-        // wrong.
+        // comment claimed: `Session::enter` runs above this literal, so the
+        // alternate screen is already ours by the time this line does anything.
+        // The placement is right and the reason was wrong. It used to rest on
+        // struct fields evaluating in written order, which was true and is no
+        // longer the reason: the session is taken above the literal now, so the
+        // signal handler could be armed at the moment the screen becomes ours
+        // rather than after this load.
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws
         // cold until something writes to it. That is the honest first frame: a
@@ -201,26 +226,21 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         regions: Regions::default(),
     };
 
-    // The channel is built here, three sends before its first `recv`, because
-    // this is the first of its senders to be armed. It is inert until something
-    // sends: it costs nothing, wakes nobody, and I1 never sees it.
-    let (tx, rx) = mpsc::channel();
-
-    // **Immediately after the screen is taken, and before anything is drawn on
-    // it.** `Session::enter` installs the panic hook before it takes the first
-    // step, for exactly this reason: the window between taking a terminal and
-    // being able to give it back is the window a safety net has to already
-    // cover. A signal arriving before the loop starts is not lost, it waits in
-    // the channel and is handled by the first `recv`.
+    // The arming from above, reported now that there is somewhere to report it. A
+    // signal that arrived before this point is not lost: it waits in the channel
+    // and the first `recv` below handles it.
     //
-    // Reported rather than fatal, and it is the same judgement `WatchLost` gets.
-    // A monitor that refused to open because it could not arm a safety net would
-    // be a worse answer than one that opens and says so on the frame below.
+    // **A notice rather than the durable header mode `WatchLost` also sets**, and
+    // the two are not the same shape. A lost watch changes what every later frame
+    // *is*, so a reader looking at a stale diff has to keep being told. An
+    // unarmed handler changes nothing on screen and matters only at the moment
+    // somebody kills the process, so being told once, on the first frame, is
+    // being told. Stated here because the transience is a choice.
     //
     // The wording says *stop* rather than *signal*, because I8 is one guarantee
-    // over two mechanisms and half of the readers of this line are on a platform
-    // that has no signals at all.
-    if let Err(e) = signal::forward(tx.clone()) {
+    // over two mechanisms and half the readers of this line are on a platform
+    // with no signals at all.
+    if let Err(e) = armed {
         shell.app.warn(format!(
             "not catching an external stop, so a kill may not restore the terminal: {e}"
         ));

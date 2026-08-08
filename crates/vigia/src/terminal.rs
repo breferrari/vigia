@@ -904,6 +904,28 @@ mod tests {
         // platform actually emits rather than what a recorder was told to expect.
         let sink = std::fs::File::create(dir.join("restored")).expect("create the restore sink");
 
+        // **The expectation is derived here, in the child, and that placement is
+        // the whole of it.** `crossterm` decides once per process whether the
+        // takeover is ANSI or console-API calls, and caches the answer. The parent
+        // may have decided *before* the console this fixture allocates existed and
+        // the child *after*, in which case a parent-side expectation is a
+        // different platform's answer: zero bytes against real escape sequences,
+        // reported as I8 having broken. Same process, same answer, no straddle.
+        let mut owed = Crossterm { out: Vec::new() };
+        give_back_all(&mut owed, TAKEOVER.len());
+
+        // Non-vacuity, asserted where the fact lives rather than inferred across a
+        // process boundary. This is layer 3's rule (`the_real_console_gives_back_
+        // every_mode_it_set`) applied in the process that is about to be measured:
+        // if this console emits nothing, the sink below can prove nothing and
+        // saying so is the only honest outcome.
+        assert!(
+            !owed.out.is_empty(),
+            "this console emits no escape sequences for the takeover, so the sink \
+             would prove nothing"
+        );
+        std::fs::write(dir.join("owed"), &owed.out).expect("write what is owed");
+
         let (tx, rx) = std::sync::mpsc::channel();
         crate::signal::forward(tx).expect("arm the signal handler");
 
@@ -959,8 +981,14 @@ mod tests {
         // Before the child is spawned, because a child inherits whatever console
         // its parent had at the moment it started. A process with none can be
         // sent no control event, and neither can anything it spawns.
+        //
+        // Held in a guard rather than freed at the end, because there are three
+        // ways out of this test below it: a skip, a failing assert, and the
+        // ordinary end. A cleanup written at the bottom runs on one of them. This
+        // module is about exactly that mistake, so making it here would be a poor
+        // joke.
         #[cfg(windows)]
-        let allocated = ensure_console();
+        let _console = Allocated(ensure_console());
 
         let exe = std::env::current_exe().expect("this test binary's own path");
         let mut command = std::process::Command::new(&exe);
@@ -1005,11 +1033,11 @@ mod tests {
         }
         let status = child.wait().expect("wait for the signal child");
 
-        // Defensive, and a no-op in the ordinary case. If the child died between
-        // taking and giving back, this is what keeps the damage from following a
-        // developer out of the test run. Does nothing at all on Unix, where this
-        // process never stored a prior mode.
-        let _ = disable_raw_mode();
+        // Nothing to undo here, and that is worth one line rather than a
+        // defensive `disable_raw_mode()`: the child *builds* its guard instead of
+        // taking one, so no process in this test ever enables raw mode, and a
+        // call putting the bits back would be the global mutation layer 3
+        // refuses.
 
         assert!(
             dropped,
@@ -1020,43 +1048,48 @@ mod tests {
             "the signal child exited {status}, so it did not reach the end of its restore"
         );
 
-        // What the real adapter emits on this platform, derived here rather than
-        // written out, so the expectation cannot be wrong in the same way the
-        // child is. This walk performs the same idempotent raw-mode step the line
-        // above just did.
-        let mut expected = Crossterm { out: Vec::new() };
-        give_back_all(&mut expected, TAKEOVER.len());
-        let expected = expected.out;
-
+        // Both sides from the child, for the reason it states where it writes
+        // them: the parent is a different process and `crossterm` answers this
+        // question once per process.
+        let owed = std::fs::read(dir.join("owed")).expect("read what the child owed");
         let written = std::fs::read(dir.join("restored")).expect("read the restore sink");
+
+        // The child refuses to run at all on a console that emits nothing, so an
+        // empty pair here is a walk that stopped walking rather than a platform
+        // that never wrote.
+        assert!(
+            !owed.is_empty(),
+            "the child recorded nothing owed, which it should have refused to do"
+        );
         assert_eq!(
-            written, expected,
+            written, owed,
             "the terminal was not given back the way every other exit gives it back"
         );
 
-        // **Non-vacuity, and unconditional because layer 3 already decided it.**
-        // The comparison above holds the child's bytes against the same walk the
-        // child ran, so a walk that gave nothing back would be measured against
-        // its own silence and pass. What rules that out is not a probe here but
-        // `the_real_console_gives_back_every_mode_it_set`, which asserts without
-        // condition that the real adapter writes escape sequences on this
-        // platform. Given a green suite, empty means the walk stopped walking.
-        assert!(
-            !written.is_empty(),
-            "the guard dropped and gave nothing back at all"
-        );
+        // Left behind on failure on purpose, the way `soak.rs` leaves its
+        // worktree: the markers and the sink are the evidence.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
-        #[cfg(windows)]
-        if allocated {
-            // SAFETY: an FFI call taking nothing. Only reached when this process
-            // had no console until a moment ago, so nothing of ours is attached
-            // to the one being freed.
-            unsafe {
-                windows_sys::Win32::System::Console::FreeConsole();
+    /// Frees a console this test had to allocate, on every way out.
+    ///
+    /// `false` when the process already had one, in which case there is nothing
+    /// to give back and this does nothing.
+    #[cfg(windows)]
+    struct Allocated(bool);
+
+    #[cfg(windows)]
+    impl Drop for Allocated {
+        fn drop(&mut self) {
+            if self.0 {
+                // SAFETY: an FFI call taking nothing. Only reached when this
+                // process had no console until a moment ago, so nothing of ours
+                // is attached to the one being freed.
+                unsafe {
+                    windows_sys::Win32::System::Console::FreeConsole();
+                }
             }
         }
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Wait for a marker the child writes.
