@@ -645,8 +645,19 @@ mod tests {
             // because it returns on the first line: it never reads `SHELL`, never
             // touches `ASKED`, and never parks.
             //
-            // SAFETY: `on_ctrl` performs no unsafe operation, and for a kind outside
-            // `CAUGHT` it returns before touching any state.
+            // Checked before it is handed over, and not decoratively: if `CAUGHT`
+            // ever gained 5, the handler would deliver a wake nobody waits for and
+            // then park, and this test would **hang** rather than fail. A test that
+            // hangs reports the runner instead of the defect, which is the rule
+            // `a_hung_up_shell_ends_the_pump` bounds its own source for.
+            assert!(
+                !CAUGHT.contains(&5),
+                "5 is claimed now, so handing it to the real handler would park                  forever; pick a kind outside `CAUGHT` or drop this test"
+            );
+
+            // SAFETY: `on_ctrl` performs no unsafe operation, and the assert above
+            // is what establishes that for this kind it returns before touching
+            // `SHELL`, `ASKED`, or the park.
             assert_eq!(
                 unsafe { on_ctrl(5) },
                 0,
