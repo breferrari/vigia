@@ -1,0 +1,82 @@
+# The crates.io half of the release, which `dist` does not do for us.
+#
+# dist's built-in `publish-jobs` are `homebrew` and `npm`; everything else is a
+# custom reusable workflow named in `[workspace.metadata.dist]` with a `./`
+# prefix. dist wires this in `needs: [plan, host]` and ahead of `announce`, and
+# it passes `secrets: inherit`, which is how `CARGO_REGISTRY_TOKEN` reaches here.
+#
+# Placement is the point: because `announce` waits on this job, a registry
+# failure stops the GitHub release being announced instead of leaving a version
+# whose binaries exist and whose crate does not. dist also guards the call for
+# prereleases, so nothing here needs to.
+#
+# **This is the only irreversible step in the repository.** `cargo yank` hides a
+# version from new dependents; it does not delete it, and the name stays taken.
+# `RELEASE-SMOKE.md` runs before the tag for that reason, and the version check
+# below is the last cheap thing standing between a typo and a permanent one.
+name: publish-crates-io
+
+on:
+  workflow_call:
+    inputs:
+      # dist hands every custom job the plan from its `plan` step, as a JSON
+      # string. It is the same document as the `dist-manifest.json` shipped with
+      # the release, and `announcement_tag` is the field this job reads.
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-crates-io:
+    name: publish to crates.io
+    runs-on: ubuntu-latest
+    env:
+      PLAN: ${{ inputs.plan }}
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      # A missing secret otherwise surfaces as `cargo publish` failing after it
+      # has already packaged both crates, several minutes in and one screen down
+      # in a log. It is also the single likeliest way this release goes wrong,
+      # because the token is set by hand, once, on a repository that has never
+      # needed one.
+      - name: the registry token is present
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN is not set on this repository."
+            echo "::error::Set it (gh secret set CARGO_REGISTRY_TOKEN) and re-run this job."
+            exit 1
+          fi
+          echo "token present"
+
+      # dist already refuses to plan a tag that names no version it can find, so
+      # this is the belt to that braces. It is worth the eight lines anyway,
+      # because the two artifacts it compares are edited by different hands at
+      # different times: the tag is typed once at a terminal, and the manifest is
+      # edited in a pull request days earlier.
+      - name: the announced version is the version in the manifests
+        run: |
+          set -euo pipefail
+          announced=$(jq -r '.announcement_tag' <<<"$PLAN" | sed 's/^v//')
+          for crate in vigia vigia-core; do
+            manifest=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')
+            if [ "$announced" != "$manifest" ]; then
+              echo "::error::tag announces $announced but $crate is $manifest"
+              exit 1
+            fi
+            echo "$crate $manifest matches the announced $announced"
+          done
+
+      # One command, not two. `vigia` declares `vigia-core` by path *and*
+      # version, so the registry refuses `vigia` until `vigia-core` resolves on
+      # it; `--workspace` orders the two and waits for the index itself, where
+      # two `-p` calls need a sleep between them whose right length nobody knows.
+      #
+      # `--locked` so the published crates are built against the resolution this
+      # repository tested, rather than whatever the registry offers on the day.
+      - name: publish
+        run: cargo publish --workspace --locked

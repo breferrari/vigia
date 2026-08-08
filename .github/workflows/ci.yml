@@ -102,6 +102,15 @@ jobs:
       # CLAUDE.md calls a C toolchain in the graph a spec change, not an
       # implementation detail. This is that rule with teeth: it is the whole
       # reason musl-static and Windows are cheap.
+      # The list must cover every target `[workspace.metadata.dist]` ships, and
+      # `crates/vigia/tests/package.rs::the_targets_the_release_ships_are_the_targets_the_purity_gate_checks`
+      # is what makes that a gate rather than a habit. It found this list one
+      # target short on its first run: #12 added `x86_64-apple-darwin` to the
+      # release and the purity rule had never heard of it, so a shipped binary
+      # sat outside the check CLAUDE.md calls a spec-level rule.
+      #
+      # Checking more than the release ships is fine and this list may grow that
+      # way. Checking less is the failure.
       - name: assert no cc, cmake or bindgen on any tier-1 target
         run: |
           set -euo pipefail
@@ -109,6 +118,7 @@ jobs:
           for target in \
             x86_64-unknown-linux-musl \
             x86_64-pc-windows-msvc \
+            x86_64-apple-darwin \
             aarch64-apple-darwin
           do
             found=$(cargo tree --target "$target" -e normal,build \
@@ -150,3 +160,26 @@ jobs:
             ldd "$binary" || true
             exit 1
           fi
+
+      # Static and shipped are two different claims, and until #12 only the
+      # first was checked here. `SPEC.md` §9 makes musl the *only* Linux artifact
+      # a release produces, while every budget number in this repository was
+      # taken on `ubuntu-latest` gnu in the `test` job above. So the binary Linux
+      # users actually receive had never been measured against I7 or I9 at all,
+      # which is §7's recurring shape one target over: a gate that is green about
+      # something adjacent to the thing it looks like it covers.
+      #
+      # It is not a hypothetical difference. musl's allocator is a different
+      # implementation with materially different behaviour under the allocation
+      # pattern a frame produces, and this crate has hard per-frame budgets.
+      #
+      # No runner change is needed and that is why this is affordable: a static
+      # musl test binary executes natively on a glibc host, so the same
+      # `ubuntu-latest` that built it can run it. Same slack as the `test` job,
+      # for the same reason: hosted runners are shared and their variance is not
+      # a property of this code. The structural gates take no slack and are what
+      # catch a real regression.
+      - name: budgets, against the binary Linux actually ships
+        run: cargo test --release --target x86_64-unknown-linux-musl --test budgets
+        env:
+          VIGIA_BUDGET_SLACK: "3"

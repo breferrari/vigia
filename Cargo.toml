@@ -133,3 +133,45 @@ panic = "abort"
 [profile.bench]
 inherits = "release"
 debug = true
+
+# The profile the release is built with, and it inherits `release` **and adds
+# nothing**. That is a decision rather than a default: every budget in this
+# repository (I7, I9, I3) is measured against `release`, so a `dist` profile that
+# tuned anything would make every one of those numbers a claim about a binary
+# nobody receives. dist's own suggested profile adds `lto = "thin"`, which
+# `release` above already sets, so agreeing here costs nothing at all.
+#
+# `crates/vigia/tests/package.rs::the_profile_that_ships_is_the_profile_the_budgets_measure`
+# is what stops it drifting, because nothing else would notice.
+[profile.dist]
+inherits = "release"
+
+# `cargo-dist` 0.32, whose binary is named `dist`. SPEC.md section 9 is the
+# contract; this is the machine-readable half of it.
+#
+# `publish-jobs` carries the registry job because **dist has no crates.io
+# publisher**: its built-ins are `homebrew` and `npm`, and everything else is a
+# custom reusable workflow. `./publish-crates-io` is
+# `.github/workflows/publish-crates-io.yml`, and dist places every custom publish
+# job `needs: [plan, host]` and ahead of `announce`, so a registry failure stops
+# the release being announced rather than leaving a version half-shipped.
+#
+# Four targets, and Linux is musl alone: one static binary that runs on any
+# distribution beats two that need selection logic, and CLAUDE.md already names
+# musl as this project's static-binary story. arm64 Linux and arm64 Windows are
+# deferred on the cross linker, which section 9 records.
+#
+# No `msi` installer (WiX is a C toolchain question this repository has already
+# answered elsewhere) and no `npm` (a second registry for no reader).
+[workspace.metadata.dist]
+cargo-dist-version = "0.32.0"
+ci = ["github"]
+installers = ["shell", "powershell", "homebrew"]
+tap = "breferrari/homebrew-tap"
+publish-jobs = ["homebrew", "./publish-crates-io"]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
