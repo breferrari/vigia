@@ -999,18 +999,28 @@ mod tests {
         // its parent had at the moment it started. A process with none can be
         // sent no control event, and neither can anything it spawns.
         //
-        // **Never freed, and that is the second answer to this question.** A guard
-        // that freed it on every way out was the obvious fix to a cleanup line
-        // three of four exits skipped, and it was worse: `crossterm` memoises
-        // whether the takeover is ANSI from the real stdout handle, so freeing the
-        // console changes that answer for every other test in this binary, and
-        // `the_real_console_gives_back_every_mode_it_set` would fail its own
-        // non-vacuity assert. It only fires where `AllocConsole` actually acts,
-        // which is a runner with no console, which is CI and not here.
+        // **Never freed, and the reason took three goes to state correctly.** A
+        // guard that freed it on every way out was the obvious fix to a cleanup
+        // line three exits skipped. Then the revert claimed freeing would break
+        // `the_real_console_gives_back_every_mode_it_set` on a console-less
+        // runner, which was an unmeasured guess and self-refuting: that test is on
+        // `main`, where nothing allocates a console, so if a runner had none it
+        // would already be failing there.
         //
-        // A console this process had to allocate dies with the process
-        // milliseconds later, and nothing outside the process can see it. Leaking
-        // it is the cheaper of the two mistakes.
+        // What is actually true, read out of `crossterm`'s `ansi_support.rs`:
+        // `supports_ansi()` is `enable_vt_processing().is_ok() || TERM is set and
+        // not "dumb"`, memoised **once per process** through `CONOUT$`. Two things
+        // follow. Windows CI must already have a console or a `TERM`, or that test
+        // would be red on `main`, so `AllocConsole` almost certainly never acts
+        // anywhere and this call is a fallback for the genuinely console-less case
+        // a probe had to simulate. And the asymmetry is real: allocating can only
+        // turn a not-yet-memoised `false` into `true`, which no test minds, while
+        // **freeing** can turn it into `false` for all forty tests in this binary,
+        // depending on which ran first.
+        //
+        // So the leak is not a concession. A console this process allocated dies
+        // with the process milliseconds later and nothing outside can see it,
+        // where freeing one is order-dependent damage to everything else here.
         #[cfg(windows)]
         ensure_console();
 
@@ -1260,7 +1270,11 @@ mod tests {
         }
     }
 
-    /// Make sure this process has a console, and say whether one had to be made.
+    /// Make sure this process has a console.
+    ///
+    /// Reports nothing, because neither caller has anything to do with the answer:
+    /// the console is deliberately never freed, for the reasons written where it is
+    /// called.
     ///
     /// Unconditional rather than detected, which is measured rather than lazy:
     /// `GetConsoleWindow` returns null in an ordinary redirected `cargo test` that
@@ -1271,8 +1285,11 @@ mod tests {
     /// standard handles were measured unchanged across it, so cargo keeps
     /// capturing this test's output either way.
     #[cfg(windows)]
-    fn ensure_console() -> bool {
-        // SAFETY: an FFI call taking nothing.
-        unsafe { windows_sys::Win32::System::Console::AllocConsole() != 0 }
+    fn ensure_console() {
+        // SAFETY: an FFI call taking nothing. Failure is the ordinary case and
+        // means a console was already attached.
+        unsafe {
+            windows_sys::Win32::System::Console::AllocConsole();
+        }
     }
 }

@@ -633,6 +633,28 @@ mod tests {
         const CLOSE: u32 = 2;
 
         #[test]
+        fn the_handler_maps_hand_on_to_false() {
+            // **The real handler, which round 2 left with no caller at all.** Moving
+            // its decisions into `reply` made five exits testable and made the
+            // mapping from a `Reply` back to a `BOOL` untested: turning
+            // `Reply::HandOn` into 1 kept the entire suite green, and an unclaimed
+            // `CTRL_SHUTDOWN_EVENT` answered TRUE tells Windows a shutdown was
+            // handled by a process that got no wake.
+            //
+            // Kind 5 is `CTRL_LOGOFF_EVENT`, which is safe to hand the real handler
+            // because it returns on the first line: it never reads `SHELL`, never
+            // touches `ASKED`, and never parks.
+            //
+            // SAFETY: `on_ctrl` performs no unsafe operation, and for a kind outside
+            // `CAUGHT` it returns before touching any state.
+            assert_eq!(
+                unsafe { on_ctrl(5) },
+                0,
+                "the handler answered TRUE to an event it does not claim"
+            );
+        }
+
+        #[test]
         fn an_event_this_does_not_claim_is_handed_on() {
             let (tx, _rx) = mpsc::channel();
             let asked = AtomicBool::new(false);
