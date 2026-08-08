@@ -100,6 +100,15 @@ struct FirstPaint {
 /// carve-out `budgets.rs` and `soak.rs` already name: they need a tty. Note that
 /// the real `run` takes the alternate screen *before* this work, so what a reader
 /// looks at while it happens is a blank screen.
+///
+/// **`signal::forward` is left out too, and it is the one carve-out here that
+/// does not need a tty.** It is armed between `Session::enter` and the first
+/// draw, so it is genuinely on this path and genuinely not measured by this
+/// gate. Measured separately rather than assumed: 84.7µs on the reference
+/// machine for the whole arming, dominated by a `thread::spawn` that Windows
+/// does not even do, against a 50ms budget. Named here because this slot is
+/// where the next thing armed before first paint will land unmeasured, and a
+/// carve-out nobody wrote down is the one that grows.
 fn cold_start(root: &std::path::Path) -> FirstPaint {
     let began = Instant::now();
     let worktree = Worktree::discover(root).expect("discover");

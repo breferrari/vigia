@@ -873,15 +873,22 @@ mod tests {
     /// A process that arms the real handler, blocks the way the shell blocks, and
     /// leaves the real guard to restore.
     ///
-    /// Ignored because it is meaningless on its own, and a no-op without its
-    /// environment variable, so `cargo test -- --ignored` on a developer's machine
-    /// does not sit waiting for a signal nobody is going to send.
+    /// Ignored because it is meaningless on its own, and it **fails** rather than
+    /// returning green when run directly. That is `soak_child`'s rule and the
+    /// right one: a test reporting `ok` having armed nothing is the green tick
+    /// over a check that did not run, which is what the parent below refuses two
+    /// screens further down. The assert fires before anything blocks, so running
+    /// this directly reports rather than hangs.
     #[test]
     #[ignore = "the parent process delivers the signal this waits for"]
     fn signal_child() {
-        let Ok(dir) = std::env::var(CHILD) else {
-            return;
-        };
+        let dir = std::env::var(CHILD).unwrap_or_else(|_| {
+            panic!(
+                "{CHILD} is not set, so this was run directly. It is the body of \
+                 `an_external_signal_ends_the_loop_and_the_terminal_goes_back`, which \
+                 delivers the signal it waits for; run that instead."
+            )
+        });
         let dir = std::path::PathBuf::from(dir);
 
         // The real adapter over a real file, so what lands in it is whatever this
@@ -909,23 +916,22 @@ mod tests {
             // finds is a terminal already owed back.
             std::fs::write(dir.join("ready"), b"armed").expect("write the ready marker");
 
-            // The three lines this borrows from `run`'s loop, and the only three:
-            // block on the channel, recognise the wake, leave. Everything else
-            // there is about frames, and `run` owns a terminal so no test can
-            // drive the real one. Said out loud because a copy nobody names is a
-            // copy that drifts.
+            // What this borrows from `run`'s loop, and all it borrows: block on
+            // the channel, recognise the wake, leave. Everything else there is
+            // about frames, and `run` owns a terminal so no test can drive the
+            // real one. Said out loud because a copy nobody names is a copy that
+            // drifts.
             //
-            // A `recv` that ended because the forwarder had died would drop the
-            // guard in exactly the same way a signal does, and this test would
-            // pass on it. So what ended the loop is checked rather than assumed.
-            loop {
-                match rx.recv() {
-                    Ok(crate::Wake::Signalled) => break,
-                    Ok(_) => continue,
-                    Err(e) => {
-                        panic!("the forwarder hung up before any signal arrived: {e}")
-                    }
-                }
+            // One `recv` rather than a loop, because `signal::forward` owns the
+            // only sender on this channel and sends one kind of wake. The other
+            // two arms are the ways this test could otherwise pass for the wrong
+            // reason: a `recv` that ended because the forwarder died would drop
+            // the guard exactly as a signal does, so what ended the wait is
+            // checked rather than assumed.
+            match rx.recv() {
+                Ok(crate::Wake::Signalled) => {}
+                Ok(_) => panic!("the forwarder sent a wake that was not the signal"),
+                Err(e) => panic!("the forwarder hung up before any signal arrived: {e}"),
             }
         }
 
@@ -1019,31 +1025,17 @@ mod tests {
             "the terminal was not given back the way every other exit gives it back"
         );
 
-        // **Non-vacuity, and it has to come from somewhere else.** The line above
-        // compares the child's bytes against the same walk the child ran, so a
-        // walk that gave nothing back would be compared against its own silence
-        // and pass. One step straight through the adapter answers "does this
-        // platform emit anything at all" without going near `give_back_all`.
-        let mut probe = Crossterm { out: Vec::new() };
-        probe.give_back(Step::Cursor);
-
-        if probe.out.is_empty() {
-            // Printed rather than asserted, because it is a fact about the
-            // platform and not a defect: this module's header records that
-            // Windows routes part of the takeover through the console API, which
-            // writes no bytes anywhere. The `dropped` marker is what carries the
-            // proof there, and saying so beats a comparison that quietly held
-            // over nothing.
-            println!(
-                "note: this platform emits no escape sequences for the takeover, so the byte \
-                 comparison held over nothing and the drop is what was proven"
-            );
-        } else {
-            assert!(
-                !written.is_empty(),
-                "the guard dropped and gave nothing back, on a platform whose adapter does write"
-            );
-        }
+        // **Non-vacuity, and unconditional because layer 3 already decided it.**
+        // The comparison above holds the child's bytes against the same walk the
+        // child ran, so a walk that gave nothing back would be measured against
+        // its own silence and pass. What rules that out is not a probe here but
+        // `the_real_console_gives_back_every_mode_it_set`, which asserts without
+        // condition that the real adapter writes escape sequences on this
+        // platform. Given a green suite, empty means the walk stopped walking.
+        assert!(
+            !written.is_empty(),
+            "the guard dropped and gave nothing back at all"
+        );
 
         #[cfg(windows)]
         if allocated {

@@ -12,7 +12,7 @@
 //! one change, which is I1's, and the policy stays there because that is where
 //! it is testable. `run` below coalesces **paints**: how many frames one burst
 //! of wakes is worth, which is I9's, and it can only live here because a paint
-//! is the shell's and because one of the two wake sources is the terminal. It
+//! is the shell's and because one of the three wake sources is the terminal. It
 //! decides nothing about which events are real, which is what the sentence
 //! above is protecting.
 //!
@@ -20,12 +20,20 @@
 //! `SPEC.md` §7 makes the snapshot suite over `ratatui::backend::TestBackend` the
 //! proof for I5 and I6, and a test cannot import a `main.rs`.
 //!
-//! ## Why three threads and two repositories
+//! ## Why four threads and two repositories
 //!
 //! I1 says an idle monitor does no work, and the core delivers that by blocking:
 //! [`vigia_core::Watcher::next_tick`] waits on an untimed `recv`. `crossterm`
 //! reads input the same way. Two blocking sources need two threads and one
 //! channel, or a poll loop, and a poll loop is the timer I1 forbids.
+//!
+//! The fourth is [`signal`]'s, and it is a **third wake source on the same
+//! channel** rather than a new mechanism: an externally delivered signal ends
+//! the loop, and the ordinary `Drop` restores the terminal (I8). It blocks the
+//! same way the other two do, on a self-pipe `signal-hook` drains, so it costs
+//! an idle monitor nothing either. **On Windows it does not exist**: console
+//! control events arrive on a thread the OS makes for the handler, and only
+//! while the process is leaving, so there is nothing of ours to spawn.
 //!
 //! The third is [`vigia_core::Highlighter::warm_ahead`], and it is not on that
 //! channel at all: it sends no wake, so it cannot make an idle monitor do work
@@ -41,11 +49,13 @@
 //! second open costs one repository discovery, paid after first paint, off the
 //! path I7 measures.
 //!
-//! All three are detached rather than scoped. Quitting means main returning,
+//! All of them are detached rather than scoped. Quitting means main returning,
 //! and none of them can be woken to be joined: the warmer ends by itself, and
-//! for the other two, `crossterm` has no portable
-//! interruptible read, and the one handle that unblocks the watcher makes its
-//! `next_tick` return `None` permanently, which is a shutdown and not a nudge.
+//! for the rest, `crossterm` has no portable
+//! interruptible read, the one handle that unblocks the watcher makes its
+//! `next_tick` return `None` permanently, which is a shutdown and not a nudge,
+//! and there is no portable way to interrupt a blocked read of a self-pipe
+//! either.
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -158,13 +168,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
 
-    // Built here rather than beside the two threads below, because one of its
-    // senders is armed before the first paint and the other two are armed after
-    // it. The channel itself is inert: it costs nothing, wakes nobody, and I1
-    // never sees it. What is armed late is the *watch*, and the comment where
-    // that happens is the one that explains why.
-    let (tx, rx) = mpsc::channel();
-
     let mut shell = Shell {
         session: Session::enter()?,
         app: App::new(),
@@ -198,6 +201,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         regions: Regions::default(),
     };
 
+    // The channel is built here, three sends before its first `recv`, because
+    // this is the first of its senders to be armed. It is inert until something
+    // sends: it costs nothing, wakes nobody, and I1 never sees it.
+    let (tx, rx) = mpsc::channel();
+
     // **Immediately after the screen is taken, and before anything is drawn on
     // it.** `Session::enter` installs the panic hook before it takes the first
     // step, for exactly this reason: the window between taking a terminal and
@@ -208,9 +216,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Reported rather than fatal, and it is the same judgement `WatchLost` gets.
     // A monitor that refused to open because it could not arm a safety net would
     // be a worse answer than one that opens and says so on the frame below.
+    //
+    // The wording says *stop* rather than *signal*, because I8 is one guarantee
+    // over two mechanisms and half of the readers of this line are on a platform
+    // that has no signals at all.
     if let Err(e) = signal::forward(tx.clone()) {
         shell.app.warn(format!(
-            "not catching signals, so a kill will not restore: {e}"
+            "not catching an external stop, so a kill may not restore the terminal: {e}"
         ));
     }
 
@@ -260,9 +272,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and
     // FSEvents both report reads and attribute touches, so the shell would wake
-    // itself up once for free at startup. The channel itself was built before
-    // the screen was taken, because the signal handler on it has the opposite
-    // requirement.
+    // itself up once for free at startup. The channel they send on is older than
+    // they are: the signal handler above shares it, and has the opposite
+    // requirement about when it is armed.
     spawn_watch(path.to_path_buf(), tx.clone());
     spawn_input(tx);
 
