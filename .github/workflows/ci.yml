@@ -247,10 +247,18 @@ jobs:
       # version of this step named `--test budgets` alone and the comment claimed
       # it covered I7 and I9. It covered I9: a first-paint cost is invisible to
       # any gate that warms up, so `SPEC.md` §7 gives I7 a file of its own.
+      #
+      # `--nocapture` so the numbers reach the log. Every gate here prints what
+      # it measured, and libtest discards a *passing* test's output without
+      # this, so the job would prove the artifact holds its budgets and record
+      # nothing about by how much. `SPEC.md` §10 quotes a figure for every other
+      # budget on the reference machine; this is the only place the musl ones
+      # can come from.
       - name: budgets, against the binary Linux actually ships
         run: >
           cargo test -p vigia --release
           --target x86_64-unknown-linux-musl
           --test budgets --test first_paint
+          -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
