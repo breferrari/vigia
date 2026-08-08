@@ -397,7 +397,7 @@ Milestone: [Phase 7](https://github.com/breferrari/vigia/milestone/7)
 
 **Filter: does this put the binary in someone else's hands?**
 
-**v0.1 ships by 2026-08-09, and exactly two things gate it**: [#24](https://github.com/breferrari/vigia/issues/24), **landed 2026-08-08**, and a [`RELEASE-SMOKE.md`](RELEASE-SMOKE.md) run against the built artifact. Nothing else — not an open decision, not a shelf row, not a red instrument whose report already explains itself. A date is a filter; "when it is ready" is a horizon, and this repository has watched its own machinery prove that the horizon recedes at exactly the speed of approach. The README's claims are trimmed to what the evidence holds at ship time (the smoke checklist's own step 4), which is what makes shipping bare honest rather than early.
+**v0.1 ships by 2026-08-09, and one thing gates it now**: a [`RELEASE-SMOKE.md`](RELEASE-SMOKE.md) run against the built artifact. It was two until 2026-08-08, when [#24](https://github.com/breferrari/vigia/issues/24) landed. Nothing else — not an open decision, not a shelf row, not a red instrument whose report already explains itself. A date is a filter; "when it is ready" is a horizon, and this repository has watched its own machinery prove that the horizon recedes at exactly the speed of approach. The README's claims are trimmed to what the evidence holds at ship time (the smoke checklist's own step 4), which is what makes shipping bare honest rather than early.
 
 | | Task | Issue |
 |---|---|---|

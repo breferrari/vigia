@@ -48,16 +48,16 @@ that a claim without a failing-capable check is a wish.
       gate signals a child process, so what is left here is the half a gate
       cannot reach: a real terminal, and on Windows a real key, which is the
       one delivery path #24 could not measure.)
-- [ ] Kill it a **second** time while it is still up, if the first appears to do
-      nothing. The process must die. It is allowed to leave the terminal as it
-      was on that second ask, which is the floor under the graceful path: see
-      SPEC.md section 11.1. `reset` after this one is expected.
-
-`kill -9` and `taskkill /F` are deliberately not on this list. They are outside
-I8 on both platforms because neither runs any code the process owns, and the
-release notes say that rather than implying more.
 - [ ] A non-repository path: one-line error before the alternate screen, exit
       non-zero.
+
+Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are
+outside I8 on both platforms, because neither runs any code the process owns, and
+the release notes say that rather than implying more. A *second* kill is inside
+I8 as a by-choice exclusion (SPEC.md section 11.1: it takes the default
+disposition and restores nothing), and it is covered by
+`a_second_external_signal_kills_a_shell_that_ignored_the_first` rather than by a
+box that a working build can never tick.
 
 ## 4. The claims the README makes are the claims the evidence holds
 
