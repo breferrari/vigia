@@ -983,14 +983,26 @@ mod tests {
             "lib.rs was not read, so scanning it proves nothing"
         );
 
+        // **Comments stripped, because both names appear in prose in this file and
+        // a check that reads prose is a check on prose.** Every comment above the
+        // arming discusses `Session::enter`, so one sentence moved earlier would
+        // either fail this test against correct code or pass it against wrong code,
+        // depending on which name it mentioned. Both failure directions are the
+        // gate proving nothing, which is the whole thing this test exists against.
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         // **Order.** The handler has to be armed before the first step of the
         // takeover, not after the fourth: a signal arriving mid-takeover is
         // otherwise still an uncaught kill. Two earlier versions of this line were
         // in the wrong place, one of them after a 318µs grammar load.
-        let arming = shipped
+        let arming = code
             .find("signal::forward(")
             .expect("`run` no longer arms the signal handler at all");
-        let takeover = shipped
+        let takeover = code
             .find("Session::enter()")
             .expect("`run` no longer takes the terminal");
         assert!(
@@ -1005,7 +1017,7 @@ mod tests {
         // arm that merely continued would make the first signal a no-op and the
         // second a hard kill, which is worse than either alone.
         assert!(
-            shipped.contains("Wake::Signalled => break 'awake"),
+            code.contains("Wake::Signalled => break 'awake"),
             "the signalled wake no longer unconditionally leaves the loop, which is \
              what makes `signal`'s one-way escalation latch safe"
         );
