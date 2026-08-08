@@ -103,8 +103,18 @@ jobs:
       # against. Slack applies to the absolute wall-clock gates only: hosted
       # runners are shared, and their variance is not a property of this code.
       # The structural gates take no slack and are what catch a real regression.
+      #
+      # **`first_paint` is here as of #12, and its absence was a hole.** I7 is
+      # the one budget whose gate does not live in a `budgets.rs`: a first-paint
+      # cost is invisible to any gate that warms up, so `SPEC.md` §7 gives it a
+      # file of its own. That file's absolute gate is release-only, via
+      # `absolute_gates_apply`, and this step named only `--test budgets`, so the
+      # gate reported itself skipped under `cargo test --workspace` in debug and
+      # was never selected in release. **I7's absolute gate ran nowhere.** It is
+      # the exact shape §7 keeps recording, arrived at through the test
+      # *selector* rather than through the gate: green, and about nothing.
       - name: budgets
-        run: cargo test --release --test budgets
+        run: cargo test --release --test budgets --test first_paint
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -227,15 +237,20 @@ jobs:
       # installing a C cross-compiler here.
       #
       # It is the right scope regardless, which is what makes the narrowing
-      # honest rather than convenient. This gate exists because the binary a
-      # Linux user receives had never been measured against **I7 and I9**, and
-      # both of those live in `crates/vigia/tests/budgets.rs`: first paint, the
-      # frame budget, the memory read, scrolling. `vigia-core`'s budgets are
-      # engine primitives (I2a, I4) rather than anything a reader feels, they are
-      # measured on gnu in the `test` job above, and they are not what "the
-      # artifact Linux ships" was ever about. `vigia`'s only dev-dependency is
+      # honest rather than convenient. `vigia-core`'s budgets are engine
+      # primitives (I2a, I4) rather than anything a reader feels, they are
+      # measured on gnu in the `test` job above, and they were never what "the
+      # artifact Linux ships" was about. `vigia`'s only dev-dependency is
       # `insta`, which is pure Rust, so this compiles with no C anything.
+      #
+      # **Both test targets, because I7 is not in `budgets.rs`.** An earlier
+      # version of this step named `--test budgets` alone and the comment claimed
+      # it covered I7 and I9. It covered I9: a first-paint cost is invisible to
+      # any gate that warms up, so `SPEC.md` §7 gives I7 a file of its own.
       - name: budgets, against the binary Linux actually ships
-        run: cargo test -p vigia --release --target x86_64-unknown-linux-musl --test budgets
+        run: >
+          cargo test -p vigia --release
+          --target x86_64-unknown-linux-musl
+          --test budgets --test first_paint
         env:
           VIGIA_BUDGET_SLACK: "3"

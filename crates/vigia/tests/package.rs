@@ -79,8 +79,12 @@ fn test_files() -> Vec<(String, String)> {
         })
         .collect();
     found.sort();
+    // Nineteen today. The floor is set just under that rather than at some round
+    // number well below it, because the only thing this guards is the scan
+    // pointing at the wrong directory, and a loose floor makes that survivable:
+    // `> 10` would still pass if half the suite went missing.
     assert!(
-        found.len() > 10,
+        found.len() >= 18,
         "found only {} test files, which means the scan is looking in the wrong \
          place and every assertion built on it is vacuous",
         found.len()
@@ -110,12 +114,36 @@ fn escapes(source: &str) -> bool {
 /// One function rather than two predicates and a filter written at each call
 /// site: three tests need exactly this list, and a fourth escape shape should
 /// be teachable in one place.
+///
+/// **The vacuity guards live here rather than in one caller**, because every
+/// caller is a `for` loop over this list and every one of them passes trivially
+/// if it comes back empty. Putting them in the producer means a scanner that
+/// stops scanning fails all three at once instead of quietly satisfying two.
 fn escaping_tests() -> Vec<String> {
-    test_files()
+    let escaping: Vec<String> = test_files()
         .into_iter()
         .filter(|(_, source)| escapes(source))
         .map(|(name, _)| name)
-        .collect()
+        .collect();
+
+    assert!(
+        escaping.len() >= 13,
+        "expected at least the thirteen files SPEC.md §9 counts, found {}: \
+         {escaping:?}. If that is genuinely correct, §9 needs the edit rather \
+         than this line",
+        escaping.len()
+    );
+    // This file must be among them, which is the check with the sharpest teeth:
+    // `package.rs` reads `SPEC.md` and three workflows, so if the scanner stops
+    // seeing it, the scanner is broken rather than the repository clean. It was
+    // detected for the wrong reason once already; see `PATH_ATTRIBUTE`.
+    assert!(
+        escaping.iter().any(|name| name == "package.rs"),
+        "the scanner no longer detects its own escape, so it has stopped \
+         working: {escaping:?}"
+    );
+
+    escaping
 }
 
 /// The entries of a TOML array declared as `key = [ … ]`.
@@ -126,11 +154,20 @@ fn escaping_tests() -> Vec<String> {
 /// that read one entry per line would return nothing for the other shape and be
 /// wrong silently.
 fn toml_array(source: &str, key: &str) -> Vec<String> {
+    // Comments first, on the same rule as `without_comments` for YAML: a `#`
+    // anywhere inside a multi-line array would otherwise be split on commas
+    // along with everything else and produce entries made of prose. Every array
+    // this reads is a list of bare strings, so there is no `#`-inside-a-value
+    // case to protect.
+    let source = without_comments(source);
     let start = source
         .find(&format!("\n{key} = ["))
-        .unwrap_or_else(|| panic!("expected a `{key} = [` array"));
+        .unwrap_or_else(|| panic!("expected a `{key} = [` array in this manifest"));
     let open = source[start..].find('[').expect("the array opens") + start;
-    let close = source[open..].find(']').expect("the array is closed") + open;
+    let close = source[open..]
+        .find(']')
+        .unwrap_or_else(|| panic!("the `{key}` array is never closed"))
+        + open;
     source[open + 1..close]
         .split(',')
         .map(|entry| entry.trim().trim_matches('"').to_owned())
@@ -138,14 +175,22 @@ fn toml_array(source: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
-/// YAML with its comments removed, so a `contains` check cannot be satisfied by
-/// prose about the thing instead of the thing.
+/// Text with its `#` comments removed, so a `contains` check cannot be
+/// satisfied by prose *about* the thing instead of the thing.
 ///
-/// These workflows are heavily commented by house style, and several comments
-/// quote the very command the gate below looks for. Without this, commenting out
-/// a `run:` line and leaving its explanation above it would keep the gate green.
-fn without_comments(yaml: &str) -> String {
-    yaml.lines()
+/// This repository comments heavily by house style, and several of those
+/// comments quote the very command or triple a gate below looks for. Without
+/// this, commenting out a `run:` line and leaving its explanation above it keeps
+/// the gate green, which is the failure a comment-blind `contains` is guaranteed
+/// to have eventually.
+///
+/// Used for both YAML and TOML, which share `#` and, in every file read here,
+/// share the property that no value legitimately contains one. That is worth
+/// stating because it is the limit: this would truncate a genuine `#` inside a
+/// quoted string, so it is a helper for these files rather than a comment
+/// stripper in general.
+fn without_comments(text: &str) -> String {
+    text.lines()
         .map(|line| line.split_once('#').map_or(line, |(code, _)| code))
         .collect::<Vec<_>>()
         .join("\n")
@@ -193,7 +238,7 @@ fn repo_file(relative: &str) -> String {
 /// reader who did nothing wrong.
 ///
 /// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: twelve of the seventeen test files escaped
+/// per-file, and that is deliberate: thirteen of the nineteen test files escape
 /// already, a per-file list would need editing every time a test is added, and
 /// the failure mode of forgetting is silent. This gate holds either shape,
 /// because it asks whether each escaping file is *covered*, not how.
@@ -210,28 +255,6 @@ fn every_test_that_reads_outside_the_package_is_excluded_from_it() {
              compile. Patterns are {patterns:?}"
         );
     }
-
-    // The scan itself has to be able to fail. If a refactor moved the support
-    // module inside this package and every escape vanished, the loop above would
-    // pass while asserting nothing, and this file would keep looking like a gate.
-    assert!(
-        escaping.len() >= 13,
-        "expected at least the thirteen files SPEC.md §9 counts, found {}: \
-         {escaping:?}. If that is genuinely correct, §9 needs the edit rather \
-         than this line",
-        escaping.len()
-    );
-
-    // And this file must be among them, which is the non-vacuity check with the
-    // sharpest teeth: `package.rs` reads `SPEC.md` and three workflows, so if the
-    // scanner stops seeing it, the scanner is broken rather than the repository
-    // clean. It was detected for the wrong reason once already; see
-    // `PATH_ATTRIBUTE`.
-    assert!(
-        escaping.iter().any(|name| name == "package.rs"),
-        "the scanner no longer detects its own escape, so it has stopped \
-         working: {escaping:?}"
-    );
 }
 
 /// `SPEC.md` §9 names every test file that escapes, and the naming is checked
@@ -264,6 +287,59 @@ fn the_spec_names_every_test_that_escapes_the_package() {
     }
 }
 
+/// The internal dependency's pinned version is the workspace version.
+///
+/// **The one duplication in this manifest that cargo cannot remove.** A path
+/// dependency that will be published needs both halves: `path` is what a
+/// checkout builds against, and `version` is what `cargo publish` rewrites the
+/// dependency to, because crates.io has no paths. Cargo has no
+/// `version.workspace = true` inside a dependency spec, so the number is written
+/// twice and only a gate can hold the two together.
+///
+/// The failure it prevents is silent, permanent, and passes every other check
+/// here: bump the workspace to 0.2.0 while the pin still reads 0.1.0, and
+/// `cargo publish --workspace` ships `vigia` 0.2.0 depending on `vigia-core`
+/// **0.1.0** — a real published crate that resolves, builds and installs. The
+/// binary a user gets is the new shell over the old engine, and nothing in the
+/// repository is red.
+#[test]
+fn the_internal_dependency_tracks_the_workspace_version() {
+    let root = repo_file("Cargo.toml");
+    let clean = without_comments(&root);
+
+    let workspace_version = clean
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("version = "))
+        .map(|value| value.trim().trim_matches('"').to_owned())
+        .expect("[workspace.package] declares a version");
+
+    let pinned = clean
+        .lines()
+        .find(|line| line.trim_start().starts_with("vigia-core = {"))
+        .and_then(|line| line.split("version = ").nth(1))
+        .map(|rest| {
+            rest.trim()
+                .trim_end_matches(&['}', ' '][..])
+                .trim_matches('"')
+                .to_owned()
+        })
+        .expect("[workspace.dependencies] pins vigia-core by version");
+
+    assert_eq!(
+        pinned, workspace_version,
+        "vigia-core is pinned at {pinned} while the workspace is {workspace_version}; \
+         `cargo publish --workspace` would ship a vigia that depends on an older \
+         vigia-core, permanently and without anything else going red"
+    );
+
+    // Non-vacuity: both reads must have found a real version rather than an
+    // empty string, which would compare equal and prove nothing.
+    assert!(
+        workspace_version.contains('.'),
+        "parsed {workspace_version:?} as the workspace version, which is not one"
+    );
+}
+
 /// Nothing in `exclude` has quietly stopped matching anything.
 ///
 /// A stale pattern is worse than a missing one: it reads as protection, it
@@ -278,12 +354,26 @@ fn nothing_excluded_has_since_stopped_existing() {
     // `exclude` happens to hold. The literal arm is unreachable from the current
     // manifest, and an unreachable branch in a gate's own helper is the thing
     // that breaks the first time someone narrows the pattern.
-    assert!(covers("tests/**", "soak.rs"));
-    assert!(covers("tests/soak.rs", "soak.rs"));
-    assert!(!covers("tests/soak.rs", "cli.rs"));
-    assert!(!covers("benches/**", "soak.rs"));
+    assert!(covers("tests/**", "soak.rs"), "the glob arm covers a test");
+    assert!(
+        covers("tests/soak.rs", "soak.rs"),
+        "the literal arm matches"
+    );
+    assert!(
+        !covers("tests/soak.rs", "cli.rs"),
+        "the literal arm is exact"
+    );
+    assert!(!covers("benches/**", "soak.rs"), "a glob elsewhere misses");
 
-    for pattern in exclude_patterns() {
+    // Only patterns aimed at `tests/` are checked against test names. This gate
+    // is about the exclusion that keeps escaping tests out of the tarball; an
+    // `assets/**` added later for an unrelated reason is not stale merely
+    // because no test matches it, and asserting otherwise would make a correct
+    // edit go red.
+    for pattern in exclude_patterns()
+        .into_iter()
+        .filter(|pattern| pattern.starts_with("tests/"))
+    {
         assert!(
             names.iter().any(|name| covers(&pattern, name)),
             "the `exclude` pattern `{pattern}` matches nothing under tests/, so \
@@ -380,11 +470,58 @@ fn the_release_pipeline_publishes_to_the_registry() {
         job.contains("workflow_call"),
         "{WORKFLOW} must be a reusable workflow; dist calls it with `uses:`"
     );
+
+    // **Only a `run:` body counts as publishing.** Stripping comments was not
+    // enough: a step called
+    // `- name: publish (was cargo publish --workspace, split for retries)`
+    // satisfies a whole-file `contains` while the `run:` beneath it does
+    // something else entirely, and that is a plausible edit rather than a
+    // contrived one, because it is what somebody writes while debugging a
+    // failed release. So the search is scoped to the command lines.
+    let commands: Vec<&str> = job
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| line.strip_prefix("run: "))
+        .collect();
+    let publishes: Vec<&&str> = commands
+        .iter()
+        .filter(|command| command.contains("cargo publish"))
+        .collect();
+
+    assert_eq!(
+        publishes.len(),
+        1,
+        "{WORKFLOW} must run exactly one `cargo publish`, found {publishes:?} \
+         among {commands:?}"
+    );
+    let publish = publishes[0];
     assert!(
-        job.contains("cargo publish --workspace"),
-        "{WORKFLOW} must publish with `--workspace`, which orders the two crates \
-         and waits for the index; sequential `-p` calls need a sleep of no \
-         knowable length"
+        publish.contains("--workspace"),
+        "{publish:?} must publish with `--workspace`, which orders the two \
+         crates and waits for the index; sequential `-p` calls need a sleep of \
+         no knowable length"
+    );
+    assert!(
+        publish.contains("--locked"),
+        "{publish:?} must publish with `--locked`, or the published crates are \
+         built against whatever the registry offers on the day rather than the \
+         resolution this repository tested"
+    );
+
+    // `--workspace` publishes every member, so what the workspace *holds* is
+    // part of what the release ships. A third crate added for any reason, a
+    // fixture generator, a proc macro, an experiment, would be published to
+    // crates.io permanently on the next tag, and nothing else here would
+    // mention it. Two is a deliberate number (`SPEC.md` §6's engine/shell split)
+    // rather than an accident, so a third is a decision that should be made
+    // rather than discovered.
+    let members = toml_array(&repo_file("Cargo.toml"), "members");
+    assert_eq!(
+        members.len(),
+        2,
+        "`cargo publish --workspace` ships every member and the workspace now \
+         holds {members:?}. Adding one is fine, but it claims a crates.io name \
+         forever, so decide it here rather than at the tag"
     );
 
     // dist generates release.yml from the config above, so this asserts the
@@ -404,9 +541,35 @@ fn the_release_pipeline_publishes_to_the_registry() {
     );
     assert!(
         release.contains("- custom-publish-crates-io"),
-        "release.yml's `announce` must wait on the registry job, so a failed \
-         publish stops the announcement rather than leaving a version whose \
-         binaries exist and whose crate does not"
+        "release.yml must schedule the registry job at all; run `dist generate`"
+    );
+
+    // **The ordering claim this used to make was false, so it is asserted as
+    // what it actually is.** The old wording said `announce` waiting on the
+    // publish job stopped a release half-shipping. It does not: `host` runs
+    // `gh release create` with no `--draft`, so the binaries are public before
+    // this job starts, and `announce` is a checkout. Pinning the real shape
+    // means a future dist upgrade that *did* move the release behind the
+    // publish would go red here and get the claim rewritten deliberately,
+    // rather than silently making the docs true again by accident.
+    assert!(
+        release.contains("gh release create"),
+        "release.yml no longer creates the GitHub release where this gate \
+         expects it, so the ordering documented in publish-crates-io.yml and \
+         SPEC.md §9 needs re-reading against the new generated file"
+    );
+    let release_created_at = release
+        .find("gh release create")
+        .expect("checked immediately above");
+    let registry_job_at = release
+        .find("custom-publish-crates-io:")
+        .expect("dist names the custom publish job after its workflow");
+    assert!(
+        release_created_at < registry_job_at,
+        "the generated workflow now creates the GitHub release after the \
+         registry job. That is a better order than the one documented, but the \
+         documentation says otherwise in four places and must be corrected \
+         rather than left to be right by accident"
     );
 }
 
@@ -428,7 +591,11 @@ fn the_release_pipeline_publishes_to_the_registry() {
 /// exposes `[workspace.metadata.dist]` verbatim, and the job reads it.
 #[test]
 fn the_purity_gate_derives_its_targets_from_the_release_config() {
-    let ci = repo_file(".github/workflows/ci.yml");
+    // Comment-stripped before slicing, because the region is heavily commented
+    // and those comments discuss targets by name. The non-vacuity check below
+    // asks whether a triple is spelled literally in the job, and prose about a
+    // triple is not the job spelling one.
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
     // Bounded at both ends. Taking everything *after* the marker was the first
     // spelling and it reached into the `musl` job below, which names its target
     // literally and for good reason, so the non-vacuity check below fired on a
@@ -466,13 +633,34 @@ fn the_purity_gate_derives_its_targets_from_the_release_config() {
 /// asks cargo, which is the only way to catch an `exclude` that is spelled
 /// correctly and means something other than what it looks like.
 ///
-/// It shells out, so it can be unavailable rather than failing: `cargo package`
-/// touches the registry index, and a machine with no network answers a question
-/// nobody asked. Skipping is **printed**, on `soak.rs`'s rule that a check which
-/// cannot run must say so rather than passing quietly, because a silent skip and
-/// a pass are the same green.
+/// It shells out, so it can be genuinely unavailable: `cargo package` touches
+/// the registry index, and a machine with no network answers a question nobody
+/// asked.
+///
+/// **The skip is narrow, and the first version of it was not.** That one
+/// returned on *any* non-zero exit, which meant the single most valuable failure
+/// it could see was the one it swallowed: a typo in `readme` makes
+/// `cargo package --list` fail, so a broken manifest turned this gate green.
+/// Verified, one character (`readme = "READMEE.md"`) was enough. Now only an
+/// index or network failure skips, and everything else is the finding.
+///
+/// **And the skip is written to stderr with a CI annotation, not `println!`.**
+/// libtest captures stdout for a *passing* test and discards it without
+/// `--nocapture`, so the old "skipping is printed" was false exactly where it
+/// mattered: in CI, a skip and a pass looked identical, which is the shape
+/// `soak.rs`'s own rule exists to prevent.
 #[test]
 fn the_packaged_artifact_carries_no_tests() {
+    /// Substrings that mean "this machine could not reach the registry",
+    /// as opposed to "this manifest is broken".
+    const UNREACHABLE: [&str; 5] = [
+        "failed to fetch",
+        "network failure",
+        "could not connect",
+        "failed to resolve",
+        "spurious network error",
+    ];
+
     let output = Command::new(env!("CARGO"))
         .args(["package", "--list", "--allow-dirty", "-p", "vigia"])
         .current_dir(repo_root())
@@ -481,18 +669,21 @@ fn the_packaged_artifact_carries_no_tests() {
     let output = match output {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
-            println!(
-                "SKIPPED: `cargo package --list` failed, most likely because the \
-                 registry index is unreachable. This gate proves nothing on this \
-                 run; RELEASE-SMOKE.md §1 covers it by hand.\n{}",
-                String::from_utf8_lossy(&output.stderr)
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                UNREACHABLE.iter().any(|needle| stderr.contains(needle)),
+                "`cargo package --list` failed for a reason that is not the \
+                 registry being unreachable, so this is the gate firing rather \
+                 than the gate being unavailable:\n{stderr}"
+            );
+            eprintln!(
+                "::warning::SKIPPED the_packaged_artifact_carries_no_tests: the \
+                 registry index is unreachable, so this gate proved nothing on \
+                 this run. RELEASE-SMOKE.md §1 covers it by hand.\n{stderr}"
             );
             return;
         }
-        Err(e) => {
-            println!("SKIPPED: could not run cargo: {e}");
-            return;
-        }
+        Err(e) => panic!("could not run cargo at all: {e}"),
     };
 
     let listed = String::from_utf8_lossy(&output.stdout);

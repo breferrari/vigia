@@ -12,11 +12,34 @@
 //! proves the export exists rather than that the function does.
 
 use std::ffi::OsString;
+use std::process::Command;
 
 use vigia::{Request, VERSION, request_for};
 
 fn request(arg: &str) -> Request {
-    request_for(&OsString::from(arg))
+    request_for(&[OsString::from(arg)])
+}
+
+fn request_all(args: &[&str]) -> Request {
+    let owned: Vec<OsString> = args.iter().map(OsString::from).collect();
+    request_for(&owned)
+}
+
+/// Run the real binary with one argument and return (status code, stdout, stderr).
+///
+/// `CARGO_BIN_EXE_<name>` is set by cargo for integration tests of a package
+/// that declares a binary, so the built executable is on disk at a known path
+/// and needs no building here.
+fn run_binary(arg: &str) -> (Option<i32>, String, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_vigia"))
+        .arg(arg)
+        .output()
+        .expect("the built binary runs");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
 }
 
 /// Both conventional spellings answer rather than refuse.
@@ -85,7 +108,7 @@ fn a_path_is_watched_however_it_is_spelled() {
         "..",
         "/",
         "~/code/some-repo",
-        "C:\\Dev\\vigia",
+        "C:\\code\\some-repo",
         "a path with spaces",
         "./-x",
         "src/-weird-name",
@@ -95,6 +118,44 @@ fn a_path_is_watched_however_it_is_spelled() {
             request(arg),
             Request::Watch,
             "{arg:?} is a path and should be watched"
+        );
+    }
+}
+
+/// A second argument is refused rather than dropped on the floor.
+///
+/// **The defect this was written against shipped in the first version of this
+/// surface.** `main` read `args_os().nth(1)` and passed one argument to a
+/// classifier that could not see a second, so `vigia . --colour=never` watched
+/// `.` and discarded the flag in silence. That is strictly worse than the
+/// refusal a flag gets on its own: the tool starts, draws, and looks like it
+/// accepted the option.
+///
+/// Zero arguments is `Watch`, because §11.1's path is *optional* and `main`
+/// supplies the default. That case is here rather than assumed, since it is the
+/// most common invocation there is: `vigia` with nothing after it.
+#[test]
+fn only_one_argument_is_a_surface_and_a_second_is_refused() {
+    assert_eq!(
+        request_all(&[]),
+        Request::Watch,
+        "bare `vigia` watches here"
+    );
+    assert_eq!(request_all(&["."]), Request::Watch);
+    assert_eq!(request_all(&["--version"]), Request::Version);
+
+    for args in [
+        vec![".", "--colour=never"],
+        vec![".", "."],
+        vec!["--version", "--colour=never"],
+        vec!["--version", "--version"],
+        vec![".", "-x", "-y"],
+    ] {
+        assert_eq!(
+            request_all(&args),
+            Request::TooManyArguments,
+            "{args:?} is more than one argument and must be refused, not \
+             silently truncated to its first"
         );
     }
 }
@@ -134,7 +195,7 @@ fn a_path_that_is_not_valid_unicode_is_still_a_path() {
         OsString::from_wide(&[0xD800, b'r' as u16, b'e' as u16, b'p' as u16, b'o' as u16])
     };
 
-    assert_eq!(request_for(&arg), Request::Watch);
+    assert_eq!(request_for(&[arg]), Request::Watch);
 }
 
 /// The version a release reports is never the placeholder the workspace sits at
@@ -158,19 +219,25 @@ fn the_reported_version_is_never_the_placeholder() {
          would claim a crates.io version that can never be withdrawn"
     );
 
-    let parts: Vec<&str> = VERSION.split('.').collect();
+    // **The pre-release suffix is cut before the split, not accommodated
+    // inside it.** The first version of this asserted three dotted components
+    // over the whole string, and a comment below it claimed `0.1.0-rc.1` was
+    // covered. It is not: that splits into *four* parts, so the assertion would
+    // have gone red on the release candidate before the one publish that cannot
+    // be taken back, and the reason would have been this test rather than
+    // anything wrong with the version.
+    let core = VERSION.split_once('-').map_or(VERSION, |(core, _)| core);
+
+    let parts: Vec<&str> = core.split('.').collect();
     assert_eq!(
         parts.len(),
         3,
-        "expected three dotted components, got {VERSION}"
+        "expected three dotted components in {core:?} (from {VERSION})"
     );
-    // The pre-release suffix rides on the patch component (`0.1.0-rc.1`), so
-    // only the leading digits of the last one are required to be numeric.
     for (i, part) in parts.iter().enumerate() {
-        let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
         assert!(
-            !digits.is_empty(),
-            "component {i} of {VERSION} does not begin with a number"
+            part.chars().all(|c| c.is_ascii_digit()),
+            "component {i} of {VERSION} is {part:?}, which is not a number"
         );
     }
 
@@ -178,5 +245,60 @@ fn the_reported_version_is_never_the_placeholder() {
         parts.iter().any(|p| !p.starts_with('0')),
         "every component of {VERSION} is zero, which is the placeholder wearing \
          a different spelling"
+    );
+}
+
+/// The binary prints the version on stdout and exits successfully.
+///
+/// **`main.rs` said no gate could reach it, and that was wrong.** Its docblock
+/// claimed to be "the one place in the crate no gate can reach", which is true
+/// of the *library* route and false in general: cargo sets `CARGO_BIN_EXE_vigia`
+/// for this test binary, so the real executable can simply be run. Everything
+/// above this line tests the classifier; nothing tested that `main` wires it to
+/// the right stream and the right exit code, and those are the two things
+/// `RELEASE-SMOKE.md` §2 and a packager both actually observe.
+///
+/// **stdout specifically, not "output".** A version query is a thing scripts
+/// read, and one that answered on stderr would satisfy a human running it and
+/// break `vigia --version | cut -d' ' -f2`. The exact string is asserted for the
+/// same reason `SPEC.md` §11.1 specifies it: `vigia <version>` is a format, not
+/// a suggestion.
+#[test]
+fn the_binary_prints_its_version_and_exits_zero() {
+    for spelling in ["--version", "-V"] {
+        let (code, stdout, stderr) = run_binary(spelling);
+        assert_eq!(code, Some(0), "{spelling} should exit 0, stderr: {stderr}");
+        assert_eq!(stdout.trim(), format!("vigia {VERSION}"));
+        assert!(
+            stderr.is_empty(),
+            "{spelling} wrote to stderr: {stderr:?}, so a script reading stdout \
+             is not the whole contract"
+        );
+    }
+}
+
+/// The binary refuses an unknown option on stderr and exits non-zero.
+///
+/// The other half of the same wiring, and the half a packaging script notices:
+/// an exit code of zero here would make `vigia --frobnicate` look like it
+/// worked. stderr rather than stdout for the symmetric reason above, so that a
+/// refusal never contaminates output something is parsing.
+///
+/// It must also refuse *before* taking a terminal, which is what the empty
+/// stdout asserts: an alternate-screen sequence on the way to an error message
+/// is the failure `SPEC.md` §11.1 rules against for a non-repository path, one
+/// argument shape over.
+#[test]
+fn the_binary_refuses_an_unknown_option_and_exits_non_zero() {
+    let (code, stdout, stderr) = run_binary("--colour=never");
+    assert_eq!(code, Some(1), "an unknown option should exit 1");
+    assert!(
+        stdout.is_empty(),
+        "the refusal reached stdout ({stdout:?}), which is where a version \
+         query answers"
+    );
+    assert!(
+        stderr.contains("--version is the only option"),
+        "the refusal should name the surface, got {stderr:?}"
     );
 }

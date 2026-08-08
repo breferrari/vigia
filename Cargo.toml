@@ -26,6 +26,23 @@ readme = "README.md"
 authors = ["Brenno Ferrari"]
 
 [workspace.dependencies]
+# The internal dependency, declared here rather than in `crates/vigia` so that
+# its `version` is the workspace version rather than a second copy of it.
+#
+# A registry needs both halves: `path` is what a checkout builds against, and
+# `version` is what `cargo publish` rewrites the dependency to, since crates.io
+# has no paths. Written out in the shell's manifest, those two lived in
+# different files from the version they had to match, and the failure is silent
+# and permanent: bump the workspace to 0.2.0 with `version = "0.1.0"` still
+# spelled here, and `cargo publish --workspace` ships `vigia` 0.2.0 depending on
+# `vigia-core` **0.1.0**, which is a real published crate that resolves and
+# builds. Nothing goes red, and nothing can be withdrawn afterwards.
+#
+# `version.workspace = true` inside a dependency is not a thing cargo supports,
+# so the duplication cannot be removed, only moved and then gated. Moved: the
+# two strings are now fifteen lines apart in one file rather than in two.
+# Gated: `crates/vigia/tests/package.rs::the_internal_dependency_tracks_the_workspace_version`.
+vigia-core = { path = "crates/vigia-core", version = "0.1.0" }
 # Pure Rust throughout. Adding a dependency with a C build script is a spec
 # change, not an implementation detail; see CLAUDE.md.
 #
@@ -160,8 +177,11 @@ inherits = "release"
 # publisher**: its built-ins are `homebrew` and `npm`, and everything else is a
 # custom reusable workflow. `./publish-crates-io` is
 # `.github/workflows/publish-crates-io.yml`, and dist places every custom publish
-# job `needs: [plan, host]` and ahead of `announce`, so a registry failure stops
-# the release being announced rather than leaving a version half-shipped.
+# job `needs: [plan, host]`, which puts it **after** the GitHub release is
+# already public: `host` runs `gh release create` with no `--draft`. That is the
+# right order because crates.io is the only irreversible step in the release, so
+# it goes last, after everything that can be deleted and redone has succeeded.
+# The workflow's own header carries the full reasoning and what it costs.
 #
 # Four targets, and Linux is musl alone: one static binary that runs on any
 # distribution beats two that need selection logic, and CLAUDE.md already names

@@ -30,7 +30,7 @@ exclude = ["tests/**"]
 
 [dependencies]
 ratatui.workspace = true
-vigia-core = { path = "../vigia-core", version = "0.1.0" }
+vigia-core.workspace = true
 
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:
 # SPEC.md section 6 keeps the core free of anything the shell decides, and a

@@ -5,10 +5,26 @@
 # prefix. dist wires this in `needs: [plan, host]` and ahead of `announce`, and
 # it passes `secrets: inherit`, which is how `CARGO_REGISTRY_TOKEN` reaches here.
 #
-# Placement is the point: because `announce` waits on this job, a registry
-# failure stops the GitHub release being announced instead of leaving a version
-# whose binaries exist and whose crate does not. dist also guards the call for
-# prereleases, so nothing here needs to.
+# **Placement is the point, and the first version of this comment had the
+# reason backwards.** It claimed that because `announce` waits on this job, a
+# registry failure stops the release being announced and nothing half-ships.
+# That is false: `dist`'s `host` job runs `gh release create` with no `--draft`,
+# so by the time this job starts, the GitHub release and its binaries are
+# already public, and `announce` is a checkout.
+#
+# The order is still the right one, for the opposite reason to the one claimed.
+# **crates.io is the only step here that cannot be undone.** A GitHub release can
+# be deleted, a tap commit can be reverted, a tag can be moved. So the
+# irreversible action goes last, after every reversible thing has already
+# succeeded, rather than first where it would be spent on a release that then
+# fails to build its own announcement.
+#
+# What that costs, stated rather than designed away: if this job fails, the
+# binaries are public and the crate name is unclaimed. That is recoverable by
+# re-running the job, and `RELEASE-SMOKE.md` §5 checks it directly instead of
+# inferring it from a green workflow.
+#
+# dist guards the call for prereleases, so nothing here needs to.
 #
 # **This is the only irreversible step in the repository.** `cargo yank` hides a
 # version from new dependents; it does not delete it, and the name stays taken.
@@ -57,10 +73,23 @@ jobs:
       # because the two artifacts it compares are edited by different hands at
       # different times: the tag is typed once at a terminal, and the manifest is
       # edited in a pull request days earlier.
+      # **Read from the plan's resolved version, not from the tag.** The first
+      # version of this stripped a leading `v` off `announcement_tag` and
+      # compared that. dist accepts more tag shapes than that handles:
+      # `releases/v0.1.0` survives the `sed` intact, and `vigia-v0.1.0` loses
+      # `vigia`'s own `v`. Both fail closed, which sounds safe and is not,
+      # because by the time this job runs the GitHub release is already public,
+      # so a false failure is a half-shipped release rather than a stopped one.
+      # `.releases[0].app_version` is dist's own resolved version, which is the
+      # thing actually being published, and it needs no parsing at all.
       - name: the announced version is the version in the manifests
         run: |
           set -euo pipefail
-          announced=$(jq -r '.announcement_tag' <<<"$PLAN" | sed 's/^v//')
+          announced=$(jq -r '.releases[0].app_version' <<<"$PLAN")
+          if [ -z "$announced" ] || [ "$announced" = "null" ]; then
+            echo "::error::the plan carries no resolved version to publish"
+            exit 1
+          fi
           for crate in vigia vigia-core; do
             manifest=$(cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')

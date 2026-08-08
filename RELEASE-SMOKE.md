@@ -28,7 +28,7 @@ Two of these cannot be set by anything but a person holding a token, and a tag
 pushed without them produces a release that half fails: the binaries exist, the
 announcement does not, and the crate name is still unclaimed.
 
-- [ ] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
+- [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
 - [ ] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
       crates.io token with publish scope. `.github/workflows/publish-crates-io.yml`
       checks for it before packaging anything, so a missing one fails in seconds
@@ -57,7 +57,7 @@ announcement does not, and the crate name is still unclaimed.
       what the install fragments resolve, so this is worth reading rather than
       assuming.
 
-## 2. Install the way a user does, on all three tier-1 targets
+## 2. Install the way a user does, on every platform the release builds for
 
 - [ ] `cargo install --path <unpacked crate>` (or the dist artifact) on Windows,
       macOS, Linux: binary lands on PATH, and `vigia --version` prints the
@@ -87,7 +87,7 @@ announcement does not, and the crate name is still unclaimed.
       one delivery path #24 could not measure.)
 - [ ] A non-repository path: one-line error before the alternate screen, exit
       non-zero.
-- [ ] An argument that is not an option and not a path: `vigia --colour=never`
+- [ ] An option that does not exist: `vigia --colour=never`
       prints the one-line refusal and exits non-zero, rather than reporting that
       `--colour=never` is not a repository.
 
@@ -118,11 +118,20 @@ box that a working build can never tick.
 The publish is a CI job now, so these verify rather than perform.
 
 - [ ] The `Release` workflow is green end to end, including
-      `custom-publish-crates-io`. `announce` waits on it, so a green
-      announcement is itself evidence the registry accepted both crates.
+      `custom-publish-crates-io`. **Read that job specifically rather than the
+      overall tick.** The GitHub release is created in `host`, before the
+      registry job runs and with no `--draft`, so binaries being public proves
+      nothing about crates.io. A green `announce` does not either: it is a
+      checkout.
 - [ ] `cargo install vigia` from crates.io, on one machine that has never built
-      this repo. The true cold path, and the only box here that a green workflow
-      does not already imply.
+      this repo. The true cold path.
+- [ ] If the registry job failed while the release went public, that is the
+      documented half-failure and not a mystery: re-run the job. If it failed
+      *after* `vigia-core` was accepted and before `vigia` was, `vigia-core`
+      0.1.0 is spent permanently, so the re-run must not bump only one of the
+      two. Publishing an already-published version is an error, not a silent
+      no-op, so a re-run of a fully successful publish also fails and that is
+      expected.
 - [ ] `brew install breferrari/tap/vigia`, and the formula in the tap names the
       tag that was just pushed.
 - [ ] The GitHub release carries the artifacts `cargo-dist` built, not a

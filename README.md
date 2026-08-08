@@ -4,7 +4,7 @@
 
 *Portuguese: a watchman, the one who keeps watch.*
 
-`🚧 v0.1.0, the first release. Early, and honest about it: every claim below is one the tests hold.`
+`🚧 Early, and honest about it: every claim below is one a test holds.`
 
 </div>
 
@@ -166,7 +166,7 @@ set -g  default-terminal "tmux-256color"
 set -ga terminal-overrides ",*:Tc"
 ```
 
-**What is early about it.** There are no flags: one optional path, and the configuration above.
+**What is early about it.** The surface is one optional path and `--version`, plus the configuration above. Nothing else is a flag, on purpose.
 
 ## 🖼️ Where it is going
 
@@ -211,7 +211,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI |
 | ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
 | ✅ | **3. Glanceability** | Sparklines, heat bars, live counters, the status bar, theming |
-| ⬜ | **4. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
+| 🔨 | **4. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 
 Being built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and it is written before the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked: the table above is the shape, that file is what is actually done.
 

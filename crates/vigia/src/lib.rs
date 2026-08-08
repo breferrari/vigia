@@ -93,7 +93,7 @@ pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, rows_in, rows_of,
 };
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
@@ -163,7 +163,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The CLI is one optional positional path and one flag (`SPEC.md` §11.1), so
 /// this is the whole surface. It lives here rather than in `main.rs` because §7
 /// makes the test suite the proof and a test cannot import a `main.rs`, which is
-/// the split that file's own module docblock already describes.
+/// the split that file's own module docblock describes. What stays over there is
+/// the dispatch: which stream each answer is written to, and the exit code, both
+/// of which `tests/cli.rs` reaches by running the built binary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Request {
     /// Watch the argument as a path.
@@ -176,6 +178,37 @@ pub enum Request {
     /// path, so `vigia --colour=never` is told what the options are instead of
     /// being told `--colour=never` is not a repository.
     NoSuchOption,
+    /// More than one argument, when the surface is exactly one.
+    ///
+    /// **Refused rather than ignored**, which is a change from how this behaved
+    /// before the surface was gated: `vigia . --colour=never` used to watch `.`
+    /// and drop the rest on the floor, so a reader who typed a flag alongside a
+    /// path got no signal that the flag does not exist. That is the same defect
+    /// [`NoSuchOption`](Request::NoSuchOption) exists to prevent, reached from a
+    /// position the old check never looked at, and it is worse there: the tool
+    /// appears to accept the flag, because it starts and draws.
+    TooManyArguments,
+}
+
+/// Classify the arguments `vigia` was given, which is at most one.
+///
+/// Takes the whole list rather than one argument, because **arity is part of the
+/// surface and nothing was checking it**. The classifier used to see only
+/// `args_os().nth(1)`, so `vigia . --colour=never` watched `.` and discarded the
+/// rest silently: the flag that does not exist produced a running program
+/// instead of the one-line refusal that a flag on its own produces. A function
+/// handed one argument cannot notice a second, which is why the fix is the
+/// signature rather than an extra check at the call site.
+///
+/// An empty list is [`Watch`](Request::Watch), and `main` supplies the default
+/// path. That keeps the "optional positional" of §11.1 in one place instead of
+/// splitting the default across both files.
+pub fn request_for(args: &[OsString]) -> Request {
+    match args {
+        [] => Request::Watch,
+        [arg] => request_for_one(arg),
+        _ => Request::TooManyArguments,
+    }
 }
 
 /// Classify the one argument `vigia` takes.
@@ -206,7 +239,7 @@ pub enum Request {
 /// proportional to its length. `to_string_lossy` validates the entire string to
 /// decide whether it can borrow, where `as_encoded_bytes().first()` reads one
 /// byte, and this runs before anything else in the process on the I7 path.
-pub fn request_for(arg: &OsStr) -> Request {
+fn request_for_one(arg: &OsStr) -> Request {
     if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
         return Request::Version;
     }
