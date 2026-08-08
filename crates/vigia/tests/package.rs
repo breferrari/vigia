@@ -45,6 +45,19 @@ use std::process::Command;
 const PATH_ATTRIBUTE: &str = concat!("#[path = \"..", "/../");
 const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 
+/// How many of `vigia`'s test files read outside the package.
+///
+/// Stated once here and asserted against the *documents* that repeat it, rather
+/// than written into an assertion and left to agree with them by hand. Three
+/// files spell this number in prose, and the whole reason this test file exists
+/// is that a number living only in prose drifted by a factor of four. Fixing
+/// that with a number living only in a test would have been the same mistake
+/// with a smaller radius.
+const ESCAPING_FILES: usize = 13;
+
+/// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
+const ESCAPING_FILES_SPELLED: &str = "thirteen";
+
 /// The repository root, two levels above this package.
 ///
 /// Spelled `join("../..")` rather than `join("..").join("..")` so the climb
@@ -112,13 +125,13 @@ fn escapes(source: &str) -> bool {
 /// Every test file that reads outside the package, by name, sorted.
 ///
 /// One function rather than two predicates and a filter written at each call
-/// site: three tests need exactly this list, and a fourth escape shape should
+/// site: two tests need exactly this list, and a fourth escape shape should
 /// be teachable in one place.
 ///
 /// **The vacuity guards live here rather than in one caller**, because every
 /// caller is a `for` loop over this list and every one of them passes trivially
 /// if it comes back empty. Putting them in the producer means a scanner that
-/// stops scanning fails all three at once instead of quietly satisfying two.
+/// stops scanning fails both at once instead of quietly satisfying one.
 fn escaping_tests() -> Vec<String> {
     let escaping: Vec<String> = test_files()
         .into_iter()
@@ -138,10 +151,9 @@ fn escaping_tests() -> Vec<String> {
     // the three documents that have to change with it.
     assert_eq!(
         escaping.len(),
-        13,
-        "SPEC.md §9, crates/vigia/Cargo.toml and RELEASE-SMOKE.md all say \
-         thirteen files read outside this package. Found {}: {escaping:?}. \
-         Update all four together",
+        ESCAPING_FILES,
+        "the three documents that state this count all say {ESCAPING_FILES}. \
+         Found {}: {escaping:?}. Update them together",
         escaping.len()
     );
     // This file must be among them, which is the check with the sharpest teeth:
@@ -184,6 +196,82 @@ fn toml_array(source: &str, key: &str) -> Vec<String> {
         .map(|entry| entry.trim().trim_matches('"').to_owned())
         .filter(|entry| !entry.is_empty())
         .collect()
+}
+
+/// The shell commands a workflow actually runs, one string per step.
+///
+/// **Written as a small parser with its own test because two attempts at doing
+/// it with a line filter were both wrong, in opposite directions.** The first
+/// read only `run: <command>`, so rewriting a step as a `run: |` block, which
+/// is what anyone does the moment it needs two lines, reported that the file
+/// contained no publish command at all. The second dropped the `run:`
+/// requirement to fix that, and thereby matched *any* line, so a step called
+/// `- name: publish (was cargo publish, split for retries)` satisfied the gate
+/// while the command beneath it did something else. That second failure is the
+/// one the gate was written to catch in the first place.
+///
+/// Three shapes, which is all GitHub Actions offers and all this needs:
+///
+/// - `run: cargo publish …` on one line.
+/// - `run: |` (or `run: >`) with an indented body, joined into one string.
+/// - Either of those with `\` continuations, joined, because a flag on a
+///   continued line is invisible to anything working line by line and
+///   `--dry-run` is exactly the flag someone would put there.
+///
+/// Nothing else on a step is a command, which is the property both earlier
+/// versions lost: a `name:`, an `if:` or a comment may say anything at all.
+fn run_commands(yaml: &str) -> Vec<String> {
+    let lines: Vec<&str> = yaml.lines().collect();
+    let mut commands = Vec::new();
+    let mut index = 0;
+
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim_start();
+        // `- run:` as well as `run:`, since the first step of a list carries the
+        // dash on the same line as its first key.
+        let Some(rest) = trimmed
+            .strip_prefix("- run:")
+            .or_else(|| trimmed.strip_prefix("run:"))
+        else {
+            index += 1;
+            continue;
+        };
+        let indent = line.len() - trimmed.len();
+        let rest = rest.trim();
+
+        let mut body = if rest == "|" || rest == ">" || rest.is_empty() {
+            // A block scalar: every following line indented past the key.
+            let mut collected = Vec::new();
+            index += 1;
+            while index < lines.len() {
+                let next = lines[index];
+                let next_indent = next.len() - next.trim_start().len();
+                if next.trim().is_empty() {
+                    index += 1;
+                    continue;
+                }
+                if next_indent <= indent {
+                    break;
+                }
+                collected.push(next.trim().to_owned());
+                index += 1;
+            }
+            collected.join("\n")
+        } else {
+            index += 1;
+            rest.to_owned()
+        };
+
+        // Shell line continuations, so a flag on the next physical line belongs
+        // to the same command.
+        while let Some(at) = body.find("\\\n") {
+            body.replace_range(at..at + 2, " ");
+        }
+        commands.push(body.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+
+    commands
 }
 
 /// Did `cargo package` fail because this machine cannot reach the registry,
@@ -342,6 +430,85 @@ fn the_spec_names_every_test_that_escapes_the_package() {
              two phases for exactly this reason"
         );
     }
+
+    // **And every document that states the count states the right one.**
+    // Asserting the number in a test and leaving the three files to agree with
+    // it by hand is the same defect with a smaller radius: bumping the constant
+    // for a fourteenth escaping test would otherwise leave all three saying
+    // "thirteen", green.
+    for (path, text) in [
+        ("SPEC.md", spec.as_str()),
+        (
+            "crates/vigia/Cargo.toml",
+            &read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")),
+        ),
+        ("RELEASE-SMOKE.md", &repo_file("RELEASE-SMOKE.md")),
+    ] {
+        assert!(
+            text.contains(ESCAPING_FILES_SPELLED),
+            "{path} should say `{ESCAPING_FILES_SPELLED}` files read outside \
+             the package, matching the {ESCAPING_FILES} counted from disk"
+        );
+    }
+}
+
+/// The command scan reads commands and nothing else.
+///
+/// Every case here is one an audit round actually got past a previous version
+/// of this scan, so the list is a record of how it was wrong rather than a
+/// survey of YAML. Two of them are the same defect from opposite sides: a
+/// `name:` that quotes a command is not a command, and a command split over two
+/// physical lines is still one.
+#[test]
+fn only_the_commands_a_workflow_runs_are_read_as_commands() {
+    let inline = run_commands("    steps:\n      - run: cargo publish --workspace\n");
+    assert_eq!(inline, vec!["cargo publish --workspace"]);
+
+    // A block scalar, which is what a step becomes the moment it needs a
+    // `set -euo pipefail`. The first version of the scan returned nothing here.
+    let block = run_commands(
+        "      - name: publish\n        run: |\n          set -euo pipefail\n          cargo publish --workspace --locked\n      - name: next\n",
+    );
+    assert_eq!(
+        block,
+        vec!["set -euo pipefail cargo publish --workspace --locked"],
+        "a block body is one command, and the step after it is not part of it"
+    );
+
+    // A `name:` quoting the command is not the command. The second version of
+    // the scan matched this and so passed while the real step did nothing.
+    let decoy = run_commands(
+        "      - name: publish (was cargo publish --workspace --locked, split for retries)\n        run: echo skip\n",
+    );
+    assert_eq!(
+        decoy,
+        vec!["echo skip"],
+        "a step's name may say anything; only its `run:` is a command"
+    );
+
+    // A continuation, so a flag on the second physical line is still part of
+    // the command. `--dry-run` hidden this way passed the gate that exists to
+    // reject it.
+    let continued = run_commands(
+        "        run: |\n          cargo publish --workspace --locked \\\n            --dry-run\n",
+    );
+    assert_eq!(
+        continued,
+        vec!["cargo publish --workspace --locked --dry-run"],
+        "a `\\` continuation joins, or a flag on the next line is invisible"
+    );
+
+    // And the real file yields exactly one command containing a publish.
+    let real = run_commands(&without_comments(&repo_file(
+        ".github/workflows/publish-crates-io.yml",
+    )));
+    assert_eq!(
+        real.iter()
+            .filter(|command| command.contains("cargo publish"))
+            .count(),
+        1,
+        "the real workflow should hold exactly one publish: {real:?}"
+    );
 }
 
 /// The skip condition is checked against stderr cargo really produced.
@@ -652,18 +819,8 @@ fn the_release_pipeline_publishes_to_the_registry() {
     // something else entirely, and that is a plausible edit rather than a
     // contrived one, because it is what somebody writes while debugging a
     // failed release. So the search is scoped to the command lines.
-    // Both `run: <command>` and the indented body of a `run: |` block, because
-    // the block form is what anybody writes the moment a step needs two lines
-    // or a `set -euo pipefail`, and the two steps above this one in that file
-    // already use it. Reading only the inline form turned that ordinary edit
-    // into a false red claiming no publish command existed.
-    let commands: Vec<&str> = job
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| line.strip_prefix("run: ").unwrap_or(line))
-        .collect();
-    let publishes: Vec<&&str> = commands
+    let commands = run_commands(&job);
+    let publishes: Vec<&String> = commands
         .iter()
         .filter(|command| command.contains("cargo publish"))
         .collect();
@@ -874,6 +1031,13 @@ fn the_packaged_artifact_carries_no_tests() {
     let output = Command::new(env!("CARGO"))
         .args(["package", "--list", "--allow-dirty", "-p", "vigia"])
         .current_dir(repo_root())
+        // **Colour off, or the classifier below cannot see a `warning:`.**
+        // `ci.yml` sets `CARGO_TERM_COLOR: always` for the whole workflow, so in
+        // CI cargo writes `\e[1m\e[93mwarning\e[0m:` and a prefix test for
+        // `warning:` is false on every line. That would put the one filter that
+        // stops a recovered network blip excusing a broken manifest out of
+        // action precisely where it matters, and nowhere else.
+        .env("CARGO_TERM_COLOR", "never")
         .output();
 
     let output = match output {
