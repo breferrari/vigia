@@ -1,8 +1,9 @@
 //! Catching the exit nobody at this keyboard asked for.
 //!
-//! I8 promises the terminal back on every exit the process controls, and until
-//! this module there was exactly one it did not: a signal delivered from
-//! outside. `SIGINT`, `SIGTERM` and `SIGHUP` kill a process with their default
+//! I8 promises the terminal back on every exit the process **can observe**, and
+//! this module is why that row says "observe" rather than "controls": until it
+//! existed there was exactly one such exit the shell did not cover, a signal
+//! delivered from outside. `SIGINT`, `SIGTERM` and `SIGHUP` kill a process with their default
 //! disposition, so neither [`Session`](crate::Session)'s `Drop` nor the panic
 //! hook runs, and the reader is left in the alternate screen with no echo and a
 //! mouse reporting every movement as garbage. A pane closing sends exactly that,
