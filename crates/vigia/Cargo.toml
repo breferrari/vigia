@@ -15,14 +15,27 @@ vigia-core = { path = "../vigia-core", version = "0.0.0" }
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:
 # SPEC.md section 6 keeps the core free of anything the shell decides, and a
 # number that exists to be painted is the shell's. Linux is deliberately absent
-# from both blocks below, since `/proc/self/status` needs no crate and no
-# `unsafe`. So does every other target, which reports the readout unavailable
-# rather than guessing.
+# from the two blocks immediately below, since `/proc/self/status` needs no
+# crate and no `unsafe`. So does every other target, which reports the readout
+# unavailable rather than guessing.
 [target.'cfg(target_os = "macos")'.dependencies]
 libc.workspace = true
 
+# Two things on this one target, and they arrive by different routes: the
+# memory readout above, and `Win32_System_Console` for the externally delivered
+# signal, which is a feature of this same crate rather than a dependency of its
+# own.
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+
+# Every Unix, including Linux, which is what separates this block from the two
+# above: a signal is not a readout, and `std` has no API for one anywhere. The
+# shell rather than the core for the same reason as the pair above, one step
+# further out. Taking a terminal is the shell's, so giving it back on a signal
+# nobody typed is too, and SPEC.md section 6 puts terminal I/O outside
+# `vigia-core` entirely.
+[target.'cfg(unix)'.dependencies]
+signal-hook.workspace = true
 
 # The tests reach `vigia-core/tests/support` by `#[path]`, the way
 # `vigia-core/benches/engine.rs` does, so a shell test and an engine gate cannot

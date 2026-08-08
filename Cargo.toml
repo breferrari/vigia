@@ -66,7 +66,8 @@ ratatui = { version = "0.30", default-features = false, features = [
 # every pin above: the one default is coloured diffs, and a diff is the entire
 # output of a failing snapshot test.
 insta = "1.48"
-# The status bar's memory readout, SPEC.md section 5.1. Both are FFI
+# The status bar's memory readout, SPEC.md section 5.1, and on Windows one
+# further thing the block below names. Both are FFI
 # declarations against facilities the OS already ships, both are pinned to the
 # version already resolved for that target, and neither adds a crate to any
 # graph: gix pulls libc into the Apple graph through gix-hash and cpufeatures,
@@ -84,14 +85,33 @@ insta = "1.48"
 # the reference machine, discovered in CI instead of here. A trim with no
 # benefit is not worth paying for with a target you cannot test.
 libc = "0.2"
-# Two features, the smallest set that answers. ProcessStatus is
-# GetProcessMemoryInfo and PROCESS_MEMORY_COUNTERS; Threading is
-# GetCurrentProcess, whose pseudo-handle could be written as `-1` instead but
-# would then be a magic number nobody could check against a header.
+# Three features, each the smallest set that answers, and they no longer answer
+# for one section alone. ProcessStatus is GetProcessMemoryInfo and
+# PROCESS_MEMORY_COUNTERS; Threading is GetCurrentProcess, whose pseudo-handle
+# could be written as `-1` instead but would then be a magic number nobody could
+# check against a header. Console is SetConsoleCtrlHandler and the CTRL_*
+# constants, which is the Windows half of the externally delivered signal in
+# SPEC.md section 6, and it adds no crate because a feature never does.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_System_Console",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+] }
+# The Unix half of that same decision, SPEC.md section 6. Windows has no
+# signals, so the two halves are two crates rather than one behind a cfg.
+#
+# `default-features = false` with `iterator` put back is exactly what the
+# default would give, since `iterator` implies `channel`. It is written out
+# because every other pin here is, and because the feature that matters is the
+# one left off: `extended-siginfo-raw` is what turns this crate's `build.rs`
+# from `fn main() {}` into a `cc` invocation, and it is the only route from here
+# into a C toolchain.
+#
+# Adds no crate either: crossterm already pulls it into both Unix graphs through
+# ratatui. Confirmed with `cargo tree -i`, on the same rule as the pair above.
+signal-hook = { version = "0.3", default-features = false, features = [
+    "iterator",
 ] }
 
 [profile.release]

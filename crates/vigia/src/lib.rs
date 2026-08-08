@@ -53,13 +53,14 @@
 mod app;
 mod colour;
 mod input;
-/// Public where its five siblings are private, and for one reason: `soak.rs` is
+/// Public where its seven siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
 /// harness needs the same reader the shell uses. Two implementations of "read
 /// this process's RSS" that could disagree is exactly what one of them existing
 /// is meant to prevent.
 pub mod memory;
 mod render;
+mod signal;
 mod terminal;
 /// Public for the same reason [`memory`] is: a theme file is parsed by a pure
 /// function over a string, `tests/palette.rs` is an integration test and can only
@@ -114,13 +115,27 @@ enum Wake {
     WatchLost(String),
     /// Terminal input stopped, so nothing can reach the shell any more.
     ///
-    /// Fatal, and it is the one wake-up that is. In raw mode every way out is a
-    /// key event: the terminal does not turn Ctrl-C into a signal, and there is
-    /// no handler that would catch one. So a shell that kept drawing after this
-    /// would hold the alternate screen with no way to leave it, and the only
-    /// remaining exit is a kill, which runs neither the guard nor the panic hook
-    /// and hands back a terminal in raw mode. Leaving is the smaller failure.
+    /// Fatal, and it is the one wake-up that is. In raw mode every way out from
+    /// this keyboard is a key event, because the terminal does not turn Ctrl-C
+    /// into a signal. So a shell that kept drawing after this would hold the
+    /// alternate screen with nothing the reader in front of it could do about
+    /// it, and leaving is the smaller failure.
+    ///
+    /// **What changed with [`Signalled`](Wake::Signalled) is the consequence,
+    /// not the ruling.** This used to say the only remaining exit was a kill,
+    /// which ran neither the guard nor the panic hook and handed back a terminal
+    /// in raw mode. A kill is caught now and restores like any other exit, so the
+    /// cost of staying is no longer a wrecked terminal. It is still a pane that
+    /// cannot be closed from the pane, which is reason enough.
     InputLost,
+    /// Something outside this process asked it to stop.
+    ///
+    /// The quit key's arm, reached without a key. It carries nothing because
+    /// there is nothing left to decide: whichever signal it was, the answer is
+    /// to leave, and the terminal goes back the way it does on every other exit,
+    /// through the `Drop` on the way out. [`signal`] is where the reasoning
+    /// lives, above all why the handler must restore nothing itself.
+    Signalled,
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
@@ -142,6 +157,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // already in colours this terminal can show and the frame path never
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
+
+    // Built here rather than beside the two threads below, because one of its
+    // senders is armed before the first paint and the other two are armed after
+    // it. The channel itself is inert: it costs nothing, wakes nobody, and I1
+    // never sees it. What is armed late is the *watch*, and the comment where
+    // that happens is the one that explains why.
+    let (tx, rx) = mpsc::channel();
 
     let mut shell = Shell {
         session: Session::enter()?,
@@ -175,6 +197,23 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
     };
+
+    // **Immediately after the screen is taken, and before anything is drawn on
+    // it.** `Session::enter` installs the panic hook before it takes the first
+    // step, for exactly this reason: the window between taking a terminal and
+    // being able to give it back is the window a safety net has to already
+    // cover. A signal arriving before the loop starts is not lost, it waits in
+    // the channel and is handled by the first `recv`.
+    //
+    // Reported rather than fatal, and it is the same judgement `WatchLost` gets.
+    // A monitor that refused to open because it could not arm a safety net would
+    // be a worse answer than one that opens and says so on the frame below.
+    if let Err(e) = signal::forward(tx.clone()) {
+        shell.app.warn(format!(
+            "not catching signals, so a kill will not restore: {e}"
+        ));
+    }
+
     // **For a screen with rows on it, so a clean worktree spawns nothing.**
     // Starting a monitor on a tree nobody has touched is an ordinary way to
     // start one, and there is no grammar to compile for an empty state.
@@ -221,8 +260,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and
     // FSEvents both report reads and attribute touches, so the shell would wake
-    // itself up once for free at startup.
-    let (tx, rx) = mpsc::channel();
+    // itself up once for free at startup. The channel itself was built before
+    // the screen was taken, because the signal handler on it has the opposite
+    // requirement.
     spawn_watch(path.to_path_buf(), tx.clone());
     spawn_input(tx);
 
@@ -249,6 +289,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 Wake::InputLost => {
                     return Err("terminal input ended, so there was no way left to quit".into());
                 }
+                // The quit key's arm without the key, so `break` and not
+                // `return`: nothing failed, and a message printed after the
+                // terminal came back would be a message the sender did not ask
+                // for. Breaking drops `shell`, which drops `Session`, which is
+                // what puts the terminal back — the same three steps every other
+                // exit takes, which is the whole reason the handler in `signal`
+                // restores nothing itself.
+                Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
                     // **The regions the last paint actually drew.** A pointer is
                     // told what it is over by asking the same function `render`
