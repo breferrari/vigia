@@ -6,7 +6,22 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 authors.workspace = true
+keywords = ["git", "diff", "watch", "worktree"]
+categories = ["development-tools"]
+
+# Deliberately **not** excluded, unlike `vigia`. Every escape `SPEC.md` section 9
+# counts is out of *that* package: this one's `tests/support/mod.rs` is inside
+# its own directory, and `benches/engine.rs` reaches it by `#[path]` without
+# leaving. So the packaged copy is self-consistent and its tests are worth
+# shipping, which is the asymmetry rather than an oversight.
+#
+# The one thing they still need is `git` on `PATH`, because the fixtures are
+# built by shelling out to it (see the dev-dependencies note below). That is a
+# soft requirement on a machine that has already installed a git tool, not a
+# broken package.
 
 [dependencies]
 gix.workspace = true

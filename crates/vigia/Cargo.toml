@@ -6,11 +6,31 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
 authors.workspace = true
+keywords = ["git", "diff", "tui", "monitor", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+
+# `SPEC.md` section 9 counts thirteen escapes out of this package: twelve
+# `#[path]` reaches into `vigia-core/tests/support`, and `soak.rs` reading the
+# soak workflow out of `.github`. Neither destination is inside this directory,
+# so a packaged copy carries a test suite that cannot compile.
+#
+# Excluding the tests is section 9's own resolution, and the direction is the
+# point: it stops the *package* claiming a suite it cannot build, it does not
+# stop the repository testing itself. Every gate still runs in a checkout, which
+# is the only place they were ever meaningful, because all thirteen escapes
+# exist to reach fixtures a published crate has no business shipping.
+#
+# `crates/vigia/tests/package.rs` is what keeps this honest. A fourteenth escape
+# added somewhere this pattern does not cover fails there, rather than at
+# somebody's `cargo install`.
+exclude = ["tests/**"]
 
 [dependencies]
 ratatui.workspace = true
-vigia-core = { path = "../vigia-core", version = "0.0.0" }
+vigia-core = { path = "../vigia-core", version = "0.1.0" }
 
 # Here and not in `vigia-core`, because the memory readout is a drawn thing:
 # SPEC.md section 6 keeps the core free of anything the shell decides, and a

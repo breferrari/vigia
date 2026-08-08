@@ -3,11 +3,19 @@ resolver = "3"
 members = ["crates/vigia-core", "crates/vigia"]
 
 [workspace.package]
-version = "0.0.0"
+# Both crates move together, because both are published together and a registry
+# will not take `vigia` until `vigia-core` resolves on it (SPEC.md section 9).
+# Independent versions would buy nothing and cost a second tag format.
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/breferrari/vigia"
+homepage = "https://github.com/breferrari/vigia"
+# The root README, shared by both crates. A registry page with no readme reads
+# as abandoned, and `vigia-core` has nothing to say that this file does not say
+# better: it is the engine behind the thing the reader came to look at.
+readme = "README.md"
 authors = ["Brenno Ferrari"]
 
 [workspace.dependencies]
