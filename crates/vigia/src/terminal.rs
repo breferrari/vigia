@@ -50,7 +50,8 @@
 //! to this module: the handler restores nothing, it ends the loop, and the guard
 //! above then does what it already did. The number of ways to leave went up by
 //! one and the number of ways to restore did not, which is the property worth
-//! having and the reason the tests below did not have to grow a fourth layer.
+//! having: the three test layers below are unchanged, and what they gained is a
+//! section beside them rather than among them.
 //!
 //! What is still out of reach is `SIGKILL` and `TerminateProcess`, on the same
 //! footing on both platforms, because neither runs any code the process owns.
@@ -346,6 +347,14 @@ mod tests {
     //!    `Step::AlternateScreen` is wired to `LeaveAlternateScreen` rather than
     //!    to `EnterAlternateScreen`. Layers 1 and 2 would both pass with that
     //!    wire crossed.
+    //!
+    //! A fourth section follows them and is deliberately **not** a fourth layer.
+    //! The three above prove the restore *policy*, each from an angle the others
+    //! cannot see. What section 4 proves is that an externally delivered signal
+    //! reaches that policy at all: it needs a second process, and it asserts over
+    //! the real bytes a real guard wrote on its way out. Adding a way to *leave*
+    //! did not add a way to *restore*, which is why the three layers are
+    //! unchanged and why the new section sits beside them rather than among them.
 
     use std::sync::{Arc, Mutex};
 
@@ -847,7 +856,7 @@ mod tests {
         }
     }
 
-    // ---- 4. The signal, end to end ----------------------------------------
+    // ---- Beside the layers: the signal, end to end ------------------------
     //
     // The one thing here that needs two processes. A signal cannot be delivered
     // to the process that would have to observe it arriving, a console control
