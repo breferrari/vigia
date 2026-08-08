@@ -99,20 +99,26 @@ fn a_path_is_watched_however_it_is_spelled() {
     }
 }
 
-/// A non-UTF-8 argument is classified from the bytes the user actually typed.
+/// A path that is not valid Unicode is watched, not refused.
 ///
-/// The defect this exists against is `to_string_lossy`, which is what the
-/// refusal used before [#12](https://github.com/breferrari/vigia/issues/12):
-/// it replaces what it cannot decode with `U+FFFD`, so the classification would
-/// be made from a string that is not the argument. Here the *first byte* is
-/// already undecodable, which is the case where a lossy conversion and the raw
-/// bytes disagree about what the argument starts with.
+/// **This docblock used to name `to_string_lossy` as the defect it guards, and
+/// that was wrong.** Mutating `request_for` back to the lossy form the refusal
+/// used before [#12](https://github.com/breferrari/vigia/issues/12) leaves this
+/// test, and the whole file, green: lossy decoding substitutes `U+FFFD`, which
+/// is neither `-` nor `--version`, so both spellings classify every input
+/// identically. The mutation survived, and a test whose stated purpose a
+/// mutation cannot kill is a test claiming something it does not check.
+///
+/// What it does check is worth keeping, so the claim is narrowed to it: an
+/// argument this process cannot decode is still a **path**. The implementation
+/// that would fail is the tempting one, `arg.to_str().ok_or(...)`, refusing what
+/// it cannot read; that mutation is killed here. `vigia` opens a repository by
+/// path and never needs to interpret the bytes, so refusing them would turn a
+/// checkout named in another locale's encoding into an unusable directory.
 ///
 /// Constructed per platform because there is no portable way to spell an invalid
 /// argument: on Unix an `OsString` is bytes and any byte is allowed, and on
 /// Windows it is UTF-16 where an unpaired surrogate is the equivalent hole.
-/// Neither is exotic. A repository checked out under a name a different locale
-/// wrote reaches this path on the first argument.
 #[test]
 fn a_path_that_is_not_valid_unicode_is_still_a_path() {
     #[cfg(unix)]

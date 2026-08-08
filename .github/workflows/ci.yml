@@ -50,6 +50,35 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets
 
+      # `.github/workflows/release.yml` is generated from
+      # `[workspace.metadata.dist]` and must never be hand-edited, so the failure
+      # to worry about is editing the config and not regenerating. Nothing else
+      # would notice: the file only runs on a tag, which is the one event that
+      # cannot be rehearsed.
+      #
+      # `crates/vigia/tests/package.rs` checks the publish wiring specifically,
+      # in `cargo test`, where a developer sees it in a second. This is the
+      # thorough half and checks the whole file, which is the same two-tier
+      # arrangement the budget gates use.
+      #
+      # Proven to bite before it was trusted (2026-08-08): dropping
+      # `./publish-crates-io` from `publish-jobs` without regenerating leaves
+      # this red with a diff and `run 'dist init' to update the file`. Worth
+      # knowing what it does *not* catch, because it is the opposite of the
+      # obvious guess: the target list does not bake into `release.yml` at all
+      # (zero triples appear there; the build matrix is computed at release time
+      # from `dist plan`), so adding a target leaves this green and correctly so.
+      #
+      # The prebuilt binary rather than `cargo install cargo-dist`, which is a
+      # multi-minute source build of a large crate for one boolean.
+      - name: the generated release workflow is current
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
+            | sh
+          dist generate --check
+
   test:
     name: test and budgets (${{ matrix.os }})
     if: github.event.pull_request.draft != true
@@ -102,24 +131,31 @@ jobs:
       # CLAUDE.md calls a C toolchain in the graph a spec change, not an
       # implementation detail. This is that rule with teeth: it is the whole
       # reason musl-static and Windows are cheap.
-      # The list must cover every target `[workspace.metadata.dist]` ships, and
-      # `crates/vigia/tests/package.rs::the_targets_the_release_ships_are_the_targets_the_purity_gate_checks`
-      # is what makes that a gate rather than a habit. It found this list one
-      # target short on its first run: #12 added `x86_64-apple-darwin` to the
-      # release and the purity rule had never heard of it, so a shipped binary
-      # sat outside the check CLAUDE.md calls a spec-level rule.
+      # **The targets are derived, not re-typed.** They were re-typed until #12,
+      # and the two lists came apart the moment a fourth target shipped:
+      # `x86_64-apple-darwin` went into `[workspace.metadata.dist]` and this rule
+      # had never heard of it, so a binary users receive sat outside the check
+      # `CLAUDE.md` calls a spec-level rule rather than an implementation detail.
       #
-      # Checking more than the release ships is fine and this list may grow that
-      # way. Checking less is the failure.
+      # A gate over the duplication was written first and it did catch that, but
+      # it can only fire *after* somebody types the fifth target wrong. Reading
+      # the release config directly makes the drift impossible instead: cargo
+      # exposes `[workspace.metadata.dist]` verbatim under `.metadata.dist`, so
+      # there is exactly one list and this is it.
+      # `crates/vigia/tests/package.rs::the_purity_gate_derives_its_targets_from_the_release_config`
+      # holds the derivation in place, in both directions.
       - name: assert no cc, cmake or bindgen on any tier-1 target
         run: |
           set -euo pipefail
+          targets=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.metadata.dist.targets[]')
+          if [ -z "$targets" ]; then
+            echo "::error::no targets in [workspace.metadata.dist]; the release \
+          config moved and this gate is now checking nothing"
+            exit 1
+          fi
           status=0
-          for target in \
-            x86_64-unknown-linux-musl \
-            x86_64-pc-windows-msvc \
-            x86_64-apple-darwin \
-            aarch64-apple-darwin
+          for target in $targets
           do
             found=$(cargo tree --target "$target" -e normal,build \
               | grep -oiE '\bcc v[0-9.]+|\bcmake v[0-9.]+|\bbindgen v[0-9.]+' \

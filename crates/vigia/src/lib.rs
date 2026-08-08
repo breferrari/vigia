@@ -193,12 +193,19 @@ pub enum Request {
 /// as the surface grows, where a version string comes from the manifest and
 /// cannot drift.
 ///
-/// **Compared against the raw [`OsStr`], never a lossy conversion.** An argument
-/// is not required to be valid Unicode on any tier-1 target, and
-/// `to_string_lossy` would replace what it cannot decode with `U+FFFD`: a path
-/// containing an unpaired surrogate would then be classified from a string that
-/// is not the one the user typed, and every ordinary start would pay an
-/// allocation to reach the same answer `==` reaches without one.
+/// **Compared against the raw [`OsStr`], and the reason is cost rather than
+/// correctness.** The obvious claim to make here is that `to_string_lossy` (what
+/// the old refusal used) would misclassify a path that is not valid Unicode, and
+/// **that claim is false**: lossy decoding replaces what it cannot read with
+/// `U+FFFD`, which is not `-` and is not `--version`, so it reaches the same
+/// answer this does on every input. Mutation-tested rather than reasoned, and
+/// the mutation *survived* the whole suite, which is how the overclaim was
+/// caught.
+///
+/// What the raw comparison buys is that classifying an argument stops being
+/// proportional to its length. `to_string_lossy` validates the entire string to
+/// decide whether it can borrow, where `as_encoded_bytes().first()` reads one
+/// byte, and this runs before anything else in the process on the I7 path.
 pub fn request_for(arg: &OsStr) -> Request {
     if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
         return Request::Version;

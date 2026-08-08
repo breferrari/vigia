@@ -27,22 +27,39 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The two shapes a test uses to read outside this package.
+///
+/// **Assembled with `concat!` rather than written whole, so that this file does
+/// not match itself.** The needles are the only strings in the repository whose
+/// presence *means* "something escapes here", so a scanner that spells them
+/// literally is guaranteed to find one in its own source. That is not a
+/// harmless false positive: `package.rs` genuinely does escape, through
+/// [`repo_root`], so the scanner reported the right answer by the wrong
+/// mechanism, and the wrong mechanism is the one that survives. Rewriting
+/// [`repo_root`] to climb some other way would have silently stopped this file
+/// being detected while it went on escaping, and every gate below would have
+/// stayed green.
+///
+/// Verified rather than reasoned: before this split, `escapes(package.rs)` was
+/// true with zero `#[path]` attributes in the file.
+const PATH_ATTRIBUTE: &str = concat!("#[path = \"..", "/../");
+const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
+
 /// The repository root, two levels above this package.
+///
+/// Spelled `join("../..")` rather than `join("..").join("..")` so the climb
+/// appears in this file's source as [`CLIMBING_LITERAL`]. That makes
+/// `package.rs` detectable by the same rule as every other escaping test,
+/// rather than exempt from its own gate by an accident of spelling.
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
+        .join("../..")
         .canonicalize()
         .expect("the repository root is two levels above this package")
 }
 
 fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-}
-
-/// This package's own manifest.
-fn manifest() -> String {
-    read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
 }
 
 /// Every `.rs` file directly under this package's `tests/`, by file name.
@@ -71,38 +88,75 @@ fn test_files() -> Vec<(String, String)> {
     found
 }
 
-/// A `#[path]` attribute whose target climbs out of this package.
-fn escapes_by_path(source: &str) -> bool {
-    source.contains("#[path = \"../../")
-}
-
-/// A `CARGO_MANIFEST_DIR` join that climbs out of this package.
+/// Does this test's source read anything outside the package?
 ///
-/// Matched on the *joined literal* rather than on the `env!` alone, because
-/// `soak.rs` uses `CARGO_MANIFEST_DIR` twice and only one of the two leaves:
-/// `join("tests/soak.rs")` stays inside, and `join(WORKFLOW)` does not. A check
-/// that counted every mention would call the first one an escape and be wrong in
-/// the direction that looks thorough.
-fn escapes_by_manifest_dir(source: &str) -> bool {
-    source.contains("CARGO_MANIFEST_DIR") && source.contains("\"../../")
+/// Two shapes, and both are needed. A `#[path]` attribute climbing out is how
+/// twelve files reach `vigia-core/tests/support/mod.rs`. A `CARGO_MANIFEST_DIR`
+/// join climbing out is how `soak.rs` reads the soak workflow and how this file
+/// reads `SPEC.md`.
+///
+/// The `CARGO_MANIFEST_DIR` half is matched on the *climbing literal* rather
+/// than on the `env!` alone, because `soak.rs` uses `CARGO_MANIFEST_DIR` twice
+/// and only one of the two leaves: `join("tests/soak.rs")` stays inside, and the
+/// workflow path does not. A check that counted every mention would call the
+/// first one an escape and be wrong in the direction that looks thorough.
+fn escapes(source: &str) -> bool {
+    source.contains(PATH_ATTRIBUTE)
+        || (source.contains("CARGO_MANIFEST_DIR") && source.contains(CLIMBING_LITERAL))
 }
 
-/// The `exclude` patterns in this package's manifest.
-fn exclude_patterns() -> Vec<String> {
-    let manifest = manifest();
-    let start = manifest
-        .find("\nexclude = [")
-        .expect("crates/vigia/Cargo.toml declares an `exclude` list");
-    let open = manifest[start..].find('[').expect("the list opens") + start;
-    let close = manifest[open..]
-        .find(']')
-        .expect("the `exclude` list is closed on one line or across several")
-        + open;
-    manifest[open + 1..close]
+/// Every test file that reads outside the package, by name, sorted.
+///
+/// One function rather than two predicates and a filter written at each call
+/// site: three tests need exactly this list, and a fourth escape shape should
+/// be teachable in one place.
+fn escaping_tests() -> Vec<String> {
+    test_files()
+        .into_iter()
+        .filter(|(_, source)| escapes(source))
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// The entries of a TOML array declared as `key = [ … ]`.
+///
+/// Handles the one-line and the multi-line spellings identically, because it
+/// splits on commas rather than on lines. That matters: `exclude` is written on
+/// one line today and `publish-jobs` could be rewrapped by anyone, and a parser
+/// that read one entry per line would return nothing for the other shape and be
+/// wrong silently.
+fn toml_array(source: &str, key: &str) -> Vec<String> {
+    let start = source
+        .find(&format!("\n{key} = ["))
+        .unwrap_or_else(|| panic!("expected a `{key} = [` array"));
+    let open = source[start..].find('[').expect("the array opens") + start;
+    let close = source[open..].find(']').expect("the array is closed") + open;
+    source[open + 1..close]
         .split(',')
         .map(|entry| entry.trim().trim_matches('"').to_owned())
         .filter(|entry| !entry.is_empty())
         .collect()
+}
+
+/// YAML with its comments removed, so a `contains` check cannot be satisfied by
+/// prose about the thing instead of the thing.
+///
+/// These workflows are heavily commented by house style, and several comments
+/// quote the very command the gate below looks for. Without this, commenting out
+/// a `run:` line and leaving its explanation above it would keep the gate green.
+fn without_comments(yaml: &str) -> String {
+    yaml.lines()
+        .map(|line| line.split_once('#').map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The `exclude` patterns in this package's manifest.
+fn exclude_patterns() -> Vec<String> {
+    toml_array(
+        &read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")),
+        "exclude",
+    )
 }
 
 /// Does `pattern` cover `tests/<name>`?
@@ -146,29 +200,37 @@ fn repo_file(relative: &str) -> String {
 #[test]
 fn every_test_that_reads_outside_the_package_is_excluded_from_it() {
     let patterns = exclude_patterns();
-    let mut escaping = Vec::new();
+    let escaping = escaping_tests();
 
-    for (name, source) in test_files() {
-        if escapes_by_path(&source) || escapes_by_manifest_dir(&source) {
-            escaping.push(name.clone());
-            assert!(
-                patterns.iter().any(|p| covers(p, &name)),
-                "tests/{name} reads outside the package but no `exclude` pattern \
-                 covers it, so a published .crate would carry a test that cannot \
-                 compile. Patterns are {patterns:?}"
-            );
-        }
+    for name in &escaping {
+        assert!(
+            patterns.iter().any(|p| covers(p, name)),
+            "tests/{name} reads outside the package but no `exclude` pattern \
+             covers it, so a published .crate would carry a test that cannot \
+             compile. Patterns are {patterns:?}"
+        );
     }
 
     // The scan itself has to be able to fail. If a refactor moved the support
     // module inside this package and every escape vanished, the loop above would
     // pass while asserting nothing, and this file would keep looking like a gate.
     assert!(
-        escaping.len() >= 12,
-        "expected at least the twelve `#[path]` consumers SPEC.md §9 counts, \
-         found {}: {escaping:?}. If that is genuinely correct, §9 needs the \
-         edit rather than this line",
+        escaping.len() >= 13,
+        "expected at least the thirteen files SPEC.md §9 counts, found {}: \
+         {escaping:?}. If that is genuinely correct, §9 needs the edit rather \
+         than this line",
         escaping.len()
+    );
+
+    // And this file must be among them, which is the non-vacuity check with the
+    // sharpest teeth: `package.rs` reads `SPEC.md` and three workflows, so if the
+    // scanner stops seeing it, the scanner is broken rather than the repository
+    // clean. It was detected for the wrong reason once already; see
+    // `PATH_ATTRIBUTE`.
+    assert!(
+        escaping.iter().any(|name| name == "package.rs"),
+        "the scanner no longer detects its own escape, so it has stopped \
+         working: {escaping:?}"
     );
 }
 
@@ -192,15 +254,13 @@ fn the_spec_names_every_test_that_escapes_the_package() {
         .find(|line| line.contains("A published `.crate` does not carry"))
         .expect("SPEC.md §9 carries the escape bullet");
 
-    for (name, source) in test_files() {
-        if escapes_by_path(&source) || escapes_by_manifest_dir(&source) {
-            assert!(
-                bullet.contains(&format!("`{name}`")),
-                "tests/{name} escapes the package and SPEC.md §9's escape bullet \
-                 does not name it. That bullet was wrong by a factor of four for \
-                 two phases for exactly this reason"
-            );
-        }
+    for name in escaping_tests() {
+        assert!(
+            bullet.contains(&format!("`{name}`")),
+            "tests/{name} escapes the package and SPEC.md §9's escape bullet \
+             does not name it. That bullet was wrong by a factor of four for \
+             two phases for exactly this reason"
+        );
     }
 }
 
@@ -213,6 +273,15 @@ fn the_spec_names_every_test_that_escapes_the_package() {
 #[test]
 fn nothing_excluded_has_since_stopped_existing() {
     let names: Vec<String> = test_files().into_iter().map(|(name, _)| name).collect();
+
+    // Both arms of `covers` are exercised here rather than left to whatever
+    // `exclude` happens to hold. The literal arm is unreachable from the current
+    // manifest, and an unreachable branch in a gate's own helper is the thing
+    // that breaks the first time someone narrows the pattern.
+    assert!(covers("tests/**", "soak.rs"));
+    assert!(covers("tests/soak.rs", "soak.rs"));
+    assert!(!covers("tests/soak.rs", "cli.rs"));
+    assert!(!covers("benches/**", "soak.rs"));
 
     for pattern in exclude_patterns() {
         assert!(
@@ -262,6 +331,19 @@ fn the_profile_that_ships_is_the_profile_the_budgets_measure() {
         "[profile.dist] must inherit `release` and add nothing, or the budgets \
          stop describing the shipped binary"
     );
+
+    // The scan above ends the block at the next `\n[`, so a sub-table like
+    // `[profile.dist.package."gix"]` would sit *outside* what it read and tune
+    // the release build without this assertion ever seeing it. Cargo supports
+    // per-package profile overrides, so that is a real edit somebody could make
+    // in good faith, and the block scan cannot be widened to catch it without
+    // becoming a TOML parser.
+    assert!(
+        !root.contains("\n[profile.dist."),
+        "a [profile.dist.*] sub-table overrides the shipped profile where the \
+         block scan above cannot see it; the budgets would stop describing the \
+         binary and this gate would stay green"
+    );
 }
 
 /// The release pipeline actually sends both crates to the registry.
@@ -282,14 +364,18 @@ fn the_release_pipeline_publishes_to_the_registry() {
     const JOB: &str = "./publish-crates-io";
     const WORKFLOW: &str = ".github/workflows/publish-crates-io.yml";
 
-    let root = repo_file("Cargo.toml");
+    let jobs = toml_array(&repo_file("Cargo.toml"), "publish-jobs");
     assert!(
-        root.contains(&format!("\"{JOB}\"")),
+        jobs.iter().any(|entry| entry == JOB),
         "[workspace.metadata.dist] publish-jobs must name {JOB}, or nothing \
-         publishes to crates.io on a tag"
+         publishes to crates.io on a tag. It holds {jobs:?}"
     );
 
-    let job = repo_file(WORKFLOW);
+    // Comment-stripped, because this repository comments heavily and the
+    // paragraph above the `run:` line in that workflow quotes the very command
+    // asserted here. Against the raw text, commenting out the publish and
+    // leaving its explanation in place keeps this gate green.
+    let job = without_comments(&repo_file(WORKFLOW));
     assert!(
         job.contains("workflow_call"),
         "{WORKFLOW} must be a reusable workflow; dist calls it with `uses:`"
@@ -303,8 +389,15 @@ fn the_release_pipeline_publishes_to_the_registry() {
 
     // dist generates release.yml from the config above, so this asserts the
     // generated file is current rather than that the config is right. A stale
-    // release.yml is the failure mode of editing the config and not regenerating.
-    let release = repo_file(".github/workflows/release.yml");
+    // release.yml is the failure mode of editing the config and not
+    // regenerating, and it is a real one **for the publish wiring specifically**:
+    // measured 2026-08-08, dropping `./publish-crates-io` from the config and
+    // not regenerating leaves `dist generate --check` red and both assertions
+    // below red too, while the *target* list bakes into release.yml not at all
+    // (zero triples appear in it; the build matrix is computed at release time
+    // from `dist plan`). So this checks the half that can actually go stale, and
+    // `ci.yml`'s `dist generate --check` covers the whole file.
+    let release = without_comments(&repo_file(".github/workflows/release.yml"));
     assert!(
         release.contains("uses: ./.github/workflows/publish-crates-io.yml"),
         "release.yml does not call the registry job; run `dist generate`"
@@ -317,56 +410,52 @@ fn the_release_pipeline_publishes_to_the_registry() {
     );
 }
 
-/// Every target the release ships is a target the no-C-toolchain gate checks.
+/// The no-C-toolchain gate reads its target list from the release config rather
+/// than from a second hand-typed copy.
 ///
-/// `CLAUDE.md` calls a C build dependency in the graph a spec change rather than
-/// an implementation detail, and `ci.yml`'s `pure-rust` job is that rule with
-/// teeth. But it holds a hand-written target list and `[workspace.metadata.dist]`
-/// holds another, so the rule only covers what someone remembered to type twice.
-/// Shipping a fourth target was exactly the moment those two lists came apart:
-/// `x86_64-apple-darwin` was added to the release and the purity gate had never
-/// heard of it.
+/// **There used to be a test here asserting the two lists agreed, and deleting
+/// it is the fix rather than a retreat from it.** `CLAUDE.md` calls a C build
+/// dependency in the graph a spec change rather than an implementation detail,
+/// and `ci.yml`'s `pure-rust` job is that rule with teeth; it held a hand-typed
+/// target list while `[workspace.metadata.dist]` held another. Shipping a fourth
+/// target was the moment they came apart, and the gate caught it:
+/// `x86_64-apple-darwin` was in the release and the purity job had never heard
+/// of it.
 ///
-/// One direction, deliberately. The purity gate may check more than the release
-/// ships (a target considered and not yet shipped is worth keeping honest); what
-/// it may never do is check less.
+/// A gate over a duplication fires *after* somebody types the fifth target
+/// wrong. Deriving the list makes the drift impossible instead, so what this
+/// asserts now is only that the derivation is still there: `cargo metadata`
+/// exposes `[workspace.metadata.dist]` verbatim, and the job reads it.
 #[test]
-fn the_targets_the_release_ships_are_the_targets_the_purity_gate_checks() {
-    let root = repo_file("Cargo.toml");
-    let start = root
-        .find("targets = [")
-        .expect("[workspace.metadata.dist] declares its targets");
-    let end = root[start..].find(']').expect("the target list closes") + start;
-    let shipped: Vec<String> = root[start..end]
-        .lines()
-        .skip(1)
-        .map(|line| {
-            line.trim()
-                .trim_end_matches(',')
-                .trim_matches('"')
-                .to_owned()
-        })
-        .filter(|line| !line.is_empty())
-        .collect();
+fn the_purity_gate_derives_its_targets_from_the_release_config() {
+    let ci = repo_file(".github/workflows/ci.yml");
+    // Bounded at both ends. Taking everything *after* the marker was the first
+    // spelling and it reached into the `musl` job below, which names its target
+    // literally and for good reason, so the non-vacuity check below fired on a
+    // different job's line. `exit $status` is this script's last line.
+    let job = ci
+        .split_once("assert no cc, cmake or bindgen")
+        .map(|(_, rest)| rest)
+        .expect("ci.yml carries the no-C-toolchain assertion");
+    let job = job
+        .split_once("exit $status")
+        .map(|(script, _)| script)
+        .expect("the no-C-toolchain script ends by exiting its status");
 
     assert!(
-        shipped.len() >= 4,
-        "parsed only {shipped:?} from the dist target list, which means the \
-         parse is wrong rather than the config"
+        job.contains("metadata.dist.targets"),
+        "the no-C-toolchain job must derive its targets from \
+         [workspace.metadata.dist] via `cargo metadata`, not re-type them. A \
+         hand-typed second copy is how `x86_64-apple-darwin` shipped unchecked"
     );
 
-    let ci = repo_file(".github/workflows/ci.yml");
-    let checked = ci
-        .split("assert no cc, cmake or bindgen")
-        .nth(1)
-        .expect("ci.yml carries the no-C-toolchain assertion");
-
-    for target in shipped {
+    // Non-vacuity: if the job re-acquired a literal list, the derivation above
+    // could still be present and unused. No triple should be spelled out.
+    for target in toml_array(&repo_file("Cargo.toml"), "targets") {
         assert!(
-            checked.contains(&target),
-            "the release ships {target} and the no-C-toolchain gate never checks \
-             it, so CLAUDE.md's pure-Rust rule does not cover a binary users \
-             receive"
+            !job.contains(&target),
+            "{target} is spelled literally in the purity job, which means the \
+             hand-typed list is back alongside the derivation"
         );
     }
 }

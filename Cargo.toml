@@ -11,6 +11,13 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/breferrari/vigia"
+# The same URL as `repository`, which is a duplicate and is kept deliberately.
+# Measured both ways 2026-08-08: without it the generated Homebrew formula is
+# byte-identical, because dist falls back to `repository`, **but `dist plan`
+# emits `WARN The Homebrew publish job is enabled but no homepage was
+# specified`** on every run. A standing warning on the one workflow whose log
+# nobody can rehearse is worse than a field whose duplication is written down,
+# because the warning is what a future reader stops to investigate.
 homepage = "https://github.com/breferrari/vigia"
 # The root README, shared by both crates. A registry page with no readme reads
 # as abandoned, and `vigia-core` has nothing to say that this file does not say
