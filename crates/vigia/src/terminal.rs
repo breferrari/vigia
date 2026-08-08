@@ -1015,7 +1015,7 @@ mod tests {
         // anywhere and this call is a fallback for the genuinely console-less case
         // a probe had to simulate. And the asymmetry is real: allocating can only
         // turn a not-yet-memoised `false` into `true`, which no test minds, while
-        // **freeing** can turn it into `false` for all forty tests in this binary,
+        // **freeing** can turn it into `false` for all forty-eight tests in this binary,
         // depending on which ran first.
         //
         // So the leak is not a concession. A console this process allocated dies

@@ -371,7 +371,9 @@ pub(crate) fn forward(_tx: Sender<Wake>) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+// Gated the way its items are: every test below drives `claim`, `answer` or a
+// platform body, and none of those exist on a target with neither mechanism.
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     //! The half of this module a test can reach.
     //!
@@ -635,11 +637,19 @@ mod tests {
         #[test]
         fn the_handler_maps_hand_on_to_false() {
             // **The real handler, which round 2 left with no caller at all.** Moving
-            // its decisions into `reply` made five exits testable and made the
-            // mapping from a `Reply` back to a `BOOL` untested: turning
-            // `Reply::HandOn` into 1 kept the entire suite green, and an unclaimed
-            // `CTRL_SHUTDOWN_EVENT` answered TRUE tells Windows a shutdown was
-            // handled by a process that got no wake.
+            // its decisions into `reply` made five exits testable and left the
+            // mapping from a `Reply` back to a `BOOL` with nothing calling it. An
+            // unclaimed `CTRL_SHUTDOWN_EVENT` answered TRUE tells Windows a
+            // shutdown was handled by a process that got no wake.
+            //
+            // **What this adds is measured rather than assumed, and it is less than
+            // it first looked.** Turning `Reply::HandOn` into 1 fails two tests, not
+            // none: this one, and the wedged-child gate, which reaches `HandOn` on
+            // its second delivery. The audit that asked for this test claimed the
+            // whole suite stayed green, and that was wrong. What this genuinely buys
+            // is the same catch in a millisecond instead of the wedged gate's thirty
+            // seconds, and on a runner where that gate skips for want of a console
+            // it is the only thing left holding the mapping.
             //
             // Kind 5 is `CTRL_LOGOFF_EVENT`, which is safe to hand the real handler
             // because it returns on the first line: it never reads `SHELL`, never
@@ -655,9 +665,11 @@ mod tests {
                 "5 is claimed now, so handing it to the real handler would park                  forever; pick a kind outside `CAUGHT` or drop this test"
             );
 
-            // SAFETY: `on_ctrl` performs no unsafe operation, and the assert above
-            // is what establishes that for this kind it returns before touching
-            // `SHELL`, `ASKED`, or the park.
+            // SAFETY: `on_ctrl` performs no unsafe operation. It does read `SHELL`,
+            // because `reply`'s arguments evaluate before the call, and that read is
+            // a non-blocking `OnceLock::get` whose result this kind never looks at.
+            // What the assert above establishes is the part that matters: for a kind
+            // outside `CAUGHT`, `reply` returns before it touches `ASKED` or parks.
             assert_eq!(
                 unsafe { on_ctrl(5) },
                 0,
@@ -688,16 +700,18 @@ mod tests {
         #[test]
         fn a_first_ask_is_answered_and_lets_its_thread_go() {
             let (tx, rx) = mpsc::channel();
-            let asked = AtomicBool::new(false);
 
+            // Parking on either would leave one OS thread per delivery for the
+            // life of a process meant to stay open for days. A fresh latch per
+            // kind, because one ask is all each gets.
             for kind in [C, BREAK] {
                 let asked = AtomicBool::new(false);
                 assert_eq!(reply(kind, Some(&tx), &asked), Reply::Handled);
+                assert!(
+                    matches!(rx.try_recv(), Ok(Wake::Signalled)),
+                    "control event {kind} was answered without delivering a wake"
+                );
             }
-            // Parking on these would leave one OS thread per delivery for the life
-            // of a process meant to stay open for days.
-            assert_eq!(reply(C, Some(&tx), &asked), Reply::Handled);
-            assert!(matches!(rx.try_recv(), Ok(Wake::Signalled)));
         }
 
         #[test]
