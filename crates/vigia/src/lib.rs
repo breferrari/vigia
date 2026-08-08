@@ -93,6 +93,7 @@ pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, rows_in, rows_of,
 };
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
@@ -146,6 +147,70 @@ enum Wake {
     /// through the `Drop` on the way out. [`signal`] is where the reasoning
     /// lives, above all why the handler must restore nothing itself.
     Signalled,
+}
+
+/// The version this binary reports, which is the package's.
+///
+/// Read from the manifest rather than written down, so the string a user quotes
+/// in a report cannot drift from the tag the release was cut at. `SPEC.md` §9
+/// makes the tag the one irreversible event in the release, and a version
+/// constant maintained by hand is the obvious way for the binary to disagree
+/// with it.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// What `vigia`'s single argument is asking for.
+///
+/// The CLI is one optional positional path and one flag (`SPEC.md` §11.1), so
+/// this is the whole surface. It lives here rather than in `main.rs` because §7
+/// makes the test suite the proof and a test cannot import a `main.rs`, which is
+/// the split that file's own module docblock already describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Request {
+    /// Watch the argument as a path.
+    Watch,
+    /// Print the version and exit successfully.
+    Version,
+    /// An argument beginning with `-` that is not a version query.
+    ///
+    /// Refused with one line naming the surface rather than being taken as a
+    /// path, so `vigia --colour=never` is told what the options are instead of
+    /// being told `--colour=never` is not a repository.
+    NoSuchOption,
+}
+
+/// Classify the one argument `vigia` takes.
+///
+/// **B6 forbids flags that *configure*, and a version query is not one**, which
+/// is the amendment `SPEC.md` §11 records: this prints a line and exits before a
+/// terminal is taken, so there is no frame it can change and no state it can
+/// leave. Both conventional spellings are accepted, because a user who tries one
+/// tries the other, and refusing exactly one of them is a worse surface than
+/// refusing both.
+///
+/// Everything else beginning with `-` is still
+/// [`NoSuchOption`](Request::NoSuchOption). That includes `--help`, which §11.1
+/// leaves open on purpose: help text describes a surface and has to be kept true
+/// as the surface grows, where a version string comes from the manifest and
+/// cannot drift.
+///
+/// **Compared against the raw [`OsStr`], never a lossy conversion.** An argument
+/// is not required to be valid Unicode on any tier-1 target, and
+/// `to_string_lossy` would replace what it cannot decode with `U+FFFD`: a path
+/// containing an unpaired surrogate would then be classified from a string that
+/// is not the one the user typed, and every ordinary start would pay an
+/// allocation to reach the same answer `==` reaches without one.
+pub fn request_for(arg: &OsStr) -> Request {
+    if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
+        return Request::Version;
+    }
+    // The first byte, rather than a decoded first character. `-` is ASCII and
+    // both encodings behind `OsStr` are self-synchronising there, so a leading
+    // `b'-'` cannot be the tail of some other character however the rest of the
+    // argument is spelled.
+    match arg.as_encoded_bytes().first() {
+        Some(b'-') => Request::NoSuchOption,
+        _ => Request::Watch,
+    }
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
