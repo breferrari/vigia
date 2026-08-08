@@ -25,14 +25,18 @@ fn request_all(args: &[&str]) -> Request {
     request_for(&owned)
 }
 
-/// Run the real binary with one argument and return (status code, stdout, stderr).
+/// Run the real binary with these arguments and return (status, stdout, stderr).
 ///
 /// `CARGO_BIN_EXE_<name>` is set by cargo for integration tests of a package
 /// that declares a binary, so the built executable is on disk at a known path
 /// and needs no building here.
-fn run_binary(arg: &str) -> (Option<i32>, String, String) {
+///
+/// Takes a slice rather than one argument, because the arity refusal is one of
+/// the three arms and a one-argument helper cannot reach it. That is how it
+/// stayed unexercised when the classifier for it was added and gated.
+fn run_binary(args: &[&str]) -> (Option<i32>, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_vigia"))
-        .arg(arg)
+        .args(args)
         .output()
         .expect("the built binary runs");
     (
@@ -266,7 +270,7 @@ fn the_reported_version_is_never_the_placeholder() {
 #[test]
 fn the_binary_prints_its_version_and_exits_zero() {
     for spelling in ["--version", "-V"] {
-        let (code, stdout, stderr) = run_binary(spelling);
+        let (code, stdout, stderr) = run_binary(&[spelling]);
         assert_eq!(code, Some(0), "{spelling} should exit 0, stderr: {stderr}");
         assert_eq!(stdout.trim(), format!("vigia {VERSION}"));
         assert!(
@@ -290,15 +294,71 @@ fn the_binary_prints_its_version_and_exits_zero() {
 /// argument shape over.
 #[test]
 fn the_binary_refuses_an_unknown_option_and_exits_non_zero() {
-    let (code, stdout, stderr) = run_binary("--colour=never");
+    let (code, stdout, stderr) = run_binary(&["--colour=never"]);
     assert_eq!(code, Some(1), "an unknown option should exit 1");
     assert!(
         stdout.is_empty(),
         "the refusal reached stdout ({stdout:?}), which is where a version \
          query answers"
     );
+    // The property, not the sentence: it must name the option that does exist
+    // and say that a path is what it takes. Pinning the exact wording made this
+    // go red when `-V` was added to the usage line, which is a documentation
+    // improvement rather than a regression, and a gate that fires on those
+    // teaches people to edit the gate instead of reading it.
     assert!(
-        stderr.contains("--version is the only option"),
+        stderr.contains("--version") && stderr.contains("path"),
         "the refusal should name the surface, got {stderr:?}"
     );
+}
+
+/// The binary refuses a second argument, on stderr, non-zero, without drawing.
+///
+/// **The third arm, and it was the one with no end-to-end gate.** Round 1 added
+/// `Request::TooManyArguments` and tested the classifier; nothing ran the actual
+/// binary with two arguments, because the helper above took one. So the arm that
+/// decides the exit code and the stream for this case was the only one of three
+/// that no test reached, in a file written to cover the whole surface.
+///
+/// The empty stdout matters most here. This is the arm reached by
+/// `vigia . --colour=never`, which before the refusal existed *started the
+/// program*: if it regressed, the tell would be an alternate-screen escape
+/// sequence on stdout rather than a wrong exit code.
+#[test]
+fn the_binary_refuses_a_second_argument_and_exits_non_zero() {
+    let (code, stdout, stderr) = run_binary(&[".", "--colour=never"]);
+    assert_eq!(code, Some(1), "two arguments should exit 1");
+    assert!(
+        stdout.is_empty(),
+        "the refusal reached stdout ({stdout:?}), which means the program got \
+         far enough to draw something"
+    );
+    assert!(
+        stderr.contains("got 2 arguments"),
+        "the refusal should say how many it got, so the reader can see that the \
+         count is the problem: {stderr:?}"
+    );
+}
+
+/// The usage line names every spelling the classifier accepts.
+///
+/// A refusal describing a smaller surface than the tool has teaches the reader
+/// something false at the moment they are already stuck. `-V` was accepted and
+/// unmentioned, which is the drift this catches: the two live in different
+/// files, `USAGE` in `main.rs` and the accepted set in `lib.rs`.
+#[test]
+fn the_refusal_names_every_spelling_the_classifier_accepts() {
+    let (_, _, usage) = run_binary(&["--frobnicate"]);
+
+    for spelling in ["--version", "-V"] {
+        assert_eq!(
+            request(spelling),
+            Request::Version,
+            "{spelling} is accepted, so the usage line must mention it"
+        );
+        assert!(
+            usage.contains(spelling),
+            "the refusal accepts {spelling} and does not mention it: {usage:?}"
+        );
+    }
 }

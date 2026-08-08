@@ -158,7 +158,7 @@ enum Wake {
 /// with it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// What `vigia`'s single argument is asking for.
+/// What `vigia`'s argument list is asking for.
 ///
 /// The CLI is one optional positional path and one flag (`SPEC.md` §11.1), so
 /// this is the whole surface. It lives here rather than in `main.rs` because §7
@@ -190,7 +190,10 @@ pub enum Request {
     TooManyArguments,
 }
 
-/// Classify the arguments `vigia` was given, which is at most one.
+/// Classify the arguments `vigia` was given.
+///
+/// A surface of at most one, so anything longer is [`TooManyArguments`](Request::TooManyArguments)
+/// rather than a list to interpret.
 ///
 /// Takes the whole list rather than one argument, because **arity is part of the
 /// surface and nothing was checking it**. The classifier used to see only

@@ -90,6 +90,10 @@ announcement does not, and the crate name is still unclaimed.
 - [ ] An option that does not exist: `vigia --colour=never`
       prints the one-line refusal and exits non-zero, rather than reporting that
       `--colour=never` is not a repository.
+- [ ] A second argument: `vigia . --colour=never` says how many it got and
+      exits non-zero, rather than watching `.` and dropping the flag. Both
+      refusals go to stderr with nothing on stdout, so a script reading
+      `vigia --version` is never handed an error message.
 
 Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are
 outside I8 on both platforms, because neither runs any code the process owns, and

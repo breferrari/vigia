@@ -4,7 +4,7 @@
 
 *Portuguese: a watchman, the one who keeps watch.*
 
-`🚧 Early, and honest about it: every claim below is one a test holds.`
+`🚧 Early. v0.1.0 is the first release, and until its tag lands the install lines below are what it will ship, not what is live yet.`
 
 </div>
 

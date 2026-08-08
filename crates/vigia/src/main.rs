@@ -70,5 +70,10 @@ fn main() -> ExitCode {
 ///
 /// Shared so the two can never drift into describing different tools, which is
 /// the failure a reader meets at exactly the moment they are already confused.
-const USAGE: &str = "It takes one optional path, and --version is the only \
-                     option. `vigia .` watches this tree.";
+/// Every accepted spelling is named, `-V` included, because a refusal that
+/// describes a smaller surface than the tool has teaches the reader something
+/// false at the moment they are already stuck.
+/// `tests/cli.rs::the_refusal_names_every_spelling_the_classifier_accepts`
+/// keeps this in step with the classifier, which lives in another file.
+const USAGE: &str = "It takes one optional path, and --version (or -V) is the \
+                     only option. `vigia .` watches this tree.";

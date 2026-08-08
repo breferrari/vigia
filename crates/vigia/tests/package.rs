@@ -175,6 +175,44 @@ fn toml_array(source: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
+/// Did `cargo package` fail because this machine cannot reach the registry,
+/// rather than because the manifest is broken?
+///
+/// **The distinction decides whether the gate below skips or fires**, and the
+/// first attempt at it was wrong in the dangerous direction *and* the annoying
+/// one at once. It listed five substrings written from memory, none of which
+/// cargo 1.94 actually emits for the common offline shape, so an offline
+/// developer got a hard red from a gate that had nothing to say.
+///
+/// The strings here are **captured from real runs** rather than recalled, which
+/// is the whole reason [`the_unreachable_registry_is_told_apart_from_a_broken_manifest`]
+/// exists beside this: a list of magic strings nobody has ever matched against
+/// real output is prose wearing a `const`. Two shapes were observed on
+/// 2026-08-08 with cargo 1.94.0:
+///
+/// - Cold `--offline`: `no matching package named 'notify' found`, followed by
+///   `you're using offline mode (--offline)`. Note that the first line alone is
+///   indistinguishable from a genuinely missing dependency, which is why the
+///   marker is the *offline* sentence rather than the failure.
+/// - A broken manifest: `readme 'READMEE.md' does not appear to exist`, which
+///   matches nothing here and so correctly fires the gate.
+///
+/// Case-insensitive because cargo capitalises some of these mid-sentence
+/// (`Could not connect to server`) and not others.
+fn registry_unreachable(stderr: &str) -> bool {
+    const MARKERS: [&str; 7] = [
+        "offline mode",
+        "failed to fetch",
+        "failed to download",
+        "network failure",
+        "spurious network error",
+        "could not connect",
+        "could not resolve",
+    ];
+    let lowered = stderr.to_lowercase();
+    MARKERS.iter().any(|marker| lowered.contains(marker))
+}
+
 /// Text with its `#` comments removed, so a `contains` check cannot be
 /// satisfied by prose *about* the thing instead of the thing.
 ///
@@ -287,6 +325,52 @@ fn the_spec_names_every_test_that_escapes_the_package() {
     }
 }
 
+/// The skip condition is checked against stderr cargo really produced.
+///
+/// A gate that skips has to be right about *when*, and both directions cost
+/// something real: skipping on a broken manifest hides a release defect, and
+/// firing on an offline machine breaks development for a reason the developer
+/// cannot act on. The condition was written from memory once and was wrong both
+/// ways, so the fixtures below are pasted from actual `cargo package --list`
+/// runs on 2026-08-08 with cargo 1.94.0 rather than composed.
+#[test]
+fn the_unreachable_registry_is_told_apart_from_a_broken_manifest() {
+    // Captured: `CARGO_HOME=<empty> CARGO_NET_OFFLINE=true cargo package --list`
+    let cold_offline = "error: no matching package named `notify` found\n\
+         location searched: crates.io index\n\
+         required by package `vigia-core v0.1.0 (…/crates/vigia-core)`\n\
+         As a reminder, you're using offline mode (--offline) which can \
+         sometimes cause surprising resolution failures, if this error is too \
+         confusing you may wish to retry without `--offline`.";
+    assert!(
+        registry_unreachable(cold_offline),
+        "the offline shape must skip, or an offline developer gets a red they \
+         cannot act on"
+    );
+
+    // Captured: the same command with `readme = "READMEE.md"` in the manifest.
+    let broken_manifest = "error: readme `READMEE.md` does not appear to exist (relative to \
+         `…/crates/vigia`).\nPlease update the readme setting in the manifest \
+         at `…/crates/vigia/Cargo.toml`.";
+    assert!(
+        !registry_unreachable(broken_manifest),
+        "a broken manifest must fire the gate; skipping here is exactly the \
+         defect that let a one-character typo turn the package gate green"
+    );
+
+    // The capitalised forms, since cargo does not capitalise consistently and
+    // the match is case-insensitive for that reason rather than by habit.
+    assert!(registry_unreachable("Could not connect to server"));
+    assert!(registry_unreachable(
+        "Caused by: [5] Could not resolve proxy name"
+    ));
+
+    // And an unrelated failure is not swallowed.
+    assert!(!registry_unreachable(
+        "error: failed to parse manifest at `Cargo.toml`"
+    ));
+}
+
 /// The internal dependency's pinned version is the workspace version.
 ///
 /// **The one duplication in this manifest that cargo cannot remove.** A path
@@ -307,7 +391,22 @@ fn the_internal_dependency_tracks_the_workspace_version() {
     let root = repo_file("Cargo.toml");
     let clean = without_comments(&root);
 
-    let workspace_version = clean
+    // **Scoped to the `[workspace.package]` block, not the first `version = `
+    // in the file.** The unscoped form was demonstrated green against a stale
+    // pin: put any table declaring a `version` above `[workspace.package]`, and
+    // this read *that* one, compared it against a `vigia-core` pin of the same
+    // number, and reported agreement while the workspace sat at a different
+    // version. A vacuity guard on the shape of the string cannot see that,
+    // because both strings are perfectly well-formed versions.
+    let package_block = clean
+        .split("\n[workspace.package]")
+        .nth(1)
+        .expect("the root manifest declares [workspace.package]");
+    let package_block = package_block
+        .split_once("\n[")
+        .map_or(package_block, |(block, _)| block);
+
+    let workspace_version = package_block
         .lines()
         .find_map(|line| line.trim().strip_prefix("version = "))
         .map(|value| value.trim().trim_matches('"').to_owned())
@@ -337,6 +436,18 @@ fn the_internal_dependency_tracks_the_workspace_version() {
     assert!(
         workspace_version.contains('.'),
         "parsed {workspace_version:?} as the workspace version, which is not one"
+    );
+
+    // And the shell must still *use* the workspace entry. Everything above
+    // checks the entry is correct; none of it notices if `crates/vigia` stops
+    // reading it and inlines its own `version` again, which is precisely the
+    // shape this whole gate was written against, one file over.
+    let shell = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"));
+    assert!(
+        without_comments(&shell).contains("vigia-core.workspace = true"),
+        "crates/vigia/Cargo.toml no longer takes vigia-core from \
+         [workspace.dependencies], so the pin checked above is not the one \
+         being published"
     );
 }
 
@@ -544,32 +655,51 @@ fn the_release_pipeline_publishes_to_the_registry() {
         "release.yml must schedule the registry job at all; run `dist generate`"
     );
 
-    // **The ordering claim this used to make was false, so it is asserted as
-    // what it actually is.** The old wording said `announce` waiting on the
-    // publish job stopped a release half-shipping. It does not: `host` runs
-    // `gh release create` with no `--draft`, so the binaries are public before
-    // this job starts, and `announce` is a checkout. Pinning the real shape
-    // means a future dist upgrade that *did* move the release behind the
-    // publish would go red here and get the claim rewritten deliberately,
-    // rather than silently making the docs true again by accident.
+    // **The ordering claim this used to make was false, so what is asserted is
+    // the mechanism rather than the conclusion.** The old wording said
+    // `announce` waiting on the publish job stopped a release half-shipping. It
+    // does not: `host` runs `gh release create` with no `--draft`, so the
+    // binaries are public before the registry job starts.
+    //
+    // Asserted as two facts a reader can check, not as a byte-offset
+    // comparison. Textual order in a YAML mapping is not semantic, so an
+    // offset comparison both false-reds (dist reorders its emitted jobs and
+    // nothing has changed) and false-greens on the edit that actually matters:
+    // adding `--draft` to that line moves no offsets at all, and dist's own
+    // stated direction is draft-then-undraft, so a future upgrade lands
+    // exactly that.
+    let gh_release_line = release
+        .lines()
+        .find(|line| line.contains("gh release create"))
+        .expect(
+            "release.yml no longer creates the GitHub release where this gate \
+             expects it, so the ordering documented in publish-crates-io.yml \
+             and SPEC.md §9 needs re-reading against the new generated file",
+        );
     assert!(
-        release.contains("gh release create"),
-        "release.yml no longer creates the GitHub release where this gate \
-         expects it, so the ordering documented in publish-crates-io.yml and \
-         SPEC.md §9 needs re-reading against the new generated file"
+        !gh_release_line.contains("--draft"),
+        "the release is created as a draft now, so it is *not* public before \
+         the registry job and the documented cost of that ordering is wrong in \
+         four places. Better behaviour, but it has to be written down \
+         deliberately rather than become true by accident: {gh_release_line}"
     );
-    let release_created_at = release
-        .find("gh release create")
-        .expect("checked immediately above");
-    let registry_job_at = release
-        .find("custom-publish-crates-io:")
+
+    // And the registry job genuinely waits for the artifacts, which is the
+    // half of the ordering that is load bearing: publishing a crate before its
+    // binaries built would spend the irreversible step on a release that may
+    // still fail.
+    let registry_job = release
+        .split_once("custom-publish-crates-io:")
+        .map(|(_, rest)| rest)
         .expect("dist names the custom publish job after its workflow");
+    let needs = registry_job
+        .split_once("uses:")
+        .map(|(needs, _)| needs)
+        .expect("a custom job is scheduled with `uses:`");
     assert!(
-        release_created_at < registry_job_at,
-        "the generated workflow now creates the GitHub release after the \
-         registry job. That is a better order than the one documented, but the \
-         documentation says otherwise in four places and must be corrected \
-         rather than left to be right by accident"
+        needs.contains("host"),
+        "the registry job no longer waits on `host`, so it could publish \
+         permanently before the artifacts exist: {needs}"
     );
 }
 
@@ -651,16 +781,6 @@ fn the_purity_gate_derives_its_targets_from_the_release_config() {
 /// `soak.rs`'s own rule exists to prevent.
 #[test]
 fn the_packaged_artifact_carries_no_tests() {
-    /// Substrings that mean "this machine could not reach the registry",
-    /// as opposed to "this manifest is broken".
-    const UNREACHABLE: [&str; 5] = [
-        "failed to fetch",
-        "network failure",
-        "could not connect",
-        "failed to resolve",
-        "spurious network error",
-    ];
-
     let output = Command::new(env!("CARGO"))
         .args(["package", "--list", "--allow-dirty", "-p", "vigia"])
         .current_dir(repo_root())
@@ -671,7 +791,7 @@ fn the_packaged_artifact_carries_no_tests() {
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(
-                UNREACHABLE.iter().any(|needle| stderr.contains(needle)),
+                registry_unreachable(&stderr),
                 "`cargo package --list` failed for a reason that is not the \
                  registry being unreachable, so this is the gate firing rather \
                  than the gate being unavailable:\n{stderr}"
