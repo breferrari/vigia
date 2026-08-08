@@ -179,7 +179,27 @@ jobs:
       # for the same reason: hosted runners are shared and their variance is not
       # a property of this code. The structural gates take no slack and are what
       # catch a real regression.
+      #
+      # **`-p vigia`, and the scoping is the finding rather than a convenience.**
+      # The unscoped form fails to *compile* for this target, and not for any
+      # reason to do with this code: `vigia-core`'s dev-dependency on `criterion`
+      # pulls `alloca`, whose build script is `cc`, which then goes looking for
+      # `x86_64-linux-musl-gcc` and does not find one on a hosted runner. So the
+      # pure-Rust property CLAUDE.md protects holds for the *shipped* graph and
+      # does not hold for the *dev* graph on a cross target, which is a real
+      # constraint and is recorded in `SPEC.md` §7 rather than worked around by
+      # installing a C cross-compiler here.
+      #
+      # It is the right scope regardless, which is what makes the narrowing
+      # honest rather than convenient. This gate exists because the binary a
+      # Linux user receives had never been measured against **I7 and I9**, and
+      # both of those live in `crates/vigia/tests/budgets.rs`: first paint, the
+      # frame budget, the memory read, scrolling. `vigia-core`'s budgets are
+      # engine primitives (I2a, I4) rather than anything a reader feels, they are
+      # measured on gnu in the `test` job above, and they are not what "the
+      # artifact Linux ships" was ever about. `vigia`'s only dev-dependency is
+      # `insta`, which is pure Rust, so this compiles with no C anything.
       - name: budgets, against the binary Linux actually ships
-        run: cargo test --release --target x86_64-unknown-linux-musl --test budgets
+        run: cargo test -p vigia --release --target x86_64-unknown-linux-musl --test budgets
         env:
           VIGIA_BUDGET_SLACK: "3"
