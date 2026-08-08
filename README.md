@@ -4,7 +4,7 @@
 
 *Portuguese: a watchman, the one who keeps watch.*
 
-`🚧 Early development. It runs, and it installs from source. No packaged release yet.`
+`🚧 v0.1.0, the first release. Early, and honest about it: every claim below is one the tests hold.`
 
 </div>
 
@@ -24,19 +24,37 @@ It is closer to `btop` than to a git client: something you glance at, read from 
 
 ## 📦 Try it
 
-There is **no crates.io release and no prebuilt binary yet**. Both are Phase 4, and publishing a name to crates.io is permanent, so it happens when there is a version worth keeping forever. What exists today is a binary that builds from source in one command.
+```sh
+cargo install vigia                        # any platform with a Rust toolchain
+brew install breferrari/tap/vigia          # macOS and Linuxbrew
+```
+
+Or take a prebuilt binary, which needs no toolchain at all:
+
+```sh
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.sh | sh
+
+# Windows
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
+```
+
+Every [release](https://github.com/breferrari/vigia/releases) also carries the archives directly, for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc.
+
+Building from source works too, and needs Rust 1.85 or newer:
 
 ```sh
 cargo install --git https://github.com/breferrari/vigia vigia
 ```
 
-Rust 1.85 or newer is the only requirement. Every dependency is pure Rust, so there is no C toolchain and no system library to install first.
+**No C toolchain, on any of those paths.** Every dependency is pure Rust, which is a property CI asserts on each shipped target rather than a claim: a `cc`, `cmake` or `bindgen` entering the dependency graph fails the build.
 
 Then, from the worktree you want to watch:
 
 ```sh
 vigia                  # the current directory
 vigia ~/code/some-repo
+vigia --version        # the only option there is
 ```
 
 | Keys | |
