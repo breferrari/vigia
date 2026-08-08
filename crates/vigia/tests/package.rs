@@ -340,7 +340,12 @@ fn the_targets_the_release_ships_are_the_targets_the_purity_gate_checks() {
     let shipped: Vec<String> = root[start..end]
         .lines()
         .skip(1)
-        .map(|line| line.trim().trim_end_matches(',').trim_matches('"').to_owned())
+        .map(|line| {
+            line.trim()
+                .trim_end_matches(',')
+                .trim_matches('"')
+                .to_owned()
+        })
         .filter(|line| !line.is_empty())
         .collect();
 

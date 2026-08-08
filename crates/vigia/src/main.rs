@@ -32,7 +32,9 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Request::NoSuchOption => {
-            eprintln!("vigia: takes a path; --version is the only option. `vigia .` watches this tree");
+            eprintln!(
+                "vigia: takes a path; --version is the only option. `vigia .` watches this tree"
+            );
             ExitCode::FAILURE
         }
         Request::Watch => match vigia::run(Path::new(&arg)) {
