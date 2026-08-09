@@ -4,7 +4,7 @@
 
 *Portuguese: a watchman, the one who keeps watch.*
 
-`🚧 Early development. It runs, and it installs from source. No packaged release yet.`
+`🚧 Early. v0.1.0 is the first release, and until its tag lands the install lines below are what it will ship, not what is live yet.`
 
 </div>
 
@@ -24,19 +24,37 @@ It is closer to `btop` than to a git client: something you glance at, read from 
 
 ## 📦 Try it
 
-There is **no crates.io release and no prebuilt binary yet**. Both are Phase 4, and publishing a name to crates.io is permanent, so it happens when there is a version worth keeping forever. What exists today is a binary that builds from source in one command.
+```sh
+cargo install vigia                        # any platform with a Rust toolchain
+brew install breferrari/tap/vigia          # macOS and Linuxbrew
+```
+
+Or take a prebuilt binary, which needs no toolchain at all:
+
+```sh
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.sh | sh
+
+# Windows
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
+```
+
+Every [release](https://github.com/breferrari/vigia/releases) also carries the archives directly, for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc.
+
+Building from source works too, and needs Rust 1.85 or newer:
 
 ```sh
 cargo install --git https://github.com/breferrari/vigia vigia
 ```
 
-Rust 1.85 or newer is the only requirement. Every dependency is pure Rust, so there is no C toolchain and no system library to install first.
+**No C toolchain, on any of those paths.** Every dependency is pure Rust, which is a property CI asserts on each shipped target rather than a claim: a `cc`, `cmake` or `bindgen` entering the dependency graph fails the build.
 
 Then, from the worktree you want to watch:
 
 ```sh
 vigia                  # the current directory
 vigia ~/code/some-repo
+vigia --version        # the only option there is
 ```
 
 | Keys | |
@@ -148,7 +166,7 @@ set -g  default-terminal "tmux-256color"
 set -ga terminal-overrides ",*:Tc"
 ```
 
-**What is early about it.** There are no flags: one optional path, and the configuration above.
+**What is early about it.** The surface is one optional path and `--version`, plus the configuration above. Nothing else is a flag, on purpose.
 
 ## 🖼️ Where it is going
 
@@ -193,7 +211,10 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI |
 | ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
 | ✅ | **3. Glanceability** | Sparklines, heat bars, live counters, the status bar, theming |
-| ⬜ | **4. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
+| ✅ | **4. The artifacts tell the truth** | README, mockup, spec and tracker agree with the code and each other |
+| ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them |
+| 🔨 | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
+| ⬜ | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
 
 Being built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and it is written before the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked: the table above is the shape, that file is what is actually done.
 

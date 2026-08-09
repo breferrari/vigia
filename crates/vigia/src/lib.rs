@@ -93,6 +93,7 @@ pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, rows_in, rows_of,
 };
 
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
@@ -146,6 +147,123 @@ enum Wake {
     /// through the `Drop` on the way out. [`signal`] is where the reasoning
     /// lives, above all why the handler must restore nothing itself.
     Signalled,
+}
+
+/// The version this binary reports, which is the package's.
+///
+/// Read from the manifest rather than written down, so the string a user quotes
+/// in a report cannot drift from the tag the release was cut at. `SPEC.md` §9
+/// makes the tag the one irreversible event in the release, and a version
+/// constant maintained by hand is the obvious way for the binary to disagree
+/// with it.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// What `vigia`'s argument list is asking for.
+///
+/// The CLI is one optional positional path and one flag (`SPEC.md` §11.1), so
+/// this is the whole surface. It lives here rather than in `main.rs` because §7
+/// makes the test suite the proof and a test cannot import a `main.rs`, which is
+/// the split that file's own module docblock describes. What stays over there is
+/// the dispatch: which stream each answer is written to, and the exit code, both
+/// of which `tests/cli.rs` reaches by running the built binary.
+///
+/// **Deliberately not `#[non_exhaustive]`, and it was tried.** The argument for
+/// it is that this crate is about to be published permanently and §11.1 leaves
+/// `--help` open, so answering it adds a variant and breaks every downstream
+/// `match`. Two things make it the wrong trade here. `main.rs` is a separate
+/// crate from this library, so the attribute reaches it too and forces a `_`
+/// arm on the one match that must never silently ignore a new variant, which is
+/// exactly the exhaustiveness this enum exists to get. And at `0.x` the
+/// protection is worth nothing anyway: cargo already treats every `0.x` minor
+/// bump as breaking, so adding a variant costs `0.2.0` either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Request {
+    /// Watch the argument as a path.
+    Watch,
+    /// Print the version and exit successfully.
+    Version,
+    /// An argument beginning with `-` that is not a version query.
+    ///
+    /// Refused with one line naming the surface rather than being taken as a
+    /// path, so `vigia --colour=never` is told what the options are instead of
+    /// being told `--colour=never` is not a repository.
+    NoSuchOption,
+    /// More than one argument, when the surface is exactly one.
+    ///
+    /// **Refused rather than ignored**, which is a change from how this behaved
+    /// before the surface was gated: `vigia . --colour=never` used to watch `.`
+    /// and drop the rest on the floor, so a reader who typed a flag alongside a
+    /// path got no signal that the flag does not exist. That is the same defect
+    /// [`NoSuchOption`](Request::NoSuchOption) exists to prevent, reached from a
+    /// position the old check never looked at, and it is worse there: the tool
+    /// appears to accept the flag, because it starts and draws.
+    TooManyArguments,
+}
+
+/// Classify the arguments `vigia` was given.
+///
+/// A surface of at most one, so anything longer is [`TooManyArguments`](Request::TooManyArguments)
+/// rather than a list to interpret.
+///
+/// Takes the whole list rather than one argument, because **arity is part of the
+/// surface and nothing was checking it**. The classifier used to see only
+/// `args_os().nth(1)`, so `vigia . --colour=never` watched `.` and discarded the
+/// rest silently: the flag that does not exist produced a running program
+/// instead of the one-line refusal that a flag on its own produces. A function
+/// handed one argument cannot notice a second, which is why the fix is the
+/// signature rather than an extra check at the call site.
+///
+/// An empty list is [`Watch`](Request::Watch), and `main` supplies the default
+/// path. That keeps the "optional positional" of §11.1 in one place instead of
+/// splitting the default across both files.
+pub fn request_for(args: &[OsString]) -> Request {
+    match args {
+        [] => Request::Watch,
+        [arg] => request_for_one(arg),
+        _ => Request::TooManyArguments,
+    }
+}
+
+/// Classify the one argument `vigia` takes.
+///
+/// **B6 forbids flags that *configure*, and a version query is not one**, which
+/// is the amendment `SPEC.md` §11 records: this prints a line and exits before a
+/// terminal is taken, so there is no frame it can change and no state it can
+/// leave. Both conventional spellings are accepted, because a user who tries one
+/// tries the other, and refusing exactly one of them is a worse surface than
+/// refusing both.
+///
+/// Everything else beginning with `-` is still
+/// [`NoSuchOption`](Request::NoSuchOption). That includes `--help`, which §11.1
+/// leaves open on purpose: help text describes a surface and has to be kept true
+/// as the surface grows, where a version string comes from the manifest and
+/// cannot drift.
+///
+/// **Compared against the raw [`OsStr`], and the reason is cost rather than
+/// correctness.** The obvious claim to make here is that `to_string_lossy` (what
+/// the old refusal used) would misclassify a path that is not valid Unicode, and
+/// **that claim is false**: lossy decoding replaces what it cannot read with
+/// `U+FFFD`, which is not `-` and is not `--version`, so it reaches the same
+/// answer this does on every input. Mutation-tested rather than reasoned, and
+/// the mutation *survived* the whole suite, which is how the overclaim was
+/// caught.
+///
+/// What the raw comparison buys is that classifying an argument stops being
+/// proportional to its length. `to_string_lossy` validates the entire string to
+/// decide whether it can borrow, where `as_encoded_bytes().first()` reads one
+/// byte, and this runs before anything else in the process on the I7 path.
+fn request_for_one(arg: &OsStr) -> Request {
+    if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
+        return Request::Version;
+    }
+    // The first byte, rather than a decoded first character. `-` is ASCII and
+    // both encodings behind `OsStr` are self-synchronising there, so a leading
+    // `b'-'` cannot be the tail of some other character however the rest of the
+    // argument is spelled.
+    match arg.as_encoded_bytes().first() {
+        Some(b'-') => Request::NoSuchOption,
+        _ => Request::Watch,
+    }
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.

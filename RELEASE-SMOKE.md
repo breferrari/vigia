@@ -1,36 +1,73 @@
-# Release smoke — run against the built artifact at the release SHA
+# Release smoke — run against the built artifact, before the tag
 
 CI green is necessary and not sufficient. A sibling project shipped two
 consecutive patches with a green matrix that broke the flagship install on day
-one, and its fix was this checklist's ancestor. A crates.io publish is
-permanent — `cargo yank` hides a version, it does not delete it, and the name
-stays taken — so everything below runs BEFORE the first `publish`, against the
-artifact a user would receive, never against the checkout that built it.
+one, and its fix was this checklist's ancestor.
+
+**The `git tag` is the irreversible event, and everything hangs off it.** Pushing
+`v0.1.0` builds the four target artifacts, creates the GitHub release, publishes
+the Homebrew formula to the tap, and runs `cargo publish --workspace`. A
+crates.io publish is permanent: `cargo yank` hides a version, it does not delete
+it, and the name stays taken. So §0 to §4 below run **before** the tag, against
+`dist build` output rather than against a published artifact, and §5 verifies
+what landed after it.
+
+That ordering changed on 2026-08-08 with
+[#12](https://github.com/breferrari/vigia/issues/12). This file used to say
+"before the first `publish`", which was true while the publish was a command
+somebody typed. It is a CI job now, so the last human decision point moved
+earlier, to the tag.
 
 Every box carries evidence in the release notes: the command run and what it
 printed. A checked box with no evidence is a claim, and this repo's method is
 that a claim without a failing-capable check is a wish.
 
+## 0. Prerequisites, once, before the first tag ever
+
+Two of these cannot be set by anything but a person holding a token, and a tag
+pushed without them produces a release that half fails: the binaries exist, the
+announcement does not, and the crate name is still unclaimed.
+
+- [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
+- [ ] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
+      crates.io token with publish scope. `.github/workflows/publish-crates-io.yml`
+      checks for it before packaging anything, so a missing one fails in seconds
+      rather than several minutes in.
+- [ ] `gh secret set HOMEBREW_TAP_TOKEN` on `breferrari/vigia`, from a GitHub
+      personal access token with `repo` scope. This is what lets the release
+      write to the tap.
+
 ## 1. The artifact, not the checkout
 
-- [ ] `cargo package --list` — no `.github/`, no test support paths (SPEC.md §9
-      records the two escapes that read outside the package; confirm the
-      exclusion actually excludes them).
+- [ ] `cargo package --list -p vigia` — no `.github/`, no `tests/`, and
+      `README.md` present. SPEC.md §9 counts thirteen test files that read
+      outside the package, and `exclude = ["tests/**"]` is what keeps them out of
+      the tarball. Gated by
+      `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests`,
+      re-checked here because that gate skips when the registry index is
+      unreachable.
 - [ ] Unpack the built `.crate` into a clean directory; `cargo build --release`
       there succeeds with no path leaking back into the checkout.
-- [ ] `cargo-dist` dry run: every tier-1 artifact builds; the Homebrew formula
-      it generates names the tap, not `homebrew-core`.
+- [ ] `dist plan` names all four targets (`x86_64-unknown-linux-musl`,
+      `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`),
+      three installers, and the tap rather than `homebrew-core`.
+- [ ] `dist build --artifacts=lies` and read `target/distrib/vigia.rb`: the
+      Linux URL names the **musl** archive. The formula's `target_triple` helper
+      says `unknown-linux-gnu`, which is used only for binary aliases and is not
+      what the install fragments resolve, so this is worth reading rather than
+      assuming.
 
-## 2. Install the way a user does, on all three tier-1 targets
+## 2. Install the way a user does, on every platform the release builds for
 
 - [ ] `cargo install --path <unpacked crate>` (or the dist artifact) on Windows,
-      macOS, Linux — binary lands on PATH, `vigia --version` prints the release
-      version.
+      macOS, Linux: binary lands on PATH, and `vigia --version` prints the
+      release version. That flag exists as of #12; SPEC.md §11 B6 records why a
+      version query is not the kind of flag it forbids.
 - [ ] Binary size within the documented budget (SPEC.md §10 records 5.04 MiB
       with bundled grammars; a surprise here is a packaging change, not drift).
-- [ ] musl artifact: `ldd` reports no shared libraries (the static claim is
+- [ ] musl artifact: `ldd` reports no shared libraries. The static claim is
       enforced in CI and re-checked here because this is the artifact, not the
-      build).
+      build.
 
 ## 3. Run it against a real repository, not a fixture
 
@@ -50,6 +87,13 @@ that a claim without a failing-capable check is a wish.
       one delivery path #24 could not measure.)
 - [ ] A non-repository path: one-line error before the alternate screen, exit
       non-zero.
+- [ ] An option that does not exist: `vigia --colour=never`
+      prints the one-line refusal and exits non-zero, rather than reporting that
+      `--colour=never` is not a repository.
+- [ ] A second argument: `vigia . --colour=never` says how many it got and
+      exits non-zero, rather than watching `.` and dropping the flag. Both
+      refusals go to stderr with nothing on stdout, so a script reading
+      `vigia --version` is never handed an error message.
 
 Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are
 outside I8 on both platforms, because neither runs any code the process owns, and
@@ -68,11 +112,36 @@ box that a working build can never tick.
       deliberate departures SPEC.md §5.1 records are the only ones).
 - [ ] Windows posture (supported vs best-effort) is stated, per SPEC.md §10's
       open half.
+- [ ] The install section names only channels this release actually produces.
+      **The README ships inside every artifact** (`dist plan` lists it under
+      `[misc]` in each archive), so it describes the release it is packaged with
+      rather than the state of the repository on the day it was edited.
 
-## 5. After the publish
+## 5. After the tag
 
+The publish is a CI job now, so these verify rather than perform.
+
+- [ ] The `Release` workflow is green end to end, including
+      `custom-publish-crates-io`. **Read that job specifically rather than the
+      overall tick.** The GitHub release is created in `host`, before the
+      registry job runs and with no `--draft`, so binaries being public proves
+      nothing about crates.io. A green `announce` does not either: it is a
+      checkout.
 - [ ] `cargo install vigia` from crates.io, on one machine that has never built
-      this repo — the true cold path.
-- [ ] `brew install breferrari/tap/vigia` once the tap exists.
-- [ ] Tag matches the published SHA; the GitHub release carries the artifacts
-      `cargo-dist` built, not a re-build.
+      this repo. The true cold path.
+- [ ] If the registry job failed while the release went public, that is the
+      documented half-failure. **Which recovery depends on how far it got, and
+      re-running the job is only right for one of the two cases**, because
+      publishing an already-published version is an error rather than a silent
+      no-op:
+      - Nothing was accepted: re-run the job.
+      - `vigia-core` was accepted and `vigia` was not: a plain re-run fails on
+        `vigia-core` and never reaches `vigia`. Publish the second by hand,
+        `cargo publish -p vigia --locked`, from the tagged commit.
+
+      Either way `vigia-core` 0.1.0 is spent permanently once it is accepted, so
+      the fix is never to bump one crate and not the other.
+- [ ] `brew install breferrari/tap/vigia`, and the formula in the tap names the
+      tag that was just pushed.
+- [ ] The GitHub release carries the artifacts `cargo-dist` built, not a
+      re-build, and the tag matches the SHA that was smoke-tested above.

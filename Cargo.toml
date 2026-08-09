@@ -3,14 +3,46 @@ resolver = "3"
 members = ["crates/vigia-core", "crates/vigia"]
 
 [workspace.package]
-version = "0.0.0"
+# Both crates move together, because both are published together and a registry
+# will not take `vigia` until `vigia-core` resolves on it (SPEC.md section 9).
+# Independent versions would buy nothing and cost a second tag format.
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/breferrari/vigia"
+# The same URL as `repository`, which is a duplicate and is kept deliberately.
+# Measured both ways 2026-08-08: without it the generated Homebrew formula is
+# byte-identical, because dist falls back to `repository`, **but `dist plan`
+# emits `WARN The Homebrew publish job is enabled but no homepage was
+# specified`** on every run. A standing warning on the one workflow whose log
+# nobody can rehearse is worse than a field whose duplication is written down,
+# because the warning is what a future reader stops to investigate.
+homepage = "https://github.com/breferrari/vigia"
+# The root README, shared by both crates. A registry page with no readme reads
+# as abandoned, and `vigia-core` has nothing to say that this file does not say
+# better: it is the engine behind the thing the reader came to look at.
+readme = "README.md"
 authors = ["Brenno Ferrari"]
 
 [workspace.dependencies]
+# The internal dependency, declared here rather than in `crates/vigia` so that
+# its `version` is the workspace version rather than a second copy of it.
+#
+# A registry needs both halves: `path` is what a checkout builds against, and
+# `version` is what `cargo publish` rewrites the dependency to, since crates.io
+# has no paths. Written out in the shell's manifest, those two lived in
+# different files from the version they had to match, and the failure is silent
+# and permanent: bump the workspace to 0.2.0 with `version = "0.1.0"` still
+# spelled here, and `cargo publish --workspace` ships `vigia` 0.2.0 depending on
+# `vigia-core` **0.1.0**, which is a real published crate that resolves and
+# builds. Nothing goes red, and nothing can be withdrawn afterwards.
+#
+# `version.workspace = true` inside a dependency is not a thing cargo supports,
+# so the duplication cannot be removed, only moved and then gated. Moved: the
+# two strings are now fifteen lines apart in one file rather than in two.
+# Gated: `crates/vigia/tests/package.rs::the_internal_dependency_tracks_the_workspace_version`.
+vigia-core = { path = "crates/vigia-core", version = "0.1.0" }
 # Pure Rust throughout. Adding a dependency with a C build script is a spec
 # change, not an implementation detail; see CLAUDE.md.
 #
@@ -125,3 +157,48 @@ panic = "abort"
 [profile.bench]
 inherits = "release"
 debug = true
+
+# The profile the release is built with, and it inherits `release` **and adds
+# nothing**. That is a decision rather than a default: every budget in this
+# repository (I7, I9, I3) is measured against `release`, so a `dist` profile that
+# tuned anything would make every one of those numbers a claim about a binary
+# nobody receives. dist's own suggested profile adds `lto = "thin"`, which
+# `release` above already sets, so agreeing here costs nothing at all.
+#
+# `crates/vigia/tests/package.rs::the_profile_that_ships_is_the_profile_the_budgets_measure`
+# is what stops it drifting, because nothing else would notice.
+[profile.dist]
+inherits = "release"
+
+# `cargo-dist` 0.32, whose binary is named `dist`. SPEC.md section 9 is the
+# contract; this is the machine-readable half of it.
+#
+# `publish-jobs` carries the registry job because **dist has no crates.io
+# publisher**: its built-ins are `homebrew` and `npm`, and everything else is a
+# custom reusable workflow. `./publish-crates-io` is
+# `.github/workflows/publish-crates-io.yml`, and dist places every custom publish
+# job `needs: [plan, host]`, which puts it **after** the GitHub release is
+# already public: `host` runs `gh release create` with no `--draft`. That is the
+# right order because crates.io is the only irreversible step in the release, so
+# it goes last, after everything that can be deleted and redone has succeeded.
+# The workflow's own header carries the full reasoning and what it costs.
+#
+# Four targets, and Linux is musl alone: one static binary that runs on any
+# distribution beats two that need selection logic, and CLAUDE.md already names
+# musl as this project's static-binary story. arm64 Linux and arm64 Windows are
+# deferred on the cross linker, which section 9 records.
+#
+# No `msi` installer (WiX is a C toolchain question this repository has already
+# answered elsewhere) and no `npm` (a second registry for no reader).
+[workspace.metadata.dist]
+cargo-dist-version = "0.32.0"
+ci = ["github"]
+installers = ["shell", "powershell", "homebrew"]
+tap = "breferrari/homebrew-tap"
+publish-jobs = ["homebrew", "./publish-crates-io"]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
