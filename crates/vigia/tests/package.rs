@@ -1161,6 +1161,51 @@ fn the_release_button_reaches_the_release() {
         "release.yml no longer compares the tag against `dry-run`, so the \
          rehearsal in bump.yml may now publish"
     );
+
+    // **Both tokens are checked before the version moves, and the tap one is
+    // checked for `push`.** This is v0.1.0's actual failure written down as a
+    // gate. `HOMEBREW_TAP_TOKEN` could read the tap and not write to it; the
+    // formula job checked the tap out successfully and then failed `git push`
+    // with a 403, by which point the GitHub release and the crates.io publish
+    // had both already happened.
+    //
+    // Asserting `permissions.push` rather than merely that a check exists is
+    // the point. A check that only proves the token *works* passes against a
+    // read-only one, because reading a public repository needs no grant at all,
+    // so a token scoped to entirely the wrong repository reads this one fine.
+    let preflight = commands
+        .iter()
+        .find(|command| command.contains(r#"-z "${CARGO_REGISTRY_TOKEN"#))
+        .expect(
+            "bump.yml must guard on the registry token being empty before it              bumps anything. Finding the *name* is not enough: it appears in              this step's own error message and in its `env:` block, so a              search for it passes against a check that has been disabled",
+        );
+    // Each assertion names a form only the *check* has, never one an error
+    // message or an `env:` entry also carries. Both of these were written the
+    // loose way first and both survived mutation: deleting the tap presence
+    // check left `HOMEBREW_TAP_TOKEN` in the curl and the env block, and
+    // replacing the jq path left `permissions.push` in the failure message.
+    // That is the fourth time in this file a mention has stood in for the thing.
+    assert!(
+        preflight.contains(r#"-z "${HOMEBREW_TAP_TOKEN"#),
+        "the pre-flight does not check the tap token is set, and that is the          one that failed a release: {preflight}"
+    );
+    assert!(
+        preflight.contains(".permissions.push"),
+        "the tap check must read `.permissions.push` from the API, not merely          mention it: a read-only token reads a public repo and then fails the          release. {preflight}"
+    );
+
+    // And it has to run before the commit, or it reports a problem the version
+    // has already moved past.
+    let checked_at = bump
+        .find(r#"-z "${CARGO_REGISTRY_TOKEN"#)
+        .expect("checked immediately above");
+    let committed_at = bump
+        .find("git commit")
+        .expect("bump.yml commits the version it raised");
+    assert!(
+        checked_at < committed_at,
+        "the token pre-flight runs after the commit, so a bad token would be          found only once main already carries the new version"
+    );
 }
 
 /// The tarball cargo would actually upload carries no tests.
