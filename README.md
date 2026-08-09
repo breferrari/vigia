@@ -214,6 +214,7 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **4. The artifacts tell the truth** | README, mockup, spec and tracker agree with the code and each other |
 | ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them |
 | 🔨 | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
+| ⬜ | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
 
 Being built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and it is written before the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked: the table above is the shape, that file is what is actually done.
 

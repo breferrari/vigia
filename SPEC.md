@@ -332,6 +332,8 @@ Live status, issue-linked, is in [`ROADMAP.md`](ROADMAP.md). This section is the
 
 **Phase 7 — distribution.** `cargo-dist`, crates.io publish, personal Homebrew tap, prebuilt binaries on GitHub releases.
 
+**Phase 8 — look and feel.** Layout, colour, keys and chrome, taken after distribution on purpose: the minimal real thing ships first, and polish lands as post-release momentum guided by the real-use evidence rather than ahead of it. **Missing from this list until 2026-08-09**, when [#12](https://github.com/breferrari/vigia/issues/12) corrected the README's phase table and found the same gap here. That is the drift the parenthetical below already records, one phase later: this section is the shape and `ROADMAP.md` is the authority on numbering, so a phase that exists there and not here is this file being behind again.
+
 **The Shelf** (milestone `Shelf`, titled "Phase 5" until 2026-08-06): work found mid-phase and consciously shelved, taken only by deliberate choice, never "next". It holds no place in the sequence at all, which is why the phase number was retired — a number claims a place.
 
 *(This list said "Phase 4 — distribution, Phase 5 — deferred items" until 2026-08-05, a whole phase-numbering behind the roadmap it defers to. The pre-flight cannot see this file's own phase prose — it compares invariant tokens and milestone titles — so the drift sat here across two renumberings. This section is the shape; `ROADMAP.md` is the state and the authority on numbering.)*
