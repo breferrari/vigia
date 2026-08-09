@@ -1,41 +1,50 @@
-# Release smoke — run against the built artifact, before the tag
+# Release smoke — run against the built artifact, before the release is dispatched
 
 CI green is necessary and not sufficient. A sibling project shipped two
 consecutive patches with a green matrix that broke the flagship install on day
 one, and its fix was this checklist's ancestor.
 
-**The `git tag` is the irreversible event, and everything hangs off it.** Pushing
-`v0.1.0` builds the four target artifacts, creates the GitHub release, publishes
-the Homebrew formula to the tap, and runs `cargo publish --workspace`. A
-crates.io publish is permanent: `cargo yank` hides a version, it does not delete
-it, and the name stays taken. So §0 to §4 below run **before** the tag, against
-`dist build` output rather than against a published artifact, and §5 verifies
-what landed after it.
+**Dispatching `bump and release` is the irreversible event, and everything hangs
+off it.** Choosing *patch*, *minor* or *major* from the Actions tab raises the
+version, commits it, builds the four target artifacts, creates the GitHub
+release, publishes the Homebrew formula to the tap, and runs
+`cargo publish --workspace`. A crates.io publish is permanent: `cargo yank`
+hides a version, it does not delete it, and the name stays taken. So §0 to §4
+below run **before** the dispatch, against `dist build` output rather than
+against a published artifact, and §5 verifies what landed after it.
 
-That ordering changed on 2026-08-08 with
-[#12](https://github.com/breferrari/vigia/issues/12). This file used to say
-"before the first `publish`", which was true while the publish was a command
-somebody typed. It is a CI job now, so the last human decision point moved
-earlier, to the tag.
+**`git tag && git push --tags` no longer releases anything.** `dispatch-releases`
+removed that trigger, for the reason `SPEC.md` §9 records: it is what lets the
+bump start the release without a second permanent token.
+
+The gate moved twice, and both moves were the same correction. This file first
+said "before the first `publish`", which was true while the publish was a
+command somebody typed; it became a CI job on 2026-08-08, so the last human
+decision point moved to the tag. It moved again on 2026-08-09 when the tag
+became a button. **Rehearse it rather than trusting this paragraph**: the bump's
+`rehearse` option, or `release.yml`'s own dispatch with the tag left at
+`dry-run`, runs the whole path and publishes nothing.
 
 Every box carries evidence in the release notes: the command run and what it
 printed. A checked box with no evidence is a claim, and this repo's method is
 that a claim without a failing-capable check is a wish.
 
-## 0. Prerequisites, once, before the first tag ever
+## 0. Prerequisites, once, before the first release ever
 
-Two of these cannot be set by anything but a person holding a token, and a tag
-pushed without them produces a release that half fails: the binaries exist, the
-announcement does not, and the crate name is still unclaimed.
+Two of these cannot be set by anything but a person holding a token, and a
+release dispatched without them half fails: the binaries exist, the announcement
+does not, and the crate name is still unclaimed.
 
 - [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
-- [ ] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
-      crates.io token with publish scope. `.github/workflows/publish-crates-io.yml`
+- [x] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
+      crates.io token scoped to `publish-new` and `publish-update` on `vigia`
+      and `vigia-core`. *(Set 2026-08-09.)* `.github/workflows/publish-crates-io.yml`
       checks for it before packaging anything, so a missing one fails in seconds
       rather than several minutes in.
-- [ ] `gh secret set HOMEBREW_TAP_TOKEN` on `breferrari/vigia`, from a GitHub
-      personal access token with `repo` scope. This is what lets the release
-      write to the tap.
+- [x] `gh secret set HOMEBREW_TAP_TOKEN` on `breferrari/vigia`. The job checks
+      out the tap and pushes a commit, so contents read/write on
+      `breferrari/homebrew-tap` is enough; dist's own guide asks for a classic
+      token with `repo`, which is wider than the job needs. *(Set 2026-08-09.)*
 
 ## 1. The artifact, not the checkout
 
@@ -117,7 +126,7 @@ box that a working build can never tick.
       `[misc]` in each archive), so it describes the release it is packaged with
       rather than the state of the repository on the day it was edited.
 
-## 5. After the tag
+## 5. After the dispatch
 
 The publish is a CI job now, so these verify rather than perform.
 

@@ -1,0 +1,168 @@
+# Cut a release from the Actions tab: pick which part of the version to raise,
+# and this bumps it, commits, and hands off to `release.yml`.
+#
+# **Why this exists rather than `git tag vX.Y.Z && git push --tags`.** The tag
+# form works and is two commands, but it puts the version number in a human's
+# hands at the moment it becomes permanent: a crates.io version cannot be
+# withdrawn, and the number has to agree in two places in `Cargo.toml` that are
+# fifteen lines apart. Choosing *patch* from a list is a smaller decision than
+# typing `0.1.1`, and it cannot be typed wrong.
+#
+# **The dispatch is the mechanism, and it is not a preference.** A tag pushed
+# from a workflow using `GITHUB_TOKEN` does **not** trigger another workflow:
+# GitHub suppresses it to prevent recursion. So the obvious build, bump then
+# push a tag then let the tag-push release fire, silently does nothing and would
+# need a second long-lived PAT to work around. `workflow_dispatch` is one of the
+# two documented exceptions to that rule, so triggering the release directly
+# works with the token this job already has and adds no secret. That is what
+# `dispatch-releases = true` in `[workspace.metadata.dist]` is for, and it is
+# also why `release.yml` no longer runs on a tag push at all.
+#
+# **Ordering is chosen so nothing is pushed before it is checked.** The version
+# is edited, verified, and built *before* the commit, so a bump that produces an
+# inconsistent manifest fails with `main` untouched and no release started. The
+# check is not new: `crates/vigia/tests/package.rs` already fails when the two
+# version strings disagree, because a `vigia` published against an older
+# `vigia-core` is a real crate that resolves and installs and can never be
+# unpublished.
+name: bump and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+      rehearse:
+        description: Work out the version and build everything, publish nothing, leave main alone
+        type: boolean
+        default: false
+
+# One release at a time. Two of these interleaving would race on the version
+# they each read, and both would push.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  bump:
+    name: bump ${{ inputs.bump }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Refuse anywhere but the default branch. The release is cut from `main`
+      # and a bump committed to a branch would be a version nothing ever tags.
+      - name: this runs on main or not at all
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/${DEFAULT}" ]; then
+            echo "::error::dispatched against ${GITHUB_REF}; a release is cut from ${DEFAULT}"
+            exit 1
+          fi
+        env:
+          DEFAULT: ${{ github.event.repository.default_branch }}
+
+      - name: work out the next version
+        id: version
+        run: |
+          set -euo pipefail
+          current=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "vigia") | .version')
+
+          # Three numeric components and nothing else. A pre-release version is
+          # refused rather than guessed at: what `patch` means for `0.2.0-rc.1`
+          # is a judgement, and this job is for the case where it is not.
+          if ! printf '%s' "$current" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::current version is ${current}, which this job will not bump automatically"
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<<"$current"
+          case "${{ inputs.bump }}" in
+            major) next="$((major + 1)).0.0" ;;
+            minor) next="${major}.$((minor + 1)).0" ;;
+            patch) next="${major}.${minor}.$((patch + 1))" ;;
+            *) echo "::error::unknown bump ${{ inputs.bump }}"; exit 1 ;;
+          esac
+
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "::notice::${{ inputs.bump }}: $current -> $next"
+
+      # Both strings, in one step, because moving one and not the other is the
+      # failure this whole job is arranged around. The patterns are anchored to
+      # the start of a line and each matches exactly one line in the manifest.
+      - name: raise the version
+        run: |
+          set -euo pipefail
+          next='${{ steps.version.outputs.next }}'
+          sed -i -E "s|^version = \"[^\"]+\"|version = \"${next}\"|" Cargo.toml
+          sed -i -E "s|^(vigia-core = \{ path = \"crates/vigia-core\", version = )\"[^\"]+\"|\1\"${next}\"|" Cargo.toml
+
+          # Verify the edit rather than trusting the substitution, because a sed
+          # that matched nothing exits 0 and leaves the old version in place.
+          found=$(grep -cE "\"${next}\"" Cargo.toml)
+          if [ "$found" -ne 2 ]; then
+            echo "::error::expected both version strings at ${next}, found ${found}"
+            grep -nE '^version = |^vigia-core = ' Cargo.toml
+            exit 1
+          fi
+          cargo update --workspace
+
+      # The gate that makes the sed above safe, run before anything is pushed.
+      # It compares the two strings the edit touched and fails if they disagree.
+      - name: the manifests agree
+        run: cargo test -p vigia --test package the_internal_dependency_tracks_the_workspace_version
+
+      # And the binary reports the new number, which is the claim a user checks.
+      - name: the binary reports the new version
+        run: |
+          set -euo pipefail
+          cargo build --release --locked
+          got=$(./target/release/vigia --version)
+          want='vigia ${{ steps.version.outputs.next }}'
+          if [ "$got" != "$want" ]; then
+            echo "::error::binary says '${got}', expected '${want}'"
+            exit 1
+          fi
+          echo "::notice::${got}"
+
+      - name: rehearsal stops here
+        if: ${{ inputs.rehearse }}
+        run: |
+          echo "::notice::rehearsal: would release ${{ steps.version.outputs.next }}. main untouched."
+
+      - name: commit the bump
+        if: ${{ !inputs.rehearse }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "release: ${{ steps.version.outputs.next }}"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+      # `dry-run` is `release.yml`'s own word for build-everything-publish-
+      # nothing, so a rehearsal exercises the whole release path and stops short
+      # of the irreversible step.
+      - name: hand off to the release
+        run: |
+          set -euo pipefail
+          tag='v${{ steps.version.outputs.next }}'
+          if [ "${{ inputs.rehearse }}" = "true" ]; then tag=dry-run; fi
+          gh workflow run release.yml --ref "${{ github.event.repository.default_branch }}" -f tag="$tag"
+          echo "::notice::dispatched release.yml with tag=${tag}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
