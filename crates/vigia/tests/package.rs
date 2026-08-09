@@ -259,28 +259,37 @@ fn run_commands(yaml: &str) -> Vec<String> {
                     .chars()
                     .all(|c| matches!(c, '-' | '+' | '0'..='9')));
 
-        let mut body = if is_block {
-            // A block scalar: every following line indented past the key.
-            let mut collected = Vec::new();
-            index += 1;
-            while index < lines.len() {
-                let next = lines[index];
-                let next_indent = next.len() - next.trim_start().len();
-                if next.trim().is_empty() {
-                    index += 1;
-                    continue;
-                }
-                if next_indent <= indent {
-                    break;
-                }
-                collected.push(next.trim().to_owned());
-                index += 1;
-            }
-            collected.join("\n")
+        // **Both arms absorb the continuation lines, and only the block one did
+        // at first.** The inline arm took its single line and moved on, which
+        // was fail-open on precisely the flag this scan exists to reject: the
+        // real publish step *is* the inline form, so appending
+        // `\` and `--dry-run` on the next line gave GitHub one command carrying
+        // `--dry-run` and gave this scan one command without it. Every
+        // assertion passed while the release published nothing.
+        //
+        // A more-indented line after a key belongs to that key's value in YAML
+        // whichever form it took, so the collection rule is the same for both
+        // and only the first line differs.
+        let mut collected: Vec<String> = if is_block {
+            Vec::new()
         } else {
-            index += 1;
-            rest.to_owned()
+            vec![rest.to_owned()]
         };
+        index += 1;
+        while index < lines.len() {
+            let next = lines[index];
+            if next.trim().is_empty() {
+                index += 1;
+                continue;
+            }
+            let next_indent = next.len() - next.trim_start().len();
+            if next_indent <= indent {
+                break;
+            }
+            collected.push(next.trim().to_owned());
+            index += 1;
+        }
+        let mut body = collected.join("\n");
 
         // Shell line continuations, so a flag on the next physical line belongs
         // to the same command.
@@ -531,6 +540,21 @@ fn only_the_commands_a_workflow_runs_are_read_as_commands() {
         continued,
         vec!["cargo publish --workspace --locked --dry-run"],
         "a `\\` continuation joins, or a flag on the next line is invisible"
+    );
+
+    // **A continuation after the *inline* form.** This is the shape the real
+    // publish step has, and the arm that handled it took one line and stopped,
+    // so `--dry-run` on the next line was invisible to the assertion that
+    // exists to reject it while GitHub ran it. Fail-open, on the one flag that
+    // makes the whole job a no-op.
+    let inline_continued = run_commands(
+        "        run: cargo publish --workspace --locked \\\n          --dry-run\n        env:\n          TOKEN: x\n",
+    );
+    assert_eq!(
+        inline_continued,
+        vec!["cargo publish --workspace --locked --dry-run"],
+        "an inline command continues onto more-indented lines, and stops at the \
+         next sibling key"
     );
 
     // A chomping indicator is still a block scalar. Reading `|-` as the command
