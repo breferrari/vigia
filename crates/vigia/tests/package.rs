@@ -1189,9 +1189,24 @@ fn the_release_button_reaches_the_release() {
         preflight.contains(r#"-z "${HOMEBREW_TAP_TOKEN"#),
         "the pre-flight does not check the tap token is set, and that is the          one that failed a release: {preflight}"
     );
+    // **An actual write, not a report about one.** The first version read
+    // `.permissions.push` from the API, and that is a proxy which does not
+    // predict the thing: it answered `true` for the very token whose `git push`
+    // had been denied 403, because for a fine-grained token that field reflects
+    // the user's role on the repository rather than the token's grants. So the
+    // check creates a ref in the tap and deletes it, and this asserts that
+    // shape rather than any wording.
     assert!(
-        preflight.contains(".permissions.push"),
-        "the tap check must read `.permissions.push` from the API, not merely          mention it: a read-only token reads a public repo and then fails the          release. {preflight}"
+        preflight.contains("-X POST") && preflight.contains("/git/refs"),
+        "the tap check must attempt a real write. Reading the repository, or          reading a permissions field about it, both pass for a token that          cannot push: {preflight}"
+    );
+    assert!(
+        preflight.contains("-X DELETE"),
+        "the write probe must undo itself, or every rehearsal leaves a branch          in the tap: {preflight}"
+    );
+    assert!(
+        preflight.contains("201"),
+        "the probe must check the create actually succeeded; curl exits 0 on a          403 body: {preflight}"
     );
 
     // And it has to run before the commit, or it reports a problem the version
