@@ -1083,6 +1083,86 @@ fn the_purity_gate_derives_its_targets_from_the_release_config() {
     }
 }
 
+/// The button that cuts a release reaches the workflow that performs one.
+///
+/// **Three files have to agree and only one of them fails loudly on its own.**
+/// `bump.yml` dispatches `release.yml`; `release.yml` accepts a dispatch only
+/// because `[workspace.metadata.dist] dispatch-releases = true` generated it
+/// that way; and that same setting is what removed the tag-push trigger. Turn
+/// the setting off and regenerate, and `bump.yml` still exists, still has its
+/// dropdown, still bumps the version and still pushes the commit, and then
+/// dispatches a workflow that has no `workflow_dispatch` to receive it. The
+/// release never runs. Nothing is red, the version has already moved, and the
+/// tell is a release that simply did not happen.
+///
+/// That is worth a gate rather than a comment because the failure is silent in
+/// the direction that matters and because the whole mechanism exists to avoid a
+/// second long-lived token: a tag pushed from a workflow holding `GITHUB_TOKEN`
+/// triggers nothing, and `workflow_dispatch` is the exception being relied on.
+#[test]
+fn the_release_button_reaches_the_release() {
+    let root = repo_file("Cargo.toml");
+    assert!(
+        without_comments(&root).contains("dispatch-releases = true"),
+        "bump.yml starts the release by dispatching it, so the release must be \
+         dispatchable. Without this setting dist generates a tag-push trigger \
+         and the button bumps the version and releases nothing"
+    );
+
+    let release = without_comments(&repo_file(".github/workflows/release.yml"));
+    assert!(
+        release.contains("workflow_dispatch:"),
+        "release.yml has no workflow_dispatch to receive the dispatch; run \
+         `dist generate`"
+    );
+
+    // The bump must name the workflow that exists, by file name, since `gh
+    // workflow run` takes one and a typo there is a 404 at release time.
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let commands = run_commands(&bump);
+    let dispatch = commands
+        .iter()
+        .find(|command| command.contains("gh workflow run"))
+        .expect("bump.yml dispatches the release");
+
+    // **The word immediately after `gh workflow run`, not a mention anywhere in
+    // the step.** A `run: |` body is one string here, and that body ends with an
+    // `echo` naming `release.yml` for the log. Asserting `contains` over the
+    // whole block therefore passed against `gh workflow run releases.yml`,
+    // matching the echo while the dispatch went to a workflow that does not
+    // exist, which is a release that silently never happens. Caught by mutation,
+    // and it is the third time in this file that a mention has stood in for the
+    // thing.
+    let target = dispatch
+        .split_whitespace()
+        .skip_while(|word| *word != "run")
+        .nth(1)
+        .expect("`gh workflow run` names a workflow");
+    assert_eq!(
+        target, "release.yml",
+        "the bump dispatches {target}, which is not the release workflow"
+    );
+    assert!(
+        dispatch.contains("-f tag="),
+        "release.yml's dispatch takes a `tag` input and treats its absence as \
+         nothing to do: {dispatch}"
+    );
+
+    // And the rehearsal word is dist's, not ours. `release.yml` decides whether
+    // to publish by comparing the tag against the literal `dry-run`, so a bump
+    // that spelled it differently would publish during a rehearsal.
+    assert!(
+        bump.contains("dry-run"),
+        "the rehearsal path must pass the tag dist reads as build-but-do-not-\
+         publish, which is the literal `dry-run`"
+    );
+    assert!(
+        release.contains("'dry-run'"),
+        "release.yml no longer compares the tag against `dry-run`, so the \
+         rehearsal in bump.yml may now publish"
+    );
+}
+
 /// The tarball cargo would actually upload carries no tests.
 ///
 /// Every gate above reads a file and reasons about what cargo *will* do. This one

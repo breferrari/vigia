@@ -193,6 +193,18 @@ inherits = "release"
 [workspace.metadata.dist]
 cargo-dist-version = "0.32.0"
 ci = ["github"]
+# The release is triggered from the Actions tab rather than by a tag push, which
+# is what lets `.github/workflows/bump.yml` start it. A tag pushed by a workflow
+# holding `GITHUB_TOKEN` triggers nothing, because GitHub suppresses it to
+# prevent recursion, and `workflow_dispatch` is one of the two documented
+# exceptions. So this is the setting that removes the need for a second
+# long-lived PAT, rather than a preference about where buttons live.
+#
+# It **disables tag-push releases**, which is the whole cost: `git tag v0.1.2 &&
+# git push --tags` stops producing a release once this is on. `bump.yml` is the
+# way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
+# defaults to the tag `dry-run`, meaning build everything and publish nothing.
+dispatch-releases = true
 installers = ["shell", "powershell", "homebrew"]
 tap = "breferrari/homebrew-tap"
 publish-jobs = ["homebrew", "./publish-crates-io"]
