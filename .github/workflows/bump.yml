@@ -111,16 +111,46 @@ jobs:
             exit 1
           fi
 
-          push=$(curl -sS -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+          # **A real write, then undo it.** `.permissions.push` was the first
+          # spelling and it is a proxy that does not predict the thing: it
+          # reported `true` for the very token whose `git push` had been denied
+          # 403 during v0.1.0, because for a fine-grained token that field
+          # reflects the user's role on the repository rather than the grants on
+          # the token. A guard that passes for the token that already failed is
+          # not a guard, and shipping one is worse than shipping none.
+          #
+          # So this creates a branch in the tap and deletes it. It goes through
+          # the same auth path a formula commit does, so it asserts the
+          # capability itself rather than a report about it, and it leaves
+          # nothing behind. The tap holds no workflows, so a ref existing for a
+          # second triggers nothing.
+          head=$(curl -sS -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+            "https://api.github.com/repos/${tap}/git/ref/heads/main" | jq -r '.object.sha // empty')
+          if [ -z "$head" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN cannot even read ${tap}"
+            exit 1
+          fi
+
+          probe="refs/heads/release-preflight-${GITHUB_RUN_ID}"
+          code=$(curl -sS -o probe.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${tap}" | jq -r '.permissions.push // false')
-          if [ "$push" != "true" ]; then
-            echo "::error::HOMEBREW_TAP_TOKEN cannot push to ${tap} (permissions.push=${push})."
-            echo "::error::It may still be able to read it, which is what let this reach a release once before."
+            "https://api.github.com/repos/${tap}/git/refs" \
+            -d "{\"ref\":\"${probe}\",\"sha\":\"${head}\"}")
+
+          if [ "$code" != "201" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN cannot write to ${tap}: HTTP ${code}"
+            echo "::error::$(jq -r '.message // empty' probe.json)"
+            echo "::error::It can read ${tap}, which proves nothing: reading a public repo needs no grant."
             echo "::error::Fine-grained token: Contents must be Read and write, and ${tap} must be in its repository list."
             exit 1
           fi
-          echo "::notice::both tokens present; ${tap} is writable"
+
+          curl -sS -o /dev/null -X DELETE \
+            -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+            "https://api.github.com/repos/${tap}/git/${probe}" \
+            || echo "::warning::left ${probe} in ${tap}; harmless, delete at leisure"
+          echo "::notice::both tokens present; a real write to ${tap} succeeded and was undone"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
