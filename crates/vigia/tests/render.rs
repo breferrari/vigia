@@ -4260,14 +4260,21 @@ fn the_wash_bleeds_under_the_inset() {
 }
 
 #[test]
-fn the_pane_stops_the_same_distance_from_both_edges() {
+fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
     // The premise `planning_width` charges the inset on one side only rests on,
     // measured off a drawn row rather than derived: `SPEC.md` §11.1 rules that a
     // glance row's two trailing columns are the **scrollbar's reserve** and not a
     // margin, and #119 adds the matching leading columns rather than a second set
-    // of trailing ones. If that is right, a file row on a pane with nothing to
-    // scroll stands the same distance from both edges, and the inset has cost the
-    // path its own width in columns rather than twice it.
+    // of trailing ones. If that is right, a file row's left blank is exactly the
+    // margin's leading half and its right blank is exactly the bar's reserve, so
+    // the margin has cost the path its own width in columns rather than twice it.
+    //
+    // **The name says "once and once" rather than "the same distance", which is
+    // what it said until round 3 of the audit.** The two blanks are only equal
+    // from eighty columns up, where the leading half is also two; from 43 to 79
+    // the left is one and the right is still the bar's two. The assertion below
+    // always encoded that asymmetry correctly while the name denied it, which is
+    // the worse way round, because a reader trusts the name and skips the body.
     //
     // **Swept, and the odd rungs are in the sweep rather than excused from it.**
     // A first version sampled 80 and 120, which are the widths where the margin's
@@ -4408,7 +4415,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
     }
 
     // **Named widths, not a count**, for the reason
-    // `the_pane_stops_the_same_distance_from_both_edges` carries in full: the
+    // `a_row_pays_its_margin_once_and_the_bars_reserve_once` carries in full: the
     // `> 60` floor this replaced tolerated thirty skips out of ninety-one, enough
     // to lose every rung boundary while still reading green.
     for rung in [43u16, 44, 79, 80] {

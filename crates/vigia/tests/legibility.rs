@@ -3001,7 +3001,7 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
     //
     // **A claim about the table rather than about a drawn row, deliberately.**
     // The screen-side half of this is
-    // `tests/render.rs::the_pane_stops_the_same_distance_from_both_edges`, which
+    // `tests/render.rs::a_row_pays_its_margin_once_and_the_bars_reserve_once`, which
     // measures both margins of a real row; what is left here is the standing
     // condition that lets `planning_width` charge the inset on one side, and the
     // only way to break it is to edit the ladder. A first version also asserted
