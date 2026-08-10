@@ -2244,11 +2244,18 @@ impl Painter<'_> {
     /// second time.
     ///
     /// **So a residual survives, and it is smaller than what was here before
-    /// rather than new.** Between 43 and 79 columns the right margin is one
-    /// column and the bar's reserve is two, so a content row's edge still moves
-    /// by one when a diff grows long enough to take a bar. On `main` it moved by
-    /// two at every width; from eighty columns up it now does not move at all.
-    /// Halved and bounded is what this issue is entitled to buy; removing it
+    /// rather than new.** The movement when a diff grows a bar is [`BAR_WIDTH`]
+    /// less the trailing margin: **two** below forty-four columns, where the
+    /// margin has no right-hand half yet, **one** from forty-four to
+    /// seventy-nine, and **none** from eighty up where the two are equal. On
+    /// `main` it was two at every width.
+    ///
+    /// Forty-three is deliberately *not* in the improved band, which is the kind
+    /// of thing a range written from memory gets wrong: its rung is the odd one
+    /// and spends its single column on the left, so its trailing margin is zero
+    /// and it behaves exactly as `main` did.
+    ///
+    /// Reduced and bounded is what this issue is entitled to buy; removing it
     /// outright is the same I6 trade as the paragraph above, and it is the reason
     /// `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge` asserts
     /// the *barred* screen against its own heading rather than asserting that
