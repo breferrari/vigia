@@ -3181,3 +3181,58 @@ fn the_hint_bar_never_marks_its_own_edge() {
          far fewer rows than it should"
     );
 }
+
+#[test]
+fn the_pane_holds_its_trailing_margin_off_the_chrome() {
+    // The half of the ladder no drawn glance row can report, found by round 5 of
+    // #119's audit as a mutation nothing killed: widening the source's trailing
+    // half at a single rung survives the whole workspace suite.
+    //
+    // **Why the glance rows cannot see it.** A file row's right-hand blank is the
+    // scrollbar's reserve of two columns, drawn or not, at every width. The
+    // trailing margin is narrower than that reserve everywhere, so it never
+    // decides where a glance row stops and changing it moves nothing on those
+    // rows. `a_row_pays_its_margin_once_and_the_bars_reserve_once` in
+    // `tests/render.rs` therefore pins a constant two on the right by design.
+    //
+    // Chrome is where the trailing half is load bearing, because the header and
+    // the footer have no bar to reserve against and stop at the margin itself.
+    // The header's mode word is right-aligned and drawn whole or not at all, so
+    // the blank behind it is exactly the trailing margin whenever it is drawn.
+    let view = every_row_kind();
+    let chrome = chrome();
+    let word = chrome.mode.word();
+    let mut checked: Vec<u16> = Vec::new();
+
+    for width in WIDTHS {
+        let rows = rows_at(width, 24, &view, &chrome);
+        let header = &rows[0];
+        // `rows_at` trims trailing blanks, so the drawn row cannot report them.
+        // The mode word's own end is what locates the margin instead: the row is
+        // trimmed back to it, so the columns after it are the blank.
+        if !header.ends_with(word) {
+            continue;
+        }
+        let occupied = Span::raw(header.as_str()).width();
+        let trailing = usize::from(width).saturating_sub(occupied);
+        checked.push(width);
+        assert_eq!(
+            trailing,
+            margin_at(width) - inset_at(width),
+            "at {width} columns the header's mode word leaves {trailing} columns \
+             behind it where the ladder's trailing half is {}, so the pane's right \
+             margin and the table have come apart: {header:?}",
+            margin_at(width) - inset_at(width)
+        );
+    }
+
+    // The rungs where the trailing half actually changes, named rather than
+    // counted, for the reason every sweep on this branch now names them.
+    for rung in [43u16, 44, 79, 80] {
+        assert!(
+            checked.contains(&rung),
+            "the sweep never drew the mode word at {rung} columns, which is a rung \
+             boundary of the margin ladder"
+        );
+    }
+}

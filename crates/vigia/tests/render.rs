@@ -4282,8 +4282,18 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
     // arithmetic, and every one of them was a column out at whichever rung is
     // odd, including the sentence that had just been written to correct the
     // previous one. A range in a comment cannot be wrong loudly. The loop below
-    // therefore records where the blanks match and checks it against the rule
-    // they follow, so the claim is derived at the same place it is used.
+    // therefore records the narrowest width whose two blanks match and pins it,
+    // so the claim is measured off the screen at the same place it is used.
+    //
+    // **One assertion here was a tautology and is gone**, which is worth keeping
+    // as a note because of where it happened. Alongside the pin, the first
+    // version also asserted per width that `leading == trailing` exactly when the
+    // leading half reaches the reserve. The `assert_eq!` above already pins
+    // `leading` to the leading half and `trailing` to two, so substituting makes
+    // those two expressions the same one: it passed whenever the assertion above
+    // it passed and was unreachable otherwise. Deleting it changed no mutation
+    // outcome. An unfalsifiable check, written into the very commit that existed
+    // to replace an uncheckable claim.
     //
     // **Swept, and the odd rungs are in the sweep rather than excused from it.**
     // A first version sampled 80 and 120, which are the widths where the margin's
@@ -4317,25 +4327,6 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
              paid once: {row:?}"
         );
 
-        // The coincidence, checked where it happens rather than described in a
-        // comment that has to be maintained by hand.
-        assert_eq!(
-            leading == trailing,
-            usize::from(inset_at(width)) == trailing,
-            "at {width} columns the two blanks are {} while the leading half {} \
-             the bar's reserve, so the pane is square at a width where the ladder \
-             says it should not be, or lopsided where it should not be",
-            if leading == trailing {
-                "equal"
-            } else {
-                "unequal"
-            },
-            if usize::from(inset_at(width)) == trailing {
-                "reaches"
-            } else {
-                "does not reach"
-            }
-        );
         if leading == trailing {
             square_from = Some(square_from.map_or(width, |first: u16| first.min(width)));
         }
