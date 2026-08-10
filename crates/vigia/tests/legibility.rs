@@ -3112,6 +3112,17 @@ fn the_hint_bar_never_marks_its_own_edge() {
     let view = every_row_kind();
     let mut saw_hints = 0usize;
     for chrome in [chrome(), following(), diagnostics()] {
+        // **The field extraction below rests on there being no notice**, because
+        // a notice *replaces* the hints and is a single token that marks its own
+        // edge by design. Reading one as a hint bar would redden this gate for
+        // the one reason it is not about. Guarded rather than assumed: none of
+        // the three fixtures carries a notice today and nothing else stops one
+        // being added to them.
+        assert!(
+            chrome.notice.is_none(),
+            "a fixture grew a notice, so the footer's left field is no longer the \
+             hint bar and this gate would be asserting the wrong rule against it"
+        );
         for width in WIDTHS {
             let rows = rows_at(width, 24, &view, &chrome);
             let footer = rows.last().expect("a footer row");
