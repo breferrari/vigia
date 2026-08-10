@@ -2766,7 +2766,11 @@ impl Painter<'_> {
                 Rect {
                     y,
                     height: 1,
-                    x: left + caret_width,
+                    // Saturating like the `left` it is added to, rather than
+                    // half-defended: `render` contracts that any area is legal,
+                    // and an origin near the top of the range is the one part of
+                    // that contract nothing on screen would ever exercise.
+                    x: left.saturating_add(caret_width),
                     width: inner,
                 },
                 &Heading::of(entry),

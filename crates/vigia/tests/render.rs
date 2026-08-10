@@ -4269,16 +4269,25 @@ fn the_pane_stops_the_same_distance_from_both_edges() {
     // scroll stands the same distance from both edges, and the inset has cost the
     // path its own width in columns rather than twice it.
     //
-    // Two widths where the ladder's split is even. 43 and 79 are the odd rungs
-    // and are lopsided by one column on purpose; `the_pane_insets_its_text_at_
-    // every_rung` in `tests/legibility.rs` is what covers those.
-    for width in [80u16, 120] {
+    // **Swept, and the odd rungs are in the sweep rather than excused from it.**
+    // A first version sampled 80 and 120, which are the widths where the margin's
+    // two halves are equal, and reasoned that 43 and 79 were lopsided and so had
+    // to be left out. That was wrong about which quantity the right-hand two is:
+    // it is the scrollbar's constant reserve, not half of anything, so the pair
+    // asserted here is `(inset, 2)` at every width and the odd rungs satisfy it
+    // like the rest. Sampling the two even widths meant the gate never looked at
+    // a rung where the halves differ, which is the only place the claim could
+    // have come apart.
+    let mut checked = 0usize;
+    for width in 43u16..=120 {
         let backend = screen(width, 5, &glancing(), &chrome());
         let row = row_text(&backend, 1);
-        assert!(
-            row.contains("watch.rs"),
-            "row 1 at {width} columns is not the first file heading: {row:?}"
-        );
+        // Below the width where the path survives at all there is no heading to
+        // read; `the_pane_insets_its_text_at_every_rung` owns those.
+        if !row.contains("watch.rs") {
+            continue;
+        }
+        checked += 1;
 
         let leading = row.chars().take_while(|c| *c == ' ').count();
         let trailing = row.chars().rev().take_while(|c| *c == ' ').count();
@@ -4291,6 +4300,14 @@ fn the_pane_stops_the_same_distance_from_both_edges() {
              paid once: {row:?}"
         );
     }
+
+    // Both rungs of the ladder have to be inside what the sweep actually read,
+    // or it has re-sampled one case under a wider loop.
+    assert!(
+        checked > 60,
+        "only {checked} widths drew a file heading, which is too few to have \
+         crossed the ladder's rungs"
+    );
 }
 
 #[test]

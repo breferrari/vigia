@@ -3028,3 +3028,118 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
         );
     }
 }
+
+#[test]
+fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
+    // Found by the adversarial pass on
+    // [#119](https://github.com/breferrari/vigia/issues/119), which deleted
+    // `Painter::region_text`'s trailing term and watched the whole suite stay
+    // green while the diff's content rows ran two columns further right.
+    //
+    // **The gap was a fixture property rather than an oversight.**
+    // `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge` in
+    // `tests/render.rs` is the other half of this rule, and it draws only the
+    // screens where a scrollbar exists. There, the region has already lost the
+    // bar's two columns and `region_text`'s `min` picks that edge whatever the
+    // margin says, so the term it is about is unreachable from that gate. This
+    // one draws the opposite screen: a diff that fits, no bar, and the trailing
+    // margin as the only thing holding the row back from the pane's edge.
+    let long = "        for change in self.changes() { ".repeat(8);
+    let view = View {
+        // Inside the pane at every height swept below, so `scrollable` is false
+        // and no bar is drawn. That is the whole point of the fixture.
+        total_rows: 0,
+        rows_above: 0,
+        rows: vec![
+            Row::Hunk {
+                old_start: 258,
+                old_lines: 7,
+                new_start: 258,
+                new_lines: 9,
+            },
+            line(LineKind::Removed, 260, &long),
+            line(LineKind::Added, 261, &long),
+        ],
+        ..every_row_kind()
+    };
+
+    let mut reached = 0usize;
+    for width in WIDTHS {
+        let trailing = margin_at(width) - inset_at(width);
+        let rows = rows_at(width, 8, &view, &chrome());
+        for (y, row) in rows.iter().enumerate() {
+            // The rule runs edge to edge by §5.3 and is the one row exempt.
+            if row.is_empty() || row.starts_with('─') {
+                continue;
+            }
+            let occupied = Span::raw(row.as_str()).width();
+            assert!(
+                occupied + trailing <= usize::from(width),
+                "at {width} columns row {y} occupies {occupied} of the pane and \
+                 leaves {} columns behind it, inside the {trailing}-column \
+                 trailing margin: {row:?}",
+                usize::from(width) - occupied
+            );
+            if trailing > 0 && occupied + trailing == usize::from(width) {
+                reached += 1;
+            }
+        }
+    }
+
+    // **A row has to actually stand on the margin somewhere**, or this asserts a
+    // ceiling nothing reaches and deleting the term under test stays green,
+    // which is exactly how the term got shipped ungated in the first place.
+    assert!(
+        reached > 0,
+        "no row anywhere in the sweep ended exactly on the trailing margin, so \
+         this gate is a bound nothing touches"
+    );
+}
+
+#[test]
+fn the_hint_bar_never_marks_its_own_edge() {
+    // §11.1: the hint bar is a **list**, so it drops whole hints and never part
+    // of one. `the_hint_bar_drops_whole_hints_and_never_half_of_one` asserts the
+    // rung is whole; this asserts the row it was drawn into was wide enough to
+    // hold it, which is a different failure and was reachable.
+    //
+    // Found by the adversarial pass on #119 by deleting `Footer::plan`'s
+    // trailing term: the suite stayed green while the footer drew
+    // `q quit · f follow · jk scro›` at 44, 55, 68 and 76 columns. The plan
+    // picks a rung against one width and `Painter::status_line` draws it into
+    // another, so any drift between the two marks the bar rather than dropping a
+    // rung, and nothing was watching the *drawn* row for it.
+    let view = every_row_kind();
+    let mut saw_hints = 0usize;
+    for chrome in [chrome(), following(), diagnostics()] {
+        for width in WIDTHS {
+            let rows = rows_at(width, 24, &view, &chrome);
+            let footer = rows.last().expect("a footer row");
+            if footer.is_empty() {
+                continue;
+            }
+            // The hints are the left-hand field. The state and the readouts are
+            // right-aligned and are not a list, so a mark inside them would be a
+            // different rule's business.
+            let hints = content(footer, width)
+                .split("  ")
+                .next()
+                .unwrap_or_default()
+                .trim_end();
+            if hints.contains(HINT_SEPARATOR) || hints.starts_with("f follow") {
+                saw_hints += 1;
+            }
+            assert!(
+                !hints.contains(CONTINUES),
+                "at {width} columns the hint bar marked its own edge ({hints:?}), \
+                 so a rung was drawn into a row narrower than the plan measured \
+                 it against instead of a whole hint being dropped"
+            );
+        }
+    }
+    assert!(
+        saw_hints > 100,
+        "only {saw_hints} screens drew a hint bar at all, so this sweep never \
+         reached the row it is about"
+    );
+}
