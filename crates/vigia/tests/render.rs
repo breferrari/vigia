@@ -97,6 +97,54 @@ fn heat_colours(theme: &Theme) -> Vec<Option<Color>> {
     .collect()
 }
 
+/// #119's margin ladder, widest pane first: blank columns the pane keeps between
+/// its own edge and any glyph, **both sides counted together**.
+///
+/// Restated rather than imported, for the reason this file restates every
+/// constant it asserts against: a test reading the renderer's own table would
+/// agree with it by construction instead of checking it.
+///
+/// A total rather than a per-side figure because a per-side ladder steps both
+/// sides on the same column, which hands a widening pane a narrower row. The odd
+/// rungs at 43 and 79 are the step between the two even ones #119 names, so at 44
+/// the pane keeps one cell a side and at 80 it keeps two.
+const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
+
+/// The column every row's text begins at, on a pane this wide: the margin above,
+/// split evenly with the odd column going left.
+fn inset_at(width: u16) -> u16 {
+    let total = MARGIN_RUNGS
+        .iter()
+        .find(|(from, _)| width >= *from)
+        .map_or(0, |(_, cells)| *cells);
+    total.div_ceil(2)
+}
+
+/// A drawn row with the pane's inset taken off its head, having first checked
+/// that the inset is exactly what is there.
+///
+/// The check and the strip are one operation rather than a `trim_start` on
+/// purpose: trimming accepts whatever the pane did, including a row still drawn
+/// at column zero, so every assertion reading a row from its head would quietly
+/// stop being able to fail.
+fn content(row: &str, width: u16) -> &str {
+    if row.is_empty() {
+        return row;
+    }
+    let inset = usize::from(inset_at(width));
+    let head: Vec<char> = row.chars().take(inset).collect();
+    assert!(
+        head.len() == inset && head.iter().all(|c| *c == ' '),
+        "at {width} columns a row put a glyph inside the pane's {inset}-column \
+         inset: {row:?}"
+    );
+    let at = row
+        .char_indices()
+        .nth(inset)
+        .map_or(row.len(), |(at, _)| at);
+    &row[at..]
+}
+
 /// Draw a view at `width` by `height` and hand back the backend to snapshot.
 fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
@@ -1150,6 +1198,11 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             // the background agree on a space: at seventeen columns the row is
             // `vigia   watching`, and the space after the name belongs to the
             // gap rather than to the clause the ladder drew.
+            // #119's inset off the head first, and through `content` so that the
+            // strip is also the assertion: a `trim_start` here would let a row
+            // drawn at column zero match just as well, and `drawn.is_empty()`
+            // below would then quietly skip every screen instead of failing.
+            let header = content(&header, width);
             let matched: String = header
                 .chars()
                 .zip(clause.chars())
@@ -1172,7 +1225,7 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             }
             let cells = drawn.chars().count() + usize::from(cut);
             for x in 0..cells {
-                let cell = &backend.buffer()[(x as u16, 0)];
+                let cell = &backend.buffer()[(x as u16 + inset_at(width), 0)];
                 assert_eq!(
                     cell.style().fg,
                     theme.chrome.fg,
@@ -1201,7 +1254,7 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
     // Without this the loop above would pass against a renderer that painted the
     // entire row in `chrome`.
     let backend = screen(80, 8, &view, &chrome());
-    let gap = &backend.buffer()[(clause.chars().count() as u16 + 1, 0)];
+    let gap = &backend.buffer()[(clause.chars().count() as u16 + 1 + inset_at(80), 0)];
     assert_eq!(
         gap.style().fg,
         theme.chrome_dim.fg,
@@ -1384,7 +1437,7 @@ fn the_empty_state_names_the_branch_and_what_it_did_not_find() {
     // and was being told it was clean while `git status` said the opposite.
     let backend = screen(80, 6, &nothing_changed(), &empty_chrome());
     assert_eq!(
-        row_text(&backend, 1).trim_end(),
+        content(row_text(&backend, 1).trim_end(), 80),
         "no unstaged changes · main"
     );
 }
@@ -1396,7 +1449,10 @@ fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
     // because `HEAD@abc123` would put a commit id in a monitor that shows no
     // commits.
     let backend = screen(80, 6, &nothing_changed(), &chrome());
-    assert_eq!(row_text(&backend, 1).trim_end(), "no unstaged changes");
+    assert_eq!(
+        content(row_text(&backend, 1).trim_end(), 80),
+        "no unstaged changes"
+    );
 }
 
 #[test]
@@ -2099,8 +2155,12 @@ fn the_palette_reaches_the_cells() {
     let buffer = backend.buffer();
     let theme = Theme::default();
 
+    // #119: the pane's own inset comes before anything a row draws, so every
+    // column counted here is counted from the first content column and not from
+    // the pane's edge.
+    let inset = inset_at(80);
     let row_of = |needle: char, y: u16| {
-        let cell = &buffer[(0, y)];
+        let cell = &buffer[(inset, y)];
         assert_eq!(
             cell.symbol(),
             needle.to_string(),
@@ -2111,7 +2171,7 @@ fn the_palette_reaches_the_cells() {
 
     // Body rows start at y = 1: the header is y = 0. The gutter occupies the
     // first columns, so the sigil and its colour are found past it.
-    let sigil_x = 4;
+    let sigil_x = inset + 4;
     let removed = &buffer[(sigil_x, 5)];
     let added = &buffer[(sigil_x, 6)];
     assert_eq!(removed.symbol(), "-", "expected the removed line at y=5");
@@ -2125,7 +2185,7 @@ fn the_palette_reaches_the_cells() {
          palette exists to prevent"
     );
     assert_eq!(
-        buffer[(0, 5)].style().fg,
+        buffer[(inset, 5)].style().fg,
         theme.gutter.fg,
         "the line number is not drawn in the gutter colour"
     );
@@ -2829,10 +2889,11 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
         );
     }
 
-    // The path's own cell, past the kind letter and its space. Compared on
-    // foreground and modifiers rather than on the whole `Style`, because a cell
-    // carries the buffer's own defaults for everything the theme left alone.
-    let path_x = 2;
+    // The path's own cell, past the pane's inset and then past the kind letter
+    // and its space. Compared on foreground and modifiers rather than on the
+    // whole `Style`, because a cell carries the buffer's own defaults for
+    // everything the theme left alone.
+    let path_x = inset_at(80) + 2;
     let drawn = |y: u16| {
         let style = backend.buffer()[(path_x, y)].style();
         (style.fg, style.add_modifier)
@@ -3067,8 +3128,12 @@ fn the_caret_marks_the_file_the_diff_is_inside() {
         let buffer = backend.buffer();
 
         for row in 0..3u16 {
-            // The list starts on row 1, immediately under the single header line.
-            let marked = buffer[(0, row + 1)].symbol() == CARET;
+            // The list starts on row 1, immediately under the single header line,
+            // and the caret sits at the pane's first content column rather than
+            // at its edge: #119 moves the marker with the text it points into,
+            // which is what `assets/preview.svg` draws (window edge `x=8`, caret
+            // `x=16`, kind letter `x=32`).
+            let marked = buffer[(inset_at(64), row + 1)].symbol() == CARET;
             assert_eq!(
                 marked,
                 row as usize == current,
@@ -3538,7 +3603,14 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         if bar {
             saw_both = true;
         }
-        let left = usize::from(width) - if bar { BAR_COLUMNS } else { 0 } - CARET_COLUMNS;
+        // **The pane's inset comes off before anything else does.** Left out of
+        // this sum, the gate credits the row with one or two columns it does not
+        // have and goes on passing at exactly the widths where the floor comes
+        // closest to being breached, which are the only widths it is about.
+        let left = usize::from(width)
+            - if bar { BAR_COLUMNS } else { 0 }
+            - CARET_COLUMNS
+            - usize::from(inset_at(width));
         assert!(
             left >= ROW_FLOOR,
             "at {width} columns the row draws a caret{} leaving {left} columns, \
@@ -4089,5 +4161,134 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                 &chrome(),
             );
         }
+    }
+}
+
+#[test]
+fn the_wash_bleeds_under_the_inset() {
+    // The half of [#119](https://github.com/breferrari/vigia/issues/119) that
+    // makes the inset design rather than padding, and the half that would be
+    // silently lost by an implementation that moved the *wash* instead of the
+    // *text*. `SPEC.md` §5.3: furniture runs full-bleed and text is inset, and
+    // the two roles must not swap. The issue is explicit about why: a wash that
+    // stops short reads as a misaligned highlight, where a wash the content sits
+    // *on* reads as a band.
+    //
+    // So the pane's own first column has to be **washed and blank at once**. Both
+    // claims together are the gate: washed alone passes against a pane that never
+    // inset anything, and blank alone passes against a pane whose band starts
+    // where its text does.
+    //
+    // Drawn through `Theme::dark` for `a_wash_stops_before_the_scrollbar_column`'s
+    // reason: the sixteen named colours paint no row tint at any depth, so this
+    // gate on `Theme::default` would assert that a wash nobody painted did not
+    // reach a column it was never going to.
+    fn washed(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        let theme = vigia::Theme::dark();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+            })
+            .expect("draw");
+        terminal.backend().clone()
+    }
+
+    // Eighty and a hundred and twenty, which are two rungs of the ladder and two
+    // of the three widths `SPEC.md` §3 names.
+    for width in [80u16, 120] {
+        let inset = inset_at(width);
+        assert!(
+            inset > 0,
+            "at {width} columns the pane takes no inset, so this gate has \
+             nothing to be about"
+        );
+        let view = View {
+            total_rows: 400,
+            rows_above: 40,
+            rows: vec![
+                file("src/engine/watch.rs", 42, 7),
+                Row::Hunk {
+                    old_start: 38,
+                    old_lines: 8,
+                    new_start: 38,
+                    new_lines: 9,
+                },
+                line(
+                    LineKind::Removed,
+                    38,
+                    "    let stale = self.pending.take();",
+                ),
+                line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+            ],
+            ..two_regions(1)
+        };
+        let backend = washed(width, 18, &view, &chrome());
+        let buffer = backend.buffer();
+
+        // Found by its content rather than by a hardcoded y, since the regions
+        // above it move when the list's height rule does.
+        let row = (0..18u16)
+            .find(|y| row_text(&backend, *y).contains("let stale"))
+            .expect("the removed line was not drawn at all");
+
+        let inside = buffer[(inset, row)].bg;
+        assert_ne!(
+            inside,
+            ratatui::style::Color::Reset,
+            "at {width} columns the removed line was not washed at all, so this \
+             gate proves nothing"
+        );
+
+        for x in 0..inset {
+            assert_eq!(
+                buffer[(x, row)].bg,
+                inside,
+                "at {width} columns the wash starts at the text instead of the \
+                 pane's edge: column {x} of a washed row carries no band, so the \
+                 inset reads as a misaligned highlight"
+            );
+            assert_eq!(
+                buffer[(x, row)].symbol(),
+                " ",
+                "at {width} columns column {x} carries a glyph, so the text did \
+                 not stand back from the edge the wash reaches"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_pane_stops_the_same_distance_from_both_edges() {
+    // The premise `planning_width` charges the inset on one side only rests on,
+    // measured off a drawn row rather than derived: `SPEC.md` §11.1 rules that a
+    // glance row's two trailing columns are the **scrollbar's reserve** and not a
+    // margin, and #119 adds the matching leading columns rather than a second set
+    // of trailing ones. If that is right, a file row on a pane with nothing to
+    // scroll stands the same distance from both edges, and the inset has cost the
+    // path its own width in columns rather than twice it.
+    //
+    // Two widths where the ladder's split is even. 43 and 79 are the odd rungs
+    // and are lopsided by one column on purpose; `the_pane_insets_its_text_at_
+    // every_rung` in `tests/legibility.rs` is what covers those.
+    for width in [80u16, 120] {
+        let backend = screen(width, 5, &glancing(), &chrome());
+        let row = row_text(&backend, 1);
+        assert!(
+            row.contains("watch.rs"),
+            "row 1 at {width} columns is not the first file heading: {row:?}"
+        );
+
+        let leading = row.chars().take_while(|c| *c == ' ').count();
+        let trailing = row.chars().rev().take_while(|c| *c == ' ').count();
+        assert_eq!(
+            (leading, trailing),
+            (usize::from(inset_at(width)), 2),
+            "at {width} columns a file row stands {leading} columns from the left \
+             and {trailing} from the right. The right is the bar's reserve and \
+             never a margin (§11.1), so these agreeing is what says the inset was \
+             paid once: {row:?}"
+        );
     }
 }

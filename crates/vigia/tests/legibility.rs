@@ -52,6 +52,71 @@ const FACT_JOIN: &str = " · ";
 /// Widths every sweep covers. One column to well past the widest snapshot.
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
+/// #119's margin ladder, widest pane first: blank columns the pane keeps between
+/// its own edge and any glyph, **both sides counted together**.
+///
+/// Restated rather than imported, for [`CONTINUES`]' and `FACT_JOIN`'s reason and
+/// for the one this file states over the glance rungs: *a test that read the
+/// renderer's own table would agree with it by construction instead of checking
+/// it.* Every width in this file is derived against these numbers, so importing
+/// them would make the whole sweep unfalsifiable in exactly the direction it
+/// exists to watch.
+///
+/// A total rather than a per-side figure because a per-side ladder steps both
+/// sides on one column and hands a widening pane a narrower row, which
+/// `a_bonus_hint_rung_never_buys_itself_a_footer_row` below is what catches. The
+/// odd rungs at 43 and 79 are the step between the two even ones #119 names.
+const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
+
+/// Columns a pane this wide spends on margins, both sides together. What a row's
+/// text loses off the pane's own width.
+fn margin_at(width: u16) -> usize {
+    MARGIN_RUNGS
+        .iter()
+        .find(|(from, _)| width >= *from)
+        .map_or(0, |(_, cells)| usize::from(*cells))
+}
+
+/// The column a pane this wide begins drawing text at: the margin above, split
+/// evenly with the odd column going left.
+///
+/// Not half of [`margin_at`] rounded either way at the two odd rungs, which is
+/// why both exist: a fit predicate wants the whole margin and a cell read wants
+/// the left half, and at 43 and 79 those are 1 and 1 rather than 1 and 2.
+fn inset_at(width: u16) -> usize {
+    margin_at(width).div_ceil(2)
+}
+
+/// A drawn row with the pane's inset taken off its head, having first checked
+/// that the inset is exactly what is there.
+///
+/// **The check and the strip are one operation on purpose, and that is the whole
+/// reason this exists rather than a `trim_start`.** Trimming would pass whatever
+/// the pane did: two columns, five columns, or a row drawn at column zero when
+/// the ladder says otherwise. Every assertion in this file that reads a row from
+/// its head goes through here, so the inset is asserted once per read instead of
+/// once in a gate that the other reads then quietly stop covering.
+///
+/// A blank row has nothing to say about the inset and is handed back untouched,
+/// since [`rows_at`] has already trimmed it to nothing.
+fn content(row: &str, width: u16) -> &str {
+    if row.is_empty() {
+        return row;
+    }
+    let inset = inset_at(width);
+    let head: Vec<char> = row.chars().take(inset).collect();
+    assert!(
+        head.len() == inset && head.iter().all(|c| *c == ' '),
+        "at {width} columns a row put a glyph inside the pane's {inset}-column \
+         inset: {row:?}"
+    );
+    let at = row
+        .char_indices()
+        .nth(inset)
+        .map_or(row.len(), |(at, _)| at);
+    &row[at..]
+}
+
 fn theme() -> Theme {
     Theme::default()
 }
@@ -453,7 +518,16 @@ fn entry(path: &str) -> FileEntry {
 /// Dropped entirely is legal because the right-hand text is placed first: a
 /// header at eight columns spends all of them on `watching` and shows no name at
 /// all, which `Painter::put_right` documents as deliberate.
-fn label_is_honest(row: &str, label: &str) -> bool {
+/// **Takes the pane width so it can strip #119's inset before matching**, and
+/// that is a correctness argument rather than a convenience. This helper reads
+/// the row from its head, and its `common.is_empty()` arm returns *honest* — the
+/// legal "dropped entirely" case above. Once the pane insets its text, a row that
+/// no longer begins with the label matches nothing, `common` is empty, and every
+/// caller silently reads `true` for every width: the gate does not fail, it stops
+/// existing. [`content`] both removes the inset and asserts it was exactly there,
+/// so the empty case means dropped again and cannot mean displaced.
+fn label_is_honest(row: &str, label: &str, width: u16) -> bool {
+    let row = content(row, width);
     let common: String = row
         .chars()
         .zip(label.chars())
@@ -840,7 +914,13 @@ fn the_header_ladder_keeps_the_mode_word_last() {
             let (mut saw_both, mut saw_word_only, mut saw_neither) = (false, false, false);
 
             for width in WIDTHS {
-                let header = rows_at(width, 8, &view, &chrome)[0].clone();
+                let drawn = rows_at(width, 8, &view, &chrome)[0].clone();
+                // #119's inset comes off the head before the row is read at all,
+                // through [`content`], which asserts it was exactly there rather
+                // than trimming whatever it finds. The right-hand inset never
+                // reaches the `strip_suffix` below, because `rows_at` has already
+                // trimmed the row's trailing blanks.
+                let header = content(&drawn, width);
                 // What is left once the mode word is off the row, which is the only
                 // honest way to ask what the *left* drew: the word is right-aligned
                 // and the blanks between the two halves belong to neither.
@@ -1062,9 +1142,11 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
             let mut seen: Vec<(Name, bool, bool)> = Vec::new();
 
             for width in WIDTHS.rev() {
-                let header = rows_at(width, 8, &view, &chrome)[0].clone();
+                let drawn = rows_at(width, 8, &view, &chrome)[0].clone();
+                // See the identical strip in `the_header_ladder_keeps_the_mode_word_last`.
+                let header = content(&drawn, width);
                 let has_word = header.ends_with(word);
-                let left = header.strip_suffix(word).unwrap_or(&header).trim_end();
+                let left = header.strip_suffix(word).unwrap_or(header).trim_end();
                 let has_count = left.contains(FACT_JOIN);
 
                 let drawn: String = left
@@ -1159,13 +1241,30 @@ fn the_glance_columns_collapse_in_one_order() {
     // | 4 | 12 | 2 | 0 | 0 | 14 | 30 |
     // | 3 | 12 | 2 | 7 | 0 | 21 | 37 |
     // | 2 | 12 | 2 | 7 | 5 | 26 | 42 |
-    // | 1 | 12 | 2 | 13 | 5 | 32 | 48 |
-    // | 0 | 12 | 2 | 13 | 9 | 36 | 52 |
+    // | 1 | 12 | 2 | 13 | 5 | 32 | 49 |
+    // | 0 | 12 | 2 | 13 | 9 | 36 | 53 |
     //
-    // The `from` column is `ROW_FLOOR + BAR_WIDTH + width`: a region is planned
-    // against the pane less a scrollbar column **whether or not one is drawn**,
-    // because whether one is drawn is a fact about the contents and the layout
-    // is not allowed to be. That is the whole of `planning_width`.
+    // The `from` column is the narrowest pane whose `ROW_FLOOR + BAR_WIDTH +
+    // inset + width` fits: a region is planned against the pane less a scrollbar
+    // column **whether or not one is drawn**, because whether one is drawn is a
+    // fact about the contents and the layout is not allowed to be. That is the
+    // whole of `planning_width`.
+    //
+    // **The `inset` term is #119's, and solving for the pane rather than adding
+    // to it is why the last two rows read 49 and 53.** The pane keeps blank
+    // columns between its edge and any glyph, on a ladder of its own: none below
+    // 44 columns, one from 44, two from 80. The first four boundaries here sit
+    // under 44 and are therefore untouched. The last two sit inside the
+    // one-column rung, and the term is not simply `+1` on each: at 48 columns the
+    // inset is already being charged, so 48 leaves 45 planning columns where
+    // layout 1 needs 46, and the boundary is the first width that clears it.
+    //
+    // **Both were predicted from this table before the change was run, and both
+    // came out exactly.** That is the check #119 owed here, and it is worth more
+    // than the numbers: because the layouts are a written-out table rather than a
+    // greedy allocation, which boundaries move is decidable by reading, so a
+    // derivation that had missed would have meant the hand table and the constant
+    // table disagree, which no green run would have said.
     //
     // Layout 4 is absent below because it changes nothing this test can see: it
     // differs from 5 only by the pulse mark, and the pulse is read by neither of
@@ -1192,13 +1291,17 @@ fn the_glance_columns_collapse_in_one_order() {
     //
     // The bill for both lands on the sparkline, which now needs 42 columns where
     // it used to need 36. §11.1 carries the argument.
+    //
+    // - **One more on the top two rungs only** when the pane took #119's inset
+    //   (48, 52 became 49, 53). Nothing under 44 columns moved, because the
+    //   ladder's own floor is what buys I6's forty-column pane its columns back.
     const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
         (1, (false, 0, 0)),
         (28, (true, 0, 0)),
         (37, (true, 6, 0)),
         (42, (true, 6, 4)),
-        (48, (true, 12, 4)),
-        (52, (true, 12, 8)),
+        (49, (true, 12, 4)),
+        (53, (true, 12, 8)),
     ];
     let theme = theme();
     let heats = heat_colours(&theme);
@@ -1624,14 +1727,18 @@ fn the_empty_state_line_marks_its_edge() {
         let rows = rows_at(width, 6, &view, &on_a_branch());
         let body = &rows[1];
         assert!(
-            label_is_honest(body, LINE),
+            label_is_honest(body, LINE, width),
             "the empty state was cut at {width} columns without saying so: {body:?}"
         );
 
-        if Span::raw(LINE).width() <= usize::from(width) {
+        // Against the room the line is actually given, which is the pane less
+        // #119's inset on both sides. Measured against the pane instead, this
+        // predicate would claim the line fits at the two widths per rung where
+        // the inset has just taken the columns it needed.
+        if Span::raw(LINE).width() <= usize::from(width).saturating_sub(margin_at(width)) {
             fitted += 1;
             assert!(
-                body.starts_with(LINE),
+                content(body, width).starts_with(LINE),
                 "the empty state fits at {width} columns but was not drawn whole: {body:?}"
             );
             assert!(
@@ -2140,7 +2247,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         // rows own their full width, so for those the width alone decides and
         // both directions can be checked.
         assert!(
-            label_is_honest(&rows[0], &long_name.worktree),
+            label_is_honest(&rows[0], &long_name.worktree, width),
             "the worktree name was cut at {width} columns without saying so: {:?}",
             rows[0]
         );
@@ -2150,13 +2257,15 @@ fn a_label_cut_at_the_right_edge_says_so() {
             ("the note", &rows[2], "  unresolved conflict"),
         ] {
             assert!(
-                label_is_honest(row, full),
+                label_is_honest(row, full, width),
                 "{label} was cut at {width} columns without saying so: {row:?}"
             );
-            if Span::raw(full).width() <= usize::from(width) {
+            // The room the row is given, for the reason the empty state's own fit
+            // predicate carries: #119's inset comes off both sides first.
+            if Span::raw(full).width() <= usize::from(width).saturating_sub(margin_at(width)) {
                 fitted += 1;
                 assert!(
-                    row.starts_with(full),
+                    content(row, width).starts_with(full),
                     "{label} fits at {width} columns but was not drawn whole: {row:?}"
                 );
                 assert!(
@@ -2529,7 +2638,14 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
         .last()
         .expect("a footer")
         .to_owned();
-    let hints = wide.split("  ").next().unwrap_or_default().trim_end();
+    // #119's inset off the head first. Split on two spaces without it and the
+    // very first field is the inset itself, so `hints` came back empty and this
+    // gate reported that the widest pane draws no hint bar at all.
+    let hints = content(&wide, 120)
+        .split("  ")
+        .next()
+        .unwrap_or_default()
+        .trim_end();
     assert!(
         hints.len() > baseline.len(),
         "the widest pane drew {hints:?}, no more than the forty-column bar \
@@ -2712,4 +2828,135 @@ fn a_list_shorter_than_its_region_gives_the_rows_to_the_diff() {
         rule_at + 1,
         rows[rule_at + 1]
     );
+}
+
+#[test]
+fn the_pane_insets_its_text_at_every_rung() {
+    // [#119](https://github.com/breferrari/vigia/issues/119), swept rather than
+    // sampled. `assets/preview.svg` draws its furniture to the window edge and
+    // its glyphs one to three cells inside it, and §5.1's law is that a picture in
+    // a public README is a specification, so the shell drawing everything from
+    // column 0 was a fourth undocumented departure from it.
+    //
+    // **The claim is about the first column a glyph appears in, not about how
+    // much blank a row has.** A row can be blank, or right-aligned with nothing
+    // on its left, and neither says anything about the inset; what is illegal is
+    // a glyph inside the margin. So this asserts a floor on every row and an
+    // equality on the rows that reach it, which together pin the column.
+    //
+    // Every case and every height, because the two regions and the two footer
+    // shapes reach `Painter::text_area` by four different routes and the caret
+    // column reaches it by a fifth.
+    let mut touched = [false; 3];
+    for (label, view, chrome) in cases() {
+        for height in [3u16, 6, 24] {
+            for width in WIDTHS {
+                let inset = inset_at(width);
+                let rows = rows_at(width, height, &view, &chrome);
+                for (y, row) in rows.iter().enumerate() {
+                    if row.is_empty() {
+                        continue;
+                    }
+                    // The rule is furniture and is the one row that must **not**
+                    // stand back: it runs edge to edge, which is the other half
+                    // of §5.3's law and what `the_rule_separates_the_regions_and_
+                    // spans_the_pane` pins in `tests/render.rs`.
+                    if row.starts_with('─') {
+                        continue;
+                    }
+                    let first = row.chars().take_while(|c| *c == ' ').count();
+                    assert!(
+                        first >= inset,
+                        "{label} at {width}x{height}: row {y} starts at column \
+                         {first}, inside the pane's {inset}-column inset: {row:?}"
+                    );
+                    if first == inset && inset < touched.len() {
+                        touched[inset] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // **Every rung is reached by a row that sits exactly on it.** Without this
+    // the sweep above passes against a pane that insets everything by five, or by
+    // a hundred, since `>=` alone cannot tell a margin from an empty screen.
+    for (rung, seen) in touched.iter().enumerate() {
+        assert!(
+            seen,
+            "no row anywhere in the sweep began at column {rung}, so the \
+             {rung}-column rung of the inset ladder is never actually drawn and \
+             this gate is asserting a floor nothing stands on"
+        );
+    }
+}
+
+#[test]
+fn the_inset_never_reaches_the_forty_column_pane() {
+    // I6 is named for forty columns and every one of them is already contested:
+    // `SPEC.md` §11.1 records the sparkline being bought and sold twice over two
+    // columns at exactly this width. #119's ladder has a floor for that reason,
+    // and a floor stated only in a docblock is a floor that moves.
+    //
+    // Asserted by drawing rather than by reading the ladder back, so it fails if
+    // the floor is respected in the table and lost in the renderer.
+    //
+    // **Read off the header**, which is the one row on screen carrying no
+    // indentation of its own. A first version swept every row and failed on
+    // `Row::Note`, which `Painter::body` draws as `format!("  {note}")`: two
+    // spaces that belong to the note and say nothing about the pane. Content that
+    // indents itself cannot report where the margin is; the header can.
+    let mut checked = 0usize;
+    for (label, view, chrome) in cases() {
+        let header = rows_at(40, 24, &view, &chrome)[0].clone();
+        if header.is_empty() {
+            continue;
+        }
+        checked += 1;
+        assert!(
+            !header.starts_with(' '),
+            "{label}: at forty columns the header stands back from the edge \
+             ({header:?}), so the inset has reached the width I6 is named for"
+        );
+    }
+    assert!(
+        checked > 0,
+        "no case drew a header at forty columns, so this gate asserted nothing"
+    );
+}
+
+#[test]
+fn the_inset_never_outgrows_the_scrollbars_reserve() {
+    // What `planning_width` rests on, and the reason it subtracts the pane's
+    // inset on the **left alone**. `SPEC.md` §11.1 rules there is no trailing
+    // reserve beyond the scrollbar column, and that the two columns a glance row
+    // stops short of the pane's edge are the bar's rather than a margin. That
+    // holds only while a row's right-hand margin is at least as wide as the
+    // inset would have wanted, and today it is exactly as wide.
+    //
+    // A rung wider than the bar's reserve would put a trailing reserve back and
+    // needs that ruling re-decided by a person, so this is a gate rather than a
+    // `max` in the renderer quietly doing it for nobody.
+    //
+    // **A claim about the table rather than about a drawn row, deliberately.**
+    // The screen-side half of this is
+    // `tests/render.rs::the_pane_stops_the_same_distance_from_both_edges`, which
+    // measures both margins of a real row; what is left here is the standing
+    // condition that lets `planning_width` charge the inset on one side, and the
+    // only way to break it is to edit the ladder. A first version also asserted
+    // that no row overruns the pane and was wrong twice over: `rows_at` keeps the
+    // leading blanks, so `occupied` already counts the inset and adding it again
+    // double-charged, and the overrun claim is what
+    // `no_row_ever_occupies_more_columns_than_the_screen` already sweeps.
+    const BAR_COLUMNS: usize = 2;
+    for width in WIDTHS {
+        let inset = inset_at(width);
+        assert!(
+            inset <= BAR_COLUMNS,
+            "at {width} columns the pane wants a {inset}-column inset, wider \
+             than the {BAR_COLUMNS} the scrollbar already reserves, so the right \
+             margin is no longer the bar's and §11.1's no-trailing-reserve ruling \
+             has to be re-decided"
+        );
+    }
 }

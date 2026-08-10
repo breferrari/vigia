@@ -368,6 +368,108 @@ const BAR_WIDTH: usize = reserved(1);
 /// between the two floors reads off the source rather than being asserted here.
 const BAR_FLOOR: usize = BAR_WIDTH + ROW_FLOOR;
 
+/// The pane's whole margin, both sides counted together: blank columns it keeps
+/// between its own edge and any glyph. Widest pane first.
+///
+/// `assets/preview.svg` draws its **furniture** to the window's edge and its
+/// **text** one to three cells inside it. Measured off the file: the nine row
+/// washes span `x=8 width=884` and the region rule runs `x1=8` to `x2=892`, which
+/// is the window exactly, while the nearest glyph is the caret at `x=16` and the
+/// text proper begins at `x=32`. The shell drew everything from column 0, and by
+/// §5.1's own law a picture in a public README is a specification, so that was a
+/// fourth undocumented departure from it rather than a choice
+/// ([#119](https://github.com/breferrari/vigia/issues/119)).
+///
+/// **Nothing below forty-four columns**, and that floor is the ladder's point
+/// rather than a rounding. I6 is named for forty and every column there is
+/// already contested: the sparkline has been bought and sold twice in this file
+/// over two columns at exactly that width. A pane that cannot afford an inset
+/// does not take one, and a reader at forty gets the pane they got before.
+///
+/// **Two rungs and a floor**, rather than three rows, so the fallthrough in
+/// [`inset_of`] is the I6 case a sweep actually reaches instead of a row no pane
+/// can miss. `SPEC.md` §11.1 carries the rungs.
+///
+/// The top rung is a judgement inside what the picture shows rather than a number
+/// read off it: the mockup's own left inset is one cell at the caret and three at
+/// the kind letter, on a canvas about a hundred and nine columns wide. §5.3
+/// already rules that the picture binds the element set and each element's
+/// promises, never glyph-for-glyph fidelity.
+///
+/// **Counted as a total across both sides rather than per side, and that is the
+/// rung table rather than an arithmetic convenience.** A per-side ladder steps
+/// its two sides on the same column, so it costs two columns for the one a
+/// widening pane just gained: `pane - 2` goes *down* by one exactly where it
+/// should go up. That is what [`ROW_LAYOUTS`] is written out to refuse, one
+/// element further out, and it is not theoretical. Taking both sides at once grew
+/// the footer to two rows at 44 and at 80, spending a body row on a wider pane,
+/// and walked the header's worktree name from marked back to whole as the pane
+/// *narrowed* across 80. Both were caught by gates that already existed
+/// (`a_bonus_hint_rung_never_buys_itself_a_footer_row`,
+/// `the_header_facts_degrade_through_one_recorded_sequence`), which is what an
+/// invariant with a failing test behind it is for.
+///
+/// So the total climbs by one per rung and [`margins_of`] splits it. The two odd
+/// rungs are the widths where the pane has bought one column of margin and not
+/// yet the second: 43 and 79. **The widths #119 actually names are both even**,
+/// one cell a side at 44 and two at 80, so the ladder it proposed is what ships
+/// and these two rows are the step between them rather than a change to it.
+const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
+
+/// The margin a pane this wide takes, both sides together.
+///
+/// A table resolved by reading down it, for [`Columns::plan`]'s reason one
+/// element out: a written-out ladder cannot oscillate where a formula can, and
+/// monotonicity is then a property of the table rather than an argument about the
+/// code. `the_pane_insets_its_text_at_every_rung` is what reddens if a rung is
+/// ever added out of order, since it sweeps the drawn column rather than reading
+/// this table back.
+///
+/// **Decided from the pane and never from a region**, which is the same ruling
+/// [`planning_width`] and [`CARET_FLOOR`] already make: a region rect has lost
+/// the bar's columns when a bar was drawn, and whether one was is a fact about
+/// the *contents*. Reading the inset off one would make a pane at eighty columns
+/// take the eighty-column inset until a seventh file changed.
+const fn margin_of(pane: u16) -> u16 {
+    let mut rung = 0;
+    while rung < MARGIN_RUNGS.len() {
+        let (from, cells) = MARGIN_RUNGS[rung];
+        if pane >= from {
+            return cells;
+        }
+        rung += 1;
+    }
+    // Under every rung, which is where I6's forty-column pane lands.
+    0
+}
+
+/// The blank columns the pane keeps on its left and on its right.
+///
+/// The rung above, **split as evenly as it goes, with the odd column going
+/// left.** A reader registers the left margin as the edge of the page, since it
+/// is where every line starts, and the regions already take their left from this
+/// ladder while their right is the scrollbar's fixed reserve, so spending the odd
+/// column on the left is what keeps chrome and rows converging as a pane widens
+/// rather than alternating.
+///
+/// At the two widths #119 names the split is even, one cell a side at 44 and two
+/// at 80. Only 43 and 79 are lopsided, and each is a single width.
+///
+/// A region does not call this. [`planning_width`] takes the left alone, because
+/// `SPEC.md` §11.1 rules its right-hand columns are the bar's and not a margin.
+const fn margins_of(pane: u16) -> (u16, u16) {
+    let total = margin_of(pane);
+    (total.div_ceil(2), total / 2)
+}
+
+/// The column a pane this wide begins drawing text at.
+///
+/// The left half of [`margins_of`], named because it is what every row is offset
+/// by and what [`planning_width`] charges a region.
+const fn inset_of(pane: u16) -> u16 {
+    margins_of(pane).0
+}
+
 /// Columns the frame time's number gets, whatever it says.
 ///
 /// **A fixed field, and it is the whole of why the readout is safe to draw.**
@@ -946,8 +1048,8 @@ fn scrollable(span: u64, of: u64) -> bool {
 
 /// The width a region's glance columns are planned against.
 ///
-/// **The pane, less a caret inset it may have and less a scrollbar column
-/// whether or not one is drawn.** The bar's presence is a fact about the
+/// **The pane, less its own inset, less a caret column it may have, and less a
+/// scrollbar column whether or not one is drawn.** The bar's presence is a fact about the
 /// contents rather than the pane: [`scrollable`] asks whether what a region
 /// holds outruns what it can show, so a seventh changed file or a diff one row
 /// taller than the screen makes a bar appear and narrows the region under a
@@ -961,8 +1063,25 @@ fn scrollable(span: u64, of: u64) -> bool {
 ///
 /// Written once because both regions need it and they must agree; [`Painter::body`]
 /// takes no caret, so it passes zero.
-const fn planning_width(pane: u16, inset: u16) -> u16 {
-    pane.saturating_sub(BAR_WIDTH as u16).saturating_sub(inset)
+///
+/// **And less the pane's own inset, which is paid on the left alone.** That is
+/// [#119](https://github.com/breferrari/vigia/issues/119) reconciled with the
+/// ruling above it rather than layered on top: `SPEC.md` §11.1 rules there is *no
+/// trailing reserve beyond the scrollbar column*, and that the two columns a row
+/// stops short of the pane's right edge are the bar's rather than a margin. So
+/// the inset does **not** buy a second set of blank columns on the right. It buys
+/// the matching set on the left, and the pane comes out even at the top rung
+/// because [`BAR_WIDTH`] and the widest rung of [`INSET_RUNGS`] are both two.
+///
+/// That coincidence is load bearing, so it is a gate rather than a comment:
+/// `the_inset_never_outgrows_the_scrollbars_reserve` fails if a rung ever exceeds
+/// [`BAR_WIDTH`], because a rung that did would put a trailing reserve back and
+/// needs the §11.1 ruling re-decided rather than a silent `max` here quietly
+/// doing it for nobody.
+const fn planning_width(pane: u16, caret: u16) -> u16 {
+    pane.saturating_sub(BAR_WIDTH as u16)
+        .saturating_sub(inset_of(pane))
+        .saturating_sub(caret)
 }
 
 /// Columns something of `width` costs on the right-hand side of a row.
@@ -1574,7 +1693,24 @@ impl<'a> Footer<'a> {
     /// that is occasionally a column meaner than it had to be, and the meanness
     /// only shows below seventeen columns.
     fn plan(area: Rect, chrome: &'a Chrome, files: usize) -> Self {
-        let width = usize::from(area.width);
+        // **The room the footer's glyphs actually get**, which is the pane less
+        // its inset on both sides: chrome has no scrollbar reserve standing in
+        // for the right-hand half the way a glance row does. Planned here rather
+        // than at each caller because this runs from three of them — [`render`],
+        // [`regions`] and [`body_layout`] — and a footer whose height was decided
+        // against one width and drawn against another would put the diff's last
+        // row under the hints.
+        //
+        // Derived from `area.width` rather than from a `Painter`, since this is a
+        // free function and the pane is what it is handed. [`margins_of`] is a
+        // pure function of the pane, so the three callers cannot disagree.
+        //
+        // **Both margins, and the pair is what keeps this monotone.** The footer's
+        // height must never grow as a pane widens, and a margin that took its two
+        // sides on the same column would do exactly that at 44 and at 80.
+        // [`margins_of`] carries the argument.
+        let (leading, trailing) = margins_of(area.width);
+        let width = usize::from(area.width.saturating_sub(leading).saturating_sub(trailing));
         if area.height < 2 {
             return Self {
                 rows: 0,
@@ -1924,6 +2060,13 @@ pub fn render(
         buf,
         theme,
         gutter: 0,
+        // **From the pane, once, before anything is drawn.** Every row below is
+        // handed a `Rect` that has already lost the bar's columns on the screens
+        // where a bar exists, so a drawer that resolved the ladder from what it
+        // was given would take a different inset on the two regions of one pane
+        // and change it when a seventh file changed. See [`inset_of`].
+        inset: margins_of(area.width).0,
+        trailing: margins_of(area.width).1,
         paint: PaintStats::default(),
     };
 
@@ -2025,11 +2168,46 @@ struct Painter<'a> {
     theme: &'a Theme,
     /// Digits reserved for line numbers, or zero when there is no room.
     gutter: usize,
+    /// Blank columns the pane keeps on its left and on its right, from
+    /// [`margins_of`] and resolved once against the whole pane.
+    ///
+    /// Beside `gutter` and for `gutter`'s reason: a measurement every row shares
+    /// has to be taken once, or the rows disagree about the screen they are on.
+    /// The two are not always equal, and [`margins_of`] says why.
+    inset: u16,
+    /// The right-hand half of the pair above.
+    trailing: u16,
     /// What the content rows have cost so far, returned by [`render`].
     paint: PaintStats,
 }
 
 impl Painter<'_> {
+    /// The columns of `area` a glyph may use.
+    ///
+    /// The complement of what this type draws **furniture** into, which stays
+    /// `area` itself: `SPEC.md` §5.3 rules that washes and rules run to the pane's
+    /// edge while text stands back from it, and that the two roles must not swap.
+    /// A wash that stopped short would read as a misaligned highlight and text at
+    /// column zero reads as squeezed, so [`Painter::line_row`] and
+    /// [`Painter::status_line`] each paint their row from `area` and then place
+    /// their glyphs through this.
+    ///
+    /// **Both sides, unlike a region's glance columns.** The rows that go through
+    /// [`planning_width`] pay the inset on the left alone, because the scrollbar's
+    /// reserve is already standing in the columns the right-hand inset would want.
+    /// Chrome has no bar to reserve against and neither do the diff's content
+    /// rows, so here the pane owes both.
+    fn text_area(&self, area: Rect) -> Rect {
+        Rect {
+            x: area.x.saturating_add(self.inset),
+            width: area
+                .width
+                .saturating_sub(self.inset)
+                .saturating_sub(self.trailing),
+            ..area
+        }
+    }
+
     /// Write `text` at `x`, clipped to `limit` columns, and return the next
     /// column.
     fn put(&mut self, x: u16, y: u16, text: &str, limit: usize, style: Style) -> u16 {
@@ -2213,11 +2391,15 @@ impl Painter<'_> {
         right: &str,
         right_style: Style,
     ) {
+        // **The wash takes the whole row and the text takes the inset one**,
+        // which is §5.3's furniture rule and the reason these two lines address
+        // different rectangles. See [`Painter::text_area`].
         self.buf.set_style(area, self.theme.chrome_dim);
-        let taken = self.put_right(area, right, right_style);
-        let room = usize::from(area.width).saturating_sub(taken);
+        let text = self.text_area(area);
+        let taken = self.put_right(text, right, right_style);
+        let room = usize::from(text.width).saturating_sub(taken);
         let rung = widest_fitting_or_last(left, room);
-        self.put_marked(area.x, area.y, rung, room, style);
+        self.put_marked(text.x, text.y, rung, room, style);
     }
 
     fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
@@ -2310,8 +2492,13 @@ impl Painter<'_> {
         // Where `put_right` will place that string, and how much of its head the
         // readouts occupy. Computed from the same two strings it is drawn from,
         // so the tint below cannot address a column the text does not.
-        let placed =
-            bottom.x + bottom.width - width_of(&right).min(usize::from(bottom.width)) as u16;
+        //
+        // **Against the inset row rather than the whole one**, because that is
+        // where `status_line` puts the text: measuring from the pane's edge would
+        // put `placed` two columns right of the string it names, and the tint
+        // would recolour the blank margin while the readouts stayed grey.
+        let text = self.text_area(bottom);
+        let placed = text.x + text.width - width_of(&right).min(usize::from(text.width)) as u16;
         let readouts = width_of(&footer.diagnostics);
 
         if footer.rows == 2 {
@@ -2329,11 +2516,13 @@ impl Painter<'_> {
                 &right,
                 self.theme.chrome_dim,
             );
-            self.tint_readouts(upper, placed, readouts);
+            // The inset row for the reason `placed` uses one: the walk is bounded
+            // by its `row`'s right edge, and the text's edge is not the pane's.
+            self.tint_readouts(Rect { y: upper.y, ..text }, placed, readouts);
             self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
         } else {
             self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
-            self.tint_readouts(bottom, placed, readouts);
+            self.tint_readouts(text, placed, readouts);
         }
     }
 
@@ -2450,7 +2639,18 @@ impl Painter<'_> {
         // presence depend on whether the list happens to be scrollable. See
         // [`CARET_FLOOR`].
         let caret = usize::from(pane) >= CARET_FLOOR;
-        let inset = if caret { CARET_WIDTH as u16 } else { 0 };
+        let caret_width = if caret { CARET_WIDTH as u16 } else { 0 };
+        // **The pane's inset sits outside the caret's**, which is the order the
+        // picture draws: `assets/preview.svg` puts the window edge at `x=8` and
+        // the caret at `x=16`, one cell in, with the kind letter a caret-column
+        // further at `x=32`. So the marker moves with the text rather than
+        // staying pinned to the edge the wash reaches.
+        //
+        // [`CARET_FLOOR`] is deliberately left alone rather than gaining an
+        // inset term. It is eighteen columns and [`inset_of`] is zero at every
+        // width below forty-four, so a term added here could never change the
+        // answer, and a branch no sweep can reach is a branch no gate can cover.
+        let left = area.x.saturating_add(self.inset);
 
         // From the **pane**, less the caret's inset and less a scrollbar column
         // whether or not one was taken, for [`CARET_FLOOR`]'s reason one element
@@ -2475,7 +2675,7 @@ impl Painter<'_> {
         // all of them even while the layout stayed the same. Those two columns
         // are left blank when there is no bar.
         let shown = usize::from(area.height);
-        let inner = planning_width(pane, inset);
+        let inner = planning_width(pane, caret_width);
         let columns = Columns::plan(inner);
 
         for (offset, entry) in view.list.iter().take(shown).enumerate() {
@@ -2485,13 +2685,13 @@ impl Painter<'_> {
             // untouched, so `View::collect` can legitimately report `usize::MAX`
             // here. `position_of` guards the identical hazard one region up.
             if caret && view.list_top.saturating_add(offset) == view.top.file {
-                self.put(area.x, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
+                self.put(left, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
             }
             self.file_row(
                 Rect {
                     y,
                     height: 1,
-                    x: area.x + inset,
+                    x: left + caret_width,
                     width: inner,
                 },
                 &Heading::of(entry),
@@ -2617,12 +2817,16 @@ impl Painter<'_> {
     }
 
     fn body(&mut self, area: Rect, view: &View, chrome: &Chrome, pane: u16) {
+        // Every glyph this region draws goes through here, and the region rect
+        // itself is kept for the one thing that is furniture rather than text:
+        // [`Painter::line_row`]'s wash. See [`Painter::text_area`].
+        let text = self.text_area(area);
         if view.files == 0 {
             self.put_marked(
-                area.x,
-                area.y,
+                text.x,
+                text.y,
                 &empty_state(chrome.branch.as_deref()),
-                usize::from(area.width),
+                usize::from(text.width),
                 self.theme.chrome_dim,
             );
             return;
@@ -2660,6 +2864,7 @@ impl Painter<'_> {
                 Row::File(entry) => self.file_row(
                     Rect {
                         y,
+                        x: text.x,
                         width: inner,
                         ..area
                     },
@@ -2673,7 +2878,12 @@ impl Painter<'_> {
                     new_start,
                     new_lines,
                 } => {
-                    let text = format!(
+                    // Named `header` rather than `text`, which is the rect this
+                    // region draws its glyphs into and which every arm here now
+                    // reads. The `Row::Line` arm binds a `text` field of its own,
+                    // so one of the three had to give the name up and this is the
+                    // one nothing outside the arm wants.
+                    let header = format!(
                         "@@ -{} +{} @@",
                         span(*old_start, *old_lines),
                         span(*new_start, *new_lines)
@@ -2681,11 +2891,11 @@ impl Painter<'_> {
                     // Marked rather than clipped, and this is the row where it
                     // matters most: `@@ -258,7 +25` is not a shortened header,
                     // it is a header naming a different line.
-                    self.put_marked(area.x, y, &text, usize::from(area.width), self.theme.hunk);
+                    self.put_marked(text.x, y, &header, usize::from(text.width), self.theme.hunk);
                 }
                 Row::Note(note) => {
-                    let text = format!("  {note}");
-                    self.put_marked(area.x, y, &text, usize::from(area.width), self.theme.note);
+                    let drawn = format!("  {note}");
+                    self.put_marked(text.x, y, &drawn, usize::from(text.width), self.theme.note);
                 }
                 Row::Line {
                     kind,
@@ -3074,8 +3284,23 @@ impl Painter<'_> {
             self.buf.set_style(area, wash);
         }
 
-        let mut x = area.x;
-        let mut room = usize::from(area.width);
+        // **The wash above took the whole row and the glyphs take the inset
+        // one**, which is the half of `SPEC.md` §5.3 that makes the inset design
+        // rather than padding: a band the content sits *on* reads as a band, and
+        // a band that stopped where the text stopped would read as a highlight
+        // someone misaligned. [#119](https://github.com/breferrari/vigia/issues/119)
+        // is explicit that it is the pane's furniture that bleeds and only its
+        // text that stands back.
+        //
+        // The wash is still `area` rather than the pane on a screen with a
+        // scrollbar, and that is the existing ruling
+        // `a_wash_stops_before_the_scrollbar_column` rather than something this
+        // changed.
+        // Named `glyphs` rather than `text`, which is this row's content and is
+        // already a parameter here.
+        let glyphs = self.text_area(area);
+        let mut x = glyphs.x;
+        let mut room = usize::from(glyphs.width);
         if self.gutter > 0 {
             let gutter = self.gutter;
             let numbered = format!("{number:>gutter$} ");
