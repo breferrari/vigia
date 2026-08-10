@@ -2,9 +2,9 @@
 source: crates/vigia/tests/render.rs
 expression: "screen(80, 6, &view, &chrome)"
 ---
-"vigia · 1 changed                                                       watching"
-"M crates/vigia-core/src/frame.rs                          ________    +3    -1  "
-"@@ -258,7 +258,9 @@                                                             "
-"258      pub fn advance(&mut self) {                                            "
-"259          let mut files = Vec::new();                                        "
-"the index entry for src/lib.rs points at a missing blob                      1/1"
+"  vigia · 1 changed                                                   watching  "
+"  M crates/vigia-core/src/frame.rs                        ________    +3    -1  "
+"  @@ -258,7 +258,9 @@                                                           "
+"  258      pub fn advance(&mut self) {                                          "
+"  259          let mut files = Vec::new();                                      "
+"  the index entry for src/lib.rs points at a missing blob                  1/1  "
