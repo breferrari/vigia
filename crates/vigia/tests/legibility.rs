@@ -2992,12 +2992,12 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
     // reserve beyond the scrollbar column, and that the two columns a glance row
     // stops short of the pane's edge are the bar's rather than a margin. That
     // holds only while the pane's own right-hand margin is no wider than that
-    // reserve, and today it is exactly as wide.
+    // reserve. Today it never exceeds it and reaches it at the top rung: the
+    // trailing half is 0 below 44 columns, 1 from 44 to 79, and 2 from 80 up.
     //
     // A rung whose right half outgrew the bar's reserve would put a trailing
-    // reserve back and
-    // needs that ruling re-decided by a person, so this is a gate rather than a
-    // `max` in the renderer quietly doing it for nobody.
+    // reserve back and needs that ruling re-decided by a person, so this is a
+    // gate rather than a `max` in the renderer quietly doing it for nobody.
     //
     // **A claim about the table rather than about a drawn row, deliberately.**
     // The screen-side half of this is
@@ -3046,8 +3046,10 @@ fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
     // margin as the only thing holding the row back from the pane's edge.
     let long = "        for change in self.changes() { ".repeat(8);
     let view = View {
-        // Inside the pane at every height swept below, so `scrollable` is false
-        // and no bar is drawn. That is the whole point of the fixture.
+        // No total reported, so `scrollable` is false and no bar is drawn at any
+        // width. That is the whole point of the fixture. Zero means "no total"
+        // rather than "a short diff", and the screen is the same either way; a
+        // realistic spelling would be `total_rows: 3`.
         total_rows: 0,
         rows_above: 0,
         rows: vec![
@@ -3111,6 +3113,7 @@ fn the_hint_bar_never_marks_its_own_edge() {
     // rung, and nothing was watching the *drawn* row for it.
     let view = every_row_kind();
     let mut saw_hints = 0usize;
+    let mut seen_at: Vec<u16> = Vec::new();
     for chrome in [chrome(), following(), diagnostics()] {
         // **The field extraction below rests on there being no notice**, because
         // a notice *replaces* the hints and is a single token that marks its own
@@ -3129,28 +3132,52 @@ fn the_hint_bar_never_marks_its_own_edge() {
             if footer.is_empty() {
                 continue;
             }
-            // The hints are the left-hand field. The state and the readouts are
-            // right-aligned and are not a list, so a mark inside them would be a
-            // different rule's business.
-            let hints = content(footer, width)
-                .split("  ")
-                .next()
-                .unwrap_or_default()
-                .trim_end();
-            if hints.contains(HINT_SEPARATOR) || hints.starts_with("f follow") {
+            // **The whole row, not a parse of it.** A first version split on two
+            // spaces and took the first field as the hints, and that field is a
+            // *superset*: wherever `put_right`'s gap comes out one column wide it
+            // carries the state or the frame cell along with the hints, on 8 of
+            // 339 screens. It never failed open, being only ever stricter, but the
+            // comment claiming it was the hint bar was false, and a gate that
+            // asserts on a field it has misidentified is one edit from asserting
+            // nothing.
+            //
+            // With the notice guarded away above, the row's only markable
+            // left-hand token *is* the hint bar: the state and the diagnostics are
+            // ladders resolved by `widest_fitting`, which drops whole rungs, and
+            // `put_right` drops its token whole rather than cutting it. So a mark
+            // anywhere on this row is the thing this gate is about.
+            let drawn = content(footer, width);
+            if drawn.contains(HINT_SEPARATOR) || drawn.contains("f follow") {
                 saw_hints += 1;
+                seen_at.push(width);
             }
             assert!(
-                !hints.contains(CONTINUES),
-                "at {width} columns the hint bar marked its own edge ({hints:?}), \
-                 so a rung was drawn into a row narrower than the plan measured \
-                 it against instead of a whole hint being dropped"
+                !drawn.contains(CONTINUES),
+                "at {width} columns the footer marked an edge ({drawn:?}). With no \
+                 notice on this chrome the only token that can be marked is the \
+                 hint bar, so a rung was drawn into a row narrower than the plan \
+                 measured it against instead of a whole hint being dropped"
             );
         }
     }
+    // **Named widths rather than a count**, because a count is satisfied by the
+    // wrong widths. The floor here was `saw_hints > 100` against an actual 339 of
+    // 360, which tolerates 239 skips: prefixing the loop's skip with
+    // `width < 87 ||` still passed at 102 while dropping every width where the
+    // defect this gate was written for actually shows, 44 through 76. A
+    // non-vacuity floor with that much slack is a floor that has stopped being
+    // one.
+    for width in [44u16, 55, 68, 76] {
+        assert!(
+            seen_at.contains(&width),
+            "the sweep never read a hint bar at {width} columns, which is inside \
+             the band where dropping `Footer::plan`'s trailing term marks it, so \
+             this gate no longer covers what it was written for"
+        );
+    }
     assert!(
-        saw_hints > 100,
-        "only {saw_hints} screens drew a hint bar at all, so this sweep never \
-         reached the row it is about"
+        saw_hints > 300,
+        "only {saw_hints} of 360 screens drew a hint bar, so the sweep is reading \
+         far fewer rows than it should"
     );
 }

@@ -4278,7 +4278,7 @@ fn the_pane_stops_the_same_distance_from_both_edges() {
     // like the rest. Sampling the two even widths meant the gate never looked at
     // a rung where the halves differ, which is the only place the claim could
     // have come apart.
-    let mut checked = 0usize;
+    let mut read_at: Vec<u16> = Vec::new();
     for width in 43u16..=120 {
         let backend = screen(width, 5, &glancing(), &chrome());
         let row = row_text(&backend, 1);
@@ -4287,7 +4287,7 @@ fn the_pane_stops_the_same_distance_from_both_edges() {
         if !row.contains("watch.rs") {
             continue;
         }
-        checked += 1;
+        read_at.push(width);
 
         let leading = row.chars().take_while(|c| *c == ' ').count();
         let trailing = row.chars().rev().take_while(|c| *c == ' ').count();
@@ -4301,13 +4301,20 @@ fn the_pane_stops_the_same_distance_from_both_edges() {
         );
     }
 
-    // Both rungs of the ladder have to be inside what the sweep actually read,
-    // or it has re-sampled one case under a wider loop.
-    assert!(
-        checked > 60,
-        "only {checked} widths drew a file heading, which is too few to have \
-         crossed the ladder's rungs"
-    );
+    // **Named widths, not a count.** A count is satisfied by the wrong widths.
+    // This sweep reads 78 of 78 and its first floor was `> 60`, which tolerates
+    // seventeen skips: prefixing the skip above with `width < 60 ||` still passed
+    // while the whole 43 to 59 band went unread, rungs and all. The rungs are the
+    // few widths where the margin's two halves differ, so they are the ones worth
+    // naming.
+    for rung in [43u16, 44, 79, 80] {
+        assert!(
+            read_at.contains(&rung),
+            "the sweep never read a file heading at {rung} columns, which is a \
+             boundary of the margin ladder and one of the few widths where its \
+             two halves are not equal"
+        );
+    }
 }
 
 #[test]
@@ -4335,7 +4342,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
     const TRACK: &str = "▕";
     const THUMB: &str = "█";
 
-    let mut checked = 0usize;
+    let mut read_at: Vec<u16> = Vec::new();
     for width in 30u16..=120 {
         // Long enough to reach whatever edge it is given, so the row's rightmost
         // glyph is the edge rather than the end of its text.
@@ -4377,7 +4384,7 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         if !bar_drawn {
             continue;
         }
-        checked += 1;
+        read_at.push(width);
 
         let last_glyph = |y: u16| {
             (0..width)
@@ -4400,12 +4407,15 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         );
     }
 
-    // Both rungs of the margin have to be inside the sweep, or it re-samples the
-    // one case the two-width version already covered. 30 to 120 spans every rung
-    // boundary the ladder has.
-    assert!(
-        checked > 60,
-        "only {checked} widths drew a heading, a long content line and a bar \
-         together, which is too few for a sweep across the ladder's rungs"
-    );
+    // **Named widths, not a count**, for the reason
+    // `the_pane_stops_the_same_distance_from_both_edges` carries in full: the
+    // `> 60` floor this replaced tolerated thirty skips out of ninety-one, enough
+    // to lose every rung boundary while still reading green.
+    for rung in [43u16, 44, 79, 80] {
+        assert!(
+            read_at.contains(&rung),
+            "the sweep never drew a heading, a long content line and a bar \
+             together at {rung} columns, which is a boundary of the margin ladder"
+        );
+    }
 }

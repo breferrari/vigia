@@ -1084,11 +1084,19 @@ fn scrollable(span: u64, of: u64) -> bool {
 /// margin across both sides and [`inset_of`] is what this function charges: the
 /// widest rung is four.
 ///
-/// That coincidence is load bearing, so it is a gate rather than a comment:
-/// `the_inset_never_outgrows_the_scrollbars_reserve` fails if a rung's left half
-/// ever exceeds [`BAR_WIDTH`], because a left half that did would put a trailing
-/// reserve back and needs the §11.1 ruling re-decided rather than a silent `max`
-/// here quietly doing it for nobody.
+/// **The gate watches the other half, and the two sentences are about different
+/// things.** What makes the pane look square at the top rung is the *left* half
+/// matching [`BAR_WIDTH`], which is the paragraph above. What makes charging the
+/// margin once *correct* is the **trailing** half never outgrowing that reserve,
+/// because the reserve is what stands in for it: a right-hand margin wider than
+/// two columns would no longer be covered and §11.1's no-trailing-reserve ruling
+/// would have to be re-decided. So
+/// `the_inset_never_outgrows_the_scrollbars_reserve` asserts the trailing half.
+///
+/// This sentence claimed the leading half until round 3 of #119's audit, which is
+/// the same defect the round before had just fixed **in the test**, restated one
+/// layer up in the prose that explains it. It is falsifiable and was falsified:
+/// a top rung of `(80, 5)` gives a left half of three and the gate stays green.
 const fn planning_width(pane: u16, caret: u16) -> u16 {
     pane.saturating_sub(BAR_WIDTH as u16)
         .saturating_sub(inset_of(pane))
@@ -2728,7 +2736,7 @@ impl Painter<'_> {
         // `planning_width(pane, CARET_WIDTH)` staying at or above [`ROW_FLOOR`],
         // and it does with room: at eighteen columns the inset is zero and the
         // width is exactly fourteen, and every width where the inset is non-zero
-        // is at least twenty-five columns clear of the floor. A term added here
+        // is at least twenty-four columns clear of the floor. A term added here
         // could never change the answer, and a branch no sweep can reach is a
         // branch no gate can cover.
         // `a_row_keeps_its_floor_after_both_the_bar_and_the_caret` sweeps it.
