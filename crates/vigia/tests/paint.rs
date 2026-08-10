@@ -257,21 +257,13 @@ fn a_clipped_wide_row_still_says_it_continues() {
     // would then be reading the bar and reporting every row as unmarked, which is
     // this gate failing for a reason that has nothing to do with what it asserts.
     //
-    // A window at the row's right end rather than a computed column: which cell
-    // holds the mark depends on whether the bar is drawn, on the gap the bar
-    // reserves before itself, and since #119 on the pane's inset as well.
-    // Recomputing all three here would be restating the renderer's own rules
-    // instead of checking its output.
-    //
-    // **Five, which is the three it was plus the widest inset rung.** The window
-    // is a bound rather than a claim about where the mark sits: what this gate
-    // asserts is that a clipped row says so at all, and the exact column is
-    // pinned by `tests/legibility.rs::the_pane_insets_its_text_at_every_rung`.
-    // Widening by the ladder's own maximum leaves this test's claim untouched and
-    // lets the other one carry the precision.
+    // The last three columns rather than a computed one: which of them holds the
+    // mark depends on whether the bar is drawn, and the bar reserves a gap before
+    // itself so the mark can be two columns in. Recomputing that here would be
+    // restating the renderer's own rule instead of checking its output.
     let mut marked = 0usize;
     for y in 1..area.height.saturating_sub(1) {
-        let tail: Vec<String> = (1..=5)
+        let tail: Vec<String> = (1..=3)
             .filter(|back| area.width >= *back)
             .map(|back| buf[(area.width - back, y)].symbol().to_owned())
             .collect();

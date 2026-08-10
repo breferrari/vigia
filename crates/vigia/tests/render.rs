@@ -4308,10 +4308,18 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
     // it here would restate the renderer. What the ruling actually says is that
     // these two agree once the bar has taken its columns, and the bug was exactly
     // their disagreeing.
+    // **Swept, not sampled at the two named widths.** A first version checked 80
+    // and 120 only, which are exactly the rung where the trailing margin equals
+    // the bar's reserve, so the one place the two could come apart went unlooked
+    // at. They do not come apart anywhere, and that is a claim worth holding
+    // rather than a coincidence worth sampling: with a bar drawn the region has
+    // already lost two columns and the margin never wants more than two, so the
+    // stop is the bar's at every width.
     const TRACK: &str = "▕";
     const THUMB: &str = "█";
 
-    for width in [80u16, 120] {
+    let mut checked = 0usize;
+    for width in 30u16..=120 {
         // Long enough to reach whatever edge it is given, so the row's rightmost
         // glyph is the edge rather than the end of its text.
         let long = "    let stale = self.pending.take(); ".repeat(12);
@@ -4333,24 +4341,26 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         let backend = screen(width, 18, &view, &chrome());
         let buffer = backend.buffer();
 
-        let heading = (0..18u16)
-            .find(|y| row_text(&backend, *y).contains("watch.rs") && *y > 4)
-            .expect("the diff's own heading was not drawn");
-        let content = (0..18u16)
-            .find(|y| row_text(&backend, *y).contains("pending"))
-            .expect("the long content line was not drawn");
+        // Narrow panes elide the path, so the heading stops naming `watch.rs` and
+        // there is nothing to compare against. Skipped rather than asserted, with
+        // the counter below standing in for coverage.
+        let (Some(heading), Some(content)) = (
+            (0..18u16).find(|y| row_text(&backend, *y).contains("watch.rs") && *y > 4),
+            (0..18u16).find(|y| row_text(&backend, *y).contains("pending")),
+        ) else {
+            continue;
+        };
 
-        // Non-vacuity: the whole finding is about the screens where a bar exists,
-        // so a fixture that never draws one would assert nothing.
+        // The whole finding is about the screens where a bar exists, so a width
+        // that draws none has nothing to say here.
         let bar_drawn = (0..18u16).any(|y| {
             let cell = buffer[(width - 1, y)].symbol();
             cell == TRACK || cell == THUMB
         });
-        assert!(
-            bar_drawn,
-            "at {width} columns no scrollbar was drawn, so this gate never \
-             reached the case it is about"
-        );
+        if !bar_drawn {
+            continue;
+        }
+        checked += 1;
 
         let last_glyph = |y: u16| {
             (0..width)
@@ -4372,4 +4382,13 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
             last_glyph(heading)
         );
     }
+
+    // Both rungs of the margin have to be inside the sweep, or it re-samples the
+    // one case the two-width version already covered. 30 to 120 spans every rung
+    // boundary the ladder has.
+    assert!(
+        checked > 60,
+        "only {checked} widths drew a heading, a long content line and a bar \
+         together, which is too few for a sweep across the ladder's rungs"
+    );
 }

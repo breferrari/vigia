@@ -80,9 +80,11 @@ fn margin_at(width: u16) -> usize {
 /// The column a pane this wide begins drawing text at: the margin above, split
 /// evenly with the odd column going left.
 ///
-/// Not half of [`margin_at`] rounded either way at the two odd rungs, which is
-/// why both exist: a fit predicate wants the whole margin and a cell read wants
-/// the left half, and at 43 and 79 those are 1 and 1 rather than 1 and 2.
+/// Both exist because a fit predicate wants the whole margin while a cell read
+/// wants the left half, and at the odd rungs those are different numbers: at 43
+/// the margin is 1 and the inset is 1, at 79 the margin is 3 and the inset is 2.
+/// Reaching for one where the other belongs is off by a column at exactly the
+/// two widths nothing else singles out.
 fn inset_at(width: u16) -> usize {
     margin_at(width).div_ceil(2)
 }
@@ -1576,7 +1578,16 @@ fn a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently() {
         let (mut saw_marked, mut saw_whole) = (0usize, 0usize);
 
         for width in WIDTHS {
-            let header = rows_at(width, 8, &view, &chrome)[0].clone();
+            let drawn_row = rows_at(width, 8, &view, &chrome)[0].clone();
+            // #119's margin off the head before anything reads this row from its
+            // start. The `drawn.is_empty()` arm below means *the mode word took
+            // the whole line*, which is the ladder working; with the margin still
+            // on, it would also mean *the name is drawn and simply does not begin
+            // at column zero*, so every width from 43 up would take that
+            // `continue` while `saw_marked` kept ticking on the narrow ones and
+            // the non-vacuity counter stayed satisfied. `content` strips and
+            // asserts in one step, so the empty case cannot mean displaced.
+            let header = content(&drawn_row, width);
             if header.contains(name) {
                 saw_whole += 1;
                 assert!(
@@ -1652,7 +1663,14 @@ fn a_notice_too_long_for_its_pane_is_marked_rather_than_dropped() {
 
     for width in WIDTHS {
         let rows = rows_at(width, 8, &view, &chrome);
-        let footer = rows.last().expect("a footer row").clone();
+        let drawn_row = rows.last().expect("a footer row").clone();
+        // #119's margin off the head, through `content`, for the reason
+        // `a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently`
+        // carries in full: the `drawn.is_empty()` arm below is a legitimate
+        // "the state took the whole line", and leaving the margin on would let it
+        // silently absorb "the notice is drawn but not at column zero" at every
+        // width from 43 up.
+        let footer = content(&drawn_row, width).to_owned();
         // Which of `Painter::footer`'s two `status_line` calls drew this row,
         // read off the screen rather than recomputed. A two-row footer puts the
         // state on the upper line and leaves the notice the bottom one alone; a
@@ -2973,10 +2991,11 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
     // inset on the **left alone**. `SPEC.md` §11.1 rules there is no trailing
     // reserve beyond the scrollbar column, and that the two columns a glance row
     // stops short of the pane's edge are the bar's rather than a margin. That
-    // holds only while a row's right-hand margin is at least as wide as the
-    // inset would have wanted, and today it is exactly as wide.
+    // holds only while the pane's own right-hand margin is no wider than that
+    // reserve, and today it is exactly as wide.
     //
-    // A rung wider than the bar's reserve would put a trailing reserve back and
+    // A rung whose right half outgrew the bar's reserve would put a trailing
+    // reserve back and
     // needs that ruling re-decided by a person, so this is a gate rather than a
     // `max` in the renderer quietly doing it for nobody.
     //
@@ -2990,15 +3009,22 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
     // leading blanks, so `occupied` already counts the inset and adding it again
     // double-charged, and the overrun claim is what
     // `no_row_ever_occupies_more_columns_than_the_screen` already sweeps.
+    // **The trailing half, which is the one the ruling is about.** A first
+    // version asserted the *leading* half, which is the column `planning_width`
+    // charges explicitly and which is therefore under nobody's ruling: it can be
+    // as wide as the pane can afford. What has to stay inside the bar's reserve
+    // is the margin the row does **not** pay for, because the reserve is standing
+    // in for it. The two happen to be equal at every rung today, so the wrong one
+    // passed, which is why this is stated rather than checked by eye.
     const BAR_COLUMNS: usize = 2;
     for width in WIDTHS {
-        let inset = inset_at(width);
+        let trailing = margin_at(width) - inset_at(width);
         assert!(
-            inset <= BAR_COLUMNS,
-            "at {width} columns the pane wants a {inset}-column inset, wider \
-             than the {BAR_COLUMNS} the scrollbar already reserves, so the right \
-             margin is no longer the bar's and §11.1's no-trailing-reserve ruling \
-             has to be re-decided"
+            trailing <= BAR_COLUMNS,
+            "at {width} columns the pane wants a {trailing}-column right margin, \
+             wider than the {BAR_COLUMNS} the scrollbar already reserves, so \
+             those columns stop being the bar's and §11.1's no-trailing-reserve \
+             ruling has to be re-decided"
         );
     }
 }

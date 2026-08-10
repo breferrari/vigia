@@ -453,11 +453,12 @@ const fn margin_of(pane: u16) -> u16 {
 /// The blank columns the pane keeps on its left and on its right.
 ///
 /// The rung above, **split as evenly as it goes, with the odd column going
-/// left.** A reader registers the left margin as the edge of the page, since it
-/// is where every line starts, and the regions already take their left from this
-/// ladder while their right is the scrollbar's fixed reserve, so spending the odd
-/// column on the left is what keeps chrome and rows converging as a pane widens
-/// rather than alternating.
+/// left.** The odd rung has to land somewhere, and left is the side that reads:
+/// spent on the right instead, a 43-column pane would draw its text hard against
+/// column zero and hold a blank column on the far side, which is the squeezed
+/// look #119 exists to remove wearing the margin on the wrong edge. A reader
+/// registers the left as the edge of the page because it is where every line
+/// starts.
 ///
 /// At the two widths #119 names the split is even, one cell a side at 44 and two
 /// at 80. Only 43 and 79 are lopsided, and each is a single width.
@@ -1078,13 +1079,16 @@ fn scrollable(span: u64, of: u64) -> bool {
 /// stops short of the pane's right edge are the bar's rather than a margin. So
 /// the inset does **not** buy a second set of blank columns on the right. It buys
 /// the matching set on the left, and the pane comes out even at the top rung
-/// because [`BAR_WIDTH`] and the widest rung of [`MARGIN_RUNGS`] are both two.
+/// because [`BAR_WIDTH`] and the widest **left half** of [`MARGIN_RUNGS`] are
+/// both two. The half rather than the rung, because that table counts the whole
+/// margin across both sides and [`inset_of`] is what this function charges: the
+/// widest rung is four.
 ///
 /// That coincidence is load bearing, so it is a gate rather than a comment:
-/// `the_inset_never_outgrows_the_scrollbars_reserve` fails if a rung ever exceeds
-/// [`BAR_WIDTH`], because a rung that did would put a trailing reserve back and
-/// needs the §11.1 ruling re-decided rather than a silent `max` here quietly
-/// doing it for nobody.
+/// `the_inset_never_outgrows_the_scrollbars_reserve` fails if a rung's left half
+/// ever exceeds [`BAR_WIDTH`], because a left half that did would put a trailing
+/// reserve back and needs the §11.1 ruling re-decided rather than a silent `max`
+/// here quietly doing it for nobody.
 const fn planning_width(pane: u16, caret: u16) -> u16 {
     pane.saturating_sub(BAR_WIDTH as u16)
         .saturating_sub(inset_of(pane))
@@ -2196,15 +2200,15 @@ impl Painter<'_> {
     /// `area` itself: `SPEC.md` §5.3 rules that washes and rules run to the pane's
     /// edge while text stands back from it, and that the two roles must not swap.
     /// A wash that stopped short would read as a misaligned highlight and text at
-    /// column zero reads as squeezed, so [`Painter::line_row`] and
-    /// [`Painter::status_line`] each paint their row from `area` and then place
-    /// their glyphs through this.
+    /// column zero reads as squeezed, so [`Painter::status_line`] paints its row
+    /// from `area` and then places its glyphs through this.
     ///
-    /// **Both sides, unlike a region's glance columns.** The rows that go through
-    /// [`planning_width`] pay the inset on the left alone, because the scrollbar's
-    /// reserve is already standing in the columns the right-hand inset would want.
-    /// Chrome has no bar to reserve against and neither do the diff's content
-    /// rows, so here the pane owes both.
+    /// **Chrome only.** The header and the footer are the two rows handed the
+    /// whole pane, with no scrollbar reserve standing in the columns a right-hand
+    /// margin wants, so they are the rows that owe both sides. A glance row pays
+    /// the left alone through [`planning_width`], and the diff's content rows have
+    /// their own rule in [`Painter::region_text`], because their rect may already
+    /// have lost the bar's columns and would otherwise be charged twice.
     fn text_area(&self, area: Rect) -> Rect {
         Rect {
             x: area.x.saturating_add(self.inset),
@@ -2238,7 +2242,33 @@ impl Painter<'_> {
     /// question rather than a margin question, so this keeps the region's own
     /// right edge where it already was and only declines to charge the margin a
     /// second time.
+    ///
+    /// **So a residual survives, and it is smaller than what was here before
+    /// rather than new.** Between 43 and 79 columns the right margin is one
+    /// column and the bar's reserve is two, so a content row's edge still moves
+    /// by one when a diff grows long enough to take a bar. On `main` it moved by
+    /// two at every width; from eighty columns up it now does not move at all.
+    /// Halved and bounded is what this issue is entitled to buy; removing it
+    /// outright is the same I6 trade as the paragraph above, and it is the reason
+    /// `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge` asserts
+    /// the *barred* screen against its own heading rather than asserting that
+    /// nothing ever moves.
     fn region_text(&self, area: Rect, pane: u16) -> Rect {
+        // **The two derivations of the margin have to be the same one.**
+        // `self.trailing` was resolved in [`render`] from the pane it was handed,
+        // and [`planning_width`] resolves [`inset_of`] from the `pane` a caller
+        // passes down. They are the same function of the same number today and
+        // nothing in the types says so, which is one refactor away from a region
+        // laid out against a width the chrome above it disagrees with. Asserted
+        // rather than consolidated: folding the pane onto [`Painter`] would churn
+        // three signatures that predate this issue, and a check that runs in every
+        // debug test is what actually catches the drift.
+        debug_assert_eq!(
+            margins_of(pane),
+            (self.inset, self.trailing),
+            "a region is being drawn against a different pane than the painter was \
+             built for, so its margin and the chrome's have come apart"
+        );
         let stop = area.width.min(pane.saturating_sub(self.trailing));
         Rect {
             x: area.x.saturating_add(self.inset),
@@ -2685,10 +2715,16 @@ impl Painter<'_> {
         // further at `x=32`. So the marker moves with the text rather than
         // staying pinned to the edge the wash reaches.
         //
-        // [`CARET_FLOOR`] is deliberately left alone rather than gaining an
-        // inset term. It is eighteen columns and [`inset_of`] is zero at every
-        // width below forty-four, so a term added here could never change the
-        // answer, and a branch no sweep can reach is a branch no gate can cover.
+        // [`CARET_FLOOR`] is deliberately left alone rather than gaining a margin
+        // term. It is eighteen columns; [`inset_of`] is zero below forty-three and
+        // never more than two above it, so what the floor has to survive is
+        // `planning_width(pane, CARET_WIDTH)` staying at or above [`ROW_FLOOR`],
+        // and it does with room: at eighteen columns the inset is zero and the
+        // width is exactly fourteen, and every width where the inset is non-zero
+        // is at least twenty-five columns clear of the floor. A term added here
+        // could never change the answer, and a branch no sweep can reach is a
+        // branch no gate can cover.
+        // `a_row_keeps_its_floor_after_both_the_bar_and_the_caret` sweeps it.
         let left = area.x.saturating_add(self.inset);
 
         // From the **pane**, less the caret's inset and less a scrollbar column
