@@ -813,7 +813,23 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
                 continue;
             }
             // The sigil costs a column beyond the text itself.
-            if Span::raw(full).width() < usize::from(width) {
+            //
+            // **Against the room the row is given, not against the pane.** #119
+            // takes the margin off both sides first, so a line whose width falls
+            // between the two is genuinely clipped while a guard written against
+            // `width` skips it, which is coverage lost silently rather than a
+            // failure.
+            //
+            // **On today's fixture this changes nothing, and saying so is worth
+            // more than the change.** The margin is zero below 43 columns and the
+            // widest line here is twenty-six, so every width this sweep reaches has
+            // `room == width`. That was measured rather than assumed: instrumented,
+            // the non-vacuity flag below trips at widths 1 to 26 and nowhere else,
+            // before this edit and after it. It is written against the room so the
+            // gate stays correct if `awkward()` ever gains a wider line, not
+            // because it reaches a hazard today that it did not reach before.
+            let room = usize::from(width).saturating_sub(margin_at(width));
+            if Span::raw(full).width() < room {
                 continue;
             }
             assert!(
@@ -824,7 +840,18 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             // Non-vacuity that matters more than the usual kind: only the widths
             // where a glyph lands on the final column can lose the mark, so a
             // sweep that never hit one would pass against the defect.
-            if Span::raw(row.trim_end_matches(CONTINUES)).width() + 1 == usize::from(width) {
+            //
+            // The final **content** column, for the guard's reason and with the
+            // same caveat. `rows_at` keeps the leading blanks, so a row that fills
+            // its room measures the inset plus the room, which is the pane less
+            // whatever the right-hand margin took. Below 43 columns that is the
+            // pane itself, which is every width this fixture reaches, so the two
+            // spellings agree today and only the wider fixture would tell them
+            // apart.
+            let trailing = margin_at(width) - inset_at(width);
+            if Span::raw(row.trim_end_matches(CONTINUES)).width() + 1
+                == usize::from(width) - trailing
+            {
                 saw_swallowable = true;
             }
         }
@@ -2844,10 +2871,19 @@ fn the_pane_insets_its_text_at_every_rung() {
     // a glyph inside the margin. So this asserts a floor on every row and an
     // equality on the rows that reach it, which together pin the column.
     //
-    // Every case and every height, because the two regions and the two footer
-    // shapes reach `Painter::text_area` by four different routes and the caret
-    // column reaches it by a fifth.
-    let mut touched = [false; 3];
+    // Every case and every height, because the two regions and the two chrome
+    // rows reach the margin by four different routes and the caret column
+    // reaches it by a fifth.
+    //
+    // Sized from the ladder rather than written as a literal, so adding a rung
+    // widens the coverage requirement instead of leaving the new rung unchecked.
+    // The widest leading column is the widest total, halved upwards.
+    let widest = MARGIN_RUNGS
+        .iter()
+        .map(|(_, total)| usize::from(*total).div_ceil(2))
+        .max()
+        .expect("the ladder has rungs");
+    let mut touched = vec![false; widest + 1];
     for (label, view, chrome) in cases() {
         for height in [3u16, 6, 24] {
             for width in WIDTHS {
@@ -2870,7 +2906,13 @@ fn the_pane_insets_its_text_at_every_rung() {
                         "{label} at {width}x{height}: row {y} starts at column \
                          {first}, inside the pane's {inset}-column inset: {row:?}"
                     );
-                    if first == inset && inset < touched.len() {
+                    // Indexed without a bounds guard on purpose. `touched` is
+                    // sized from the ladder itself, so a rung wider than it is a
+                    // rung this gate cannot see: a guard here would read as
+                    // defensive and would in fact drop that rung's coverage in
+                    // silence, which is the failure mode this whole test exists
+                    // to refuse. Out of range panics and names the width.
+                    if first == inset {
                         touched[inset] = true;
                     }
                 }

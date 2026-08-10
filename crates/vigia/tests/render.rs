@@ -4292,3 +4292,84 @@ fn the_pane_stops_the_same_distance_from_both_edges() {
         );
     }
 }
+
+#[test]
+fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
+    // Found by the audit on [#119](https://github.com/breferrari/vigia/issues/119)
+    // and gated here because nothing covered it. The diff region is handed a rect
+    // that has already lost the scrollbar's columns wherever a bar is drawn, and
+    // those are the same columns a right-hand margin wants. Charging both put a
+    // content line two columns left of the heading above it, and only on the
+    // screens where the diff outgrew its pane, which is the layout becoming a
+    // function of the contents that `SPEC.md` §11.1 refuses.
+    //
+    // **Asserted against the heading in the same region rather than against a
+    // column number**, because the number is what the ladder decides and pinning
+    // it here would restate the renderer. What the ruling actually says is that
+    // these two agree once the bar has taken its columns, and the bug was exactly
+    // their disagreeing.
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
+
+    for width in [80u16, 120] {
+        // Long enough to reach whatever edge it is given, so the row's rightmost
+        // glyph is the edge rather than the end of its text.
+        let long = "    let stale = self.pending.take(); ".repeat(12);
+        let view = View {
+            total_rows: 4000,
+            rows_above: 40,
+            rows: vec![
+                file("src/engine/watch.rs", 42, 7),
+                Row::Hunk {
+                    old_start: 38,
+                    old_lines: 8,
+                    new_start: 38,
+                    new_lines: 9,
+                },
+                line(LineKind::Removed, 38, &long),
+            ],
+            ..two_regions(1)
+        };
+        let backend = screen(width, 18, &view, &chrome());
+        let buffer = backend.buffer();
+
+        let heading = (0..18u16)
+            .find(|y| row_text(&backend, *y).contains("watch.rs") && *y > 4)
+            .expect("the diff's own heading was not drawn");
+        let content = (0..18u16)
+            .find(|y| row_text(&backend, *y).contains("pending"))
+            .expect("the long content line was not drawn");
+
+        // Non-vacuity: the whole finding is about the screens where a bar exists,
+        // so a fixture that never draws one would assert nothing.
+        let bar_drawn = (0..18u16).any(|y| {
+            let cell = buffer[(width - 1, y)].symbol();
+            cell == TRACK || cell == THUMB
+        });
+        assert!(
+            bar_drawn,
+            "at {width} columns no scrollbar was drawn, so this gate never \
+             reached the case it is about"
+        );
+
+        let last_glyph = |y: u16| {
+            (0..width)
+                .rev()
+                .find(|x| {
+                    let symbol = buffer[(*x, y)].symbol();
+                    symbol != " " && symbol != TRACK && symbol != THUMB
+                })
+                .expect("a row with no glyph on it")
+        };
+
+        assert_eq!(
+            last_glyph(content),
+            last_glyph(heading),
+            "at {width} columns the content line stops at column {} where the \
+             heading in the same region stops at {}, so the pane's trailing \
+             margin was charged on top of the scrollbar's own reserve",
+            last_glyph(content),
+            last_glyph(heading)
+        );
+    }
+}

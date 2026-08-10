@@ -380,15 +380,22 @@ const BAR_FLOOR: usize = BAR_WIDTH + ROW_FLOOR;
 /// fourth undocumented departure from it rather than a choice
 /// ([#119](https://github.com/breferrari/vigia/issues/119)).
 ///
-/// **Nothing below forty-four columns**, and that floor is the ladder's point
+/// **Nothing below forty-three columns**, and that floor is the ladder's point
 /// rather than a rounding. I6 is named for forty and every column there is
 /// already contested: the sparkline has been bought and sold twice in this file
-/// over two columns at exactly that width. A pane that cannot afford an inset
+/// over two columns at exactly that width. A pane that cannot afford a margin
 /// does not take one, and a reader at forty gets the pane they got before.
 ///
-/// **Two rungs and a floor**, rather than three rows, so the fallthrough in
-/// [`inset_of`] is the I6 case a sweep actually reaches instead of a row no pane
-/// can miss. `SPEC.md` §11.1 carries the rungs.
+/// **Forty-three, not forty-four, and the difference is the odd rung rather than
+/// a slip.** #119 proposes the ladder per side, one cell each from 44 and two
+/// from 80, and that is exactly what ships at 44 and at 80. The total has to
+/// climb one column at a time to stay monotone, so the first of the two columns
+/// lands a width early, at 43. What the floor protects is I6's forty-column pane,
+/// which is three columns clear of it either way; what it does not claim is that
+/// 43 is untouched, because it is not. `the_inset_never_reaches_the_forty_column_pane`
+/// gates the claim that is actually load bearing.
+///
+/// `SPEC.md` §11.1 carries the rungs.
 ///
 /// The top rung is a judgement inside what the picture shows rather than a number
 /// read off it: the mockup's own left inset is one cell at the caret and three at
@@ -1071,7 +1078,7 @@ fn scrollable(span: u64, of: u64) -> bool {
 /// stops short of the pane's right edge are the bar's rather than a margin. So
 /// the inset does **not** buy a second set of blank columns on the right. It buys
 /// the matching set on the left, and the pane comes out even at the top rung
-/// because [`BAR_WIDTH`] and the widest rung of [`INSET_RUNGS`] are both two.
+/// because [`BAR_WIDTH`] and the widest rung of [`MARGIN_RUNGS`] are both two.
 ///
 /// That coincidence is load bearing, so it is a gate rather than a comment:
 /// `the_inset_never_outgrows_the_scrollbars_reserve` fails if a rung ever exceeds
@@ -2055,6 +2062,7 @@ pub fn render(
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
     let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
+    let margins = margins_of(area.width);
 
     let mut painter = Painter {
         buf,
@@ -2065,8 +2073,8 @@ pub fn render(
         // where a bar exists, so a drawer that resolved the ladder from what it
         // was given would take a different inset on the two regions of one pane
         // and change it when a seventh file changed. See [`inset_of`].
-        inset: margins_of(area.width).0,
-        trailing: margins_of(area.width).1,
+        inset: margins.0,
+        trailing: margins.1,
         paint: PaintStats::default(),
     };
 
@@ -2204,6 +2212,37 @@ impl Painter<'_> {
                 .width
                 .saturating_sub(self.inset)
                 .saturating_sub(self.trailing),
+            ..area
+        }
+    }
+
+    /// The same, for a rect a scrollbar may already have narrowed.
+    ///
+    /// **The bar's columns and the trailing margin are the same blank, so the
+    /// stop is whichever is already further in rather than both.**
+    /// [`Painter::with_bar`] hands [`Painter::body`] a rect that has lost
+    /// [`BAR_WIDTH`] on the screens where a bar is drawn, and those are exactly
+    /// the columns a right-hand margin would have wanted. Subtracting the margin
+    /// on top charged it twice: at eighty columns a heading's last glyph sat in
+    /// column 77 while the content line under it stopped at 75, and the two
+    /// agreed only while the diff was short enough to need no bar. A layout that
+    /// moves when the diff outgrows the pane is the defect [`planning_width`]
+    /// exists to refuse, reaching the one row class the ruling had not been
+    /// applied to.
+    ///
+    /// **What this deliberately does not do is give these rows the bar's reserve
+    /// unconditionally.** That would make them agree with a heading at every
+    /// width, which is tempting and is [#77](https://github.com/breferrari/vigia/issues/77)'s
+    /// ruling one row class further, but it costs every content line two columns
+    /// at *every* width including the forty I6 is named for. That is a spec
+    /// question rather than a margin question, so this keeps the region's own
+    /// right edge where it already was and only declines to charge the margin a
+    /// second time.
+    fn region_text(&self, area: Rect, pane: u16) -> Rect {
+        let stop = area.width.min(pane.saturating_sub(self.trailing));
+        Rect {
+            x: area.x.saturating_add(self.inset),
+            width: stop.saturating_sub(self.inset),
             ..area
         }
     }
@@ -2817,16 +2856,21 @@ impl Painter<'_> {
     }
 
     fn body(&mut self, area: Rect, view: &View, chrome: &Chrome, pane: u16) {
-        // Every glyph this region draws goes through here, and the region rect
-        // itself is kept for the one thing that is furniture rather than text:
-        // [`Painter::line_row`]'s wash. See [`Painter::text_area`].
-        let text = self.text_area(area);
+        // **Two rects, because this region draws both roles.** A heading is placed
+        // against the pane through [`planning_width`]; everything else here keeps
+        // the region's own right edge and only stands back from it, through
+        // [`Painter::region_text`], which is where the reason lives. The region
+        // rect itself stays untouched for the wash, which is furniture.
+        //
+        // Resolved once rather than per row, since both are properties of the
+        // pane and the region rather than of any line.
+        let glyphs = self.region_text(area, pane);
         if view.files == 0 {
             self.put_marked(
-                text.x,
-                text.y,
+                glyphs.x,
+                glyphs.y,
                 &empty_state(chrome.branch.as_deref()),
-                usize::from(text.width),
+                usize::from(glyphs.width),
                 self.theme.chrome_dim,
             );
             return;
@@ -2864,7 +2908,7 @@ impl Painter<'_> {
                 Row::File(entry) => self.file_row(
                     Rect {
                         y,
-                        x: text.x,
+                        x: glyphs.x,
                         width: inner,
                         ..area
                     },
@@ -2878,11 +2922,10 @@ impl Painter<'_> {
                     new_start,
                     new_lines,
                 } => {
-                    // Named `header` rather than `text`, which is the rect this
-                    // region draws its glyphs into and which every arm here now
-                    // reads. The `Row::Line` arm binds a `text` field of its own,
-                    // so one of the three had to give the name up and this is the
-                    // one nothing outside the arm wants.
+                    // Named `header` rather than `text`, because the `Row::Line`
+                    // arm below binds a `text` field of its own and two `text`
+                    // bindings one arm apart, meaning different things, is how the
+                    // wrong one gets read.
                     let header = format!(
                         "@@ -{} +{} @@",
                         span(*old_start, *old_lines),
@@ -2891,11 +2934,23 @@ impl Painter<'_> {
                     // Marked rather than clipped, and this is the row where it
                     // matters most: `@@ -258,7 +25` is not a shortened header,
                     // it is a header naming a different line.
-                    self.put_marked(text.x, y, &header, usize::from(text.width), self.theme.hunk);
+                    self.put_marked(
+                        glyphs.x,
+                        y,
+                        &header,
+                        usize::from(glyphs.width),
+                        self.theme.hunk,
+                    );
                 }
                 Row::Note(note) => {
                     let drawn = format!("  {note}");
-                    self.put_marked(text.x, y, &drawn, usize::from(text.width), self.theme.note);
+                    self.put_marked(
+                        glyphs.x,
+                        y,
+                        &drawn,
+                        usize::from(glyphs.width),
+                        self.theme.note,
+                    );
                 }
                 Row::Line {
                     kind,
@@ -2911,11 +2966,23 @@ impl Painter<'_> {
                     // to the bottom of the pane: the context rows under it, the
                     // blank rows under those, and the footer. Measured at 200x60,
                     // that was 366,000 cells a frame where 12,000 will do.
+                    //
+                    // **Two rects, because this row has both roles on it.** The
+                    // wash is furniture and takes the region's own width; the
+                    // glyphs take the pane-planned width every other row here
+                    // takes. Handing one rect and letting the drawer derive the
+                    // other is what charged the trailing margin twice.
                     self.line_row(
                         Rect {
                             y,
                             height: 1,
                             ..area
+                        },
+                        Rect {
+                            y,
+                            height: 1,
+                            x: glyphs.x,
+                            width: glyphs.width,
                         },
                         *kind,
                         *number,
@@ -3250,7 +3317,15 @@ impl Painter<'_> {
     /// Both are absent on a palette that declines them and on a depth that cannot
     /// express them, and then this draws exactly what it drew before #11: the sigil
     /// alone, which is the loss §11.1 records.
-    fn line_row(&mut self, area: Rect, kind: LineKind, number: u32, text: &str, spans: &[Span]) {
+    fn line_row(
+        &mut self,
+        area: Rect,
+        glyphs: Rect,
+        kind: LineKind,
+        number: u32,
+        text: &str,
+        spans: &[Span],
+    ) {
         let (diff, sigil) = match kind {
             LineKind::Added => (self.theme.added, '+'),
             LineKind::Removed => (self.theme.removed, '-'),
@@ -3296,9 +3371,6 @@ impl Painter<'_> {
         // scrollbar, and that is the existing ruling
         // `a_wash_stops_before_the_scrollbar_column` rather than something this
         // changed.
-        // Named `glyphs` rather than `text`, which is this row's content and is
-        // already a parameter here.
-        let glyphs = self.text_area(area);
         let mut x = glyphs.x;
         let mut room = usize::from(glyphs.width);
         if self.gutter > 0 {
