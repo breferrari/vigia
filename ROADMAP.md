@@ -424,7 +424,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
+| ✅ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
 | ⬜ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |
 | ⬜ | File-granular navigation: `n`/`p`, digits jump to a listed file | [#122](https://github.com/breferrari/vigia/issues/122) |
 | ⬜ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
@@ -433,7 +433,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | The pane rewards space: density scaling, the churn graph, side-by-side regions | [#125](https://github.com/breferrari/vigia/issues/125) |
 | ⬜ | An agent's write is how the grammar compile arrives, and the warmer only ran at launch | [#129](https://github.com/breferrari/vigia/issues/129) |
 
-**After distribution on purpose.** The minimal real thing ships first — a crates.io name is claimed by publishing, and their own doctrine says the first publish is the smallest real one — and polish lands as visible post-release momentum, guided by the [#72](https://github.com/breferrari/vigia/issues/72) week's real-use data instead of ahead of it. [#119](https://github.com/breferrari/vigia/issues/119) sits first because it moves layout boundaries the other rows would otherwise re-derive twice; the three decisions carry both branches in their bodies and can be ruled in one sitting, each unblocking a small build. `SPEC.md` §5.3 is the design language these rows are derived from; a feel improvement that costs an invariant a sentence is a `decision` here, one that costs nothing is a row.
+**After distribution on purpose.** The minimal real thing ships first — a crates.io name is claimed by publishing, and their own doctrine says the first publish is the smallest real one — and polish lands as visible post-release momentum, guided by the [#72](https://github.com/breferrari/vigia/issues/72) week's real-use data instead of ahead of it. [#119](https://github.com/breferrari/vigia/issues/119) sits first because it moves layout boundaries the other rows would otherwise re-derive twice, and it moved exactly two: the glance ladder's top rungs went from 48 and 52 columns to 49 and 53, both predicted off the layout table before the change was run and nothing below 44 touched. What it cost that nobody predicted is a ruling rather than a number, and the next feel row inherits it: **a margin is laddered as a total and split between the sides**, because stepping both sides on one column of pane hands a widening pane a narrower row, which two existing gates caught within a minute of each other. The three decisions carry both branches in their bodies and can be ruled in one sitting, each unblocking a small build. `SPEC.md` §5.3 is the design language these rows are derived from; a feel improvement that costs an invariant a sentence is a `decision` here, one that costs nothing is a row.
 
 **Every PR in this phase carries a screenshot, and the bar is sized to the surface.** Feel is vetoed by eyes in five seconds, not argued in prose — a PR without a picture of what changed is not a Phase 8 PR. The pass discipline for this class is `/simplify` plus snapshot review, per `take-next` step 6's surface rule; the full audit loop is reserved for the parts that touch the frame path or an invariant, because a night of adversarial agents on an inset buys less than one human look.
 
@@ -488,6 +488,8 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
 | ⬜ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
 | ⬜ | `MIN_TICKS` restates `MIN_FRAMES`, and the queue it looks like it guards is unbounded | [#114](https://github.com/breferrari/vigia/issues/114) |
+| ⬜ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
+| ⬜ | 0.1.1: trusted publishing, so the crates.io token stops existing | [#141](https://github.com/breferrari/vigia/issues/141) |
 
 **Two of the five findings closed on [#66](https://github.com/breferrari/vigia/issues/66)'s own branch rather than waiting for a phase**, which is the rule about fixing what the work surfaces rather than filing it away. [#79](https://github.com/breferrari/vigia/issues/79) is the pointer and the thumb, both of which are affordances that branch published; leaving a drawn thumb inert for a phase would have shipped the same aspirational-UX defect [#66](https://github.com/breferrari/vigia/issues/66) exists to remove. [#81](https://github.com/breferrari/vigia/issues/81) was filed undiagnosed and asked for a gate rather than a fix, so it cost one test: it is **green**, the wash stops where `with_bar` narrows the rect, and the mark in the report was the host terminal's own scrollbar.
 
