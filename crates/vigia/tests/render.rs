@@ -4270,11 +4270,20 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
     // the margin has cost the path its own width in columns rather than twice it.
     //
     // **The name says "once and once" rather than "the same distance", which is
-    // what it said until round 3 of the audit.** The two blanks are only equal
-    // from eighty columns up, where the leading half is also two; from 43 to 79
-    // the left is one and the right is still the bar's two. The assertion below
-    // always encoded that asymmetry correctly while the name denied it, which is
-    // the worse way round, because a reader trusts the name and skips the body.
+    // what it said until round 3 of the audit.** The two blanks are equal only
+    // where the leading half reaches the bar's two, and not at every width. The
+    // assertion below always encoded that asymmetry correctly while the name
+    // denied it, which is the worse way round: a reader trusts the name and
+    // skips the body.
+    //
+    // **Where they coincide is asserted rather than written down**, and that is
+    // this branch's own lesson turned into code. Four separate prose claims here
+    // stated a width band computed from the shape of the ladder rather than its
+    // arithmetic, and every one of them was a column out at whichever rung is
+    // odd, including the sentence that had just been written to correct the
+    // previous one. A range in a comment cannot be wrong loudly. The loop below
+    // therefore records where the blanks match and checks it against the rule
+    // they follow, so the claim is derived at the same place it is used.
     //
     // **Swept, and the odd rungs are in the sweep rather than excused from it.**
     // A first version sampled 80 and 120, which are the widths where the margin's
@@ -4286,6 +4295,7 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
     // a rung where the halves differ, which is the only place the claim could
     // have come apart.
     let mut read_at: Vec<u16> = Vec::new();
+    let mut square_from: Option<u16> = None;
     for width in 43u16..=120 {
         let backend = screen(width, 5, &glancing(), &chrome());
         let row = row_text(&backend, 1);
@@ -4306,7 +4316,45 @@ fn a_row_pays_its_margin_once_and_the_bars_reserve_once() {
              never a margin (§11.1), so these agreeing is what says the inset was \
              paid once: {row:?}"
         );
+
+        // The coincidence, checked where it happens rather than described in a
+        // comment that has to be maintained by hand.
+        assert_eq!(
+            leading == trailing,
+            usize::from(inset_at(width)) == trailing,
+            "at {width} columns the two blanks are {} while the leading half {} \
+             the bar's reserve, so the pane is square at a width where the ladder \
+             says it should not be, or lopsided where it should not be",
+            if leading == trailing {
+                "equal"
+            } else {
+                "unequal"
+            },
+            if usize::from(inset_at(width)) == trailing {
+                "reaches"
+            } else {
+                "does not reach"
+            }
+        );
+        if leading == trailing {
+            square_from = Some(square_from.map_or(width, |first: u16| first.min(width)));
+        }
     }
+
+    // **The narrowest square pane, derived from the sweep rather than recalled.**
+    // Four prose claims on this branch stated this band from the shape of the
+    // ladder instead of its arithmetic and every one was a column out: the
+    // margin's leading half reaches the bar's two at the *odd* rung, 79, not at
+    // 80 where the pair completes. Pinned here so the fifth attempt cannot be a
+    // sentence nobody can check.
+    assert_eq!(
+        square_from,
+        Some(79),
+        "the narrowest pane whose two blanks match has moved. It is the width \
+         where the margin's leading half first reaches the bar's reserve of two, \
+         which is the ladder's odd rung and not the wider width where the pair \
+         itself completes"
+    );
 
     // **Named widths, not a count.** A count is satisfied by the wrong widths.
     // This sweep reads 78 of 78 and its first floor was `> 60`, which tolerates
