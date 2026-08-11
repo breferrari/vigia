@@ -358,6 +358,7 @@ jobs:
           echo "::notice::rehearsal: would release ${{ steps.version.outputs.next }}. main untouched."
 
       - name: commit the bump
+        id: commit
         if: ${{ !inputs.rehearse }}
         run: |
           set -euo pipefail
@@ -402,9 +403,21 @@ jobs:
       # It is not retried automatically, because a dispatch that failed for a
       # reason nobody has read is not obviously safe to repeat. It is named
       # instead, with the one command that finishes the job.
+      #
+      # **Conditioned on the commit having succeeded, not merely on something
+      # having failed.** A bare `failure()` also fires when the *pre-flight*
+      # rejects a token, which is the common case and the one where nothing was
+      # committed at all. It would then announce a stranded version that does
+      # not exist and hand over a dispatch command for a version `${DEFAULT}`
+      # does not carry, which is worse than silence: acting on it releases the
+      # old code under the new number. `steps.commit.outcome` is `skipped` on a
+      # rehearsal, so that case needs no separate guard.
       - name: say how to finish a release the dispatch did not start
-        if: ${{ failure() && !inputs.rehearse }}
+        if: ${{ failure() && steps.commit.outcome == 'success' }}
         run: |
-          echo "::error::${{ steps.version.outputs.next }} may be committed to the default branch with no release dispatched."
-          echo "::error::Check whether the bump landed, and if it did, finish it with:"
-          echo "::error::  gh workflow run release.yml --ref ${{ github.event.repository.default_branch }} -f tag=v${{ steps.version.outputs.next }}"
+          echo "::error::${{ steps.version.outputs.next }} is committed to ${DEFAULT} and no release was dispatched for it."
+          echo "::error::Re-running this workflow will not finish it: the re-run starts from the pre-bump commit and bumps past this version."
+          echo "::error::Finish it with:"
+          echo "::error::  gh workflow run release.yml --ref ${DEFAULT} -f tag=v${{ steps.version.outputs.next }}"
+        env:
+          DEFAULT: ${{ github.event.repository.default_branch }}
