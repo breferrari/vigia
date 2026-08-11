@@ -348,20 +348,6 @@ fn registry_unreachable(stderr: &str) -> bool {
         .any(|line| MARKERS.iter().any(|marker| line.contains(marker)))
 }
 
-/// Text with its `#` comments removed, so a `contains` check cannot be
-/// satisfied by prose *about* the thing instead of the thing.
-///
-/// This repository comments heavily by house style, and several of those
-/// comments quote the very command or triple a gate below looks for. Without
-/// this, commenting out a `run:` line and leaving its explanation above it keeps
-/// the gate green, which is the failure a comment-blind `contains` is guaranteed
-/// to have eventually.
-///
-/// Used for both YAML and TOML, which share `#` and, in every file read here,
-/// share the property that no value legitimately contains one. That is worth
-/// stating because it is the limit: this would truncate a genuine `#` inside a
-/// quoted string, so it is a helper for these files rather than a comment
-/// stripper in general.
 /// Assert that `preflight` carries a create-then-delete write probe against
 /// `repo`, anchored on the shell variable naming the ref it creates.
 ///
@@ -421,11 +407,52 @@ fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
     );
     // And the create is checked, or a 403 passes silently: `curl` exits 0 on
     // one, and the delete that follows would be undoing a ref never made.
+    //
+    // **The comparison *and* the stop.** Asserting only `!= "201"` leaves the
+    // probe decorative: replace the failure body with an `echo` and the string
+    // survives, the job carries on, and the irreversible half proceeds against
+    // a token that has just been shown not to work. Demonstrated by running it,
+    // not reasoned about.
+    let checked = &preflight[created..undone];
     assert!(
-        preflight[created..undone].contains(r#"!= "201""#),
-        "nothing checks that the write probe against {repo} succeeded: {}",
-        &preflight[created..undone]
+        checked.contains(r#"!= "201""#),
+        "nothing checks that the write probe against {repo} succeeded: {checked}"
     );
+    assert!(
+        checked.contains("exit 1"),
+        "the write probe against {repo} notices a failed create and continues \
+         anyway, which is a probe that reports rather than guards: {checked}"
+    );
+}
+
+/// The step named `name`, from its `- name:` to the next step's.
+///
+/// **A step is more than the commands it runs, and [`run_commands`] only ever
+/// sees the commands.** An `if:` or a `continue-on-error:` beside them decides
+/// whether any of it executes, and both are invisible to every gate in this file
+/// that reads a `run:` body. Adding `if: ${{ inputs.rehearse }}` to the token
+/// pre-flight leaves the entire suite green while switching off the guard that
+/// exists because a release actually failed.
+fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
+    let header = format!("- name: {name}");
+    let at = bump
+        .find(&header)
+        .unwrap_or_else(|| panic!("bump.yml has no step named `{name}`"));
+    let rest = &bump[at + header.len()..];
+    rest.find("\n      - ").map_or(rest, |end| &rest[..end])
+}
+
+/// A step that must run on every dispatch carries nothing that can skip it.
+fn assert_step_always_runs(bump: &str, name: &str) {
+    let block = step_block(bump, name);
+    for key in ["\n        if:", "\n        continue-on-error:"] {
+        assert!(
+            !block.contains(key),
+            "the `{name}` step carries a `{}` , so it can be skipped or its \
+             failure ignored while every gate reading its commands stays green",
+            key.trim()
+        );
+    }
 }
 
 /// `first` appears before `second` in the workflow's text.
@@ -442,6 +469,20 @@ fn assert_precedes(bump: &str, first: &str, second: &str, why: &str) {
     assert!(at < then, "{why}");
 }
 
+/// Text with its `#` comments removed, so a `contains` check cannot be
+/// satisfied by prose *about* the thing instead of the thing.
+///
+/// This repository comments heavily by house style, and several of those
+/// comments quote the very command or triple a gate below looks for. Without
+/// this, commenting out a `run:` line and leaving its explanation above it keeps
+/// the gate green, which is the failure a comment-blind `contains` is guaranteed
+/// to have eventually.
+///
+/// Used for both YAML and TOML, which share `#` and, in every file read here,
+/// share the property that no value legitimately contains one. That is worth
+/// stating because it is the limit: this would truncate a genuine `#` inside a
+/// quoted string, so it is a helper for these files rather than a comment
+/// stripper in general.
 fn without_comments(text: &str) -> String {
     text.lines()
         .map(|line| line.split_once('#').map_or(line, |(code, _)| code))
@@ -1332,20 +1373,30 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     // directions: see [`assert_write_probe`] for the direction that was missed.
     assert_write_probe(preflight, "mine", "${GITHUB_REPOSITORY}");
 
-    // **Both halves of the bypass, because the write probe does not imply it.**
-    // A token with `Contents: Read and write` still cannot move a protected
-    // branch unless its owner is an admin and the branch lets admins through.
-    // The probe above covers the grant; these cover the standing and the rule.
+    // **The other half of the bypass, because the write probe does not imply
+    // it.** A token with `Contents: Read and write` still cannot move a
+    // protected branch unless the account behind it is an admin. The probe
+    // above covers the grant; this covers the standing.
+    //
+    // Span-bound with its comparison and its stop, for the reason
+    // [`assert_write_probe`] is: `contains(".permissions.admin")` alone was
+    // satisfied by deleting the whole check and leaving an `echo` that named
+    // it, which was demonstrated by running it rather than argued.
+    let admin = preflight
+        .find(".permissions.admin")
+        .expect("nothing reads the standing of the account behind RELEASE_TOKEN");
+    let stops = preflight[admin..]
+        .find("::notice::")
+        .map_or(preflight.len(), |end| admin + end);
+    let standing = &preflight[admin..stops];
     assert!(
-        preflight.contains(".permissions.admin"),
-        "nothing checks the token's owner can bypass the required checks, which \
-         is the half a successful write probe says nothing about: {preflight}"
+        standing.contains(r#"!= "true""#) && standing.contains("exit 1"),
+        "the admin standing is read and not acted on, so a token whose owner \
+         cannot bypass the required checks passes this step: {standing}"
     );
-    assert!(
-        preflight.contains("enforce_admins"),
-        "nothing checks that main still lets admins bypass. Turning that off \
-         leaves every other check green and rejects the push: {preflight}"
-    );
+
+    // And the step cannot be skipped out from under any of it.
+    assert_step_always_runs(&bump, "the tokens can do what the release will ask of them");
 
     // **The remote the push names carries the token.** This is the assertion the
     // whole gate exists for: `git push origin` is what failed, it is one word

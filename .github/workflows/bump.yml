@@ -28,7 +28,8 @@
 # rather than admin, so it cannot bypass them either. That is run 31435812487,
 # the button's first real run, and it is why `RELEASE_TOKEN` exists: a
 # repository-scoped token whose owner is an admin, so the push is a bypass the
-# protection allows. Nothing else in this job uses it.
+# protection allows. Only the push and the pre-flight that proves it can push
+# use that token.
 #
 # **Ordering is chosen so nothing is pushed before it is checked.** The version
 # is edited, verified, and built *before* the commit, so a bump that produces an
@@ -64,10 +65,6 @@ concurrency:
 permissions:
   contents: write
   actions: write
-  # Read-only, and only so the pre-flight can ask whether `main` still allows an
-  # admin to bypass its required checks. Reading branch protection needs this;
-  # `RELEASE_TOKEN` is deliberately not widened past `Contents` to answer it.
-  administration: read
 
 jobs:
   bump:
@@ -90,7 +87,7 @@ jobs:
         env:
           DEFAULT: ${{ github.event.repository.default_branch }}
 
-      # **Both tokens, checked here, before the version moves.**
+      # **All three tokens, checked here, before the version moves.**
       #
       # v0.1.0 is why this step exists. `HOMEBREW_TAP_TOKEN` could read the tap
       # and not write to it, and nothing found out until the release was already
@@ -145,15 +142,15 @@ jobs:
           # capability itself rather than a report about it, and it leaves
           # nothing behind. The tap holds no workflows, so a ref existing for a
           # second triggers nothing.
-          head=$(curl -sS -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+          head=$(curl -sS --max-time 30 -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             "https://api.github.com/repos/${tap}/git/ref/heads/main" | jq -r '.object.sha // empty')
           if [ -z "$head" ]; then
             echo "::error::HOMEBREW_TAP_TOKEN cannot even read ${tap}"
             exit 1
           fi
 
-          probe="refs/heads/release-preflight-${GITHUB_RUN_ID}"
-          code=$(curl -sS -o probe.json -w '%{http_code}' -X POST \
+          probe="refs/heads/release-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          code=$(curl -sS -o probe.json -w '%{http_code}' --max-time 30 -X POST \
             -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${tap}/git/refs" \
@@ -167,10 +164,20 @@ jobs:
             exit 1
           fi
 
-          curl -sS -o /dev/null -X DELETE \
+          # **The undo is checked, because `curl -sS` exits 0 on a 403 and the
+          # `||` arm below was therefore unreachable for the one failure it
+          # names.** A ref left behind is not harmless the way the old wording
+          # claimed: the ref name is derived from the run, so the *re-run* of a
+          # failed release POSTs to a ref that already exists, gets a 422, and
+          # reports a healthy token as broken. `GITHUB_RUN_ATTEMPT` in the name
+          # fixes the collision; checking the code is what makes the warning
+          # appear at all.
+          gone=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
             -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
-            "https://api.github.com/repos/${tap}/git/${probe}" \
-            || echo "::warning::left ${probe} in ${tap}; harmless, delete at leisure"
+            "https://api.github.com/repos/${tap}/git/${probe}")
+          if [ "$gone" != "204" ]; then
+            echo "::warning::left ${probe} in ${tap} (HTTP ${gone}); delete it before the next release"
+          fi
 
           # **The push to `${DEFAULT}` is the step no rehearsal reaches**, since
           # a rehearsal's whole promise is to leave it alone, and it is the step
@@ -188,13 +195,16 @@ jobs:
           # than careful.** A branch created by a PAT does raise events, unlike
           # one created by `GITHUB_TOKEN`, so a probe in `refs/heads/` is safe
           # only while no workflow here listens for a branch. That is true today
-          # and nothing tests it, which by this repo's own rule is a wish. A ref
-          # outside the branch and tag namespaces cannot raise a push or create
-          # event at all, so the claim stops needing to be true. Verified against
-          # this repository's API: it creates, it deletes, and it never appears
-          # as a branch.
-          mine="refs/preflight/${GITHUB_RUN_ID}"
-          code=$(curl -sS -o mine.json -w '%{http_code}' -X POST \
+          # and nothing tests it, which by this repo's own rule is a wish.
+          #
+          # Two claims, and they rest on different things. That the namespace
+          # *works* is measured: created, deleted, and never listed as a branch
+          # in this repository. That it cannot raise a `push` or `create` event
+          # rests on the documented trigger surface, where both events are
+          # defined over branches and tags, and it is not something this check
+          # observes.
+          mine="refs/preflight/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          code=$(curl -sS -o mine.json -w '%{http_code}' --max-time 30 -X POST \
             -H "Authorization: Bearer ${RELEASE_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" \
@@ -207,10 +217,12 @@ jobs:
             exit 1
           fi
 
-          curl -sS -o /dev/null -X DELETE \
+          gone=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
             -H "Authorization: Bearer ${RELEASE_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/${mine}" \
-            || echo "::warning::left ${mine} behind; harmless, delete at leisure"
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/${mine}")
+          if [ "$gone" != "204" ]; then
+            echo "::warning::left ${mine} in ${GITHUB_REPOSITORY} (HTTP ${gone}); delete it before the next release"
+          fi
 
           # **Second half: the bypass, and this one is a rule check rather than a
           # probe. Saying so is the point.** The only true probe of "can this
@@ -220,72 +232,55 @@ jobs:
           # pretending to have performed one.
           #
           # `.permissions.admin` is the field the first version of this guard was
-          # wrong to use, and it is the right one here, because the question
-          # changed. That version asked whether a *token* could push and read a
-          # field reporting the *user's role*, which is why it passed for a token
-          # that had already been denied. Bypassing a protected branch genuinely
-          # is a property of the user's role. The probe above covers the token's
-          # grant; this covers the actor's standing.
-          admin=$(curl -sS -H "Authorization: Bearer ${RELEASE_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}" | jq -r '.permissions.admin // false')
-          if [ "$admin" != "true" ]; then
+          # wrong to use, and the question has changed rather than the field
+          # having become trustworthy. **What it answers, exactly:** the
+          # *authenticated user's role* on this repository, never the token's own
+          # grants. That is why it once passed for a token already denied 403.
+          # Bypassing a protected branch is a property of that role, so it is the
+          # right instrument for this question, which is whether the account
+          # behind the token is an admin here. It is still the wrong instrument
+          # for "can this token write", and the probe above is what answers that
+          # one. Neither covers the other, and this repository is public, so a
+          # token with no grant on it at all would still read `admin: true`.
+          #
+          # What neither covers: that a fine-grained token *inherits* its owner's
+          # bypass at push time. It is the premise the whole approach rests on,
+          # no run has yet demonstrated it, and `RELEASE-SMOKE.md` §0 records it
+          # as unproven rather than letting this step imply otherwise.
+          code=$(curl -sS -o admin.json -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}")
+          if [ "$code" != "200" ]; then
+            echo "::error::RELEASE_TOKEN cannot read ${GITHUB_REPOSITORY}: HTTP ${code}"
+            exit 1
+          fi
+          if [ "$(jq -r '.permissions.admin // false' admin.json)" != "true" ]; then
             echo "::error::RELEASE_TOKEN's owner is not an admin of ${GITHUB_REPOSITORY}, so its push cannot bypass the required checks on ${DEFAULT}"
             exit 1
           fi
 
-          # And the setting that makes that role sufficient. Turning on "do not
-          # allow bypassing the above settings" would leave every check above
-          # green and reject the push exactly as run 31435812487 was rejected.
-          # Read with the workflow's own token, which `administration: read`
-          # covers, so `RELEASE_TOKEN` stays scoped to `Contents`.
+          # **Whether `${DEFAULT}` still lets admins bypass is deliberately not
+          # checked, and that is a ruling rather than an omission.** Reading
+          # branch protection needs admin rights on the API. The workflow's own
+          # token cannot be granted them, because `administration` is not one of
+          # the scopes a workflow may request under `permissions:`, and granting
+          # them to `RELEASE_TOKEN` would widen a long-lived secret past
+          # `Contents` to buy a better error message.
           #
-          # Anything this check cannot read is a stop, including the code that
-          # looks most like a pass. **A 404 is not "unprotected".** It is what
-          # the classic endpoint answers for a branch whose protection comes
-          # from a *ruleset* instead, and reading it as a pass would fail in the
-          # green direction on the day protection is migrated: every check here
-          # would agree the push is fine and the push would be rejected. So a
-          # 404 is followed up rather than trusted, on the endpoint that answers
-          # across both mechanisms. Measured against this repository: it reports
-          # 0 for `main` while `main` is classically protected, so an empty
-          # answer there really does mean no ruleset rather than no protection.
-          code=$(curl -sS -o protection.json -w '%{http_code}' \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${DEFAULT}/protection")
-          case "$code" in
-            404)
-              rules=$(curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${GITHUB_REPOSITORY}/rules/branches/${DEFAULT}" \
-                | jq -r 'if type == "array" then length else "unreadable" end')
-              if [ "$rules" = "0" ]; then
-                echo "::notice::${DEFAULT} carries no protection of either kind, so the push needs no bypass"
-              else
-                echo "::error::${DEFAULT} has no classic protection but ${rules} ruleset rule(s), which this check cannot evaluate for bypass"
-                echo "::error::Whether the push is allowed is now a question about ruleset bypass actors. Teach this check that before releasing."
-                exit 1
-              fi
-              ;;
-            200)
-              if [ "$(jq -r '.enforce_admins.enabled' protection.json)" != "false" ]; then
-                echo "::error::${DEFAULT} enforces its required checks against admins too, so no token can push the bump"
-                echo "::error::Either allow admins to bypass, or move the version bump into an ordinary pull request."
-                exit 1
-              fi
-              ;;
-            *)
-              echo "::error::cannot read ${DEFAULT}'s protection: HTTP ${code}. This job needs permissions: administration: read"
-              exit 1
-              ;;
-          esac
-
+          # A better error message is all it would buy. What this step exists to
+          # prevent is an **irreversible half-step**: a version moved, a tag cut,
+          # a crate published, against a token that cannot finish the job. A
+          # protection setting that refuses the push is not one of those. The
+          # push is the last thing before the release is dispatched, so it fails
+          # with `${DEFAULT}` unmoved, no tag, and nothing published, which is
+          # precisely what run 31435812487 did. That failure is already loud and
+          # already safe, and paying a permanent widening of a secret to
+          # rephrase it is the wrong trade.
           echo "::notice::three tokens present; real writes to ${tap} and ${GITHUB_REPOSITORY} succeeded and were undone"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT: ${{ github.event.repository.default_branch }}
 
       - name: work out the next version
