@@ -1275,6 +1275,27 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
         "the probe deletes the ref before it creates it"
     );
 
+    // **And each of those two is the verb it looks like.** Naming the endpoints
+    // alone leaves the probe passing after its create is quietly changed to a
+    // read, which is the exact failure this guard was rewritten once to escape:
+    // reading a repository proves nothing, because reading a public one needs no
+    // grant at all. The slices are bounded by this probe's own first line, so
+    // the tap's `-X POST` above cannot satisfy either.
+    let block = preflight
+        .find(r#"mine="refs/heads/"#)
+        .expect("the probe names the ref it creates");
+    assert!(
+        preflight[block..created].contains("-X POST"),
+        "the probe of this repository is not a write: {}",
+        &preflight[block..created]
+    );
+    assert!(
+        preflight[created..undone].contains("-X DELETE"),
+        "the probe does not delete the ref it created, so every run leaves one \
+         behind: {}",
+        &preflight[created..undone]
+    );
+
     // And the create is checked between the two, or a 403 passes silently:
     // `curl` exits 0 on one, and the delete that follows would then be undoing
     // a ref that was never made.
