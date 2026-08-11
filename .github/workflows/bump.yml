@@ -71,7 +71,19 @@ jobs:
     name: bump ${{ inputs.bump }}
     runs-on: ubuntu-latest
     steps:
+      # **`persist-credentials: false`, and without it this whole change does
+      # nothing.** The default leaves the *workflow's* token in `.git/config` as
+      # `http.https://github.com/.extraheader`, and git sends a configured
+      # `Authorization` header in preference to any userinfo in the remote URL.
+      # So the push below would carry `GITHUB_TOKEN` however carefully the URL
+      # names `RELEASE_TOKEN`, every check in the pre-flight would pass, and the
+      # push would be rejected exactly as run 31435812487 was. Demonstrated
+      # against a local HTTP server: with the extraheader set, both the initial
+      # request and the post-401 retry sent the bot's token and the URL's was
+      # never sent at all. `release.yml` already checks out this way.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -174,7 +186,7 @@ jobs:
           # appear at all.
           gone=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
             -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
-            "https://api.github.com/repos/${tap}/git/${probe}")
+            "https://api.github.com/repos/${tap}/git/${probe}" || echo 000)
           if [ "$gone" != "204" ]; then
             echo "::warning::left ${probe} in ${tap} (HTTP ${gone}); delete it before the next release"
           fi
@@ -219,7 +231,7 @@ jobs:
 
           gone=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
             -H "Authorization: Bearer ${RELEASE_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/${mine}")
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/${mine}" || echo 000)
           if [ "$gone" != "204" ]; then
             echo "::warning::left ${mine} in ${GITHUB_REPOSITORY} (HTTP ${gone}); delete it before the next release"
           fi
@@ -231,9 +243,10 @@ jobs:
           # documented condition under which the push is allowed instead of
           # pretending to have performed one.
           #
-          # `.permissions.admin` is the field the first version of this guard was
-          # wrong to use, and the question has changed rather than the field
-          # having become trustworthy. **What it answers, exactly:** the
+          # `.permissions.admin` is a sibling of `.permissions.push`, which is the
+          # field the first version of this guard was wrong to use, and the
+          # question has changed rather than the family having become
+          # trustworthy. **What it answers, exactly:** the
           # *authenticated user's role* on this repository, never the token's own
           # grants. That is why it once passed for a token already denied 403.
           # Bypassing a protected branch is a property of that role, so it is the
@@ -327,7 +340,7 @@ jobs:
           # diagnostic below could say which line failed to move. Exactly the
           # case the diagnostic exists for is the case it was unreachable in.
           found=$(grep -cE "\"${next}\"" Cargo.toml || true)
-          if [ "$found" -ne 2 ]; then
+          if [ "${found:-0}" != "2" ]; then
             echo "::error::expected both version strings at ${next}, found ${found}"
             grep -nE '^version = |^vigia-core = ' Cargo.toml
             exit 1
@@ -367,13 +380,18 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "release: ${{ steps.version.outputs.next }}"
 
-          # **Pushed with `RELEASE_TOKEN`, not with the token the checkout
-          # carries**, and the credential is confined to this one step rather
-          # than persisted into `.git/config` for the whole job. The header
-          # explains why the workflow's own token cannot do this; the pre-flight
-          # is what proves this one still can, before the version moved. Actions
-          # masks a registered secret in log output, so a push that fails prints
-          # the remote with `***` where the token is.
+          # **Pushed with `RELEASE_TOKEN`, and this only works because the
+          # checkout was told to persist no credentials.** Otherwise the bot's
+          # token sits in `.git/config` as an `Authorization` header, git
+          # prefers it over the userinfo in this URL, and the push goes out as
+          # the bot: see the note on the checkout step, which is where the
+          # mechanism actually lives. The credential is confined to this step's
+          # own environment.
+          #
+          # The header explains why the workflow's own token cannot do this; the
+          # pre-flight is what proves this one still can, before the version
+          # moved. Actions masks a registered secret in log output, so a push
+          # that fails prints the remote with `***` where the token is.
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
             "HEAD:${DEFAULT}"
         env:

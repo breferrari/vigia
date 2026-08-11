@@ -442,15 +442,89 @@ fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
     rest.find("\n      - ").map_or(rest, |end| &rest[..end])
 }
 
+/// The mapping keys sitting at exactly `indent` columns, unquoted.
+///
+/// **Not a substring search for `if:`, because four spellings evade one.** A
+/// quoted `"if":`, an `if :` with a space before the colon, the key at a
+/// different indent, and the same key one level up on the *job* are all valid
+/// YAML and all mean the step does not run. Each of those passed a `contains`
+/// check that had been mutation-tested against the obvious spelling only, which
+/// is what a single mutation buys: confidence in the one case you thought of.
+///
+/// Lines inside a `run: |` body are indented deeper than any key this asks
+/// about, so shell `if [ ... ]` is never mistaken for the YAML key.
+fn keys_at_indent(text: &str, indent: usize) -> Vec<String> {
+    text.lines()
+        .filter(|line| {
+            line.len() > indent
+                && line[..indent].chars().all(|c| c == ' ')
+                && !line[indent..].starts_with(' ')
+        })
+        .filter_map(|line| line.trim().split_once(':'))
+        .map(|(key, _)| {
+            key.trim()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_owned()
+        })
+        .collect()
+}
+
 /// A step that must run on every dispatch carries nothing that can skip it.
 fn assert_step_always_runs(bump: &str, name: &str) {
-    let block = step_block(bump, name);
-    for key in ["\n        if:", "\n        continue-on-error:"] {
+    let keys = keys_at_indent(step_block(bump, name), 8);
+    for key in ["if", "continue-on-error"] {
         assert!(
-            !block.contains(key),
-            "the `{name}` step carries a `{}` , so it can be skipped or its \
-             failure ignored while every gate reading its commands stays green",
-            key.trim()
+            !keys.contains(&key.to_owned()),
+            "the `{name}` step carries a `{key}:`, so it can be skipped or its \
+             failure ignored while every gate reading its commands stays green"
+        );
+    }
+}
+
+/// The step named `name` runs only when this is not a rehearsal.
+///
+/// **The rehearsal's whole promise is that `main` is left alone**, and until
+/// this existed that promise had no gate: deleting the condition from `commit
+/// the bump` left the suite green while every rehearsal pushed a version to the
+/// default branch, with the step above it still printing "main untouched".
+fn assert_step_skips_a_rehearsal(bump: &str, name: &str) {
+    let block = step_block(bump, name);
+    let at = block
+        .find("        if:")
+        .unwrap_or_else(|| panic!("the `{name}` step has no `if:` at all"));
+    let condition = block[at..].lines().next().unwrap_or_default();
+    assert!(
+        condition.contains("!inputs.rehearse"),
+        "the `{name}` step does not skip a rehearsal, so a rehearsal would move \
+         the default branch it promises to leave alone: {condition}"
+    );
+}
+
+/// One job, carrying nothing that can skip it.
+///
+/// **A step-level check cannot see the level above it.** Moving the pre-flight
+/// into a second job that nothing `needs:` leaves every step-level assertion
+/// true while the commit runs whether or not the tokens were ever checked, and
+/// an `if:` on the job skips every step in it at once. Both parsed as valid
+/// YAML and both passed before this existed.
+fn assert_one_job_that_always_runs(bump: &str) {
+    let jobs = &bump[bump.find("\njobs:").expect("bump.yml defines jobs")..];
+    let names = keys_at_indent(jobs, 2);
+    assert_eq!(
+        names.len(),
+        1,
+        "bump.yml defines {} jobs ({names:?}); the gates below reason about one, \
+         and a second job that nothing `needs:` runs the commit whether or not \
+         the tokens were checked",
+        names.len()
+    );
+
+    let job = keys_at_indent(jobs, 4);
+    for key in ["if", "continue-on-error"] {
+        assert!(
+            !job.contains(&key.to_owned()),
+            "the bump job carries a `{key}:`, which skips or forgives every step \
+             in it at once, including the pre-flight"
         );
     }
 }
@@ -1395,8 +1469,33 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
          cannot bypass the required checks passes this step: {standing}"
     );
 
-    // And the step cannot be skipped out from under any of it.
-    assert_step_always_runs(&bump, "the tokens can do what the release will ask of them");
+    // And none of it can be skipped out from under the commit: not the step,
+    // not the job it sits in, and not by moving it into a job nothing waits for.
+    assert_one_job_that_always_runs(&bump);
+    for always in [
+        "this runs on main or not at all",
+        "the tokens can do what the release will ask of them",
+        "hand off to the release",
+    ] {
+        assert_step_always_runs(&bump, always);
+    }
+
+    // And the rehearsal still leaves the default branch alone, which is the one
+    // promise the whole rehearsal path makes.
+    assert_step_skips_a_rehearsal(&bump, "commit the bump");
+
+    // **The checkout persists no credentials, and this is the assertion the
+    // push assertion above rests on.** With the default, the workflow's own
+    // token sits in `.git/config` as an `Authorization` header and git prefers
+    // it over the userinfo in the push URL, so the push goes out as the bot and
+    // is rejected exactly as run 31435812487 was, with every other check here
+    // green. Naming the token in the URL is necessary and not sufficient.
+    assert!(
+        bump.contains("persist-credentials: false"),
+        "the checkout persists the workflow's token into .git/config, where git \
+         prefers it over the token in the push URL: the push would authenticate \
+         as the bot and be rejected, with this whole pre-flight passing"
+    );
 
     // **The remote the push names carries the token.** This is the assertion the
     // whole gate exists for: `git push origin` is what failed, it is one word
