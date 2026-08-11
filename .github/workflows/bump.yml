@@ -182,10 +182,18 @@ jobs:
           # probe above and for the same reason, against this repository: create
           # a ref, require the 201, delete it. This is what catches a token that
           # expired, that was scoped to the wrong repository, or that was created
-          # without `Contents: Read and write`. No workflow here triggers on a
-          # branch other than `${DEFAULT}`, so the ref existing for a second
-          # starts nothing.
-          mine="refs/heads/release-preflight-${GITHUB_RUN_ID}"
+          # without `Contents: Read and write`.
+          #
+          # **Outside `refs/heads/` on purpose, and that is structural rather
+          # than careful.** A branch created by a PAT does raise events, unlike
+          # one created by `GITHUB_TOKEN`, so a probe in `refs/heads/` is safe
+          # only while no workflow here listens for a branch. That is true today
+          # and nothing tests it, which by this repo's own rule is a wish. A ref
+          # outside the branch and tag namespaces cannot raise a push or create
+          # event at all, so the claim stops needing to be true. Verified against
+          # this repository's API: it creates, it deletes, and it never appears
+          # as a branch.
+          mine="refs/preflight/${GITHUB_RUN_ID}"
           code=$(curl -sS -o mine.json -w '%{http_code}' -X POST \
             -H "Authorization: Bearer ${RELEASE_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
@@ -231,16 +239,34 @@ jobs:
           # Read with the workflow's own token, which `administration: read`
           # covers, so `RELEASE_TOKEN` stays scoped to `Contents`.
           #
-          # A 404 is the branch not being protected at all, which is a pass:
-          # there is then nothing to bypass. Only a readable protection that
-          # *enforces* against admins is a failure, and anything else is this
-          # check being unable to answer, which is itself worth stopping for.
+          # Anything this check cannot read is a stop, including the code that
+          # looks most like a pass. **A 404 is not "unprotected".** It is what
+          # the classic endpoint answers for a branch whose protection comes
+          # from a *ruleset* instead, and reading it as a pass would fail in the
+          # green direction on the day protection is migrated: every check here
+          # would agree the push is fine and the push would be rejected. So a
+          # 404 is followed up rather than trusted, on the endpoint that answers
+          # across both mechanisms. Measured against this repository: it reports
+          # 0 for `main` while `main` is classically protected, so an empty
+          # answer there really does mean no ruleset rather than no protection.
           code=$(curl -sS -o protection.json -w '%{http_code}' \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${DEFAULT}/protection")
           case "$code" in
-            404) echo "::notice::${DEFAULT} is not protected, so the push needs no bypass" ;;
+            404)
+              rules=$(curl -sS -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/rules/branches/${DEFAULT}" \
+                | jq -r 'if type == "array" then length else "unreadable" end')
+              if [ "$rules" = "0" ]; then
+                echo "::notice::${DEFAULT} carries no protection of either kind, so the push needs no bypass"
+              else
+                echo "::error::${DEFAULT} has no classic protection but ${rules} ruleset rule(s), which this check cannot evaluate for bypass"
+                echo "::error::Whether the push is allowed is now a question about ruleset bypass actors. Teach this check that before releasing."
+                exit 1
+              fi
+              ;;
             200)
               if [ "$(jq -r '.enforce_admins.enabled' protection.json)" != "false" ]; then
                 echo "::error::${DEFAULT} enforces its required checks against admins too, so no token can push the bump"

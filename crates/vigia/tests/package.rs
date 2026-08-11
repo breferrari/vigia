@@ -362,6 +362,86 @@ fn registry_unreachable(stderr: &str) -> bool {
 /// stating because it is the limit: this would truncate a genuine `#` inside a
 /// quoted string, so it is a helper for these files rather than a comment
 /// stripper in general.
+/// Assert that `preflight` carries a create-then-delete write probe against
+/// `repo`, anchored on the shell variable naming the ref it creates.
+///
+/// **Bounded to one probe, because there are two now and unbounded assertions
+/// stopped telling them apart.** The tap's gate asserted `-X POST`, `/git/refs`,
+/// `-X DELETE` and `201` over the whole step. When a second probe landed in that
+/// same step, every one of those strings had two suppliers: deleting the tap
+/// probe entirely left the gate green, and the gate exists because v0.1.0
+/// actually failed there. That is the fourth time in this file a mention has
+/// stood in for the thing, and the first time the mention was a *different real
+/// mechanism* rather than a comment.
+///
+/// So each assertion is confined to its own probe's span: from the line naming
+/// the ref, through the create, to the request that undoes it. A probe deleted
+/// now takes its span with it and its own gate fails.
+fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
+    // `refs/` rather than `refs/heads/`: the two probes deliberately sit in
+    // different namespaces, since only one of them needs to avoid raising a
+    // branch event, and the anchor is about which probe this is rather than
+    // where it writes.
+    let opens = format!("{ref_var}=\"refs/");
+    let creates = format!("repos/{repo}/git/refs");
+    let undoes = format!("repos/{repo}/git/${{{ref_var}}}");
+
+    let at = preflight
+        .find(&opens)
+        .unwrap_or_else(|| panic!("no probe names a ref in `{ref_var}`: {preflight}"));
+    let created = preflight.find(&creates).unwrap_or_else(|| {
+        panic!(
+            "the pre-flight must attempt a real write to {repo}. Reading it, or \
+             reading a permissions field about it, both pass for a token that \
+             cannot push: {preflight}"
+        )
+    });
+    let undone = preflight.find(&undoes).unwrap_or_else(|| {
+        panic!(
+            "the write probe against {repo} must undo itself, or every run leaves a branch behind"
+        )
+    });
+    assert!(
+        at < created && created < undone,
+        "the {repo} probe is out of order: it must name the ref, create it, then delete it"
+    );
+
+    // The verb, not only the endpoint. Naming the URL alone leaves the probe
+    // green after its create is quietly changed to a read, and reading proves
+    // nothing here: reading a public repository needs no grant at all.
+    assert!(
+        preflight[at..created].contains("-X POST"),
+        "the probe of {repo} is not a write: {}",
+        &preflight[at..created]
+    );
+    assert!(
+        preflight[created..undone].contains("-X DELETE"),
+        "the probe of {repo} does not delete the ref it created: {}",
+        &preflight[created..undone]
+    );
+    // And the create is checked, or a 403 passes silently: `curl` exits 0 on
+    // one, and the delete that follows would be undoing a ref never made.
+    assert!(
+        preflight[created..undone].contains(r#"!= "201""#),
+        "nothing checks that the write probe against {repo} succeeded: {}",
+        &preflight[created..undone]
+    );
+}
+
+/// `first` appears before `second` in the workflow's text.
+///
+/// Both token gates need this and both spelled it out: a check that reports a
+/// problem after the version has already moved reports it too late.
+fn assert_precedes(bump: &str, first: &str, second: &str, why: &str) {
+    let at = bump
+        .find(first)
+        .unwrap_or_else(|| panic!("`{first}` is not in bump.yml at all"));
+    let then = bump
+        .find(second)
+        .unwrap_or_else(|| panic!("`{second}` is not in bump.yml at all"));
+    assert!(at < then, "{why}");
+}
+
 fn without_comments(text: &str) -> String {
     text.lines()
         .map(|line| line.split_once('#').map_or(line, |(code, _)| code))
@@ -1196,30 +1276,21 @@ fn the_release_button_reaches_the_release() {
     // the user's role on the repository rather than the token's grants. So the
     // check creates a ref in the tap and deletes it, and this asserts that
     // shape rather than any wording.
-    assert!(
-        preflight.contains("-X POST") && preflight.contains("/git/refs"),
-        "the tap check must attempt a real write. Reading the repository, or          reading a permissions field about it, both pass for a token that          cannot push: {preflight}"
-    );
-    assert!(
-        preflight.contains("-X DELETE"),
-        "the write probe must undo itself, or every rehearsal leaves a branch          in the tap: {preflight}"
-    );
-    assert!(
-        preflight.contains("201"),
-        "the probe must check the create actually succeeded; curl exits 0 on a          403 body: {preflight}"
-    );
+    //
+    // **Bounded to the tap's own probe, and it was not always.** These three
+    // assertions ran over the whole step until a second probe landed in it, at
+    // which point every string they look for had two suppliers and deleting the
+    // tap probe outright left them green. See [`assert_write_probe`].
+    assert_write_probe(preflight, "probe", "${tap}");
 
     // And it has to run before the commit, or it reports a problem the version
     // has already moved past.
-    let checked_at = bump
-        .find(r#"-z "${CARGO_REGISTRY_TOKEN"#)
-        .expect("checked immediately above");
-    let committed_at = bump
-        .find("git commit")
-        .expect("bump.yml commits the version it raised");
-    assert!(
-        checked_at < committed_at,
-        "the token pre-flight runs after the commit, so a bad token would be          found only once main already carries the new version"
+    assert_precedes(
+        &bump,
+        r#"-z "${CARGO_REGISTRY_TOKEN"#,
+        "git commit",
+        "the token pre-flight runs after the commit, so a bad token would be \
+         found only once main already carries the new version",
     );
 }
 
@@ -1256,54 +1327,10 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
         );
 
     // **A real write to *this* repository, told apart from the tap's probe by
-    // the repository it names.** Both probes are the same shape on purpose, and
-    // that is exactly why the assertion has to name which one it is looking at:
-    // asserting `-X POST` and `/git/refs` alone passes on the tap probe with
-    // this one deleted.
-    let created = preflight
-        .find("repos/${GITHUB_REPOSITORY}/git/refs")
-        .expect(
-            "the pre-flight must attempt a real write to this repository. \
-             Reading it, or reading a permissions field about it, both pass for \
-             a token that cannot push",
-        );
-    let undone = preflight
-        .find("repos/${GITHUB_REPOSITORY}/git/${mine}")
-        .expect("the write probe must undo itself, or every run leaves a branch behind");
-    assert!(
-        created < undone,
-        "the probe deletes the ref before it creates it"
-    );
-
-    // **And each of those two is the verb it looks like.** Naming the endpoints
-    // alone leaves the probe passing after its create is quietly changed to a
-    // read, which is the exact failure this guard was rewritten once to escape:
-    // reading a repository proves nothing, because reading a public one needs no
-    // grant at all. The slices are bounded by this probe's own first line, so
-    // the tap's `-X POST` above cannot satisfy either.
-    let block = preflight
-        .find(r#"mine="refs/heads/"#)
-        .expect("the probe names the ref it creates");
-    assert!(
-        preflight[block..created].contains("-X POST"),
-        "the probe of this repository is not a write: {}",
-        &preflight[block..created]
-    );
-    assert!(
-        preflight[created..undone].contains("-X DELETE"),
-        "the probe does not delete the ref it created, so every run leaves one \
-         behind: {}",
-        &preflight[created..undone]
-    );
-
-    // And the create is checked between the two, or a 403 passes silently:
-    // `curl` exits 0 on one, and the delete that follows would then be undoing
-    // a ref that was never made.
-    assert!(
-        preflight[created..undone].contains(r#"!= "201""#),
-        "nothing checks that the write probe actually succeeded: {}",
-        &preflight[created..undone]
-    );
+    // the repository it names.** Both probes are the same shape on purpose, so
+    // the assertions have to say which one they are looking at, in both
+    // directions: see [`assert_write_probe`] for the direction that was missed.
+    assert_write_probe(preflight, "mine", "${GITHUB_REPOSITORY}");
 
     // **Both halves of the bypass, because the write probe does not imply it.**
     // A token with `Contents: Read and write` still cannot move a protected
@@ -1327,11 +1354,10 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
         .iter()
         .find(|command| command.contains("git commit -m"))
         .expect("bump.yml commits the version it raised");
-    let words: Vec<&str> = commit.split_whitespace().collect();
-    let remote = words
-        .windows(2)
-        .position(|pair| pair == ["git", "push"])
-        .and_then(|at| words.get(at + 2))
+    let remote = commit
+        .split("git push")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
         .expect("bump.yml pushes the commit it made");
     assert!(
         remote.contains("RELEASE_TOKEN"),
@@ -1343,16 +1369,12 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
 
     // And the whole check runs before the commit, on the same reasoning as the
     // gate above it: found afterwards, the version has already moved.
-    let checked_at = bump
-        .find(r#"-z "${RELEASE_TOKEN"#)
-        .expect("checked immediately above");
-    let committed_at = bump
-        .find("git commit")
-        .expect("bump.yml commits the version it raised");
-    assert!(
-        checked_at < committed_at,
+    assert_precedes(
+        &bump,
+        r#"-z "${RELEASE_TOKEN"#,
+        "git commit",
         "the push token is checked after the commit, so a token that cannot \
-         move main would be found only once the version had already moved"
+         move main would be found only once the version had already moved",
     );
 }
 
