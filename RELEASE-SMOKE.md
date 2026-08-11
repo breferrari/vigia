@@ -31,9 +31,11 @@ that a claim without a failing-capable check is a wish.
 
 ## 0. Prerequisites, once, before the first release ever
 
-Two of these cannot be set by anything but a person holding a token, and a
+Three of these cannot be set by anything but a person holding a token, and a
 release dispatched without them half fails: the binaries exist, the announcement
-does not, and the crate name is still unclaimed.
+does not, and the crate name is still unclaimed. The third fails better than
+that, stopping the release before anything is spent rather than half way
+through, and it is still worth not discovering on the day.
 
 - [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
 - [x] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
@@ -45,6 +47,16 @@ does not, and the crate name is still unclaimed.
       out the tap and pushes a commit, so contents read/write on
       `breferrari/homebrew-tap` is enough; dist's own guide asks for a classic
       token with `repo`, which is wider than the job needs. *(Set 2026-08-09.)*
+- [ ] `gh secret set RELEASE_TOKEN` on `breferrari/vigia`, from a fine-grained
+      token with **Contents: Read and write** on `breferrari/vigia` and nothing
+      else. **Two properties are load bearing here and they are separate
+      claims.** Contents is what lets the token write at all; its owner being an
+      **admin** of the repository is what lets that write past `main`'s seven
+      required status checks, which nothing else can do: a commit pushed with
+      `GITHUB_TOKEN` triggers no workflow, so the checks it needs never arrive
+      and the push is rejected forever. `bump.yml` proves both before the
+      version moves, the first by creating a ref and deleting it, the second by
+      reading the owner's role and the branch's `enforce_admins` setting.
 
 ## 1. The artifact, not the checkout
 
