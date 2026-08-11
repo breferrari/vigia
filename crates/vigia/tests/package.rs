@@ -1223,6 +1223,118 @@ fn the_release_button_reaches_the_release() {
     );
 }
 
+/// The push that moves `main` carries a token that can, and it is checked first.
+///
+/// **Run 31435812487 written down as a gate.** The button's first real run built
+/// everything, moved both version strings, and was rejected at the push with
+/// *"7 of 7 required status checks are expected"*. `main` is protected; a commit
+/// pushed with `GITHUB_TOKEN` triggers no workflow, so those checks can never
+/// arrive on it; and the bot holds write rather than admin, so it cannot bypass
+/// them. Retrying reaches the same answer forever.
+///
+/// **This is the one step in that workflow no rehearsal has ever reached**,
+/// because a rehearsal's whole promise is to leave `main` alone. Three green
+/// rehearsals and a token guard rewritten twice all ran over a step none of them
+/// performed, which is why the gate is here rather than left to the next
+/// release to discover.
+///
+/// Each assertion names a form only the *mechanism* has. `RELEASE_TOKEN` appears
+/// in the step's `env:` block, in two error messages and in a comment, so
+/// finding the name proves nothing; this file has recorded four separate
+/// occasions where a mention stood in for the thing.
+#[test]
+fn the_push_that_moves_main_is_authorised_before_the_version_does() {
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let commands = run_commands(&bump);
+
+    let preflight = commands
+        .iter()
+        .find(|command| command.contains(r#"-z "${RELEASE_TOKEN"#))
+        .expect(
+            "bump.yml must guard on the push token being empty before it bumps \
+             anything, in the form only the check has",
+        );
+
+    // **A real write to *this* repository, told apart from the tap's probe by
+    // the repository it names.** Both probes are the same shape on purpose, and
+    // that is exactly why the assertion has to name which one it is looking at:
+    // asserting `-X POST` and `/git/refs` alone passes on the tap probe with
+    // this one deleted.
+    let created = preflight
+        .find("repos/${GITHUB_REPOSITORY}/git/refs")
+        .expect(
+            "the pre-flight must attempt a real write to this repository. \
+             Reading it, or reading a permissions field about it, both pass for \
+             a token that cannot push",
+        );
+    let undone = preflight
+        .find("repos/${GITHUB_REPOSITORY}/git/${mine}")
+        .expect("the write probe must undo itself, or every run leaves a branch behind");
+    assert!(
+        created < undone,
+        "the probe deletes the ref before it creates it"
+    );
+
+    // And the create is checked between the two, or a 403 passes silently:
+    // `curl` exits 0 on one, and the delete that follows would then be undoing
+    // a ref that was never made.
+    assert!(
+        preflight[created..undone].contains(r#"!= "201""#),
+        "nothing checks that the write probe actually succeeded: {}",
+        &preflight[created..undone]
+    );
+
+    // **Both halves of the bypass, because the write probe does not imply it.**
+    // A token with `Contents: Read and write` still cannot move a protected
+    // branch unless its owner is an admin and the branch lets admins through.
+    // The probe above covers the grant; these cover the standing and the rule.
+    assert!(
+        preflight.contains(".permissions.admin"),
+        "nothing checks the token's owner can bypass the required checks, which \
+         is the half a successful write probe says nothing about: {preflight}"
+    );
+    assert!(
+        preflight.contains("enforce_admins"),
+        "nothing checks that main still lets admins bypass. Turning that off \
+         leaves every other check green and rejects the push: {preflight}"
+    );
+
+    // **The remote the push names carries the token.** This is the assertion the
+    // whole gate exists for: `git push origin` is what failed, it is one word
+    // away from what ships, and every check above passes with it restored.
+    let commit = commands
+        .iter()
+        .find(|command| command.contains("git commit -m"))
+        .expect("bump.yml commits the version it raised");
+    let words: Vec<&str> = commit.split_whitespace().collect();
+    let remote = words
+        .windows(2)
+        .position(|pair| pair == ["git", "push"])
+        .and_then(|at| words.get(at + 2))
+        .expect("bump.yml pushes the commit it made");
+    assert!(
+        remote.contains("RELEASE_TOKEN"),
+        "the bump pushes to `{remote}`, which carries the workflow's own token. \
+         That push is rejected by branch protection and cannot ever be accepted, \
+         because a GITHUB_TOKEN push triggers no workflow and so can never carry \
+         the checks main requires"
+    );
+
+    // And the whole check runs before the commit, on the same reasoning as the
+    // gate above it: found afterwards, the version has already moved.
+    let checked_at = bump
+        .find(r#"-z "${RELEASE_TOKEN"#)
+        .expect("checked immediately above");
+    let committed_at = bump
+        .find("git commit")
+        .expect("bump.yml commits the version it raised");
+    assert!(
+        checked_at < committed_at,
+        "the push token is checked after the commit, so a token that cannot \
+         move main would be found only once the version had already moved"
+    );
+}
+
 /// The tarball cargo would actually upload carries no tests.
 ///
 /// Every gate above reads a file and reasons about what cargo *will* do. This one

@@ -18,6 +18,18 @@
 # `dispatch-releases = true` in `[workspace.metadata.dist]` is for, and it is
 # also why `release.yml` no longer runs on a tag push at all.
 #
+# **The commit needs a second token, and that is a different problem from the
+# one above.** `dispatch-releases` removes the need for a PAT to *start* the
+# release; it says nothing about *writing* to `main`, which is protected by
+# seven required status checks. A commit pushed with `GITHUB_TOKEN` triggers no
+# workflow, by the same suppression rule the paragraph above relies on, so those
+# checks can never arrive on it and the push is rejected with "7 of 7 required
+# status checks are expected" however long anyone waits. The bot holds write
+# rather than admin, so it cannot bypass them either. That is run 31435812487,
+# the button's first real run, and it is why `RELEASE_TOKEN` exists: a
+# repository-scoped token whose owner is an admin, so the push is a bypass the
+# protection allows. Nothing else in this job uses it.
+#
 # **Ordering is chosen so nothing is pushed before it is checked.** The version
 # is edited, verified, and built *before* the commit, so a bump that produces an
 # inconsistent manifest fails with `main` untouched and no release started. The
@@ -52,6 +64,10 @@ concurrency:
 permissions:
   contents: write
   actions: write
+  # Read-only, and only so the pre-flight can ask whether `main` still allows an
+  # admin to bypass its required checks. Reading branch protection needs this;
+  # `RELEASE_TOKEN` is deliberately not widened past `Contents` to answer it.
+  administration: read
 
 jobs:
   bump:
@@ -102,6 +118,11 @@ jobs:
             echo "::error::HOMEBREW_TAP_TOKEN is not set; the formula would never reach the tap"
             exit 1
           fi
+          if [ -z "${RELEASE_TOKEN:-}" ]; then
+            echo "::error::RELEASE_TOKEN is not set; the bump would build everything and then fail to move ${DEFAULT}"
+            echo "::error::Fine-grained token, Contents: Read and write, repository ${GITHUB_REPOSITORY} only, owned by an admin of it."
+            exit 1
+          fi
 
           # The tap's name comes from the release config rather than a copy here,
           # on the same rule as the no-C-toolchain job's target list.
@@ -150,10 +171,96 @@ jobs:
             -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             "https://api.github.com/repos/${tap}/git/${probe}" \
             || echo "::warning::left ${probe} in ${tap}; harmless, delete at leisure"
-          echo "::notice::both tokens present; a real write to ${tap} succeeded and was undone"
+
+          # **The push to `${DEFAULT}` is the step no rehearsal reaches**, since
+          # a rehearsal's whole promise is to leave it alone, and it is the step
+          # that failed on the button's first real run. So it is checked here
+          # instead, and it takes two separate things being true. Neither half
+          # predicts the push on its own.
+          #
+          # **First half: the token's own grant, probed.** Same shape as the tap
+          # probe above and for the same reason, against this repository: create
+          # a ref, require the 201, delete it. This is what catches a token that
+          # expired, that was scoped to the wrong repository, or that was created
+          # without `Contents: Read and write`. No workflow here triggers on a
+          # branch other than `${DEFAULT}`, so the ref existing for a second
+          # starts nothing.
+          mine="refs/heads/release-preflight-${GITHUB_RUN_ID}"
+          code=$(curl -sS -o mine.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -d "{\"ref\":\"${mine}\",\"sha\":\"$(git rev-parse HEAD)\"}")
+
+          if [ "$code" != "201" ]; then
+            echo "::error::RELEASE_TOKEN cannot write to ${GITHUB_REPOSITORY}: HTTP ${code}"
+            echo "::error::$(jq -r '.message // empty' mine.json)"
+            echo "::error::Fine-grained token: Contents must be Read and write, and ${GITHUB_REPOSITORY} must be in its repository list."
+            exit 1
+          fi
+
+          curl -sS -o /dev/null -X DELETE \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/${mine}" \
+            || echo "::warning::left ${mine} behind; harmless, delete at leisure"
+
+          # **Second half: the bypass, and this one is a rule check rather than a
+          # probe. Saying so is the point.** The only true probe of "can this
+          # token move a protected branch" is moving it, which is the
+          # irreversible act everything here runs before, so this asserts the
+          # documented condition under which the push is allowed instead of
+          # pretending to have performed one.
+          #
+          # `.permissions.admin` is the field the first version of this guard was
+          # wrong to use, and it is the right one here, because the question
+          # changed. That version asked whether a *token* could push and read a
+          # field reporting the *user's role*, which is why it passed for a token
+          # that had already been denied. Bypassing a protected branch genuinely
+          # is a property of the user's role. The probe above covers the token's
+          # grant; this covers the actor's standing.
+          admin=$(curl -sS -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}" | jq -r '.permissions.admin // false')
+          if [ "$admin" != "true" ]; then
+            echo "::error::RELEASE_TOKEN's owner is not an admin of ${GITHUB_REPOSITORY}, so its push cannot bypass the required checks on ${DEFAULT}"
+            exit 1
+          fi
+
+          # And the setting that makes that role sufficient. Turning on "do not
+          # allow bypassing the above settings" would leave every check above
+          # green and reject the push exactly as run 31435812487 was rejected.
+          # Read with the workflow's own token, which `administration: read`
+          # covers, so `RELEASE_TOKEN` stays scoped to `Contents`.
+          #
+          # A 404 is the branch not being protected at all, which is a pass:
+          # there is then nothing to bypass. Only a readable protection that
+          # *enforces* against admins is a failure, and anything else is this
+          # check being unable to answer, which is itself worth stopping for.
+          code=$(curl -sS -o protection.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/${DEFAULT}/protection")
+          case "$code" in
+            404) echo "::notice::${DEFAULT} is not protected, so the push needs no bypass" ;;
+            200)
+              if [ "$(jq -r '.enforce_admins.enabled' protection.json)" != "false" ]; then
+                echo "::error::${DEFAULT} enforces its required checks against admins too, so no token can push the bump"
+                echo "::error::Either allow admins to bypass, or move the version bump into an ordinary pull request."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::cannot read ${DEFAULT}'s protection: HTTP ${code}. This job needs permissions: administration: read"
+              exit 1
+              ;;
+          esac
+
+          echo "::notice::three tokens present; real writes to ${tap} and ${GITHUB_REPOSITORY} succeeded and were undone"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
 
       - name: work out the next version
         id: version
@@ -233,7 +340,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock
           git commit -m "release: ${{ steps.version.outputs.next }}"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+          # **Pushed with `RELEASE_TOKEN`, not with the token the checkout
+          # carries**, and the credential is confined to this one step rather
+          # than persisted into `.git/config` for the whole job. The header
+          # explains why the workflow's own token cannot do this; the pre-flight
+          # is what proves this one still can, before the version moved. Actions
+          # masks a registered secret in log output, so a push that fails prints
+          # the remote with `***` where the token is.
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+            "HEAD:${DEFAULT}"
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
 
       # `dry-run` is `release.yml`'s own word for build-everything-publish-
       # nothing, so a rehearsal exercises the whole release path and stops short
