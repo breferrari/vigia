@@ -210,11 +210,11 @@ jobs:
           # and nothing tests it, which by this repo's own rule is a wish.
           #
           # Two claims, and they rest on different things. That the namespace
-          # *works* is measured: created, deleted, and never listed as a branch
-          # in this repository. That it cannot raise a `push` or `create` event
-          # rests on the documented trigger surface, where both events are
-          # defined over branches and tags, and it is not something this check
-          # observes.
+          # *works* was checked against this repository's API when this landed:
+          # the ref created, deleted, and never appeared as a branch. That it
+          # cannot raise a `push` or `create` event rests on the documented
+          # trigger surface, where both events are defined over branches and
+          # tags, and it is not something any check here observes.
           mine="refs/preflight/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           code=$(curl -sS -o mine.json -w '%{http_code}' --max-time 30 -X POST \
             -H "Authorization: Bearer ${RELEASE_TOKEN}" \
@@ -289,7 +289,11 @@ jobs:
           # precisely what run 31435812487 did. That failure is already loud and
           # already safe, and paying a permanent widening of a secret to
           # rephrase it is the wrong trade.
-          echo "::notice::three tokens present; real writes to ${tap} and ${GITHUB_REPOSITORY} succeeded and were undone"
+          # Says what was proved, not what was tidied. Whether each probe ref was
+          # actually removed is the business of the two checks above, which warn
+          # by name when one survives; claiming it here as well would contradict
+          # them in the one case anybody needs to read.
+          echo "::notice::three tokens present; real writes to ${tap} and ${GITHUB_REPOSITORY} both succeeded"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

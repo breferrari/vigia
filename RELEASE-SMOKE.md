@@ -34,14 +34,14 @@ that a claim without a failing-capable check is a wish.
 
 ## 0. Prerequisites, once, before the first release ever
 
-Three of the boxes below are secrets, and only a person holding a token can set
-them. A release dispatched without the first two half fails: the binaries exist,
-the announcement does not, and the crate name is still unclaimed. The third,
-`RELEASE_TOKEN`, fails better than that, stopping the release before anything is
-spent rather than half way through, and it is still worth not discovering on the
-day. The last two boxes are not secrets at all: one is a repository setting the
-release depends on and does not check, and one is a claim nobody has yet been in
-a position to prove.
+Six boxes. The first is the tap repository existing at all. Three are secrets,
+and only a person holding a token can set them: a release dispatched without
+`CARGO_REGISTRY_TOKEN` or `HOMEBREW_TAP_TOKEN` half fails, with the binaries
+built, the announcement missing and the crate name still unclaimed, while
+`RELEASE_TOKEN` fails better than that, stopping the release before anything is
+spent rather than half way through. The last two are not secrets at all: one is
+a repository setting the release depends on and deliberately does not check, and
+one is a claim nobody has yet been in a position to prove.
 
 - [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
 - [x] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a

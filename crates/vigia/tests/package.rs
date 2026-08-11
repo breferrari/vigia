@@ -1517,6 +1517,23 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
          the checks main requires"
     );
 
+    // **And it pushes the bump at the default branch.** The remote being right
+    // says nothing about the refspec: `HEAD:refs/heads/scratch` authenticates
+    // perfectly, lands the version somewhere nothing tags, and leaves the
+    // release dispatching against a branch that never moved. Found by mutation,
+    // after the remote assertion had already been mutation-tested and looked
+    // like enough.
+    let refspec = commit
+        .split("git push")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().nth(1))
+        .expect("the push names what it is pushing");
+    assert!(
+        refspec.contains("HEAD:") && refspec.contains("DEFAULT"),
+        "the bump pushes `{refspec}` rather than HEAD at the default branch, so \
+         the version would land where nothing releases it"
+    );
+
     // And the whole check runs before the commit, on the same reasoning as the
     // gate above it: found afterwards, the version has already moved.
     assert_precedes(
