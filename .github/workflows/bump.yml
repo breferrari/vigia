@@ -128,8 +128,8 @@ jobs:
             exit 1
           fi
           if [ -z "${RELEASE_TOKEN:-}" ]; then
-            echo "::error::RELEASE_TOKEN is not set; the bump would build everything and then fail to move ${DEFAULT}"
-            echo "::error::Fine-grained token, Contents: Read and write, repository ${GITHUB_REPOSITORY} only, owned by an admin of it."
+            echo "::error::the release token is not set; the bump would build everything and then fail to move ${DEFAULT}"
+            echo "::error::It comes from the HOMEBREW_TAP_TOKEN secret: a fine-grained token with Contents Read and write on ${GITHUB_REPOSITORY}, owned by an admin of it."
             exit 1
           fi
 
@@ -305,7 +305,15 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # **One fine-grained token fills both roles, and the secret's name is
+          # older than the second one.** `HOMEBREW_TAP_TOKEN` carries Contents
+          # read and write on *both* `breferrari/vigia` and the tap, and its
+          # owner is an admin here, which is everything the push needs. The
+          # shell variable keeps the role's name rather than the secret's,
+          # because what this step reasons about is the release credential; the
+          # two probes below still discriminate, since the token's repository
+          # access list can drop either repository independently.
+          RELEASE_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           DEFAULT: ${{ github.event.repository.default_branch }}
 
       - name: work out the next version
@@ -409,7 +417,15 @@ jobs:
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
             "HEAD:${DEFAULT}"
         env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # **One fine-grained token fills both roles, and the secret's name is
+          # older than the second one.** `HOMEBREW_TAP_TOKEN` carries Contents
+          # read and write on *both* `breferrari/vigia` and the tap, and its
+          # owner is an admin here, which is everything the push needs. The
+          # shell variable keeps the role's name rather than the secret's,
+          # because what this step reasons about is the release credential; the
+          # two probes below still discriminate, since the token's repository
+          # access list can drop either repository independently.
+          RELEASE_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           DEFAULT: ${{ github.event.repository.default_branch }}
 
       # `dry-run` is `release.yml`'s own word for build-everything-publish-

@@ -34,14 +34,22 @@ that a claim without a failing-capable check is a wish.
 
 ## 0. Prerequisites, once, before the first release ever
 
-Six boxes. The first is the tap repository existing at all. Three are secrets,
+Five boxes. The first is the tap repository existing at all. Two are secrets,
 and only a person holding a token can set them: a release dispatched without
-`CARGO_REGISTRY_TOKEN` or `HOMEBREW_TAP_TOKEN` half fails, with the binaries
-built, the announcement missing and the crate name still unclaimed, while
-`RELEASE_TOKEN` fails better than that, stopping the release before anything is
-spent rather than half way through. The last two are not secrets at all: one is
-a repository setting the release depends on and deliberately does not check, and
+either half fails, with the binaries built, the announcement missing and the
+crate name still unclaimed. The last two are not secrets at all: one is a
+repository setting the release depends on and deliberately does not check, and
 one is a claim nobody has yet been in a position to prove.
+
+**Two secrets, three jobs, because one token does two of them.**
+`HOMEBREW_TAP_TOKEN` carries Contents read and write on *both*
+`breferrari/homebrew-tap` and `breferrari/vigia`, so it is the credential that
+pushes the formula to the tap **and** the credential that moves the version on
+`main`. `bump.yml` reads it into a variable named for the second role, because
+that is what the step reasons about. The name on the secret is older than the
+second use and is left alone rather than churned: renaming a secret means
+regenerating the token, and the two uses are separable whenever that is wanted,
+by minting a token scoped to this repository alone and pointing the bump at it.
 
 - [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
 - [x] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
@@ -49,20 +57,24 @@ one is a claim nobody has yet been in a position to prove.
       and `vigia-core`. *(Set 2026-08-09.)* `.github/workflows/publish-crates-io.yml`
       checks for it before packaging anything, so a missing one fails in seconds
       rather than several minutes in.
-- [x] `gh secret set HOMEBREW_TAP_TOKEN` on `breferrari/vigia`. The job checks
-      out the tap and pushes a commit, so contents read/write on
-      `breferrari/homebrew-tap` is enough; dist's own guide asks for a classic
-      token with `repo`, which is wider than the job needs. *(Set 2026-08-09.)*
-- [ ] `gh secret set RELEASE_TOKEN` on `breferrari/vigia`, from a fine-grained
-      token with **Contents: Read and write** on `breferrari/vigia` and nothing
-      else, **minted by an account that is an admin of the repository**.
-      **Two properties are load bearing here and they are separate claims.**
-      Contents is what lets the token write at all; its owner being an admin is
-      what lets that write past `main`'s seven required status checks, which
-      nothing else can do: a commit pushed with `GITHUB_TOKEN` triggers no
-      workflow, so the checks it needs never arrive and the push is rejected
-      forever. `bump.yml` checks both before the version moves, the first by
-      creating a ref and deleting it, the second by reading the owner's role.
+- [x] `gh secret set HOMEBREW_TAP_TOKEN` on `breferrari/vigia`, from a
+      fine-grained token with **Contents: Read and write** on **both**
+      `breferrari/homebrew-tap` and `breferrari/vigia`, **owned by an account
+      that is an admin of `breferrari/vigia`**. *(Set 2026-08-09; the vigia
+      grant recorded here 2026-08-12.)* dist's own guide asks for a classic
+      token with `repo`, which is wider than either job needs.
+
+      The tap half needs only contents on the tap. **The bump half needs two
+      things that are separate claims.** Contents on this repository is what
+      lets the token write at all; its owner being an admin is what lets that
+      write past `main`'s seven required status checks, which nothing else can
+      do, because a commit pushed with `GITHUB_TOKEN` triggers no workflow, so
+      the checks it needs never arrive and the push is rejected forever.
+      `bump.yml` checks both before the version moves, the first by creating a
+      ref and deleting it, the second by reading the owner's role. It probes the
+      tap the same way, and the two probes still discriminate despite sharing a
+      credential, because the token's repository-access list can drop either
+      repository on its own.
 - [ ] `main` keeps **"do not allow bypassing the above settings" switched off**,
       which is what makes an admin's push legal at all. `bump.yml` does not
       check this and says why: reading branch protection needs admin rights on
@@ -75,8 +87,8 @@ one is a claim nobody has yet been in a position to prove.
       than left implied. What has been measured is the half either side of it:
       an admin identity does bypass these exact seven checks (probed on a
       throwaway branch protected identically to `main`, 2026-08-11), and the
-      token's own write grant is probed on every run. Tick this once a
-      `RELEASE_TOKEN` push to `main` has actually landed, and name the run.
+      token's own write grant is probed on every run. Tick this once a real
+      bump push to `main` has actually landed, and name the run.
 
 ## 1. The artifact, not the checkout
 
