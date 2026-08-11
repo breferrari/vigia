@@ -492,11 +492,21 @@ fn assert_step_skips_a_rehearsal(bump: &str, name: &str) {
     let at = block
         .find("        if:")
         .unwrap_or_else(|| panic!("the `{name}` step has no `if:` at all"));
-    let condition = block[at..].lines().next().unwrap_or_default();
-    assert!(
-        condition.contains("!inputs.rehearse"),
-        "the `{name}` step does not skip a rehearsal, so a rehearsal would move \
-         the default branch it promises to leave alone: {condition}"
+    let condition = block[at..]
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches("if:")
+        .trim();
+    // **The whole condition, not a substring of it.** `!inputs.rehearse ||
+    // github.event_name == 'workflow_dispatch'` contains the needle and is
+    // always true, so a `contains` check licenses the exact thing it forbids.
+    assert_eq!(
+        condition, "${{ !inputs.rehearse }}",
+        "the `{name}` step's condition is `{condition}`, which is not simply \
+         `not a rehearsal`, so a rehearsal may move the default branch it \
+         promises to leave alone"
     );
 }
 
@@ -1483,6 +1493,43 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     // And the rehearsal still leaves the default branch alone, which is the one
     // promise the whole rehearsal path makes.
     assert_step_skips_a_rehearsal(&bump, "commit the bump");
+
+    // **No step anywhere forgives its own failure.** Named steps are checked
+    // above, but `continue-on-error` is worse than an `if:` wherever it lands:
+    // on `commit the bump` it lets a *failed push* dispatch the release anyway,
+    // and it sets that step's outcome to `failure`, which also silences the
+    // recovery notice that exists for exactly this case.
+    assert!(
+        !keys_at_indent(&bump, 8).contains(&"continue-on-error".to_owned()),
+        "a step in bump.yml carries `continue-on-error:`, so the release can \
+         proceed past a step that failed"
+    );
+
+    // **The commit happens before the dispatch.** Reordering them dispatches a
+    // release for a version the default branch does not carry yet, which
+    // publishes the old code under the new number.
+    assert_precedes(
+        &bump,
+        "git commit",
+        "gh workflow run",
+        "bump.yml dispatches the release before it commits the version, so the \
+         release would build whatever the default branch carried beforehand",
+    );
+
+    // **A rehearsal dispatches `dry-run` and a real release does not, and the
+    // polarity is the assertion.** Flipping this one comparison makes every
+    // rehearsal publish to crates.io for real, which is the irreversible half
+    // of the release and the one thing the rehearsal path exists to avoid.
+    let dispatch = commands
+        .iter()
+        .find(|command| command.contains("gh workflow run"))
+        .expect("bump.yml dispatches the release");
+    assert!(
+        dispatch.contains(r#"= "true" ]; then tag=dry-run"#),
+        "the rehearsal's tag no longer depends on `rehearse` being true in the \
+         way this gate can read. A flipped comparison here publishes for real \
+         on every rehearsal: {dispatch}"
+    );
 
     // **The checkout persists no credentials, and this is the assertion the
     // push assertion above rests on.** With the default, the workflow's own

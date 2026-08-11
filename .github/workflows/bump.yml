@@ -154,6 +154,13 @@ jobs:
           # capability itself rather than a report about it, and it leaves
           # nothing behind. The tap holds no workflows, so a ref existing for a
           # second triggers nothing.
+          #
+          # **That argument is weaker than the one this step applies to its own
+          # probe below**, which moved out of `refs/heads/` precisely so the
+          # claim would stop needing to be true. It is left standing here
+          # because the tap is a different repository with a different owner of
+          # that risk, and changing a probe that has worked is not this branch's
+          # to do. Worth revisiting when the tap next changes.
           head=$(curl -sS --max-time 30 -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             "https://api.github.com/repos/${tap}/git/ref/heads/main" | jq -r '.object.sha // empty')
           if [ -z "$head" ]; then
@@ -177,8 +184,8 @@ jobs:
           fi
 
           # **The undo is checked, because `curl -sS` exits 0 on a 403 and the
-          # `||` arm below was therefore unreachable for the one failure it
-          # names.** A ref left behind is not harmless the way the old wording
+          # `|| echo` arm this replaced was therefore unreachable for the one
+          # failure it named.** A ref left behind is not harmless the way the old wording
           # claimed: the ref name is derived from the run, so the *re-run* of a
           # failed release POSTs to a ref that already exists, gets a 422, and
           # reports a healthy token as broken. `GITHUB_RUN_ATTEMPT` in the name
@@ -248,7 +255,8 @@ jobs:
           # question has changed rather than the family having become
           # trustworthy. **What it answers, exactly:** the
           # *authenticated user's role* on this repository, never the token's own
-          # grants. That is why it once passed for a token already denied 403.
+          # grants. That is why `.permissions.push` once passed for a token
+          # already denied 403.
           # Bypassing a protected branch is a property of that role, so it is the
           # right instrument for this question, which is whether the account
           # behind the token is an admin here. It is still the wrong instrument
@@ -392,9 +400,11 @@ jobs:
           # mechanism actually lives. The credential is confined to this step's
           # own environment.
           #
-          # The header explains why the workflow's own token cannot do this; the
-          # pre-flight is what proves this one still can, before the version
-          # moved. Actions masks a registered secret in log output, so a push
+          # The header explains why the workflow's own token cannot do this.
+          # The pre-flight proves this token can still *write here*, before the
+          # version moved; that it may write past the protection is a rule check
+          # rather than something demonstrated, and the paragraph above the
+          # ruling says so. Actions masks a registered secret in log output, so a push
           # that fails prints the remote with `***` where the token is.
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
             "HEAD:${DEFAULT}"
