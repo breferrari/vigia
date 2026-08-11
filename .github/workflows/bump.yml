@@ -322,7 +322,11 @@ jobs:
 
           # Verify the edit rather than trusting the substitution, because a sed
           # that matched nothing exits 0 and leaves the old version in place.
-          found=$(grep -cE "\"${next}\"" Cargo.toml)
+          # `|| true`, because `grep -c` exits 1 when it counts nothing and
+          # `set -e` would then kill the step on the assignment, before the
+          # diagnostic below could say which line failed to move. Exactly the
+          # case the diagnostic exists for is the case it was unreachable in.
+          found=$(grep -cE "\"${next}\"" Cargo.toml || true)
           if [ "$found" -ne 2 ]; then
             echo "::error::expected both version strings at ${next}, found ${found}"
             grep -nE '^version = |^vigia-core = ' Cargo.toml
@@ -387,3 +391,20 @@ jobs:
           echo "::notice::dispatched release.yml with tag=${tag}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # **The one failure that leaves the repository mid-release.** Everything
+      # before the commit fails with nothing moved. After it, the version is on
+      # `${DEFAULT}` and only the dispatch stands between that and a release, so
+      # a dispatch that fails strands a bumped version nobody tagged: re-running
+      # this workflow checks out the pre-bump commit and bumps past it, and the
+      # stranded version becomes unreleasable by button.
+      #
+      # It is not retried automatically, because a dispatch that failed for a
+      # reason nobody has read is not obviously safe to repeat. It is named
+      # instead, with the one command that finishes the job.
+      - name: say how to finish a release the dispatch did not start
+        if: ${{ failure() && !inputs.rehearse }}
+        run: |
+          echo "::error::${{ steps.version.outputs.next }} may be committed to the default branch with no release dispatched."
+          echo "::error::Check whether the bump landed, and if it did, finish it with:"
+          echo "::error::  gh workflow run release.yml --ref ${{ github.event.repository.default_branch }} -f tag=v${{ steps.version.outputs.next }}"

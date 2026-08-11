@@ -1283,8 +1283,8 @@ fn the_release_button_reaches_the_release() {
          rehearsal in bump.yml may now publish"
     );
 
-    // **Both tokens are checked before the version moves, and the tap one is
-    // checked for `push`.** This is v0.1.0's actual failure written down as a
+    // **All three tokens are checked before the version moves, and the two that
+    // must write are checked for `push`.** This is v0.1.0's actual failure as a
     // gate. `HOMEBREW_TAP_TOKEN` could read the tap and not write to it; the
     // formula job checked the tap out successfully and then failed `git push`
     // with a 403, by which point the GitHub release and the crates.io publish
