@@ -15,7 +15,10 @@ against a published artifact, and §5 verifies what landed after it.
 
 **`git tag && git push --tags` no longer releases anything.** `dispatch-releases`
 removed that trigger, for the reason `SPEC.md` §9 records: it is what lets the
-bump start the release without a second permanent token.
+bump *start* the release without a second permanent token. Starting it and
+committing it are different questions, and only the first is answered there:
+the bump's own commit to a protected `main` does need a token of its own, which
+is the third secret in §0.
 
 The gate moved twice, and both moves were the same correction. This file first
 said "before the first `publish`", which was true while the publish was a
@@ -31,9 +34,14 @@ that a claim without a failing-capable check is a wish.
 
 ## 0. Prerequisites, once, before the first release ever
 
-Two of these cannot be set by anything but a person holding a token, and a
-release dispatched without them half fails: the binaries exist, the announcement
-does not, and the crate name is still unclaimed.
+Six boxes. The first is the tap repository existing at all. Three are secrets,
+and only a person holding a token can set them: a release dispatched without
+`CARGO_REGISTRY_TOKEN` or `HOMEBREW_TAP_TOKEN` half fails, with the binaries
+built, the announcement missing and the crate name still unclaimed, while
+`RELEASE_TOKEN` fails better than that, stopping the release before anything is
+spent rather than half way through. The last two are not secrets at all: one is
+a repository setting the release depends on and deliberately does not check, and
+one is a claim nobody has yet been in a position to prove.
 
 - [x] `breferrari/homebrew-tap` exists and is public. *(Created 2026-08-08.)*
 - [x] `gh secret set CARGO_REGISTRY_TOKEN` on `breferrari/vigia`, from a
@@ -45,6 +53,30 @@ does not, and the crate name is still unclaimed.
       out the tap and pushes a commit, so contents read/write on
       `breferrari/homebrew-tap` is enough; dist's own guide asks for a classic
       token with `repo`, which is wider than the job needs. *(Set 2026-08-09.)*
+- [ ] `gh secret set RELEASE_TOKEN` on `breferrari/vigia`, from a fine-grained
+      token with **Contents: Read and write** on `breferrari/vigia` and nothing
+      else, **minted by an account that is an admin of the repository**.
+      **Two properties are load bearing here and they are separate claims.**
+      Contents is what lets the token write at all; its owner being an admin is
+      what lets that write past `main`'s seven required status checks, which
+      nothing else can do: a commit pushed with `GITHUB_TOKEN` triggers no
+      workflow, so the checks it needs never arrive and the push is rejected
+      forever. `bump.yml` checks both before the version moves, the first by
+      creating a ref and deleting it, the second by reading the owner's role.
+- [ ] `main` keeps **"do not allow bypassing the above settings" switched off**,
+      which is what makes an admin's push legal at all. `bump.yml` does not
+      check this and says why: reading branch protection needs admin rights on
+      the API, which the workflow's own token cannot be granted and the release
+      token should not be widened to hold. If it is ever switched on, the
+      release fails at the push with `main` unmoved and nothing published.
+- [ ] **Unproven until the first real push:** that a fine-grained token
+      *inherits* its owner's bypass. It is documented behaviour and it is the
+      premise the whole button rests on, so it is written here as a claim rather
+      than left implied. What has been measured is the half either side of it:
+      an admin identity does bypass these exact seven checks (probed on a
+      throwaway branch protected identically to `main`, 2026-08-11), and the
+      token's own write grant is probed on every run. Tick this once a
+      `RELEASE_TOKEN` push to `main` has actually landed, and name the run.
 
 ## 1. The artifact, not the checkout
 

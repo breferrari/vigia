@@ -348,6 +348,211 @@ fn registry_unreachable(stderr: &str) -> bool {
         .any(|line| MARKERS.iter().any(|marker| line.contains(marker)))
 }
 
+/// Assert that `preflight` carries a create-then-delete write probe against
+/// `repo`, anchored on the shell variable naming the ref it creates.
+///
+/// **Bounded to one probe, because there are two now and unbounded assertions
+/// stopped telling them apart.** The tap's gate asserted `-X POST`, `/git/refs`,
+/// `-X DELETE` and `201` over the whole step. When a second probe landed in that
+/// same step, every one of those strings had two suppliers: deleting the tap
+/// probe entirely left the gate green, and the gate exists because v0.1.0
+/// actually failed there. That is the fourth time in this file a mention has
+/// stood in for the thing, and the first time the mention was a *different real
+/// mechanism* rather than a comment.
+///
+/// So each assertion is confined to its own probe's span: from the line naming
+/// the ref, through the create, to the request that undoes it. A probe deleted
+/// now takes its span with it and its own gate fails.
+fn assert_write_probe(preflight: &str, ref_var: &str, repo: &str) {
+    // `refs/` rather than `refs/heads/`: the two probes deliberately sit in
+    // different namespaces, since only one of them needs to avoid raising a
+    // branch event, and the anchor is about which probe this is rather than
+    // where it writes.
+    let opens = format!("{ref_var}=\"refs/");
+    let creates = format!("repos/{repo}/git/refs");
+    let undoes = format!("repos/{repo}/git/${{{ref_var}}}");
+
+    let at = preflight
+        .find(&opens)
+        .unwrap_or_else(|| panic!("no probe names a ref in `{ref_var}`: {preflight}"));
+    let created = preflight.find(&creates).unwrap_or_else(|| {
+        panic!(
+            "the pre-flight must attempt a real write to {repo}. Reading it, or \
+             reading a permissions field about it, both pass for a token that \
+             cannot push: {preflight}"
+        )
+    });
+    let undone = preflight.find(&undoes).unwrap_or_else(|| {
+        panic!(
+            "the write probe against {repo} must undo itself, or every run leaves a branch behind"
+        )
+    });
+    assert!(
+        at < created && created < undone,
+        "the {repo} probe is out of order: it must name the ref, create it, then delete it"
+    );
+
+    // The verb, not only the endpoint. Naming the URL alone leaves the probe
+    // green after its create is quietly changed to a read, and reading proves
+    // nothing here: reading a public repository needs no grant at all.
+    assert!(
+        preflight[at..created].contains("-X POST"),
+        "the probe of {repo} is not a write: {}",
+        &preflight[at..created]
+    );
+    assert!(
+        preflight[created..undone].contains("-X DELETE"),
+        "the probe of {repo} does not delete the ref it created: {}",
+        &preflight[created..undone]
+    );
+    // And the create is checked, or a 403 passes silently: `curl` exits 0 on
+    // one, and the delete that follows would be undoing a ref never made.
+    //
+    // **The comparison *and* the stop.** Asserting only `!= "201"` leaves the
+    // probe decorative: replace the failure body with an `echo` and the string
+    // survives, the job carries on, and the irreversible half proceeds against
+    // a token that has just been shown not to work. Demonstrated by running it,
+    // not reasoned about.
+    let checked = &preflight[created..undone];
+    assert!(
+        checked.contains(r#"!= "201""#),
+        "nothing checks that the write probe against {repo} succeeded: {checked}"
+    );
+    assert!(
+        checked.contains("exit 1"),
+        "the write probe against {repo} notices a failed create and continues \
+         anyway, which is a probe that reports rather than guards: {checked}"
+    );
+}
+
+/// The step named `name`, from its `- name:` to the next step's.
+///
+/// **A step is more than the commands it runs, and [`run_commands`] only ever
+/// sees the commands.** An `if:` or a `continue-on-error:` beside them decides
+/// whether any of it executes, and both are invisible to every gate in this file
+/// that reads a `run:` body. Adding `if: ${{ inputs.rehearse }}` to the token
+/// pre-flight leaves the entire suite green while switching off the guard that
+/// exists because a release actually failed.
+fn step_block<'a>(bump: &'a str, name: &str) -> &'a str {
+    let header = format!("- name: {name}");
+    let at = bump
+        .find(&header)
+        .unwrap_or_else(|| panic!("bump.yml has no step named `{name}`"));
+    let rest = &bump[at + header.len()..];
+    rest.find("\n      - ").map_or(rest, |end| &rest[..end])
+}
+
+/// The mapping keys sitting at exactly `indent` columns, unquoted.
+///
+/// **Not a substring search for `if:`, because four spellings evade one.** A
+/// quoted `"if":`, an `if :` with a space before the colon, the key at a
+/// different indent, and the same key one level up on the *job* are all valid
+/// YAML and all mean the step does not run. Each of those passed a `contains`
+/// check that had been mutation-tested against the obvious spelling only, which
+/// is what a single mutation buys: confidence in the one case you thought of.
+///
+/// Lines inside a `run: |` body are indented deeper than any key this asks
+/// about, so shell `if [ ... ]` is never mistaken for the YAML key.
+fn keys_at_indent(text: &str, indent: usize) -> Vec<String> {
+    text.lines()
+        .filter(|line| {
+            line.len() > indent
+                && line[..indent].chars().all(|c| c == ' ')
+                && !line[indent..].starts_with(' ')
+        })
+        .filter_map(|line| line.trim().split_once(':'))
+        .map(|(key, _)| {
+            key.trim()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_owned()
+        })
+        .collect()
+}
+
+/// A step that must run on every dispatch carries nothing that can skip it.
+fn assert_step_always_runs(bump: &str, name: &str) {
+    let keys = keys_at_indent(step_block(bump, name), 8);
+    for key in ["if", "continue-on-error"] {
+        assert!(
+            !keys.contains(&key.to_owned()),
+            "the `{name}` step carries a `{key}:`, so it can be skipped or its \
+             failure ignored while every gate reading its commands stays green"
+        );
+    }
+}
+
+/// The step named `name` runs only when this is not a rehearsal.
+///
+/// **The rehearsal's whole promise is that `main` is left alone**, and until
+/// this existed that promise had no gate: deleting the condition from `commit
+/// the bump` left the suite green while every rehearsal pushed a version to the
+/// default branch, with the step above it still printing "main untouched".
+fn assert_step_skips_a_rehearsal(bump: &str, name: &str) {
+    let block = step_block(bump, name);
+    let at = block
+        .find("        if:")
+        .unwrap_or_else(|| panic!("the `{name}` step has no `if:` at all"));
+    let condition = block[at..]
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches("if:")
+        .trim();
+    // **The whole condition, not a substring of it.** `!inputs.rehearse ||
+    // github.event_name == 'workflow_dispatch'` contains the needle and is
+    // always true, so a `contains` check licenses the exact thing it forbids.
+    assert_eq!(
+        condition, "${{ !inputs.rehearse }}",
+        "the `{name}` step's condition is `{condition}`, which is not simply \
+         `not a rehearsal`, so a rehearsal may move the default branch it \
+         promises to leave alone"
+    );
+}
+
+/// One job, carrying nothing that can skip it.
+///
+/// **A step-level check cannot see the level above it.** Moving the pre-flight
+/// into a second job that nothing `needs:` leaves every step-level assertion
+/// true while the commit runs whether or not the tokens were ever checked, and
+/// an `if:` on the job skips every step in it at once. Both parsed as valid
+/// YAML and both passed before this existed.
+fn assert_one_job_that_always_runs(bump: &str) {
+    let jobs = &bump[bump.find("\njobs:").expect("bump.yml defines jobs")..];
+    let names = keys_at_indent(jobs, 2);
+    assert_eq!(
+        names.len(),
+        1,
+        "bump.yml defines {} jobs ({names:?}); the gates below reason about one, \
+         and a second job that nothing `needs:` runs the commit whether or not \
+         the tokens were checked",
+        names.len()
+    );
+
+    let job = keys_at_indent(jobs, 4);
+    for key in ["if", "continue-on-error"] {
+        assert!(
+            !job.contains(&key.to_owned()),
+            "the bump job carries a `{key}:`, which skips or forgives every step \
+             in it at once, including the pre-flight"
+        );
+    }
+}
+
+/// `first` appears before `second` in the workflow's text.
+///
+/// Both token gates need this and both spelled it out: a check that reports a
+/// problem after the version has already moved reports it too late.
+fn assert_precedes(bump: &str, first: &str, second: &str, why: &str) {
+    let at = bump
+        .find(first)
+        .unwrap_or_else(|| panic!("`{first}` is not in bump.yml at all"));
+    let then = bump
+        .find(second)
+        .unwrap_or_else(|| panic!("`{second}` is not in bump.yml at all"));
+    assert!(at < then, "{why}");
+}
+
 /// Text with its `#` comments removed, so a `contains` check cannot be
 /// satisfied by prose *about* the thing instead of the thing.
 ///
@@ -1162,8 +1367,8 @@ fn the_release_button_reaches_the_release() {
          rehearsal in bump.yml may now publish"
     );
 
-    // **Both tokens are checked before the version moves, and the tap one is
-    // checked for `push`.** This is v0.1.0's actual failure written down as a
+    // **All three tokens are checked before the version moves, and the two that
+    // must write are checked for `push`.** This is v0.1.0's actual failure as a
     // gate. `HOMEBREW_TAP_TOKEN` could read the tap and not write to it; the
     // formula job checked the tap out successfully and then failed `git push`
     // with a 403, by which point the GitHub release and the crates.io publish
@@ -1196,30 +1401,194 @@ fn the_release_button_reaches_the_release() {
     // the user's role on the repository rather than the token's grants. So the
     // check creates a ref in the tap and deletes it, and this asserts that
     // shape rather than any wording.
-    assert!(
-        preflight.contains("-X POST") && preflight.contains("/git/refs"),
-        "the tap check must attempt a real write. Reading the repository, or          reading a permissions field about it, both pass for a token that          cannot push: {preflight}"
-    );
-    assert!(
-        preflight.contains("-X DELETE"),
-        "the write probe must undo itself, or every rehearsal leaves a branch          in the tap: {preflight}"
-    );
-    assert!(
-        preflight.contains("201"),
-        "the probe must check the create actually succeeded; curl exits 0 on a          403 body: {preflight}"
-    );
+    //
+    // **Bounded to the tap's own probe, and it was not always.** These three
+    // assertions ran over the whole step until a second probe landed in it, at
+    // which point every string they look for had two suppliers and deleting the
+    // tap probe outright left them green. See [`assert_write_probe`].
+    assert_write_probe(preflight, "probe", "${tap}");
 
     // And it has to run before the commit, or it reports a problem the version
     // has already moved past.
-    let checked_at = bump
-        .find(r#"-z "${CARGO_REGISTRY_TOKEN"#)
-        .expect("checked immediately above");
-    let committed_at = bump
-        .find("git commit")
-        .expect("bump.yml commits the version it raised");
+    assert_precedes(
+        &bump,
+        r#"-z "${CARGO_REGISTRY_TOKEN"#,
+        "git commit",
+        "the token pre-flight runs after the commit, so a bad token would be \
+         found only once main already carries the new version",
+    );
+}
+
+/// The push that moves `main` carries a token that can, and it is checked first.
+///
+/// **Run 31435812487 written down as a gate.** The button's first real run built
+/// everything, moved both version strings, and was rejected at the push with
+/// *"7 of 7 required status checks are expected"*. `main` is protected; a commit
+/// pushed with `GITHUB_TOKEN` triggers no workflow, so those checks can never
+/// arrive on it; and the bot holds write rather than admin, so it cannot bypass
+/// them. Retrying reaches the same answer forever.
+///
+/// **This is the one step in that workflow no rehearsal has ever reached**,
+/// because a rehearsal's whole promise is to leave `main` alone. Three green
+/// rehearsals and a token guard rewritten twice all ran over a step none of them
+/// performed, which is why the gate is here rather than left to the next
+/// release to discover.
+///
+/// Each assertion names a form only the *mechanism* has. `RELEASE_TOKEN` appears
+/// in the step's `env:` block, in two error messages and in a comment, so
+/// finding the name proves nothing; this file has recorded four separate
+/// occasions where a mention stood in for the thing.
+#[test]
+fn the_push_that_moves_main_is_authorised_before_the_version_does() {
+    let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
+    let commands = run_commands(&bump);
+
+    let preflight = commands
+        .iter()
+        .find(|command| command.contains(r#"-z "${RELEASE_TOKEN"#))
+        .expect(
+            "bump.yml must guard on the push token being empty before it bumps \
+             anything, in the form only the check has",
+        );
+
+    // **A real write to *this* repository, told apart from the tap's probe by
+    // the repository it names.** Both probes are the same shape on purpose, so
+    // the assertions have to say which one they are looking at, in both
+    // directions: see [`assert_write_probe`] for the direction that was missed.
+    assert_write_probe(preflight, "mine", "${GITHUB_REPOSITORY}");
+
+    // **The other half of the bypass, because the write probe does not imply
+    // it.** A token with `Contents: Read and write` still cannot move a
+    // protected branch unless the account behind it is an admin. The probe
+    // above covers the grant; this covers the standing.
+    //
+    // Span-bound with its comparison and its stop, for the reason
+    // [`assert_write_probe`] is: `contains(".permissions.admin")` alone was
+    // satisfied by deleting the whole check and leaving an `echo` that named
+    // it, which was demonstrated by running it rather than argued.
+    let admin = preflight
+        .find(".permissions.admin")
+        .expect("nothing reads the standing of the account behind RELEASE_TOKEN");
+    let stops = preflight[admin..]
+        .find("::notice::")
+        .map_or(preflight.len(), |end| admin + end);
+    let standing = &preflight[admin..stops];
     assert!(
-        checked_at < committed_at,
-        "the token pre-flight runs after the commit, so a bad token would be          found only once main already carries the new version"
+        standing.contains(r#"!= "true""#) && standing.contains("exit 1"),
+        "the admin standing is read and not acted on, so a token whose owner \
+         cannot bypass the required checks passes this step: {standing}"
+    );
+
+    // And none of it can be skipped out from under the commit: not the step,
+    // not the job it sits in, and not by moving it into a job nothing waits for.
+    assert_one_job_that_always_runs(&bump);
+    for always in [
+        "this runs on main or not at all",
+        "the tokens can do what the release will ask of them",
+        "hand off to the release",
+    ] {
+        assert_step_always_runs(&bump, always);
+    }
+
+    // And the rehearsal still leaves the default branch alone, which is the one
+    // promise the whole rehearsal path makes.
+    assert_step_skips_a_rehearsal(&bump, "commit the bump");
+
+    // **No step anywhere forgives its own failure.** Named steps are checked
+    // above, but `continue-on-error` is worse than an `if:` wherever it lands:
+    // on `commit the bump` it lets a *failed push* dispatch the release anyway,
+    // and it sets that step's outcome to `failure`, which also silences the
+    // recovery notice that exists for exactly this case.
+    assert!(
+        !keys_at_indent(&bump, 8).contains(&"continue-on-error".to_owned()),
+        "a step in bump.yml carries `continue-on-error:`, so the release can \
+         proceed past a step that failed"
+    );
+
+    // **The commit happens before the dispatch.** Reordering them dispatches a
+    // release for a version the default branch does not carry yet, which
+    // publishes the old code under the new number.
+    assert_precedes(
+        &bump,
+        "git commit",
+        "gh workflow run",
+        "bump.yml dispatches the release before it commits the version, so the \
+         release would build whatever the default branch carried beforehand",
+    );
+
+    // **A rehearsal dispatches `dry-run` and a real release does not, and the
+    // polarity is the assertion.** Flipping this one comparison makes every
+    // rehearsal publish to crates.io for real, which is the irreversible half
+    // of the release and the one thing the rehearsal path exists to avoid.
+    let dispatch = commands
+        .iter()
+        .find(|command| command.contains("gh workflow run"))
+        .expect("bump.yml dispatches the release");
+    assert!(
+        dispatch.contains(r#"= "true" ]; then tag=dry-run"#),
+        "the rehearsal's tag no longer depends on `rehearse` being true in the \
+         way this gate can read. A flipped comparison here publishes for real \
+         on every rehearsal: {dispatch}"
+    );
+
+    // **The checkout persists no credentials, and this is the assertion the
+    // push assertion above rests on.** With the default, the workflow's own
+    // token sits in `.git/config` as an `Authorization` header and git prefers
+    // it over the userinfo in the push URL, so the push goes out as the bot and
+    // is rejected exactly as run 31435812487 was, with every other check here
+    // green. Naming the token in the URL is necessary and not sufficient.
+    assert!(
+        bump.contains("persist-credentials: false"),
+        "the checkout persists the workflow's token into .git/config, where git \
+         prefers it over the token in the push URL: the push would authenticate \
+         as the bot and be rejected, with this whole pre-flight passing"
+    );
+
+    // **The remote the push names carries the token.** This is the assertion the
+    // whole gate exists for: `git push origin` is what failed, it is one word
+    // away from what ships, and every check above passes with it restored.
+    let commit = commands
+        .iter()
+        .find(|command| command.contains("git commit -m"))
+        .expect("bump.yml commits the version it raised");
+    let remote = commit
+        .split("git push")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .expect("bump.yml pushes the commit it made");
+    assert!(
+        remote.contains("RELEASE_TOKEN"),
+        "the bump pushes to `{remote}`, which carries the workflow's own token. \
+         That push is rejected by branch protection and cannot ever be accepted, \
+         because a GITHUB_TOKEN push triggers no workflow and so can never carry \
+         the checks main requires"
+    );
+
+    // **And it pushes the bump at the default branch.** The remote being right
+    // says nothing about the refspec: `HEAD:refs/heads/scratch` authenticates
+    // perfectly, lands the version somewhere nothing tags, and leaves the
+    // release dispatching against a branch that never moved. Found by mutation,
+    // after the remote assertion had already been mutation-tested and looked
+    // like enough.
+    let refspec = commit
+        .split("git push")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().nth(1))
+        .expect("the push names what it is pushing");
+    assert!(
+        refspec.contains("HEAD:") && refspec.contains("DEFAULT"),
+        "the bump pushes `{refspec}` rather than HEAD at the default branch, so \
+         the version would land where nothing releases it"
+    );
+
+    // And the whole check runs before the commit, on the same reasoning as the
+    // gate above it: found afterwards, the version has already moved.
+    assert_precedes(
+        &bump,
+        r#"-z "${RELEASE_TOKEN"#,
+        "git commit",
+        "the push token is checked after the commit, so a token that cannot \
+         move main would be found only once the version had already moved",
     );
 }
 

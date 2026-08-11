@@ -18,6 +18,19 @@
 # `dispatch-releases = true` in `[workspace.metadata.dist]` is for, and it is
 # also why `release.yml` no longer runs on a tag push at all.
 #
+# **The commit needs a second token, and that is a different problem from the
+# one above.** `dispatch-releases` removes the need for a PAT to *start* the
+# release; it says nothing about *writing* to `main`, which is protected by
+# seven required status checks. A commit pushed with `GITHUB_TOKEN` triggers no
+# workflow, by the same suppression rule the paragraph above relies on, so those
+# checks can never arrive on it and the push is rejected with "7 of 7 required
+# status checks are expected" however long anyone waits. The bot holds write
+# rather than admin, so it cannot bypass them either. That is run 31435812487,
+# the button's first real run, and it is why `RELEASE_TOKEN` exists: a
+# repository-scoped token whose owner is an admin, so the push is a bypass the
+# protection allows. Only the push and the pre-flight that proves it can push
+# use that token.
+#
 # **Ordering is chosen so nothing is pushed before it is checked.** The version
 # is edited, verified, and built *before* the commit, so a bump that produces an
 # inconsistent manifest fails with `main` untouched and no release started. The
@@ -58,7 +71,19 @@ jobs:
     name: bump ${{ inputs.bump }}
     runs-on: ubuntu-latest
     steps:
+      # **`persist-credentials: false`, and without it this whole change does
+      # nothing.** The default leaves the *workflow's* token in `.git/config` as
+      # `http.https://github.com/.extraheader`, and git sends a configured
+      # `Authorization` header in preference to any userinfo in the remote URL.
+      # So the push below would carry `GITHUB_TOKEN` however carefully the URL
+      # names `RELEASE_TOKEN`, every check in the pre-flight would pass, and the
+      # push would be rejected exactly as run 31435812487 was. Demonstrated
+      # against a local HTTP server: with the extraheader set, both the initial
+      # request and the post-401 retry sent the bot's token and the URL's was
+      # never sent at all. `release.yml` already checks out this way.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -74,7 +99,7 @@ jobs:
         env:
           DEFAULT: ${{ github.event.repository.default_branch }}
 
-      # **Both tokens, checked here, before the version moves.**
+      # **All three tokens, checked here, before the version moves.**
       #
       # v0.1.0 is why this step exists. `HOMEBREW_TAP_TOKEN` could read the tap
       # and not write to it, and nothing found out until the release was already
@@ -102,6 +127,11 @@ jobs:
             echo "::error::HOMEBREW_TAP_TOKEN is not set; the formula would never reach the tap"
             exit 1
           fi
+          if [ -z "${RELEASE_TOKEN:-}" ]; then
+            echo "::error::RELEASE_TOKEN is not set; the bump would build everything and then fail to move ${DEFAULT}"
+            echo "::error::Fine-grained token, Contents: Read and write, repository ${GITHUB_REPOSITORY} only, owned by an admin of it."
+            exit 1
+          fi
 
           # The tap's name comes from the release config rather than a copy here,
           # on the same rule as the no-C-toolchain job's target list.
@@ -124,15 +154,22 @@ jobs:
           # capability itself rather than a report about it, and it leaves
           # nothing behind. The tap holds no workflows, so a ref existing for a
           # second triggers nothing.
-          head=$(curl -sS -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+          #
+          # **That argument is weaker than the one this step applies to its own
+          # probe below**, which moved out of `refs/heads/` precisely so the
+          # claim would stop needing to be true. It is left standing here
+          # because the tap is a different repository with a different owner of
+          # that risk, and changing a probe that has worked is not this branch's
+          # to do. Worth revisiting when the tap next changes.
+          head=$(curl -sS --max-time 30 -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             "https://api.github.com/repos/${tap}/git/ref/heads/main" | jq -r '.object.sha // empty')
           if [ -z "$head" ]; then
             echo "::error::HOMEBREW_TAP_TOKEN cannot even read ${tap}"
             exit 1
           fi
 
-          probe="refs/heads/release-preflight-${GITHUB_RUN_ID}"
-          code=$(curl -sS -o probe.json -w '%{http_code}' -X POST \
+          probe="refs/heads/release-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          code=$(curl -sS -o probe.json -w '%{http_code}' --max-time 30 -X POST \
             -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${tap}/git/refs" \
@@ -146,14 +183,130 @@ jobs:
             exit 1
           fi
 
-          curl -sS -o /dev/null -X DELETE \
+          # **The undo is checked, because `curl -sS` exits 0 on a 403 and the
+          # `|| echo` arm this replaced was therefore unreachable for the one
+          # failure it named.** A ref left behind is not harmless the way the old wording
+          # claimed: the ref name is derived from the run, so the *re-run* of a
+          # failed release POSTs to a ref that already exists, gets a 422, and
+          # reports a healthy token as broken. `GITHUB_RUN_ATTEMPT` in the name
+          # fixes the collision; checking the code is what makes the warning
+          # appear at all.
+          gone=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
             -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
-            "https://api.github.com/repos/${tap}/git/${probe}" \
-            || echo "::warning::left ${probe} in ${tap}; harmless, delete at leisure"
-          echo "::notice::both tokens present; a real write to ${tap} succeeded and was undone"
+            "https://api.github.com/repos/${tap}/git/${probe}" || echo 000)
+          if [ "$gone" != "204" ]; then
+            echo "::warning::left ${probe} in ${tap} (HTTP ${gone}); delete it before the next release"
+          fi
+
+          # **The push to `${DEFAULT}` is the step no rehearsal reaches**, since
+          # a rehearsal's whole promise is to leave it alone, and it is the step
+          # that failed on the button's first real run. So it is checked here
+          # instead, and it takes two separate things being true. Neither half
+          # predicts the push on its own.
+          #
+          # **First half: the token's own grant, probed.** Same shape as the tap
+          # probe above and for the same reason, against this repository: create
+          # a ref, require the 201, delete it. This is what catches a token that
+          # expired, that was scoped to the wrong repository, or that was created
+          # without `Contents: Read and write`.
+          #
+          # **Outside `refs/heads/` on purpose, and that is structural rather
+          # than careful.** A branch created by a PAT does raise events, unlike
+          # one created by `GITHUB_TOKEN`, so a probe in `refs/heads/` is safe
+          # only while no workflow here listens for a branch. That is true today
+          # and nothing tests it, which by this repo's own rule is a wish.
+          #
+          # Two claims, and they rest on different things. That the namespace
+          # *works* was checked against this repository's API when this landed:
+          # the ref created, deleted, and never appeared as a branch. That it
+          # cannot raise a `push` or `create` event rests on the documented
+          # trigger surface, where both events are defined over branches and
+          # tags, and it is not something any check here observes.
+          mine="refs/preflight/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          code=$(curl -sS -o mine.json -w '%{http_code}' --max-time 30 -X POST \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -d "{\"ref\":\"${mine}\",\"sha\":\"$(git rev-parse HEAD)\"}")
+
+          if [ "$code" != "201" ]; then
+            echo "::error::RELEASE_TOKEN cannot write to ${GITHUB_REPOSITORY}: HTTP ${code}"
+            echo "::error::$(jq -r '.message // empty' mine.json)"
+            echo "::error::Fine-grained token: Contents must be Read and write, and ${GITHUB_REPOSITORY} must be in its repository list."
+            exit 1
+          fi
+
+          gone=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X DELETE \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/${mine}" || echo 000)
+          if [ "$gone" != "204" ]; then
+            echo "::warning::left ${mine} in ${GITHUB_REPOSITORY} (HTTP ${gone}); delete it before the next release"
+          fi
+
+          # **Second half: the bypass, and this one is a rule check rather than a
+          # probe. Saying so is the point.** The only true probe of "can this
+          # token move a protected branch" is moving it, which is the
+          # irreversible act everything here runs before, so this asserts the
+          # documented condition under which the push is allowed instead of
+          # pretending to have performed one.
+          #
+          # `.permissions.admin` is a sibling of `.permissions.push`, which is the
+          # field the first version of this guard was wrong to use, and the
+          # question has changed rather than the family having become
+          # trustworthy. **What it answers, exactly:** the
+          # *authenticated user's role* on this repository, never the token's own
+          # grants. That is why `.permissions.push` once passed for a token
+          # already denied 403.
+          # Bypassing a protected branch is a property of that role, so it is the
+          # right instrument for this question, which is whether the account
+          # behind the token is an admin here. It is still the wrong instrument
+          # for "can this token write", and the probe above is what answers that
+          # one. Neither covers the other, and this repository is public, so a
+          # token with no grant on it at all would still read `admin: true`.
+          #
+          # What neither covers: that a fine-grained token *inherits* its owner's
+          # bypass at push time. It is the premise the whole approach rests on,
+          # no run has yet demonstrated it, and `RELEASE-SMOKE.md` §0 records it
+          # as unproven rather than letting this step imply otherwise.
+          code=$(curl -sS -o admin.json -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer ${RELEASE_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}")
+          if [ "$code" != "200" ]; then
+            echo "::error::RELEASE_TOKEN cannot read ${GITHUB_REPOSITORY}: HTTP ${code}"
+            exit 1
+          fi
+          if [ "$(jq -r '.permissions.admin // false' admin.json)" != "true" ]; then
+            echo "::error::RELEASE_TOKEN's owner is not an admin of ${GITHUB_REPOSITORY}, so its push cannot bypass the required checks on ${DEFAULT}"
+            exit 1
+          fi
+
+          # **Whether `${DEFAULT}` still lets admins bypass is deliberately not
+          # checked, and that is a ruling rather than an omission.** Reading
+          # branch protection needs admin rights on the API. The workflow's own
+          # token cannot be granted them, because `administration` is not one of
+          # the scopes a workflow may request under `permissions:`, and granting
+          # them to `RELEASE_TOKEN` would widen a long-lived secret past
+          # `Contents` to buy a better error message.
+          #
+          # A better error message is all it would buy. What this step exists to
+          # prevent is an **irreversible half-step**: a version moved, a tag cut,
+          # a crate published, against a token that cannot finish the job. A
+          # protection setting that refuses the push is not one of those. The
+          # push is the last thing before the release is dispatched, so it fails
+          # with `${DEFAULT}` unmoved, no tag, and nothing published, which is
+          # precisely what run 31435812487 did. That failure is already loud and
+          # already safe, and paying a permanent widening of a secret to
+          # rephrase it is the wrong trade.
+          # Says what was proved, not what was tidied. Whether each probe ref was
+          # actually removed is the business of the two checks above, which warn
+          # by name when one survives; claiming it here as well would contradict
+          # them in the one case anybody needs to read.
+          echo "::notice::three tokens present; real writes to ${tap} and ${GITHUB_REPOSITORY} both succeeded"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
 
       - name: work out the next version
         id: version
@@ -194,8 +347,12 @@ jobs:
 
           # Verify the edit rather than trusting the substitution, because a sed
           # that matched nothing exits 0 and leaves the old version in place.
-          found=$(grep -cE "\"${next}\"" Cargo.toml)
-          if [ "$found" -ne 2 ]; then
+          # `|| true`, because `grep -c` exits 1 when it counts nothing and
+          # `set -e` would then kill the step on the assignment, before the
+          # diagnostic below could say which line failed to move. Exactly the
+          # case the diagnostic exists for is the case it was unreachable in.
+          found=$(grep -cE "\"${next}\"" Cargo.toml || true)
+          if [ "${found:-0}" != "2" ]; then
             echo "::error::expected both version strings at ${next}, found ${found}"
             grep -nE '^version = |^vigia-core = ' Cargo.toml
             exit 1
@@ -226,6 +383,7 @@ jobs:
           echo "::notice::rehearsal: would release ${{ steps.version.outputs.next }}. main untouched."
 
       - name: commit the bump
+        id: commit
         if: ${{ !inputs.rehearse }}
         run: |
           set -euo pipefail
@@ -233,7 +391,26 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock
           git commit -m "release: ${{ steps.version.outputs.next }}"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+          # **Pushed with `RELEASE_TOKEN`, and this only works because the
+          # checkout was told to persist no credentials.** Otherwise the bot's
+          # token sits in `.git/config` as an `Authorization` header, git
+          # prefers it over the userinfo in this URL, and the push goes out as
+          # the bot: see the note on the checkout step, which is where the
+          # mechanism actually lives. The credential is confined to this step's
+          # own environment.
+          #
+          # The header explains why the workflow's own token cannot do this.
+          # The pre-flight proves this token can still *write here*, before the
+          # version moved; that it may write past the protection is a rule check
+          # rather than something demonstrated, and the paragraph above the
+          # ruling says so. Actions masks a registered secret in log output, so a push
+          # that fails prints the remote with `***` where the token is.
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+            "HEAD:${DEFAULT}"
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
 
       # `dry-run` is `release.yml`'s own word for build-everything-publish-
       # nothing, so a rehearsal exercises the whole release path and stops short
@@ -247,3 +424,32 @@ jobs:
           echo "::notice::dispatched release.yml with tag=${tag}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # **The one failure that leaves the repository mid-release.** Everything
+      # before the commit fails with nothing moved. After it, the version is on
+      # `${DEFAULT}` and only the dispatch stands between that and a release, so
+      # a dispatch that fails strands a bumped version nobody tagged: re-running
+      # this workflow checks out the pre-bump commit and bumps past it, and the
+      # stranded version becomes unreleasable by button.
+      #
+      # It is not retried automatically, because a dispatch that failed for a
+      # reason nobody has read is not obviously safe to repeat. It is named
+      # instead, with the one command that finishes the job.
+      #
+      # **Conditioned on the commit having succeeded, not merely on something
+      # having failed.** A bare `failure()` also fires when the *pre-flight*
+      # rejects a token, which is the common case and the one where nothing was
+      # committed at all. It would then announce a stranded version that does
+      # not exist and hand over a dispatch command for a version `${DEFAULT}`
+      # does not carry, which is worse than silence: acting on it releases the
+      # old code under the new number. `steps.commit.outcome` is `skipped` on a
+      # rehearsal, so that case needs no separate guard.
+      - name: say how to finish a release the dispatch did not start
+        if: ${{ failure() && steps.commit.outcome == 'success' }}
+        run: |
+          echo "::error::${{ steps.version.outputs.next }} is committed to ${DEFAULT} and no release was dispatched for it."
+          echo "::error::Re-running this workflow will not finish it: the re-run starts from the pre-bump commit and bumps past this version."
+          echo "::error::Finish it with:"
+          echo "::error::  gh workflow run release.yml --ref ${DEFAULT} -f tag=v${{ steps.version.outputs.next }}"
+        env:
+          DEFAULT: ${{ github.event.repository.default_branch }}
