@@ -2758,31 +2758,43 @@ fn a_wider_hint_bar_cannot_quietly_push_the_readouts_out() {
     // claim is the boundaries themselves.
     let view = every_row_kind();
     let tall = 24u16;
+    // **Hands back what it matched on, rather than only the verdict.** A message
+    // that re-read the screen to print it would be a second derivation of "the
+    // footer", and the two can disagree: the hints take the last row and the
+    // state takes the one above whenever the footer has grown to two lines, so a
+    // message printing `rows.last()` would show the row that structurally cannot
+    // carry a readout, on a gate whose whole subject is what the footer
+    // allocates.
+    //
+    // The match is on the pair rather than on a count, because `(true, _) => 2`
+    // fails a ladder that drew `MiB` without `frame`, where summing two booleans
+    // would score that 1 and pass it.
     let readouts = |width: u16| {
         let rows = rows_at(width, tall, &view, &diagnostics());
         let footer = rows[rows.len() - 2..].join(" ");
-        match (footer.contains("MiB"), footer.contains("frame")) {
+        let rung = match (footer.contains("MiB"), footer.contains("frame")) {
             (true, _) => 2,
             (false, true) => 1,
             (false, false) => 0,
-        }
+        };
+        (rung, footer)
     };
 
     for (width, rung) in READOUT_RUNGS {
+        let (arrived, footer) = readouts(width);
         assert_eq!(
-            readouts(width),
-            rung,
-            "at {width} columns the footer is not at readout rung {rung}: {:?}",
-            rows_at(width, tall, &view, &diagnostics()).last()
+            arrived, rung,
+            "at {width} columns the footer is not at readout rung {rung}: {footer:?}"
         );
         // The column before it is the half that makes this a boundary rather
         // than a sample: a ladder drawn one rung too generously everywhere would
         // satisfy the line above and fail here.
+        let (before, footer) = readouts(width - 1);
         assert_eq!(
-            readouts(width - 1),
+            before,
             rung - 1,
             "at {} columns the footer already had readout rung {rung}, so {width} \
-             is not where it arrives",
+             is not where it arrives: {footer:?}",
             width - 1
         );
     }

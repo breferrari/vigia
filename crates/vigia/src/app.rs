@@ -455,7 +455,6 @@ impl App {
                 }
             }
             Action::Scroll(rows) => {
-                self.anchored = true;
                 self.scroll(rows, frame)?;
             }
             // **Moves the window and nothing else**, which is the whole of
@@ -539,13 +538,7 @@ impl App {
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
-                self.anchored = true;
-                let rows = height.saturating_sub(1).max(1);
-                // `as isize` would turn an absurd height into a negative step and
-                // send a page-down upwards. A terminal cannot be that tall, which
-                // is a reason to convert rather than to rely on it.
-                let step = isize::try_from(rows).unwrap_or(isize::MAX);
-                self.scroll(pages.saturating_mul(step), frame)?;
+                self.step_by(pages, height.saturating_sub(1), frame)?;
             }
             // **And a half page keeps none, which is not an inconsistency with
             // the arm above.** The overlap row exists to leave a reader something
@@ -556,12 +549,10 @@ impl App {
             //
             // Floored in both directions rather than rounded, so `d` and then `u`
             // land back where they started on an odd body as well as an even one.
-            // `.max(1)` is what keeps a two-row body moving at all.
+            // The floor under the step itself is [`App::step_by`]'s, and it is
+            // what keeps a body two rows tall moving at all.
             Action::HalfPage(halves) => {
-                self.anchored = true;
-                let rows = (height / 2).max(1);
-                let step = isize::try_from(rows).unwrap_or(isize::MAX);
-                self.scroll(halves.saturating_mul(step), frame)?;
+                self.step_by(halves, height / 2, frame)?;
             }
             Action::Top => {
                 self.anchored = false;
@@ -598,6 +589,22 @@ impl App {
         }
     }
 
+    /// Move `count` steps of `rows` each, for the actions measured in screens
+    /// rather than in rows.
+    ///
+    /// The two of them differ in the row count alone, so that is all their arms
+    /// state and everything else is here. **Floored at one row**, which is what
+    /// keeps a body two rows tall moving under either of them.
+    ///
+    /// `as isize` would turn an absurd height into a negative step and send a
+    /// page-down upwards. A terminal cannot be that tall, which is a reason to
+    /// convert rather than to rely on it. That argument covers both callers from
+    /// here; it used to sit on one of them and be copied to the other.
+    fn step_by(&mut self, count: isize, rows: usize, frame: &mut Frame) -> Result<()> {
+        let step = isize::try_from(rows.max(1)).unwrap_or(isize::MAX);
+        self.scroll(count.saturating_mul(step), frame)
+    }
+
     /// The two directions are deliberately not symmetrical, and the signatures
     /// say so rather than hiding it.
     ///
@@ -607,7 +614,21 @@ impl App {
     /// cannot do that. Stepping off the top of a file means knowing how tall the
     /// one above it is, which is a question only the frame can answer and which
     /// can fail.
+    ///
+    /// **Anchoring happens here rather than in each arm that scrolls**, because
+    /// [`App::anchored`] is defined as "reached by scrolling rather than by a
+    /// jump" and reaching here *is* what scrolling means. It was written out at
+    /// three call sites, which is the shape [`App::apply`]'s own header argues
+    /// against: a rule spelled out three times is one an arm eventually forgets,
+    /// and the arm that forgot it would leave the viewport free to back up and
+    /// fill the pane with nothing on screen to say so, which is
+    /// [#59](https://github.com/breferrari/vigia/issues/59) returning.
+    ///
+    /// Above the zero case rather than inside the two that move, so a step that
+    /// resolves to no rows still counts as scrolling, exactly as it did when the
+    /// callers set it.
     fn scroll(&mut self, rows: isize, frame: &mut Frame) -> Result<()> {
+        self.anchored = true;
         match rows.cmp(&0) {
             std::cmp::Ordering::Equal => Ok(()),
             std::cmp::Ordering::Greater => {

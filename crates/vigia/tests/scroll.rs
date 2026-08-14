@@ -576,18 +576,28 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::HalfPage(-1),
     ];
 
+    // **Built once, because none of it varies with the action or the height.**
+    // The frame is a forty-file `gix` diff and `Highlighter::new` loads the
+    // default syntax set, and this loop runs them twice per action: rebuilding
+    // them per iteration cost 0.61s against 0.23s hoisted, on a suite that runs
+    // on three platforms. Sharing the frame is safe because nothing here calls
+    // `advance` and the fixture worktree never changes, so `apply` and `view`
+    // only touch the diff cache. What is **not** hoisted is the `App`: its
+    // position is the thing being measured, so each run starts from a new one.
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let full = body();
+
     for action in actions {
         // Two heights far enough apart that any action reading one would land
         // somewhere different. Started from the same place each time.
-        let landed: Vec<Position> = [0usize, body()]
+        let landed: Vec<Position> = [0usize, full]
             .into_iter()
             .map(|height| {
-                let mut frame = worktree.frame();
-                materialise(&mut frame);
                 let mut app = App::new();
-                let mut highlighter = Highlighter::new();
-                let history = History::new();
-                app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, body())
+                app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
                     .expect("seed");
                 app.apply(action, &mut frame, height).expect("apply");
                 app.view(&mut frame, &mut highlighter, &history, split())
