@@ -547,6 +547,22 @@ impl App {
                 let step = isize::try_from(rows).unwrap_or(isize::MAX);
                 self.scroll(pages.saturating_mul(step), frame)?;
             }
+            // **And a half page keeps none, which is not an inconsistency with
+            // the arm above.** The overlap row exists to leave a reader something
+            // shared across the seam; a half page already leaves half the screen
+            // standing, so a row taken off the step would be paying twice for one
+            // anchor. `less` and vim both move exactly half a window and this is
+            // their binding.
+            //
+            // Floored in both directions rather than rounded, so `d` and then `u`
+            // land back where they started on an odd body as well as an even one.
+            // `.max(1)` is what keeps a two-row body moving at all.
+            Action::HalfPage(halves) => {
+                self.anchored = true;
+                let rows = (height / 2).max(1);
+                let step = isize::try_from(rows).unwrap_or(isize::MAX);
+                self.scroll(halves.saturating_mul(step), frame)?;
+            }
             Action::Top => {
                 self.anchored = false;
                 self.position = Position::default();

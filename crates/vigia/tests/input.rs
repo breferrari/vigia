@@ -116,6 +116,47 @@ fn f_toggles_follow_and_shift_f_does_not() {
 }
 
 #[test]
+fn d_and_u_are_the_half_page_and_ctrl_d_still_quits() {
+    // `less`'s own bindings, and the collision this map has to survive: `Ctrl-D`
+    // is one of four ways out, so a plain `d` gaining a meaning is one arm's
+    // ordering away from making the quit key scroll instead. The CONTROL branch
+    // returns before the plain match, and this is what says so.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('d')), Regions::default()),
+        Some(Action::HalfPage(1))
+    );
+    assert_eq!(
+        action_for(&press(KeyCode::Char('u')), Regions::default()),
+        Some(Action::HalfPage(-1))
+    );
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('d')),
+            Regions::default()
+        ),
+        Some(Action::Quit),
+        "a plain `d` took the quit key with it"
+    );
+
+    // The two the issue refused, held as refusals rather than left to chance.
+    // `Ctrl-U` is not a second spelling of `u`: nothing here rebinds a control
+    // key to a scroll. `D` and `U` are unbound for the reason `F` is, one key
+    // map over from `g` and `G`.
+    for event in [
+        with(KeyModifiers::CONTROL, KeyCode::Char('u')),
+        press(KeyCode::Char('D')),
+        press(KeyCode::Char('U')),
+    ] {
+        assert_eq!(
+            action_for(&event, Regions::default()),
+            None,
+            "{event:?} became an action, on a map where case and control are both \
+             load bearing"
+        );
+    }
+}
+
+#[test]
 fn only_the_actions_that_move_the_viewport_disengage_follow() {
     // `SPEC.md` §11.1 hangs follow mode on this split, and both sides are a way
     // for I5 to be quietly wrong rather than loudly broken. Too eager and a
@@ -127,6 +168,8 @@ fn only_the_actions_that_move_the_viewport_disengage_follow() {
         Action::Scroll(-1),
         Action::Page(1),
         Action::Page(-1),
+        Action::HalfPage(1),
+        Action::HalfPage(-1),
         Action::Top,
         Action::Bottom,
     ] {
@@ -327,11 +370,15 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
     assert!(!Action::ScrollList(-1).is_manual_scroll());
     assert!(Action::Scroll(1).is_manual_scroll());
     assert!(Action::Page(1).is_manual_scroll());
+    assert!(Action::HalfPage(1).is_manual_scroll());
     assert!(Action::Bottom.is_manual_scroll());
 
     // And it is not measured in screens, so the loop never pays for a terminal
-    // size to apply one.
+    // size to apply one. Asserted beside two that are, for the same reason the
+    // block above is a contrast rather than a single claim.
     assert!(!Action::ScrollList(1).needs_height());
+    assert!(Action::Page(1).needs_height());
+    assert!(Action::HalfPage(1).needs_height());
 }
 
 /// A screen with a pinned list on rows 1..4, a diff on 5..20, and bars at 79.

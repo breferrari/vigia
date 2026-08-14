@@ -371,6 +371,60 @@ fn a_page_keeps_one_row_of_overlap() {
 }
 
 #[test]
+fn a_half_page_keeps_no_overlap_because_it_already_is_one() {
+    // The deliberate asymmetry with the gate above, asserted rather than left as
+    // a comment. A page takes a row off its step so the two screens share
+    // something; a half page already leaves half the screen standing, so taking a
+    // row as well would pay twice for one anchor and put `d` and `u` out of step
+    // with each other.
+    let scratch = fixture("shell-scroll-half");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    let rows = body();
+    let landed = after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::HalfPage(1),
+    );
+    let absolute = landed.file * SPAN + landed.row;
+    assert_eq!(
+        absolute,
+        rows / 2,
+        "a half page of {rows} rows moved {absolute} rather than half of them"
+    );
+
+    // **The round trip is the half that odd bodies can break.** Both directions
+    // floor, so they agree; a step that rounded one way would leave `u` a row
+    // short of where `d` started, once per press, and a reader would drift.
+    assert_eq!(
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::HalfPage(-1)
+        ),
+        Position { file: 0, row: 0 },
+        "half a page back did not return to the top of a {rows} row body"
+    );
+
+    // Non-vacuity: the two steps really are different sizes, so this gate cannot
+    // be satisfied by a `HalfPage` that quietly forwards to `Page`.
+    assert_ne!(
+        rows / 2,
+        rows - 1,
+        "the fixture's body is too short to tell a half page from a whole one"
+    );
+}
+
+#[test]
 fn a_position_survives_the_file_it_pointed_into_disappearing() {
     // The panic this whole clamp exists for. The reader scrolls to the last file,
     // the agent in the other pane commits, and the file list the position was
@@ -518,6 +572,8 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::ToggleFollow,
         Action::Page(1),
         Action::Page(-1),
+        Action::HalfPage(1),
+        Action::HalfPage(-1),
     ];
 
     for action in actions {
