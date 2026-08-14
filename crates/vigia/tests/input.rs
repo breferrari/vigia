@@ -205,6 +205,13 @@ fn every_row_the_list_can_draw_has_a_digit() {
     // that can never be drawn. Both stay **unbound** rather than becoming
     // out-of-range jumps: an unbound key is no action at all, where a bound one
     // is a jump that lands nowhere and spends the reader's follow mode doing it.
+    //
+    // **This is the only place either is asserted, deliberately.** The inert list
+    // in `nothing_a_reader_did_not_ask_for_becomes_an_action` holds keys with no
+    // home of their own, which is why `D`, `U`, `N` and `P` are not in it either.
+    // Restating `'7'` there would hardcode what this loop derives, so raising the
+    // cap would redden a test named for idle cost and send the next reader to the
+    // wrong file to find out why.
     let past = char::from_digit(LIST_ROWS as u32 + 1, 10).expect("a digit past the cap");
     for digit in ['0', past] {
         assert_eq!(
@@ -310,12 +317,6 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
         press(KeyCode::Enter),
         press(KeyCode::Char('x')),
         with(KeyModifiers::CONTROL, KeyCode::Char('q')),
-        // The digits either side of the ones the list can name. `0` counts from
-        // the wrong end and `7` is past a cap of six, so both are ordinary
-        // unbound keys and a reader who typed one into the wrong pane has not
-        // moved anything.
-        press(KeyCode::Char('0')),
-        press(KeyCode::Char('7')),
     ];
     for event in inert {
         assert_eq!(

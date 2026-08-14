@@ -371,13 +371,17 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
 /// The list row a digit names, counting from zero where a reader counts from one.
 ///
 /// Total rather than fallible, and the call site is why: the only one is a
-/// `'1'..='6'` match arm, where `to_digit` cannot fail and the subtraction cannot
-/// underflow. A monitor has no useful answer to an impossible input beyond the
-/// first row, and it certainly has no business panicking on a keystroke, so the
-/// unreachable branches fall there rather than being propagated to a caller that
-/// would only have to discard them.
+/// `'1'..='6'` match arm, where `to_digit` cannot fail. A monitor has no useful
+/// answer to an impossible input beyond the first row, and it certainly has no
+/// business panicking on a keystroke, so the one unreachable branch falls there
+/// rather than being propagated to a caller that would only have to discard it.
+///
+/// The narrowing cannot fail either and so is not written as though it might:
+/// base ten yields at most nine, which is a `u16` several times over.
 fn row_of(digit: char) -> u16 {
-    u16::try_from(digit.to_digit(10).unwrap_or(1).saturating_sub(1)).unwrap_or(0)
+    digit
+        .to_digit(10)
+        .map_or(0, |rank| rank.saturating_sub(1) as u16)
 }
 
 fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
