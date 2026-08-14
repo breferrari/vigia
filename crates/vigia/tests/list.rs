@@ -890,3 +890,235 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
     // And a click on the diff below is still inert, which is B4 standing.
     assert_eq!(action_for(&click(regions.diff.0 + 1), regions), None);
 }
+
+/// A digit key press, through the real key map rather than by construction.
+fn digit(key: char) -> ratatui::crossterm::event::Event {
+    use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))
+}
+
+/// A digit names the row it is drawn beside, not the file that many from the top.
+///
+/// **The distinction the window makes, and the one an absolute index would lose.**
+/// `SPEC.md` §11.1 gives the digits the *visible window* of the list: what you can
+/// see is what you can name. With the list at the top the two readings agree, so
+/// a gate that only ever pressed a digit from a fresh shell would pass against an
+/// implementation that resolved the digit against the changed set instead. The
+/// second half browses first, which is where they come apart.
+///
+/// It is still not selection: nothing is remembered, no row becomes special, and
+/// the event after it means what it would have meant. `SPEC.md` §11.2 B4 stands
+/// for the same reason it stands for a click.
+#[test]
+fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
+    use vigia::{Regions, action_for};
+
+    const FILES: usize = 40;
+
+    let scratch = Scratch::large_diff("list-digit", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+
+    let opening = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert_eq!(opening.list_top, 0, "the window did not start at the top");
+
+    // `Regions::default()` deliberately: a digit is a key, so the hit-test that
+    // a click needs has nothing to say about it, and passing a real region here
+    // would hide a map that had started consulting one.
+    let action = action_for(&digit('3'), Regions::default());
+    assert_eq!(action, Some(Action::ListRow(2)));
+    app.apply(action.expect("action"), &mut frame, body.diff)
+        .expect("apply");
+    assert_eq!(
+        app.view(&mut frame, &mut highlighter, &history, body)
+            .expect("view")
+            .top,
+        Position { file: 2, row: 0 },
+        "`3` did not put the diff at the third listed file"
+    );
+
+    // Now browse, so the window and the changed set no longer agree, and press
+    // the same digit again.
+    for _ in 0..10 {
+        app.apply(Action::ScrollList(1), &mut frame, body.diff)
+            .expect("apply");
+    }
+    let browsed = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    assert!(
+        browsed.list_top > 0,
+        "the window did not move, so this proves nothing"
+    );
+
+    app.apply(action.expect("action"), &mut frame, body.diff)
+        .expect("apply");
+    assert_eq!(
+        app.view(&mut frame, &mut highlighter, &history, body)
+            .expect("view")
+            .top,
+        Position {
+            file: browsed.list_top + 2,
+            row: 0
+        },
+        "`3` resolved against the changed set rather than against the window the \
+         reader can see"
+    );
+}
+
+/// A digit pressed after the diff shrank names no file at all.
+///
+/// **The case the window bound cannot catch, and the reason both bounds exist.**
+/// `App::list_rows` is what the *last frame* drew, so between a paint and the
+/// keystroke that follows it the changed set can get shorter: `git reset --hard`,
+/// a branch switch, an agent reverting its own work. `SPEC.md` §11.1 names that
+/// as an ordinary event on the pane this tool exists for rather than an edge
+/// case, and it is exactly when someone looks over.
+///
+/// Six rows were on screen, two files are left, and `6` still passes the window
+/// bound because the window is remembered from the frame that drew six. Only the
+/// file-count bound refuses it. Found by mutation: deleting that bound left every
+/// other gate in this suite green, because both halves of
+/// `a_digit_past_the_drawn_window_is_a_no_op` are caught by the window bound
+/// first and neither one isolates this.
+///
+/// Asserted on `App::position` rather than on the view, deliberately. A view
+/// resolves a degenerate position by clamping it, so driving one would hide the
+/// defect behind the very clamp that `collect_resolves_every_degenerate_viewport`
+/// is about. What is wrong here is the position the keystroke *stored*.
+#[test]
+fn a_digit_after_the_diff_shrank_names_no_file() {
+    use vigia::{Regions, action_for};
+
+    const FILES: usize = 8;
+    const LEFT: usize = 2;
+
+    let scratch = Scratch::large_diff("list-digit-shrank", FILES, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FILES);
+    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+
+    let before = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view")
+        .top;
+
+    // The agent in the other pane puts most of it back.
+    for index in LEFT..FILES {
+        scratch.git(&["checkout", "--", &format!("src/mod_{index}.rs")]);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), LEFT, "the fixture did not shrink");
+
+    // No view in between, which is the whole point: the reader is pressing a key
+    // against the screen they can still see.
+    let action = action_for(&digit('6'), Regions::default()).expect("action");
+    app.apply(action, &mut frame, body.diff).expect("apply");
+    assert_eq!(
+        app.position(),
+        before,
+        "`6` moved the diff to a file that no longer exists, against a list that \
+         drew {LIST_ROWS} rows before the tree shrank to {LEFT}"
+    );
+}
+
+/// A digit naming a row the list is not drawing moves nothing.
+///
+/// **Two shapes, because they are two different defects and only one of them is
+/// interesting.** A list can fall short of the digits from either side, and the
+/// arm in `App::apply` needs a bound for each.
+///
+/// *Fewer files than rows* is the control: the file it would name is past the end
+/// of the changed set, so the file-count bound that has been there since the
+/// click landed catches it. This half passes with no window bound at all.
+///
+/// *Fewer rows than digits* is the one that needs the window bound. A nine-row
+/// pane beside an agent is ordinary, and the region gives way to the diff before
+/// it reaches its cap, so `5` and `6` are on the reader's keyboard while the list
+/// is drawing four rows. Without the bound the digit resolves against the file
+/// list and the diff jumps to a file that is not on screen — a jump the reader
+/// asked for by name, landing somewhere they cannot see they named.
+#[test]
+fn a_digit_past_the_drawn_window_is_a_no_op() {
+    use vigia::{Regions, action_for};
+
+    // Fewer files than rows.
+    const FEW: usize = 3;
+    let scratch = Scratch::large_diff("list-digit-few-files", FEW, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let body = split(WIDE, 24, FEW);
+    assert_eq!(body.list, FEW, "the fixture does not draw one row per file");
+
+    let before = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view")
+        .top;
+    let action = action_for(&digit('5'), Regions::default()).expect("action");
+    app.apply(action, &mut frame, body.diff).expect("apply");
+    assert_eq!(
+        app.view(&mut frame, &mut highlighter, &history, body)
+            .expect("view")
+            .top,
+        before,
+        "`5` moved the diff with three files changed"
+    );
+
+    // Fewer rows than digits. Eight files rather than forty: all this half needs
+    // is more files than the region has rows, so the extra thirty-two are two
+    // `git` fixtures' worth of setup and a `materialise` over five times the
+    // diffs, on every platform in the matrix, proving the same thing. Kept clear
+    // of `LIST_ROWS` so the number does not read as related to the cap.
+    const MANY: usize = 8;
+    const SHORT: u16 = 9;
+    let scratch = Scratch::large_diff("list-digit-short-pane", MANY, 1);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+
+    let mut app = App::new();
+    let body = split(WIDE, SHORT, MANY);
+    assert!(
+        body.list > 0 && body.list < LIST_ROWS,
+        "a {SHORT}-row pane drew {} list rows, so this proves nothing",
+        body.list
+    );
+
+    let before = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view")
+        .top;
+    let past = char::from_digit(body.list as u32 + 1, 10).expect("a digit past the window");
+    let action = action_for(&digit(past), Regions::default()).expect("action");
+    app.apply(action, &mut frame, body.diff).expect("apply");
+    assert_eq!(
+        app.view(&mut frame, &mut highlighter, &history, body)
+            .expect("view")
+            .top,
+        before,
+        "`{past}` moved the diff to a file the list is not drawing, with {} rows \
+         on screen",
+        body.list
+    );
+}

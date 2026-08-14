@@ -325,6 +325,34 @@ fn jumping_to_the_last_file_disengages_rather_than_re_engaging() {
 }
 
 #[test]
+fn a_file_step_disengages_follow_at_both_ends_of_the_diff() {
+    // `n` moves the diff, so it disengages for the reason every other jump does.
+    // The half worth asserting is the **second** one: `p` at the first file moves
+    // nothing at all, and it still disengages, because on this map follow yields
+    // to a reader's intent rather than to whether the arithmetic landed
+    // somewhere new. `Action::Top` at the top already behaves this way and the
+    // test one row up pins it; a file step that quietly took the other rule would
+    // leave a reader who asked to go somewhere being dragged back on the next
+    // write, with nothing on screen to say why.
+    let scratch = fixture("shell-follow-file-step");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    for action in [Action::File(1), Action::File(-1)] {
+        let mut app = App::new();
+        assert!(app.following());
+        assert_eq!(app.position(), Position { file: 0, row: 0 });
+        app.apply(action, &mut frame, body()).expect("apply");
+        assert!(
+            !app.following(),
+            "{action:?} left follow mode engaged, so a reader who asked to move \
+             gets dragged back on the next write"
+        );
+    }
+}
+
+#[test]
 fn a_change_to_a_file_that_is_not_in_the_diff_leaves_the_view_where_it_was() {
     // Ordinary rather than exceptional: an edit reverted before the tick
     // landed, or a file written back to the bytes the index already holds.

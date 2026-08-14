@@ -406,8 +406,7 @@ impl App {
         else {
             return false;
         };
-        self.anchored = false;
-        self.position = Position { file, row: 0 };
+        self.jump_to(file);
         // A jump moves the diff, so the map goes back to following it. Follow
         // mode dragging the view to a file the pinned list was not showing is
         // exactly when a reader most needs the two to agree.
@@ -487,15 +486,58 @@ impl App {
                 let travel = frame.files().len().saturating_sub(self.list_rows.max(1));
                 self.browse(scaled(at, travel), frame);
             }
-            // A click on a listed file. Out of range is a click on blank space
-            // under a list shorter than its region, which is not a file and so
-            // is not a jump: silently doing nothing is right where clamping to
-            // the last file would move the diff somewhere nobody pointed at.
+            // A click on a listed file, or one of the digits `1`-`6`. Out of
+            // range is not a file and so is not a jump: silently doing nothing is
+            // right where clamping to the last file would move the diff somewhere
+            // nobody pointed at.
+            //
+            // **Two bounds, and they answer different questions.** The row bound
+            // is about *this* screen: `Regions::over_list` already keeps a click
+            // inside the region, so it changes nothing for the mouse, but a
+            // keystroke has no such filter and a pane short enough to give the
+            // list four rows still has a `5` and a `6` on the reader's keyboard.
+            // `SPEC.md` §11.1 gives the digits the **drawn window** rather than
+            // the changed set, so a digit naming a row that is not on screen
+            // names nothing at all.
+            //
+            // The file bound is about the screen being **out of date**, which is
+            // the part reading gets wrong. Given the row bound, no gesture against
+            // a freshly drawn list can name a file past the end: the window is
+            // never taller than what is left below it. `list_rows` is what the
+            // *last frame* drew, though, and the changed set can shrink before the
+            // next one: `git reset --hard`, a branch switch, the agent in the
+            // other pane reverting its own work. Six rows drawn, two files left,
+            // and `6` still passes the row bound. Deleting this line left the
+            // whole suite green until `a_digit_after_the_diff_shrank_names_no_file`
+            // was written for exactly that, which is how the rationale above it
+            // was found to be the wrong one.
             Action::ListRow(offset) => {
-                let file = self.list_top.saturating_add(usize::from(offset));
-                if file < frame.files().len() {
-                    self.anchored = false;
-                    self.position = Position { file, row: 0 };
+                let offset = usize::from(offset);
+                let file = self.list_top.saturating_add(offset);
+                if offset < self.list_rows && file < frame.files().len() {
+                    self.jump_to(file);
+                }
+            }
+            // **One rule: step the file index, land on the heading, do nothing
+            // when there is no such file.** Row zero is the heading, which is the
+            // resolution a list click and `jump_to_newest` already use, and it
+            // costs no diff: nothing here asks how tall anything is, so I4 never
+            // sees this.
+            //
+            // `p` from inside a file goes to the **previous** file rather than to
+            // the top of the current one. The pager reflex of "this section
+            // first" would make one key mean two things depending on where the
+            // viewport happened to be, which `SPEC.md` §11.1 refuses across this
+            // whole map, and `g` already reaches a top.
+            //
+            // Both ends are no-ops for the position, so neither key ever moves
+            // the view in the direction opposite to itself. Follow is still
+            // disengaged above, for the reason `Action::is_manual_scroll` gives.
+            Action::File(step) => {
+                if let Some(file) = self.position.file.checked_add_signed(step)
+                    && file < frame.files().len()
+                {
+                    self.jump_to(file);
                 }
             }
             // Dragging the diff's bar, which counts **rows**, so this resolves a
@@ -555,21 +597,44 @@ impl App {
                 self.step_by(halves, height / 2, frame)?;
             }
             Action::Top => {
-                self.anchored = false;
-                self.position = Position::default();
+                self.jump_to(0);
             }
             // The last *file*, from its top, rather than the last row of the
             // whole diff. Finding that row would mean diffing every file to add
             // up their heights, which is the read I4 forbids.
             Action::Bottom => {
-                self.anchored = false;
-                self.position = Position {
-                    file: frame.files().len().saturating_sub(1),
-                    row: 0,
-                };
+                self.jump_to(frame.files().len().saturating_sub(1));
             }
         }
         Ok(true)
+    }
+
+    /// Put the viewport at the top of `file`, which is what a **jump** means.
+    ///
+    /// **The rule was written out at five call sites and this is the fifth's
+    /// doing.** [`App::scroll`] one method down already argues this case for the
+    /// other half of the pair: anchoring lives there rather than in each arm
+    /// that scrolls, because *"a rule spelled out three times is one an arm
+    /// eventually forgets"*. The jump side never got the same treatment, and
+    /// adding a sixth arm that restates it is what made the omission worth
+    /// closing rather than noting.
+    ///
+    /// Row zero because a jump lands on the file's **heading**. Finding any
+    /// other row means asking how tall the file is, which costs the diff I4
+    /// forbids, so this is the one resolution every jump on this map shares:
+    /// follow, `g`, `G`, a click on a listed file, a digit, and `n`/`p`.
+    ///
+    /// `anchored` is cleared because that word means "reached by scrolling", and
+    /// a jump is the other thing. See [`App::anchored`] for what it costs to get
+    /// wrong: a viewport free to back up and fill a short tail moves the file the
+    /// jump was *for* off the top row.
+    ///
+    /// The caller picks the index, and that is the whole of what the arms differ
+    /// by. Nothing here bounds it: an arm that cannot say which file it means has
+    /// nothing to jump to and does not call this.
+    fn jump_to(&mut self, file: usize) {
+        self.anchored = false;
+        self.position = Position { file, row: 0 };
     }
 
     /// Move the list's window, and take the map over only if it moved.

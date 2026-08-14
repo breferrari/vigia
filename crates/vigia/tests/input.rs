@@ -13,7 +13,7 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use vigia::{Action, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
+use vigia::{Action, LIST_ROWS, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -157,6 +157,72 @@ fn d_and_u_are_the_half_page_and_ctrl_d_still_quits() {
 }
 
 #[test]
+fn n_and_p_are_the_file_step() {
+    // The granularity between a row and the whole diff, and the unit the pinned
+    // list draws. Both letters were free: no search exists to claim `n`, and a
+    // `less` reader carries the next-file reflex from `:n`/`:p` already.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('n')), Regions::default()),
+        Some(Action::File(1))
+    );
+    assert_eq!(
+        action_for(&press(KeyCode::Char('p')), Regions::default()),
+        Some(Action::File(-1))
+    );
+
+    // Held as refusals rather than left to chance, exactly as `D` and `U` are
+    // one test up: `g`/`G` already teach that case is load bearing here, so an
+    // upper-case letter that quietly gained a meaning would be a surprise this
+    // map has avoided everywhere else.
+    for event in [press(KeyCode::Char('N')), press(KeyCode::Char('P'))] {
+        assert_eq!(
+            action_for(&event, Regions::default()),
+            None,
+            "{event:?} became an action, on a map where case is load bearing"
+        );
+    }
+}
+
+#[test]
+fn every_row_the_list_can_draw_has_a_digit() {
+    // **The gate that makes the restated bound safe.** `input.rs` spells the
+    // digits `'1'..='6'` rather than importing `LIST_ROWS`, because everything
+    // there is a pure function of a key code and reaching into the renderer for a
+    // layout constant would end that. The cost of restating is drift, and this is
+    // what pays it: raise the cap to seven and the loop goes red here instead of
+    // leaving the seventh drawn row with no key that reaches it.
+    for row in 0..LIST_ROWS {
+        let digit = char::from_digit(row as u32 + 1, 10).expect("a digit for the row");
+        assert_eq!(
+            action_for(&press(KeyCode::Char(digit)), Regions::default()),
+            Some(Action::ListRow(row as u16)),
+            "`{digit}` does not name row {row}, which the list draws"
+        );
+    }
+
+    // And the boundary in the other direction. `0` has no row to name because
+    // rows are counted from one on screen, and the digit past the cap names a row
+    // that can never be drawn. Both stay **unbound** rather than becoming
+    // out-of-range jumps: an unbound key is no action at all, where a bound one
+    // is a jump that lands nowhere and spends the reader's follow mode doing it.
+    //
+    // **This is the only place either is asserted, deliberately.** The inert list
+    // in `nothing_a_reader_did_not_ask_for_becomes_an_action` holds keys with no
+    // home of their own, which is why `D`, `U`, `N` and `P` are not in it either.
+    // Restating `'7'` there would hardcode what this loop derives, so raising the
+    // cap would redden a test named for idle cost and send the next reader to the
+    // wrong file to find out why.
+    let past = char::from_digit(LIST_ROWS as u32 + 1, 10).expect("a digit past the cap");
+    for digit in ['0', past] {
+        assert_eq!(
+            action_for(&press(KeyCode::Char(digit)), Regions::default()),
+            None,
+            "`{digit}` became an action, and it names no row the list can draw"
+        );
+    }
+}
+
+#[test]
 fn only_the_actions_that_move_the_viewport_disengage_follow() {
     // `SPEC.md` §11.1 hangs follow mode on this split, and both sides are a way
     // for I5 to be quietly wrong rather than loudly broken. Too eager and a
@@ -170,6 +236,11 @@ fn only_the_actions_that_move_the_viewport_disengage_follow() {
         Action::Page(-1),
         Action::HalfPage(1),
         Action::HalfPage(-1),
+        // A file step moves the diff, so it belongs on this side whichever end
+        // it is pressed at: `Top` at the top and `Bottom` at the last file are
+        // already here and already move nothing.
+        Action::File(1),
+        Action::File(-1),
         Action::Top,
         Action::Bottom,
     ] {

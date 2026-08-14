@@ -104,6 +104,21 @@ pub enum Action {
     /// The separate variant is what forces the two exhaustive matches below to
     /// rule on it, which is the whole reason they are written out.
     HalfPage(isize),
+    /// Move the viewport by this many **changed files**, negative for back.
+    ///
+    /// The granularity the map was missing. Rows are `j`/`k`, screens are
+    /// `Space`/`d`, the two ends are `g`/`G`, and none of them is the unit the
+    /// pinned list draws, the header counts and the reader thinks in.
+    ///
+    /// A signed step rather than two directional variants, which is what
+    /// [`Action::Page`] and [`Action::HalfPage`] already are: one arm in
+    /// `App::apply`, one rule, and no way for the two directions to drift apart.
+    ///
+    /// **Not [`Action::ListRow`] by another route.** That one names a row of the
+    /// *window* and needs the app's `list_top` to mean anything; this names a
+    /// file relative to where the diff already is, and works with no region on
+    /// screen at all.
+    File(isize),
     /// Go to the first changed file.
     Top,
     /// Go to the last changed file.
@@ -122,15 +137,26 @@ pub enum Action {
     ListTo(u32),
     /// Put the diff at the file this many rows down the pinned list.
     ///
-    /// From a click on a list row. An **offset into the window**, not a file
-    /// index, because the window's position is the app's state and this module
-    /// does not have it.
+    /// From a click on a list row, or from one of the digits `1`-`6`. An
+    /// **offset into the window**, not a file index, because the window's
+    /// position is the app's state and this module does not have it.
+    ///
+    /// **One variant for both, because they are one intention.** A digit names
+    /// the row it is drawn beside, which is the same sentence a click makes with
+    /// a pointer instead of a key: *what you can see is what you can name*. A
+    /// second variant would be a second spelling needing the same guard in the
+    /// same arm.
     ///
     /// A click is the one gesture a reader will try without being told, and it
     /// is still not selection: nothing is remembered, no row becomes special,
     /// and the next event is interpreted exactly as it would have been. That is
     /// what `SPEC.md` §11.2 B4 refuses, and it is untouched. The same argument
     /// already licensed dragging a scrollbar.
+    ///
+    /// **An offset past the drawn window is possible from a digit and not from a
+    /// click**, since [`Regions::over_list`] bounds a pointer to the region and
+    /// nothing bounds a keystroke. `App::apply` is where that is caught, because
+    /// how many rows were drawn is the app's state and not this module's.
     ListRow(u16),
     /// Put the diff at this fraction of its total height.
     ///
@@ -156,7 +182,17 @@ impl Action {
     /// "does not disengage" on its own and be right about half the time.
     pub fn is_manual_scroll(self) -> bool {
         match self {
-            Self::Scroll(_) | Self::Page(_) | Self::HalfPage(_) | Self::Top | Self::Bottom => true,
+            // `File` is here rather than below because it moves the *diff*, and
+            // it disengages even at an end where it moves nothing: `Top` at the
+            // top and `Bottom` at the last file already do, so on this map
+            // follow yields to a reader's intent rather than to whether the
+            // arithmetic happened to land somewhere new.
+            Self::Scroll(_)
+            | Self::Page(_)
+            | Self::HalfPage(_)
+            | Self::File(_)
+            | Self::Top
+            | Self::Bottom => true,
             // A resize moves no viewport and expresses no intent, and a pane
             // beside an agent is resized constantly, so treating it as a
             // scroll would disengage follow mode for free. `ToggleFollow` is
@@ -204,7 +240,12 @@ impl Action {
             // `ListTo` does not: the list's travel is its own row count, which
             // the app already holds.
             Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) => true,
-            Self::Scroll(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => false,
+            // `File` steps a file index and lands on a heading, so it is
+            // measured in files and never in rows: no height can change where it
+            // arrives.
+            Self::Scroll(_) | Self::File(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => {
+                false
+            }
             Self::ListTo(_) | Self::ListRow(_) => false,
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
         }
@@ -293,6 +334,31 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Char('u') => Some(Action::HalfPage(-1)),
         KeyCode::Home | KeyCode::Char('g') => Some(Action::Top),
         KeyCode::End | KeyCode::Char('G') => Some(Action::Bottom),
+        // The file granularity the map was missing. Both letters were free: no
+        // search exists to claim `n`, and `less` readers carry the next-file
+        // reflex from `:n`/`:p` already. `N` and `P` are unbound for the reason
+        // `D`, `U` and `F` are, one row above a pair where `g`/`G` have already
+        // taught that case is load bearing here.
+        KeyCode::Char('n') => Some(Action::File(1)),
+        KeyCode::Char('p') => Some(Action::File(-1)),
+        // **The digits address the drawn window, and there are six of them
+        // because `render::LIST_ROWS` is six.** The numbered-jump grammar a
+        // terminal monitor's reader already has, over a region that draws its
+        // rows in an order they can count.
+        //
+        // The bound is **restated rather than imported**: everything else in
+        // this module is a pure function of a key code, and reaching into the
+        // renderer for a layout constant would end that. What makes the
+        // restatement safe is `tests/input.rs`, which presses every digit
+        // `1..=LIST_ROWS` and asserts the one after it is unbound, so raising the
+        // cap goes red here instead of leaving a drawn row unreachable.
+        //
+        // `0` and `7`-`9` stay unbound rather than becoming out-of-range jumps,
+        // and the difference is real: an unbound key is no action at all, where a
+        // bound one naming a row that is not drawn is the empty-list-space case
+        // and disengages follow like any other jump. A row that can never exist
+        // should not spend a reader's follow mode.
+        KeyCode::Char(digit @ '1'..='6') => Some(Action::ListRow(row_of(digit))),
         // Lower case only, and `G` above is why. `g`/`G` already mean two
         // different things here, so a reader has been taught that shift
         // matters, and folding case would hand `F` a meaning nobody asked for
@@ -300,6 +366,22 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Char('f') => Some(Action::ToggleFollow),
         _ => None,
     }
+}
+
+/// The list row a digit names, counting from zero where a reader counts from one.
+///
+/// Total rather than fallible, and the call site is why: the only one is a
+/// `'1'..='6'` match arm, where `to_digit` cannot fail. A monitor has no useful
+/// answer to an impossible input beyond the first row, and it certainly has no
+/// business panicking on a keystroke, so the one unreachable branch falls there
+/// rather than being propagated to a caller that would only have to discard it.
+///
+/// The narrowing cannot fail either and so is not written as though it might:
+/// base ten yields at most nine, which is a `u16` several times over.
+fn row_of(digit: char) -> u16 {
+    digit
+        .to_digit(10)
+        .map_or(0, |rank| rank.saturating_sub(1) as u16)
 }
 
 fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {

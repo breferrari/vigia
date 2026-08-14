@@ -330,6 +330,149 @@ fn home_and_end_go_to_the_first_and_last_file() {
 }
 
 #[test]
+fn n_and_p_step_one_file_and_land_on_its_heading() {
+    // The granularity between a row and the whole diff. Row zero is the heading,
+    // which is the resolution a list click and a follow jump already use, and it
+    // is what makes the step cost no diff: nothing asks how tall anything is.
+    let scratch = fixture("shell-scroll-files");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // Three steps rather than one, so "moved once" and "steps every time" are
+    // different assertions. Each lands on a heading, never one row past it.
+    for file in 1..=3 {
+        assert_eq!(
+            after(
+                &mut app,
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Action::File(1)
+            ),
+            Position { file, row: 0 },
+            "`n` did not land on file {file}'s heading"
+        );
+    }
+    for file in [2, 1] {
+        assert_eq!(
+            after(
+                &mut app,
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Action::File(-1)
+            ),
+            Position { file, row: 0 },
+            "`p` did not land on file {file}'s heading"
+        );
+    }
+
+    // **`p` from inside a file goes to the previous file, not to this one's
+    // heading**, and that is the ruling rather than the easy reading. The pager
+    // reflex of "this section first" would make one key mean two things depending
+    // on where the viewport happened to be, which `SPEC.md` §11.1 refuses across
+    // this whole map; `g` is the key that reaches a top.
+    assert_eq!(
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::Scroll(2)
+        ),
+        Position { file: 1, row: 2 },
+        "the fixture does not put the viewport inside file 1"
+    );
+    assert_eq!(
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::File(-1)
+        ),
+        Position { file: 0, row: 0 },
+        "`p` from inside a file stopped at that file's heading, so the key means \
+         two things depending on where the reader was"
+    );
+}
+
+#[test]
+fn the_file_step_stops_at_both_ends() {
+    // **Neither key ever moves the view in the direction opposite to itself.**
+    // Clamping the file index and always landing on row zero would give `n` at
+    // the last file a backwards jump to that file's heading, and `p` at the first
+    // a forwards one to the top: both would be a key undoing what its own arrow
+    // says. There is no such file, so nothing moves.
+    let scratch = fixture("shell-scroll-file-ends");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    assert_eq!(
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::File(-1)
+        ),
+        Position { file: 0, row: 0 },
+        "`p` at the first file moved"
+    );
+
+    // And from *inside* the first file, which is the case a saturating index
+    // would quietly turn into `g`.
+    after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Scroll(2),
+    );
+    assert_eq!(
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::File(-1)
+        ),
+        Position { file: 0, row: 2 },
+        "`p` inside the first file jumped to its heading, which is `g`'s job"
+    );
+
+    after(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Action::Bottom,
+    );
+    assert_eq!(
+        after(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Action::File(1)
+        ),
+        Position {
+            file: FILES - 1,
+            row: 0
+        },
+        "`n` at the last file moved"
+    );
+}
+
+#[test]
 fn a_page_keeps_one_row_of_overlap() {
     // A page that moved a whole screen would leave nothing shared between the
     // two, and a reader loses their place at the seam. One row of overlap is what
@@ -574,6 +717,11 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::Page(-1),
         Action::HalfPage(1),
         Action::HalfPage(-1),
+        // Measured in files, so no height can change where it arrives. Both
+        // directions, because the backwards one lands by *not* moving and a
+        // no-op is exactly the shape that passes a height check vacuously.
+        Action::File(1),
+        Action::File(-1),
     ];
 
     // **Built once, because none of it varies with the action or the height.**
