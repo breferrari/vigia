@@ -2571,6 +2571,158 @@ fn the_pulse_draws_a_mark_and_never_a_label() {
     }
 }
 
+/// [#149](https://github.com/breferrari/vigia/issues/149), and the same shape as
+/// the pulse's label one test up: a ruling that a glance surface refuses a
+/// *word*, turned into something that fails.
+///
+/// > The list does not draw the rank the digits address.
+///
+/// **The refusal is the whole reason this exists, because the change is cheap.**
+/// The caret column is two columns wide on every pane at or above `CARET_FLOOR`
+/// and blank on every row but the one the diff is inside, so `1`-`6` could be
+/// drawn there for no column and no frame time, and a session that reads only
+/// that far will find it free. §11.1 refuses it on what a rank *says* (the
+/// region is a map, and a numbered list is a menu), which is an argument no
+/// budget gate can hold.
+///
+/// **Two snapshots do move when a rank lands** — `rows__a_real_repository_draws`
+/// and `follow__a_scripted_edit_sequence_draws_the_file_that_changed_last` are
+/// the only pictures in the suite carrying a populated list, and drawing a rank
+/// reddens both. That is not the same thing as holding the ruling. A snapshot
+/// failure is a **diff to accept**: `cargo insta accept` turns it green and
+/// leaves no trace of what was decided. This one fails with the rule in the
+/// message, so the change has to be argued for rather than accepted, which is
+/// the same job `a_wider_hint_bar_cannot_quietly_push_the_readouts_out` does one
+/// region down.
+///
+/// **The claim is written against what opens a row rather than against the
+/// gutter's two columns**, so it needs no restated `CARET_FLOOR` and stays true
+/// below one: whatever the width, the first glyph on a list row is the mark or
+/// that file's own kind letter, and a rank makes it a digit.
+///
+/// **It sweeps because §11.1 refuses a rank drawn only where there is room for
+/// one**, which is the same reason the pulse's label is swept one test up: a
+/// width-gated rung comes back invisibly to the two snapshots that pin 40 and
+/// 80, so only a sweep sees it.
+///
+/// **What this does not reach is a rank on the *right* of the row**, after the
+/// counts, which §11.1 forbids just as squarely — the ruling is not left-scoped.
+/// It is not asserted here because a row already ends in `+1 -0` and the fixture
+/// paths end in digits, so no whole-row "there is no bare digit" claim is
+/// available; closing it properly needs a digit-free fixture and a slot-by-slot
+/// assertion, which is a bigger gate than the ruling has yet earned. The name of
+/// this test and §11.1's citation of it are both scoped to the gutter on
+/// purpose, so nothing here overclaims.
+///
+/// **Both directions, and derived from observation rather than from a restated
+/// constant.** A widening pane walks a list row up three bands: nothing, then
+/// the file's name, then the name with the mark. Each band is asserted non-empty
+/// and the walk asserted never to descend, so a fixture that stopped drawing the
+/// region, or a caret drawn unconditionally, fails here instead of passing
+/// blank. `render.rs`'s `the_caret_degrades_once_and_never_flickers` holds the
+/// upper crossing too, over a narrower sweep; what is only here is the lower
+/// one, which is what catches a region going blank again on a *wider* pane.
+#[test]
+fn the_caret_column_draws_a_mark_and_never_a_rank() {
+    /// The marker, restated rather than imported for [`CONTINUES`]' reason.
+    const CARET: char = '▸';
+    /// The fixture's files, its list, and what the layout has to afford.
+    const FILES: usize = 6;
+
+    /// What a list row's opening glyph says, in the order a widening pane climbs
+    /// through them. The derived `Ord` is the ladder.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Band {
+        Blank,
+        Named,
+        Marked,
+    }
+
+    let tall = 24u16;
+    let chrome = chrome();
+    let view = numbered(usize::from(tall) + 8, FILES, FILES);
+    assert_eq!(view.list.len(), FILES, "the fixture is not a full list");
+
+    // The band each width produced. Row 0 is the current file, so it is the only
+    // row that can carry the mark.
+    let mut seen: Vec<(u16, Band)> = Vec::new();
+
+    for width in WIDTHS {
+        // Not `clamped_to`, which cannot move a figure `Body::split` has already
+        // capped at `LIST_ROWS`: the fixture is six files and the cap is six, so
+        // clamping would only turn this into "at least six".
+        let listed = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files).list;
+        assert_eq!(
+            listed, FILES,
+            "at {width} columns the layout affords {listed} list rows, so this \
+             sweep is not reading a full region"
+        );
+
+        // The header owns row 0 and never takes a second line, which
+        // `the_header_never_takes_a_second_line` is what holds.
+        let rows = rows_at(width, tall, &view, &chrome);
+        for (offset, row) in rows.iter().skip(1).take(listed).enumerate() {
+            let opening = content(row, width).chars().find(|c| !c.is_whitespace());
+
+            // A `None` opening is a blank row, which `rows_at`'s `trim_end` has
+            // already reduced to the empty string, so there is nothing to claim
+            // of it here. It is legal only where the row has no room to name its
+            // file at all, and the bands below are what pin that to the narrowest
+            // widths.
+            if let Some(glyph) = opening {
+                // The one claim. A rank puts a digit here. The letter is read off
+                // the fixture rather than restated, so a change to [`entry`]'s
+                // kind fails here loudly instead of leaving a magic `'M'` behind;
+                // `list_top` is zero, so list row `offset` draws
+                // `view.list[offset]`. It does **not** catch a row drawing another
+                // file's letter, because every entry this fixture builds carries
+                // the same one.
+                let kind = view.list[offset].kind;
+                assert!(
+                    glyph == kind || (glyph == CARET && offset == 0),
+                    "at {width} columns list row {offset} opens with {glyph:?} \
+                     rather than its kind letter {kind:?} or, on the current \
+                     file, the mark: {row:?}"
+                );
+            }
+
+            if offset == 0 {
+                seen.push((
+                    width,
+                    match opening {
+                        None => Band::Blank,
+                        Some(glyph) if glyph == CARET => Band::Marked,
+                        Some(_) => Band::Named,
+                    },
+                ));
+            }
+        }
+    }
+
+    // Non-vacuity in three directions at once: a region that stopped drawing
+    // never reaches the last two bands, and a caret drawn without its floor
+    // never reaches the first two.
+    for band in [Band::Blank, Band::Named, Band::Marked] {
+        assert!(
+            seen.iter().any(|(_, drawn)| *drawn == band),
+            "no width in {WIDTHS:?} drew a {band:?} list row, so the sweep is \
+             asserting over fewer bands than the renderer has"
+        );
+    }
+
+    // And the ladder only ever climbs. A caret that came and went with the width
+    // would read as the current file changing, which is the failure
+    // `CARET_FLOOR` was written against.
+    for pair in seen.windows(2) {
+        let ((below, was), (above, band)) = (pair[0], pair[1]);
+        assert!(
+            band >= was,
+            "widening from {below} to {above} columns went from {was:?} back to \
+             {band:?}, so the row bands are not one crossing each"
+        );
+    }
+}
+
 /// The third case of `SPEC.md` §11.1's layout rule, and the one that is a
 /// correctness claim rather than a tidiness one.
 ///
