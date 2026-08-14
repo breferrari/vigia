@@ -93,6 +93,17 @@ pub enum Action {
     ScrollList(isize),
     /// Move the viewport by whole screens, negative for up.
     Page(isize),
+    /// Move the viewport by half screens, negative for up.
+    ///
+    /// Its own action rather than a fraction on [`Action::Page`], and the two
+    /// steps are the reason: a page moves `height - 1` rows and this moves
+    /// `height / 2`, so one is not the other scaled. Half of `Page`'s own step
+    /// would also inherit the overlap row, which a half screen does not want and
+    /// `App::apply` says why.
+    ///
+    /// The separate variant is what forces the two exhaustive matches below to
+    /// rule on it, which is the whole reason they are written out.
+    HalfPage(isize),
     /// Go to the first changed file.
     Top,
     /// Go to the last changed file.
@@ -145,7 +156,7 @@ impl Action {
     /// "does not disengage" on its own and be right about half the time.
     pub fn is_manual_scroll(self) -> bool {
         match self {
-            Self::Scroll(_) | Self::Page(_) | Self::Top | Self::Bottom => true,
+            Self::Scroll(_) | Self::Page(_) | Self::HalfPage(_) | Self::Top | Self::Bottom => true,
             // A resize moves no viewport and expresses no intent, and a pane
             // beside an agent is resized constantly, so treating it as a
             // scroll would disengage follow mode for free. `ToggleFollow` is
@@ -172,8 +183,8 @@ impl Action {
 
     /// Whether applying this needs to know how tall the body is.
     ///
-    /// Only [`Action::Page`] does: it is the one action measured in screens
-    /// rather than in rows. Everything else is given the height and ignores it.
+    /// Only the actions measured in screens do, rather than in rows. Everything
+    /// else is given the height and ignores it.
     ///
     /// This exists because the answer is **expensive**, not because it is
     /// interesting. Deriving the height costs an uncached terminal-size syscall
@@ -187,11 +198,12 @@ impl Action {
     /// it mattered.
     pub fn needs_height(self) -> bool {
         match self {
-            // A page steps by a screenful, and a drag on the diff's bar maps the
-            // track onto everything *but* the last screenful, so both need to
-            // know how tall one is. `ListTo` does not: the list's travel is its
-            // own row count, which the app already holds.
-            Self::Page(_) | Self::DiffTo(_) => true,
+            // A page steps by a screenful and a half page by half of one, and a
+            // drag on the diff's bar maps the track onto everything *but* the
+            // last screenful, so all three need to know how tall one is.
+            // `ListTo` does not: the list's travel is its own row count, which
+            // the app already holds.
+            Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) => true,
             Self::Scroll(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => false,
             Self::ListTo(_) | Self::ListRow(_) => false,
             Self::Quit | Self::Redraw | Self::ToggleFollow => false,
@@ -267,6 +279,18 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Char('K') => Some(Action::ScrollList(-1)),
         KeyCode::PageDown | KeyCode::Char(' ') => Some(Action::Page(1)),
         KeyCode::PageUp => Some(Action::Page(-1)),
+        // `less`'s own half-page pair, and the shell already claims `less +F`
+        // semantics one row down, so the precedent is internal as well as
+        // cultural. **`Ctrl-D` and `Ctrl-U` are refused rather than overlooked**:
+        // `Ctrl-D` quits, four rows up, and rebinding a way out to a scroll is
+        // the surprise this map has avoided everywhere else. Plain letters or
+        // nothing.
+        //
+        // Below the CONTROL arm above, which returns, so `Ctrl-D` cannot reach
+        // here. `D` and `U` are unbound for the reason `F` is: `g` and `G`
+        // already teach that case is load bearing on this map.
+        KeyCode::Char('d') => Some(Action::HalfPage(1)),
+        KeyCode::Char('u') => Some(Action::HalfPage(-1)),
         KeyCode::Home | KeyCode::Char('g') => Some(Action::Top),
         KeyCode::End | KeyCode::Char('G') => Some(Action::Bottom),
         // Lower case only, and `G` above is why. `g`/`G` already mean two

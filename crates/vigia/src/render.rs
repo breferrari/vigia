@@ -133,6 +133,21 @@ const HINT_RUNGS: [&str; 5] = [
 ///
 /// Everything from here down is what `SPEC.md` §11.1 rules a reader is owed at
 /// forty columns; above it is what a wider pane can afford.
+///
+/// **A bonus rung is free of a row and not free of columns, and this is the
+/// sentence to read before adding one.** [`Footer::plan`] hands the diagnostics
+/// whatever survives the state, the gap and the hints, so every column a wider
+/// bar takes is a column the readouts lose, and nothing here stops that. What it
+/// costs today: `JK files` is why the frame cell first arrives at 69 columns and
+/// the pair at 77. A fifth hint of ten columns was measured at 81 and 89, which
+/// is what [#121](https://github.com/breferrari/vigia/issues/121) refused, and
+/// `crates/vigia/tests/legibility.rs::a_wider_hint_bar_cannot_quietly_push_the_readouts_out`
+/// is the gate that will say so rather than letting it pass quietly.
+///
+/// Whether that ordering is *right* is deliberately not settled here:
+/// §11.1's drop order puts advice above instrumentation at every width, and
+/// whether a rung nobody is owed is exempt from it is
+/// [#147](https://github.com/breferrari/vigia/issues/147).
 const HINT_BASELINE: usize = 1;
 
 /// What joins two hints.

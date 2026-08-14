@@ -62,6 +62,7 @@ vigia --version        # the only option there is
 | `q` `Esc` `Ctrl+C` `Ctrl+D` | quit |
 | `j` `k` `↑` `↓` | scroll a row |
 | `Space` `PgDn` `PgUp` | page |
+| `d` `u` | half a page, the `less` bindings |
 | `g` `Home` / `G` `End` | first / last changed file |
 | `J` `K` `Shift+↑` `Shift+↓` | scroll the pinned file list |
 | `f` | follow the newest change, or stop following |

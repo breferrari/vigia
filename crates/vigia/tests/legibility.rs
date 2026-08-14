@@ -2719,6 +2719,87 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     }
 }
 
+/// The widths at which the status readouts reach each of their rungs, in the
+/// state that has both to draw.
+///
+/// Pinned as numbers, the way [`MARGIN_RUNGS`] is, because what they are pinned
+/// *against* is the footer's one unguarded allocation: `Footer::plan` hands the
+/// diagnostics whatever is left after the state, the gap and the hints, so every
+/// column a wider hint bar takes is a column the readouts lose. `HINT_BASELINE`
+/// stops a bonus rung from buying a footer **row** and stops nothing else, and
+/// these two numbers are what make the next layer visible.
+///
+/// Derived rather than chosen: at 68 columns the drawn bar is 40 wide, the state
+/// and its gap take 14, and 66 − 14 − 2 − 40 leaves 10, which holds neither cell;
+/// one column of pane later it holds the frame's 11. Change the state ladder, the
+/// diagnostics ladder or the margins and these move legitimately, so a failure
+/// here is a question rather than a verdict. Change the **hints** and they move
+/// because a hint was paid for out of a readout, which is the case this exists
+/// for.
+const READOUT_RUNGS: [(u16, usize); 2] = [(69, 1), (77, 2)];
+
+#[test]
+fn a_wider_hint_bar_cannot_quietly_push_the_readouts_out() {
+    // #121 found this by trying to add a fifth hint. `du half` is ten columns
+    // including its separator, and the 80-column status bar is **exactly full**:
+    // 40 of hints, 2, 19 of readouts, 2, 13 of state, into the 76 that eighty
+    // columns leave after the inset. So the bonus rung fits by taking both cells,
+    // and `render__the_status_bar_carries_what_a_frame_cost.snap` — the picture
+    // whose stated job is to show the layout is *good* at one width, not merely
+    // legal at every width — would have gone from `0.8ms frame   19MiB` to
+    // neither. The hint was dropped instead; this is what keeps the next one from
+    // arriving without anyone noticing what it spent.
+    //
+    // **Monotonicity was tried first and could not fail on this**, which is worth
+    // recording rather than quietly replacing: "a readout, once drawn, is never
+    // lost by widening" is true of the naive version too, because the boundaries
+    // slide *outward* together (69 and 77 become 81 and 89) instead of crossing.
+    // A gate that cannot fail on the case it was written for is a wish, so the
+    // claim is the boundaries themselves.
+    let view = every_row_kind();
+    let tall = 24u16;
+    // **Hands back what it matched on, rather than only the verdict.** A message
+    // that re-read the screen to print it would be a second derivation of "the
+    // footer", and the two can disagree: the hints take the last row and the
+    // state takes the one above whenever the footer has grown to two lines, so a
+    // message printing `rows.last()` would show the row that structurally cannot
+    // carry a readout, on a gate whose whole subject is what the footer
+    // allocates.
+    //
+    // The match is on the pair rather than on a count, because `(true, _) => 2`
+    // fails a ladder that drew `MiB` without `frame`, where summing two booleans
+    // would score that 1 and pass it.
+    let readouts = |width: u16| {
+        let rows = rows_at(width, tall, &view, &diagnostics());
+        let footer = rows[rows.len() - 2..].join(" ");
+        let rung = match (footer.contains("MiB"), footer.contains("frame")) {
+            (true, _) => 2,
+            (false, true) => 1,
+            (false, false) => 0,
+        };
+        (rung, footer)
+    };
+
+    for (width, rung) in READOUT_RUNGS {
+        let (arrived, footer) = readouts(width);
+        assert_eq!(
+            arrived, rung,
+            "at {width} columns the footer is not at readout rung {rung}: {footer:?}"
+        );
+        // The column before it is the half that makes this a boundary rather
+        // than a sample: a ladder drawn one rung too generously everywhere would
+        // satisfy the line above and fail here.
+        let (before, footer) = readouts(width - 1);
+        assert_eq!(
+            before,
+            rung - 1,
+            "at {} columns the footer already had readout rung {rung}, so {width} \
+             is not where it arrives: {footer:?}",
+            width - 1
+        );
+    }
+}
+
 #[test]
 fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // I6's floor, held against the newest thing that can take a column. A bar is
