@@ -487,13 +487,51 @@ impl App {
                 let travel = frame.files().len().saturating_sub(self.list_rows.max(1));
                 self.browse(scaled(at, travel), frame);
             }
-            // A click on a listed file. Out of range is a click on blank space
-            // under a list shorter than its region, which is not a file and so
-            // is not a jump: silently doing nothing is right where clamping to
-            // the last file would move the diff somewhere nobody pointed at.
+            // A click on a listed file, or one of the digits `1`-`6`. Out of
+            // range is a click on blank space under a list shorter than its
+            // region, which is not a file and so is not a jump: silently doing
+            // nothing is right where clamping to the last file would move the
+            // diff somewhere nobody pointed at.
+            //
+            // **Two bounds, because the digits reach a place a pointer cannot.**
+            // `Regions::over_list` already keeps a click inside the region, so
+            // the row bound below changes nothing for the mouse; a keystroke has
+            // no such filter, and a pane short enough to give the list four rows
+            // still has a `5` and a `6` on the reader's keyboard. `SPEC.md` §11.1
+            // gives the digits the **drawn window** rather than the changed set,
+            // so a digit naming a row that is not on screen names nothing at all.
+            // Without this the row is silently resolved against the file list and
+            // the diff jumps to a file the reader cannot see.
             Action::ListRow(offset) => {
                 let file = self.list_top.saturating_add(usize::from(offset));
-                if file < frame.files().len() {
+                if usize::from(offset) < self.list_rows && file < frame.files().len() {
+                    self.anchored = false;
+                    self.position = Position { file, row: 0 };
+                }
+            }
+            // **One rule: step the file index, land on the heading, do nothing
+            // when there is no such file.** Row zero is the heading, which is the
+            // resolution a list click and `jump_to_newest` already use, and it
+            // costs no diff: nothing here asks how tall anything is, so I4 never
+            // sees this.
+            //
+            // `p` from inside a file goes to the **previous** file rather than to
+            // the top of the current one. The pager reflex of "this section
+            // first" would make one key mean two things depending on where the
+            // viewport happened to be, which `SPEC.md` §11.1 refuses across this
+            // whole map, and `g` already reaches a top.
+            //
+            // Both ends are no-ops for the position, so neither key ever moves
+            // the view in the direction opposite to itself. Follow is still
+            // disengaged above, for the reason `Action::is_manual_scroll` gives.
+            Action::File(step) => {
+                let files = frame.files().len();
+                if let Some(file) = self
+                    .position
+                    .file
+                    .checked_add_signed(step)
+                    .filter(|file| *file < files)
+                {
                     self.anchored = false;
                     self.position = Position { file, row: 0 };
                 }
