@@ -327,6 +327,48 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     }
 }
 
+/// `SPEC.md` §11.2 B9, and it needs its own test rather than a line in the inert
+/// list above.
+///
+/// > B9 — a yank key over OSC 52. Ruled 2026-08-15: no.
+///
+/// That list holds keys with **no home of their own**, which is why `D`, `U`,
+/// `N` and `P` are not in it. `y` has one: a ruling refused it, on the ground
+/// that it would be the first key on this map to destroy something the reader
+/// owns, with no way for the program to confirm it happened. A key that is
+/// refused for a reason is not the same thing as a key nobody thought of, and
+/// the difference is exactly what a later reader needs.
+///
+/// **This is the gate B9 was missing.** Its sibling,
+/// `legibility.rs::a_drawn_path_carries_no_escape_sequence_of_its_own`, holds
+/// B8 by forbidding an escape inside a cell, and cannot hold this one: an OSC 52
+/// write draws nothing, touches no cell, and leaves the buffer identical, so the
+/// whole rendering suite stays green while the ruling is violated. The keymap is
+/// where B9 is decidable, because a clipboard write needs a key to arrive on.
+///
+/// **What it reaches and what it does not.** It reaches the shape anyone would
+/// actually build, which is a plain `y`, and the two neighbouring spellings the
+/// map's own conventions would suggest next. It does not reach a clipboard write
+/// hung on a key that already has a meaning, and nothing here can: that would be
+/// a change to an existing binding's behaviour rather than a new binding, and
+/// `only_the_actions_that_move_the_viewport_disengage_follow` is the closest
+/// thing to a guard over it.
+#[test]
+fn the_yank_key_is_refused_rather_than_unbound() {
+    for event in [
+        press(KeyCode::Char('y')),
+        press(KeyCode::Char('Y')),
+        with(KeyModifiers::CONTROL, KeyCode::Char('y')),
+    ] {
+        assert_eq!(
+            action_for(&event, Regions::default()),
+            None,
+            "{event:?} became an action, and `SPEC.md` §11.2 B9 refused the yank \
+             key rather than leaving it unassigned"
+        );
+    }
+}
+
 #[test]
 fn a_shifted_key_still_carries_its_meaning() {
     // `G` cannot be typed without shift, and a terminal reports the modifier
