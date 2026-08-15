@@ -678,6 +678,287 @@ fn run_end(backend: &TestBackend, y: u16, sigil: &str) -> Option<u16> {
     Some(end)
 }
 
+/// Every foreground the `sigil` half of row `y`'s counts cell is drawn in, sigil
+/// and digits together. Empty where the row draws no such half.
+///
+/// **The whole half rather than its sigil**, because a change that coloured the
+/// `+` and left `42` grey is exactly the half-applied shape the two gates below
+/// exist to catch, and one cell cannot see it. The run is [`run_end`]'s, which is
+/// where the "digits after the sigil" walk already lives; every caller guards
+/// that the fixture's paths carry neither sigil, so a run found here came from
+/// the counts cell.
+///
+/// **One not-found path, and the pair is destructured together to keep it that
+/// way.** [`run_end`] returns `None` under exactly the condition
+/// [`column_where`] does, on the same buffer, so a fallback between them would
+/// be a branch nothing can reach that also disagreed with this function's own
+/// empty answer: it would report a one-cell run where the miss above reports
+/// none. This file has been bitten by unreachable branches before.
+///
+/// Foregrounds rather than whole styles, because that is what every colour gate
+/// in this file compares and what the ruling is about.
+fn half_ink(backend: &TestBackend, y: u16, sigil: &str) -> Vec<Option<Color>> {
+    let (Some(start), Some(end)) = (
+        column_where(backend, y, |symbol, _| symbol == sigil),
+        run_end(backend, y, sigil),
+    ) else {
+        return Vec::new();
+    };
+    let buffer = backend.buffer();
+    (start..=end).map(|x| buffer[(x, y)].style().fg).collect()
+}
+
+/// Which rows of `backend` between `rows` draw a counts cell at all.
+///
+/// Found rather than computed, so a gate over "both regions" is over the regions
+/// the renderer actually drew and not over two numbers a test picked.
+///
+/// **Through [`half_ink`] rather than through [`run_end`] directly**, which costs
+/// a discarded `Vec` per probed row and buys the property that matters: the
+/// question "is there a half here" and the question "what colour is it" are then
+/// the *same* helper, so they cannot come to disagree about what a half is. The
+/// allocation is microseconds against the `screen` render each caller does
+/// anyway.
+fn counting_rows(backend: &TestBackend, rows: std::ops::Range<u16>) -> Vec<u16> {
+    rows.filter(|&y| !half_ink(backend, y, "+").is_empty())
+        .collect()
+}
+
+/// The file entries `view` streams below the pinned list, in draw order.
+///
+/// Named because two helpers walk it and the walk is a `match` over a row enum
+/// whose other arms are not files, which is four lines of noise inside a chain
+/// that is about something else.
+fn streamed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
+    view.rows.iter().filter_map(|row| match row {
+        Row::File(entry) => Some(entry),
+        _ => None,
+    })
+}
+
+/// The fixture paths a counts scan would misread, which must be none.
+///
+/// `half_ink` finds a half by its sigil, so a path carrying `+` or `-` would be
+/// read as a counts cell and every assertion below would be over the wrong
+/// columns. It was `the_glance_columns_agree_down_the_list`'s inline guard, and
+/// is here because three gates need it now and a second copy would check the
+/// first copy rather than the fixture.
+fn guard_sigil_free_paths(view: &View) {
+    for path in view
+        .list
+        .iter()
+        .chain(streamed_files(view))
+        .map(|entry| &entry.path)
+    {
+        assert!(
+            !path.contains('+') && !path.contains('-'),
+            "the fixture path {path:?} carries a counts sigil, so the scan would \
+             read the path instead"
+        );
+    }
+}
+
+#[test]
+fn the_counters_take_the_pictures_green_and_red() {
+    // `SPEC.md` §5.1's third departure, colour half. `assets/preview.svg` has
+    // drawn `+42` in `.grn` and `-7` in `.red` since before anything was built,
+    // and §5.3 already licensed the loan: green and red "are loaned out only
+    // where they restate the same fact (the footer's follow marker, the
+    // counters)". The shell shipped the marker half and drew both counters in
+    // one dim grey, so the two numbers a reader takes at a glance looked like
+    // chrome.
+    //
+    // Invisible to every snapshot by construction, the way the follow marker's
+    // gate is: `TestBackend`'s `Display` writes symbols and drops styles, so
+    // this reads cells.
+    //
+    // Over `ragged_counts` because it is the fixture with **both** regions
+    // populated. `Painter::file_row` draws the list and the diff heading alike,
+    // which §5.1 rules deliberately, so a gate that saw one of them would be
+    // half a gate over a ruling about both.
+    let view = ragged_counts();
+    let theme = Theme::default();
+    guard_sigil_free_paths(&view);
+    let backend = screen(80, 10, &view, &chrome());
+
+    // Both regions, found rather than assumed, and counted separately: a gate
+    // that totalled the counts cells it found would be satisfied by four list
+    // rows and never reach the stream.
+    let list_rows = counting_rows(&backend, 1..4);
+    let stream_rows = counting_rows(&backend, 4..10);
+    assert_eq!(
+        list_rows.len(),
+        3,
+        "only {} of three list rows drew a counts cell, so this asserts less \
+         than it reads",
+        list_rows.len()
+    );
+    assert!(
+        !stream_rows.is_empty(),
+        "no row below the list drew a counts cell, so the diff heading is \
+         unasserted and the ruling is gated in one region of two"
+    );
+
+    // Paired with what the fixture says each row's churn is, because the ruling
+    // is value-dependent: a half takes a diff colour where it has something to
+    // say. Row order is the pairing, which
+    // `the_glance_columns_agree_down_the_list` already rests on.
+    //
+    // Two `zip`s rather than one over a chained entry iterator, which reads
+    // flatter and would make the pairing depend on `list_rows.len()` matching
+    // `view.list.len()`. That holds today and is pinned only against the literal
+    // three above, so the flatter form would trade a structural guarantee for a
+    // shape.
+    let expected: Vec<(u16, (u32, u32))> = list_rows
+        .iter()
+        .copied()
+        .zip(
+            view.list
+                .iter()
+                .map(|entry| entry.churn.expect("the fixture gives every list row churn")),
+        )
+        .chain(
+            stream_rows
+                .iter()
+                .copied()
+                .zip(streamed_files(&view).filter_map(|entry| entry.churn)),
+        )
+        .collect();
+
+    for &(y, (added, removed)) in &expected {
+        for (label, sigil, lines, ink) in [
+            ("added", "+", added, theme.added.fg),
+            ("removed", "-", removed, theme.removed.fg),
+        ] {
+            // A zero half is grey by a ruling of its own, and
+            // `a_zero_counter_stays_grey_because_it_restates_no_change` owns it.
+            if lines == 0 {
+                continue;
+            }
+            let drawn = half_ink(&backend, y, sigil);
+            assert!(
+                !drawn.is_empty(),
+                "row {y} says it {label} {lines} lines and drew no {sigil} half"
+            );
+            // The whole run against one colour repeated, rather than a walk:
+            // uniformity is the claim, and a failure prints both runs with the
+            // offending cell visible in them.
+            assert_eq!(
+                drawn,
+                vec![ink; drawn.len()],
+                "row {y}'s {label} half is not the picture's colour for it"
+            );
+        }
+    }
+
+    // Non-vacuity by *case* rather than by count: a fixture that lost every
+    // removal, or every addition, would leave the loop above asserting nothing
+    // on that half while the region checks stayed green. Derived from the same
+    // table the loop skips on, so the two cannot disagree.
+    let greens = expected.iter().filter(|(_, (added, _))| *added > 0).count();
+    let reds = expected
+        .iter()
+        .filter(|(_, (_, removed))| *removed > 0)
+        .count();
+    assert!(
+        greens > 0 && reds > 0,
+        "the sweep coloured {greens} added halves and {reds} removed halves, so \
+         one of the two is unasserted"
+    );
+
+    // Every direction, or a screen painted one colour throughout satisfies
+    // everything above. `Theme::default` is the ANSI palette, which is the
+    // configuration a colour gate is likeliest to be vacuous under.
+    for (what, one, other) in [
+        (
+            "added and the grey it replaces",
+            theme.added.fg,
+            theme.chrome_dim.fg,
+        ),
+        (
+            "removed and the grey it replaces",
+            theme.removed.fg,
+            theme.chrome_dim.fg,
+        ),
+        ("added and removed", theme.added.fg, theme.removed.fg),
+    ] {
+        assert_ne!(
+            one, other,
+            "the theme draws {what} alike, so this test cannot tell them apart"
+        );
+    }
+}
+
+#[test]
+fn a_zero_counter_stays_grey_because_it_restates_no_change() {
+    // `assets/preview.svg` draws `Cargo.toml`'s `-0` in `.faint` where the two
+    // rows above it draw `.red`, and §5.3 says why: green and red are loaned
+    // "only where they restate the same fact", and a `-0` restates none.
+    //
+    // It is also what keeps the element readable. On a worktree an agent is only
+    // adding to, an unconditional red would put red on every row, and the counts
+    // column would stop answering the question a glance asks it.
+    //
+    // **The role, not the shade.** The picture's grey there is `.faint`
+    // `#6e7681` and the shell's `chrome_dim` is `#8b949e` on `dark`; which grey
+    // is a separate departure §5.1 records as open, and this gate would pass on
+    // either. What it refuses is a diff colour.
+    let view = ragged_counts();
+    let theme = Theme::default();
+    guard_sigil_free_paths(&view);
+
+    // Guard the fixture: without a zero in it this is a test about a row that
+    // removes something, and it would pass against a renderer with no rule at
+    // all. Read off the view rather than off the screen, for the same reason.
+    let zeroed: Vec<u16> = view
+        .list
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.churn.is_some_and(|(_, removed)| removed == 0))
+        .map(|(index, _)| index as u16 + 1)
+        .collect();
+    // Bound in the pattern rather than asserted and then iterated, so "there is
+    // exactly one" is what the code says and not something it checks and then
+    // loops over anyway.
+    let [y] = zeroed[..] else {
+        panic!(
+            "the fixture has {} rows that remove nothing rather than the one it \
+             is built around, so this gate is over a different screen",
+            zeroed.len()
+        )
+    };
+
+    let backend = screen(80, 10, &view, &chrome());
+    let grey = half_ink(&backend, y, "-");
+    assert!(
+        !grey.is_empty(),
+        "row {y} removes nothing and drew no removed half at all, so the pair \
+         stopped standing or falling together"
+    );
+    assert_eq!(
+        grey,
+        vec![theme.chrome_dim.fg; grey.len()],
+        "row {y}'s `-0` took a colour, and a zero restates no change"
+    );
+
+    // The same row's `+2` is still green, which is what makes the rule per half
+    // rather than per cell: a renderer that greyed the whole cell whenever
+    // either half was zero would satisfy the assertion above.
+    let green = half_ink(&backend, y, "+");
+    assert!(!green.is_empty(), "row {y} drew no added half");
+    assert_eq!(
+        green,
+        vec![theme.added.fg; green.len()],
+        "row {y}'s added half lost its colour because the half beside it is zero"
+    );
+
+    assert_ne!(
+        theme.chrome_dim.fg, theme.removed.fg,
+        "the theme draws the grey and the removed colour alike, so this test \
+         cannot tell them apart"
+    );
+}
+
 #[test]
 fn the_glance_columns_agree_down_the_list() {
     // #77. `assets/preview.svg` puts every glance element at the same x on every
@@ -734,13 +1015,7 @@ fn the_glance_columns_agree_down_the_list() {
         .collect();
     // Both halves, by where each ends. The fixture's paths carry neither sigil,
     // so a run found here came from the counts cell.
-    for path in view.list.iter().map(|e| &e.path) {
-        assert!(
-            !path.contains('+') && !path.contains('-'),
-            "the fixture path {path:?} carries a counts sigil, so the scan below \
-             would read the path instead"
-        );
-    }
+    guard_sigil_free_paths(&view);
     let added: Vec<(u16, u16)> = (1..4u16)
         .filter_map(|y| run_end(&backend, y, "+").map(|x| (y, x)))
         .collect();

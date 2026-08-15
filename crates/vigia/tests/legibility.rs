@@ -207,10 +207,24 @@ const TRACK: char = '_';
 ///
 /// **Symbol and colour together, because neither alone separates the two strips
 /// any more.** The sparkline's top rung is `█` and so is every heat slice, so a
-/// symbol-only match counts one as the other; the heat track is the same dim
-/// grey as the `+42 -7` counters, so a colour-only match counts those. Both
-/// gates below were symbol-only and one of them silently started counting
-/// eighteen buckets the moment the heat strip landed.
+/// symbol-only match counts one as the other. Both gates below were symbol-only
+/// and one of them silently started counting eighteen buckets the moment the
+/// heat strip landed.
+///
+/// The colour half has changed hands twice and is worth keeping straight. It
+/// read "the heat track is the same dim grey as the `+42 -7` counters", which
+/// was true when `chrome_dim` was colour 8 and stopped being true when
+/// [#60](https://github.com/breferrari/vigia/issues/60) lifted it off. What
+/// makes the colour term load-bearing **now** is the other direction: since
+/// [#157](https://github.com/breferrari/vigia/issues/157) a counts cell is drawn
+/// in `Theme::added` and `Theme::removed`, and those collide with the heat
+/// strip's own ramp rather than with its track. On `ansi` they are `Green` and
+/// `Red`, the names `heat_added` and `heat_removed` also take; on `dark`
+/// `added` is `heat_added`'s `#3fb950` and `removed` is `heat_removed_warm`'s
+/// `#f85149`, and [`heat_colours`] collects every rung. So a colour-only match
+/// still counts the counters as heat slices, which is what this doc always
+/// claimed and now has the right reason for. The symbol term is what separates
+/// them: a slice is `█` and a counter is digits.
 fn cells_coloured(
     backend: &TestBackend,
     y: u16,
