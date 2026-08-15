@@ -588,13 +588,44 @@ impl Theme {
             // does is that green already means addition two rows down, and a churn
             // sparkline is about *when*, not *what*.
             spark: rgb(0x39, 0xc5, 0xcf),
-            // One step above `heat_track`'s `#21262d`, for the field's own
-            // reason: a stroke needs more contrast than a block to read as the
-            // same weight, and `#21262d` on this background is a block colour.
-            spark_track: rgb(0x30, 0x36, 0x3d),
+            // **One step above `heat_track`, which is the rule this field always
+            // had and could not satisfy while the thing it was a step above was
+            // itself invisible.** A stroke needs more contrast than a block to
+            // read as the same weight: `_` is one line in a cell where `▄` is
+            // half of one. With `heat_track` at 2.96:1 this is 4.12:1, and it was
+            // `#30363d` at **1.55:1** until 2026-08-16, which is below even the
+            // block it was supposed to outrank.
+            //
+            // Found by the gate rather than by eye, which is the point of having
+            // one: nobody reported the sparkline, and an empty bucket is exactly
+            // the case `SPEC.md` §5.1 rules has to draw a track, so a launched
+            // worktree with no history behind it was drawing the blank column
+            // [#78](https://github.com/breferrari/vigia/issues/78) exists to remove.
+            spark_track: rgb(0x6e, 0x76, 0x81),
             bar: rgb(0x8b, 0x94, 0x9e),
-            bar_track: rgb(0x21, 0x26, 0x2d),
-            heat_track: rgb(0x21, 0x26, 0x2d),
+            // **`#57606a`, and it was `#21262d` until 2026-08-16, which was
+            // invisible.** Reported from use: the scrollbar's track and its step
+            // buttons could not be seen at all, and a button appeared only while
+            // it was pressed, because a press draws in `bar` above and everything
+            // else on that column drew in this.
+            //
+            // Measured rather than adjusted by eye: `#21262d` on `#0d1117` is
+            // **1.24:1**, where 1.0 is the background exactly. It was never a
+            // subtle colour, it was an absent one, and the same value made the
+            // empty heat bucket `SPEC.md` §5.1 promises a track for draw nothing.
+            //
+            // The earlier reading was that the value was right and the defect
+            // belonged to the sixteen-colour rung, because these were taken off
+            // `assets/preview.svg` where they do read. That is the picture-versus-
+            // cell-grid distinction §5.1 already draws: a 1.24:1 edge over many
+            // pixels of SVG is perceptible and the same ratio in one terminal cell
+            // is not. The mockup is not wrong; reading a cell colour off it is.
+            //
+            // `#57606a` is **2.96:1**, against the thumb's 6.15:1. Both visible,
+            // and the gap between them is what keeps the ruling one line up true:
+            // the track is context and the thumb is the reading.
+            bar_track: rgb(0x57, 0x60, 0x6a),
+            heat_track: rgb(0x57, 0x60, 0x6a),
             heat_added: rgb(0x3f, 0xb9, 0x50),
             heat_added_warm: rgb(0x56, 0xd3, 0x64),
             heat_added_hot: rgb(0x7e, 0xe7, 0x87),
@@ -685,11 +716,17 @@ impl Theme {
             // and not a second one: both move one step *towards* the foreground,
             // and on a light background that direction is down. `#d0d7de` is a
             // block colour on white and a stroke drawn in it is barely there.
-            spark_track: rgb(0xaf, 0xb8, 0xc1),
+            // One step above `heat_track` for the reason `Theme::dark`'s carries;
+            // `#afb8c1` was 2.01:1, under the block it is meant to outrank.
+            spark_track: rgb(0x7d, 0x85, 0x90),
             bar: rgb(0x59, 0x63, 0x6e),
-            bar_track: rgb(0xd0, 0xd7, 0xde),
+            // `#8c959f` at 3.04:1 on white, where `#d0d7de` was **1.45:1** and
+            // invisible for the same reason the dark palette's was. See the note
+            // on `Theme::dark`'s `bar_track`; the two were wrong together and are
+            // fixed together, and the gap below `bar`'s 6.11:1 matches.
+            bar_track: rgb(0x8c, 0x95, 0x9f),
             // Light enough to read as a track on white, dark enough to be visible.
-            heat_track: rgb(0xd0, 0xd7, 0xde),
+            heat_track: rgb(0x8c, 0x95, 0x9f),
             heat_added: rgb(0x4a, 0xc2, 0x6b),
             heat_added_warm: rgb(0x2d, 0xa4, 0x4e),
             heat_added_hot: rgb(0x11, 0x63, 0x29),
