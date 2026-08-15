@@ -1327,21 +1327,21 @@ fn counts_of(churn: Option<(u32, u32)>, theme: &Theme) -> (Half, Half) {
         text: churn_of(sigil, lines),
         ink: if lines == 0 { theme.chrome_dim } else { ink },
     };
-    churn.map_or_else(
-        || {
-            let empty = || Half {
-                text: String::new(),
-                ink: theme.chrome_dim,
-            };
-            (empty(), empty())
-        },
-        |(added, removed)| {
-            (
-                half('+', added, theme.added),
-                half('-', removed, theme.removed),
-            )
-        },
-    )
+    // Beside `half` rather than inside the arm, and the two are the same rule
+    // reached by two routes: a half says nothing when its own count is zero, and
+    // both halves say nothing when there is no line diff behind them. `Half` is
+    // not `Clone`, so this is a closure rather than one value used twice.
+    let empty = || Half {
+        text: String::new(),
+        ink: theme.chrome_dim,
+    };
+    match churn {
+        Some((added, removed)) => (
+            half('+', added, theme.added),
+            half('-', removed, theme.removed),
+        ),
+        None => (empty(), empty()),
+    }
 }
 
 /// Where each glance element sits on **every** file row of one region.

@@ -684,18 +684,27 @@ fn run_end(backend: &TestBackend, y: u16, sigil: &str) -> Option<u16> {
 /// **The whole half rather than its sigil**, because a change that coloured the
 /// `+` and left `42` grey is exactly the half-applied shape the two gates below
 /// exist to catch, and one cell cannot see it. The run is [`run_end`]'s, which is
-/// where the "digits after the sigil" walk already lives; both callers guard that
-/// the fixture's paths carry neither sigil, so a run found here came from the
-/// counts cell.
+/// where the "digits after the sigil" walk already lives; every caller guards
+/// that the fixture's paths carry neither sigil, so a run found here came from
+/// the counts cell.
+///
+/// **One not-found path, and the pair is destructured together to keep it that
+/// way.** [`run_end`] returns `None` under exactly the condition
+/// [`column_where`] does, on the same buffer, so a fallback between them would
+/// be a branch nothing can reach that also disagreed with this function's own
+/// empty answer: it would report a one-cell run where the miss above reports
+/// none. This file has been bitten by unreachable branches before.
 ///
 /// Foregrounds rather than whole styles, because that is what every colour gate
 /// in this file compares and what the ruling is about.
 fn half_ink(backend: &TestBackend, y: u16, sigil: &str) -> Vec<Option<Color>> {
-    let buffer = backend.buffer();
-    let Some(start) = column_where(backend, y, |symbol, _| symbol == sigil) else {
+    let (Some(start), Some(end)) = (
+        column_where(backend, y, |symbol, _| symbol == sigil),
+        run_end(backend, y, sigil),
+    ) else {
         return Vec::new();
     };
-    let end = run_end(backend, y, sigil).unwrap_or(start);
+    let buffer = backend.buffer();
     (start..=end).map(|x| buffer[(x, y)].style().fg).collect()
 }
 
@@ -703,9 +712,28 @@ fn half_ink(backend: &TestBackend, y: u16, sigil: &str) -> Vec<Option<Color>> {
 ///
 /// Found rather than computed, so a gate over "both regions" is over the regions
 /// the renderer actually drew and not over two numbers a test picked.
+///
+/// **Through [`half_ink`] rather than through [`run_end`] directly**, which costs
+/// a discarded `Vec` per probed row and buys the property that matters: the
+/// question "is there a half here" and the question "what colour is it" are then
+/// the *same* helper, so they cannot come to disagree about what a half is. The
+/// allocation is microseconds against the `screen` render each caller does
+/// anyway.
 fn counting_rows(backend: &TestBackend, rows: std::ops::Range<u16>) -> Vec<u16> {
     rows.filter(|&y| !half_ink(backend, y, "+").is_empty())
         .collect()
+}
+
+/// The file entries `view` streams below the pinned list, in draw order.
+///
+/// Named because two helpers walk it and the walk is a `match` over a row enum
+/// whose other arms are not files, which is four lines of noise inside a chain
+/// that is about something else.
+fn streamed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
+    view.rows.iter().filter_map(|row| match row {
+        Row::File(entry) => Some(entry),
+        _ => None,
+    })
 }
 
 /// The fixture paths a counts scan would misread, which must be none.
@@ -719,10 +747,7 @@ fn guard_sigil_free_paths(view: &View) {
     for path in view
         .list
         .iter()
-        .chain(view.rows.iter().filter_map(|row| match row {
-            Row::File(entry) => Some(entry),
-            _ => None,
-        }))
+        .chain(streamed_files(view))
         .map(|entry| &entry.path)
     {
         assert!(
@@ -759,17 +784,17 @@ fn the_counters_take_the_pictures_green_and_red() {
     // Both regions, found rather than assumed, and counted separately: a gate
     // that totalled the counts cells it found would be satisfied by four list
     // rows and never reach the stream.
-    let listed = counting_rows(&backend, 1..4);
-    let streamed = counting_rows(&backend, 4..10);
+    let list_rows = counting_rows(&backend, 1..4);
+    let stream_rows = counting_rows(&backend, 4..10);
     assert_eq!(
-        listed.len(),
+        list_rows.len(),
         3,
         "only {} of three list rows drew a counts cell, so this asserts less \
          than it reads",
-        listed.len()
+        list_rows.len()
     );
     assert!(
-        !streamed.is_empty(),
+        !stream_rows.is_empty(),
         "no row below the list drew a counts cell, so the diff heading is \
          unasserted and the ruling is gated in one region of two"
     );
@@ -778,7 +803,13 @@ fn the_counters_take_the_pictures_green_and_red() {
     // is value-dependent: a half takes a diff colour where it has something to
     // say. Row order is the pairing, which
     // `the_glance_columns_agree_down_the_list` already rests on.
-    let expected = listed
+    //
+    // Two `zip`s rather than one over a chained entry iterator, which reads
+    // flatter and would make the pairing depend on `list_rows.len()` matching
+    // `view.list.len()`. That holds today and is pinned only against the literal
+    // three above, so the flatter form would trade a structural guarantee for a
+    // shape.
+    let expected: Vec<(u16, (u32, u32))> = list_rows
         .iter()
         .copied()
         .zip(
@@ -787,20 +818,17 @@ fn the_counters_take_the_pictures_green_and_red() {
                 .map(|entry| entry.churn.expect("the fixture gives every list row churn")),
         )
         .chain(
-            streamed
+            stream_rows
                 .iter()
                 .copied()
-                .zip(view.rows.iter().filter_map(|row| match row {
-                    Row::File(entry) => entry.churn,
-                    _ => None,
-                })),
-        );
+                .zip(streamed_files(&view).filter_map(|entry| entry.churn)),
+        )
+        .collect();
 
-    let (mut greens, mut reds) = (0usize, 0usize);
-    for (y, (added, removed)) in expected {
-        for (label, sigil, lines, ink, seen) in [
-            ("added", "+", added, theme.added.fg, &mut greens),
-            ("removed", "-", removed, theme.removed.fg, &mut reds),
+    for &(y, (added, removed)) in &expected {
+        for (label, sigil, lines, ink) in [
+            ("added", "+", added, theme.added.fg),
+            ("removed", "-", removed, theme.removed.fg),
         ] {
             // A zero half is grey by a ruling of its own, and
             // `a_zero_counter_stays_grey_because_it_restates_no_change` owns it.
@@ -812,20 +840,26 @@ fn the_counters_take_the_pictures_green_and_red() {
                 !drawn.is_empty(),
                 "row {y} says it {label} {lines} lines and drew no {sigil} half"
             );
-            for (offset, fg) in drawn.iter().enumerate() {
-                assert_eq!(
-                    *fg, ink,
-                    "cell {offset} of row {y}'s {label} half is not the \
-                     picture's colour for it"
-                );
-            }
-            *seen += 1;
+            // The whole run against one colour repeated, rather than a walk:
+            // uniformity is the claim, and a failure prints both runs with the
+            // offending cell visible in them.
+            assert_eq!(
+                drawn,
+                vec![ink; drawn.len()],
+                "row {y}'s {label} half is not the picture's colour for it"
+            );
         }
     }
 
     // Non-vacuity by *case* rather than by count: a fixture that lost every
-    // removal, or every addition, would leave one of these loops asserting
-    // nothing while the region checks above stayed green.
+    // removal, or every addition, would leave the loop above asserting nothing
+    // on that half while the region checks stayed green. Derived from the same
+    // table the loop skips on, so the two cannot disagree.
+    let greens = expected.iter().filter(|(_, (added, _))| *added > 0).count();
+    let reds = expected
+        .iter()
+        .filter(|(_, (_, removed))| *removed > 0)
+        .count();
     assert!(
         greens > 0 && reds > 0,
         "the sweep coloured {greens} added halves and {reds} removed halves, so \
@@ -883,43 +917,40 @@ fn a_zero_counter_stays_grey_because_it_restates_no_change() {
         .filter(|(_, entry)| entry.churn.is_some_and(|(_, removed)| removed == 0))
         .map(|(index, _)| index as u16 + 1)
         .collect();
-    assert_eq!(
-        zeroed.len(),
-        1,
-        "the fixture has {} rows that remove nothing rather than the one it is \
-         built around, so this gate is over a different screen",
-        zeroed.len()
-    );
+    // Bound in the pattern rather than asserted and then iterated, so "there is
+    // exactly one" is what the code says and not something it checks and then
+    // loops over anyway.
+    let [y] = zeroed[..] else {
+        panic!(
+            "the fixture has {} rows that remove nothing rather than the one it \
+             is built around, so this gate is over a different screen",
+            zeroed.len()
+        )
+    };
 
     let backend = screen(80, 10, &view, &chrome());
-    for y in zeroed {
-        let grey = half_ink(&backend, y, "-");
-        assert!(
-            !grey.is_empty(),
-            "row {y} removes nothing and drew no removed half at all, so the \
-             pair stopped standing or falling together"
-        );
-        for (offset, fg) in grey.iter().enumerate() {
-            assert_eq!(
-                *fg, theme.chrome_dim.fg,
-                "cell {offset} of row {y}'s `-0` took a colour, and a zero \
-                 restates no change"
-            );
-        }
+    let grey = half_ink(&backend, y, "-");
+    assert!(
+        !grey.is_empty(),
+        "row {y} removes nothing and drew no removed half at all, so the pair \
+         stopped standing or falling together"
+    );
+    assert_eq!(
+        grey,
+        vec![theme.chrome_dim.fg; grey.len()],
+        "row {y}'s `-0` took a colour, and a zero restates no change"
+    );
 
-        // The same row's `+2` is still green, which is what makes the rule
-        // per half rather than per cell: a renderer that greyed the whole cell
-        // whenever either half was zero would satisfy the loop above.
-        let green = half_ink(&backend, y, "+");
-        assert!(!green.is_empty(), "row {y} drew no added half");
-        for (offset, fg) in green.iter().enumerate() {
-            assert_eq!(
-                *fg, theme.added.fg,
-                "cell {offset} of row {y}'s added half lost its colour because \
-                 the half beside it is zero"
-            );
-        }
-    }
+    // The same row's `+2` is still green, which is what makes the rule per half
+    // rather than per cell: a renderer that greyed the whole cell whenever
+    // either half was zero would satisfy the assertion above.
+    let green = half_ink(&backend, y, "+");
+    assert!(!green.is_empty(), "row {y} drew no added half");
+    assert_eq!(
+        green,
+        vec![theme.added.fg; green.len()],
+        "row {y}'s added half lost its colour because the half beside it is zero"
+    );
 
     assert_ne!(
         theme.chrome_dim.fg, theme.removed.fg,
