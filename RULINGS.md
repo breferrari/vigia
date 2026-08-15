@@ -27,6 +27,23 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 
 ---
 
+## I1 — a held mouse button is not an event, so a step button cannot repeat
+
+> [!NOTE]
+> **Measured 2026-08-15 while building [#166](https://github.com/breferrari/vigia/issues/166).** The scrollbar's step buttons were asked for as ordinary buttons, and the first question a button raises is whether holding it repeats. It cannot, and the reason is not this program's design but the protocol's: there is no event to hang the repeat on.
+
+**The mechanism, read from `crossterm`'s source rather than assumed.** `MouseEventKind` has exactly eight variants: `Down(button)`, `Up(button)`, `Drag(button)`, `Moved`, and the four `Scroll*`. There is no variant meaning *the button is still down*, and there is no lower layer carrying one either: the entry above records that the bundle sets `?1003h`, so the terminal is already reporting the most it reports, and `?1003h` is **motion**. A finger resting on a button with the pointer stationary produces the single `Down` and then nothing at all until the pointer moves or the button is released.
+
+**So repeat has to come from a clock, and that is the thing I1 exists to refuse.** The only implementations available are a timer that fires while a flag says a button is held, or a loop that re-reads the button's state on a schedule, and both are a fixed cadence by another name. §5.3 refuses the same thing one layer up for animation: *"snap, never ease."* A step button that repeats is an eased scroll with a mouse holding it.
+
+**The affordance is therefore one step per click, and it is recorded as a ruling rather than left to be rediscovered as a disappointment.** The alternative reading — that this is a shortfall to be fixed when someone finds the right trick — is what the entry is here to close. There is no trick that is not a clock. What makes one step per click sufficient rather than merely honest is that the button is not the travel affordance: the wheel, `j`/`k`, `d`/`u`, `n`/`p`, the digits, `g`, `G` and a draggable thumb are, and the button is for the step none of them expresses with a pointer.
+
+**The same finding decides the drag.** `input.rs` is a pure function of an event and a layout, with no state between calls, so it cannot know that a drag *began* on a button rather than on the thumb. Given that, a `Drag` over a button row has two candidate meanings and both are wrong: stepping makes a press-and-jiggle walk the view a row per twitch, and clamping to the end teleports it there. It is inert instead, which costs nothing real because the last track row already reaches the last window. Holding that reading stateless is what keeps the whole map a table test, and it is the reason the asymmetry between `Down` and `Drag` is a ruling rather than an oversight.
+
+**What holds it** is `crates/vigia/tests/input.rs::a_drag_onto_a_step_button_is_inert`, which asserts the same cell answers a press and refuses a drag, so the two gestures are being told apart rather than the row being dead. If a future session adds repeat, that gate is what it has to argue with first.
+
+---
+
 ## I4 — narrowed 2026-08-01: counting a height is not summing content
 
 > [!NOTE]
