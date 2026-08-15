@@ -3152,6 +3152,15 @@ impl Painter<'_> {
                         self.theme.hunk,
                     );
                 }
+                // **Empty on purpose, and the arm exists to say so.** A gap is
+                // the blank that closes a file's block
+                // ([#165](https://github.com/breferrari/vigia/issues/165)), and
+                // an unwritten row is already blank: it is what every row below
+                // a short diff has always been. Writing spaces would be the same
+                // screen at the cost of a row of cells, and leaving the variant
+                // out of this match is not available, which is the half that
+                // makes the silence safe rather than an omission.
+                Row::Gap => {}
                 Row::Note(note) => {
                     let drawn = format!("  {note}");
                     self.put_marked(

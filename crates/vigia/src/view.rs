@@ -112,6 +112,45 @@ pub enum Row {
     },
     /// Why a file has no lines under it.
     Note(&'static str),
+    /// The blank row that closes a file's block.
+    ///
+    /// **Ruled 2026-08-15** ([#165](https://github.com/breferrari/vigia/issues/165)).
+    /// A file's last content row and the next file's heading sat on adjacent
+    /// rows, and a heading is a `Painter::file_row` carrying the kind letter,
+    /// the path, the pulse, the heat strip, the sparkline and the counters, so a
+    /// dense row landed directly under a dense row with nothing but content
+    /// marking the boundary. The stream has one such boundary per changed file
+    /// and drew none of them, where the boundary between the two *regions* one
+    /// level up gets a rule of its own.
+    ///
+    /// **Trailing rather than leading**, which keeps a heading the **first** row
+    /// of its own block. Every jump on this map resolves through `App::jump_to`
+    /// to `Position { file, row: 0 }`, so a leading blank would put one above
+    /// every heading a reader jumped to, or force the jump to resolve to
+    /// heading-minus-one, which is the off-by-one this row model has been bitten
+    /// by before.
+    ///
+    /// **After every file but the last, and that exception is [`gap_rows`]'.**
+    /// The first draft of this ruling was uniform, on the argument that a
+    /// per-file conditional costs more than one blank row at the bottom of the
+    /// stream. It does not, and the reason is not arithmetic: `SPEC.md` §11.1
+    /// rules that the bottom of the diff is **content**, and
+    /// `tests/scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank` is
+    /// the gate over it, carrying its own warning about having once been
+    /// weakened. A blank there would separate the diff from nothing, since the
+    /// footer is chrome with a row of its own.
+    ///
+    /// **A blank row rather than a rule.** §11.2 B11 ruled the rule between the
+    /// regions stays bare, so a rule inside the stream would be a second one on
+    /// the same screen meaning something different, and §5.3's furniture law
+    /// would run it full-bleed across the pane. Space is the quietest thing that
+    /// is still a boundary, and it is the heading's own density that makes space
+    /// around it read.
+    ///
+    /// Carries nothing, and the renderer draws nothing for it: an unwritten row
+    /// is already blank, which is what every row below a short diff has always
+    /// been.
+    Gap,
 }
 
 /// Slices a file's length is divided into for the heat strip.
@@ -458,6 +497,11 @@ fn note_for(kind: &ChangeKind, diff: &FileDiff) -> Option<&'static str> {
 }
 
 /// Rows one file contributes: its heading, then either a note or its hunks.
+///
+/// **Without the blank that closes the block**, which is [`gap_rows`]' and is
+/// kept out of here deliberately: whether a file is followed by one is a fact
+/// about its *position*, and this function is handed a file rather than a place
+/// in a list. Every caller that sums these adds the other term.
 fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
     if note_for(kind, diff).is_some() {
         return 2;
@@ -467,6 +511,47 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
         .iter()
         .map(|hunk| 1 + hunk.lines.len())
         .sum::<usize>()
+}
+
+/// The blank row closing the block of the file at `index`, as a count.
+///
+/// One row after every file **but the last**
+/// ([#165](https://github.com/breferrari/vigia/issues/165)); [`Row::Gap`] carries
+/// why there is one at all and why it trails rather than leads.
+///
+/// **Not uniform, and the last file is the whole of the exception.** `SPEC.md`
+/// §11.1 rules that scrolling past the end rests on the last *screenful* and
+/// that the bottom of the diff is **content**, which
+/// `tests/scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank` holds
+/// and which carries its own warning about having once been weakened. A blank
+/// there would separate the diff from nothing, since the footer is chrome with a
+/// row of its own, so it would spend the one row a reader who scrolled to the
+/// end asked for and buy no boundary.
+///
+/// **Written once because four expressions sum file heights and all four have to
+/// agree**: the walk in [`View::collect`], [`View::last_screenful`], the
+/// scrollbar drag's per-file walk in `App::apply`, and [`diff_rows`]. A row the
+/// walk draws that a total does not know about is a row-exact bar that stops
+/// reaching its own bottom, which is the failure this repo has already paid for
+/// once in the same arithmetic.
+pub fn gap_rows(index: usize, files: usize) -> usize {
+    usize::from(index + 1 < files)
+}
+
+/// Rows the whole diff occupies, the blanks between files included.
+///
+/// The counting twin of [`View::collect`]'s walk at the level a scrollbar needs:
+/// [`vigia_core::Frame::height`] sums what each file draws and knows nothing
+/// about the blanks between them, because [`crate::rows_of`] is handed a file
+/// rather than a position. `files - 1` is exactly the sum of [`gap_rows`] over
+/// every file, and it is added here rather than at each caller so the two
+/// callers cannot come to disagree.
+///
+/// `tests/scroll.rs::the_counting_twins_agree_with_the_rows_drawn` is what fails
+/// when this and the walk part company.
+pub fn diff_rows(frame: &mut Frame) -> Result<usize> {
+    let files = frame.files().len();
+    Ok(frame.height(rows_of)? + files.saturating_sub(1))
 }
 
 /// One changed file as the walk has it: what happened, what it diffs to, and
@@ -480,6 +565,14 @@ struct Changed<'f> {
     kind: &'f ChangeKind,
     diff: &'f FileDiff,
     index: usize,
+    /// Whether a blank closes this file's block, which is every file but the
+    /// last ([`gap_rows`]).
+    ///
+    /// Carried here rather than passed beside it for the reason this struct
+    /// exists: it is what keeps [`View::take_file`] inside the argument count
+    /// clippy is willing to read, and adding the fourth fact as a fourth
+    /// parameter is what put it over.
+    closes: bool,
 }
 
 /// Everything a row about this file needs, for either region.
@@ -513,6 +606,11 @@ fn entry_of(kind: &ChangeKind, diff: &FileDiff, history: &History) -> FileEntry 
 pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> usize {
     // A note is a heading and one line saying why, which is exactly what
     // `note_for` produces for the same three cases.
+    //
+    // **The blank between two files is not counted here**, for the reason
+    // [`gap_rows`] gives: it depends on where a file sits and this is handed a
+    // file. [`diff_rows`] is the total that adds them, and it exists so the two
+    // callers of this cannot come to disagree about that.
     if matches!(change.kind, ChangeKind::Conflict | ChangeKind::TypeChange) || span.binary {
         return 2;
     }
@@ -530,8 +628,9 @@ pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> 
 ///
 /// If `index` is out of range, the same way [`vigia_core::Frame::diff`] does.
 pub fn rows_in(frame: &mut Frame, index: usize) -> Result<usize> {
+    let files = frame.files().len();
     let (change, diff) = frame.diff(index)?;
-    Ok(span_of(&change.kind, diff))
+    Ok(span_of(&change.kind, diff) + gap_rows(index, files))
 }
 
 impl View {
@@ -693,7 +792,7 @@ impl View {
                 // Both halves of the tuple are immutable borrows of the same
                 // frame, so the kind needs no clone to be read alongside the
                 // diff.
-                let span = span_of(&change.kind, diff);
+                let span = span_of(&change.kind, diff) + gap_rows(index, files);
 
                 if !placed {
                     if skip >= span {
@@ -757,6 +856,7 @@ impl View {
                         kind: &change.kind,
                         diff,
                         index,
+                        closes: gap_rows(index, files) > 0,
                     },
                     // The pass is taken whatever this frame does with it, so the
                     // sweep in its `Drop` still runs and the cache stays bounded
@@ -881,14 +981,14 @@ impl View {
         if !wanted || self.files == 0 {
             return Ok(());
         }
-        self.total_rows = frame.height(crate::rows_of)?;
+        self.total_rows = crate::view::diff_rows(frame)?;
 
         // Everything before the file the viewport is in, plus how far into it.
         // `frame.height` has already filled the span cache, so this second walk
         // reads nothing.
         let mut above = 0usize;
         for index in 0..self.top.file.min(self.files) {
-            above += frame.rows_of(index, crate::rows_of)?;
+            above += frame.rows_of(index, crate::rows_of)? + gap_rows(index, self.files);
         }
         self.rows_above = above + self.top.row.min(self.current_span);
         Ok(())
@@ -1071,7 +1171,7 @@ impl View {
         loop {
             *read += 1;
             let (change, diff) = frame.diff(index)?;
-            have += span_of(&change.kind, diff);
+            have += span_of(&change.kind, diff) + gap_rows(index, files);
             if have >= height {
                 return Ok(Position {
                     file: index,
@@ -1105,7 +1205,12 @@ impl View {
         height: usize,
         drawn: &mut Vec<(usize, FileEntry)>,
     ) {
-        let Changed { kind, diff, index } = file;
+        let Changed {
+            kind,
+            diff,
+            index,
+            closes,
+        } = file;
         let mut n = 0usize;
 
         if n >= skip {
@@ -1122,78 +1227,102 @@ impl View {
         }
         n += 1;
 
-        if let Some(note) = note_for(kind, diff) {
-            if n >= skip && self.rows.len() < height {
-                self.rows.push(Row::Note(note));
-            }
-            return;
-        }
-
-        for (ordinal, hunk) in diff.hunks.iter().enumerate() {
-            if self.rows.len() >= height {
-                return;
-            }
-
-            // A hunk entirely above the window costs one addition. The line
-            // numbers restart from the next hunk's header, so nothing has to be
-            // carried across the ones that are skipped.
-            let span = 1 + hunk.lines.len();
-            if n + span <= skip {
-                n += span;
-                continue;
+        // **A labelled block so the block's closing gap has one push site.**
+        // The three paths below used to `return`, and each is a place a row can
+        // run out of room; with a trailing [`Row::Gap`] to add
+        // ([#165](https://github.com/breferrari/vigia/issues/165)) that would
+        // have been three copies of one push, which is how the copies come to
+        // disagree. Breaking out instead leaves the gap as a single tail,
+        // guarded by the same `n >= skip && rows.len() < height` every other row
+        // here is: a path that broke for want of room fails that guard on its
+        // own, so no branch has to remember it.
+        'block: {
+            if let Some(note) = note_for(kind, diff) {
+                if n >= skip && self.rows.len() < height {
+                    self.rows.push(Row::Note(note));
+                }
+                n += 1;
+                break 'block;
             }
 
-            if n >= skip {
-                self.rows.push(Row::Hunk {
-                    old_start: hunk.old_start,
-                    old_lines: hunk.old_lines,
-                    new_start: hunk.new_start,
-                    new_lines: hunk.new_lines,
-                });
-            }
-            n += 1;
+            for (ordinal, hunk) in diff.hunks.iter().enumerate() {
+                if self.rows.len() >= height {
+                    break 'block;
+                }
 
-            // The core carries line numbers per hunk rather than per line, so
-            // both sides are counted forward from the header. Every line
-            // advances the side it exists on; context advances both.
-            let mut old = hunk.old_start;
-            let mut new = hunk.new_start;
-            for (within, line) in hunk.lines.iter().enumerate() {
-                let number = match line.kind {
-                    LineKind::Removed => {
-                        old += 1;
-                        old - 1
-                    }
-                    LineKind::Added => {
-                        new += 1;
-                        new - 1
-                    }
-                    LineKind::Context => {
-                        old += 1;
-                        new += 1;
-                        new - 1
-                    }
-                };
+                // A hunk entirely above the window costs one addition. The
+                // line numbers restart from the next hunk's header, so nothing
+                // has to be carried across the ones that are skipped.
+                let span = 1 + hunk.lines.len();
+                if n + span <= skip {
+                    n += span;
+                    continue;
+                }
+
                 if n >= skip {
-                    if self.rows.len() >= height {
-                        return;
-                    }
-                    self.rows.push(Row::Line {
-                        kind: line.kind,
-                        number,
-                        text: line.text.clone(),
-                        // `None` is the plain first frame, and empty spans are
-                        // already a legal, drawn state: it is what a file type
-                        // with no grammar produces, so the renderer needs no new
-                        // case for this. See `Viewport::highlight`.
-                        spans: match highlighter.as_deref_mut() {
-                            Some(pass) => pass.spans(&diff.path, ordinal, hunk, within).to_vec(),
-                            None => Vec::new(),
-                        },
+                    self.rows.push(Row::Hunk {
+                        old_start: hunk.old_start,
+                        old_lines: hunk.old_lines,
+                        new_start: hunk.new_start,
+                        new_lines: hunk.new_lines,
                     });
                 }
                 n += 1;
+
+                // The core carries line numbers per hunk rather than per line,
+                // so both sides are counted forward from the header. Every line
+                // advances the side it exists on; context advances both.
+                let mut old = hunk.old_start;
+                let mut new = hunk.new_start;
+                for (within, line) in hunk.lines.iter().enumerate() {
+                    let number = match line.kind {
+                        LineKind::Removed => {
+                            old += 1;
+                            old - 1
+                        }
+                        LineKind::Added => {
+                            new += 1;
+                            new - 1
+                        }
+                        LineKind::Context => {
+                            old += 1;
+                            new += 1;
+                            new - 1
+                        }
+                    };
+                    if n >= skip {
+                        if self.rows.len() >= height {
+                            break 'block;
+                        }
+                        self.rows.push(Row::Line {
+                            kind: line.kind,
+                            number,
+                            text: line.text.clone(),
+                            // `None` is the plain first frame, and empty spans
+                            // are already a legal, drawn state: it is what a
+                            // file type with no grammar produces, so the
+                            // renderer needs no new case for this. See
+                            // `Viewport::highlight`.
+                            spans: match highlighter.as_deref_mut() {
+                                Some(pass) => {
+                                    pass.spans(&diff.path, ordinal, hunk, within).to_vec()
+                                }
+                                None => Vec::new(),
+                            },
+                        });
+                    }
+                    n += 1;
+                }
             }
+        }
+
+        // The blank that closes the block, on the same terms as every row above
+        // it. [`Row::Gap`] carries the ruling and [`gap_rows`] carries the one
+        // exception; what matters here is that it is one counted row like any
+        // other, so a viewport resting on it is a legal position and a window
+        // that stops before it simply drew fewer rows.
+        if closes && n >= skip && self.rows.len() < height {
+            self.rows.push(Row::Gap);
         }
     }
 }

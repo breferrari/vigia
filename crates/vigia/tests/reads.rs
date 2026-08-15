@@ -871,11 +871,12 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    // Each file here is one rewritten line: a file row, a hunk row and two
-    // content rows. Scrolling by forty files' worth of rows lands well inside the
-    // list rather than at either end.
+    // Each file here is one rewritten line: a file row, a hunk row, two content
+    // rows, and since [#165](https://github.com/breferrari/vigia/issues/165) the
+    // blank that closes the block. Scrolling by forty files' worth of rows lands
+    // well inside the list rather than at either end.
     let span = vigia::rows_in(&mut frame, 0).expect("rows");
-    assert_eq!(span, 4, "the fixture is not one line per file");
+    assert_eq!(span, 5, "the fixture is not one line per file");
     app.apply(
         vigia::Action::Scroll((span * 40) as isize),
         &mut frame,
@@ -925,7 +926,9 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    let span = 4;
+    // A whole block: heading, hunk header, two content rows and the closing
+    // blank, so a screen of exactly `span` rows is exactly one file's worth.
+    let span = 5;
     for height in [span, span * 2, span * 5] {
         // **List-free deliberately.** This gate is about the *diff* walk reading
         // in proportion to the rows it was given, and a pinned list would add a
@@ -939,10 +942,12 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
                 Body::diff_only(height),
             )
             .expect("view");
+        // `span` is the whole block, the closing blank included, because that is
+        // what a screen's worth of rows is spent on.
         assert_eq!(
             view.read,
             height / span,
-            "a {height}-row screen over {span}-row files read {} files",
+            "a {height}-row screen over {span}-row blocks read {} files",
             view.read
         );
         assert_eq!(view.rows.len(), height);
@@ -1542,7 +1547,12 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     // scrolled. Mutation found the second term untested — dropping it left every
     // gate green while the thumb stopped moving inside a file.
     const FILES: usize = 12;
-    const SPAN: usize = 4;
+    /// A file's whole block: heading, hunk header, two content rows, and the
+    /// blank that closes it ([#165](https://github.com/breferrari/vigia/issues/165)).
+    /// `rows_above` is what the scrollbar is positioned from, so it counts the
+    /// blank exactly as the total does, and a `4` here would be asserting the
+    /// desynchronised arithmetic rather than the drawn one.
+    const SPAN: usize = 5;
 
     let scratch = Scratch::large_diff("shell-rows-above", FILES, 1);
     let worktree = scratch.worktree();

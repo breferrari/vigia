@@ -567,3 +567,101 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     );
     assert_eq!(view.rows.len(), 2, "a binary file drew extra rows");
 }
+
+#[test]
+fn a_files_block_ends_in_a_blank_row() {
+    // [#165](https://github.com/breferrari/vigia/issues/165). A file's last
+    // content row and the next file's heading sat on adjacent rows, and a
+    // heading is a `Painter::file_row` carrying the kind letter, the path, the
+    // pulse, the heat strip, the sparkline and the counters, so a dense row
+    // landed directly under a dense row and the only thing marking the boundary
+    // was the content itself.
+    //
+    // **Trailing and uniform**, which is the ruling rather than an
+    // implementation detail, so the gate is written against all three of its
+    // halves: every heading after the first is preceded by a gap, the **first**
+    // row of the stream is a heading and not a gap, and the **last** file gets
+    // one too. Dropping any one of those is a different ruling that would
+    // otherwise pass this test.
+    //
+    // Against a real frame rather than hand-built rows, because the claim is
+    // about what `View::take_file` produces from a diff, which is exactly what
+    // this file exists to cover.
+    let scratch = Scratch::new("shell-rows-gap");
+    scratch.write("src/lib.rs", numbered(12));
+    scratch.write("README.md", unique("readme", 3));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
+    scratch.write("src/added.rs", unique("added", 2));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    let view = View::collect(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Viewport {
+            position: Position { file: 0, row: 0 },
+            anchored: false,
+            diff_rows: ALL_ROWS,
+            ..Viewport::default()
+        },
+    )
+    .expect("view");
+
+    let headings: Vec<usize> = view
+        .rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| matches!(row, Row::File(_)))
+        .map(|(i, _)| i)
+        .collect();
+
+    // Non-vacuity first: with one changed file there is no boundary to draw and
+    // every assertion below holds for a renderer that draws no gap at all.
+    assert!(
+        headings.len() >= 2,
+        "the fixture drew {} headings, so there is no inter-file boundary in it \
+         and this gate proves nothing",
+        headings.len()
+    );
+    assert!(
+        view.rows.len() < ALL_ROWS,
+        "the whole diff did not fit, so the last row below is a window edge \
+         rather than the end of the stream"
+    );
+
+    assert_eq!(
+        headings.first(),
+        Some(&0),
+        "the stream does not open on a heading, so a gap was drawn above the \
+         first file: {:?}",
+        view.rows.first()
+    );
+    for &at in &headings[1..] {
+        assert_eq!(
+            view.rows.get(at - 1),
+            Some(&Row::Gap),
+            "the row above the heading at {at} is {:?} rather than the blank \
+             that ends the file before it",
+            view.rows.get(at - 1)
+        );
+    }
+    // **And the last file does not get one.** That is the exception rather than
+    // an oversight, and it is the half of this ruling that was reversed while it
+    // was being built: `SPEC.md` §11.1 rules the bottom of the diff is
+    // **content**, `scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank`
+    // is the gate over it, and that gate carries its own warning about having
+    // once been weakened. A blank there would separate the diff from nothing,
+    // since the footer is chrome with a row of its own. Asserted here as well,
+    // because this is the file that would notice a uniform gap coming back.
+    assert!(
+        !matches!(view.rows.last(), Some(Row::Gap)),
+        "the stream ends on a blank, so the gap has gone uniform and the bottom \
+         of the diff is no longer content"
+    );
+}

@@ -25,9 +25,25 @@ use support::{Scratch, generated, materialise};
 /// Files in the scrolling fixture.
 const FILES: usize = 40;
 
-/// Rows one file of the fixture occupies: its heading, one hunk header, and the
-/// one line it replaced.
+/// Rows one file of the fixture's **content** occupies: its heading, one hunk
+/// header, and the one line it replaced.
 const SPAN: usize = 4;
+
+/// Rows one file's whole block occupies: [`SPAN`] plus the blank that closes it.
+///
+/// **The unit a row index maps onto a position through**, since
+/// [#165](https://github.com/breferrari/vigia/issues/165) gave every file but
+/// the last a trailing [`Row::Gap`]. Before it, block and span were the same
+/// number and the arithmetic below could use either; they are not, and the one
+/// that is wrong now is the one that reads `SPAN`.
+const BLOCK: usize = SPAN + 1;
+
+/// Rows the fixture's whole diff occupies.
+///
+/// Not `FILES * BLOCK`: the last file closes the stream, so it has no blank
+/// after it, which is the exception `view::gap_rows` carries and `SPEC.md`
+/// §11.1's "the bottom of the diff is content" is the reason for.
+const TOTAL: usize = FILES * BLOCK - 1;
 
 fn body() -> usize {
     // Eighty columns, where the footer is one line whatever the state, so the
@@ -78,13 +94,21 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
     materialise(&mut frame);
 
     assert_eq!(frame.files().len(), FILES);
-    for index in [0, FILES / 2, FILES - 1] {
+    // **Two shapes, not one**, and the last file is the whole of the difference:
+    // every file but it carries the blank that closes its block, so a fixture
+    // guard asserting one number would be asserting the wrong one somewhere.
+    for index in [0, FILES / 2] {
         assert_eq!(
             vigia::rows_in(&mut frame, index).expect("rows"),
-            SPAN,
-            "file {index} is not {SPAN} rows"
+            BLOCK,
+            "file {index} is not {BLOCK} rows, so its closing blank is missing"
         );
     }
+    assert_eq!(
+        vigia::rows_in(&mut frame, FILES - 1).expect("rows"),
+        SPAN,
+        "the last file is not {SPAN} rows, so it gained a closing blank and the          bottom of the diff is no longer content"
+    );
 }
 
 #[test]
@@ -146,7 +170,7 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
     let history = History::new();
 
     let mut seen = Vec::new();
-    for _ in 0..(SPAN * 3) {
+    for _ in 0..(BLOCK * 3) {
         seen.push(after(
             &mut app,
             &mut frame,
@@ -156,10 +180,10 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
         ));
     }
 
-    let expected: Vec<Position> = (1..=SPAN * 3)
+    let expected: Vec<Position> = (1..=BLOCK * 3)
         .map(|n| Position {
-            file: n / SPAN,
-            row: n % SPAN,
+            file: n / BLOCK,
+            row: n % BLOCK,
         })
         .collect();
     assert_eq!(
@@ -187,7 +211,7 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
 
-    let start = SPAN * 3;
+    let start = BLOCK * 3;
     let landed = after(
         &mut app,
         &mut frame,
@@ -217,8 +241,8 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
         .map(|step| {
             let absolute = start - step - 1;
             Position {
-                file: absolute / SPAN,
-                row: absolute % SPAN,
+                file: absolute / BLOCK,
+                row: absolute % BLOCK,
             }
         })
         .collect();
@@ -270,14 +294,14 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
          {} blank under a diff with {} rows to spare",
         body(),
         body() - rows,
-        FILES * SPAN
+        TOTAL
     );
     // The bottom of the diff and nowhere else. Asserted through the position as
     // well as the count, because a screen full of the *wrong* rows satisfies the
     // count on its own.
     assert_eq!(
-        top.file * SPAN + top.row + body(),
-        FILES * SPAN,
+        top.file * BLOCK + top.row + body(),
+        TOTAL,
         "the screen is full but ends somewhere other than the end of the diff: {top:?}"
     );
     assert!(
@@ -493,7 +517,7 @@ fn a_page_keeps_one_row_of_overlap() {
         &history,
         Action::Page(1),
     );
-    let absolute = landed.file * SPAN + landed.row;
+    let absolute = landed.file * BLOCK + landed.row;
     assert_eq!(
         absolute,
         rows - 1,
@@ -536,7 +560,7 @@ fn a_half_page_keeps_no_overlap_because_it_already_is_one() {
         &history,
         Action::HalfPage(1),
     );
-    let absolute = landed.file * SPAN + landed.row;
+    let absolute = landed.file * BLOCK + landed.row;
     assert_eq!(
         absolute,
         rows / 2,
@@ -647,7 +671,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
         &mut frame,
         &mut highlighter,
         &history,
-        Action::Scroll((SPAN * 7 + 2) as isize),
+        Action::Scroll((BLOCK * 7 + 2) as isize),
     );
     assert_eq!(
         before,
@@ -917,11 +941,13 @@ fn a_diff_shorter_than_the_screen_starts_at_the_top() {
         Position::default(),
         "a diff shorter than the screen did not start at the top"
     );
+    // `BLOCK + SPAN` and not `2 * SPAN`: the first file carries the blank that
+    // closes its block and the second is the last, so it does not.
     assert_eq!(
         rows,
-        2 * SPAN,
+        BLOCK + SPAN,
         "a two file diff drew {rows} rows rather than the {} it has",
-        2 * SPAN
+        BLOCK + SPAN
     );
 }
 
@@ -995,4 +1021,114 @@ fn dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end() {
         "the bottom of the track landed at {end:?}, which is row {} of {total}",
         rows_above + end.row
     );
+}
+
+#[test]
+fn the_counting_twins_agree_with_the_rows_drawn() {
+    // **The gate `view::rows_of`'s own doc asks for and did not have.** It and
+    // `span_of` "have to agree exactly: one is what the screen draws and the
+    // other is what the scrollbar is scaled against", and until
+    // [#165](https://github.com/breferrari/vigia/issues/165) nothing checked it:
+    // every other gate here reads a *position*, and a total that drifted from
+    // the walk moves no position at all. It moves the thumb, silently, on a bar
+    // this project already had to make row-exact once.
+    //
+    // A threshold-shaped claim, so no snapshot can see it: the two numbers are
+    // computed on different code paths from the same frame and never appear on
+    // screen together.
+    let scratch = fixture("shell-scroll-twins");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // The total the bar is scaled against, blanks included.
+    let total = vigia::diff_rows(&mut frame).expect("total");
+
+    // The rows the walk actually produces, given more room than the diff needs
+    // so nothing is clipped and the count is the whole stream.
+    let view = View::collect(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        vigia::Viewport {
+            position: Position::default(),
+            anchored: false,
+            diff_rows: TOTAL * 2,
+            ..vigia::Viewport::default()
+        },
+    )
+    .expect("view");
+
+    assert!(
+        view.rows.len() < TOTAL * 2,
+        "the walk filled the window it was given, so its row count is the \
+         window's rather than the diff's and this compares two different things"
+    );
+    assert_eq!(
+        total,
+        view.rows.len(),
+        "the scrollbar is scaled against {total} rows and the walk drew {}, so \
+         the bar cannot reach its own bottom",
+        view.rows.len()
+    );
+    // Non-vacuity: the fixture has to contain a boundary, or the blanks the two
+    // sides have to agree about do not exist and this passes on arithmetic that
+    // never met one.
+    assert!(
+        total > SPAN,
+        "the fixture is one file, so there is no inter-file blank for the two \
+         counts to disagree about"
+    );
+}
+
+#[test]
+fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
+    // **The property a trailing blank could quietly take away.** Every jump on
+    // this map resolves through `App::jump_to` to `Position { file, row: 0 }`,
+    // and row 0 of a file is its heading only while the blank that closes a
+    // block **trails** rather than leads
+    // ([#165](https://github.com/breferrari/vigia/issues/165)). A leading blank
+    // would put one above every heading a reader jumped to, and nothing else in
+    // this suite reads the row a jump landed on: the position gates all compare
+    // `Position`s, which are identical either way.
+    //
+    // So this asserts the drawn row rather than the position, which is the only
+    // form of the claim that can tell the two designs apart.
+    let scratch = fixture("shell-scroll-jumps");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // Scrolled off a boundary first, so a jump has somewhere to come back from
+    // and "landed on a heading" is not just "never moved".
+    app.apply(Action::Scroll((BLOCK * 5 + 2) as isize), &mut frame, body())
+        .expect("scroll");
+
+    for (name, action) in [
+        ("n", Action::File(1)),
+        ("p", Action::File(-1)),
+        ("a digit", Action::ListRow(2)),
+        ("g", Action::Top),
+        ("G", Action::Bottom),
+    ] {
+        app.apply(action, &mut frame, body()).expect("apply");
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, split())
+            .expect("view");
+        assert!(
+            matches!(view.rows.first(), Some(Row::File(_))),
+            "{name} landed on {:?} rather than on a file's heading",
+            view.rows.first()
+        );
+        assert_eq!(
+            view.top.row, 0,
+            "{name} landed inside a file rather than at its top: {:?}",
+            view.top
+        );
+    }
 }
