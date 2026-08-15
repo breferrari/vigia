@@ -303,6 +303,22 @@ fn a_key_release_is_not_a_keypress() {
 fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // Each of these is delivered by a real terminal in ordinary use, and every
     // one of them turning into a frame is how a monitor acquires an idle cost.
+    //
+    // **`Moved` is the one with a ruling behind it, so read `SPEC.md` §11.2 B10
+    // before deciding this line is stale.** It is delivered because the mouse
+    // bundle sets `?1003h`, any-event tracking, which nothing here consumes and
+    // which cannot portably be switched off; `RULINGS.md`'s I1 section carries
+    // what it costs.
+    //
+    // **This fixture cannot be the whole tripwire, and the sibling below is
+    // why.** `Regions::default()` is a screen with no region and no bars, so a
+    // hover arm written the way the click arm above it is written — gated on
+    // `over_list` — returns `None` here and leaves this green. The proof that
+    // the fixture is doing the work is one line down: `Down(Left)` is asserted
+    // inert here and is emphatically not inert in production. So this list
+    // catches only a region-blind hover, and
+    // [`pointer_motion_over_a_laid_out_screen_is_still_no_action`] catches the
+    // one anybody would actually build.
     let inert = [
         wheel(MouseEventKind::Moved),
         wheel(MouseEventKind::Down(MouseButton::Left)),
@@ -365,6 +381,43 @@ fn the_yank_key_is_refused_rather_than_unbound() {
             None,
             "{event:?} became an action, and `SPEC.md` §11.2 B9 refused the yank \
              key rather than leaving it unassigned"
+        );
+    }
+}
+
+/// `SPEC.md` §11.2 B10's tripwire, and the reason the inert list above is not
+/// it.
+///
+/// > B10 — a hover highlight on what the pointer is over. Ruled 2026-08-15: no.
+///
+/// **The fixture is the whole point.** [`nothing_a_reader_did_not_ask_for_becomes_an_action`]
+/// hands `action_for` a `Regions::default()`, which is a screen with no list, no
+/// diff and no bar, so every region-gated arm in the map returns `None` against
+/// it whatever it does in production — `Down(Left)` sits in that same list and
+/// puts the diff at a file on a real screen. A hover written the way the click
+/// arm is written, `Moved if regions.over_list(row)`, is therefore invisible
+/// there. Here the screen is laid out, and the pointer is placed over the list,
+/// over the diff and on the scrollbar column in turn: the three places a hover
+/// would have something to say.
+///
+/// **What this does and does not hold.** It holds that pointer motion produces
+/// no *action*, which is what B10 rests on and what reddens the day a hover
+/// binding lands. It does **not** hold that motion produces no *paint*, and
+/// nothing in this suite does: `vigia::run` draws once per drained batch whether
+/// or not any wake in it produced an action, so the honest count today is one
+/// paint per motion batch rather than zero. `RULINGS.md`'s I1 section carries
+/// that finding and [#154](https://github.com/breferrari/vigia/issues/154)
+/// tracks it; #123's exit criterion asked for a zero-paints gate and this is
+/// deliberately not one, because writing it today would assert something untrue.
+#[test]
+fn pointer_motion_over_a_laid_out_screen_is_still_no_action() {
+    for (place, row) in [("the list", 2), ("the diff", 9), ("the scrollbar", 6)] {
+        let event = at(MouseEventKind::Moved, 79, row);
+        assert_eq!(
+            action_for(&event, two_regions()),
+            None,
+            "motion over {place} became an action, so `SPEC.md` §11.2 B10 has \
+             been reversed without being reopened"
         );
     }
 }
