@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" role="img"
+     aria-label="Proposal mockup for the vigia keys overlay: a centred window titled keys, listing every binding as a key and a verb in two columns, with a close control at its top right and a line saying how to dismiss it, drawn over the ordinary pane whose header, changed-file list, diff, scrollbar and status bar all stay visible around it.">
+
+  <!-- PROPOSAL. NOT THE SPECIFICATION.
+
+       assets/preview.svg is the one canonical mockup and this is not it. SPEC.md
+       section 5.3 rules that the picture is never redrawn ahead of a ruling, because a
+       picture answering an open question IS the answer and must not arrive by ambush,
+       which is section 11.2 B4. Issue #167 is open: whether the keymap gets an overlay
+       at all is undecided, and so is every question inside it.
+
+       This exists so that ruling can be made by looking rather than by arguing, which
+       is what Phase 8 says a feel decision needs. It is foldered and named so it cannot
+       be mistaken for the artifact that binds.
+
+       Delete it when #167 is ruled, either way. Declined, it is a picture of something
+       that does not exist. Adopted, the canonical mockup is corrected in the same pass
+       as the ruling, and a second picture of a settled question is drift waiting to
+       happen.
+
+       Drawn on the canonical picture's own grid: one monospace cell at 13.5px is about
+       8.1px, rows sit 26px apart, and every glyph is placed at an explicit x so nothing
+       depends on whitespace surviving. The box is box-drawing characters on that grid
+       rather than a rounded rect, because a terminal has no rounded rect and a mock
+       that hides the cell grid hides the question being asked.
+
+       Three things in here are proposals inside the proposal, not incidental: the close
+       control is a glyph outside CP437, the same trap #159 and #166 hit; Esc is drawn
+       as a dismissal while it is currently bound to Quit; and the sheet lists gestures
+       rather than keys, which is #80's open question answered one way. -->
+
+  <defs>
+    <clipPath id="win"><rect x="8" y="8" width="884" height="454" rx="12"/></clipPath>
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+      .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
+      .grn { fill: #3fb950 } .red { fill: #f85149 } .cyn { fill: #39c5cf }
+      .con { fill: #e3b341 }
+    </style>
+  </defs>
+
+  <rect x="8" y="8" width="884" height="454" rx="12" fill="#0d1117"/>
+
+  <g clip-path="url(#win)">
+    <rect x="8" y="8" width="884" height="46" fill="#161b22"/>
+    <circle cx="34" cy="31" r="6" fill="#f85149"/>
+    <circle cx="54" cy="31" r="6" fill="#e3b341"/>
+    <circle cx="74" cy="31" r="6" fill="#3fb950"/>
+
+    <g font-size="13.5">
+      <!-- The pane behind, drawn whole and unmoved on purpose. The argument for the
+           overlay is that it composites over cells already drawn and changes no rect,
+           where five more hint items would bring the second footer line at more widths
+           and take a row off the diff. -->
+      <text class="m fg" x="32.0" y="84">vigia</text>
+      <text class="m dim" x="80.6" y="84">·</text>
+      <text class="m fg" x="96.8" y="84">3 changed</text>
+      <text class="m cyn" x="866.0" y="84" text-anchor="end">watching</text>
+      <text class="m fg" x="50.0" y="92">M src/engine/watch.rs</text>
+      <rect x="300" y="88" width="7" height="3" rx="0.5" fill="#3fb950"/>
+      <rect x="310" y="82" width="7" height="9" rx="0.5" fill="#3fb950"/>
+      <rect x="320" y="86" width="7" height="5" rx="0.5" fill="#3fb950"/>
+      <rect x="330" y="80" width="7" height="11" rx="0.5" fill="#3fb950"/>
+      <rect x="340" y="84" width="7" height="7" rx="0.5" fill="#3fb950"/>
+      <rect x="350" y="88" width="7" height="3" rx="0.5" fill="#3fb950"/>
+      <rect x="360" y="82" width="7" height="9" rx="0.5" fill="#3fb950"/>
+      <rect x="370" y="86" width="7" height="5" rx="0.5" fill="#3fb950"/>
+      <text class="m grn" x="452.0" y="92" text-anchor="end">+42</text>
+      <text class="m red" x="500.0" y="92" text-anchor="end">−7</text>
+      <rect x="540" y="82" width="11" height="8" rx="2" fill="#3fb950"/>
+      <rect x="554" y="82" width="11" height="8" rx="2" fill="#3fb950"/>
+      <rect x="568" y="82" width="11" height="8" rx="2" fill="#3fb950"/>
+      <rect x="582" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="596" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="610" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="624" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="638" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="652" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="666" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="680" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="694" y="82" width="11" height="8" rx="2" fill="#21262d"/>
+      <text class="m fg" x="50.0" y="124">M src/render/frame.rs</text>
+      <rect x="300" y="120" width="7" height="3" rx="0.5" fill="#3fb950"/>
+      <rect x="310" y="114" width="7" height="9" rx="0.5" fill="#3fb950"/>
+      <rect x="320" y="118" width="7" height="5" rx="0.5" fill="#3fb950"/>
+      <rect x="330" y="112" width="7" height="11" rx="0.5" fill="#3fb950"/>
+      <rect x="340" y="116" width="7" height="7" rx="0.5" fill="#3fb950"/>
+      <rect x="350" y="120" width="7" height="3" rx="0.5" fill="#3fb950"/>
+      <rect x="360" y="114" width="7" height="9" rx="0.5" fill="#3fb950"/>
+      <rect x="370" y="118" width="7" height="5" rx="0.5" fill="#3fb950"/>
+      <text class="m grn" x="452.0" y="124" text-anchor="end">+11</text>
+      <text class="m red" x="500.0" y="124" text-anchor="end">−3</text>
+      <rect x="540" y="114" width="11" height="8" rx="2" fill="#3fb950"/>
+      <rect x="554" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="568" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="582" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="596" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="610" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="624" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="638" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="652" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="666" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="680" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <rect x="694" y="114" width="11" height="8" rx="2" fill="#21262d"/>
+      <line x1="8" y1="140" x2="892" y2="140" stroke="#21262d" stroke-width="1"/>
+      <text class="m faint" x="60.0" y="176" text-anchor="end">38</text>
+      <text class="m fg" x="88.0" y="176">fn coalesce(&amp;mut self, ev: Event) -&gt; Option&lt;Frame&gt; {</text>
+      <text class="m faint" x="60.0" y="202" text-anchor="end">39</text>
+      <text class="m fg" x="88.0" y="202">    if self.pending.is_empty() {</text>
+      <text class="m faint" x="60.0" y="228" text-anchor="end">40</text>
+      <text class="m fg" x="88.0" y="228">        self.deadline = Instant::now() + DEBOUNCE;</text>
+      <text class="m faint" x="60.0" y="254" text-anchor="end">41</text>
+      <text class="m fg" x="88.0" y="254">    }</text>
+      <text class="m faint" x="60.0" y="280" text-anchor="end">42</text>
+      <text class="m fg" x="88.0" y="280">    self.pending.insert(ev.path);</text>
+      <text class="m faint" x="60.0" y="306" text-anchor="end">43</text>
+      <text class="m fg" x="88.0" y="306">    self.flush()</text>
+      <text class="m faint" x="60.0" y="332" text-anchor="end">44</text>
+      <text class="m fg" x="88.0" y="332">    None</text>
+      <text class="m faint" x="60.0" y="358" text-anchor="end">45</text>
+      <text class="m fg" x="88.0" y="358">}</text>
+      <text class="m faint" x="60.0" y="384" text-anchor="end">46</text>
+      <text class="m faint" x="60.0" y="410" text-anchor="end">47</text>
+      <text class="m fg" x="88.0" y="410">fn flush(&amp;mut self) -&gt; Option&lt;Frame&gt; {</text>
+      <rect x="872" y="160" width="6" height="250" rx="3" fill="#21262d"/>
+      <rect x="872" y="160" width="6" height="82" rx="3" fill="#8b949e"/>
+
+      <!-- The overlay: 60 columns by 10 rows, centred in the body between the header
+           and the status bar, on the same cell grid as everything above it. -->
+      <rect x="207" y="113" width="486.0" height="260" fill="#161b22"/>
+      <text class="m dim" x="207.0" y="131">┌─</text>
+      <text class="m cyn" x="231.3" y="131">keys</text>
+      <text class="m dim" x="271.8" y="131">──────────────────────────────────────────────</text>
+      <text class="m faint" x="652.5" y="131">✕</text>
+      <text class="m dim" x="668.7" y="131">─┐</text>
+      <text class="m dim" x="207.0" y="157">│</text>
+      <text class="m dim" x="684.9" y="157">│</text>
+      <text class="m dim" x="207.0" y="183">│</text>
+      <text class="m dim" x="684.9" y="183">│</text>
+      <text class="m dim" x="207.0" y="209">│</text>
+      <text class="m dim" x="684.9" y="209">│</text>
+      <text class="m dim" x="207.0" y="235">│</text>
+      <text class="m dim" x="684.9" y="235">│</text>
+      <text class="m dim" x="207.0" y="261">│</text>
+      <text class="m dim" x="684.9" y="261">│</text>
+      <text class="m dim" x="207.0" y="287">│</text>
+      <text class="m dim" x="684.9" y="287">│</text>
+      <text class="m dim" x="207.0" y="313">│</text>
+      <text class="m dim" x="684.9" y="313">│</text>
+      <text class="m dim" x="207.0" y="339">│</text>
+      <text class="m dim" x="684.9" y="339">│</text>
+      <text class="m dim" x="207.0" y="365">└──────────────────────────────────────────────────────────┘</text>
+      <text class="m cyn" x="231.3" y="183">q  Esc</text>
+      <text class="m fg" x="320.4" y="183">quit</text>
+      <text class="m cyn" x="458.1" y="183">f</text>
+      <text class="m fg" x="547.2" y="183">follow</text>
+      <text class="m cyn" x="231.3" y="209">j k  ↓ ↑</text>
+      <text class="m fg" x="320.4" y="209">scroll a row</text>
+      <text class="m cyn" x="458.1" y="209">J K</text>
+      <text class="m fg" x="547.2" y="209">scroll the list</text>
+      <text class="m cyn" x="231.3" y="235">d  u</text>
+      <text class="m fg" x="320.4" y="235">half page</text>
+      <text class="m cyn" x="458.1" y="235">Space</text>
+      <text class="m fg" x="547.2" y="235">page</text>
+      <text class="m cyn" x="231.3" y="261">g  G</text>
+      <text class="m fg" x="320.4" y="261">first and last</text>
+      <text class="m cyn" x="458.1" y="261">n  p</text>
+      <text class="m fg" x="547.2" y="261">step a file</text>
+      <text class="m cyn" x="231.3" y="287">1 - 6</text>
+      <text class="m fg" x="320.4" y="287">jump to a listed row</text>
+      <text class="m cyn" x="458.1" y="287">?</text>
+      <text class="m fg" x="547.2" y="287">this sheet</text>
+      <text class="m faint" x="231.3" y="339">?   Esc   or   ✕    close</text>
+
+      <rect x="8" y="432" width="884" height="30" fill="#161b22"/>
+      <line x1="8" y1="432" x2="892" y2="432" stroke="#21262d" stroke-width="1"/>
+      <text class="m faint" x="32.0" y="452" font-size="12.5">q quit  ·  f follow  ·  ? keys</text>
+      <text class="m" x="866" y="452" font-size="12.5" text-anchor="end"><tspan class="cyn">0.8ms</tspan><tspan class="dim"> frame</tspan><tspan class="dim">&#160;&#160;&#160;</tspan><tspan class="cyn">24MiB</tspan><tspan class="dim">&#160;&#160;</tspan><tspan class="dim">follow </tspan><tspan class="grn">&#9654;</tspan></text>
+    </g>
+  </g>
+</svg>
