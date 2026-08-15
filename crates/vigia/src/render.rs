@@ -38,7 +38,7 @@ use ratatui::style::Style;
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
-use crate::input::Regions;
+use crate::input::{Region, Regions};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
 
@@ -482,6 +482,20 @@ const BAR_WIDTH: usize = reserved(1);
 /// glance element and [`ROW_FLOOR`] outranks every one of them. The parallel
 /// between the two floors reads off the source rather than being asserted here.
 const BAR_FLOOR: usize = BAR_WIDTH + ROW_FLOOR;
+
+/// Whether a pane of `width` can afford a scrollbar at all.
+///
+/// **One rule for the whole screen, asked in one place**, so a reader never sees
+/// half a pair. [`render`] and [`regions`] each kept this comparison by hand,
+/// under two different local names, which is the same shape [`Bar`]'s own doc
+/// gives for the predicate beside it: a threshold two expressions agree about
+/// clerically stays correct on the drawn side while the *width at which* it
+/// changes drifts, and nothing that reads the output can see the difference. The
+/// bar's two other decisions already come from [`bar_for`]; this is the term that
+/// was left behind.
+const fn affords_bar(width: u16) -> bool {
+    width as usize >= BAR_FLOOR
+}
 
 /// The pane's whole margin, both sides counted together: blank columns it keeps
 /// between its own edge and any glyph. Widest pane first.
@@ -1229,6 +1243,21 @@ impl Bar {
             Self::None | Self::Bare => (top, rows),
         }
     }
+
+    /// The whole region a pointer is told about: its rows, and the part of them
+    /// this bar leaves as track.
+    ///
+    /// **The one place the two are paired**, so [`Region`] can never be built
+    /// holding one region's rows beside another's track. That is a bug with no
+    /// symptom on screen, which is why it is closed by construction here rather
+    /// than left to a gate.
+    fn region(self, top: u16, rows: u16) -> Region {
+        Region {
+            top,
+            rows,
+            track: self.track(top, rows),
+        }
+    }
 }
 
 /// Decide a region's bar from what it holds and what the pane can afford.
@@ -1237,10 +1266,14 @@ impl Bar {
 /// the whole screen so a reader never sees half a pair. Everything else is about
 /// this region.
 ///
-/// **A one-row region gets nothing**, because [`scrollable`] guarantees
-/// `span < of` and therefore `(span * rows) / of < rows`, so the thumb equals the
-/// track exactly when `rows == 1`. Drawing it spends two of forty columns on a
-/// mark that cannot move.
+/// **A region shorter than [`MIN_TRACK`] gets nothing**, because [`scrollable`]
+/// guarantees `span < of` and therefore `(span * rows) / of < rows`, so the thumb
+/// equals the track exactly when `rows == 1`. Drawing it spends two of forty
+/// columns on a mark that cannot move. Written against the constant rather than
+/// as `rows > 1`, because the two are the same claim and only one of them moves
+/// when the shortest track worth drawing does: a hand-spelled floor one screen
+/// below the constant that names it is the drift [`STEP_FLOOR`] is written as a
+/// sum to refuse.
 ///
 /// **Buttons from [`STEP_FLOOR`] up, and never below it.** The buttons come out
 /// of the track, so a region short enough to be all buttons would have a bar with
@@ -1248,7 +1281,7 @@ impl Bar {
 /// before there were any. Monotone by construction: one comparison against one
 /// threshold, so a taller region can never lose them.
 fn bar_for(wide: bool, rows: u16, span: u64, of: u64) -> Bar {
-    if !(wide && rows > 1 && scrollable(span, of)) {
+    if !(wide && rows >= MIN_TRACK && scrollable(span, of)) {
         return Bar::None;
     }
     if rows >= STEP_FLOOR {
@@ -2287,7 +2320,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     }
     let footer = Footer::plan(area, chrome, view.files);
     let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
-    let wide = usize::from(area.width) >= BAR_FLOOR;
+    let wide = affords_bar(area.width);
 
     let list_top = area.y + 1;
     let diff_top = list_top + body.list as u16 + u16::from(body.rule);
@@ -2303,11 +2336,9 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let diff_bar = bar_for(wide, diff_rows, body.diff as u64, view.total_rows as u64);
 
     Regions {
-        list: (list_top, list_rows),
-        diff: (diff_top, diff_rows),
+        list: list_bar.region(list_top, list_rows),
+        diff: diff_bar.region(diff_top, diff_rows),
         bar: (list_bar.drawn() || diff_bar.drawn()).then(|| area.x + area.width - 1),
-        list_track: list_bar.track(list_top, list_rows),
-        diff_track: diff_bar.track(diff_top, diff_rows),
     }
 }
 
@@ -2364,7 +2395,7 @@ pub fn render(
     // Wide enough for a bar at all. Each region then decides separately whether
     // it has anywhere to scroll, because a list of three files and a diff of
     // thirty thousand rows are different questions.
-    let bars = usize::from(area.width) >= BAR_FLOOR;
+    let bars = affords_bar(area.width);
     let mut y = area.y + 1;
 
     if body.list > 0 {

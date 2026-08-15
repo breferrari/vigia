@@ -14,81 +14,77 @@ use ratatui::crossterm::event::{
 /// rather than pixels, so matching it makes one notch feel like one notch.
 pub const WHEEL_ROWS: isize = 3;
 
-/// Where the screen's regions are, so a pointer can be told what it is over.
+/// A span of rows on the screen, and the part of it a scrollbar's thumb can
+/// occupy.
 ///
-/// **The one thing this module knows about layout, and it is passed in rather
-/// than derived.** Everything else here is a pure function of a key code, which
-/// is what makes the whole map a table test; a mouse gesture cannot be, because
-/// "scroll the thing under the pointer" is a question about the screen. Handing
-/// it the three numbers keeps the decision here and the arithmetic testable.
+/// **One type rather than two parallel tuples, so the pairing cannot be got
+/// wrong.** The region and its track are only ever meaningful together: a track
+/// belonging to the other region compiles perfectly as a second tuple argument
+/// and resolves a press against rows the thumb is not on, which is a bug with no
+/// symptom on screen. Carrying them in one value makes that unrepresentable
+/// rather than merely untested.
 ///
-/// Rows are absolute within the pane. `Default` is a screen with no region and
-/// no bars, which is what a caller that has not laid out yet should say.
+/// `rows` of zero means there is no region at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Regions {
-    /// First row of the pinned list, and how many rows it has. Zero rows means
-    /// there is no region and every gesture belongs to the diff.
-    pub list: (u16, u16),
-    /// First row of the diff region, and how many rows it has.
-    pub diff: (u16, u16),
-    /// The column both scrollbars are drawn in, when either is.
-    pub bar: Option<u16>,
-    /// The rows of the pinned list's bar that carry track rather than a step
-    /// button, and the same for the diff's.
+pub struct Region {
+    /// First row of the region, absolute within the pane.
+    pub top: u16,
+    /// How many rows it has.
+    pub rows: u16,
+    /// First row of its bar's **track**, and how many rows that is.
     ///
     /// **Passed rather than derived, which is this module's whole rule.** A
-    /// stepped bar spends its first and last row on buttons, so the track is not
-    /// the region; working that out here would mean knowing the height ladder
+    /// stepped bar spends its first and last row on step buttons, so the track is
+    /// not the region; working that out here would mean knowing the height ladder
     /// that decides it, and a second copy of a threshold is how the pointer comes
-    /// to seek from a row the thumb is not on. Equal to the region itself
-    /// wherever the bar has no buttons, so a caller that does not care may ask
+    /// to seek from a row the thumb is not on. Equal to `(top, rows)` wherever
+    /// the bar has no buttons, so a caller that does not care may ask
     /// unconditionally.
-    pub list_track: (u16, u16),
-    /// See [`Regions::list_track`].
-    pub diff_track: (u16, u16),
+    pub track: (u16, u16),
 }
 
-impl Regions {
-    /// Whether `row` is inside the pinned list.
-    fn over_list(self, row: u16) -> bool {
-        let (top, rows) = self.list;
+impl Region {
+    /// A region with no scrollbar buttons, whose track is the whole of it.
+    ///
+    /// The shape every region had before there were step buttons, and the one a
+    /// caller wants whenever the bar is bare or absent.
+    pub fn bare(top: u16, rows: u16) -> Self {
+        Self {
+            top,
+            rows,
+            track: (top, rows),
+        }
+    }
+
+    /// Whether `row` falls inside this region.
+    ///
+    /// One predicate rather than the three near-copies this module grew: the
+    /// same half-open range test decided *is the pointer over the list*, *is it
+    /// on a track* and *is it on a button*, and a change to what "inside" means
+    /// wanted three edits with gates behind only two of them.
+    fn contains(self, row: u16) -> bool {
+        Self::within(row, (self.top, self.rows))
+    }
+
+    /// The same test against a bare `(top, rows)` span, for the track.
+    fn within(row: u16, span: (u16, u16)) -> bool {
+        let (top, rows) = span;
         rows > 0 && row >= top && row < top + rows
     }
 
-    /// The step a press on `row` asks for, or `None` where it is not on a button.
+    /// `-1` on this region's leading step button, `1` on its trailing one, and
+    /// `None` both between them and outside the region.
     ///
-    /// A button is a row **inside a region and outside that region's track**,
-    /// which is the whole definition: a bar with no buttons has a track equal to
-    /// its region and can never answer here. The region is what decides which
-    /// action, and the two are not interchangeable — moving the map expresses no
-    /// intent about the diff, so the list's buttons step the window and the
-    /// diff's step the viewport, exactly as the drag on the same column already
-    /// does. `SPEC.md` §11.1.
-    ///
-    /// **One step per press, and there is no other option.** No mouse protocol
-    /// reports a button that is *still* down: `crossterm` has `Down`, `Up`,
-    /// `Drag` and `Moved`, and a drag needs motion, so repeat-while-held would
-    /// have to be driven by a clock I1 forbids. `RULINGS.md` carries the
-    /// measurement.
-    fn step(self, row: u16) -> Option<Action> {
-        if let Some(rows) = Self::button(row, self.list, self.list_track) {
-            return Some(Action::ScrollList(rows));
-        }
-        Self::button(row, self.diff, self.diff_track).map(Action::Scroll)
-    }
-
-    /// `-1` on a region's leading button, `1` on its trailing one, `None` between
-    /// them and `None` outside the region.
-    ///
-    /// Written against the **track's** ends rather than the region's, so the two
-    /// cannot come apart: a row above the track is the up button and a row below
-    /// it is the down one, whatever the ladder decided the track would be.
-    fn button(row: u16, region: (u16, u16), track: (u16, u16)) -> Option<isize> {
-        let (top, rows) = region;
-        if rows == 0 || row < top || row >= top + rows {
+    /// Written against the **track's** ends rather than a floor of its own, so
+    /// the two cannot come apart: a row above the track is the up button and a
+    /// row below it is the down one, whatever the ladder decided the track would
+    /// be. A bar with no buttons has a track equal to its region, so it can never
+    /// answer here.
+    fn button(self, row: u16) -> Option<isize> {
+        if !self.contains(row) {
             return None;
         }
-        let (track_top, track_rows) = track;
+        let (track_top, track_rows) = self.track;
         if row < track_top {
             Some(-1)
         } else if row >= track_top + track_rows {
@@ -98,15 +94,14 @@ impl Regions {
         }
     }
 
-    /// How far down a bar's track `row` sits, as a fraction over [`TRACK_SCALE`],
-    /// or `None` when it is not on that track.
+    /// How far down this bar's track `row` sits, as a fraction over
+    /// [`TRACK_SCALE`], or `None` when it is not on the track.
     ///
-    /// **Given the track and never the region**, which are the same tuple only
-    /// while a bar has no step buttons. Callers pass [`Regions::list_track`] or
-    /// [`Regions::diff_track`].
-    fn along(self, row: u16, track: (u16, u16)) -> Option<u32> {
-        let (top, rows) = track;
-        if rows == 0 || row < top || row >= top + rows {
+    /// **The track and never the region**, which are the same span only while a
+    /// bar has no step buttons.
+    fn along(self, row: u16) -> Option<u32> {
+        let (top, rows) = self.track;
+        if !Self::within(row, self.track) {
             return None;
         }
         // **Divided by the last row's index, not by the row count.** Over `rows`
@@ -126,6 +121,53 @@ impl Regions {
             return Some(0);
         }
         Some((u32::from(row - top) * TRACK_SCALE) / travel)
+    }
+}
+
+/// Where the screen's regions are, so a pointer can be told what it is over.
+///
+/// **The one thing this module knows about layout, and it is passed in rather
+/// than derived.** Everything else here is a pure function of a key code, which
+/// is what makes the whole map a table test; a mouse gesture cannot be, because
+/// "scroll the thing under the pointer" is a question about the screen. Handing
+/// it the numbers keeps the decision here and the arithmetic testable.
+///
+/// Rows are absolute within the pane. `Default` is a screen with no region and
+/// no bars, which is what a caller that has not laid out yet should say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Regions {
+    /// The pinned file list. Zero rows means there is no region and every
+    /// gesture belongs to the diff.
+    pub list: Region,
+    /// The diff region.
+    pub diff: Region,
+    /// The column both scrollbars are drawn in, when either is.
+    pub bar: Option<u16>,
+}
+
+impl Regions {
+    /// Whether `row` is inside the pinned list.
+    fn over_list(self, row: u16) -> bool {
+        self.list.contains(row)
+    }
+
+    /// The step a press on `row` asks for, or `None` where it is not on a button.
+    ///
+    /// **The region is what decides which action**, and the two are not
+    /// interchangeable: moving the map expresses no intent about the diff, so the
+    /// list's buttons step the window and the diff's step the viewport, exactly
+    /// as the drag on the same column already does. `SPEC.md` §11.1.
+    ///
+    /// **One step per press, and there is no other option.** No mouse protocol
+    /// reports a button that is *still* down: `crossterm` has `Down`, `Up`,
+    /// `Drag` and `Moved`, and a drag needs motion, so repeat-while-held would
+    /// have to be driven by a clock I1 forbids. `RULINGS.md` carries the
+    /// measurement.
+    fn step(self, row: u16) -> Option<Action> {
+        if let Some(rows) = self.list.button(row) {
+            return Some(Action::ScrollList(rows));
+        }
+        self.diff.button(row).map(Action::Scroll)
     }
 }
 
@@ -472,11 +514,11 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         }
         // **The track, not the region**, so a stepped bar seeks from the rows its
         // thumb actually occupies. Where there are no buttons the two are the
-        // same tuple and this is what it always was.
-        if let Some(at) = regions.along(mouse.row, regions.list_track) {
+        // same span and this is what it always was.
+        if let Some(at) = regions.list.along(mouse.row) {
             return Some(Action::ListTo(at));
         }
-        if let Some(at) = regions.along(mouse.row, regions.diff_track) {
+        if let Some(at) = regions.diff.along(mouse.row) {
             return Some(Action::DiffTo(at));
         }
         return None;
@@ -496,7 +538,7 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         // the list, because the diff below is already showing what it is showing
         // and a click on it would have nothing to mean.
         MouseEventKind::Down(MouseButton::Left) if regions.over_list(mouse.row) => {
-            Some(Action::ListRow(mouse.row - regions.list.0))
+            Some(Action::ListRow(mouse.row - regions.list.top))
         }
         // Everything else is deliberately inert. Horizontal wheels exist and
         // lines do not pan: the renderer clips instead, which is what I6 asks

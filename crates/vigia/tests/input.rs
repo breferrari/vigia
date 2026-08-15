@@ -13,7 +13,7 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use vigia::{Action, LIST_ROWS, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
+use vigia::{Action, LIST_ROWS, Region, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -560,11 +560,13 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 /// draw, and gates written against it would pass while agreeing with nothing.
 fn two_regions() -> Regions {
     Regions {
-        list: (1, 3),
-        diff: (5, 15),
+        list: Region::bare(1, 3),
+        diff: Region {
+            top: 5,
+            rows: 15,
+            track: (6, 13),
+        },
         bar: Some(79),
-        list_track: (1, 3),
-        diff_track: (6, 13),
     }
 }
 
@@ -738,11 +740,17 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
     // one is deliberately below the floor: what is proved here is that the region
     // decides which action, so a bar drawn over the map moves the map.
     let regions = Regions {
-        list: (1, 6),
-        diff: (8, 12),
+        list: Region {
+            top: 1,
+            rows: 6,
+            track: (2, 4),
+        },
+        diff: Region {
+            top: 8,
+            rows: 12,
+            track: (9, 10),
+        },
         bar: Some(79),
-        list_track: (2, 4),
-        diff_track: (9, 10),
     };
     let press = MouseEventKind::Down(MouseButton::Left);
 
@@ -756,16 +764,11 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
         Some(Action::ScrollList(1)),
         "the list's down button did not step the map down"
     );
-    // Neither of them says anything about the diff, and the diff's say nothing
+    // The list's buttons say nothing about the diff and the diff's say nothing
     // about the map. The bar is one column for both regions, so this is the
-    // assertion that stops a press being resolved against the wrong one.
-    for row in [1u16, 6] {
-        let action = action_for(&at(press, 79, row), regions).expect("a step");
-        assert!(
-            matches!(action, Action::ScrollList(_)),
-            "a press on the list's bar at row {row} produced {action:?}"
-        );
-    }
+    // assertion that stops a press being resolved against the wrong one. Only
+    // the diff's rows are swept: the list's two are already pinned to exact
+    // actions above, and repeating them as a `matches!` would prove less.
     for row in [8u16, 19] {
         let action = action_for(&at(press, 79, row), regions).expect("a step");
         assert!(
@@ -807,22 +810,45 @@ fn a_drag_onto_a_step_button_is_inert() {
 #[test]
 fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
     // A button is the region's drag by another gesture, so it has to answer follow
-    // mode the same way. Moving the map expresses no intent about the diff and
-    // moving the diff is a manual scroll: the actions the buttons produce already
-    // say exactly that, and this is what stops a future button growing an action
-    // of its own that does not.
-    assert!(!Action::ScrollList(-1).is_manual_scroll());
-    assert!(Action::Scroll(-1).is_manual_scroll());
-    assert_eq!(
-        Action::ListTo(0).is_manual_scroll(),
-        Action::ScrollList(-1).is_manual_scroll(),
-        "the list's button and the list's drag disagree about follow"
-    );
-    assert_eq!(
-        Action::DiffTo(0).is_manual_scroll(),
-        Action::Scroll(-1).is_manual_scroll(),
-        "the diff's button and the diff's drag disagree about follow"
-    );
+    // mode the same way: moving the map expresses no intent about the diff, and
+    // moving the diff is a manual scroll.
+    //
+    // **Driven through `action_for` rather than asserted about the `Action`
+    // variants directly**, and that is the whole gate. A version of this test
+    // that read `Action::Scroll(-1).is_manual_scroll()` off the enum would be
+    // three existing tests restated, and would stay green with the step buttons
+    // deleted outright: what has to be checked is that pressing a button *yields*
+    // an action carrying the region's own follow rule, not that the enum still
+    // has the rule.
+    let regions = Regions {
+        list: Region {
+            top: 1,
+            rows: 6,
+            track: (2, 4),
+        },
+        diff: Region {
+            top: 8,
+            rows: 12,
+            track: (9, 10),
+        },
+        bar: Some(79),
+    };
+    let press = MouseEventKind::Down(MouseButton::Left);
+
+    for (name, row, drag) in [
+        ("the list's up button", 1u16, Action::ListTo(0)),
+        ("the list's down button", 6, Action::ListTo(0)),
+        ("the diff's up button", 8, Action::DiffTo(0)),
+        ("the diff's down button", 19, Action::DiffTo(0)),
+    ] {
+        let step = action_for(&at(press, 79, row), regions).expect("a step");
+        assert_eq!(
+            step.is_manual_scroll(),
+            drag.is_manual_scroll(),
+            "{name} and a drag on the same bar disagree about follow mode: \
+             {step:?} against {drag:?}"
+        );
+    }
 }
 
 #[test]

@@ -856,7 +856,7 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
     // the row-to-offset arithmetic is half of what can be wrong here.
     let area = Rect::new(0, 0, WIDE, 24);
     let regions = regions(area, &chrome(&app), &view);
-    let (list_top_row, list_rows) = regions.list;
+    let (list_top_row, list_rows) = (regions.list.top, regions.list.rows);
     assert!(list_rows > 1, "no region was published to click on");
 
     let click = |row: u16| {
@@ -888,7 +888,7 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
     }
 
     // And a click on the diff below is still inert, which is B4 standing.
-    assert_eq!(action_for(&click(regions.diff.0 + 1), regions), None);
+    assert_eq!(action_for(&click(regions.diff.top + 1), regions), None);
 }
 
 /// A digit key press, through the real key map rather than by construction.

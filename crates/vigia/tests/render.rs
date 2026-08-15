@@ -32,8 +32,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, diff_height,
-    regions, render,
+    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Region, Row, Theme, View,
+    diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -3673,7 +3673,7 @@ fn thumb_rows(backend: &TestBackend, x: u16, rows: std::ops::Range<u16>) -> Vec<
 fn stepped_track(region: std::ops::Range<u16>) -> std::ops::Range<u16> {
     let rows = region.end - region.start;
     assert!(
-        rows >= 4,
+        rows >= STEP_FLOOR,
         "a {rows}-row region is below the step floor, so its bar has no buttons \
          and its track is the region itself"
     );
@@ -3965,16 +3965,33 @@ const STEP_DOWN: &str = "▼";
 const STEP_FLOOR: u16 = 2 + 2;
 
 /// The symbol on the bar's column at row `y`.
-fn bar_at(backend: &TestBackend, y: u16) -> String {
+///
+/// Borrowed from the backend rather than owned: the sweeps below read this once
+/// per row per pane height, and a `String` per cell is an allocation for a
+/// comparison against a one-character literal.
+fn bar_at(backend: &TestBackend, y: u16) -> &str {
     let buffer = backend.buffer();
     let x = buffer.area().width - 1;
-    buffer[(x, y)].symbol().to_owned()
+    buffer[(x, y)].symbol()
 }
 
 /// Whether a region's rows carry a bar at all.
-fn has_bar(backend: &TestBackend, region: (u16, u16)) -> bool {
-    let (top, rows) = region;
-    (top..top + rows).any(|y| is_bar_glyph(&bar_at(backend, y)))
+fn has_bar(backend: &TestBackend, region: Region) -> bool {
+    (region.top..region.top + region.rows).any(|y| is_bar_glyph(bar_at(backend, y)))
+}
+
+/// The fixture the step-button gates sweep: thirty changed files, six listed, a
+/// diff far taller than any pane.
+///
+/// **Built once and shared**, because none of the sweeps below vary it: they
+/// vary the pane, and a `View` rebuilt inside the loop makes a reader compare
+/// three constructions to confirm that.
+fn a_stepped_screen() -> View {
+    View {
+        total_rows: 4_000,
+        rows_above: 0,
+        ..a_list_of(30, 6, 0)
+    }
 }
 
 #[test]
@@ -3985,28 +4002,24 @@ fn the_scrollbar_draws_a_step_button_at_each_end() {
     // recomputed it would be checking its own copy.
     let width = 64u16;
     let height = 24u16;
-    let view = View {
-        total_rows: 4_000,
-        rows_above: 0,
-        ..a_list_of(30, 6, 0)
-    };
+    let view = a_stepped_screen();
     let backend = screen(width, height, &view, &chrome());
     let seen = regions(Rect::new(0, 0, width, height), &chrome(), &view);
 
     for (name, region) in [("the list", seen.list), ("the diff", seen.diff)] {
-        let (top, rows) = region;
         assert!(
-            rows >= STEP_FLOOR,
-            "{name} is {rows} rows, which is below the floor this gate is about"
+            region.rows >= STEP_FLOOR,
+            "{name} is {} rows, which is below the floor this gate is about",
+            region.rows
         );
         assert!(has_bar(&backend, region), "{name} drew no bar to step");
         assert_eq!(
-            bar_at(&backend, top),
+            bar_at(&backend, region.top),
             STEP_UP,
             "{name} has no up button on its first row"
         );
         assert_eq!(
-            bar_at(&backend, top + rows - 1),
+            bar_at(&backend, region.top + region.rows - 1),
             STEP_DOWN,
             "{name} has no down button on its last row"
         );
@@ -4030,23 +4043,22 @@ fn the_painted_track_is_the_track_the_pointer_is_told_about() {
     for above in [0usize, 1, 800, 2_000, 3_970] {
         for list_top in [0usize, 12, 24] {
             let view = View {
-                total_rows: 4_000,
                 rows_above: above,
                 ..a_list_of(30, 6, list_top)
+            };
+            let view = View {
+                total_rows: 4_000,
+                ..view
             };
             let backend = screen(width, height, &view, &chrome());
             let seen = regions(Rect::new(0, 0, width, height), &chrome(), &view);
 
-            for (name, region, track) in [
-                ("the list", seen.list, seen.list_track),
-                ("the diff", seen.diff, seen.diff_track),
-            ] {
+            for (name, region) in [("the list", seen.list), ("the diff", seen.diff)] {
                 if !has_bar(&backend, region) {
                     continue;
                 }
-                let (top, rows) = region;
-                let (track_top, track_rows) = track;
-                for y in top..top + rows {
+                let (track_top, track_rows) = region.track;
+                for y in region.top..region.top + region.rows {
                     let glyph = bar_at(&backend, y);
                     let on_track = y >= track_top && y < track_top + track_rows;
                     let is_button = glyph == STEP_UP || glyph == STEP_DOWN;
@@ -4059,7 +4071,7 @@ fn the_painted_track_is_the_track_the_pointer_is_told_about() {
                         track_top + track_rows
                     );
                     assert!(
-                        is_bar_glyph(&glyph),
+                        is_bar_glyph(glyph),
                         "{name}: row {y} of the bar's column draws {glyph:?}, which \
                          is not a bar glyph at all"
                     );
@@ -4080,37 +4092,46 @@ fn the_step_buttons_arrive_at_the_step_floor_and_never_leave() {
     // The pane's height is swept and the region heights are *read back*, because
     // how a body divides is `Body::split`'s business and reproducing it here
     // would make this a gate over a copy.
+    //
+    // **`MIN_BODY` is 2, so the diff can legitimately be two rows tall**, and two
+    // buttons in two rows would leave no track, no thumb and nothing to click
+    // between them. #166 asks for both sides of that explicitly: the counters
+    // below are what make the sweep prove it reached the short case rather than
+    // passing by never producing one.
     let width = 64u16;
+    let view = a_stepped_screen();
+    let chrome = chrome();
     let mut short = 0;
     let mut tall = 0;
+    let mut shortest_diff: Option<(u16, u16)> = None;
 
-    for height in 6u16..=40 {
-        let view = View {
-            total_rows: 4_000,
-            rows_above: 0,
-            ..a_list_of(30, 6, 0)
-        };
-        let backend = screen(width, height, &view, &chrome());
-        let seen = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    for height in 5u16..=40 {
+        let backend = screen(width, height, &view, &chrome);
+        let seen = regions(Rect::new(0, 0, width, height), &chrome, &view);
 
         for (name, region) in [("the list", seen.list), ("the diff", seen.diff)] {
             if !has_bar(&backend, region) {
                 continue;
             }
-            let (top, rows) = region;
-            let stepped = bar_at(&backend, top) == STEP_UP;
+            let stepped = bar_at(&backend, region.top) == STEP_UP;
             assert_eq!(
                 stepped,
-                rows >= STEP_FLOOR,
-                "at {height} rows of pane, {name} is {rows} rows and \
-                 {} step buttons",
+                region.rows >= STEP_FLOOR,
+                "at {height} rows of pane, {name} is {} rows and {} step buttons",
+                region.rows,
                 if stepped { "has" } else { "has no" }
             );
-            if rows >= STEP_FLOOR {
+            if region.rows >= STEP_FLOOR {
                 tall += 1;
             } else {
                 short += 1;
             }
+        }
+
+        if has_bar(&backend, seen.diff)
+            && shortest_diff.is_none_or(|(rows, _)| seen.diff.rows < rows)
+        {
+            shortest_diff = Some((seen.diff.rows, height));
         }
     }
 
@@ -4118,6 +4139,14 @@ fn the_step_buttons_arrive_at_the_step_floor_and_never_leave() {
     // reaching the case it is named for.
     assert!(short > 0, "no region below the step floor was swept");
     assert!(tall > 0, "no region at or above the step floor was swept");
+
+    let (rows, height) = shortest_diff.expect("no pane height drew a diff bar at all");
+    assert!(
+        rows < STEP_FLOOR,
+        "the shortest diff region this sweep found is {rows} rows at a pane of \
+         {height}, which never reaches below the floor, so the region `MIN_BODY` \
+         squeezes hardest went unlooked at"
+    );
 }
 
 #[test]
@@ -4128,6 +4157,12 @@ fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
     // in three rows would leave one cell of track that is full at every window,
     // which is the "column saying there is nothing to scroll" the bar already
     // refuses one rung down.
+    //
+    // **`TRACK` and `THUMB` by hand rather than `is_bar_glyph`**, which is the
+    // whole assertion: that helper accepts the buttons too, so reading this
+    // through it would pass against the bar this gate exists to refuse.
+    const TRACK: &str = "▕";
+    const THUMB: &str = "█";
     let width = 64u16;
     let height = 24u16;
     // Three listed rows over thirty files: a bar, and a region one row short of
@@ -4139,18 +4174,22 @@ fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
     };
     let backend = screen(width, height, &view, &chrome());
     let seen = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-    let (top, rows) = seen.list;
 
-    assert_eq!(rows, STEP_FLOOR - 1, "the fixture is not below the floor");
+    assert_eq!(
+        seen.list.rows,
+        STEP_FLOOR - 1,
+        "the fixture is not below the floor"
+    );
     assert!(has_bar(&backend, seen.list), "the short list drew no bar");
     assert_eq!(
-        seen.list_track, seen.list,
+        seen.list.track,
+        (seen.list.top, seen.list.rows),
         "a bar with no buttons must offer its whole region as track"
     );
-    for y in top..top + rows {
+    for y in seen.list.top..seen.list.top + seen.list.rows {
         let glyph = bar_at(&backend, y);
         assert!(
-            glyph == "▕" || glyph == "█",
+            glyph == TRACK || glyph == THUMB,
             "row {y} of a bar below the step floor draws {glyph:?}"
         );
     }
@@ -4161,83 +4200,39 @@ fn both_regions_reach_the_step_buttons_through_one_drawer() {
     // #166 asks for this to be asserted rather than assumed. The two regions have
     // different heights, different minimums and different units, and what makes
     // one drawer serve both is that the button ladder is decided from the region
-    // rather than from the pane. So: at the same height, the same column.
+    // rather than from the pane. So: at the same height, the same ends.
+    //
+    // Only the ends are compared. The thumb's position answers to each region's
+    // own contents, so the rows between them are not shared vocabulary and a
+    // whole-column comparison would be asserting something untrue.
     let width = 64u16;
+    let view = a_stepped_screen();
+    let chrome = chrome();
 
     // A pane whose two regions are the same height, found rather than computed.
     let (backend, seen, height) = (10u16..=40)
         .find_map(|height| {
-            let view = View {
-                total_rows: 4_000,
-                rows_above: 0,
-                ..a_list_of(30, 6, 0)
-            };
-            let backend = screen(width, height, &view, &chrome());
-            let seen = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-            (seen.list.1 == seen.diff.1 && seen.list.1 >= STEP_FLOOR)
+            let backend = screen(width, height, &view, &chrome);
+            let seen = regions(Rect::new(0, 0, width, height), &chrome, &view);
+            (seen.list.rows == seen.diff.rows && seen.list.rows >= STEP_FLOOR)
                 .then_some((backend, seen, height))
         })
-        .expect("no pane height gives the two regions equal height");
+        .expect("no pane height gives the two regions equal height above the floor");
 
-    let rows = seen.list.1;
-    for offset in 0..rows {
-        let list = bar_at(&backend, seen.list.0 + offset);
-        let diff = bar_at(&backend, seen.diff.0 + offset);
-        // The thumb's own position answers to each region's contents, so only the
-        // ends are the drawer's shared vocabulary and only the ends are compared.
-        if offset == 0 || offset == rows - 1 {
-            assert_eq!(
-                list, diff,
-                "at {height} rows the two {rows}-row regions draw different glyphs \
-                 at offset {offset} of their bars"
-            );
-        }
+    for (name, region) in [("the list", seen.list), ("the diff", seen.diff)] {
+        assert_eq!(
+            bar_at(&backend, region.top),
+            STEP_UP,
+            "at {height} rows of pane, {name}'s {}-row bar has no up button",
+            region.rows
+        );
+        assert_eq!(
+            bar_at(&backend, region.top + region.rows - 1),
+            STEP_DOWN,
+            "at {height} rows of pane, {name}'s {}-row bar has no down button",
+            region.rows
+        );
     }
-    assert_eq!(bar_at(&backend, seen.list.0), STEP_UP);
-    assert_eq!(bar_at(&backend, seen.list.0 + rows - 1), STEP_DOWN);
-}
-
-#[test]
-fn the_shortest_diff_region_is_gated_on_both_sides_of_the_step_floor() {
-    // `MIN_BODY` is 2, so a diff region can legitimately be two rows tall, and
-    // two buttons in two rows would leave no track, no thumb and nothing to click
-    // between them. #166 asks for both sides of that explicitly, so the shortest
-    // region the layout can produce is checked as well as the floor itself.
-    let width = 64u16;
-    let mut shortest: Option<(u16, u16)> = None;
-
-    for height in 5u16..=40 {
-        let view = View {
-            total_rows: 4_000,
-            rows_above: 0,
-            ..a_list_of(30, 6, 0)
-        };
-        let backend = screen(width, height, &view, &chrome());
-        let seen = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-        if !has_bar(&backend, seen.diff) {
-            continue;
-        }
-        let rows = seen.diff.1;
-        if shortest.is_none_or(|(shortest, _)| rows < shortest) {
-            shortest = Some((rows, height));
-        }
-        if rows < STEP_FLOOR {
-            assert_ne!(
-                bar_at(&backend, seen.diff.0),
-                STEP_UP,
-                "a {rows}-row diff region drew a button, leaving nothing between \
-                 the two"
-            );
-        }
-    }
-
-    let (rows, height) = shortest.expect("no pane height drew a diff bar at all");
-    assert!(
-        rows < STEP_FLOOR,
-        "the shortest diff region this sweep found is {rows} rows at a pane of \
-         {height}, which never reaches below the floor, so the case this gate is \
-         named for went unlooked at"
-    );
 }
 
 #[test]

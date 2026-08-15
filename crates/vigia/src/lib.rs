@@ -82,7 +82,7 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
-pub use input::{Action, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
+pub use input::{Action, Region, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
     diff_height, regions, render,
