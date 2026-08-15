@@ -86,17 +86,20 @@ fn after(
 
 #[test]
 fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
-    // Every assertion below is arithmetic over SPAN, so it is worth one test
+    // Every assertion below is arithmetic over BLOCK, so it is worth one test
     // rather than a comment. Get this wrong and the others pass vacuously.
+    //
     let scratch = fixture("shell-scroll-shape");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
 
     assert_eq!(frame.files().len(), FILES);
-    // **Two shapes, not one**, and the last file is the whole of the difference:
-    // every file but it carries the blank that closes its block, so a fixture
-    // guard asserting one number would be asserting the wrong one somewhere.
+    // **Two shapes since [#165](https://github.com/breferrari/vigia/issues/165)**,
+    // and the last file is the whole of the difference: every file but it
+    // carries the blank that closes its block, so a guard asserting one number
+    // would be silently right about half the files and silently wrong about the
+    // other.
     for index in [0, FILES / 2] {
         assert_eq!(
             vigia::rows_in(&mut frame, index).expect("rows"),
@@ -107,7 +110,8 @@ fn the_fixture_is_the_shape_the_rest_of_this_file_assumes() {
     assert_eq!(
         vigia::rows_in(&mut frame, FILES - 1).expect("rows"),
         SPAN,
-        "the last file is not {SPAN} rows, so it gained a closing blank and the          bottom of the diff is no longer content"
+        "the last file is not {SPAN} rows, so it gained a closing blank and \
+         the bottom of the diff is no longer content"
     );
 }
 
@@ -892,7 +896,7 @@ fn a_last_file_shorter_than_the_screen_is_filled_from_the_ones_above_it() {
     // ask, because its borrow of the current file is live until that file is
     // drawn.
     //
-    // Four-row files against a twenty-two row body means six of them fill it, so
+    // Five-row blocks against a twenty-two row body means five of them fill it, so
     // this exercises a real walk rather than the degenerate one.
     let scratch = fixture("shell-scroll-short-tail");
     let worktree = scratch.worktree();
@@ -1043,6 +1047,15 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
 
+    // Non-vacuity first, stated as the claim rather than through a number that
+    // only implies it on a fixture of this exact shape: a one-file diff has no
+    // boundary for the two counts to disagree about, and one file with two hunks
+    // would satisfy a `total > SPAN` proxy while meeting none.
+    assert!(
+        frame.files().len() > 1,
+        "the fixture is one file, so there is no inter-file blank for the two          counts to disagree about"
+    );
+
     // The total the bar is scaled against, blanks included.
     let total = vigia::diff_rows(&mut frame).expect("total");
 
@@ -1072,14 +1085,6 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
         "the scrollbar is scaled against {total} rows and the walk drew {}, so \
          the bar cannot reach its own bottom",
         view.rows.len()
-    );
-    // Non-vacuity: the fixture has to contain a boundary, or the blanks the two
-    // sides have to agree about do not exist and this passes on arithmetic that
-    // never met one.
-    assert!(
-        total > SPAN,
-        "the fixture is one file, so there is no inter-file blank for the two \
-         counts to disagree about"
     );
 }
 

@@ -565,8 +565,7 @@ impl App {
                     row: 0,
                 };
                 for file in 0..files {
-                    let rows = frame.rows_of(file, crate::view::rows_of)?
-                        + crate::view::gap_rows(file, files);
+                    let rows = crate::view::block_rows(frame, file)?;
                     if seen + rows > target {
                         position = Position {
                             file,

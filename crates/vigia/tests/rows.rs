@@ -58,6 +58,27 @@ fn lines_of(text: &str) -> Vec<String> {
     text.lines().map(str::to_owned).collect()
 }
 
+/// Two changed files and a third left alone, which is the smallest tree with an
+/// inter-file boundary in it.
+///
+/// **Named because two gates need the same shape and a fixture built twice
+/// drifts.** `a_real_repository_draws` reads the cells this produces and
+/// `a_files_block_ends_in_a_blank_row` reads the rows, so a change to one copy
+/// would leave the other asserting against a screen nobody draws. Every sibling
+/// test file here names its scratch shape for the same reason.
+///
+/// `README.md` is committed and never touched, so it is the file that must
+/// **not** appear: it is what stops a walk over every tracked file passing.
+fn two_changed(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/lib.rs", numbered(12));
+    scratch.write("README.md", unique("readme", 3));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
+    scratch.write("src/added.rs", unique("added", 2));
+    scratch
+}
+
 #[test]
 fn every_line_number_names_the_line_it_is_on() {
     // The fixture is built so the two sides cannot agree by accident: two lines
@@ -401,12 +422,7 @@ fn a_real_repository_draws() {
     // [#8](https://github.com/breferrari/vigia/issues/8) proves them where they
     // live instead, in `crates/vigia/src/terminal.rs`, against a recorded console
     // rather than a real one.
-    let scratch = Scratch::new("shell-rows-draw");
-    scratch.write("src/lib.rs", numbered(12));
-    scratch.write("README.md", unique("readme", 3));
-    scratch.commit_all("baseline");
-    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
-    scratch.write("src/added.rs", unique("added", 2));
+    let scratch = two_changed("shell-rows-draw");
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -577,22 +593,18 @@ fn a_files_block_ends_in_a_blank_row() {
     // landed directly under a dense row and the only thing marking the boundary
     // was the content itself.
     //
-    // **Trailing and uniform**, which is the ruling rather than an
-    // implementation detail, so the gate is written against all three of its
-    // halves: every heading after the first is preceded by a gap, the **first**
-    // row of the stream is a heading and not a gap, and the **last** file gets
-    // one too. Dropping any one of those is a different ruling that would
-    // otherwise pass this test.
+    // **Trailing, and on every file but the last**, which is the ruling rather
+    // than an implementation detail, so the gate is written against all three of
+    // its halves: every heading after the first is preceded by a gap, the
+    // **first** row of the stream is a heading and not a gap, and the **last**
+    // file does **not** get one. Dropping any of the three is a different ruling
+    // that would otherwise pass this test, and the third is the one that was
+    // reversed while this was being built (the reason is at the assertion).
     //
     // Against a real frame rather than hand-built rows, because the claim is
     // about what `View::take_file` produces from a diff, which is exactly what
     // this file exists to cover.
-    let scratch = Scratch::new("shell-rows-gap");
-    scratch.write("src/lib.rs", numbered(12));
-    scratch.write("README.md", unique("readme", 3));
-    scratch.commit_all("baseline");
-    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
-    scratch.write("src/added.rs", unique("added", 2));
+    let scratch = two_changed("shell-rows-gap");
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -617,8 +629,7 @@ fn a_files_block_ends_in_a_blank_row() {
         .rows
         .iter()
         .enumerate()
-        .filter(|(_, row)| matches!(row, Row::File(_)))
-        .map(|(i, _)| i)
+        .filter_map(|(at, row)| matches!(row, Row::File(_)).then_some(at))
         .collect();
 
     // Non-vacuity first: with one changed file there is no boundary to draw and

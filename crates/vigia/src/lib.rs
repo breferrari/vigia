@@ -90,7 +90,7 @@ pub use render::{
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, diff_rows, gap_rows,
+    FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, View, Viewport, block_rows, diff_rows,
     rows_in, rows_of,
 };
 

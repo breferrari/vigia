@@ -389,7 +389,12 @@ pub struct View {
     /// the same reason: resolution belongs in one place, and the place is
     /// whichever code knows where the diff actually landed.
     pub list_top: usize,
-    /// Rows the file the diff is inside contributes, heading included.
+    /// Rows the block the diff is inside contributes: heading, content, and the
+    /// blank that closes it where one does
+    /// ([#165](https://github.com/breferrari/vigia/issues/165)).
+    ///
+    /// The **block** rather than the file, because `rows_above` clamps against
+    /// it and is positioned in the same units the total is.
     ///
     /// **Free, and that is the whole reason the diff's scrollbar can move within
     /// a file at all.** The file the viewport is inside has been diffed by
@@ -525,17 +530,43 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
 /// `tests/scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank` holds
 /// and which carries its own warning about having once been weakened. A blank
 /// there would separate the diff from nothing, since the footer is chrome with a
-/// row of its own, so it would spend the one row a reader who scrolled to the
-/// end asked for and buy no boundary.
+/// row of its own.
 ///
-/// **Written once because four expressions sum file heights and all four have to
-/// agree**: the walk in [`View::collect`], [`View::last_screenful`], the
-/// scrollbar drag's per-file walk in `App::apply`, and [`diff_rows`]. A row the
-/// walk draws that a total does not know about is a row-exact bar that stops
-/// reaching its own bottom, which is the failure this repo has already paid for
-/// once in the same arithmetic.
-pub fn gap_rows(index: usize, files: usize) -> usize {
+/// **Private, and reached through [`block_of`] and [`block_rows`] rather than
+/// added by hand.** The first draft of this was `pub` and let all six
+/// expressions that sum file heights add the term themselves, under a doc
+/// enumerating them. That doc named four of the six on the day it landed and two
+/// callers were missed: `tests/reads.rs`'s cost diagnostic broke by exactly
+/// `files - 1`, and `tests/scroll.rs`'s drag gate stayed green only because two
+/// omissions cancelled. It is the third time on this branch that a quantity
+/// spelled at each site drifted from the doc naming the sites, and [`crate::Body`]
+/// one region up already had the answer: *"All three numbers come from one
+/// function because they have to agree."* So a caller holding a position asks
+/// for a **block** and cannot forget the term.
+fn gap_rows(index: usize, files: usize) -> usize {
     usize::from(index + 1 < files)
+}
+
+/// Rows the block of the file at `index` occupies: the file's own rows and the
+/// blank that closes it.
+///
+/// **Where a position is known, so where [`gap_rows`] is added.** The counting
+/// twins stay per-file because they are handed a file; this is the quantity a
+/// caller that knows *where* the file sits actually wants, and asking for it is
+/// what stops the term being forgotten.
+fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> usize {
+    span_of(kind, diff) + gap_rows(index, files)
+}
+
+/// The same block, counted from the span cache rather than from a diff.
+///
+/// [`block_of`]'s twin by route rather than by quantity, and the distinction is
+/// I4's: this is a `stat` against a span the tick has already proved, where
+/// [`rows_in`] pays [`vigia_core::Frame::diff`]. A caller that has totalled the
+/// diff walks part of it again through here for free.
+pub fn block_rows(frame: &mut Frame, index: usize) -> Result<usize> {
+    let files = frame.files().len();
+    Ok(frame.rows_of(index, rows_of)? + gap_rows(index, files))
 }
 
 /// Rows the whole diff occupies, the blanks between files included.
@@ -545,7 +576,8 @@ pub fn gap_rows(index: usize, files: usize) -> usize {
 /// about the blanks between them, because [`crate::rows_of`] is handed a file
 /// rather than a position. `files - 1` is exactly the sum of [`gap_rows`] over
 /// every file, and it is added here rather than at each caller so the two
-/// callers cannot come to disagree.
+/// callers cannot come to disagree. [`block_of`] and [`block_rows`] are the
+/// per-file half of the same rule.
 ///
 /// `tests/scroll.rs::the_counting_twins_agree_with_the_rows_drawn` is what fails
 /// when this and the walk part company.
@@ -617,7 +649,13 @@ pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> 
     1 + span.hunks as usize + span.lines as usize
 }
 
-/// How many rows the file at `index` would occupy.
+/// How many rows the **block** of the file at `index` would occupy.
+///
+/// **The blank that closes it is included**, unlike [`span_of`], because a
+/// position is exactly what this is for. That is the difference between this and
+/// [`crate::rows_of`], and it is the one a caller summing both has to hold:
+/// `tests/reads.rs`'s cost diagnostic asserted the two totals equal and broke by
+/// `files - 1` when it stopped being true.
 ///
 /// Costs whatever [`vigia_core::Frame::diff`] costs, which for a file already
 /// held between frames is one `stat` and no read. That is what makes it usable
@@ -630,7 +668,7 @@ pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> 
 pub fn rows_in(frame: &mut Frame, index: usize) -> Result<usize> {
     let files = frame.files().len();
     let (change, diff) = frame.diff(index)?;
-    Ok(span_of(&change.kind, diff) + gap_rows(index, files))
+    Ok(block_of(&change.kind, diff, index, files))
 }
 
 impl View {
@@ -792,7 +830,7 @@ impl View {
                 // Both halves of the tuple are immutable borrows of the same
                 // frame, so the kind needs no clone to be read alongside the
                 // diff.
-                let span = span_of(&change.kind, diff) + gap_rows(index, files);
+                let span = block_of(&change.kind, diff, index, files);
 
                 if !placed {
                     if skip >= span {
@@ -981,14 +1019,14 @@ impl View {
         if !wanted || self.files == 0 {
             return Ok(());
         }
-        self.total_rows = crate::view::diff_rows(frame)?;
+        self.total_rows = diff_rows(frame)?;
 
         // Everything before the file the viewport is in, plus how far into it.
         // `frame.height` has already filled the span cache, so this second walk
         // reads nothing.
         let mut above = 0usize;
         for index in 0..self.top.file.min(self.files) {
-            above += frame.rows_of(index, crate::rows_of)? + gap_rows(index, self.files);
+            above += block_rows(frame, index)?;
         }
         self.rows_above = above + self.top.row.min(self.current_span);
         Ok(())
@@ -1171,7 +1209,7 @@ impl View {
         loop {
             *read += 1;
             let (change, diff) = frame.diff(index)?;
-            have += span_of(&change.kind, diff) + gap_rows(index, files);
+            have += block_of(&change.kind, diff, index, files);
             if have >= height {
                 return Ok(Position {
                     file: index,
