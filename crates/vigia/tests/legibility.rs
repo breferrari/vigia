@@ -190,6 +190,17 @@ fn occupied(width: u16, height: u16, view: &View, chrome: &Chrome, y: u16) -> us
     total
 }
 
+/// The narrowest text column the renderer will keep a gutter for, restated
+/// rather than imported for [`CONTINUES`]' reason.
+///
+/// A test that read `MIN_TEXT_WIDTH` would agree with the renderer by
+/// construction, and agreeing with it is exactly what let this number go
+/// unenforced: it was a threshold two expressions held by hand, and when
+/// [#164](https://github.com/breferrari/vigia/issues/164) gave the sigil a clear
+/// column one of them was not recharged, so the gutter survived on 23 columns
+/// of text while the constant read 24 and every gate stayed green.
+const MIN_TEXT_WIDTH: usize = 24;
+
 /// The eighth-blocks a sparkline is drawn from, restated rather than imported.
 ///
 /// A test sharing the renderer's own table would agree with it by construction.
@@ -828,7 +839,18 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             if row.is_empty() {
                 continue;
             }
-            // The sigil costs a column beyond the text itself.
+            // The sigil and its gap cost two columns beyond the text itself
+            // ([#164](https://github.com/breferrari/vigia/issues/164)), so a row
+            // is clipped once the text reaches `room - 1` rather than `room`.
+            //
+            // **This guard is where that lands, and the arithmetic is easy to
+            // put in the wrong place.** The `+ 1` further down is the
+            // continuation mark and is unaffected; it is this comparison that
+            // decides which widths the sweep bothers looking at, so leaving it
+            // at `room` silently skips the widths where the new column is what
+            // pushed the row over. The gate would still have passed, on a
+            // narrower set of widths than it claims, which is the shape its own
+            // non-vacuity flag exists to catch and would not have caught here.
             //
             // **Against the room the row is given, not against the pane.** #119
             // takes the margin off both sides first, so a line whose width falls
@@ -845,7 +867,11 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             // gate stays correct if `awkward()` ever gains a wider line, not
             // because it reaches a hazard today that it did not reach before.
             let room = usize::from(width).saturating_sub(margin_at(width));
-            if Span::raw(full).width() < room {
+            // Read as "the text plus the sigil and its gap still fit", which
+            // names the two columns instead of leaving a reader to hold two
+            // different `+ 1`s twenty lines apart. Written as an addition rather
+            // than `room - 2` because `room` reaches zero in this sweep.
+            if Span::raw(full).width() + 2 <= room {
                 continue;
             }
             assert!(
@@ -3591,4 +3617,117 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
              boundary of the margin ladder"
         );
     }
+}
+
+/// Numbered content rows whose text is far too long to fit any pane in the
+/// sweep, over a diff tall enough that the region always draws a scrollbar.
+///
+/// Both halves are load-bearing. The text has to **clip at every width**, or the
+/// sweep measures how long a line happened to be instead of how many columns the
+/// renderer gave it. And the bar has to be **drawn**, because that is the case
+/// the gutter's affordability rule gets wrong: it measures against a planning
+/// width that always charges the bar's column, where the row is drawn into an
+/// area that only loses it when a bar exists, so the two coincide exactly when
+/// one does. A short diff would leave the sweep looking at the case that works.
+fn overlong(rows: usize) -> View {
+    View {
+        list: vec![entry("src/f.rs")],
+        list_top: 0,
+        current_span: rows,
+        total_rows: rows,
+        rows_above: 0,
+        rows: (0..rows)
+            .map(|i| line(LineKind::Added, 1000 + i as u32, &"x".repeat(200)))
+            .collect(),
+        files: 1,
+        top: Position::default(),
+        read: 1,
+        peak: 0,
+    }
+}
+
+#[test]
+fn a_drawn_gutter_leaves_the_text_its_floor() {
+    // **The gate `MIN_TEXT_WIDTH` never had**, and its absence is the reason a
+    // one-column regression shipped through a green suite.
+    //
+    // The rule is a threshold rather than a drawn thing: *if the line numbers
+    // are drawn at all, what is left for text is at least `MIN_TEXT_WIDTH`*.
+    // Every other gate in this file reads what the renderer drew, and a
+    // threshold is invisible that way, so nothing here could see
+    // `gutter_width` deciding affordability against a prefix that had grown by
+    // a column ([#164](https://github.com/breferrari/vigia/issues/164)). The
+    // two gutter gates that do exist sample away from the boundary
+    // (`render.rs::the_gutter_gives_way_before_the_text_does` takes 40 and 24)
+    // and the other asserts the gutter does not *vanish* rather than that what
+    // survives clears this floor.
+    //
+    // Measured off the drawn row rather than recomputed. The fixture's line is
+    // 200 characters, so a drawn row fills its content region exactly and the
+    // occupied cells past the sigil's gap *are* the columns the renderer gave
+    // it, mark included.
+    let view = overlong(40);
+    let chrome = chrome();
+    let mut checked = 0usize;
+    let mut dropped = 0usize;
+
+    for width in WIDTHS {
+        let backend = drawn(width, 8, &view, &chrome);
+        let buffer = backend.buffer();
+        // The first content row: the list takes one, the rule one, the header
+        // one, and the heading and hunk header one each.
+        let Some(y) = (0..8u16).find(|&y| (0..width).any(|x| buffer[(x, y)].symbol() == "x"))
+        else {
+            continue;
+        };
+        let Some(sigil) = (0..width).find(|&x| buffer[(x, y)].symbol() == "+") else {
+            continue;
+        };
+
+        // A gutter is drawn when there are digits before the sigil. With none,
+        // the row opens on the sigil and this rule has nothing to say: the
+        // renderer already gave the text every column it had.
+        let numbered = (0..sigil).any(|x| {
+            buffer[(x, y)]
+                .symbol()
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+        });
+        if !numbered {
+            dropped += 1;
+            continue;
+        }
+
+        // **The content's own glyphs, not every non-blank cell**, and the
+        // difference is the whole gate. The scrollbar draws in the last column
+        // and is never blank, so counting occupancy adds one and masks exactly
+        // the one-column shortfall this exists to catch. The first version of
+        // this test did that and passed against the defect: it was mutated, went
+        // green, and only then said anything useful.
+        //
+        // The fixture's line is a run of `x`, so its cells and the continuation
+        // mark are the content region's whole contents.
+        let text: usize = ((sigil + 2)..width)
+            .filter(|&x| {
+                let symbol = buffer[(x, y)].symbol();
+                symbol == "x" || symbol == CONTINUES.to_string()
+            })
+            .count();
+        assert!(
+            text >= MIN_TEXT_WIDTH,
+            "at {width} columns the gutter is drawn and leaves {text} columns of \
+             text, where the floor it is kept for is {MIN_TEXT_WIDTH}"
+        );
+        checked += 1;
+    }
+
+    // Both ends, or the sweep proved one case and called it a rule. Without the
+    // second the gate passes on a renderer that never draws a gutter at all,
+    // which is the vacuous shape this file records twice already.
+    assert!(
+        checked > 0 && dropped > 0,
+        "the sweep saw the gutter drawn at {checked} widths and dropped at \
+         {dropped}, so it never crossed the boundary it is about"
+    );
 }

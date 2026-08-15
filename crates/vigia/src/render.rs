@@ -306,6 +306,72 @@ const KIND_WIDTH: usize = 2;
 /// floor built on top of it starts from.
 const ROW_FLOOR: usize = KIND_WIDTH + MIN_PATH_WIDTH;
 
+/// What stands between a content row's sigil and the line itself.
+///
+/// `assets/preview.svg` has drawn it from the start: the picture's own comment
+/// states that one cell at 13.5px is ~8.1px, and it places the sigil at x=72 and
+/// every content origin at x=88, so the sigil's one cell ends at 80.1 and a clear
+/// column stands after it. [`Painter::line_row`] carries the argument for why it
+/// does not degrade with width, which is the only thing about it that needed
+/// deciding ([#164](https://github.com/breferrari/vigia/issues/164)).
+///
+/// **One ASCII byte, one column, and the two have to stay the same number**,
+/// because [`SIGIL_WIDTH`] derives from `len()`, which counts bytes where every
+/// use of it counts columns. `width_of` is the column-correct spelling and is
+/// not `const`, so this comment is the guard: a wider or non-ASCII gap has to
+/// change that derivation rather than ride through it.
+///
+/// A `&str` rather than a `char` for that derivation, and **not** because runs
+/// are `String`s, which an earlier draft of this said. The sigil beside it is a
+/// `char` pushed the same way through `to_string()`, so the run type forces
+/// nothing; `.len()` is what needs the `&str`.
+const SIGIL_GAP: &str = " ";
+
+/// Columns a content row spends on the sigil and the gap after it.
+///
+/// **Three expressions have to agree about this row's prefix and only two of
+/// them are in [`Painter::line_row`]**: what is pushed as runs, what is
+/// subtracted from the row's room to bound the walk, and what [`gutter_width`]
+/// measures a text column against before ruling the line numbers affordable.
+/// [`line_origin`] is what the last two read.
+///
+/// **The third was already wrong when this doc first claimed there were two.**
+/// `gutter_width` carried a bare `digits + 2`, exact while the sigil stood alone
+/// and a column behind the moment the gap landed: on a pane with a scrollbar, at
+/// the narrowest width keeping the gutter, the text column was 23 against
+/// [`MIN_TEXT_WIDTH`]'s 24. A constant whose doc names the sites it governs is
+/// only as good as that list, and this is the second time this file has recorded
+/// that failure ([`KIND_WIDTH`] is the first).
+///
+/// **The runs-against-bound half is caught, and that was worth measuring rather
+/// than assuming.** Mutated to `1` while the gap is still pushed, so the bound
+/// sits a column looser than the runs, three gates redden:
+/// `legibility.rs::a_wide_glyph_at_the_edge_does_not_swallow_the_mark` and
+/// `::a_clipped_content_line_says_it_continues`, plus the forty-column snapshot.
+/// The `gutter_width` half was caught by nothing, which is the difference
+/// between a number two *drawing* expressions share and a number a **threshold**
+/// reads.
+const SIGIL_WIDTH: usize = 1 + SIGIL_GAP.len();
+
+/// Columns before a content row's first character of line, gutter included.
+///
+/// **Written once because two expressions have to agree about it and did not**:
+/// [`Painter::line_row`] bounds its content walk with this, and [`gutter_width`]
+/// measures a pane against it before ruling the line numbers affordable. They
+/// answered differently for one commit, so the gutter survived on a text column
+/// [`MIN_TEXT_WIDTH`] forbids.
+///
+/// The `+ 1` is the gutter's own trailing space, which lives inside a `format!`
+/// at the point of drawing and had no name until this. A zero gutter draws
+/// neither digits nor space, so it costs neither.
+const fn line_origin(gutter: usize) -> usize {
+    if gutter == 0 {
+        SIGIL_WIDTH
+    } else {
+        gutter + 1 + SIGIL_WIDTH
+    }
+}
+
 /// The smallest body a second footer line may leave behind.
 ///
 /// Two rows, because that is the shortest thing that still reads as a diff: a
@@ -608,8 +674,27 @@ const NOTHING_CHANGED: &str = "no unstaged changes";
 ///
 /// Below this the gutter costs more than it explains, which is the shape of
 /// "truncated to useless" that I6 forbids. At forty columns with four-digit line
-/// numbers the text still gets thirty-four, so the gutter survives the case the
-/// invariant is actually about.
+/// numbers the text still gets **thirty-three**, so the gutter survives the case
+/// the invariant is actually about.
+///
+/// **That number was thirty-four until 2026-08-15, and the figure is not the
+/// interesting part.** [#164](https://github.com/breferrari/vigia/issues/164)
+/// gave the sigil a clear column, which comes out of content, so every figure
+/// here moved by one. The defect it exposed is that [`gutter_width`] was ruling
+/// the numbers affordable against a prefix that no longer existed, so at the
+/// narrowest pane keeping the gutter it enforced this floor at **23**. On a pane
+/// with a scrollbar, which is the ordinary case for a diff taller than its
+/// region, that is one width per digit count and all of them sit below 43,
+/// inside the band I6 is named for. [`line_origin`] is what both sites read now.
+///
+/// **And nothing reddened, because this constant had no test.** It was a
+/// threshold two expressions agreed about by hand, which is the wish
+/// `CLAUDE.md` names rather than the invariant it reads as:
+/// `render.rs::the_gutter_gives_way_before_the_text_does` samples 40 and 24 and
+/// never the boundary, and `a_diff_taller_than_the_pane_keeps_its_line_numbers`
+/// asserts the gutter does not vanish rather than that what survives clears this
+/// floor. `crates/vigia/tests/legibility.rs::a_drawn_gutter_leaves_the_text_its_floor`
+/// is the sweep that fails when it does not.
 const MIN_TEXT_WIDTH: usize = 24;
 
 /// What the monitor is doing, which is the mockup's `watching` and the set that
@@ -3517,8 +3602,51 @@ impl Painter<'_> {
         // three hundred is fourteen kilobytes a row of churn. A run that is
         // pushed at all advances `column` by at least one, so the pane bounds the
         // count too.
-        let mut runs = Vec::with_capacity((spans.len() + 2).min(room + 2));
+        //
+        // **Three fixed runs and not two**, which #164 moved and which is worth
+        // the word because the term is invisible from outside: the sigil, its
+        // gap, and the tail `content_runs` pushes for whatever the spans did not
+        // reach. Left at two the hint was a run short exactly when `spans` is
+        // empty, which is **every content row of a process's first frame** (the
+        // shell draws that one plain, and it is the frame I7 gives 50ms to), so
+        // each of those rows grew its `Vec` from 2 to 4. Measured with a counting
+        // allocator over a 40-row body: 3 allocations and 111 bytes a row before
+        // the gap, 5 and 272 with the gap at `+ 2`, 4 and 152 at `+ 3`. The
+        // `.min` arm is unchanged and still has room: two fixed runs plus at most
+        // `room - 2` content runs is `room`.
+        let mut runs = Vec::with_capacity((spans.len() + 3).min(room + 2));
         runs.push((sigil.to_string(), sigil_style));
+
+        // **The gap `assets/preview.svg` has drawn since before any of this
+        // existed** ([#164](https://github.com/breferrari/vigia/issues/164)).
+        // The picture states its own grid in a comment, one cell at 13.5px being
+        // ~8.1px, and it puts the sigil at x=72 and every content origin at
+        // x=88: the sigil is one cell, 72 to 80.1, so a clear column has always
+        // stood between the two. §5.1's departure list is meant to be the
+        // complete set of licensed disagreements with the picture and this was
+        // not on it, so it was an omission rather than a decision.
+        //
+        // **It does not ladder**, where every other spacing decision here does.
+        // The sigil column *is* the diff signal at any depth or on any palette
+        // that cannot wash the row, which §5.1 records and `tests/colour.rs`
+        // gates, so a column that keeps that signal legible is part of the
+        // signal rather than decoration beside it, and I6's "every cell is
+        // contested" does not reach it. A gap that vanished at 43 columns would
+        // take the signal's legibility with it exactly where the pane is most
+        // crowded.
+        //
+        // **Its own run, and styled `diff` rather than `sigil_style`.** Folding
+        // it into the sigil's own string is the obvious form and it is wrong:
+        // `sigil_style` carries the row's bar where a theme sets one, and §5.1
+        // rules that bar to be the sigil cell, so a two-character string would
+        // draw it two columns wide. `diff` is the same foreground *before* that
+        // patch, which sets no background at all: the wash shows through for the
+        // reason this function's own doc gives, and it is invisible on a space
+        // either way. It is not `Style::new()` because [`Painter::put_runs_marked`]
+        // seeds its continuation mark from the last run it managed to write, and
+        // at the one width where the mark lands immediately past this gap an
+        // unset style would draw it in nothing at all.
+        runs.push((SIGIL_GAP.to_owned(), diff));
 
         // Tab stops are counted from the start of the line's own content, not
         // from the left edge of the screen. The gutter and the sigil shift every
@@ -3527,8 +3655,11 @@ impl Painter<'_> {
         // an editor. The counter therefore runs **across** span boundaries: a tab
         // in the middle of a line advances to the next stop measured from the
         // line's own start, not from the start of whatever run it landed in.
-        // The sigil is one column and is pushed before the counter starts, so
-        // what is left for content is everything but it.
+        // The sigil and its gap are pushed before the counter starts, so what is
+        // left for content is everything but them, and the counter's own origin
+        // is unmoved: [`Painter::content_runs`] opens at zero whatever precedes
+        // it, which is what keeps a tab measured from the line rather than from
+        // the buffer.
         //
         // **This is the bound, and it is what makes a row cost the pane rather
         // than the line.** Every run below stops here, and the loop stops asking
@@ -3536,7 +3667,22 @@ impl Painter<'_> {
         // walked 74 columns deep instead of 531. Measured before it existed: a
         // 22-row body of Japanese examined 8231 characters to show 1600 columns,
         // which is 5.1x, and `tests/paint.rs` is what fails if it comes back.
-        let content = room.saturating_sub(1);
+        let content = room.saturating_sub(SIGIL_WIDTH);
+        // **The agreement with [`gutter_width`], asserted rather than left to be
+        // read.** That function rules the line numbers affordable by measuring a
+        // pane against [`line_origin`]; this reaches the same number in two
+        // steps, since `room` has already lost the gutter and its space. The two
+        // answered differently for one commit and nothing said so, because one of
+        // them is a *threshold* and no drawing gate can see a threshold. Compiled
+        // out of the shipped binary, which is the honest limit of it: what holds
+        // this in release is
+        // `legibility.rs::a_drawn_gutter_leaves_the_text_its_floor`.
+        debug_assert_eq!(
+            content,
+            usize::from(glyphs.width).saturating_sub(line_origin(self.gutter)),
+            "the content bound and the gutter's affordability rule disagree \
+             about what a row spends before its first character"
+        );
         let clipped = self.content_runs(&mut runs, text, spans, content);
         self.paint.rows += 1;
 
@@ -3582,8 +3728,13 @@ fn gutter_width(view: &View, width: usize) -> usize {
         .unwrap_or(0);
 
     let digits = largest.max(1).ilog10() as usize + 1;
-    // The gutter costs its digits plus a space, and the sigil costs one more.
-    if width.saturating_sub(digits + 2) >= MIN_TEXT_WIDTH {
+    // **Through [`line_origin`] rather than a literal**, which is #164's own
+    // correction: this was `digits + 2`, exact while the sigil stood alone and a
+    // column behind the moment the sigil got its gap, so the gutter survived on
+    // 23 columns of text where `MIN_TEXT_WIDTH` rules 24. It is the one site
+    // reading this quantity as a *threshold* rather than drawing with it, which
+    // is why no drawing gate could see it.
+    if width.saturating_sub(line_origin(digits)) >= MIN_TEXT_WIDTH {
         digits
     } else {
         0
