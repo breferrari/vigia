@@ -324,9 +324,16 @@ const SIGIL_GAP: &str = " ";
 /// The sigil and [`SIGIL_GAP`], and it is named because two expressions in
 /// [`Painter::line_row`] have to agree about it: what is *pushed* as runs and
 /// what is *subtracted* from the row's room to bound the walk. They were one
-/// literal apart when the gap did not exist, and a row whose bound disagreed
-/// with its runs by a column would clip a character early or write one past the
-/// pane, neither of which any gate here reads directly.
+/// literal apart when the gap did not exist.
+///
+/// **The disagreement is caught, and it was worth finding out rather than
+/// assuming it either way.** Mutated to `1` while the gap is still pushed, so
+/// the bound sits a column looser than the runs, three gates redden:
+/// `legibility.rs::a_wide_glyph_at_the_edge_does_not_swallow_the_mark` and
+/// `::a_clipped_content_line_says_it_continues`, plus the forty-column
+/// snapshot. So this is a name for a number two expressions share rather than
+/// the only thing standing between them and a silent defect, which is the
+/// weaker claim and the true one.
 const SIGIL_WIDTH: usize = 1 + SIGIL_GAP.len();
 
 /// The smallest body a second footer line may leave behind.
