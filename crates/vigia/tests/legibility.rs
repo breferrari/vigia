@@ -311,6 +311,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// of dropping it.
 fn chrome() -> Chrome {
     Chrome {
+        pressed: None,
         worktree: "vigia".to_owned(),
         // Only the empty state names a branch, so every populated fixture leaves
         // this `None`. That is not tidiness: it is what a real frame carries,
@@ -339,6 +340,7 @@ fn chrome() -> Chrome {
 /// pass at widths the real thing overflows.
 fn diagnostics() -> Chrome {
     Chrome {
+        pressed: None,
         frame: Some(Duration::from_millis(999)),
         memory: Some(999 * 1024 * 1024),
         ..following()
@@ -347,6 +349,7 @@ fn diagnostics() -> Chrome {
 
 fn following() -> Chrome {
     Chrome {
+        pressed: None,
         following: true,
         ..chrome()
     }
@@ -360,6 +363,7 @@ fn following() -> Chrome {
 /// which is the same trap the hundred-file case exists for below.
 fn lost() -> Chrome {
     Chrome {
+        pressed: None,
         mode: Mode::Lost,
         ..chrome()
     }
@@ -368,6 +372,7 @@ fn lost() -> Chrome {
 /// A worktree with nothing in it, on a branch.
 fn on_a_branch() -> Chrome {
     Chrome {
+        pressed: None,
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -375,6 +380,7 @@ fn on_a_branch() -> Chrome {
 
 fn with_notice() -> Chrome {
     Chrome {
+        pressed: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..following()
     }
@@ -612,6 +618,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "clean worktree on a branch, following",
             empty(),
             Chrome {
+                pressed: None,
                 following: true,
                 ..on_a_branch()
             },
@@ -639,6 +646,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "a wide worktree name, following",
             every_row_kind(),
             Chrome {
+                pressed: None,
                 worktree: "読み方リポジトリ".to_owned(),
                 ..following()
             },
@@ -647,6 +655,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "clean worktree, watch lost",
             empty(),
             Chrome {
+                pressed: None,
                 mode: Mode::Lost,
                 ..on_a_branch()
             },
@@ -670,6 +679,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             "readouts and a notice",
             every_row_kind(),
             Chrome {
+                pressed: None,
                 notice: Some("src/lib.rs vanished between being named and being read".to_owned()),
                 ..diagnostics()
             },
@@ -1204,6 +1214,7 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
         // name's own width and pinning one fixture's walk pins a coincidence.
         for name in [fixture_name.clone(), "v".to_owned(), "a".repeat(64)] {
             let chrome = Chrome {
+                pressed: None,
                 worktree: name.clone(),
                 ..chrome.clone()
             };
@@ -1611,6 +1622,7 @@ fn a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently() {
         ("wide", "読み方リポジトリテスト"),
     ] {
         let chrome = Chrome {
+            pressed: None,
             worktree: name.to_owned(),
             ..chrome()
         };
@@ -2315,6 +2327,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         peak: 0,
     };
     let long_name = Chrome {
+        pressed: None,
         worktree: "a-worktree-with-a-very-long-name-indeed".to_owned(),
         ..chrome()
     };
@@ -3156,7 +3169,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // Row one is the first list row. Trailing blanks are already trimmed by
         // `rows_at`, and the bar's own column is the only thing that can follow
         // the row's content, so it is stripped before comparing.
-        let barred_row = barred[1].trim_end_matches(['▕', '█']).trim_end().to_owned();
+        let barred_row = barred[1].trim_end_matches(['│', '█']).trim_end().to_owned();
         let bare_row = bare[1].trim_end().to_owned();
 
         // **Skip the widths where the caret's own ladder differs between the two
@@ -3173,7 +3186,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
 
         // Only where a bar is actually drawn, or the two screens are identical
         // and the comparison is vacuous.
-        if barred[1].ends_with('▕') || barred[1].ends_with('█') {
+        if barred[1].ends_with('│') || barred[1].ends_with('█') {
             assert_eq!(
                 barred_row, bare_row,
                 "at {width} columns a list row with a bar reads {barred_row:?} \

@@ -4,6 +4,8 @@
 //! whole key map a table test. The loop in [`crate::run`] does the acting; this
 //! module only decides what was asked for.
 
+use std::time::{Duration, Instant};
+
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -13,6 +15,26 @@ use ratatui::crossterm::event::{
 /// Three is what a terminal sends per physical notch when it reports lines
 /// rather than pixels, so matching it makes one notch feel like one notch.
 pub const WHEEL_ROWS: isize = 3;
+
+/// How long a step button is held before it begins repeating.
+///
+/// **Taken from the toolkits rather than chosen.** Qt's `QScrollBar` presses a
+/// control with `initialDelay = 500` and then runs its repeat timer at `50`;
+/// GTK exposes the same pair as `gtk-timeout-initial` and `gtk-timeout-repeat`,
+/// the latter defaulting to 50ms. Both landed on the same shape and nearly the
+/// same numbers, so a reader arriving from any desktop scrollbar finds the
+/// cadence they already have in their hands. Guessing here would have been a
+/// number nobody could check.
+///
+/// The delay is what keeps a single click a single step: without it every press
+/// would risk a second row before the finger lifted.
+pub const STEP_DELAY: Duration = Duration::from_millis(500);
+
+/// How long between repeats once one has begun.
+///
+/// See [`STEP_DELAY`] for where the pair comes from. Twenty steps a second,
+/// which is a readable scroll rather than a blur.
+pub const STEP_REPEAT: Duration = Duration::from_millis(50);
 
 /// A span of rows on the screen, and the part of it a scrollbar's thumb can
 /// occupy.
@@ -169,6 +191,143 @@ impl Regions {
         }
         self.diff.button(row).map(Action::Scroll)
     }
+
+    /// The step a pointer at `column`, `row` is over, whatever it is doing there.
+    ///
+    /// **Geometry alone, with no event kind in it**, which is what makes it
+    /// usable by the two callers that ask different questions of the same cell:
+    /// [`action_for`] asks *what does this press mean*, and the loop asks *is the
+    /// pointer still on the button it is repeating*. Deriving the second from a
+    /// copy of this arithmetic is how the two would come to disagree about where
+    /// a button is.
+    pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
+        if self.bar != Some(column) {
+            return None;
+        }
+        self.step(row)
+    }
+}
+
+/// What a held mouse button is repeating, and when its next step is due.
+///
+/// **A clock, and its bounds are the whole of why it is allowed.** `SPEC.md`
+/// §11.1 carries the ruling; the short version is that I1's budget is *zero
+/// wakeups while idle*, this timer exists only between a press on a step button
+/// and its release, and a held button is not idle. [`Held::wait`] is the seam
+/// that keeps that true rather than merely intended: with nothing held it hands
+/// back `None`, and the loop blocks on an untimed receive exactly as it did
+/// before any of this existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Held {
+    /// One step in the direction pressed: [`Action::Scroll`] for the diff's
+    /// buttons, [`Action::ScrollList`] for the list's.
+    step: Action,
+    /// The column and row the press landed on, so a drag off the button can be
+    /// told from a twitch on it.
+    at: (u16, u16),
+    /// When the next repeat falls due. [`STEP_DELAY`] after the press, then
+    /// [`STEP_REPEAT`] apart.
+    due: Instant,
+}
+
+impl Held {
+    /// Arm a repeat from a press that produced `step` at `at`.
+    pub fn new(step: Action, at: (u16, u16), now: Instant) -> Self {
+        Self {
+            step,
+            at,
+            due: now + STEP_DELAY,
+        }
+    }
+
+    /// The cell this hold began on, so the paint can draw that button pressed.
+    pub fn at(self) -> (u16, u16) {
+        self.at
+    }
+
+    /// How long the loop may block before this has to act, or `None` when
+    /// nothing is held.
+    ///
+    /// **The one function that decides whether this program owns a timer**, and
+    /// it is written to be called with `None` so the answer is a value rather
+    /// than a control-flow accident. `None` means an untimed receive: no
+    /// deadline, no wakeup, no cost. That is the whole of I1's budget, and
+    /// `the_loop_waits_untimed_with_nothing_held` is what fails if it stops
+    /// being true.
+    ///
+    /// Saturating, so a deadline already past asks for zero rather than
+    /// panicking on the subtraction.
+    pub fn wait(held: Option<Self>, now: Instant) -> Option<Duration> {
+        held.map(|held| held.due.saturating_duration_since(now))
+    }
+
+    /// The step now due, scaled by how many intervals have actually elapsed, and
+    /// the state to carry forward.
+    ///
+    /// **Scaled rather than one step per wake, and that is what makes the rate a
+    /// fact about time instead of about paint speed.** `Action::Scroll` already
+    /// carries a row count, so a tick that arrives three intervals late applies
+    /// `Scroll(3)` in one `apply` and one paint rather than queueing three of
+    /// each. A slow terminal therefore scrolls at the same rows per second as a
+    /// fast one, with coarser granularity, instead of accumulating a backlog it
+    /// works off after the reader lets go.
+    ///
+    /// Returns `None` before the first repeat is due, so a press that is
+    /// released inside [`STEP_DELAY`] is exactly one step.
+    pub fn fire(self, now: Instant) -> Option<(Action, Self)> {
+        if now < self.due {
+            return None;
+        }
+        let late = now.saturating_duration_since(self.due);
+        // The one now due, plus any whole intervals that passed while something
+        // else held the loop. `as_nanos` on both sides keeps this integer.
+        let extra = (late.as_nanos() / STEP_REPEAT.as_nanos().max(1)) as isize;
+        let steps = 1 + extra;
+        Some((
+            self.step.repeated(steps),
+            Self {
+                due: self.due + STEP_REPEAT * (steps as u32),
+                ..self
+            },
+        ))
+    }
+
+    /// Whether `event` ends the hold.
+    ///
+    /// Four ways, and the third is the one that closes a hole rather than
+    /// stating the obvious:
+    ///
+    /// - **A release.** The ordinary case, and any button rather than the left
+    ///   one, because a reader who has pressed a second button is done with this
+    ///   gesture whichever they lift.
+    /// - **Any key.** A hand that has reached the keyboard is not holding a
+    ///   mouse button, and `q` in particular must not be answered by a program
+    ///   still stepping.
+    /// - **A pointer move.** `MouseEventKind::Moved` is motion *with no button
+    ///   down*, which is positive evidence of a release rather than an absence
+    ///   of evidence. `crossterm`'s bundle sets `?1003h`, so it arrives on the
+    ///   first pixel of movement, and this is what catches an `Up` that never
+    ///   came: without it a lost release would leave the loop stepping until
+    ///   something else happened to wake it.
+    /// - **A drag off the button.** A twitch inside the same cell keeps the
+    ///   repeat, which is why the press's own position is carried; leaving the
+    ///   control ends it. Resuming on re-entry is what a desktop scrollbar does
+    ///   and is deliberately not done here, because it needs a suspended state
+    ///   this module has nowhere to put.
+    pub fn ends(self, event: &Event, regions: Regions) -> bool {
+        match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release => true,
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::Up(_) | MouseEventKind::Moved => true,
+                MouseEventKind::Drag(_) => {
+                    (mouse.column, mouse.row) != self.at
+                        && regions.step_at(mouse.column, mouse.row) != Some(self.step)
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
 }
 
 /// Resolution a drag reports its position at.
@@ -273,6 +432,54 @@ pub enum Action {
 }
 
 impl Action {
+    /// This action performed `times` over, as a single action where that is
+    /// possible.
+    ///
+    /// **The seam that makes holding a control a general facility rather than a
+    /// scrollbar feature.** [`Held`] repeats whatever it was armed with, and this
+    /// is where each action says how it composes with itself. Nothing about the
+    /// mechanism knows what a step button is: arm it with any action and the loop
+    /// will repeat that action, which is what a future held control gets for
+    /// free.
+    ///
+    /// **Folding rather than queueing is the performance half.** A repeat that
+    /// arrives three intervals late applies `Scroll(3)` through one `App::apply`
+    /// and one paint, instead of three of each. That makes the scroll rate a fact
+    /// about elapsed time rather than about how fast the terminal can draw: a
+    /// slow pane moves the same rows per second as a fast one, with coarser
+    /// granularity, and can never accumulate a backlog that keeps moving after
+    /// the reader lets go.
+    ///
+    /// Exhaustive rather than a wildcard, for the reason
+    /// [`Action::is_manual_scroll`] gives one function down: an action added
+    /// later stops this compiling and asks whether holding it means anything,
+    /// where a wildcard would silently answer "repeat it unchanged" and be wrong
+    /// for anything that is not a relative step. **The ones that return `self`
+    /// are rulings, not defaults**: a page or a half page held down is already
+    /// the reader's own key repeat, and `Top`, `Bottom` and `File` name a
+    /// destination that does not accumulate.
+    pub fn repeated(self, times: isize) -> Self {
+        match self {
+            // Relative row counts, so `n` steps *is* one action with `n` in it.
+            Self::Scroll(by) => Self::Scroll(by.saturating_mul(times)),
+            Self::ScrollList(by) => Self::ScrollList(by.saturating_mul(times)),
+            // Everything else repeats as itself. Folding a page count into
+            // `Page` would be correct arithmetic and the wrong feel, and the
+            // absolute moves have nothing to fold at all.
+            Self::Page(_)
+            | Self::HalfPage(_)
+            | Self::File(_)
+            | Self::Top
+            | Self::Bottom
+            | Self::ListRow(_)
+            | Self::ListTo(_)
+            | Self::DiffTo(_)
+            | Self::ToggleFollow
+            | Self::Redraw
+            | Self::Quit => self,
+        }
+    }
+
     /// Whether this is the reader moving the viewport themselves.
     ///
     /// `SPEC.md` §11.1 hangs follow mode on this: a manual scroll disengages

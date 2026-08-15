@@ -48,7 +48,7 @@ const OTHER: usize = 21;
 fn layout() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None),
+        &App::new().chrome("fixture", None, None),
         FILES,
     )
 }
@@ -173,14 +173,18 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     }
 
     let area = Rect::new(0, 0, 64, 12);
-    let height = body_layout(area, &app.chrome("fixture", None), frame.files().len());
+    let height = body_layout(
+        area,
+        &app.chrome("fixture", None, None),
+        frame.files().len(),
+    );
     let view = app
         .view(&mut frame, &mut highlighter, &history, height)
         .expect("view");
     assert_eq!(view.files, 3, "the fixture is not three changed files");
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     let mut terminal = Terminal::new(TestBackend::new(64, 12)).expect("terminal");
     terminal
         .draw(|f| {

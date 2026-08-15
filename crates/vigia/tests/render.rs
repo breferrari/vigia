@@ -70,7 +70,7 @@ const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
 /// vocabulary, and four gates that need to skip past it were spelling two of the
 /// four by hand. Declared here rather than imported for [`RAMP`]'s reason: a test
 /// sharing the renderer's constant agrees with it by construction.
-const BAR_GLYPHS: [char; 4] = ['▕', '█', '▲', '▼'];
+const BAR_GLYPHS: [char; 4] = ['│', '█', '▲', '▼'];
 
 /// Whether a cell's symbol is one of [`BAR_GLYPHS`].
 ///
@@ -87,7 +87,7 @@ fn is_bar_glyph(symbol: &str) -> bool {
 /// constant would agree with it by construction rather than check it.
 ///
 /// **`SPARK_` rather than plain `TRACK`, which four gates below already declare
-/// with a different value.** The scrollbar's track is `▕`, function-local in
+/// with a different value.** The scrollbar's track is `│`, function-local in
 /// each of them, and a file-level `TRACK` beside those would compile by
 /// shadowing and mean one thing here and another there. That is the same
 /// symbol-collision hazard this file's other helpers exist to name, arriving as
@@ -189,6 +189,7 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 /// one. The follow state gets its own snapshots instead, below.
 fn chrome() -> Chrome {
     Chrome {
+        pressed: None,
         worktree: "vigia".to_owned(),
         // `None` because these views have a diff in them, and only the empty
         // state names a branch. A populated frame never asks, which is I4 and
@@ -209,6 +210,7 @@ fn chrome() -> Chrome {
 /// The chrome of every frame after the first, on a platform that reads memory.
 fn diagnostics_chrome() -> Chrome {
     Chrome {
+        pressed: None,
         frame: Some(Duration::from_micros(800)),
         memory: Some(19 * 1024 * 1024),
         ..following_chrome()
@@ -218,6 +220,7 @@ fn diagnostics_chrome() -> Chrome {
 /// The chrome of a worktree with nothing in it, which is what B3 specifies.
 fn empty_chrome() -> Chrome {
     Chrome {
+        pressed: None,
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -226,6 +229,7 @@ fn empty_chrome() -> Chrome {
 /// The chrome a shell actually starts with.
 fn following_chrome() -> Chrome {
     Chrome {
+        pressed: None,
         following: true,
         ..chrome()
     }
@@ -574,6 +578,7 @@ fn the_header_says_which_mode_it_is_in() {
     assert!(!live.contains("not watching"), "live header: {live:?}");
 
     let stopped = Chrome {
+        pressed: None,
         mode: Mode::Lost,
         ..chrome()
     };
@@ -1741,6 +1746,7 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
 
     for (label, name) in names {
         let nameless = Chrome {
+            pressed: None,
             worktree: name.to_owned(),
             ..chrome()
         };
@@ -1814,6 +1820,7 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
 
     let live = style_of(&chrome());
     let lost = style_of(&Chrome {
+        pressed: None,
         mode: Mode::Lost,
         ..chrome()
     });
@@ -1839,6 +1846,7 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
     // coincidence to change.
     let view = one_file();
     let stopped = Chrome {
+        pressed: None,
         mode: Mode::Lost,
         notice: Some("the watch ended; this diff is no longer live".to_owned()),
         ..chrome()
@@ -1992,6 +2000,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
 fn a_notice_takes_the_footer_from_the_key_hints() {
     let view = one_file();
     let chrome = Chrome {
+        pressed: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..chrome()
     };
@@ -2015,6 +2024,7 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
     // most worth knowing precisely when something has just gone wrong.
     let view = one_file();
     let chrome = Chrome {
+        pressed: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..following_chrome()
     };
@@ -2108,6 +2118,7 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
     // slide sideways under a reader who is trying to read it. Nothing else on
     // this screen changes width without the diff changing.
     let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
+        pressed: None,
         frame: Some(cost),
         ..diagnostics_chrome()
     }));
@@ -2125,6 +2136,7 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
     // that barely moves, and it is, right up to the frame where it crosses from
     // `999MiB` to `1024MiB` and takes a column with it.
     let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
+        pressed: None,
         memory: Some(bytes),
         ..diagnostics_chrome()
     }));
@@ -2163,6 +2175,7 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
     );
 
     let unavailable = Chrome {
+        pressed: None,
         memory: None,
         ..diagnostics_chrome()
     };
@@ -2187,6 +2200,7 @@ fn the_first_paint_draws_no_readouts_at_all() {
     // cell the ladder drops *first* everywhere else.
     let view = one_file();
     let first = Chrome {
+        pressed: None,
         frame: None,
         memory: Some(19 * 1024 * 1024),
         ..following_chrome()
@@ -3687,7 +3701,7 @@ fn the_list_scrollbar_spans_the_visible_window() {
     //
     // Ten files with three on screen, so the thumb is a proper fraction rather
     // than the whole bar, and it has somewhere to move to.
-    const TRACK: &str = "▕";
+    const TRACK: &str = "│";
     let width = 64u16;
 
     let mut seen = Vec::new();
@@ -3815,7 +3829,7 @@ fn a_region_with_nothing_to_scroll_spends_no_column_on_a_bar() {
     // A full bar is a column saying there is nothing to say. The list of three
     // files with three rows on screen has nowhere to scroll, so the region keeps
     // its width for the paths.
-    const TRACK: &str = "▕";
+    const TRACK: &str = "│";
     const THUMB: &str = "█";
     let width = 64u16;
 
@@ -3842,7 +3856,7 @@ fn the_scrollbars_degrade_once_and_never_flicker() {
     // The same ladder rule the caret follows, for the same reason: a bar that
     // reappeared at a narrower width would read as the position jumping while a
     // reader dragged a pane edge.
-    const TRACK: &str = "▕";
+    const TRACK: &str = "│";
     const THUMB: &str = "█";
 
     let drawn: Vec<bool> = (1..=60u16)
@@ -3869,6 +3883,71 @@ fn the_scrollbars_degrade_once_and_never_flicker() {
         "a bar came back after being dropped: {:?}",
         &drawn[first..]
     );
+
+    // **And the width it first appears at, which monotonicity alone cannot say.**
+    // The three claims above are all true of a bar whose floor is off by any
+    // amount: both halves of the sweep stay populated and the curve stays
+    // monotone while the boundary walks. That is the shape #121 recorded as *a
+    // monotonicity claim can be true of the broken version*, and it was still
+    // open here: widening the floor by one column left this gate green.
+    //
+    // Spelled as its own sum rather than as `16` or imported, this file's rule
+    // one constant up: a bar is one column plus the gap in front of it, over the
+    // floor a row needs for a kind letter and a path worth reading.
+    const BAR_WIDTH: usize = 1 + 1;
+    const ROW_FLOOR: usize = 2 + 12;
+    const BAR_FLOOR: usize = BAR_WIDTH + ROW_FLOOR;
+    assert_eq!(
+        first + 1,
+        BAR_FLOOR,
+        "the bar first appears at {} columns, not the {BAR_FLOOR} a row needs \
+         before it can afford one",
+        first + 1
+    );
+}
+
+#[test]
+fn a_one_row_region_with_somewhere_to_scroll_still_spends_no_column() {
+    // **The claim `bar_for` makes in prose, which nothing held.** `scrollable`
+    // guarantees `span < of`, so `(span * rows) / of < rows` and the thumb equals
+    // the track exactly when a region is one row: the column would say "there is
+    // nothing to scroll" while there is, which is the reading a full bar is
+    // already refused for one rung down.
+    //
+    // It is reachable rather than theoretical, which is why it earns a gate: at
+    // six rows of pane the list is exactly one row over thirty changed files, and
+    // at three the diff is one row over four thousand. Dropping the floor from
+    // two rows to one left the whole suite green.
+    let width = 64u16;
+    let view = a_stepped_screen();
+    let mut seen_list = false;
+    let mut seen_diff = false;
+
+    for height in 3u16..=8 {
+        let backend = screen(width, height, &view, &chrome());
+        let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+
+        for (name, region, one_row) in [
+            ("the list", laid.list, &mut seen_list),
+            ("the diff", laid.diff, &mut seen_diff),
+        ] {
+            if region.rows != 1 {
+                continue;
+            }
+            *one_row = true;
+            let glyph = bar_at(&backend, region.top);
+            assert!(
+                !is_bar_glyph(glyph),
+                "at {height} rows of pane, {name} is one row and drew {glyph:?} on \
+                 the bar's column, which is a mark that cannot move"
+            );
+        }
+    }
+
+    // Both regions reach one row by different routes, and a sweep that saw
+    // neither would pass by never producing the case.
+    assert!(seen_list, "no pane height gave the list exactly one row");
+    assert!(seen_diff, "no pane height gave the diff exactly one row");
 }
 
 /// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
@@ -4027,6 +4106,84 @@ fn the_scrollbar_draws_a_step_button_at_each_end() {
 }
 
 #[test]
+fn a_held_step_button_lights_and_only_that_one() {
+    // **The feedback, and it is the half a reader notices most.** Pressing *up* at
+    // the top of a diff moves no row, so without a lit cell the control is
+    // indistinguishable from a decoration and a reader cannot tell a click that
+    // registered from one that missed.
+    //
+    // Asserted by colour rather than by glyph, because the shape does not change:
+    // a pressed button is the same triangle in the thumb's own style, which is a
+    // colour already on this column.
+    let width = 64u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let x = width - 1;
+
+    let at_rest = chrome();
+    let laid = regions(Rect::new(0, 0, width, height), &at_rest, &view);
+    let ends = [
+        laid.diff.top,
+        laid.diff.top + laid.diff.rows - 1,
+        laid.list.top,
+        laid.list.top + laid.list.rows - 1,
+    ];
+
+    // Nothing held: every button is chrome, and the thumb is the only lit thing.
+    let resting = screen(width, height, &view, &at_rest);
+    for y in ends {
+        assert_eq!(
+            resting.buffer()[(x, y)].style().fg,
+            theme.bar_track.fg,
+            "row {y} is lit with no button held"
+        );
+    }
+
+    // Each button in turn: it lights, and the other three do not.
+    for pressed in ends {
+        let held = Chrome {
+            pressed: Some((x, pressed)),
+            ..chrome()
+        };
+        let backend = screen(width, height, &view, &held);
+        for y in ends {
+            let want = if y == pressed {
+                theme.bar.fg
+            } else {
+                theme.bar_track.fg
+            };
+            assert_eq!(
+                backend.buffer()[(x, y)].style().fg,
+                want,
+                "with row {pressed} held, row {y} took the wrong style"
+            );
+        }
+        // And the glyph is unchanged, so this is a state and not a second mark.
+        let glyph = bar_at(&backend, pressed);
+        assert!(
+            glyph == STEP_UP || glyph == STEP_DOWN,
+            "a held button drew {glyph:?} instead of staying a step button"
+        );
+    }
+
+    // A cell that is not a button is unaffected, so the highlight cannot leak
+    // onto the track or off the bar's column.
+    let elsewhere = Chrome {
+        pressed: Some((x, laid.diff.track.0)),
+        ..chrome()
+    };
+    let backend = screen(width, height, &view, &elsewhere);
+    for y in ends {
+        assert_eq!(
+            backend.buffer()[(x, y)].style().fg,
+            theme.bar_track.fg,
+            "a press on the track lit the button at row {y}"
+        );
+    }
+}
+
+#[test]
 fn the_painted_track_is_the_track_the_pointer_is_told_about() {
     // **The agreement the whole shape rests on.** `regions` tells the pointer
     // where a track is and `render` draws one, and the two are separate code
@@ -4161,7 +4318,7 @@ fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
     // **`TRACK` and `THUMB` by hand rather than `is_bar_glyph`**, which is the
     // whole assertion: that helper accepts the buttons too, so reading this
     // through it would pass against the bar this gate exists to refuse.
-    const TRACK: &str = "▕";
+    const TRACK: &str = "│";
     const THUMB: &str = "█";
     let width = 64u16;
     let height = 24u16;
@@ -4328,7 +4485,7 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
     const BAR_COLUMNS: usize = 2;
     const CARET_COLUMNS: usize = 2;
     const CARET: &str = "▸";
-    const TRACK: &str = "▕";
+    const TRACK: &str = "│";
     const THUMB: &str = "█";
 
     let mut saw_both = false;
@@ -4662,6 +4819,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
         (
             "a frame over a second",
             Chrome {
+                pressed: None,
                 frame: Some(Duration::from_secs(2)),
                 ..diagnostics_chrome()
             },
@@ -4670,6 +4828,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
         (
             "memory over a gigabyte",
             Chrome {
+                pressed: None,
                 memory: Some(2 * 1024 * 1024 * 1024),
                 ..diagnostics_chrome()
             },
@@ -4721,6 +4880,7 @@ fn a_notice_can_never_colour_the_follow_marker() {
     let theme = Theme::default();
     for following in [false, true] {
         let chrome = Chrome {
+            pressed: None,
             notice: Some("cannot read ▶.rs".to_owned()),
             following,
             ..diagnostics_chrome()

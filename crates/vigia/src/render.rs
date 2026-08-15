@@ -254,9 +254,26 @@ const BAR_THUMB: char = '█';
 ///
 /// A bar with no track is a mark floating in space, and a reader cannot tell a
 /// short thumb near the top from a long one without the extent it sits in. The
-/// half-block is narrower than the thumb on purpose: the track is context and
-/// the thumb is the reading.
-const BAR_TRACK: char = '▕';
+/// line is narrower than the thumb on purpose: the track is context and the
+/// thumb is the reading.
+///
+/// **Centred in its cell, and it was not until 2026-08-15**
+/// ([#175](https://github.com/breferrari/vigia/issues/175)). This was `▕`
+/// `U+2595`, RIGHT ONE EIGHTH BLOCK, a filled sliver against the cell's right
+/// edge, and reported from use as a bar pushed off the side of the pane rather
+/// than a column with a line down it. The narrowness argument was right about
+/// what matters and wrong about which glyph delivers it: `│` is narrower than
+/// `█` too, so the contrast the old comment was defending survives the change
+/// intact, and what went with the half-block was only the flush edge nobody
+/// wanted.
+///
+/// It pays a second time where nothing was looking. `▕` is **outside** CP437 and
+/// `│` is **inside** it at `0xB3`, measured rather than assumed, so this takes a
+/// name off §10's degradation list one ruling after [#166](https://github.com/breferrari/vigia/issues/166)
+/// added two to it. [`RULE`] is the horizontal member of the same box-drawing
+/// family and is already inside, so the two structural lines on this screen now
+/// come from one set.
+const BAR_TRACK: char = '│';
 
 /// The step button at the top of a bar, and the one at the bottom.
 ///
@@ -843,6 +860,22 @@ pub struct Chrome {
     /// alone and survived only because the tick that clears a notice can never
     /// arrive again once the watch is gone.
     pub mode: Mode,
+    /// The cell a step button is being held down on, when one is.
+    ///
+    /// **Feedback, and it is the reason a click feels registered.** A button that
+    /// does not change when pressed reads as inert, and this one has a case where
+    /// nothing else says otherwise: pressing *up* at the top of a diff moves no
+    /// row, so without a lit cell the reader cannot tell the control from a
+    /// decoration.
+    ///
+    /// A column and a row rather than a direction, because the renderer already
+    /// knows where its buttons are and re-deriving which end was pressed would be
+    /// a second copy of the geometry `Regions` exists to hand out once.
+    ///
+    /// `None` on every frame no button is held, which is nearly all of them. It
+    /// costs no row, no rect and no wake: the frames it changes are frames the
+    /// step was already painting.
+    pub pressed: Option<(u16, u16)>,
     /// Something the reader should see instead of the key hints.
     ///
     /// A monitor survives a failed frame rather than exiting, so this is where a
@@ -2384,6 +2417,7 @@ pub fn render(
         inset: margins.0,
         trailing: margins.1,
         paint: PaintStats::default(),
+        pressed: chrome.pressed,
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -2495,6 +2529,12 @@ struct Painter<'a> {
     trailing: u16,
     /// What the content rows have cost so far, returned by [`render`].
     paint: PaintStats,
+    /// The cell a step button is being held on, from [`Chrome::pressed`].
+    ///
+    /// Copied onto the painter for the reason `inset` is: it is decided once for
+    /// the whole screen, and a drawer that reached back into the chrome for it
+    /// would be one more thing the two regions could answer differently.
+    pressed: Option<(u16, u16)>,
 }
 
 impl Painter<'_> {
@@ -3190,13 +3230,27 @@ impl Painter<'_> {
         // correctness claim; drawing them here keeps the one arithmetic in one
         // place and leaves this as what it reads like, two cells at the ends.
         //
-        // [`Theme::bar_track`] rather than [`Theme::bar`], so the thumb stays the
-        // only lit thing on the column and the readout is unchanged: a button is
-        // chrome, and shape is what tells it from the track it shares a weight
-        // with. It costs no theme field and no palette entry.
+        // [`Theme::bar_track`] rather than [`Theme::bar`], so at rest the thumb
+        // stays the only lit thing on the column and the readout is unchanged: a
+        // button is chrome, and shape is what tells it from the track it shares a
+        // weight with. It costs no theme field and no palette entry.
+        //
+        // **Except while it is being pressed**, when it takes the thumb's own
+        // style. That is the whole of the feedback and it reuses a colour that is
+        // already on this column, so a reader who has learned what lit means on a
+        // bar has learned this too. It matters most where nothing else can say
+        // anything: pressing *up* at the top of a diff moves no row, and without
+        // this the control is indistinguishable from a decoration.
         if matches!(bar, Bar::Stepped) {
-            self.bar_cell(x, area.y, STEP_UP, self.theme.bar_track);
-            self.bar_cell(x, area.y + area.height - 1, STEP_DOWN, self.theme.bar_track);
+            let bottom = area.y + area.height - 1;
+            for (y, glyph) in [(area.y, STEP_UP), (bottom, STEP_DOWN)] {
+                let style = if self.pressed == Some((x, y)) {
+                    self.theme.bar
+                } else {
+                    self.theme.bar_track
+                };
+                self.bar_cell(x, y, glyph, style);
+            }
         }
     }
 

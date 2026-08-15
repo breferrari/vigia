@@ -13,7 +13,12 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use vigia::{Action, LIST_ROWS, Region, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
+use std::time::{Duration, Instant};
+
+use vigia::{
+    Action, Held, LIST_ROWS, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
+    action_for,
+};
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -774,6 +779,242 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
         assert!(
             matches!(action, Action::Scroll(_)),
             "a press on the diff's bar at row {row} produced {action:?}"
+        );
+    }
+}
+
+#[test]
+fn nothing_held_means_no_timer_at_all() {
+    // **The invariant the whole clock is allowed under.** I1's budget is zero
+    // wakeups while idle, and what keeps that true is not care taken elsewhere:
+    // it is that `Held::wait` hands back `None` when nothing is held, and `None`
+    // is an untimed receive. A version that returned some large timeout instead
+    // would look harmless, pass every other gate here, and put this program on a
+    // poll loop.
+    let now = Instant::now();
+    assert_eq!(
+        Held::wait(None, now),
+        None,
+        "with nothing held the loop was given a deadline, which is a timer on an \
+         idle monitor"
+    );
+
+    // And with something held it is bounded by the step that is due, so the loop
+    // still blocks rather than spinning.
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+    let patience = Held::wait(Some(hold), now).expect("a held step has a deadline");
+    assert!(
+        patience > Duration::ZERO && patience <= STEP_DELAY,
+        "a held step asked to wait {patience:?}, which is not inside the delay \
+         before it first repeats"
+    );
+}
+
+#[test]
+fn a_press_is_one_step_until_the_delay_has_passed() {
+    // A click is a click. The first repeat is not due until `STEP_DELAY`, so a
+    // reader who presses and lets go inside it has moved exactly one row, which
+    // is what the button meant before it could be held.
+    let now = Instant::now();
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    assert_eq!(hold.fire(now), None, "a press repeated immediately");
+    assert_eq!(
+        hold.fire(now + STEP_DELAY - Duration::from_millis(1)),
+        None,
+        "a press repeated before its delay was up"
+    );
+    assert!(
+        hold.fire(now + STEP_DELAY).is_some(),
+        "a press never repeated at all"
+    );
+}
+
+#[test]
+fn a_late_repeat_folds_into_one_action_rather_than_a_backlog() {
+    // **The performance half, and it is a correctness claim rather than a
+    // micro-optimisation.** If a repeat that arrives late applied one step and
+    // left the rest owed, a pane that stalled for a second would keep scrolling
+    // after the reader let go, working off a queue. Folding the elapsed
+    // intervals into one `Scroll(n)` makes the rate a fact about time: the same
+    // rows per second on a slow terminal as on a fast one, with coarser
+    // granularity, and nothing owed.
+    let now = Instant::now();
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    // Exactly on time is one step.
+    let (step, next) = hold.fire(now + STEP_DELAY).expect("a repeat");
+    assert_eq!(step, Action::Scroll(1));
+
+    // Four intervals late is five steps in one action, not five actions.
+    let (step, _) = next
+        .fire(now + STEP_DELAY + STEP_REPEAT * 5)
+        .expect("a late repeat");
+    assert_eq!(
+        step,
+        Action::Scroll(5),
+        "a repeat four intervals late did not fold, so the backlog would outlive \
+         the reader's finger"
+    );
+
+    // And the list's buttons fold the same way, in their own units.
+    let list = Held::new(Action::ScrollList(-1), (79, 1), now);
+    let (step, _) = list
+        .fire(now + STEP_DELAY + STEP_REPEAT * 2)
+        .expect("a repeat");
+    assert_eq!(step, Action::ScrollList(-3));
+}
+
+#[test]
+fn the_clock_advances_by_whole_intervals_so_the_rate_cannot_drift() {
+    // The deadline moves by the steps it just took, from the deadline. Moving it
+    // to *now plus one interval* instead would let every late tick push the next
+    // one later, so a pane under load scrolls slower and slower with the button
+    // still down and nothing says why.
+    //
+    // **Asserted through the following deadline, not through the action**, and
+    // that distinction is the gate. A first version of this test checked only
+    // that a late tick produced `Scroll(1)`, which is true of both versions:
+    // rescheduling from the wake is invisible in the step it returns and shows up
+    // only in when the *next* one is allowed. It passed against exactly the
+    // mutation it was written to catch.
+    let now = Instant::now();
+    let slip = Duration::from_millis(3);
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    // Fire the first repeat late, but by less than one interval, so it is one
+    // step either way and only the bookkeeping differs.
+    let (step, next) = hold.fire(now + STEP_DELAY + slip).expect("a repeat");
+    assert_eq!(step, Action::Scroll(1), "a slipped tick was counted twice");
+
+    // The second is then due on the grid, `STEP_REPEAT` after the first was, and
+    // owes nothing to when the first happened to be serviced.
+    assert!(
+        next.fire(now + STEP_DELAY + STEP_REPEAT).is_some(),
+        "the second repeat was pushed back by the first one's slip, so the rate \
+         walks downwards under load"
+    );
+}
+
+#[test]
+fn a_repeat_that_falls_far_behind_never_asks_the_loop_to_spin() {
+    // `Held::wait` hands the loop a `recv_timeout`, and a deadline left in the
+    // past would make that return instantly, over and over: a busy loop wearing a
+    // blocking receive. Folding the elapsed intervals is what keeps the next
+    // deadline at or after the moment it was computed, however far behind the
+    // loop has fallen.
+    let now = Instant::now();
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    // A whole second late, which is twenty intervals.
+    let very_late = now + STEP_DELAY + Duration::from_secs(1);
+    let (step, next) = hold.fire(very_late).expect("a repeat");
+    assert_eq!(
+        step,
+        Action::Scroll(21),
+        "a second of lateness did not fold into one action"
+    );
+    assert_eq!(
+        next.fire(very_late),
+        None,
+        "the folded repeat left its own deadline in the past, so the loop would \
+         wake instantly and fire again"
+    );
+    assert!(
+        Held::wait(Some(next), very_late).is_some_and(|patience| patience > Duration::ZERO),
+        "the loop was asked to wait no time at all, which is a spin"
+    );
+}
+
+#[test]
+fn a_hold_ends_on_release_on_a_key_and_on_a_pointer_that_moved() {
+    // The four ways out, and the third is the one that closes a hole. `Moved` is
+    // motion *with no button down*, so it is positive evidence of a release
+    // rather than an absence of evidence, and it is what catches an `Up` that
+    // never arrived: without it a lost release leaves the loop stepping until
+    // something else happens to wake it.
+    let regions = two_regions();
+    let hold = Held::new(Action::Scroll(-1), (79, 5), Instant::now());
+
+    for (name, event) in [
+        (
+            "a release",
+            at(MouseEventKind::Up(MouseButton::Left), 79, 5),
+        ),
+        (
+            "a release of another button",
+            at(MouseEventKind::Up(MouseButton::Right), 79, 5),
+        ),
+        ("a pointer move", at(MouseEventKind::Moved, 79, 5)),
+        ("a key press", press(KeyCode::Char('j'))),
+        ("the quit key", press(KeyCode::Char('q'))),
+    ] {
+        assert!(
+            hold.ends(&event, regions),
+            "{name} did not end the hold, so the button would go on stepping"
+        );
+    }
+
+    // A twitch inside the same cell keeps it, which is why the press's own
+    // position is carried, and leaving the control ends it.
+    assert!(
+        !hold.ends(&at(MouseEventKind::Drag(MouseButton::Left), 79, 5), regions),
+        "a drag that never left the button ended the hold"
+    );
+    assert!(
+        hold.ends(
+            &at(MouseEventKind::Drag(MouseButton::Left), 79, 12),
+            regions
+        ),
+        "a drag off the button onto the track did not end the hold"
+    );
+}
+
+#[test]
+fn only_a_step_button_arms_a_hold() {
+    // The geometry the loop arms from is the geometry the press is resolved
+    // through, so the two cannot disagree about where a button is. Everything
+    // else on that column, and everything off it, arms nothing.
+    let regions = two_regions();
+
+    assert_eq!(regions.step_at(79, 5), Some(Action::Scroll(-1)));
+    assert_eq!(regions.step_at(79, 19), Some(Action::Scroll(1)));
+    // The track between them is a seek, not a step.
+    assert_eq!(regions.step_at(79, 12), None);
+    // The list's bar is below the step floor here, so it has no buttons at all.
+    assert_eq!(regions.step_at(79, 1), None);
+    // And off the bar's column there is nothing to hold.
+    assert_eq!(regions.step_at(40, 5), None);
+}
+
+#[test]
+fn repeating_an_action_that_does_not_accumulate_leaves_it_alone() {
+    // `Action::repeated` is the seam that makes holding general rather than
+    // scrollbar-shaped, so what each action does when held is a ruling and this
+    // is where they are held to it. Relative row counts multiply; a page held
+    // down is the reader's own key repeat and an absolute move has nothing to
+    // accumulate.
+    assert_eq!(Action::Scroll(1).repeated(4), Action::Scroll(4));
+    assert_eq!(Action::Scroll(-1).repeated(3), Action::Scroll(-3));
+    assert_eq!(Action::ScrollList(-1).repeated(2), Action::ScrollList(-2));
+
+    for action in [
+        Action::Page(1),
+        Action::HalfPage(-1),
+        Action::File(1),
+        Action::Top,
+        Action::Bottom,
+        Action::ToggleFollow,
+        Action::Redraw,
+        Action::Quit,
+        Action::ListRow(2),
+        Action::ListTo(0),
+        Action::DiffTo(0),
+    ] {
+        assert_eq!(
+            action.repeated(5),
+            action,
+            "{action:?} accumulated when held, which is a decision nobody made"
         );
     }
 }

@@ -121,7 +121,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let mut app = App::new();
     let history = History::new();
 
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     let body = body_layout(area(), &chrome, frame.files().len());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
@@ -144,7 +144,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     render(&mut buf, area(), &view, &theme, &chrome);
     let second = began.elapsed();
     let parsed_second = highlight_delta(before, highlighter.stats()).lines;
