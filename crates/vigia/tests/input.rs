@@ -303,6 +303,15 @@ fn a_key_release_is_not_a_keypress() {
 fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // Each of these is delivered by a real terminal in ordinary use, and every
     // one of them turning into a frame is how a monitor acquires an idle cost.
+    //
+    // **`Moved` is the one with a ruling behind it, so read `SPEC.md` §11.2 B10
+    // before deciding this line is stale.** It is delivered because the mouse
+    // bundle sets `?1003h`, any-event tracking, which nothing here consumes and
+    // which cannot portably be switched off; `RULINGS.md`'s I1 section carries
+    // why that is not an I1 breach. This assertion is what B10 rests on: it is
+    // the "zero paints for pointer motion" gate, and building a hover highlight
+    // reddens it here first. That is the intended tripwire rather than a
+    // regression, and the ruling is the thing to reopen.
     let inert = [
         wheel(MouseEventKind::Moved),
         wheel(MouseEventKind::Down(MouseButton::Left)),

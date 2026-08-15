@@ -18,6 +18,63 @@ body that still says the old thing is not a correction.
 
 ---
 
+## I1 — the loop already wakes on pointer motion, and the row's measure cannot see it
+
+> [!NOTE]
+> **Found 2026-08-15 while ruling [#123](https://github.com/breferrari/vigia/issues/123), and it is a correction to what I1 was understood to claim rather than to what it says**
+>
+> I1's row reads *"Redraw is **event-driven**, never a fixed timer. No filesystem
+> event and no git index change means no work"*, measured as *"**0 wakeups** while
+> idle; CPU sampled over a 60s idle window; assert no render calls"*. Every word
+> of that is still true. What was not written down anywhere is that the process
+> **is woken by a class of event the row never mentions**, and has been since the
+> mouse was taken in Phase 2.
+
+**The mechanism.** `crossterm`'s `EnableMouseCapture` is a bundle, not a switch:
+it writes `\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h`, and `?1003h`
+is **any-event tracking** — every pointer sample, whether or not a button is
+held. `1000` is press and release, `1002` is motion during a drag; `1003` is the
+one nothing in this program consumes. So a pointer crossing the pane, or nudged
+while it rests over it, delivers an event per sample. Each one arrives as
+`Wake::Input`, and `crates/vigia/src/lib.rs` calls `Shell::regions` (a `Copy`
+field read: no syscall, no allocation), calls `action_for`, gets `None`, and
+`continue`s. The comment on that arm named the concern before this ruling
+existed: *"Redrawing for a key release or a mouse move would make the idle cost
+non-zero for a reason nobody asked for."*
+
+**Why it is not a breach.** I1 is written against **work**, not against packets,
+and that distinction is load bearing rather than lucky — it is the same one the
+watch engine already turned on, where an idle tree is not a tree the kernel is
+silent about and the assertion had to move from events delivered to redraws
+performed. A motion wake performs no render, allocates nothing, and touches no
+file. The row's claim survives its own measure exactly.
+
+**Why the measure cannot see it, and why that is not fixable here.** The window
+is sixty seconds of *idle*, and a pointer in motion is not idle; a wake that
+renders nothing is not a render call. So the gate is silent on this by
+construction, in both directions. What holds the property instead is
+`crates/vigia/tests/input.rs::nothing_a_reader_did_not_ask_for_becomes_an_action`,
+which asserts that a `MouseEventKind::Moved` becomes no action, and that is the
+right tier: it gates the work, which is what I1 is about.
+
+**It cannot be given back.** The obvious repair is to request `1000`, `1002` and
+`1006` and leave `1003` off, keeping click and drag and losing only the wake.
+That is not portably available. On Windows `EnableMouseCapture::is_ansi_code_supported()`
+is `false` and `execute!` routes the bundle through the console API, writing
+**zero bytes**, so hand-written DEC modes would work on Unix and do nothing on
+Windows. The cost of the repair is the mouse on a tier-1 target, or a second
+mechanism inside I8's takeover, against a wake that is a channel receive and two
+pure calls. It is recorded rather than repaired.
+
+**What it changed.** §5.3 had priced a hover highlight as *"a wake class I1
+currently never pays"*, and §11.2 B10 was opened to weigh that trade. The trade
+did not exist: the wake is sunk either way, so B10 was decided on what hover
+would *show* instead. `crates/vigia/src/terminal.rs::every_command_is_the_escape_sequence_it_is_named_for`
+asserts the bundle byte for byte, so if `?1003h` ever stops being requested, this
+entry stops being true loudly rather than quietly.
+
+---
+
 ## I4 — narrowed 2026-08-01: counting a height is not summing content
 
 > [!NOTE]
