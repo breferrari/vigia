@@ -306,6 +306,29 @@ const KIND_WIDTH: usize = 2;
 /// floor built on top of it starts from.
 const ROW_FLOOR: usize = KIND_WIDTH + MIN_PATH_WIDTH;
 
+/// What stands between a content row's sigil and the line itself.
+///
+/// `assets/preview.svg` has drawn it from the start: the picture's own comment
+/// states that one cell at 13.5px is ~8.1px, and it places the sigil at x=72 and
+/// every content origin at x=88, so the sigil's one cell ends at 80.1 and a clear
+/// column stands after it. [`Painter::line_row`] carries the argument for why it
+/// does not degrade with width, which is the only thing about it that needed
+/// deciding ([#164](https://github.com/breferrari/vigia/issues/164)).
+///
+/// A `&str` rather than a `char` because it is pushed as a run, and runs are
+/// `String`s.
+const SIGIL_GAP: &str = " ";
+
+/// Columns a content row spends before the line's own first character.
+///
+/// The sigil and [`SIGIL_GAP`], and it is named because two expressions in
+/// [`Painter::line_row`] have to agree about it: what is *pushed* as runs and
+/// what is *subtracted* from the row's room to bound the walk. They were one
+/// literal apart when the gap did not exist, and a row whose bound disagreed
+/// with its runs by a column would clip a character early or write one past the
+/// pane, neither of which any gate here reads directly.
+const SIGIL_WIDTH: usize = 1 + SIGIL_GAP.len();
+
 /// The smallest body a second footer line may leave behind.
 ///
 /// Two rows, because that is the shortest thing that still reads as a diff: a
@@ -3520,6 +3543,37 @@ impl Painter<'_> {
         let mut runs = Vec::with_capacity((spans.len() + 2).min(room + 2));
         runs.push((sigil.to_string(), sigil_style));
 
+        // **The gap `assets/preview.svg` has drawn since before any of this
+        // existed** ([#164](https://github.com/breferrari/vigia/issues/164)).
+        // The picture states its own grid in a comment, one cell at 13.5px being
+        // ~8.1px, and it puts the sigil at x=72 and every content origin at
+        // x=88: the sigil is one cell, 72 to 80.1, so a clear column has always
+        // stood between the two. §5.1's departure list is meant to be the
+        // complete set of licensed disagreements with the picture and this was
+        // not on it, so it was an omission rather than a decision.
+        //
+        // **It does not ladder**, where every other spacing decision here does.
+        // The sigil column *is* the diff signal at any depth or on any palette
+        // that cannot wash the row, which §5.1 records and `tests/colour.rs`
+        // gates, so a column that keeps that signal legible is part of the
+        // signal rather than decoration beside it, and I6's "every cell is
+        // contested" does not reach it. A gap that vanished at 43 columns would
+        // take the signal's legibility with it exactly where the pane is most
+        // crowded.
+        //
+        // **Its own run, and styled `diff` rather than `sigil_style`.** Folding
+        // it into the sigil's own string is the obvious form and it is wrong:
+        // `sigil_style` carries the row's bar where a theme sets one, and §5.1
+        // rules that bar to be the sigil cell, so a two-character string would
+        // draw it two columns wide. `diff` is the same foreground *before* that
+        // patch, which sets no background at all: the wash shows through for the
+        // reason this function's own doc gives, and it is invisible on a space
+        // either way. It is not `Style::new()` because [`Painter::put_runs_marked`]
+        // seeds its continuation mark from the last run it managed to write, and
+        // at the one width where the mark lands immediately past this gap an
+        // unset style would draw it in nothing at all.
+        runs.push((SIGIL_GAP.to_owned(), diff));
+
         // Tab stops are counted from the start of the line's own content, not
         // from the left edge of the screen. The gutter and the sigil shift every
         // row by the same amount, so including them would align tabs to the
@@ -3527,8 +3581,11 @@ impl Painter<'_> {
         // an editor. The counter therefore runs **across** span boundaries: a tab
         // in the middle of a line advances to the next stop measured from the
         // line's own start, not from the start of whatever run it landed in.
-        // The sigil is one column and is pushed before the counter starts, so
-        // what is left for content is everything but it.
+        // The sigil and its gap are pushed before the counter starts, so what is
+        // left for content is everything but them, and the counter's own origin
+        // is unmoved: [`Painter::content_runs`] opens at zero whatever precedes
+        // it, which is what keeps a tab measured from the line rather than from
+        // the buffer.
         //
         // **This is the bound, and it is what makes a row cost the pane rather
         // than the line.** Every run below stops here, and the loop stops asking
@@ -3536,7 +3593,7 @@ impl Painter<'_> {
         // walked 74 columns deep instead of 531. Measured before it existed: a
         // 22-row body of Japanese examined 8231 characters to show 1600 columns,
         // which is 5.1x, and `tests/paint.rs` is what fails if it comes back.
-        let content = room.saturating_sub(1);
+        let content = room.saturating_sub(SIGIL_WIDTH);
         let clipped = self.content_runs(&mut runs, text, spans, content);
         self.paint.rows += 1;
 

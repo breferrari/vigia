@@ -828,7 +828,18 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             if row.is_empty() {
                 continue;
             }
-            // The sigil costs a column beyond the text itself.
+            // The sigil and its gap cost two columns beyond the text itself
+            // ([#164](https://github.com/breferrari/vigia/issues/164)), so a row
+            // is clipped once the text reaches `room - 1` rather than `room`.
+            //
+            // **This guard is where that lands, and the arithmetic is easy to
+            // put in the wrong place.** The `+ 1` further down is the
+            // continuation mark and is unaffected; it is this comparison that
+            // decides which widths the sweep bothers looking at, so leaving it
+            // at `room` silently skips the widths where the new column is what
+            // pushed the row over. The gate would still have passed, on a
+            // narrower set of widths than it claims, which is the shape its own
+            // non-vacuity flag exists to catch and would not have caught here.
             //
             // **Against the room the row is given, not against the pane.** #119
             // takes the margin off both sides first, so a line whose width falls
@@ -845,7 +856,7 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
             // gate stays correct if `awkward()` ever gains a wider line, not
             // because it reaches a hazard today that it did not reach before.
             let room = usize::from(width).saturating_sub(margin_at(width));
-            if Span::raw(full).width() < room {
+            if Span::raw(full).width() + 1 < room {
                 continue;
             }
             assert!(

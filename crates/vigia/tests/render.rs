@@ -365,6 +365,89 @@ fn the_same_screenful_at_a_hundred_and_twenty_columns() {
     insta::assert_snapshot!(screen(120, 14, &view, &chrome()));
 }
 
+#[test]
+fn a_content_row_stands_its_sigil_off_the_line() {
+    // `SPEC.md` §5.1's fifth departure, closed. `assets/preview.svg` states its
+    // own grid in a comment, one cell at 13.5px being ~8.1px, and in the diff
+    // body it puts the sigil at x=72 and every content origin at x=88. The sigil
+    // is one cell, 72 to 80.1, so the picture has always drawn **one clear
+    // column** between a sigil and its line, and the shell drew none: `-` ran
+    // into the first token a reader scans for, on the column that *is* the diff
+    // signal wherever the palette or the depth cannot wash the row.
+    //
+    // **Positional rather than pictorial.** The snapshots below move with this
+    // change and are worth having, but a snapshot asserts no rule: it records
+    // one width and would look equally settled if the gap came back tomorrow at
+    // a different one. This reads cells and says where each thing is.
+    //
+    // Two widths, and forty is not decoration: the gap costs a content column
+    // and I6 is named for that width, so a rule that only held where space was
+    // free would be the ladder this deliberately refused.
+    for width in [80u16, 40] {
+        let backend = screen(width, 14, &one_file(), &chrome());
+
+        // Found rather than computed. Recomputing where the renderer puts a
+        // sigil would be a second implementation of the gutter agreeing with the
+        // first, which is the trap `column_of`'s own doc names.
+        let removed = column_of(&backend, 5, "-");
+        let added = column_of(&backend, 6, "+");
+
+        // The sigil has not moved: it still sits one space past the gutter's
+        // digits, which is the half of the row this change must leave alone.
+        for (y, at, number) in [(5u16, removed, "260"), (6, added, "260")] {
+            let row = row_text(&backend, y);
+            let before: String = row.chars().take(usize::from(at)).collect();
+            assert!(
+                before.ends_with(&format!("{number} ")),
+                "at {width} columns row {y}'s sigil is not one space past its \
+                 line number: {before:?}"
+            );
+        }
+
+        // (row, the source line's own indentation)
+        const INDENTED: [(u16, usize); 4] = [(3, 4), (4, 8), (5, 8), (6, 8)];
+        for (y, indent) in INDENTED {
+            let row = row_text(&backend, y);
+            let cells: Vec<char> = row.chars().collect();
+            // Every row of the block takes its content from the same column,
+            // which is the picture's other claim and the one that makes the
+            // block read as a block: the two unsigilled context rows draw a
+            // space where `+` and `-` go, so their content must line up with a
+            // changed row's rather than sliding left into the gap.
+            let origin = usize::from(removed) + 2;
+            assert_eq!(
+                cells.get(origin - 1),
+                Some(&' '),
+                "at {width} columns row {y} drew no gap between its sigil and \
+                 its line: {row:?}"
+            );
+            let first = cells
+                .iter()
+                .enumerate()
+                .skip(origin)
+                .find(|(_, c)| **c != ' ')
+                .map(|(x, _)| x);
+            assert_eq!(
+                first,
+                Some(origin + indent),
+                "at {width} columns row {y}'s content does not begin {indent} \
+                 columns past the origin {origin}, so either the gap is missing \
+                 or the line moved: {row:?}"
+            );
+        }
+
+        // Non-vacuity, and it is the assertion this gate would be silently
+        // useless without: the two sigils have to be on the same column as each
+        // other, or `origin` above was computed from a row the loop never
+        // checked and every comparison is against itself.
+        assert_eq!(
+            removed, added,
+            "at {width} columns the two sigils sit in different columns, so the \
+             origin this gate measures from is not the block's"
+        );
+    }
+}
+
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
@@ -2508,7 +2591,17 @@ fn a_syntax_class_reaches_the_cells_while_the_sigil_keeps_the_diff() {
     let backend = screen(80, 6, &view, &chrome());
     let sigil = column_of(&backend, CONTENT_ROW, "+");
     let buffer = backend.buffer();
-    let at = |offset: u16| buffer[(sigil + 1 + offset, CONTENT_ROW)].style().fg;
+    // **Two past the sigil, not one.** #164 put a clear column between a sigil
+    // and its line, which `assets/preview.svg` has drawn from the start.
+    // `a_content_row_stands_its_sigil_off_the_line` is the gate for the gap
+    // itself; what this one needs is the origin the classes are measured from.
+    //
+    // The failure this produced before the offset moved is worth recording,
+    // because it is the gate proving something it was not written for: `let` was
+    // read as `Some(Green)` against `LightRed`, which is the gap cell drawn in
+    // the diff colour, and that colour is exactly what `line_row` argues the gap
+    // must take so a continuation mark landing on it is not drawn in nothing.
+    let at = |offset: u16| buffer[(sigil + 2 + offset, CONTENT_ROW)].style().fg;
 
     assert_eq!(
         buffer[(sigil, CONTENT_ROW)].style().fg,
