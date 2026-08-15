@@ -1373,3 +1373,116 @@ fn the_ramp_collapses_to_two_stops_where_it_must_and_says_so_in_the_palette() {
     // so a hot slice is still distinguishable from a quiet one.
     assert_ne!(two[0], two[1]);
 }
+
+/// The reference background each truecolour palette is designed against.
+///
+/// **A terminal does not tell this program its background**, which is why the
+/// `ansi` palette exists and why `theme.rs` opens by saying a tint has to assume
+/// one. So this is an assumption, stated rather than smuggled: it is the
+/// background `assets/preview.svg` paints and the one each palette's greys were
+/// picked against. A colour that vanishes on the background it was designed for
+/// has no chance on any other.
+const DARK_PANE: (u8, u8, u8) = (0x0d, 0x11, 0x17);
+const LIGHT_PANE: (u8, u8, u8) = (0xff, 0xff, 0xff);
+
+/// WCAG relative luminance.
+fn luminance((r, g, b): (u8, u8, u8)) -> f64 {
+    fn channel(v: u8) -> f64 {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+/// WCAG contrast ratio: 1.0 for two identical colours, 21.0 for black on white.
+fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The channels of a truecolour style's foreground.
+fn rgb_of(style: ratatui::style::Style) -> (u8, u8, u8) {
+    match style.fg.expect("a foreground") {
+        Color::Rgb(r, g, b) => (r, g, b),
+        other => panic!("expected a truecolour foreground, found {other:?}"),
+    }
+}
+
+/// The floor a mark meant to be *seen but subordinate* has to clear.
+///
+/// Well under WCAG's 4.5:1 for text, deliberately: none of these is text, and a
+/// track that competed with its own thumb would break the ruling that the track
+/// is context and the thumb is the reading. What it rules out is the case that
+/// actually shipped, which is not a subtle colour but an **absent** one.
+const TRACK_FLOOR: f64 = 2.0;
+
+#[test]
+fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
+    // **Reported from use, and the numbers say why nothing was visible.** The
+    // scrollbar's track and its step buttons drew in `bar_track`, which was
+    // `#21262d` on `#0d1117`: **1.24:1**, where 1.0 is the background exactly.
+    // Only the thumb and a *pressed* button could be seen, because those draw in
+    // `bar` at 6.15:1. The light palette had the same defect at 1.45:1, and this
+    // gate then found a third nobody had reported: the sparkline's own track at
+    // 1.55:1, which is the empty bucket §5.1 rules must draw something.
+    //
+    // **The gate that existed could not see any of it.** The sparkline tests
+    // below assert a track is not the *same palette colour* as the background,
+    // which was true of every one of these while all three were invisible.
+    // Identity is not visibility, and the difference is this test.
+    //
+    // The earlier reading was that these truecolour values were right because
+    // they are read off `assets/preview.svg`, and that the defect belonged to
+    // the sixteen-colour rung. That is the picture-versus-cell-grid distinction
+    // `SPEC.md` §5.1 already draws: a 1.24:1 edge across many pixels of SVG is
+    // perceptible, and the same ratio inside one terminal cell is not.
+    for (name, theme, pane) in [
+        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
+        (
+            "light",
+            Theme::light().resolve(Depth::Truecolor),
+            LIGHT_PANE,
+        ),
+    ] {
+        for (element, style) in [
+            ("bar_track", theme.bar_track),
+            ("heat_track", theme.heat_track),
+            ("spark_track", theme.spark_track),
+        ] {
+            let ratio = contrast(rgb_of(style), pane);
+            assert!(
+                ratio >= TRACK_FLOOR,
+                "{name}'s {element} is {ratio:.2}:1 against the pane it is drawn \
+                 on, under the {TRACK_FLOOR}:1 a mark needs to be seen at all. \
+                 1.00:1 is the background exactly"
+            );
+        }
+
+        // **And a stroke outranks a block**, which is the rule `spark_track`'s
+        // own docblock always stated and could not satisfy while the block it
+        // was a step above was itself invisible.
+        let stroke = contrast(rgb_of(theme.spark_track), pane);
+        let block = contrast(rgb_of(theme.heat_track), pane);
+        assert!(
+            stroke > block,
+            "{name}'s sparkline track is {stroke:.2}:1 against the heat track's \
+             {block:.2}:1, so the one-line glyph is dimmer than the half-block \
+             it has to read level with"
+        );
+
+        // **And still subordinate to what it is a track for.** A track that
+        // reached its own thumb would satisfy the floor above and destroy the
+        // reading it exists to support.
+        let thumb = contrast(rgb_of(theme.bar), pane);
+        let track = contrast(rgb_of(theme.bar_track), pane);
+        assert!(
+            thumb > track * 1.5,
+            "{name}'s thumb is {thumb:.2}:1 and its track {track:.2}:1, which is \
+             not enough separation for the thumb to read as the lit one"
+        );
+    }
+}
