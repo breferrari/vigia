@@ -28,7 +28,10 @@ This is a reconstruction. The original lived in a global skills directory, was n
 >   spawn. A standing "do not spawn agents unless asked" is satisfied by the
 >   invocation; it is not a second gate to clear at step 6. See that step.
 > - **Where a choice is documented, take the documented one** and say so in the
->   report. Do not offer it as a menu.
+>   report. Do not offer it as a menu. This governs *how* to build a thing, and
+>   it is not a licence to inherit a **refusal** unexamined: a documented "no"
+>   is a conclusion someone reached from a reason, and the reason is checkable.
+>   See "The record is evidence, not authority" at step 3.
 > - **Where a choice is genuinely open and nobody is there, take the more
 >   conservative branch, finish the pass, and put the question in the report.**
 >   A finished pass with a flagged decision beats an unfinished one with a
@@ -184,6 +187,18 @@ Take the **topmost unstarted task in the earliest *eligible* phase** — eligibl
 
 If a task is already `🔨 in progress`, check `git status` and the open PRs before starting anything: another session may be mid-flight, and two sessions on one task is worse than one session idle.
 
+### A decline is the most expensive thing this skill can produce, so reach it early or not at all
+
+**Four passes in Phase 8 each spent a full session and delivered a "no"** ([#149](https://github.com/breferrari/vigia/issues/149), [#120](https://github.com/breferrari/vigia/issues/120) twice, [#123](https://github.com/breferrari/vigia/issues/123), [#124](https://github.com/breferrari/vigia/issues/124)), and one of them has since been reopened because both of its reasons were false. That is the worst output shape available here: maximum cost, nothing on screen, and a reader who asked for something getting an essay about why they cannot have it.
+
+Three rules, and they are about *when* and *how hard*, not about being agreeable:
+
+- **A decline is reached in the first part of the pass or it is not a decline.** The reason a thing should not be built either holds under checking or it does not, and that is a question about facts, which is cheap. Hours spent after the reason is known are not spent deciding, they are spent **justifying**, and the tell is that the writing gets longer while the argument does not get stronger. If you have been at it a while and are still assembling the case, the honest reading is that the case is weak.
+- **A decline carries a higher bar than a build**, for the asymmetry step 3 records: a bad build is loud and a bad refusal is silent. The reason has to be a fact that survives being checked, not a consideration that sounds sound. **"It would cost a wake", "it needs a timer", "no API reports that"** are all claims with answers, and all three have been wrong here.
+- **When the reader has asked for the thing, the default is build.** A refusal overrides a direct request from the person whose product it is, so it needs a reason that would still convince them after they have read it. If the honest summary is *"it is possible, it is affordable, and I would have designed it differently"*, that is a preference and the answer is build it.
+
+**And the ruling's prose is sized to the ruling, not to the effort.** A decline that took an afternoon does not earn four paragraphs in `SPEC.md` because it took an afternoon. Long justification of a "no" is the same failure one layer over: it makes the refusal harder to revisit, because the next reader has to argue with a wall of text instead of with one checkable sentence. State the reason in the fewest words that can be falsified, and put the evidence trail in `RULINGS.md` where it belongs.
+
 ### A `decision` issue is done when the ruling is written, not when code lands
 
 Check the label before planning. An issue labelled **`decision`** is one whose acceptance is **a ruling recorded in `SPEC.md`**, not a diff. Three exist today ([#74](https://github.com/breferrari/vigia/issues/74), [#50](https://github.com/breferrari/vigia/issues/50), [#89](https://github.com/breferrari/vigia/issues/89)) and they were already written that way — #74's exit criteria read *"a ruling: build the seam, or record that direct consumption is accepted"*, and *"if declined: a line in `SPEC.md` §6 saying so, so the next reviewer finds a decision instead of an omission."*
@@ -233,6 +248,30 @@ Name, in the plan itself:
 
 Consultation at step 2 alone fires exactly once, at the moment you know least about what you will need. Naming the result here moves it to the moment you commit. A choice re-derived from scratch that contradicts a recorded one is the most expensive mistake available in this repo, and the plan is the only place it is visible while it still costs nothing.
 
+### The record is evidence, not authority
+
+`SPEC.md` is the source of truth for **what must hold now**. That is not the same as every sentence in it being beyond question, and the difference is where this skill has gone wrong more than once.
+
+**Try to break the assumption before you build on it. Look at it from the angles the original ruling did not.** A written reason is the best evidence available about what someone knew *at the time they wrote it*, which is exactly as durable as the facts it rested on. Treating it as scripture is how a repo inherits a constraint nobody has believed in for months.
+
+Three distinctions worth keeping straight, because they are not equally solid:
+
+- **An invariant with a measurement behind it** (I1's idle cost, I4's streaming bound) is load bearing and is not relitigated casually. But **whether it reaches the case in front of you is a fresh question every single time**, and that is the check that actually gets skipped. Quote the row's own words and see whether they describe your case. Twice in one week here, an invariant was cited to refuse something its budget could never have measured.
+- **A refusal** is a conclusion from a moment. It carries a date and a reason, and both expire. Challenge it by attacking the reason, not by re-arguing taste.
+- **A budget or a threshold** is a number someone chose against a workload. If your workload is not that workload, the number is not evidence about you.
+
+**A budget invoked as a reason to refuse something must be quoted with its current headroom.** Not the limit: the limit *and* where the tool actually sits against it. "This costs a wake" is not an argument when the last measurement says the frame path uses **2.4ms of a 16ms budget**, which is five times over. A budget at 19% is a budget with room, and saying so out loud is what stops the number from being used as a mood.
+
+That is not a licence to spend the headroom carelessly, and it is not an argument against the budgets, which exist because the thesis is a measurable claim. It is a rule about **honesty in citation**: the same paragraph that names the ceiling names the floor the tool is standing on, and then the trade is visible instead of implied. If the honest sentence is *"this would take us from 2.4ms to 2.6ms against a 16ms budget"*, that sentence usually settles the question in favour of building it, which is exactly why it has to be written rather than skipped.
+
+**And do not run a measurement whose only possible use is to justify a no.** Measuring to find out is the most valuable thing in this repo's history: counting instead of building took a fixture from 442.71ms to 8.76ms, and it was found by someone checking a premise rather than defending one. Measuring to build a case against a feature a reader has asked for is the same activity pointed backwards, it costs real time and attention, and it produces a number that was never going to change the answer. If you already know what you want the measurement to show, you are not measuring.
+
+**Refusals deserve more scrutiny than builds, not less, and the reason is asymmetry.** A bad build is loud: tests fail, gates redden, someone reports it within the hour. A bad refusal is silent. Nothing breaks, no gate fires, the feature simply does not exist and no one can see the hole where it should be. So the failure mode that survives longest in a well-gated repo is precisely the one the gates cannot reach, and every instrument in this skill points at code that was written rather than at code that was refused.
+
+**The burden sits on the reason, not on the person asking for the thing.** "It is written down" is not an argument, and neither is "we ruled on this." Both are pointers to an argument, and the argument is what gets checked. When a reader asks for something the record refuses, the first move is to go and re-read *why* it was refused, not to relay the refusal.
+
+**And a refusal that turns out to rest on a false premise is not a decision to defend, it is a bug in the record.** Fix it the way any other defect gets fixed: say what was wrong, reopen the question, and leave both versions visible so the next reader can see the correction rather than only its result.
+
 ### The plan names its premises, and settles the load-bearing ones itself
 
 The section above records what the plan **stands on**: decisions already written down. This one is about what it **assumes**, which is the part nothing has ever checked.
@@ -241,9 +280,36 @@ A premise is a claim that must be true for this to be the right plan at all. It 
 
 - **What must be true** for this approach to be correct.
 - **How it would be falsified** — the observation that would end the plan.
-- **The answer and where it came from**: measured, read in the dependency's source, recorded in `SPEC.md`, or *assumed*.
+- **The answer and where it came from**: measured, read in the dependency's source, **checked against the world outside this repo**, recorded in `SPEC.md`, or *assumed*.
 
-**A premise the plan is load-bearing on is not allowed to stay `assumed`. Go and find out.** Finding facts is this session's job and never Brenno's: read the source, write the throwaway probe, take the measurement. A question a probe can answer is not a question for the report, and it is certainly not one to leave for an empty room at 3am.
+**A premise the plan is load-bearing on is not allowed to stay `assumed`. Go and find out.** Finding facts is this session's job and never Brenno's: read the source, write the throwaway probe, take the measurement, **search the web**. A question a probe can answer is not a question for the report, and it is certainly not one to leave for an empty room at 3am.
+
+#### A premise about the outside world is checked against the outside world, not against memory
+
+Some premises are not about this code at all. *Does this library expose that?* *Does the protocol carry it?* *Do terminals implement it?* *What do the toolkits that solved this already use?* Those have answers, the answers change, and the one place they are never reliably stored is a model's recollection of them.
+
+**So read the dependency's source in `~/.cargo/registry`, and search the web.** Both, when both apply: the source says what the API is, the web says whether the world it talks to actually honours it. A number taken from two independent implementations is a number nobody has to defend; a number chosen because it felt right is one that gets re-argued every time it is looked at.
+
+Three from one afternoon, all of which changed what shipped:
+
+- *"No mouse protocol reports a held button"* was **confirmed** by reading `crossterm`'s `MouseEventKind`, which is what made a hold-to-repeat clock a design problem rather than a lookup.
+- *"The repeat cadence should be about 400ms then 40ms"* was a guess. Qt's `qscrollbar.cpp` uses `initialDelay = 500` and a `50` repeat, and GTK's `gtk-timeout-repeat` defaults to 50ms. **500/50 shipped**, and it is defensible in a way the guess never was.
+- *"The takeover does not enable focus reporting"* had been written into `SPEC.md` as the mechanism that made a hover highlight impossible. `crossterm` has shipped `EnableFocusChange` and `Event::FocusLost` for years, `?1004h` is implemented by xterm, iTerm2 and kitty, and on Windows the console API delivers focus events unasked. **A feature had been declined for a year-old absence that was never there.**
+
+**The cost of not checking is asymmetric.** A search that confirms what you thought costs a minute. A premise about the outside world that is quietly out of date costs a feature, and it costs it silently, because a wrong fact about someone else's library produces a plan that is internally consistent and wrong.
+
+#### A recorded decision's *reason* is a premise, and it is the one most likely to be stale
+
+The section above says the plan names the decisions it stands on. This says what to do when one of them is a **refusal** you are about to inherit.
+
+**Re-read the reason it was declined for, and check whether it is still true.** Not whether the decision was reasonable, and not whether you would make it again: whether the specific sentence it rests on is a fact today. A decline is a dated claim exactly the way a deferral is ([#76](https://github.com/breferrari/vigia/issues/76)), and it is worse than a deferral in one way, because a deferral advertises that it expires and a ruling reads as settled.
+
+Two shapes to look for, and this repo has produced both inside one week:
+
+- **The reason names an absence.** *"No API for this", "the takeover does not enable X", "nothing would tell it to turn off."* An absence is the claim most likely to have stopped being true, because dependencies add things and nobody re-reads a refusal when they do. §11.2 **B10** declined a hover highlight on *"the takeover does not enable focus reporting"*, which was a description of one line this repo had not written, phrased as though it were physics.
+- **The reason cites an invariant.** Check that the invariant's **letter** reaches the case, not just its spirit. §11.2 B10 and [#166](https://github.com/breferrari/vigia/issues/166) were both refused on I1, and in both the citation was wrong: I1's budget is *0 wakeups while idle*, and neither pointer motion nor a held button is idle, so the gate could never have caught either. **Two refusals, one invariant, zero applicability.**
+
+**And when a reason collapses, the decision reopens.** It does not acquire a new reason. B10's first reason was measured and found false during its own ruling, a second was substituted, and the conclusion never moved: the decline outlived both of its bases. A conclusion that survives while its stated basis is swapped underneath it is motivated reasoning wearing a ruling's clothes, and it is invisible from the inside, because each individual step looks like diligence. If the sentence a refusal rests on turns out not to be true, say so and put the question back on the table, even when that means reversing something written down hours earlier.
 
 Work them in dependency order. A premise whose answer depends on another still-open one is a *later* question, not a parallel one — settle the first, then ask the second with the answer in hand.
 
