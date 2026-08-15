@@ -1267,6 +1267,24 @@ fn churn_of(sigil: char, lines: u32) -> String {
     format!("{sigil}9")
 }
 
+/// One half of a file row's counts cell: what it says, and the ink it says it
+/// in.
+///
+/// Named `Half` because [`count_of`] one screen up already means the header's
+/// changed-file count, and because "one half of a counts cell" is what
+/// [`churn_of`] and [`Columns::cell`] have called this since #77 split the pair.
+///
+/// The two travel together so that "what a counts cell says" and "how it says
+/// it" cannot drift apart into two functions taking the same input, which is the
+/// shape [`counts_of`]'s own doc exists to refuse.
+struct Half {
+    /// `+42`, `-7`, or nothing where there is no line diff to count.
+    text: String,
+    /// [`Theme::added`], [`Theme::removed`], or [`Theme::chrome_dim`] where this
+    /// half has nothing to say.
+    ink: Style,
+}
+
 /// The two halves of a file row's counts cell, or empty strings when there is no
 /// line diff to count.
 ///
@@ -1277,15 +1295,52 @@ fn churn_of(sigil: char, lines: u32) -> String {
 /// ragged, which is the same complaint [#77](https://github.com/breferrari/vigia/issues/77)
 /// makes about the row as a whole, one element in.
 ///
+/// **A half takes its diff colour where it has something to say, and the row's
+/// dim grey where it does not**, which is `SPEC.md` §5.1's third departure
+/// closed on its colour half ([#157](https://github.com/breferrari/vigia/issues/157)).
+/// The picture has drawn `+42` in `.grn` and `-7` in `.red` from the start, and
+/// §5.3 licenses the loan in the same sentence that licenses the footer's follow
+/// marker: green and red are lent out "only where they restate the same fact".
+///
+/// **A `-0` restates none, which is why the rule is value-dependent rather than
+/// positional.** The picture states it too and it is easy to read past: the
+/// mockup's third row draws `+2` in `.grn` beside a `-0` in `.faint`. What it
+/// protects is the reading the element exists for. On a worktree an agent is
+/// only adding to, an unconditional red would put red on every row, and a
+/// reader's question — is anything being removed — would have no answer left on
+/// screen. The two halves are still drawn or dropped together
+/// ([`Columns::cell`]); it is only their ink that is per half.
+///
+/// Which grey is deliberately **not** settled here. The picture's is `.faint`
+/// `#6e7681` where [`Theme::chrome_dim`] is `#8b949e` on `dark`, and that is a
+/// question inside one role rather than about it; §5.1 records it as open, and
+/// the shell's greys already depart from the picture's classes elsewhere.
+///
 /// Named rather than inlined into [`Painter::file_row`] so that "what a counts
 /// cell says" is one definition. It was lifted out to keep a *measurement* and a
 /// drawing in agreement, back when the columns were sized from the widest cell
 /// among the drawn rows; that design is gone and nothing measures now, so what
-/// the split still earns is a name and a place for the empty case to live.
-fn counts_of(churn: Option<(u32, u32)>) -> (String, String) {
+/// the split still earns is a name, a place for the empty case to live, and the
+/// colour rule above stated once for both halves.
+fn counts_of(churn: Option<(u32, u32)>, theme: &Theme) -> (Half, Half) {
+    let half = |sigil: char, lines: u32, ink: Style| Half {
+        text: churn_of(sigil, lines),
+        ink: if lines == 0 { theme.chrome_dim } else { ink },
+    };
     churn.map_or_else(
-        || (String::new(), String::new()),
-        |(added, removed)| (churn_of('+', added), churn_of('-', removed)),
+        || {
+            let empty = || Half {
+                text: String::new(),
+                ink: theme.chrome_dim,
+            };
+            (empty(), empty())
+        },
+        |(added, removed)| {
+            (
+                half('+', added, theme.added),
+                half('-', removed, theme.removed),
+            )
+        },
     )
 }
 
@@ -3110,7 +3165,13 @@ impl Painter<'_> {
             // Two statements rather than a loop over the pair: the offset from
             // the right edge coincides with the width for one half and not the
             // other, and a loop asks a reader to work that out.
-            let (added, removed) = counts_of(heading.churn);
+            //
+            // **The ink is per half and comes with the text**, which is
+            // [`counts_of`]'s ruling: green and red are lent to a half that has
+            // something to say and withheld from a `-0` that has not. Their
+            // *presence* is still shared, because `columns.cell` drops the pair
+            // together.
+            let (added, removed) = counts_of(heading.churn, self.theme);
             let end = right.x + right.width;
             let field = |width: usize, from_right: usize| Rect {
                 x: end.saturating_sub(from_right as u16),
@@ -3119,13 +3180,13 @@ impl Painter<'_> {
             };
             self.put_right(
                 field(columns.cell, counts_width(columns.cell)),
-                &added,
-                self.theme.chrome_dim,
+                &added.text,
+                added.ink,
             );
             self.put_right(
                 field(columns.cell, columns.cell),
-                &removed,
-                self.theme.chrome_dim,
+                &removed.text,
+                removed.ink,
             );
         }
         past(&mut right, counts_width(columns.cell));
