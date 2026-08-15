@@ -88,6 +88,23 @@ Rule of thumb: **a `gix` limitation that would bite any Rust project is a `remem
 
 Before finishing work that changed or clarified a decision here, write it down. A finding that stays in this session is a finding the next session pays for again.
 
+## Bias to building
+
+**The budgets have room and this section exists because that stopped being obvious.** The frame budget is 16ms and the tool runs at **2.4ms p50, 3.1ms p99**, which is five times the headroom. Refusing a feature on cost, in a tool with that much slack, needs the slack quoted alongside the cost or it is not an argument.
+
+Four rows of Phase 8 spent a full session each and delivered a **decline**. One has since been reopened because *both* reasons it rested on were false: the first was an invariant whose budget could never have measured the case, and the second was an absence (*"the takeover does not enable focus reporting"*) that was one unwritten line rather than a fact about the world. Two other refusals in the same phase cited the same invariant and it did not reach either.
+
+So, when a reader asks for something:
+
+- **The default is build.** A refusal overrides the person whose product this is, so it needs a reason that survives being checked, not one that merely sounds sound.
+- **Before citing an invariant, quote the row's own words and show it reaches this case.** I1's budget is *0 wakeups while idle*; neither pointer motion nor a held button is idle. A budget cited without its current headroom is a mood, not a measurement.
+- **Check facts about the world against the world.** Read the dependency in `~/.cargo/registry`, and search the web. *"No API reports that"* is the claim most likely to be a year out of date, and it has been wrong here twice.
+- **A reason that collapses reopens the question.** It does not get replaced by a better reason for the same conclusion. That happened to [#123](https://github.com/breferrari/vigia/issues/123) and the decline outlived both of its bases.
+- **Reach a decline early or not at all.** The reason either holds under checking or it does not, and that is cheap. Hours spent after that point are spent justifying, and the tell is prose getting longer while the argument does not get stronger.
+- **Size the rigor to the surface, and do not escalate past it.** Look and feel is `/simplify` plus a screenshot; the audit loop is for the frame path and the invariants. `ROADMAP.md` has said so since Phase 8 opened and it was overridden anyway.
+
+Refusals deserve more scrutiny than builds, not less: a bad build is loud and a bad refusal is silent, so the mistake that survives longest here is the one no gate can see.
+
 ## House rules
 
 - **No agent-session artifacts in anything that lands in the repo.** No `claude.ai/code/session_*` URL, no `Claude-Session:` trailer, no local absolute path — not in commit messages, PR or issue bodies, or files. `Co-Authored-By:` is fine and wanted.
