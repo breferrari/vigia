@@ -27,7 +27,7 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 
 ---
 
-## I1 — a held mouse button is not an event, so a step button repeats on a clock
+## I1 — a held mouse button is not an event, so a gesture-bounded clock is licensed
 
 > [!IMPORTANT]
 > **Reversed 2026-08-15, the same day it was written, and the entry is kept whole because the measurement in it is still the reason the feature is hard.** The first ruling refused hold-to-repeat. It was overruled as a product decision: a scrollbar button that does not repeat while held is not a scrollbar button, and every desktop toolkit has had this since the 1980s. What survives unchanged is everything below about the protocol, which is what any implementation has to work around. What changed is the conclusion, and `SPEC.md` §11.1 carries it: **the clock is allowed because it is bounded by the reader's finger.**
@@ -35,6 +35,10 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 > The distinction the reversal turns on is the one the correction below had already found: I1's budget is *0 wakeups while **idle***, and a held mouse button is not idle. Every other timer this spec refuses would run while nothing is happening. This one cannot start on its own, cannot outlive the release, and `Held::wait` returns `None` with nothing held so the loop's receive is untimed exactly as before. I1's row now carries that qualifier rather than leaving it to be re-derived.
 >
 > Recorded rather than rewritten because a reader who finds this feature and wonders why it took a ruling deserves the protocol facts, and because the first draft's *reasoning* was wrong in a way worth keeping visible: it cited a budget that could never have caught the thing it was refusing.
+>
+> **Corrected again 2026-08-16, on the shape of the amendment rather than on the ruling.** The reversal was first written into I1 as an *exception*: *"the one clock this program owns runs only between a press on a scrollbar's step button and its release"*. That is the instance, not the rule, and an enumerated exception has two failure modes that both showed up immediately. It **blocks the next case even where the argument is identical**, and two were already in the tracker: a selection dragged past the edge of its region wants to scroll ([#177](https://github.com/breferrari/vigia/issues/177)), and a press held on the **track** is the page-repeat every desktop scrollbar has. Neither is a step button, both are clocks bounded by a gesture, and both would have needed their own reversal of a rule that had just been reversed. And it **disagreed with the code it was written for**: `Held` repeats whatever action it is armed with and `Action::repeated` is an exhaustive match specifically so a later held control inherits the mechanism, so the spec licensed one control while the code offered a facility. I1 now states three conditions (it may not start on its own, may not outlive the gesture that armed it, and the idle path must be untimed by construction) and the step buttons are an instance of them.
+>
+> The general lesson is worth more than the fix: **when a ruling is reversed under pressure, the amendment tends to be written as narrowly as the case that forced it**, because the case is what is in front of you. That is the moment to ask what the argument actually proved rather than what it was invoked for. Here the argument proved something about *bounded* clocks and was written down as something about *scrollbars*.
 
 
 > [!NOTE]
