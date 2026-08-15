@@ -27,6 +27,41 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 
 ---
 
+## I1 — a held mouse button is not an event, so a step button repeats on a clock
+
+> [!IMPORTANT]
+> **Reversed 2026-08-15, the same day it was written, and the entry is kept whole because the measurement in it is still the reason the feature is hard.** The first ruling refused hold-to-repeat. It was overruled as a product decision: a scrollbar button that does not repeat while held is not a scrollbar button, and every desktop toolkit has had this since the 1980s. What survives unchanged is everything below about the protocol, which is what any implementation has to work around. What changed is the conclusion, and `SPEC.md` §11.1 carries it: **the clock is allowed because it is bounded by the reader's finger.**
+>
+> The distinction the reversal turns on is the one the correction below had already found: I1's budget is *0 wakeups while **idle***, and a held mouse button is not idle. Every other timer this spec refuses would run while nothing is happening. This one cannot start on its own, cannot outlive the release, and `Held::wait` returns `None` with nothing held so the loop's receive is untimed exactly as before. I1's row now carries that qualifier rather than leaving it to be re-derived.
+>
+> Recorded rather than rewritten because a reader who finds this feature and wonders why it took a ruling deserves the protocol facts, and because the first draft's *reasoning* was wrong in a way worth keeping visible: it cited a budget that could never have caught the thing it was refusing.
+
+
+> [!NOTE]
+> **Measured 2026-08-15 while building [#166](https://github.com/breferrari/vigia/issues/166).** The scrollbar's step buttons were asked for as ordinary buttons, and the first question a button raises is whether holding it repeats. It cannot, and the reason is not this program's design but the protocol's: there is no event to hang the repeat on.
+
+**The mechanism, read from `crossterm`'s source rather than assumed.** `MouseEventKind` has exactly eight variants: `Down(button)`, `Up(button)`, `Drag(button)`, `Moved`, and the four `Scroll*`. There is no variant meaning *the button is still down*, and there is no lower layer carrying one either: the entry above records that the bundle sets `?1003h`, so the terminal is already reporting the most it reports, and `?1003h` is **motion**. A finger resting on a button with the pointer stationary produces the single `Down` and then nothing at all until the pointer moves or the button is released.
+
+**So repeat has to come from a clock, and building one is what the reversal above authorises.** The only implementations available are a timer that fires while a flag says a button is held, or a loop that re-reads the button's state on a schedule, and both are a fixed cadence by another name.
+
+**And which half of I1 refuses that is worth getting right, because the obvious citation is the wrong one.** The first draft of this entry said the clock is "what I1 exists to refuse", and I1's *budget* does not refuse it at all: **0 wakeups while idle**, measured over a sixty-second idle window. A timer that runs only while a button is held is not idle, nobody holds a mouse button through a sixty-second window, and the gate would therefore stay green whatever the timer did. That is the same structural blindness the entry above this one records for pointer motion, where the measure is *"silent here by construction"* — and a refusal resting on it would be checkable and wrong, which is worse than no citation. What actually reaches a held-button clock is **I1's first sentence**, which is a claim about mechanism rather than about idleness: *"Redraw is event-driven, never a fixed timer."* A repeat clock is a fixed timer producing redraws whoever is holding what, and no measure needs to catch it for the sentence to hold.
+
+**This is not a correction to the phrase everywhere else it appears.** *"The timer I1 forbids"* is this repo's own shorthand and is used correctly in every other place it occurs: the pulse decay, the header's idle word, the memory readout, the poll loop `lib.rs` rejects and §10's highlight tail are all clocks that would run **while nothing is happening**, which is precisely the state the budget measures and precisely where it bites. A held-button repeat is the one instance where the clock is bounded by an active gesture, so it slips under the measure while still failing the sentence. Worth writing down because the shorthand is otherwise reliable, and a reader who has seen it used well five times will not stop to check the sixth.
+
+§5.3 refuses the same thing one layer up for animation: *"snap, never ease."* A step button that repeats is an eased scroll with a mouse holding it. That half is a design ruling and needs no measure either.
+
+**The first ruling made one step per click the affordance, on the grounds that there is no trick that is not a clock.** That half was right and is worth keeping: nobody should go looking for a protocol feature that would give repeat for free, because there is none. What the ruling got wrong was treating "it needs a clock" as the end of the argument rather than the beginning, when the question it should have asked next is *which* clock, and whether a clock bounded by a press is the thing I1's budget was written against. It is not. See the callout at the top of this entry.
+
+**What the reversal did not change** is that the button is not the travel affordance. The wheel, `j`/`k`, `d`/`u`, `n`/`p`, the digits, `g`, `G` and a draggable thumb are, and the button is for the step none of them expresses with a pointer. That is why the repeat holds a constant rate instead of accelerating: acceleration serves travel and costs precision, and precision is what this control is for.
+
+**The same finding decides the drag.** `input.rs` is a pure function of an event and a layout, with no state between calls, so it cannot know that a drag *began* on a button rather than on the thumb. Given that, a `Drag` over a button row has two candidate meanings and both are wrong: stepping makes a press-and-jiggle walk the view a row per twitch, and clamping to the end teleports it there. It is inert instead, which costs nothing real because the last track row already reaches the last window. Holding that reading stateless is what keeps the whole map a table test, and it is the reason the asymmetry between `Down` and `Drag` is a ruling rather than an oversight.
+
+**What holds it** is `crates/vigia/tests/input.rs::a_drag_onto_a_step_button_is_inert`, which asserts the same cell answers a press and refuses a drag, so the two gestures are being told apart rather than the row being dead. The drag ruling survived the reversal untouched, because it never rested on the clock: it rests on `input.rs` having no state, and the repeat's state lives in the loop rather than in that module.
+
+**What holds the reversal** is a different gate, and it is the one to break first if this is ever revisited: `nothing_held_means_no_timer_at_all` asserts that `Held::wait(None, _)` is `None`, which is what makes the loop's receive untimed on an idle monitor. Everything else about the repeat is a feel decision; that one is the invariant. A version that returned some large timeout instead would look harmless, pass every other gate in the file, and quietly put this program on a poll loop.
+
+---
+
 ## I4 — narrowed 2026-08-01: counting a height is not summing content
 
 > [!NOTE]

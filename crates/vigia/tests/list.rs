@@ -46,7 +46,7 @@ const MIN_BODY: usize = 2;
 const WIDE: u16 = 80;
 
 fn chrome(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None)
+    app.chrome("fixture", None, None)
 }
 
 fn split(width: u16, height: u16, files: usize) -> Body {
@@ -416,14 +416,14 @@ fn the_region_at_fifty_files() {
             app.apply(Action::Scroll(1), &mut frame, 1).expect("apply");
         }
         let area = ratatui::layout::Rect::new(0, 0, 80, 24);
-        let body = body_layout(area, &app.chrome("vigia", None), FILES);
+        let body = body_layout(area, &app.chrome("vigia", None, None), FILES);
         let view = app
             .view(&mut frame, &mut highlighter, &history, body)
             .expect("view");
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let theme = Theme::default();
-        let chrome = app.chrome("vigia", None);
+        let chrome = app.chrome("vigia", None, None);
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -856,7 +856,7 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
     // the row-to-offset arithmetic is half of what can be wrong here.
     let area = Rect::new(0, 0, WIDE, 24);
     let regions = regions(area, &chrome(&app), &view);
-    let (list_top_row, list_rows) = regions.list;
+    let (list_top_row, list_rows) = (regions.list.top, regions.list.rows);
     assert!(list_rows > 1, "no region was published to click on");
 
     let click = |row: u16| {
@@ -888,7 +888,7 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
     }
 
     // And a click on the diff below is still inert, which is B4 standing.
-    assert_eq!(action_for(&click(regions.diff.0 + 1), regions), None);
+    assert_eq!(action_for(&click(regions.diff.top + 1), regions), None);
 }
 
 /// A digit key press, through the real key map rather than by construction.

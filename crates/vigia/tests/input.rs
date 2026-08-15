@@ -13,7 +13,12 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use vigia::{Action, LIST_ROWS, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
+use std::time::{Duration, Instant};
+
+use vigia::{
+    Action, Held, LIST_ROWS, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
+    action_for,
+};
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -548,10 +553,24 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 }
 
 /// A screen with a pinned list on rows 1..4, a diff on 5..20, and bars at 79.
+///
+/// **One bare bar and one stepped one, which is the geometry `render::regions`
+/// actually produces for these heights.** The list's three rows are below the
+/// step floor, so its track is its region and every gate written before there
+/// were buttons still reads the rows it always read. The diff's fifteen are
+/// above it, so rows 5 and 19 are its buttons and its track is 6..19.
+///
+/// Stating both here rather than in each test is deliberate: a fixture that gave
+/// every region a track equal to itself would be a screen the renderer cannot
+/// draw, and gates written against it would pass while agreeing with nothing.
 fn two_regions() -> Regions {
     Regions {
-        list: (1, 3),
-        diff: (5, 15),
+        list: Region::bare(1, 3),
+        diff: Region {
+            top: 5,
+            rows: 15,
+            track: (6, 13),
+        },
         bar: Some(79),
     }
 }
@@ -632,17 +651,21 @@ fn dragging_a_bar_reports_where_along_its_own_track() {
             action_for(&at(kind, 79, 3), regions),
             Some(Action::ListTo(TRACK_SCALE))
         );
-        // Top of the diff's track, its middle, and its end.
+        // Top of the diff's track, its middle, and its end. **Rows 6, 12 and 18
+        // rather than 5, 12 and 19**, because this bar is stepped: its first and
+        // last rows are buttons and the track between them is what a drag reads.
+        // The three claims are the ones this test always made, re-pointed at the
+        // rows the thumb now occupies rather than weakened.
         assert_eq!(
-            action_for(&at(kind, 79, 5), regions),
+            action_for(&at(kind, 79, 6), regions),
             Some(Action::DiffTo(0))
         );
         assert_eq!(
             action_for(&at(kind, 79, 12), regions),
-            Some(Action::DiffTo((7 * TRACK_SCALE) / 14))
+            Some(Action::DiffTo(TRACK_SCALE / 2))
         );
         assert_eq!(
-            action_for(&at(kind, 79, 19), regions),
+            action_for(&at(kind, 79, 18), regions),
             Some(Action::DiffTo(TRACK_SCALE))
         );
     }
@@ -682,6 +705,391 @@ fn dragging_the_bar_is_checked_before_the_region_under_it() {
         Some(Action::ListTo(TRACK_SCALE / 2)),
         "a drag on the bar became a wheel"
     );
+}
+
+#[test]
+fn a_press_on_a_step_button_steps_one_row_in_the_region_it_is_in() {
+    // #166's affordance. The list's three rows are below the step floor so its bar
+    // has no buttons at all; the diff's fifteen are above it, so rows 5 and 19 are
+    // its ends. One step per press, and the direction comes from which end.
+    let regions = two_regions();
+    let press = MouseEventKind::Down(MouseButton::Left);
+
+    assert_eq!(
+        action_for(&at(press, 79, 5), regions),
+        Some(Action::Scroll(-1)),
+        "the diff's up button did not step up one row"
+    );
+    assert_eq!(
+        action_for(&at(press, 79, 19), regions),
+        Some(Action::Scroll(1)),
+        "the diff's down button did not step down one row"
+    );
+
+    // And the row either side of a button is track, not another button, so the
+    // buttons are one row each rather than a zone.
+    assert_eq!(
+        action_for(&at(press, 79, 6), regions),
+        Some(Action::DiffTo(0))
+    );
+    assert_eq!(
+        action_for(&at(press, 79, 18), regions),
+        Some(Action::DiffTo(TRACK_SCALE))
+    );
+}
+
+#[test]
+fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
+    // The list's own buttons, on a fixture tall enough to have them. **A separate
+    // screen rather than a second assertion on `two_regions`**, because the shared
+    // one is deliberately below the floor: what is proved here is that the region
+    // decides which action, so a bar drawn over the map moves the map.
+    let regions = Regions {
+        list: Region {
+            top: 1,
+            rows: 6,
+            track: (2, 4),
+        },
+        diff: Region {
+            top: 8,
+            rows: 12,
+            track: (9, 10),
+        },
+        bar: Some(79),
+    };
+    let press = MouseEventKind::Down(MouseButton::Left);
+
+    assert_eq!(
+        action_for(&at(press, 79, 1), regions),
+        Some(Action::ScrollList(-1)),
+        "the list's up button did not step the map up"
+    );
+    assert_eq!(
+        action_for(&at(press, 79, 6), regions),
+        Some(Action::ScrollList(1)),
+        "the list's down button did not step the map down"
+    );
+    // The list's buttons say nothing about the diff and the diff's say nothing
+    // about the map. The bar is one column for both regions, so this is the
+    // assertion that stops a press being resolved against the wrong one. Only
+    // the diff's rows are swept: the list's two are already pinned to exact
+    // actions above, and repeating them as a `matches!` would prove less.
+    for row in [8u16, 19] {
+        let action = action_for(&at(press, 79, row), regions).expect("a step");
+        assert!(
+            matches!(action, Action::Scroll(_)),
+            "a press on the diff's bar at row {row} produced {action:?}"
+        );
+    }
+}
+
+#[test]
+fn nothing_held_means_no_timer_at_all() {
+    // **The invariant the whole clock is allowed under.** I1's budget is zero
+    // wakeups while idle, and what keeps that true is not care taken elsewhere:
+    // it is that `Held::wait` hands back `None` when nothing is held, and `None`
+    // is an untimed receive. A version that returned some large timeout instead
+    // would look harmless, pass every other gate here, and put this program on a
+    // poll loop.
+    let now = Instant::now();
+    assert_eq!(
+        Held::wait(None, now),
+        None,
+        "with nothing held the loop was given a deadline, which is a timer on an \
+         idle monitor"
+    );
+
+    // And with something held it is bounded by the step that is due, so the loop
+    // still blocks rather than spinning.
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+    let patience = Held::wait(Some(hold), now).expect("a held step has a deadline");
+    assert!(
+        patience > Duration::ZERO && patience <= STEP_DELAY,
+        "a held step asked to wait {patience:?}, which is not inside the delay \
+         before it first repeats"
+    );
+}
+
+#[test]
+fn a_press_is_one_step_until_the_delay_has_passed() {
+    // A click is a click. The first repeat is not due until `STEP_DELAY`, so a
+    // reader who presses and lets go inside it has moved exactly one row, which
+    // is what the button meant before it could be held.
+    let now = Instant::now();
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    assert_eq!(hold.fire(now), None, "a press repeated immediately");
+    assert_eq!(
+        hold.fire(now + STEP_DELAY - Duration::from_millis(1)),
+        None,
+        "a press repeated before its delay was up"
+    );
+    assert!(
+        hold.fire(now + STEP_DELAY).is_some(),
+        "a press never repeated at all"
+    );
+}
+
+#[test]
+fn a_late_repeat_folds_into_one_action_rather_than_a_backlog() {
+    // **The performance half, and it is a correctness claim rather than a
+    // micro-optimisation.** If a repeat that arrives late applied one step and
+    // left the rest owed, a pane that stalled for a second would keep scrolling
+    // after the reader let go, working off a queue. Folding the elapsed
+    // intervals into one `Scroll(n)` makes the rate a fact about time: the same
+    // rows per second on a slow terminal as on a fast one, with coarser
+    // granularity, and nothing owed.
+    let now = Instant::now();
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    // Exactly on time is one step.
+    let (step, next) = hold.fire(now + STEP_DELAY).expect("a repeat");
+    assert_eq!(step, Action::Scroll(1));
+
+    // Four intervals late is five steps in one action, not five actions.
+    let (step, _) = next
+        .fire(now + STEP_DELAY + STEP_REPEAT * 5)
+        .expect("a late repeat");
+    assert_eq!(
+        step,
+        Action::Scroll(5),
+        "a repeat four intervals late did not fold, so the backlog would outlive \
+         the reader's finger"
+    );
+
+    // And the list's buttons fold the same way, in their own units.
+    let list = Held::new(Action::ScrollList(-1), (79, 1), now);
+    let (step, _) = list
+        .fire(now + STEP_DELAY + STEP_REPEAT * 2)
+        .expect("a repeat");
+    assert_eq!(step, Action::ScrollList(-3));
+}
+
+#[test]
+fn the_clock_advances_by_whole_intervals_so_the_rate_cannot_drift() {
+    // The deadline moves by the steps it just took, from the deadline. Moving it
+    // to *now plus one interval* instead would let every late tick push the next
+    // one later, so a pane under load scrolls slower and slower with the button
+    // still down and nothing says why.
+    //
+    // **Asserted through the following deadline, not through the action**, and
+    // that distinction is the gate. A first version of this test checked only
+    // that a late tick produced `Scroll(1)`, which is true of both versions:
+    // rescheduling from the wake is invisible in the step it returns and shows up
+    // only in when the *next* one is allowed. It passed against exactly the
+    // mutation it was written to catch.
+    let now = Instant::now();
+    let slip = Duration::from_millis(3);
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    // Fire the first repeat late, but by less than one interval, so it is one
+    // step either way and only the bookkeeping differs.
+    let (step, next) = hold.fire(now + STEP_DELAY + slip).expect("a repeat");
+    assert_eq!(step, Action::Scroll(1), "a slipped tick was counted twice");
+
+    // The second is then due on the grid, `STEP_REPEAT` after the first was, and
+    // owes nothing to when the first happened to be serviced.
+    assert!(
+        next.fire(now + STEP_DELAY + STEP_REPEAT).is_some(),
+        "the second repeat was pushed back by the first one's slip, so the rate \
+         walks downwards under load"
+    );
+}
+
+#[test]
+fn a_repeat_that_falls_far_behind_never_asks_the_loop_to_spin() {
+    // `Held::wait` hands the loop a `recv_timeout`, and a deadline left in the
+    // past would make that return instantly, over and over: a busy loop wearing a
+    // blocking receive. Folding the elapsed intervals is what keeps the next
+    // deadline at or after the moment it was computed, however far behind the
+    // loop has fallen.
+    let now = Instant::now();
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+
+    // A whole second late, which is twenty intervals.
+    let very_late = now + STEP_DELAY + Duration::from_secs(1);
+    let (step, next) = hold.fire(very_late).expect("a repeat");
+    assert_eq!(
+        step,
+        Action::Scroll(21),
+        "a second of lateness did not fold into one action"
+    );
+    assert_eq!(
+        next.fire(very_late),
+        None,
+        "the folded repeat left its own deadline in the past, so the loop would \
+         wake instantly and fire again"
+    );
+    assert!(
+        Held::wait(Some(next), very_late).is_some_and(|patience| patience > Duration::ZERO),
+        "the loop was asked to wait no time at all, which is a spin"
+    );
+}
+
+#[test]
+fn a_hold_ends_on_release_on_a_key_and_on_a_pointer_that_moved() {
+    // The four ways out, and the third is the one that closes a hole. `Moved` is
+    // motion *with no button down*, so it is positive evidence of a release
+    // rather than an absence of evidence, and it is what catches an `Up` that
+    // never arrived: without it a lost release leaves the loop stepping until
+    // something else happens to wake it.
+    let regions = two_regions();
+    let hold = Held::new(Action::Scroll(-1), (79, 5), Instant::now());
+
+    for (name, event) in [
+        (
+            "a release",
+            at(MouseEventKind::Up(MouseButton::Left), 79, 5),
+        ),
+        (
+            "a release of another button",
+            at(MouseEventKind::Up(MouseButton::Right), 79, 5),
+        ),
+        ("a pointer move", at(MouseEventKind::Moved, 79, 5)),
+        ("a key press", press(KeyCode::Char('j'))),
+        ("the quit key", press(KeyCode::Char('q'))),
+    ] {
+        assert!(
+            hold.ends(&event, regions),
+            "{name} did not end the hold, so the button would go on stepping"
+        );
+    }
+
+    // A twitch inside the same cell keeps it, which is why the press's own
+    // position is carried, and leaving the control ends it.
+    assert!(
+        !hold.ends(&at(MouseEventKind::Drag(MouseButton::Left), 79, 5), regions),
+        "a drag that never left the button ended the hold"
+    );
+    assert!(
+        hold.ends(
+            &at(MouseEventKind::Drag(MouseButton::Left), 79, 12),
+            regions
+        ),
+        "a drag off the button onto the track did not end the hold"
+    );
+}
+
+#[test]
+fn only_a_step_button_arms_a_hold() {
+    // The geometry the loop arms from is the geometry the press is resolved
+    // through, so the two cannot disagree about where a button is. Everything
+    // else on that column, and everything off it, arms nothing.
+    let regions = two_regions();
+
+    assert_eq!(regions.step_at(79, 5), Some(Action::Scroll(-1)));
+    assert_eq!(regions.step_at(79, 19), Some(Action::Scroll(1)));
+    // The track between them is a seek, not a step.
+    assert_eq!(regions.step_at(79, 12), None);
+    // The list's bar is below the step floor here, so it has no buttons at all.
+    assert_eq!(regions.step_at(79, 1), None);
+    // And off the bar's column there is nothing to hold.
+    assert_eq!(regions.step_at(40, 5), None);
+}
+
+#[test]
+fn repeating_an_action_that_does_not_accumulate_leaves_it_alone() {
+    // `Action::repeated` is the seam that makes holding general rather than
+    // scrollbar-shaped, so what each action does when held is a ruling and this
+    // is where they are held to it. Relative row counts multiply; a page held
+    // down is the reader's own key repeat and an absolute move has nothing to
+    // accumulate.
+    assert_eq!(Action::Scroll(1).repeated(4), Action::Scroll(4));
+    assert_eq!(Action::Scroll(-1).repeated(3), Action::Scroll(-3));
+    assert_eq!(Action::ScrollList(-1).repeated(2), Action::ScrollList(-2));
+
+    for action in [
+        Action::Page(1),
+        Action::HalfPage(-1),
+        Action::File(1),
+        Action::Top,
+        Action::Bottom,
+        Action::ToggleFollow,
+        Action::Redraw,
+        Action::Quit,
+        Action::ListRow(2),
+        Action::ListTo(0),
+        Action::DiffTo(0),
+    ] {
+        assert_eq!(
+            action.repeated(5),
+            action,
+            "{action:?} accumulated when held, which is a decision nobody made"
+        );
+    }
+}
+
+#[test]
+fn a_drag_onto_a_step_button_is_inert() {
+    // **The ruling, and the reason it is one.** A reader who grabbed the thumb and
+    // pulled past the end of the track is over a button, and the honest reading of
+    // that is *nothing further*: the last track row already reaches the last
+    // window, so the view is where they asked for it to be.
+    //
+    // Stepping on a drag instead would make a press-and-jiggle on a button walk
+    // the view a row per twitch, and clamping to the end would teleport it there.
+    // Both need to know a drag *began* on a button, which is state, and this
+    // module has none by design.
+    let regions = two_regions();
+    let drag = MouseEventKind::Drag(MouseButton::Left);
+
+    for row in [5u16, 19] {
+        assert_eq!(
+            action_for(&at(drag, 79, row), regions),
+            None,
+            "a drag onto the diff's button at row {row} moved something"
+        );
+    }
+    // And the same cell answers a press, so this is the gesture being told apart
+    // rather than the row being dead.
+    assert_eq!(
+        action_for(&at(MouseEventKind::Down(MouseButton::Left), 79, 5), regions),
+        Some(Action::Scroll(-1))
+    );
+}
+
+#[test]
+fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
+    // A button is the region's drag by another gesture, so it has to answer follow
+    // mode the same way: moving the map expresses no intent about the diff, and
+    // moving the diff is a manual scroll.
+    //
+    // **Driven through `action_for` rather than asserted about the `Action`
+    // variants directly**, and that is the whole gate. A version of this test
+    // that read `Action::Scroll(-1).is_manual_scroll()` off the enum would be
+    // three existing tests restated, and would stay green with the step buttons
+    // deleted outright: what has to be checked is that pressing a button *yields*
+    // an action carrying the region's own follow rule, not that the enum still
+    // has the rule.
+    let regions = Regions {
+        list: Region {
+            top: 1,
+            rows: 6,
+            track: (2, 4),
+        },
+        diff: Region {
+            top: 8,
+            rows: 12,
+            track: (9, 10),
+        },
+        bar: Some(79),
+    };
+    let press = MouseEventKind::Down(MouseButton::Left);
+
+    for (name, row, drag) in [
+        ("the list's up button", 1u16, Action::ListTo(0)),
+        ("the list's down button", 6, Action::ListTo(0)),
+        ("the diff's up button", 8, Action::DiffTo(0)),
+        ("the diff's down button", 19, Action::DiffTo(0)),
+    ] {
+        let step = action_for(&at(press, 79, row), regions).expect("a step");
+        assert_eq!(
+            step.is_manual_scroll(),
+            drag.is_manual_scroll(),
+            "{name} and a drag on the same bar disagree about follow mode: \
+             {step:?} against {drag:?}"
+        );
+    }
 }
 
 #[test]

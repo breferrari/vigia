@@ -82,7 +82,9 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
-pub use input::{Action, Regions, TRACK_SCALE, WHEEL_ROWS, action_for};
+pub use input::{
+    Action, Held, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for,
+};
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
     diff_height, regions, render,
@@ -96,9 +98,10 @@ pub use view::{
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::Instant;
 
+use ratatui::crossterm::event::{Event, MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia_core::{Highlighter, History, WatchOptions, Worktree};
 
@@ -347,6 +350,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         branch: None,
         screen: View::default(),
         regions: Regions::default(),
+        held: None,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -426,7 +430,51 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // loop needs is the one buffer it keeps.
     let mut batch = Vec::with_capacity(DRAIN_CAP);
 
-    'awake: while let Ok(wake) = rx.recv() {
+    // **The only clock this program owns, and it exists only between a press on
+    // a step button and its release.** `SPEC.md` §11.1 carries the ruling and
+    // `Held::wait` is the seam that keeps it honest: with `None` here the receive
+    // below is untimed, which is I1's *0 wakeups while idle* unchanged and
+    // unmeasurable-away. Nothing arms this but a press on a bar's end.
+    'awake: loop {
+        // Untimed with nothing held, which is the whole invariant. With something
+        // held the wait is only as long as the next step is away, so the loop
+        // still blocks rather than spinning.
+        let wake = match Held::wait(shell.held, Instant::now()) {
+            None => match rx.recv() {
+                Ok(wake) => Some(wake),
+                Err(_) => break 'awake,
+            },
+            Some(patience) => match rx.recv_timeout(patience) {
+                Ok(wake) => Some(wake),
+                // The repeat fell due with nothing else to do, which is the
+                // ordinary case while a button is down.
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => break 'awake,
+            },
+        };
+
+        // **The step, folded to however many intervals actually elapsed.** One
+        // `apply` and one paint whatever the terminal has been doing, so the rate
+        // is a fact about time rather than about paint speed. Taken before the
+        // drain so a repeat that coincides with a filesystem tick still lands in
+        // that tick's frame rather than in one of its own.
+        let repeat = shell.held.and_then(|hold| hold.fire(Instant::now()));
+        if let Some((step, next)) = repeat {
+            shell.held = Some(next);
+            match shell.app.apply(step, &mut frame, 0) {
+                Ok(true) => {}
+                Ok(false) => break 'awake,
+                Err(e) => shell.app.warn(e.to_string()),
+            }
+        }
+
+        let Some(wake) = wake else {
+            // A timeout woke this, so there is nothing to drain and the paint
+            // below is the whole of the frame.
+            shell.app.sample_memory();
+            shell.draw(&mut frame, &worktree)?;
+            continue;
+        };
         // Started before the drain, not after it, because the drain is part of
         // what a frame costs. `SPEC.md` §5.1 rules that the number on the status
         // bar is the whole turn of this loop, and the batch that a flick of a
@@ -453,6 +501,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 // restores nothing itself.
                 Wake::Signalled => break 'awake,
                 Wake::Input(event) => {
+                    // **Checked before the event is interpreted**, because a
+                    // release is not an action and would otherwise fall through
+                    // the `else` below with the repeat still armed. `Held::ends`
+                    // carries the four ways a hold finishes and why.
                     // **The regions the last paint actually drew.** A pointer is
                     // told what it is over by asking the same function `render`
                     // asks, against the view that is on screen, so the wheel can
@@ -462,6 +514,21 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `Regions::default()`, which is a screen with no region and
                     // no bars.
                     let regions = shell.regions();
+                    if shell.held.is_some_and(|hold| hold.ends(&event, regions)) {
+                        shell.held = None;
+                    }
+                    // **Armed from the same press that performs the first step**,
+                    // so a click is one step and a hold is that step continued.
+                    // `Regions::step_at` is the geometry both halves read, which
+                    // is what stops the repeat and the press disagreeing about
+                    // where a button is.
+                    if let Event::Mouse(mouse) = &event
+                        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                        && let Some(step) = regions.step_at(mouse.column, mouse.row)
+                    {
+                        shell.held =
+                            Some(Held::new(step, (mouse.column, mouse.row), Instant::now()));
+                    }
                     let Some(action) = action_for(&event, regions) else {
                         // Not every event is a request. Redrawing for a key release
                         // or a mouse move would make the idle cost non-zero for a
@@ -482,7 +549,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
                     let height = if action.needs_height() {
-                        let chrome = shell.app.chrome(&shell.name, shell.branch.as_deref());
+                        let chrome =
+                            shell
+                                .app
+                                .chrome(&shell.name, shell.branch.as_deref(), shell.pressed());
                         diff_height(shell.area()?, &chrome, frame.files().len())
                     } else {
                         0
@@ -649,9 +719,22 @@ struct Shell {
     /// syscall per event, and so the answer describes the screen a reader is
     /// actually pointing at rather than the one the next paint will make.
     regions: Regions,
+    /// What a mouse button is currently being held down on, if anything.
+    ///
+    /// **Here rather than in [`App`] because it is a fact about the terminal, not
+    /// about the viewport.** A hold begins and ends on input events, and `App`
+    /// owns where the reader is looking; giving it a field it never reads would
+    /// put a gesture's lifetime inside the thing the gesture moves. The paint
+    /// reads it to light the pressed button and nothing else does.
+    held: Option<Held>,
 }
 
 impl Shell {
+    /// The cell a step button is being held on, for the frame that draws it lit.
+    fn pressed(&self) -> Option<(u16, u16)> {
+        self.held.map(Held::at)
+    }
+
     /// The drawable area of the terminal right now.
     ///
     /// **Taken from the terminal's own resized state rather than from a second
@@ -740,7 +823,9 @@ impl Shell {
         // number `View::collect` will report as `View::files`, which is what
         // keeps this row budget and the renderer's layout in agreement: `render`
         // recomputes the same split from the same two inputs.
-        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
+        let chrome = self
+            .app
+            .chrome(&self.name, self.branch.as_deref(), self.pressed());
         let body = body_layout(self.area()?, &chrome, frame.files().len());
         match self
             .app
@@ -771,7 +856,9 @@ impl Shell {
         // that can disagree. Reading the branch from the stale view instead
         // would mean holding a name across frames, which is the confident lie
         // `branch_for` refuses.
-        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
+        let chrome = self
+            .app
+            .chrome(&self.name, self.branch.as_deref(), self.pressed());
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
@@ -1139,6 +1226,34 @@ mod tests {
             code.contains("Wake::Signalled => break 'awake"),
             "the signalled wake no longer unconditionally leaves the loop, which is \
              what makes `signal`'s one-way escalation latch safe"
+        );
+
+        // **The idle receive is untimed, and that is I1's budget as a structure
+        // rather than as an observation.** `Held::wait` returning `None` is gated
+        // in `tests/input.rs`, and it buys nothing unless this loop actually
+        // branches on it: a `recv_timeout` reached unconditionally would put an
+        // idle monitor on a poll loop while every gate over `Held` stayed green,
+        // because none of them can see which receive the loop calls.
+        //
+        // Read from the source for the reason the two assertions above are: the
+        // loop owns a terminal and three threads, so there is nothing to drive it
+        // with in a unit test, and the alternative is no gate at all.
+        let untimed = code
+            .find("None => match rx.recv()")
+            .expect("the loop no longer has an untimed receive for the idle case");
+        let timed = code
+            .find("rx.recv_timeout(")
+            .expect("the loop no longer has a bounded receive for a held step");
+        assert!(
+            untimed < timed,
+            "the loop reaches `recv_timeout` before it has decided whether \
+             anything is held, so an idle monitor is being given a deadline"
+        );
+        assert!(
+            code.contains("match Held::wait(shell.held, Instant::now())"),
+            "the loop no longer decides how long to wait through `Held::wait`, so \
+             the one function that can answer *is there a timer at all* is not the \
+             one being asked"
         );
     }
 }

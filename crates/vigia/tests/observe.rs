@@ -893,7 +893,7 @@ impl Pane<'_> {
     /// The buffer is a real one and `render` writes into it.
     fn paint(&mut self, worktree: &Worktree) {
         self.branch = branch_for(&self.frame, || worktree.branch());
-        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
+        let chrome = self.app.chrome(&self.name, self.branch.as_deref(), None);
         self.body = body_layout(self.area, &chrome, self.frame.files().len());
         match self.app.view(
             &mut self.frame,
@@ -910,7 +910,7 @@ impl Pane<'_> {
                 self.app.warn(e.to_string());
             }
         }
-        let chrome = self.app.chrome(&self.name, self.branch.as_deref());
+        let chrome = self.app.chrome(&self.name, self.branch.as_deref(), None);
         let _regions = regions(self.area, &chrome, &self.view);
         render(
             &mut self.buffer,
@@ -924,7 +924,9 @@ impl Pane<'_> {
     /// The status bar's own p99 readout, as a reader glancing at the pane would
     /// see it.
     fn readout(&self) -> Option<Duration> {
-        self.app.chrome(&self.name, self.branch.as_deref()).frame
+        self.app
+            .chrome(&self.name, self.branch.as_deref(), None)
+            .frame
     }
 }
 

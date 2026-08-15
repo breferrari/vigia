@@ -21,6 +21,7 @@ use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
 fn chrome() -> Chrome {
     Chrome {
+        pressed: None,
         worktree: "vigia".to_owned(),
         branch: None,
         mode: Mode::Watching,

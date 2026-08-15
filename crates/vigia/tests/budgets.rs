@@ -92,7 +92,7 @@ fn area() -> Rect {
 }
 
 fn layout(app: &App, files: usize) -> Body {
-    body_layout(area(), &app.chrome("fixture", None), files)
+    body_layout(area(), &app.chrome("fixture", None, None), files)
 }
 
 fn body(app: &App, files: usize) -> usize {
@@ -128,7 +128,7 @@ fn shell_frame(
     let began = Instant::now();
     frame.advance().expect("advance");
     app.sample_memory();
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     let view = app.view(frame, highlighter, history, screen).expect("view");
     render(buf, area(), &view, theme, &chrome);
     // Recorded from an inner clock rather than handed the caller's, because
@@ -242,7 +242,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         );
     }
 
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     assert!(
         chrome.frame.is_some(),
         "the timed frame never recorded what it cost, so every wall-clock gate \
@@ -1409,7 +1409,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
-        let chrome = app.chrome("fixture", None);
+        let chrome = app.chrome("fixture", None, None);
         let (painted, paint) = timed(|| render(&mut buf, area(), &screen, &theme, &chrome));
         let parsed = highlight_delta(before, highlighter.stats());
 

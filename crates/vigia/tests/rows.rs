@@ -438,7 +438,11 @@ fn a_real_repository_draws() {
     // some other measurement clean. If this one did too, no test anywhere would
     // draw a real frame's two regions together and the snapshot would be a
     // picture of a screen nobody gets.
-    let split = body_layout(area, &app.chrome("fixture", None), frame.files().len());
+    let split = body_layout(
+        area,
+        &app.chrome("fixture", None, None),
+        frame.files().len(),
+    );
     let view = app
         .view(&mut frame, &mut highlighter, &history, split)
         .expect("view");
@@ -453,7 +457,7 @@ fn a_real_repository_draws() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     terminal
         .draw(|f| {
             let area = f.area();
@@ -498,7 +502,11 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
     let area = Rect::new(0, 0, 80, 12);
-    let split = body_layout(area, &app.chrome("fixture", None), frame.files().len());
+    let split = body_layout(
+        area,
+        &app.chrome("fixture", None, None),
+        frame.files().len(),
+    );
     let view = app
         .view(&mut frame, &mut highlighter, &history, split)
         .expect("view");
@@ -517,7 +525,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None);
+    let chrome = app.chrome("fixture", None, None);
     terminal
         .draw(|f| {
             let drawn = f.area();
