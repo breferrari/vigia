@@ -58,6 +58,27 @@ fn lines_of(text: &str) -> Vec<String> {
     text.lines().map(str::to_owned).collect()
 }
 
+/// Two changed files and a third left alone, which is the smallest tree with an
+/// inter-file boundary in it.
+///
+/// **Named because two gates need the same shape and a fixture built twice
+/// drifts.** `a_real_repository_draws` reads the cells this produces and
+/// `a_files_block_ends_in_a_blank_row` reads the rows, so a change to one copy
+/// would leave the other asserting against a screen nobody draws. Every sibling
+/// test file here names its scratch shape for the same reason.
+///
+/// `README.md` is committed and never touched, so it is the file that must
+/// **not** appear: it is what stops a walk over every tracked file passing.
+fn two_changed(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("src/lib.rs", numbered(12));
+    scratch.write("README.md", unique("readme", 3));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
+    scratch.write("src/added.rs", unique("added", 2));
+    scratch
+}
+
 #[test]
 fn every_line_number_names_the_line_it_is_on() {
     // The fixture is built so the two sides cannot agree by accident: two lines
@@ -401,12 +422,7 @@ fn a_real_repository_draws() {
     // [#8](https://github.com/breferrari/vigia/issues/8) proves them where they
     // live instead, in `crates/vigia/src/terminal.rs`, against a recorded console
     // rather than a real one.
-    let scratch = Scratch::new("shell-rows-draw");
-    scratch.write("src/lib.rs", numbered(12));
-    scratch.write("README.md", unique("readme", 3));
-    scratch.commit_all("baseline");
-    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
-    scratch.write("src/added.rs", unique("added", 2));
+    let scratch = two_changed("shell-rows-draw");
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -566,4 +582,97 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
         view.rows.get(1)
     );
     assert_eq!(view.rows.len(), 2, "a binary file drew extra rows");
+}
+
+#[test]
+fn a_files_block_ends_in_a_blank_row() {
+    // [#165](https://github.com/breferrari/vigia/issues/165). A file's last
+    // content row and the next file's heading sat on adjacent rows, and a
+    // heading is a `Painter::file_row` carrying the kind letter, the path, the
+    // pulse, the heat strip, the sparkline and the counters, so a dense row
+    // landed directly under a dense row and the only thing marking the boundary
+    // was the content itself.
+    //
+    // **Trailing, and on every file but the last**, which is the ruling rather
+    // than an implementation detail, so the gate is written against all three of
+    // its halves: every heading after the first is preceded by a gap, the
+    // **first** row of the stream is a heading and not a gap, and the **last**
+    // file does **not** get one. Dropping any of the three is a different ruling
+    // that would otherwise pass this test, and the third is the one that was
+    // reversed while this was being built (the reason is at the assertion).
+    //
+    // Against a real frame rather than hand-built rows, because the claim is
+    // about what `View::take_file` produces from a diff, which is exactly what
+    // this file exists to cover.
+    let scratch = two_changed("shell-rows-gap");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    let view = View::collect(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Viewport {
+            position: Position { file: 0, row: 0 },
+            anchored: false,
+            diff_rows: ALL_ROWS,
+            ..Viewport::default()
+        },
+    )
+    .expect("view");
+
+    let headings: Vec<usize> = view
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(at, row)| matches!(row, Row::File(_)).then_some(at))
+        .collect();
+
+    // Non-vacuity first: with one changed file there is no boundary to draw and
+    // every assertion below holds for a renderer that draws no gap at all.
+    assert!(
+        headings.len() >= 2,
+        "the fixture drew {} headings, so there is no inter-file boundary in it \
+         and this gate proves nothing",
+        headings.len()
+    );
+    assert!(
+        view.rows.len() < ALL_ROWS,
+        "the whole diff did not fit, so the last row below is a window edge \
+         rather than the end of the stream"
+    );
+
+    assert_eq!(
+        headings.first(),
+        Some(&0),
+        "the stream does not open on a heading, so a gap was drawn above the \
+         first file: {:?}",
+        view.rows.first()
+    );
+    for &at in &headings[1..] {
+        assert_eq!(
+            view.rows.get(at - 1),
+            Some(&Row::Gap),
+            "the row above the heading at {at} is {:?} rather than the blank \
+             that ends the file before it",
+            view.rows.get(at - 1)
+        );
+    }
+    // **And the last file does not get one.** That is the exception rather than
+    // an oversight, and it is the half of this ruling that was reversed while it
+    // was being built: `SPEC.md` §11.1 rules the bottom of the diff is
+    // **content**, `scroll.rs::the_bottom_of_the_diff_is_content_rather_than_blank`
+    // is the gate over it, and that gate carries its own warning about having
+    // once been weakened. A blank there would separate the diff from nothing,
+    // since the footer is chrome with a row of its own. Asserted here as well,
+    // because this is the file that would notice a uniform gap coming back.
+    assert!(
+        !matches!(view.rows.last(), Some(Row::Gap)),
+        "the stream ends on a blank, so the gap has gone uniform and the bottom \
+         of the diff is no longer content"
+    );
 }

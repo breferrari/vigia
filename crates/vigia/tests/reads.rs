@@ -553,7 +553,7 @@ fn an_uncommitted_gitattributes_does_not_re_read_the_worktree_every_tick() {
     for tick in 1..=2 {
         let before = frame.stats();
         frame.advance().expect("advance");
-        frame.height(vigia::rows_of).expect("height");
+        vigia::diff_rows(&mut frame).expect("height");
         let cost = delta(before, frame.stats());
         assert_eq!(
             cost.measured, 0,
@@ -871,13 +871,14 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    // Each file here is one rewritten line: a file row, a hunk row and two
-    // content rows. Scrolling by forty files' worth of rows lands well inside the
-    // list rather than at either end.
-    let span = vigia::rows_in(&mut frame, 0).expect("rows");
-    assert_eq!(span, 4, "the fixture is not one line per file");
+    // Each file here is one rewritten line: a file row, a hunk row, two content
+    // rows, and since [#165](https://github.com/breferrari/vigia/issues/165) the
+    // blank that closes the block. Scrolling by forty files' worth of rows lands
+    // well inside the list rather than at either end.
+    let block = vigia::rows_in(&mut frame, 0).expect("rows");
+    assert_eq!(block, 5, "the fixture is not one line per file");
     app.apply(
-        vigia::Action::Scroll((span * 40) as isize),
+        vigia::Action::Scroll((block * 40) as isize),
         &mut frame,
         body(),
     )
@@ -899,7 +900,7 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
 
     // Ceiling, not division: the last file on screen is usually a partial one,
     // and it is still a file the frame had to be asked for.
-    let drawn = body().div_ceil(span) + listed();
+    let drawn = body().div_ceil(block) + listed();
     let settled = app
         .view(&mut frame, &mut highlighter, &history, layout())
         .expect("view");
@@ -925,8 +926,10 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
     let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let history = History::new();
-    let span = 4;
-    for height in [span, span * 2, span * 5] {
+    // A whole block: heading, hunk header, two content rows and the closing
+    // blank, so a screen of exactly `span` rows is exactly one file's worth.
+    let block = 5;
+    for height in [block, block * 2, block * 5] {
         // **List-free deliberately.** This gate is about the *diff* walk reading
         // in proportion to the rows it was given, and a pinned list would add a
         // constant to both sides that hides exactly the hardcoded-single-file
@@ -939,10 +942,12 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
                 Body::diff_only(height),
             )
             .expect("view");
+        // `span` is the whole block, the closing blank included, because that is
+        // what a screen's worth of rows is spent on.
         assert_eq!(
             view.read,
-            height / span,
-            "a {height}-row screen over {span}-row files read {} files",
+            height / block,
+            "a {height}-row screen over {block}-row blocks read {} files",
             view.read
         );
         assert_eq!(view.rows.len(), height);
@@ -1445,7 +1450,7 @@ fn what_a_row_exact_scrollbar_would_cost() {
         // exactly as the shipped one has.
         let before = frame.stats();
         let began = Instant::now();
-        let counted = frame.height(vigia::rows_of).expect("height");
+        let counted = vigia::diff_rows(&mut frame).expect("height");
         let cold = began.elapsed();
         let cold_cost = delta(before, frame.stats());
 
@@ -1531,7 +1536,7 @@ fn a_tick_recounts_the_height_and_a_redraw_does_not() {
         .expect("view");
     assert!(
         grown.total_rows > first,
-        "the diff doubled and the height stayed at {first}, so a stale span          survived the tick"
+        "the diff doubled and the height stayed at {first}, so a stale span \n         survived the tick"
     );
 }
 
@@ -1542,7 +1547,12 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     // scrolled. Mutation found the second term untested — dropping it left every
     // gate green while the thumb stopped moving inside a file.
     const FILES: usize = 12;
-    const SPAN: usize = 4;
+    /// A file's whole block: heading, hunk header, two content rows, and the
+    /// blank that closes it ([#165](https://github.com/breferrari/vigia/issues/165)).
+    /// `rows_above` is what the scrollbar is positioned from, so it counts the
+    /// blank exactly as the total does, and a `4` here would be asserting the
+    /// desynchronised arithmetic rather than the drawn one.
+    const BLOCK: usize = 5;
 
     let scratch = Scratch::large_diff("shell-rows-above", FILES, 1);
     let worktree = scratch.worktree();
@@ -1555,15 +1565,15 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     let split = layout();
 
     let mut seen = Vec::new();
-    for step in 0..SPAN * 3 {
+    for step in 0..BLOCK * 3 {
         let view = app
             .view(&mut frame, &mut highlighter, &history, split)
             .expect("view");
         seen.push(view.rows_above);
         assert_eq!(
             view.rows_above,
-            view.top.file * SPAN + view.top.row,
-            "step {step}: {} rows above a position of {:?} over {SPAN}-row files",
+            view.top.file * BLOCK + view.top.row,
+            "step {step}: {} rows above a position of {:?} over {BLOCK}-row blocks",
             view.rows_above,
             view.top
         );
@@ -1572,7 +1582,7 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     }
 
     // Strictly increasing, which is what says the within-file term is there: a
-    // position counting whole files only would repeat each value SPAN times.
+    // position counting whole files only would repeat each value BLOCK times.
     assert!(
         seen.windows(2).all(|pair| pair[0] < pair[1]),
         "the position did not move on every row: {seen:?}"

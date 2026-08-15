@@ -556,7 +556,7 @@ impl App {
             // walk below reads nothing that this frame has not read already.
             Action::DiffTo(at) => {
                 self.anchored = false;
-                let total = frame.height(crate::view::rows_of)?;
+                let total = crate::view::diff_rows(frame)?;
                 let target = scaled(at, total.saturating_sub(height));
                 let mut seen = 0;
                 let files = frame.files().len();
@@ -565,7 +565,7 @@ impl App {
                     row: 0,
                 };
                 for file in 0..files {
-                    let rows = frame.rows_of(file, crate::view::rows_of)?;
+                    let rows = crate::view::block_rows(frame, file)?;
                     if seen + rows > target {
                         position = Position {
                             file,
