@@ -33,6 +33,19 @@ pub struct Regions {
     pub diff: (u16, u16),
     /// The column both scrollbars are drawn in, when either is.
     pub bar: Option<u16>,
+    /// The rows of the pinned list's bar that carry track rather than a step
+    /// button, and the same for the diff's.
+    ///
+    /// **Passed rather than derived, which is this module's whole rule.** A
+    /// stepped bar spends its first and last row on buttons, so the track is not
+    /// the region; working that out here would mean knowing the height ladder
+    /// that decides it, and a second copy of a threshold is how the pointer comes
+    /// to seek from a row the thumb is not on. Equal to the region itself
+    /// wherever the bar has no buttons, so a caller that does not care may ask
+    /// unconditionally.
+    pub list_track: (u16, u16),
+    /// See [`Regions::list_track`].
+    pub diff_track: (u16, u16),
 }
 
 impl Regions {
@@ -42,10 +55,57 @@ impl Regions {
         rows > 0 && row >= top && row < top + rows
     }
 
-    /// How far down a region's track `row` sits, as a fraction over
-    /// [`TRACK_SCALE`], or `None` when it is not on that track.
-    fn along(self, row: u16, region: (u16, u16)) -> Option<u32> {
+    /// The step a press on `row` asks for, or `None` where it is not on a button.
+    ///
+    /// A button is a row **inside a region and outside that region's track**,
+    /// which is the whole definition: a bar with no buttons has a track equal to
+    /// its region and can never answer here. The region is what decides which
+    /// action, and the two are not interchangeable — moving the map expresses no
+    /// intent about the diff, so the list's buttons step the window and the
+    /// diff's step the viewport, exactly as the drag on the same column already
+    /// does. `SPEC.md` §11.1.
+    ///
+    /// **One step per press, and there is no other option.** No mouse protocol
+    /// reports a button that is *still* down: `crossterm` has `Down`, `Up`,
+    /// `Drag` and `Moved`, and a drag needs motion, so repeat-while-held would
+    /// have to be driven by a clock I1 forbids. `RULINGS.md` carries the
+    /// measurement.
+    fn step(self, row: u16) -> Option<Action> {
+        if let Some(rows) = Self::button(row, self.list, self.list_track) {
+            return Some(Action::ScrollList(rows));
+        }
+        Self::button(row, self.diff, self.diff_track).map(Action::Scroll)
+    }
+
+    /// `-1` on a region's leading button, `1` on its trailing one, `None` between
+    /// them and `None` outside the region.
+    ///
+    /// Written against the **track's** ends rather than the region's, so the two
+    /// cannot come apart: a row above the track is the up button and a row below
+    /// it is the down one, whatever the ladder decided the track would be.
+    fn button(row: u16, region: (u16, u16), track: (u16, u16)) -> Option<isize> {
         let (top, rows) = region;
+        if rows == 0 || row < top || row >= top + rows {
+            return None;
+        }
+        let (track_top, track_rows) = track;
+        if row < track_top {
+            Some(-1)
+        } else if row >= track_top + track_rows {
+            Some(1)
+        } else {
+            None
+        }
+    }
+
+    /// How far down a bar's track `row` sits, as a fraction over [`TRACK_SCALE`],
+    /// or `None` when it is not on that track.
+    ///
+    /// **Given the track and never the region**, which are the same tuple only
+    /// while a bar has no step buttons. Callers pass [`Regions::list_track`] or
+    /// [`Regions::diff_track`].
+    fn along(self, row: u16, track: (u16, u16)) -> Option<u32> {
+        let (top, rows) = track;
         if rows == 0 || row < top || row >= top + rows {
             return None;
         }
@@ -396,10 +456,27 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
             MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
         )
     {
-        if let Some(at) = regions.along(mouse.row, regions.list) {
+        // **A step button answers a press and not a drag**, and that asymmetry is
+        // a ruling rather than an omission. A reader who grabbed the thumb and
+        // pulled past the end of the track is over a button, and the honest
+        // reading of that gesture is *nothing further*: the last track row
+        // already reaches the last window, so the view is where they asked for it
+        // to be. Stepping instead would make a press-and-jiggle on the top button
+        // walk the view up a row per twitch, and clamping to the end would
+        // teleport it there; both need to know a drag *began* on a button, which
+        // is state, and this module has none by design.
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && let Some(step) = regions.step(mouse.row)
+        {
+            return Some(step);
+        }
+        // **The track, not the region**, so a stepped bar seeks from the rows its
+        // thumb actually occupies. Where there are no buttons the two are the
+        // same tuple and this is what it always was.
+        if let Some(at) = regions.along(mouse.row, regions.list_track) {
             return Some(Action::ListTo(at));
         }
-        if let Some(at) = regions.along(mouse.row, regions.diff) {
+        if let Some(at) = regions.along(mouse.row, regions.diff_track) {
             return Some(Action::DiffTo(at));
         }
         return None;

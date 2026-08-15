@@ -548,11 +548,23 @@ fn scrolling_the_list_is_not_a_manual_scroll() {
 }
 
 /// A screen with a pinned list on rows 1..4, a diff on 5..20, and bars at 79.
+///
+/// **One bare bar and one stepped one, which is the geometry `render::regions`
+/// actually produces for these heights.** The list's three rows are below the
+/// step floor, so its track is its region and every gate written before there
+/// were buttons still reads the rows it always read. The diff's fifteen are
+/// above it, so rows 5 and 19 are its buttons and its track is 6..19.
+///
+/// Stating both here rather than in each test is deliberate: a fixture that gave
+/// every region a track equal to itself would be a screen the renderer cannot
+/// draw, and gates written against it would pass while agreeing with nothing.
 fn two_regions() -> Regions {
     Regions {
         list: (1, 3),
         diff: (5, 15),
         bar: Some(79),
+        list_track: (1, 3),
+        diff_track: (6, 13),
     }
 }
 
@@ -632,17 +644,21 @@ fn dragging_a_bar_reports_where_along_its_own_track() {
             action_for(&at(kind, 79, 3), regions),
             Some(Action::ListTo(TRACK_SCALE))
         );
-        // Top of the diff's track, its middle, and its end.
+        // Top of the diff's track, its middle, and its end. **Rows 6, 12 and 18
+        // rather than 5, 12 and 19**, because this bar is stepped: its first and
+        // last rows are buttons and the track between them is what a drag reads.
+        // The three claims are the ones this test always made, re-pointed at the
+        // rows the thumb now occupies rather than weakened.
         assert_eq!(
-            action_for(&at(kind, 79, 5), regions),
+            action_for(&at(kind, 79, 6), regions),
             Some(Action::DiffTo(0))
         );
         assert_eq!(
             action_for(&at(kind, 79, 12), regions),
-            Some(Action::DiffTo((7 * TRACK_SCALE) / 14))
+            Some(Action::DiffTo(TRACK_SCALE / 2))
         );
         assert_eq!(
-            action_for(&at(kind, 79, 19), regions),
+            action_for(&at(kind, 79, 18), regions),
             Some(Action::DiffTo(TRACK_SCALE))
         );
     }
@@ -681,6 +697,131 @@ fn dragging_the_bar_is_checked_before_the_region_under_it() {
         action_for(&at(MouseEventKind::Drag(MouseButton::Left), 79, 2), regions),
         Some(Action::ListTo(TRACK_SCALE / 2)),
         "a drag on the bar became a wheel"
+    );
+}
+
+#[test]
+fn a_press_on_a_step_button_steps_one_row_in_the_region_it_is_in() {
+    // #166's affordance. The list's three rows are below the step floor so its bar
+    // has no buttons at all; the diff's fifteen are above it, so rows 5 and 19 are
+    // its ends. One step per press, and the direction comes from which end.
+    let regions = two_regions();
+    let press = MouseEventKind::Down(MouseButton::Left);
+
+    assert_eq!(
+        action_for(&at(press, 79, 5), regions),
+        Some(Action::Scroll(-1)),
+        "the diff's up button did not step up one row"
+    );
+    assert_eq!(
+        action_for(&at(press, 79, 19), regions),
+        Some(Action::Scroll(1)),
+        "the diff's down button did not step down one row"
+    );
+
+    // And the row either side of a button is track, not another button, so the
+    // buttons are one row each rather than a zone.
+    assert_eq!(
+        action_for(&at(press, 79, 6), regions),
+        Some(Action::DiffTo(0))
+    );
+    assert_eq!(
+        action_for(&at(press, 79, 18), regions),
+        Some(Action::DiffTo(TRACK_SCALE))
+    );
+}
+
+#[test]
+fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
+    // The list's own buttons, on a fixture tall enough to have them. **A separate
+    // screen rather than a second assertion on `two_regions`**, because the shared
+    // one is deliberately below the floor: what is proved here is that the region
+    // decides which action, so a bar drawn over the map moves the map.
+    let regions = Regions {
+        list: (1, 6),
+        diff: (8, 12),
+        bar: Some(79),
+        list_track: (2, 4),
+        diff_track: (9, 10),
+    };
+    let press = MouseEventKind::Down(MouseButton::Left);
+
+    assert_eq!(
+        action_for(&at(press, 79, 1), regions),
+        Some(Action::ScrollList(-1)),
+        "the list's up button did not step the map up"
+    );
+    assert_eq!(
+        action_for(&at(press, 79, 6), regions),
+        Some(Action::ScrollList(1)),
+        "the list's down button did not step the map down"
+    );
+    // Neither of them says anything about the diff, and the diff's say nothing
+    // about the map. The bar is one column for both regions, so this is the
+    // assertion that stops a press being resolved against the wrong one.
+    for row in [1u16, 6] {
+        let action = action_for(&at(press, 79, row), regions).expect("a step");
+        assert!(
+            matches!(action, Action::ScrollList(_)),
+            "a press on the list's bar at row {row} produced {action:?}"
+        );
+    }
+    for row in [8u16, 19] {
+        let action = action_for(&at(press, 79, row), regions).expect("a step");
+        assert!(
+            matches!(action, Action::Scroll(_)),
+            "a press on the diff's bar at row {row} produced {action:?}"
+        );
+    }
+}
+
+#[test]
+fn a_drag_onto_a_step_button_is_inert() {
+    // **The ruling, and the reason it is one.** A reader who grabbed the thumb and
+    // pulled past the end of the track is over a button, and the honest reading of
+    // that is *nothing further*: the last track row already reaches the last
+    // window, so the view is where they asked for it to be.
+    //
+    // Stepping on a drag instead would make a press-and-jiggle on a button walk
+    // the view a row per twitch, and clamping to the end would teleport it there.
+    // Both need to know a drag *began* on a button, which is state, and this
+    // module has none by design.
+    let regions = two_regions();
+    let drag = MouseEventKind::Drag(MouseButton::Left);
+
+    for row in [5u16, 19] {
+        assert_eq!(
+            action_for(&at(drag, 79, row), regions),
+            None,
+            "a drag onto the diff's button at row {row} moved something"
+        );
+    }
+    // And the same cell answers a press, so this is the gesture being told apart
+    // rather than the row being dead.
+    assert_eq!(
+        action_for(&at(MouseEventKind::Down(MouseButton::Left), 79, 5), regions),
+        Some(Action::Scroll(-1))
+    );
+}
+
+#[test]
+fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
+    // A button is the region's drag by another gesture, so it has to answer follow
+    // mode the same way. Moving the map expresses no intent about the diff and
+    // moving the diff is a manual scroll: the actions the buttons produce already
+    // say exactly that, and this is what stops a future button growing an action
+    // of its own that does not.
+    assert!(!Action::ScrollList(-1).is_manual_scroll());
+    assert!(Action::Scroll(-1).is_manual_scroll());
+    assert_eq!(
+        Action::ListTo(0).is_manual_scroll(),
+        Action::ScrollList(-1).is_manual_scroll(),
+        "the list's button and the list's drag disagree about follow"
+    );
+    assert_eq!(
+        Action::DiffTo(0).is_manual_scroll(),
+        Action::Scroll(-1).is_manual_scroll(),
+        "the diff's button and the diff's drag disagree about follow"
     );
 }
 

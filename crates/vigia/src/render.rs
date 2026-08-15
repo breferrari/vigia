@@ -258,6 +258,40 @@ const BAR_THUMB: char = '█';
 /// the thumb is the reading.
 const BAR_TRACK: char = '▕';
 
+/// The step button at the top of a bar, and the one at the bottom.
+///
+/// **Outside CP437, and deliberately so.** Measured rather than assumed: the
+/// codec refuses `▲`, `▼`, `▴`, `▾`, `↑` and `↓` alike, and the two triangles
+/// IBM's graphic table does place are at `0x1E` and `0x1F`, which a console
+/// consumes as control codes before they reach a glyph. That is the same trap
+/// `SPEC.md` §10 already records for `←`. What settles the choice is one column
+/// over: [`BAR_TRACK`] is **itself** outside CP437, so a console that cannot
+/// draw a button already cannot draw the track it sits on, and the buttons cost
+/// such a reader nothing that survived before. A ladder for characters is
+/// [#159](https://github.com/breferrari/vigia/issues/159)'s question and is not
+/// invented here.
+const STEP_UP: char = '▲';
+const STEP_DOWN: char = '▼';
+
+/// Rows a stepped bar spends on buttons: one at each end.
+const STEP_ROWS: u16 = 2;
+
+/// The shortest track that can still express more than one position.
+///
+/// One row is full at every window, which is the "column saying there is nothing
+/// to scroll" [`scrollable`] and [`Painter::with_bar`] both already refuse. Two
+/// is where a thumb has somewhere to be.
+const MIN_TRACK: u16 = 2;
+
+/// The shortest region whose bar carries step buttons.
+///
+/// **A sum rather than a literal.** The floor is the buttons plus the smallest
+/// track worth drawing between them, and writing it as `4` would leave the
+/// agreement between the drawer and this threshold clerical: change what a
+/// stepped bar spends and every gate over the drawn output stays green while the
+/// *boundary* silently keeps the old total.
+const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
+
 /// What marks the row for the file the diff is currently inside.
 ///
 /// **Not a cursor**, and the glyph is chosen to say so. `SPEC.md` §11.2 B4 keeps
@@ -1152,6 +1186,76 @@ impl<'r> Heading<'r> {
 /// caught exactly that when this was one check instead of two.
 fn scrollable(span: u64, of: u64) -> bool {
     of != 0 && span < of
+}
+
+/// What a region's scrollbar is, before anything is drawn.
+///
+/// **One answer, read by the screen and by the pointer.** [`Painter::with_bar`]
+/// and [`regions`] each used to spell `wide && rows > 1 && scrollable(..)` for
+/// themselves, which was survivable while the two agreed by inspection and stops
+/// being so the moment a bar has parts: a threshold two expressions keep by hand
+/// is invisible to every test that reads what was drawn, because the drawn side
+/// stays correct and only the *width at which* it changes drifts. A stepped bar
+/// puts a track somewhere other than the region's own rows, and a pointer told
+/// the wrong place would seek from a row the thumb is not on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bar {
+    /// No column at all: the region shows everything it holds, or the pane
+    /// cannot afford one.
+    None,
+    /// Track and thumb, from the region's first row to its last.
+    Bare,
+    /// A step button at each end, with the track between them.
+    Stepped,
+}
+
+impl Bar {
+    /// Whether a column is taken for this at all.
+    fn drawn(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// The `(top, rows)` of a region that carry track rather than a button.
+    ///
+    /// Equal to the region itself unless the bar is [`Bar::Stepped`], so a caller
+    /// that does not care which it has can ask unconditionally.
+    ///
+    /// Saturating for [`Painter::scrollbar`]'s stated reason: a private
+    /// arithmetic whose safety rests on a floor checked in another function is an
+    /// underflow waiting for the day someone calls it with the wrong shape.
+    fn track(self, top: u16, rows: u16) -> (u16, u16) {
+        match self {
+            Self::Stepped => (top.saturating_add(1), rows.saturating_sub(STEP_ROWS)),
+            Self::None | Self::Bare => (top, rows),
+        }
+    }
+}
+
+/// Decide a region's bar from what it holds and what the pane can afford.
+///
+/// `wide` is whether the **pane** can afford a bar at all, which is one rule for
+/// the whole screen so a reader never sees half a pair. Everything else is about
+/// this region.
+///
+/// **A one-row region gets nothing**, because [`scrollable`] guarantees
+/// `span < of` and therefore `(span * rows) / of < rows`, so the thumb equals the
+/// track exactly when `rows == 1`. Drawing it spends two of forty columns on a
+/// mark that cannot move.
+///
+/// **Buttons from [`STEP_FLOOR`] up, and never below it.** The buttons come out
+/// of the track, so a region short enough to be all buttons would have a bar with
+/// nothing between them to click; below the floor the bar is exactly what it drew
+/// before there were any. Monotone by construction: one comparison against one
+/// threshold, so a taller region can never lose them.
+fn bar_for(wide: bool, rows: u16, span: u64, of: u64) -> Bar {
+    if !(wide && rows > 1 && scrollable(span, of)) {
+        return Bar::None;
+    }
+    if rows >= STEP_FLOOR {
+        Bar::Stepped
+    } else {
+        Bar::Bare
+    }
 }
 
 /// The width a region's glance columns are planned against.
@@ -2188,16 +2292,22 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let list_top = area.y + 1;
     let diff_top = list_top + body.list as u16 + u16::from(body.rule);
 
-    // A bar column only where a bar is actually drawn, and only where it can
-    // express more than one position: a one-row track is full at every window,
-    // so it says nothing and would still swallow a click.
-    let list_bar = wide && body.list > 1 && scrollable(body.list as u64, view.files as u64);
-    let diff_bar = wide && body.diff > 1 && scrollable(body.diff as u64, view.total_rows as u64);
+    // **Asked through `bar_for`, which is what `render` asks.** A bar column only
+    // where a bar is actually drawn, and only where it can express more than one
+    // position: a one-row track is full at every window, so it says nothing and
+    // would still swallow a click. The same call also says where each track is,
+    // which is the part a pointer cannot derive for itself.
+    let list_rows = body.list as u16;
+    let diff_rows = body.diff as u16;
+    let list_bar = bar_for(wide, list_rows, body.list as u64, view.files as u64);
+    let diff_bar = bar_for(wide, diff_rows, body.diff as u64, view.total_rows as u64);
 
     Regions {
-        list: (list_top, body.list as u16),
-        diff: (diff_top, body.diff as u16),
-        bar: (list_bar || diff_bar).then(|| area.x + area.width - 1),
+        list: (list_top, list_rows),
+        diff: (diff_top, diff_rows),
+        bar: (list_bar.drawn() || diff_bar.drawn()).then(|| area.x + area.width - 1),
+        list_track: list_bar.track(list_top, list_rows),
+        diff_track: diff_bar.track(diff_top, diff_rows),
     }
 }
 
@@ -2962,17 +3072,16 @@ impl Painter<'_> {
     ///
     /// `wide` is whether the pane can afford a bar at all, which is one rule for
     /// the whole screen so a reader never sees half a pair.
+    ///
+    /// **The deciding half now lives in [`bar_for`]**, which is the same
+    /// consolidation one layer out: `regions` asks it too, so the pointer and the
+    /// screen cannot disagree about whether a bar exists or where its track is.
     fn with_bar(&mut self, region: Rect, wide: bool, at: u64, span: u64, of: u64) -> Rect {
-        // **A one-row track is full at every position**, because `scrollable`
-        // guarantees `span < of` and therefore `(span * rows) / of < rows`, so the
-        // thumb equals the track exactly when `rows == 1`. Drawing it spends two
-        // of forty columns on a mark that cannot move, which is the same "column
-        // saying there is nothing to scroll" `scrollable` itself exists to
-        // refuse.
-        if !(wide && region.height > 1 && scrollable(span, of)) {
+        let bar = bar_for(wide, region.height, span, of);
+        if !bar.drawn() {
             return region;
         }
-        self.scrollbar(region, at, span, of);
+        self.scrollbar(region, bar, at, span, of);
         Rect {
             width: region.width.saturating_sub(BAR_WIDTH as u16),
             ..region
@@ -2994,14 +3103,28 @@ impl Painter<'_> {
     /// Draws nothing when `of` is zero or when everything already fits: a full
     /// bar is a column spent saying there is nothing to scroll. [`scrollable`]
     /// is the same question asked before the column is taken away.
-    fn scrollbar(&mut self, area: Rect, at: u64, span: u64, of: u64) {
-        let rows = u64::from(area.height);
-        // **Width guarded here as well as by the caller.** `render` only calls
-        // this above `BAR_FLOOR`, so a zero width cannot reach it today, and the
-        // subtraction below would underflow if one ever did. A private method
-        // whose safety rests on a condition checked in another function is a
-        // panic waiting for the day someone adds a third caller.
-        if rows == 0 || area.width == 0 || !scrollable(span, of) {
+    ///
+    /// **`bar` is passed rather than re-decided**, because [`bar_for`] needs the
+    /// pane's width and this has only a region's. Re-deriving it here is the one
+    /// way the pointer and the screen could come to hold different tracks.
+    fn scrollbar(&mut self, area: Rect, bar: Bar, at: u64, span: u64, of: u64) {
+        // **Width and height guarded here as well as by the caller.** `render`
+        // only calls this above `BAR_FLOOR` and only through `bar_for`, so a zero
+        // width cannot reach it today, and the subtractions below would underflow
+        // if one ever did. A private method whose safety rests on a condition
+        // checked in another function is a panic waiting for the day someone adds
+        // a third caller.
+        if area.height == 0 || area.width == 0 || !scrollable(span, of) {
+            return;
+        }
+
+        // **The track, not the region.** A stepped bar spends its first and last
+        // row on buttons, and every term below is scaled against what is left:
+        // getting one of them to keep the region's own height is precisely the
+        // defect the travel comment records, arriving through a different door.
+        let (track_top, track_rows) = bar.track(area.y, area.height);
+        let rows = u64::from(track_rows);
+        if rows == 0 {
             return;
         }
 
@@ -3028,17 +3151,37 @@ impl Painter<'_> {
             } else {
                 (BAR_TRACK, self.theme.bar_track)
             };
-            // **Cell by cell, not `set_stringn`.** The same choice the heat strip
-            // makes two functions down, and for a sharper reason here: a string
-            // call allocates per row and then segments the graphemes of a
-            // single-character string, which measured ten times the cost of
-            // writing the cell. A bar is `list + diff` rows of that, twice a
-            // screen.
-            // Clipped, for the reason the heat strip gives.
-            if let Some(cell) = self.buf.cell_mut((x, area.y + row as u16)) {
-                cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
-                    .set_style(style);
-            }
+            self.bar_cell(x, track_top + row as u16, glyph, style);
+        }
+
+        // **The buttons last, and after the track rather than around it.** They
+        // sit on rows the loop above never reaches, so the order is not a
+        // correctness claim; drawing them here keeps the one arithmetic in one
+        // place and leaves this as what it reads like, two cells at the ends.
+        //
+        // [`Theme::bar_track`] rather than [`Theme::bar`], so the thumb stays the
+        // only lit thing on the column and the readout is unchanged: a button is
+        // chrome, and shape is what tells it from the track it shares a weight
+        // with. It costs no theme field and no palette entry.
+        if matches!(bar, Bar::Stepped) {
+            self.bar_cell(x, area.y, STEP_UP, self.theme.bar_track);
+            self.bar_cell(x, area.y + area.height - 1, STEP_DOWN, self.theme.bar_track);
+        }
+    }
+
+    /// Write one cell of a scrollbar's column.
+    ///
+    /// **Cell by cell, not `set_stringn`.** The same choice the heat strip makes
+    /// two functions down, and for a sharper reason here: a string call allocates
+    /// per row and then segments the graphemes of a single-character string,
+    /// which measured ten times the cost of writing the cell. A bar is
+    /// `list + diff` rows of that, twice a screen.
+    ///
+    /// Clipped, for the reason the heat strip gives.
+    fn bar_cell(&mut self, x: u16, y: u16, glyph: char, style: Style) {
+        if let Some(cell) = self.buf.cell_mut((x, y)) {
+            cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
+                .set_style(style);
         }
     }
 
