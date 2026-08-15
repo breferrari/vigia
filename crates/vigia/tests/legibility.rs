@@ -2723,6 +2723,115 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
     }
 }
 
+/// `SPEC.md` §11.2 B8 and B9, and the mechanism is what is gated rather than
+/// either affordance.
+///
+/// > B8 — OSC 8 hyperlinks on drawn paths. Ruled 2026-08-15: no.
+/// > B9 — a yank key over OSC 52. Ruled 2026-08-15: no.
+///
+/// **A hyperlink is not nameable from the drawn output**, which is the whole
+/// reason this gate is shaped the way it is. A terminal that renders OSC 8
+/// correctly shows a path that looks exactly like a path, so no assertion over
+/// what a reader *sees* can tell the two apart. What both declined affordances
+/// share is a **mechanism**: an escape sequence carried in-band, inside a cell's
+/// symbol, which is the only route from a `ratatui` cell grid to a control
+/// sequence. So that is what is forbidden, and a build of either reddens this
+/// before it reddens anything else.
+///
+/// **This is also the measurement B8 rests on, kept executable.** An escape
+/// smuggled into a symbol is invisible to the terminal and maximally visible to
+/// everything else that reads those cells: `Span::raw` measures a one-column
+/// linked `M` at **46** columns, because `unicode-width` gives every character
+/// in the sequence a width, the two `ESC`s included at one column each, rather
+/// than recognising any of it as a control sequence. That is how [`occupied`],
+/// [`rows_at`] and every sweep in this file measure a row. `TestBackend`'s
+/// `Display` is every snapshot in this repository, and a linked cell lands in
+/// one verbatim, carrying the path with it. Neither cost is visible from the
+/// pane, which is why the ruling needed a gate rather than a paragraph.
+///
+/// **Note where the escape has to come from, because it is not `Painter::put`.**
+/// `ratatui`'s `set_stringn` filters graphemes containing a control character,
+/// so an escape written through the painter is dropped and only its printable
+/// payload reaches the screen. The mutation that proves this gate therefore has
+/// to write the symbol onto the cell directly; one that goes through `put`
+/// leaves this gate green while reddening two others in this file, for a reason
+/// that has nothing to do with hyperlinks. A mutation that cannot produce the
+/// artifact is not evidence about the gate that watches for it.
+///
+/// **And the scan is per cell rather than through [`rows_at`], which would
+/// weaken it.** That helper skips cells covered by a preceding double-width
+/// symbol, so an escape written onto a covered cell would never be examined.
+/// The row text it returns is fine for the non-vacuity check below, and is used
+/// for exactly that.
+///
+/// **What this does not reach, stated because §11.2 cites it.** It holds B8,
+/// whose only workable mechanism is the one forbidden here. It does **not** hold
+/// B9: a `y` bound to an OSC 52 write draws nothing, touches no cell, and leaves
+/// this buffer identical. `crates/vigia/tests/input.rs::the_yank_key_is_refused_rather_than_unbound`
+/// is B9's gate, and the two are named in each other so neither is mistaken for
+/// covering both. `render.rs::tabs_become_columns_and_control_characters_become_visible`
+/// asserts no escape at one width over one fixture with an empty list, as a
+/// property of the content sanitiser; that overlap is real and partial, and it
+/// is not a substitute for this sweep.
+///
+/// **Two fixtures, chosen to isolate the two regions a path is drawn in**, so a
+/// failure names which one and one region going blank cannot be masked by the
+/// other. [`numbered`] populates the pinned list and draws no heading;
+/// [`every_row_kind`] draws stream headings over an empty list, including a
+/// rename, which is the row that names two paths at once. `cases`'s own `pinned`
+/// carries both at once and is the right fixture for anyone who wants one screen
+/// rather than two claims.
+#[test]
+fn a_drawn_path_carries_no_escape_sequence_of_its_own() {
+    const ESC: char = '\x1b';
+    /// A fragment of every fixture path, and what non-vacuity rests on.
+    const EXTENSION: &str = ".rs";
+
+    let tall = 24u16;
+    let chrome = chrome();
+
+    for (region, view) in [
+        ("the pinned list", numbered(usize::from(tall) + 8, 6, 6)),
+        ("the diff stream", every_row_kind()),
+    ] {
+        // Whether this fixture drew anything recognisable as a path at any width.
+        // Tracked per fixture rather than over the sweep as a whole, so one region
+        // going blank cannot be covered by the other still drawing.
+        let mut naming = false;
+
+        for width in WIDTHS {
+            let backend = drawn(width, tall, &view, &chrome);
+            let buffer = backend.buffer();
+
+            for y in 0..tall {
+                for x in 0..width {
+                    let symbol = buffer[(x, y)].symbol();
+                    // The one claim.
+                    assert!(
+                        !symbol.contains(ESC),
+                        "at {width} columns {region} drew an escape sequence into \
+                         the cell at ({x}, {y}): {symbol:?}"
+                    );
+                }
+            }
+
+            // Short-circuited, because the claim is that this fixture draws paths
+            // *somewhere* in the sweep and the second render is only worth paying
+            // until it does. In practice that is the first eight widths.
+            naming = naming
+                || rows_at(width, tall, &view, &chrome)
+                    .iter()
+                    .any(|row| row.contains(EXTENSION));
+        }
+
+        assert!(
+            naming,
+            "no width in {WIDTHS:?} drew a path in {region}, so this sweep proved \
+             nothing about the rows it exists to watch"
+        );
+    }
+}
+
 /// The third case of `SPEC.md` §11.1's layout rule, and the one that is a
 /// correctness claim rather than a tidiness one.
 ///
