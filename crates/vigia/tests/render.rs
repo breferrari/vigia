@@ -383,8 +383,25 @@ fn a_content_row_stands_its_sigil_off_the_line() {
     // Two widths, and forty is not decoration: the gap costs a content column
     // and I6 is named for that width, so a rule that only held where space was
     // free would be the ladder this deliberately refused.
+    let view = one_file();
+    // Read off the fixture rather than restated beside it, which is the move the
+    // counters' gate on this same branch already makes. A hand-written table of
+    // indents is a second copy of `one_file()`: re-indent one of its lines and
+    // this gate fails naming the renderer for a fixture edit. Derived, it also
+    // covers **every** content row instead of the four somebody typed out, and
+    // the deepest two are exactly where a gap and an indent would be confused.
+    let indents: Vec<(u16, usize)> = view
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(i, row)| match row {
+            Row::Line { text, .. } => Some((i as u16 + 1, text.len() - text.trim_start().len())),
+            _ => None,
+        })
+        .collect();
+
     for width in [80u16, 40] {
-        let backend = screen(width, 14, &one_file(), &chrome());
+        let backend = screen(width, 14, &view, &chrome());
 
         // Found rather than computed. Recomputing where the renderer puts a
         // sigil would be a second implementation of the gutter agreeing with the
@@ -392,40 +409,50 @@ fn a_content_row_stands_its_sigil_off_the_line() {
         let removed = column_of(&backend, 5, "-");
         let added = column_of(&backend, 6, "+");
 
+        // **Asserted before anything reads from it**, because it is a
+        // precondition rather than an afterthought: every comparison below
+        // measures from `origin`, and if the two sigils disagreed about their
+        // column then `origin` came from a row the loop never checks and each
+        // comparison is against itself. Stated first, a disagreement fails as
+        // itself instead of as whichever assertion it corrupted.
+        assert_eq!(
+            removed, added,
+            "at {width} columns the two sigils sit in different columns, so the \
+             origin this gate measures from is not the block's"
+        );
+        let origin = usize::from(removed) + 2;
+
         // The sigil has not moved: it still sits one space past the gutter's
         // digits, which is the half of the row this change must leave alone.
-        for (y, at, number) in [(5u16, removed, "260"), (6, added, "260")] {
-            let row = row_text(&backend, y);
-            let before: String = row.chars().take(usize::from(at)).collect();
+        // Both rows of the changed pair are line 260, the removal and the
+        // addition replacing it.
+        for y in [5u16, 6] {
+            let before: String = row_text(&backend, y).chars().take(origin - 2).collect();
             assert!(
-                before.ends_with(&format!("{number} ")),
+                before.ends_with("260 "),
                 "at {width} columns row {y}'s sigil is not one space past its \
                  line number: {before:?}"
             );
         }
 
-        // (row, the source line's own indentation)
-        const INDENTED: [(u16, usize); 4] = [(3, 4), (4, 8), (5, 8), (6, 8)];
-        for (y, indent) in INDENTED {
+        for &(y, indent) in &indents {
             let row = row_text(&backend, y);
-            let cells: Vec<char> = row.chars().collect();
             // Every row of the block takes its content from the same column,
             // which is the picture's other claim and the one that makes the
             // block read as a block: the two unsigilled context rows draw a
             // space where `+` and `-` go, so their content must line up with a
             // changed row's rather than sliding left into the gap.
-            let origin = usize::from(removed) + 2;
             assert_eq!(
-                cells.get(origin - 1),
-                Some(&' '),
+                row.chars().nth(origin - 1),
+                Some(' '),
                 "at {width} columns row {y} drew no gap between its sigil and \
                  its line: {row:?}"
             );
-            let first = cells
-                .iter()
+            let first = row
+                .chars()
                 .enumerate()
                 .skip(origin)
-                .find(|(_, c)| **c != ' ')
+                .find(|(_, c)| *c != ' ')
                 .map(|(x, _)| x);
             assert_eq!(
                 first,
@@ -436,14 +463,27 @@ fn a_content_row_stands_its_sigil_off_the_line() {
             );
         }
 
-        // Non-vacuity, and it is the assertion this gate would be silently
-        // useless without: the two sigils have to be on the same column as each
-        // other, or `origin` above was computed from a row the loop never
-        // checked and every comparison is against itself.
+        // **The unindented line, which is the row this was reported on and the
+        // only one where the gap is visible to a reader.** Every line in
+        // `one_file()` is indented, so the loop above proves the *origin* moved
+        // and never shows the case the issue was filed about: `-pub fn …` with
+        // the sigil against the token. Asserted through the same origin, on its
+        // own fixture, so the two claims stay separable.
+        let bare = highlighted(LineKind::Removed, "pub fn generated_889() {}", Vec::new());
+        let flush = screen(width, 6, &bare, &chrome());
+        let sigil = column_of(&flush, CONTENT_ROW, "-");
+        let row = row_text(&flush, CONTENT_ROW);
         assert_eq!(
-            removed, added,
-            "at {width} columns the two sigils sit in different columns, so the \
-             origin this gate measures from is not the block's"
+            row.chars().nth(usize::from(sigil) + 1),
+            Some(' '),
+            "at {width} columns an unindented removal drew its sigil against the \
+             line, which is the row #164 was reported on: {row:?}"
+        );
+        assert_eq!(
+            row.chars().nth(usize::from(sigil) + 2),
+            Some('p'),
+            "at {width} columns an unindented removal does not begin exactly two \
+             columns past its sigil: {row:?}"
         );
     }
 }
