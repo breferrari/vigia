@@ -3036,10 +3036,13 @@ fn track_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
 /// in for this, because it returns the glyphs and drops the columns.
 fn bars_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
     let buffer = backend.buffer();
+    // Hoisted rather than rebuilt per cell, which is what it was on the first
+    // pass: the ramp is a fact about the theme and the loop is over the row.
+    let spark = spark_colours(theme);
     (0..buffer.area.width)
         .filter(|&x| {
             let cell = &buffer[(x, y)];
-            RAMP.contains(&cell.symbol()) && spark_colours(&theme).contains(&cell.style().fg)
+            RAMP.contains(&cell.symbol()) && spark.contains(&cell.style().fg)
         })
         .collect()
 }
