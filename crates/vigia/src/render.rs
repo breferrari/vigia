@@ -231,12 +231,44 @@ const PULSE_RUNGS: [&str; 2] = ["●", ""];
 
 /// One slice of a file, whatever it holds.
 ///
-/// A solid block, not a ramp. The sparkline two columns away already encodes
-/// magnitude as height, and a second magnitude encoding beside it would be a
-/// second dialect for one fact. Here the block is a position and the **colour**
-/// is the meaning, which is exactly what `assets/preview.svg` draws: twelve
+/// Equal weight at every slice, not a ramp. The sparkline two columns away
+/// already encodes magnitude as height, and a second magnitude encoding beside it
+/// would be a second dialect for one fact. Here the slice is a **position** and
+/// the colour is the meaning, which is what `assets/preview.svg` draws: twelve
 /// rects of equal height differing only in fill.
-const HEAT_BLOCK: char = '█';
+///
+/// **A small square rather than a full block, corrected 2026-08-16**
+/// ([#196](https://github.com/breferrari/vigia/issues/196)). The picture has
+/// always drawn the twelve as *separate* rects: width `11` on a pitch of `14`
+/// with `rx="2"`, so three pixels of gap and a rounded corner. `█` twelve times
+/// is one continuous bar on a cell grid, and the slices the projection computes
+/// are then invisible as slices, because only a change of band marks a boundary
+/// and two adjacent slices in one band read as a single wide one. That is fatal
+/// to the element's own job, which is *where in this file the work is*: a reader
+/// placing a change counts slices, and there was nothing to count.
+///
+/// A square puts the gap **inside the cell**, so the strip keeps its twelve
+/// columns and every rung of [`HEAT_RUNGS`] is untouched: a square cannot fill a
+/// cell that is about twice as tall as it is wide, and what it cannot fill is the
+/// separation. Its East Asian width is ambiguous, which is not a new hazard: `█`
+/// is ambiguous too and has been drawn here since the element existed, and
+/// [`width_of`] measures both as one column through the same table the renderer
+/// places them with.
+///
+/// **`■` U+25A0 rather than `▪` U+25AA, and CP437 is the tiebreaker.** The two
+/// look alike and the small square shipped first; measuring the pair against
+/// `Encoding.GetEncoding(437)` put `▪` **outside** the legacy Windows console's
+/// repertoire, where `■` sits at 0xFE. §10's Windows bullet names the heat strip
+/// among the things that *"survive whole"* there, and choosing the smaller square
+/// would have made that sentence false while nothing failed. That is
+/// [#175](https://github.com/breferrari/vigia/issues/175)'s own precedent, where
+/// `│` beat `▕` partly on the same membership, and it is why this docblock
+/// carries a CP437 line at all: every glyph const around it does.
+///
+/// It also ends a collision. `tests/legibility.rs` counts a sparkline's buckets
+/// by colour **and** glyph precisely because the heat strip drew the same `█` a
+/// full bucket does; the two elements now share no glyph at all.
+const HEAT_SLICE: char = '■';
 
 /// What separates the pinned file list from the diff under it.
 ///
@@ -1820,13 +1852,26 @@ pub enum Heat {
     Mixed(Band),
 }
 
-/// How busy one slice is, against the busiest slice of **its own file**.
+/// How busy one thing is, against whatever the caller measures it against.
 ///
-/// Three, because `assets/preview.svg` ramps its additions across three greens
-/// and the strip is the one element whose intensity the picture actually
-/// specifies. It used to be two: sixteen foreground-only colours hold a normal and
-/// a bright of each hue and no third stop, so the ramp was as wide as the palette
-/// could draw rather than as wide as the picture asked for.
+/// **Scale-agnostic, and it was file-scoped until
+/// [#196](https://github.com/breferrari/vigia/issues/196)**, which gave it a
+/// second caller measuring something else. The denominator belongs to the caller
+/// and the two differ on purpose: [`heat_at`] passes this **file's** busiest
+/// slice, because a strip is read *across* one row to find where the work is,
+/// and [`spark_of`] passes the busiest bucket **anywhere on screen**, because a
+/// sparkline is compared *down* a list to find which file is busiest. Each states
+/// its own choice; this type states none.
+///
+/// Three, because that is what the depth ladder can draw, which is
+/// [`Theme::heat_added`]'s own reasoning. `assets/preview.svg` ramps across
+/// three greens and asks for it, and the sentence that used to stand here made
+/// the strip *"the one element whose intensity the picture actually specifies"*,
+/// which was never true: the picture ramps its sparkline across five greens too,
+/// and #196 is the row that noticed. It used to be two: sixteen
+/// foreground-only colours hold a normal and a bright of each hue and no third
+/// stop, so the ramp was as wide as the palette could draw rather than as wide as
+/// the picture asked for.
 /// [#11](https://github.com/breferrari/vigia/issues/11) closed that, and the
 /// asymmetry it leaves is honest: at [`Depth::Ansi16`](crate::Depth::Ansi16) the
 /// `ansi` palette still spends two, and says so in its own fields rather than
@@ -1844,7 +1889,7 @@ pub enum Band {
 }
 
 impl Band {
-    /// Which band `total` falls in, against this file's `busiest` slice.
+    /// Which band `total` falls in, against the `busiest` the caller chose.
     ///
     /// Compared by cross-multiplication rather than by dividing, so an awkward
     /// `busiest` cannot round a genuinely hot slice down. Widened to `u64` first
@@ -1944,16 +1989,31 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// other" is safe, and deriving both from a third thing is.
 ///
 /// **What this does not do is constrain the payload**, and the difference is
-/// worth stating rather than implying: `Written(SPARK_TRACK)` is constructible
-/// and would draw the track glyph in the bar's style. What rules it out is that
-/// [`spark_of`] is the only producer and fills it from [`SPARK_RAMP`], not the
-/// type. An index would move the same hole one level down rather than close it.
+/// worth stating rather than implying: `Written(SPARK_TRACK, ..)` is
+/// constructible and would draw the track glyph in the bar's style. What rules it
+/// out is that [`spark_of`] is the only producer and fills it from
+/// [`SPARK_RAMP`], not the type. An index would move the same hole one level down
+/// rather than close it.
+///
+/// **The payload is a pair since [#196](https://github.com/breferrari/vigia/issues/196)**,
+/// because the sparkline ramps now and height alone no longer decides the ink.
+/// The [`Band`] rides here rather than being recomputed by the painter for the
+/// paragraph above's exact reason: a drawer deriving the band back out of the
+/// glyph's rung would be reading one derivation out of another.
+///
+/// **And that derivation is not merely indirect, it is lossy**, which is worth
+/// stating because it turns a stylistic argument into an arithmetic one. The
+/// glyph is a rung of an eight-step ramp and [`Band::of`] splits at a third and
+/// two thirds. Rung six covers the ratio interval `(0.625, 0.75]`, and the `Hot`
+/// boundary at `0.667` falls **inside** it, so one rung answers to two bands and
+/// no function of the glyph can tell which. Recomputing would quantise the colour
+/// to the height ramp and change what is drawn.
 #[derive(Clone, Copy)]
 enum Bucket {
     /// Nothing was written in this bucket's slice of the window.
     Empty,
-    /// Written, at this rung of [`SPARK_RAMP`].
-    Written(char),
+    /// Written, at this rung of [`SPARK_RAMP`] and this stop of the ramp.
+    Written(char, Band),
 }
 
 impl Bucket {
@@ -1961,7 +2021,7 @@ impl Bucket {
     fn drawn(self, theme: &Theme) -> (char, Style) {
         match self {
             Self::Empty => (SPARK_TRACK, theme.spark_track),
-            Self::Written(glyph) => (glyph, theme.spark),
+            Self::Written(glyph, band) => (glyph, theme.spark_at(band)),
         }
     }
 }
@@ -2002,7 +2062,12 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUC
         // only, since `count >= 1` already puts the numerator at or above
         // `SPARK_RAMP.len()`.
         let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
-        *bucket = Bucket::Written(SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1]);
+        // **Against the same `peak` the height is scaled from**, which is the
+        // busiest bucket anywhere on screen rather than in this file. Height and
+        // colour then say one thing at one scale, where two denominators would
+        // let a row read tall and cool at once.
+        let band = Band::of(u32::from(count), u32::from(peak));
+        *bucket = Bucket::Written(SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1], band);
     }
     drawn
 }
@@ -3784,7 +3849,7 @@ impl Painter<'_> {
             // string, and there are twelve of these on every file row of every
             // frame.
             let mut glyph = [0u8; 4];
-            let glyph = HEAT_BLOCK.encode_utf8(&mut glyph);
+            let glyph = HEAT_SLICE.encode_utf8(&mut glyph);
             let x = right.x + right.width - heat.len() as u16;
             for (offset, slice) in heat.iter().enumerate() {
                 // `cell_mut` rather than `Index`, because this used to be a

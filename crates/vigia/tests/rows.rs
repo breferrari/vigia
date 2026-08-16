@@ -541,7 +541,10 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
         .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
         .filter(|&at| {
             let cell = &buffer[at];
-            "▁▂▃▄▅▆▇█".contains(cell.symbol()) && cell.style().fg == theme.spark.fg
+            // Any stop of the ramp, which is three since #196.
+            "▁▂▃▄▅▆▇█".contains(cell.symbol())
+                && [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg]
+                    .contains(&cell.style().fg)
         })
         .count();
     assert!(

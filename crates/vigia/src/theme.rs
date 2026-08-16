@@ -169,8 +169,36 @@ palette! {
     path_hover,
     /// The `●` marking a file that moved in the last tick.
     pulse,
-    /// A churn sparkline's blocks.
+    /// A churn sparkline's blocks, at the quietest of its three stops.
+    ///
+    /// **Ramped by height since [#196](https://github.com/breferrari/vigia/issues/196),
+    /// which closes a departure rather than adding a flourish.**
+    /// `assets/preview.svg` has ramped its sparkline across five greens from the
+    /// start, tallest brightest, and the shell drew one flat colour. This field's
+    /// own docblock used to record that gap and stop there: *"The picture draws a
+    /// ramp there and we draw one colour, so it does not answer this."*
+    ///
+    /// **The hue is not what changed and is still cyan.** Green already means
+    /// addition two rows down, and a churn sparkline is about *when* rather than
+    /// *what*, which is the ruling that survives. What the picture was right
+    /// about is the ramp.
+    ///
+    /// Three stops rather than the picture's five, resolved through the same
+    /// [`Band`] and [`Theme::band`] the heat strip uses, so the two glance
+    /// elements on one row ramp through one mechanism and a reader learns the
+    /// gradient once. `Band` has three variants because a third is what the
+    /// depth ladder can draw, which is [`Theme::heat_added`]'s own reasoning.
     spark,
+    /// A sparkline bucket at a third or more of the screen's busiest.
+    spark_warm,
+    /// A sparkline bucket at two thirds or more of it.
+    ///
+    /// **Measured against the busiest bucket anywhere on screen**, not against
+    /// this file's own, which is the asymmetry `heat_at`'s docblock already
+    /// draws: a sparkline is compared *down* a file list so it shares one scale,
+    /// and a heat strip is read *across* one row so it scales to its own file.
+    /// The ramp inherits that rather than introducing a second rule.
+    spark_hot,
     /// A sparkline bucket nothing was written in.
     ///
     /// A track rather than a gap, which is the rule [`Theme::heat_track`] and
@@ -450,11 +478,26 @@ impl Theme {
         }
     }
 
+    /// Which cyan a written sparkline bucket takes, by how busy it is.
+    ///
+    /// **The sibling of [`Theme::heat`], one element over**, and it goes through
+    /// the same [`Theme::band`] so a ramp that ever draws its middle stop where
+    /// its top belongs is one line to find rather than two elements to compare.
+    /// It takes no `Cool` arm because a sparkline's empty bucket is
+    /// [`Theme::spark_track`] and is resolved by the glyph rather than by the
+    /// band: `_` against `▁`, which `SPARK_TRACK`'s own docblock rules is what
+    /// keeps that distinction a matter of shape.
+    pub fn spark_at(&self, band: Band) -> Style {
+        self.band(band, self.spark, self.spark_warm, self.spark_hot)
+    }
+
     /// One rung of a three-stop ramp.
     ///
-    /// Written once and called three times rather than nine match arms, so a ramp
-    /// that ever draws its middle stop where its top belongs is one line to find
-    /// instead of three places to compare.
+    /// Written once and called four times rather than twelve match arms, so a
+    /// ramp that ever draws its middle stop where its top belongs is one line to
+    /// find instead of four places to compare. Three of the callers are
+    /// [`Theme::heat`]'s arms and the fourth is [`Theme::spark_at`], which is what
+    /// made the count in this sentence worth keeping current.
     fn band(&self, band: Band, low: Style, warm: Style, hot: Style) -> Style {
         match band {
             Band::Low => low,
@@ -556,7 +599,13 @@ impl Theme {
             // red beside a path would read as *what*, which the sigil column
             // already means two rows below.
             pulse: fg(Color::Cyan),
+            // Two stops of hue where the other palettes have three, exactly as
+            // `heat_added` below and for the same reason: sixteen names hold a
+            // normal and a bright of each colour and no third, so the middle
+            // stop is the normal one and the ramp reads as two.
             spark: fg(Color::Cyan),
+            spark_warm: fg(Color::Cyan),
+            spark_hot: fg(Color::LightCyan),
             // `DarkGray`, and the one palette where the track does *not* step
             // towards the foreground the way `dark` and `light` do. Sixteen names
             // hold nothing between colour 8 and `Gray`, and `Gray` is what this
@@ -660,11 +709,19 @@ impl Theme {
             // than `path_live`'s `#e6edf3` and a long way clear of unreadable.
             path_hover: rgb(0xa8, 0xb1, 0xbb).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x39, 0xc5, 0xcf),
-            // Cyan, where the picture's sparkline is green. The picture draws a
-            // *ramp* there and we draw one colour, so it does not answer this; what
-            // does is that green already means addition two rows down, and a churn
-            // sparkline is about *when*, not *what*.
+            // Cyan, where the picture's sparkline is green. What decides the hue
+            // is that green already means addition two rows down, and a churn
+            // sparkline is about *when*, not *what*. This used to add that the
+            // picture "draws a ramp there and we draw one colour, so it does not
+            // answer this", which was true of the hue and became false of the
+            // ramp: #196 draws one.
+            // **The quietest stop keeps today's value**, so a worktree nobody
+            // is writing to looks exactly as it did and only the busy buckets
+            // gain. Brighter as it climbs, which is this palette's direction for
+            // every ramp it has.
             spark: rgb(0x39, 0xc5, 0xcf),
+            spark_warm: rgb(0x7a, 0xe9, 0xf0),
+            spark_hot: rgb(0xa8, 0xf2, 0xf7),
             // **One step above `heat_track`, which is the rule this field always
             // had and could not satisfy while the thing it was a step above was
             // itself invisible.** A stroke needs more contrast than a block to
@@ -794,7 +851,21 @@ impl Theme {
             // than `path`'s `#1f2328`, not darker.
             path_hover: rgb(0x3d, 0x46, 0x50).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x0a, 0x62, 0x6b),
-            spark: rgb(0x0a, 0x62, 0x6b),
+            // **Darker as it climbs**, which is the same rule as `dark`'s and
+            // not a second one: both move towards the foreground, and on a light
+            // background that direction is down.
+            //
+            // **Today's flat value becomes the middle stop here**, where on
+            // `dark` it stays the quietest, and that asymmetry is forced rather
+            // than chosen. The 256-colour cube's axes are `0, 95, 135, 175, 215,
+            // 255`, so everything below 95 collapses into one cell: a ramp
+            // running *down* from `#0a626b` has nowhere to put two more stops and
+            // `the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them`
+            // is what said so. Spread around it instead, and the quiet end
+            // lightens.
+            spark: rgb(0x5a, 0xa6, 0xae),
+            spark_warm: rgb(0x0a, 0x62, 0x6b),
+            spark_hot: rgb(0x03, 0x28, 0x2e),
             // **Darker** here where `dark`'s is brighter, which is the same rule
             // and not a second one: both move one step *towards* the foreground,
             // and on a light background that direction is down. `#d0d7de` is a

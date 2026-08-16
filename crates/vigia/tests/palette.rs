@@ -13,11 +13,36 @@
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
+use std::collections::HashSet;
+
+use ratatui::style::{Color, Style};
 use vigia::{
     Chrome, Depth, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
+
+/// The heat strip's slice, restated rather than imported: a test sharing the
+/// renderer's constant agrees with it by construction instead of checking it.
+const HEAT_SLICE: &str = "■";
+
+/// The sparkline's ramp, shortest first, restated for [`HEAT_SLICE`]'s reason
+/// and declared **once** for `tests/render.rs`'s: two copies in one binary check
+/// each other rather than the renderer, and they drift independently.
+const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/// Every stop of the sparkline's ramp, quietest first, with the key it came from.
+///
+/// [`heat_stops`]' sibling and named for the same reason that one is: adding a
+/// stop to the theme should be one edit here rather than three, and a missed one
+/// makes a gate quietly stop seeing a colour rather than fail. Three sites in
+/// this file spelled the triple out before it had a name.
+fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
+    [
+        ("spark", theme.spark),
+        ("spark_warm", theme.spark_warm),
+        ("spark_hot", theme.spark_hot),
+    ]
+}
 
 fn chrome() -> Chrome {
     Chrome {
@@ -377,7 +402,13 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
 
         // Exempt: marks and fills, none of them text, none of them colour 8.
         pulse: _,
+        // Three stops of one ramp since #196, all three exempt for the reason
+        // the first always was: a sparkline bucket is a block, not a glyph a
+        // reader has to make out. `a_sparkline_track_is_never_the_colour_of_a_bucket`
+        // is where every stop is held apart from the track it sits on.
         spark: _,
+        spark_warm: _,
+        spark_hot: _,
         bar: _,
         // A gesture in progress, brighter than `bar` and never text.
         bar_active: _,
@@ -589,7 +620,7 @@ fn heat_stops(theme: Theme) -> Vec<Color> {
         // a sparkline's top rung, and the counters on the same row share the
         // track's grey. Either half alone is a coincidence waiting to happen, and
         // has already happened once in this suite.
-        if cell.symbol() != "█" {
+        if cell.symbol() != HEAT_SLICE {
             continue;
         }
         let Some(fg) = cell.style().fg else { continue };
@@ -607,7 +638,7 @@ fn heat_sequence(theme: Theme) -> Vec<Color> {
     let backend = draw(120, 4, &graded_heat(), theme);
     let buffer = backend.buffer();
     (0..120)
-        .filter(|x| buffer[(*x, HEADING)].symbol() == "█")
+        .filter(|x| buffer[(*x, HEADING)].symbol() == HEAT_SLICE)
         .filter_map(|x| buffer[(x, HEADING)].style().fg)
         .collect()
 }
@@ -675,6 +706,132 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
     assert_eq!(indexed.len(), 3, "256 lost a stop: {indexed:?}");
 }
 
+/// One file whose eight buckets climb, so every stop of the ramp is on one row.
+///
+/// `peak` is the busiest bucket **anywhere on screen**, which is what the ramp is
+/// measured against, so it is set to the tallest bucket here rather than left at
+/// zero: a zero peak is the empty-store path and draws nothing but track.
+fn climbing() -> View {
+    View {
+        rows: vec![Row::File(FileEntry {
+            path: "src/a.rs".to_owned(),
+            from: None,
+            kind: 'M',
+            churn: Some((12, 0)),
+            spark: [0, 1, 2, 3, 5, 7, 9, 12],
+            recency: Recency::Cold,
+            heat: [HeatBucket::default(); HEAT_BUCKETS],
+        })],
+        files: 1,
+        peak: 12,
+        ..View::default()
+    }
+}
+
+#[test]
+fn a_taller_sparkline_bucket_is_drawn_hotter() {
+    // **The ramp, read off the cells rather than off the theme**, which is the
+    // half `the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them`
+    // cannot reach: that one holds the palette apart, this one holds that the
+    // renderer spends it in the right order. A ramp whose stops were distinct and
+    // applied backwards would satisfy the other gate exactly.
+    //
+    // `assets/preview.svg` has drawn this since the start, tallest brightest, and
+    // the shell drew one flat colour until #196.
+    let theme = Theme::dark().resolve(Depth::Truecolor);
+    let backend = draw(60, 4, &climbing(), theme);
+    let buffer = backend.buffer();
+
+    let drawn: Vec<(usize, Option<Color>)> = (0..60)
+        .map(|x| &buffer[(x, HEADING)])
+        .filter_map(|cell| {
+            RAMP.iter()
+                .position(|glyph| *glyph == cell.symbol())
+                .map(|rung| (rung, cell.style().fg))
+        })
+        .collect();
+    assert!(
+        drawn.len() >= 4,
+        "the fixture drew {} buckets, which is too few to see a ramp in",
+        drawn.len()
+    );
+
+    // Rank, not identity: the claim is monotone, so it survives the stops moving.
+    // Ranked once per bucket rather than once per comparison, which also puts the
+    // "no stop of the ramp" panic on the bucket that caused it.
+    let stops = spark_stops(&theme);
+    let ranked: Vec<(usize, usize)> = drawn
+        .iter()
+        .map(|&(rung, fg)| {
+            let rank = stops
+                .iter()
+                .position(|(_, style)| style.fg == fg)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the bucket at rung {rung} is drawn in {fg:?}, which is no stop of the ramp"
+                    )
+                });
+            (rung, rank)
+        })
+        .collect();
+
+    for pair in ranked.windows(2) {
+        let ((short, cooler), (tall, hotter)) = (pair[0], pair[1]);
+        assert!(
+            hotter >= cooler,
+            "the bucket at rung {tall} is drawn cooler than the shorter one at              rung {short} beside it, so the ramp runs backwards"
+        );
+    }
+    assert!(
+        ranked.last().expect("a bucket").1 > ranked[0].1,
+        "every bucket on a climbing row took one stop, so the ramp is flat"
+    );
+}
+
+#[test]
+fn the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them() {
+    // [`the_heat_ramp_has_three_stops_where_the_depth_can_draw_them`] one element
+    // over, and the same picture is what asks for it: `assets/preview.svg` ramps
+    // its sparkline across five greens where the shell drew one flat colour
+    // (#196). Three rather than five, because three is what `Band` distinguishes
+    // and what the depth ladder can draw.
+    //
+    // Read off the resolved theme rather than off cells, which is where the heat
+    // one differs: heat has a kind-by-band cross product worth drawing through,
+    // and this is one hue at three weights.
+    for (name, base) in [("dark", Theme::dark()), ("light", Theme::light())] {
+        for depth in [Depth::Truecolor, Depth::Ansi256] {
+            let theme = base.resolve(depth);
+            // Deduped rather than compared pairwise: `Color` is `Hash` as well as
+            // `Eq`, so three-into-a-set says the same thing in one assertion and
+            // keeps saying it if a fourth stop is ever added.
+            let stops = spark_stops(&theme);
+            let distinct: HashSet<Option<Color>> =
+                stops.iter().map(|(_, style)| style.fg).collect();
+            assert_eq!(
+                distinct.len(),
+                stops.len(),
+                "{name} at {depth:?} draws two sparkline stops alike: {stops:?}"
+            );
+        }
+    }
+
+    // **And `ansi` spends two, which is a fact about the palette rather than a
+    // shortfall**, exactly as `heat_added` records for itself: sixteen names hold
+    // a normal and a bright of each hue and no third, so the middle stop is the
+    // normal one. Written out in the palette rather than left to the depth ladder
+    // to collapse by accident, which is what this asserts.
+    let ansi = Theme::ansi();
+    assert_eq!(
+        ansi.spark.fg, ansi.spark_warm.fg,
+        "ansi found a third cyan, so the two-stop note in its palette is stale"
+    );
+    assert_ne!(
+        ansi.spark_warm.fg, ansi.spark_hot.fg,
+        "ansi collapsed its ramp to one stop, so height is the only channel left"
+    );
+}
+
 #[test]
 fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     // The track and the bars land on the same eight columns of the same row, and
@@ -702,10 +859,16 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
     ] {
         for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16] {
             let theme = base.resolve(depth);
-            assert_ne!(
-                theme.spark_track.fg, theme.spark.fg,
-                "{name} at {depth:?} draws a track in the bucket's own colour"
-            );
+            // **Every stop of the ramp, not only its quietest.** #196 made this
+            // three values where it was one, and a gate that checked the first
+            // would have let the other two collide with the track they are drawn
+            // beside.
+            for (stop, style) in spark_stops(&theme) {
+                assert_ne!(
+                    theme.spark_track.fg, style.fg,
+                    "{name} at {depth:?} draws a track in {stop}'s own colour"
+                );
+            }
             assert_ne!(
                 theme.spark_track.fg, theme.chrome_dim.fg,
                 "{name} at {depth:?} draws the track in the chrome's dim grey"
@@ -890,7 +1053,7 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
         "the fixture's path carries an underscore, which this gate counts as a \n         track cell"
     );
 
-    let bars = row.iter().filter(|s| "▁▂▃▄▅▆▇█".contains(**s)).count();
+    let bars = row.iter().filter(|s| RAMP.contains(s)).count();
     let track = row.iter().filter(|s| **s == "_").count();
 
     assert_eq!(
