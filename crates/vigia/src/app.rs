@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
-use crate::input::Action;
+use crate::input::{Action, Hovered};
 use crate::memory;
 use crate::render::{Body, Chrome, Mode};
 use crate::view::{Position, View, Viewport, rows_in};
@@ -356,11 +356,13 @@ impl App {
         branch: Option<&str>,
         pressed: Option<(u16, u16)>,
         gripped: Option<u16>,
+        hovered: Option<Hovered>,
         scrolling: Option<(u16, isize)>,
     ) -> Chrome {
         Chrome {
             pressed,
             gripped,
+            hovered,
             scrolling,
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
@@ -834,13 +836,13 @@ mod tests {
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
         assert_eq!(
-            app.chrome("fixture", None, None, None, None).mode,
+            app.chrome("fixture", None, None, None, None, None).mode,
             Mode::Watching
         );
 
         app.watch_lost();
         assert_eq!(
-            app.chrome("fixture", None, None, None, None).mode,
+            app.chrome("fixture", None, None, None, None, None).mode,
             Mode::Lost
         );
 
@@ -853,7 +855,7 @@ mod tests {
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(
-            app.chrome("fixture", None, None, None, None).mode,
+            app.chrome("fixture", None, None, None, None, None).mode,
             Mode::Lost
         );
     }
@@ -865,11 +867,14 @@ mod tests {
         // that nothing invents one when there is none.
         let app = App::new();
         assert_eq!(
-            app.chrome("fixture", Some("main"), None, None, None)
+            app.chrome("fixture", Some("main"), None, None, None, None)
                 .branch
                 .as_deref(),
             Some("main")
         );
-        assert_eq!(app.chrome("fixture", None, None, None, None).branch, None);
+        assert_eq!(
+            app.chrome("fixture", None, None, None, None, None).branch,
+            None
+        );
     }
 }

@@ -83,8 +83,8 @@ mod view;
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{
-    Action, Grabbed, Held, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
-    action_for, drag_action, patience, scroll_mark,
+    Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE,
+    WHEEL_ROWS, action_for, drag_action, hover_after, patience, scroll_mark,
 };
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
@@ -353,6 +353,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         regions: Regions::default(),
         held: None,
         grabbed: None,
+        hovered: None,
         scrolling: None,
         scrolling_until: None,
     };
@@ -524,6 +525,19 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     if shell.held.is_some_and(|hold| hold.ends(&event, regions)) {
                         shell.held = None;
                     }
+                    // **What the pointer is over, before anything asks what it
+                    // meant.** A mark is not an action and never becomes one
+                    // (`SPEC.md` §11.1), so this sits outside the `action_for`
+                    // path entirely: the `continue` below drops events that
+                    // request nothing, and a motion is exactly such an event, so
+                    // resolving after it would leave the mark answering the
+                    // pointer's last *click* rather than its position.
+                    //
+                    // The whole rule is in `hover_after` rather than here, for
+                    // the reason `Held::ends` is a free function: this loop
+                    // cannot be driven by a test, and a rule written inline is a
+                    // rule with no gate.
+                    shell.hovered = hover_after(&event, regions, shell.hovered);
                     // **A drag under way answers before the column is consulted,
                     // and that ordering is the fix.** `action_for` asks what is
                     // under the pointer, which is the right question for a press
@@ -597,6 +611,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             shell.branch.as_deref(),
                             shell.pressed(),
                             shell.gripped(),
+                            shell.hovered(),
                             shell.scrolling,
                         );
                         diff_height(shell.area()?, &chrome, frame.files().len())
@@ -791,6 +806,23 @@ struct Shell {
     /// track seeks, and keeps seeking wherever the pointer goes until it is let
     /// go. Only one can be armed at a time, because only one press starts them.
     grabbed: Option<Grabbed>,
+    /// What the pointer is resting on, when it is on something a click acts on.
+    ///
+    /// **The mark `SPEC.md` §11.2 B10 adopts, and it is here for
+    /// [`Shell::held`]'s reason**: where a pointer is, is a fact about the
+    /// terminal rather than about the viewport, and `App` owns the viewport.
+    ///
+    /// It needs neither an expiry nor an end, which is the whole of §11.1's
+    /// three-mark rule arriving at its third case: a hold ends with an `Up`, a
+    /// key burst has no end and takes a clock, and this is retired by its
+    /// **replacement**, because the next mouse event says where the pointer is
+    /// now. [`hover_after`] is that rule and is where it is gated.
+    ///
+    /// `None` is both *not over anything* and *the window is not focused*, which
+    /// are the same drawn result and are deliberately not distinguished: the
+    /// mark says the pointer is here, and it has nothing to say about why it is
+    /// not.
+    hovered: Option<Hovered>,
     /// Which way the viewport is currently being moved, and until when.
     ///
     /// **The one lit thing on this screen that nobody is touching.** A reader
@@ -827,6 +859,17 @@ impl Shell {
     /// draws its thumb lit.
     fn gripped(&self) -> Option<u16> {
         self.grabbed.map(|on| on.top(self.regions))
+    }
+
+    /// What the pointer is over, for the frame that marks it.
+    ///
+    /// Stored resolved rather than as a position, unlike [`Shell::pressed`],
+    /// because the resolution is against the regions of the paint the pointer
+    /// was actually over. Re-resolving here would answer against the *next*
+    /// layout, so a frame that changed the bar's geometry would move a mark the
+    /// reader had not moved.
+    fn hovered(&self) -> Option<Hovered> {
+        self.hovered
     }
 
     /// How long the loop may block before something here has to act.
@@ -965,6 +1008,7 @@ impl Shell {
             self.branch.as_deref(),
             self.pressed(),
             self.gripped(),
+            self.hovered(),
             self.scrolling,
         );
         let body = body_layout(self.area()?, &chrome, frame.files().len());
@@ -1002,6 +1046,7 @@ impl Shell {
             self.branch.as_deref(),
             self.pressed(),
             self.gripped(),
+            self.hovered(),
             self.scrolling,
         );
         // Borrowed out of `self` before the draw, not for style: the closure would

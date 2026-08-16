@@ -313,6 +313,7 @@ fn chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         // Only the empty state names a branch, so every populated fixture leaves
@@ -344,6 +345,7 @@ fn diagnostics() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         frame: Some(Duration::from_millis(999)),
         memory: Some(999 * 1024 * 1024),
@@ -355,6 +357,7 @@ fn following() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         following: true,
         ..chrome()
@@ -371,6 +374,7 @@ fn lost() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         ..chrome()
@@ -382,6 +386,7 @@ fn on_a_branch() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         branch: Some("main".to_owned()),
         ..chrome()
@@ -392,6 +397,7 @@ fn with_notice() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..following()
@@ -632,6 +638,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 following: true,
                 ..on_a_branch()
@@ -662,6 +669,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 worktree: "読み方リポジトリ".to_owned(),
                 ..following()
@@ -673,6 +681,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 mode: Mode::Lost,
                 ..on_a_branch()
@@ -699,6 +708,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
             Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 notice: Some("src/lib.rs vanished between being named and being read".to_owned()),
                 ..diagnostics()
@@ -1236,6 +1246,7 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
             let chrome = Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 worktree: name.clone(),
                 ..chrome.clone()
@@ -1646,6 +1657,7 @@ fn a_worktree_name_too_long_for_its_room_is_marked_rather_than_cut_silently() {
         let chrome = Chrome {
             pressed: None,
             gripped: None,
+            hovered: None,
             scrolling: None,
             worktree: name.to_owned(),
             ..chrome()
@@ -2353,6 +2365,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     let long_name = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         worktree: "a-worktree-with-a-very-long-name-indeed".to_owned(),
         ..chrome()

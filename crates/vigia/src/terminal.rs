@@ -62,7 +62,9 @@ use std::sync::Once;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::cursor::{Hide, Show};
-use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::event::{
+    DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -82,6 +84,25 @@ enum Step {
     AlternateScreen,
     /// Mouse reporting, which `SPEC.md` §4 puts in scope for the wheel.
     MouseCapture,
+    /// Focus reporting, so a mark drawn from pointer state can be cleared when
+    /// the reader looks away.
+    ///
+    /// **Added 2026-08-16 for `SPEC.md` §11.2 B10**, which was declined for a
+    /// year on the claim that *"the takeover does not enable focus reporting"* —
+    /// a description of this array, written as though it were a fact about
+    /// terminals. It is the middle rung of §11.1's clearing ladder: motion
+    /// inside the pane retires a hover mark on its own, and this is what retires
+    /// one when the window loses focus instead.
+    ///
+    /// **Its platform story is the opposite of [`Step::MouseCapture`]'s, which
+    /// is the trap this module's header would otherwise set.** `EnableMouseCapture`
+    /// overrides `is_ansi_code_supported` to `false` on Windows and writes zero
+    /// bytes; `EnableFocusChange` carries no such override, so with ANSI it
+    /// really does emit `?1004h`, and without it `execute_winapi` is a
+    /// deliberate no-op because the console API delivers `FOCUS_EVENT` records
+    /// unasked. Two mouse-adjacent commands, two answers: do not generalise from
+    /// whichever one you read first.
+    FocusChange,
     /// The cursor, which a monitor never places anywhere meaningful.
     Cursor,
 }
@@ -92,10 +113,11 @@ enum Step {
 /// effects than anything else here, and ratatui's own restore path orders it the
 /// same way for that reason: the escape sequences that leave the alternate screen
 /// should be written while the terminal is still in the mode they were written in.
-const TAKEOVER: [Step; 4] = [
+const TAKEOVER: [Step; 5] = [
     Step::RawMode,
     Step::AlternateScreen,
     Step::MouseCapture,
+    Step::FocusChange,
     Step::Cursor,
 ];
 
@@ -140,6 +162,7 @@ impl<W: Write> Console for Crossterm<W> {
             Step::RawMode => enable_raw_mode(),
             Step::AlternateScreen => execute!(self.out, EnterAlternateScreen),
             Step::MouseCapture => execute!(self.out, EnableMouseCapture),
+            Step::FocusChange => execute!(self.out, EnableFocusChange),
             Step::Cursor => execute!(self.out, Hide),
         }
     }
@@ -149,6 +172,7 @@ impl<W: Write> Console for Crossterm<W> {
             Step::RawMode => disable_raw_mode(),
             Step::AlternateScreen => execute!(self.out, LeaveAlternateScreen),
             Step::MouseCapture => execute!(self.out, DisableMouseCapture),
+            Step::FocusChange => execute!(self.out, DisableFocusChange),
             Step::Cursor => execute!(self.out, Show),
         };
     }
@@ -665,8 +689,18 @@ mod tests {
     fn every_command_is_the_escape_sequence_it_is_named_for() {
         // The oracle is DEC's own private mode numbers, not crossterm restating
         // itself: 1049 is the alternate screen buffer, 25 is cursor visibility,
-        // and 1000/1002/1003/1015/1006 are the mouse reporting modes. `h` sets a
-        // mode and `l` resets it, so a swapped pair is visible here as a letter.
+        // 1000/1002/1003/1015/1006 are the mouse reporting modes, and 1004 is
+        // focus reporting. `h` sets a mode and `l` resets it, so a swapped pair
+        // is visible here as a letter.
+        //
+        // **This list is written out rather than derived from `TAKEOVER`, so a
+        // step added there does not arrive here on its own.** That is the one
+        // gate in this module which does not adapt, and it is deliberate: the
+        // point of asserting bytes is that a human wrote down what the bytes
+        // should be. The two gates that *do* derive are the order walk and the
+        // real-console inverse below, and between them they catch a step that is
+        // taken out of order or not given back. Neither can catch a step wired
+        // to the wrong command, which is what this one is for.
         assert_eq!(ansi(&EnterAlternateScreen), "\x1b[?1049h");
         assert_eq!(ansi(&LeaveAlternateScreen), "\x1b[?1049l");
         assert_eq!(ansi(&Hide), "\x1b[?25l");
@@ -674,6 +708,42 @@ mod tests {
         assert_eq!(
             ansi(&EnableMouseCapture),
             "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h"
+        );
+        assert_eq!(ansi(&EnableFocusChange), "\x1b[?1004h");
+        assert_eq!(ansi(&DisableFocusChange), "\x1b[?1004l");
+    }
+
+    #[test]
+    fn the_takeover_asks_for_focus_reporting() {
+        // **The assertion `SPEC.md` §11.2 B10 needs, and the one neither gate
+        // beside it can make.** `takeover_order_is_raw_mode_first_then_the_screen`
+        // compares the walk against `TAKEOVER` itself, so it stays green whatever
+        // that array contains, and the byte gate above proves only that the
+        // command means what it is named. What nothing else says is that the
+        // takeover *contains* the step at all.
+        //
+        // It matters because the missing step is exactly what B10 was declined
+        // for: "the takeover does not enable focus reporting" was true, and was
+        // written as though it were a fact about terminals rather than about
+        // this array. Without focus reporting a hover mark loses the middle rung
+        // of §11.1's clearing ladder and goes stale whenever a reader tabs away.
+        assert!(
+            TAKEOVER.contains(&Step::FocusChange),
+            "the takeover no longer asks for focus reporting, so a hover mark \
+             has no way to learn the window lost focus (SPEC.md 11.1)"
+        );
+
+        // Before the cursor, so the modes that change how input is *reported*
+        // are taken together and given back together.
+        let at = |step| TAKEOVER.iter().position(|s| *s == step);
+        assert!(
+            at(Step::FocusChange) > at(Step::MouseCapture),
+            "focus reporting is taken before the mouse it belongs beside"
+        );
+        assert!(
+            at(Step::FocusChange) < at(Step::Cursor),
+            "focus reporting is taken after the cursor rather than with the \
+             other input modes"
         );
     }
 

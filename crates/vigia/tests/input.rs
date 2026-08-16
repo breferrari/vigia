@@ -16,8 +16,9 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Grabbed, Held, LIST_ROWS, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT,
-    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, patience, scroll_mark,
+    Action, Grabbed, Held, Hovered, LIST_ROWS, Region, Regions, SCROLL_LINGER, STEP_DELAY,
+    STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
+    scroll_mark,
 };
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
@@ -1206,6 +1207,121 @@ fn only_a_press_on_a_track_takes_hold_of_a_bar() {
     // And off the bar's column a press grabs nothing, because a drag has to
     // begin somewhere real even though it may end anywhere.
     assert_eq!(regions.grab_at(40, 12), None);
+}
+
+#[test]
+fn a_hover_resolves_to_the_button_the_track_and_nothing_else() {
+    // `SPEC.md` §11.2 B10's mark, resolved. The fixture's diff has buttons at
+    // rows 5 and 19 (its track is 6..18) and its list has none, which is the
+    // asymmetry worth testing over: a bare bar must still answer for its track.
+    let regions = two_regions();
+
+    // A button answers as the cell it is drawn on, which is the key
+    // `Chrome::pressed` already uses, so the drawer compares one kind of thing.
+    assert_eq!(regions.hover_at(79, 5), Some(Hovered::Button((79, 5))));
+    assert_eq!(regions.hover_at(79, 19), Some(Hovered::Button((79, 19))));
+
+    // **The track and the thumb answer nothing, and that is the ruling rather
+    // than an omission.** A mark on this column has to keep the rule that a
+    // click is brighter than a hover, and the thumb has only two weights: `bar`
+    // at rest and `bar_active` under a drag. A hover drawn in `bar_active` would
+    // make a drag look like a pointer resting there. So the thumb is a list row
+    // one element over, and waits on the same ruling (#189).
+    assert_eq!(regions.hover_at(79, 12), None, "the diff's track");
+    assert_eq!(regions.hover_at(79, 2), None, "the list's track");
+
+    // The list's bar has no buttons at all in this fixture, so every row of it
+    // is track. A resolver that assumed both bars were stepped would answer
+    // `Button` here and light a cell that is drawing a thumb.
+    assert_eq!(regions.hover_at(79, 1), None);
+    assert_eq!(regions.hover_at(79, 3), None);
+
+    // Off both regions, and off the bar's column. The second is what keeps the
+    // mark out of the diff body, which §11.1 rules is not clickable and must not
+    // imply it is: every column but one answers `None` whatever the row.
+    assert_eq!(regions.hover_at(79, 0), None, "above both regions");
+    assert_eq!(regions.hover_at(79, 23), None, "below both regions");
+    for row in 0..24 {
+        assert_eq!(
+            regions.hover_at(40, row),
+            None,
+            "a column that is not the bar answered a hover at row {row}, so the \
+             mark reaches the diff body"
+        );
+    }
+}
+
+#[test]
+fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
+    // §11.1's three-mark rule at its third case: a hover's subject *moves*
+    // rather than ending, so what retires it is the next observation of where
+    // the pointer is. This is the whole of `hover_after`, and it is a free
+    // function precisely so this test can exist: the loop that owns the state
+    // cannot be driven by a test.
+    let regions = two_regions();
+    let button = Some(Hovered::Button((79, 5)));
+
+    // **Replacement.** Motion onto another target is the ordinary case and the
+    // one that makes the residual rung tolerable: the mark follows the pointer
+    // for free, per cell, because `?1003h` is any-event tracking.
+    assert_eq!(
+        hover_after(&at(MouseEventKind::Moved, 79, 19), regions, button),
+        Some(Hovered::Button((79, 19)))
+    );
+
+    // **Motion onto nothing clears it**, which is the same rule and not a second
+    // one: the observation said "not over a target", and that is an answer. Both
+    // off the column and onto the track, which is a row on the bar that draws no
+    // mark until #189 rules one.
+    assert_eq!(
+        hover_after(&at(MouseEventKind::Moved, 40, 12), regions, button),
+        None
+    );
+    assert_eq!(
+        hover_after(&at(MouseEventKind::Moved, 79, 12), regions, button),
+        None
+    );
+
+    // **Every mouse event is an observation, not just `Moved`.** A press, a
+    // release, a drag and the wheel all carry a column and a row, so all of them
+    // place the mark. Singling out `Moved` would leave it stale through a whole
+    // drag, which is exactly when a reader is looking at the bar.
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::ScrollDown,
+    ] {
+        assert_eq!(
+            hover_after(&at(kind, 79, 19), regions, button),
+            Some(Hovered::Button((79, 19))),
+            "{kind:?} did not place the mark, so it can only follow a bare move"
+        );
+    }
+
+    // **`FocusLost` clears it**, which is the rung `TAKEOVER` gained a step for.
+    // Without `Step::FocusChange` this arm never fires on Unix, and a mark left
+    // over a window the reader has tabbed away from is what B10 was declined for.
+    assert_eq!(hover_after(&Event::FocusLost, regions, button), None);
+
+    // **A key leaves it alone, and this is deliberately not `Held::ends`'s
+    // rule.** That one ends a hold on any key, because a hand at the keyboard is
+    // evidence a mouse button is not down. It is no evidence at all about where
+    // a pointer is *resting*, so clearing here would blink the mark off under a
+    // reader scrolling with `j` while their pointer sits on the bar.
+    for event in [
+        press(KeyCode::Char('j')),
+        press(KeyCode::Char('q')),
+        Event::FocusGained,
+        Event::Resize(80, 24),
+    ] {
+        assert_eq!(
+            hover_after(&event, regions, button),
+            button,
+            "{event:?} retired a hover mark, and only a pointer or a lost window \
+             can say anything about where a pointer is"
+        );
+    }
 }
 
 #[test]

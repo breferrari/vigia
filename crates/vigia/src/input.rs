@@ -252,6 +252,96 @@ impl Regions {
         }
         self.diff.along(row).is_some().then_some(Grabbed::Diff)
     }
+
+    /// What a pointer at `column`, `row` is **over**, for the mark `SPEC.md`
+    /// §11.2 B10 adopts.
+    ///
+    /// **Geometry alone, like [`Regions::step_at`] above**, and the third caller
+    /// of the same arithmetic rather than a fourth copy of it: a button is
+    /// `Region::button`'s answer and a track row is `Region::along`'s, which are
+    /// the two the press path already asks. The #166 pass consolidated one such
+    /// copy and recorded why, so this deliberately composes rather than
+    /// re-deriving where a button ends.
+    ///
+    /// **Only a step button answers, and the limit is a missing rung rather
+    /// than a missing wire.** The rule a mark on this column has to keep is that
+    /// a click is brighter than a hover, and a button has three weights to spend
+    /// on it (`Theme::bar_track`, `Theme::bar`, `Theme::bar_active`) where the
+    /// thumb has two: it rests at `bar` and is dragged at `bar_active`, with
+    /// nothing in between. A hover drawn in `bar_active` would make a drag
+    /// indistinguishable from a pointer resting on the thumb.
+    ///
+    /// So the **thumb and the track are the same finding as a list row**, one
+    /// element over: surfaces a click acts on, licensed a mark by §11.1, with
+    /// nowhere to draw one until a rung is ruled. Both wait on
+    /// [#189](https://github.com/breferrari/vigia/issues/189), and this function
+    /// is where they will be added rather than a second one being written.
+    pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
+        if self.bar != Some(column) {
+            return None;
+        }
+        // Either region's button, and the cell is the answer because that is the
+        // key `Chrome::pressed` already uses. `Region::button` is asked rather
+        // than a floor being re-derived here, so the mark and the press can never
+        // disagree about where a button ends.
+        (self.list.button(row).is_some() || self.diff.button(row).is_some())
+            .then_some(Hovered::Button((column, row)))
+    }
+}
+
+/// What the pointer is resting on, when it is on something a click acts on.
+///
+/// **An enum with one variant, on purpose.** [`Hovered::Button`] carries a cell
+/// the way `Chrome::pressed` does, so the drawer compares one kind of thing;
+/// what is not here yet is a variant for the thumb and one for a list row, both
+/// of which are surfaces a click acts on and both of which are waiting on the
+/// same ruling ([#189](https://github.com/breferrari/vigia/issues/189)) about
+/// what mark a region with no spare rung gets. A bare `Option<(u16, u16)>` would
+/// say the mark is always a cell, which is the thing that is about to stop being
+/// true.
+///
+/// **This is view state and never an [`Action`]**, which is §11.1's ruling and
+/// the reason `action_for` never learns about it: the mark says where a pointer
+/// is, it is not a thing a reader asked for, and B4 stands because no key means
+/// anything different while it is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hovered {
+    /// A step button, by the cell it is drawn on.
+    Button((u16, u16)),
+}
+
+/// The mark after `event`, given the one before it.
+///
+/// **A free function for the reason [`Held::ends`] is one**: the loop that owns
+/// this state cannot be driven by a test, so a rule written inline in `run` is a
+/// rule with no gate. Everything decidable about a hover mark is decidable from
+/// an event, a layout and the previous mark, so all of it lives here.
+///
+/// §11.1 states the rule this implements: a mark is retired by whatever the
+/// program can still observe about its subject, and a hover's subject **moves**
+/// rather than ending, so what retires it is the next observation of where the
+/// pointer is. Three cases, and the third is the one that is not obvious:
+///
+/// - **Any mouse event re-resolves.** Motion, press, drag, release and the wheel
+///   all carry a column and a row, so all of them place the mark, and one that
+///   lands on no target clears it. There is no need to single out `Moved`: an
+///   event that says where the pointer is *is* the observation.
+/// - **[`Event::FocusLost`] clears it.** The window is gone, so the pointer's
+///   last known position has stopped being a claim about anything. This is the
+///   rung `TAKEOVER` gained a step for, and without that step this arm never
+///   fires on Unix.
+/// - **Everything else leaves it alone, and keys above all.** This is
+///   deliberately *not* [`Held::ends`]'s rule, which ends a hold on any key
+///   because a hand that has reached the keyboard is not holding a mouse button.
+///   That is evidence about a **button**; it is no evidence at all about where a
+///   pointer is resting, and clearing here would make the mark flicker off under
+///   a reader who is scrolling with `j` while the pointer sits on the bar.
+pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
+    match event {
+        Event::Mouse(mouse) => regions.hover_at(mouse.column, mouse.row),
+        Event::FocusLost => None,
+        _ => was,
+    }
 }
 
 /// Which region a drag that is already under way belongs to.

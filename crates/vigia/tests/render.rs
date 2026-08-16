@@ -32,7 +32,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Region, Row, Theme, View,
+    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
     diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
@@ -191,6 +191,7 @@ fn chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         // `None` because these views have a diff in them, and only the empty
@@ -214,6 +215,7 @@ fn diagnostics_chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         frame: Some(Duration::from_micros(800)),
         memory: Some(19 * 1024 * 1024),
@@ -226,6 +228,7 @@ fn empty_chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         branch: Some("main".to_owned()),
         ..chrome()
@@ -237,6 +240,7 @@ fn following_chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         following: true,
         ..chrome()
@@ -588,6 +592,7 @@ fn the_header_says_which_mode_it_is_in() {
     let stopped = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         ..chrome()
@@ -1758,6 +1763,7 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         let nameless = Chrome {
             pressed: None,
             gripped: None,
+            hovered: None,
             scrolling: None,
             worktree: name.to_owned(),
             ..chrome()
@@ -1834,6 +1840,7 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     let lost = style_of(&Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         ..chrome()
@@ -1862,6 +1869,7 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
     let stopped = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         notice: Some("the watch ended; this diff is no longer live".to_owned()),
@@ -2018,6 +2026,7 @@ fn a_notice_takes_the_footer_from_the_key_hints() {
     let chrome = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..chrome()
@@ -2044,6 +2053,7 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
     let chrome = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..following_chrome()
@@ -2140,6 +2150,7 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
     let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         frame: Some(cost),
         ..diagnostics_chrome()
@@ -2160,6 +2171,7 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
     let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         memory: Some(bytes),
         ..diagnostics_chrome()
@@ -2201,6 +2213,7 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
     let unavailable = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         memory: None,
         ..diagnostics_chrome()
@@ -2228,6 +2241,7 @@ fn the_first_paint_draws_no_readouts_at_all() {
     let first = Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         frame: None,
         memory: Some(19 * 1024 * 1024),
@@ -4362,6 +4376,182 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
 }
 
 #[test]
+fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
+    // **`SPEC.md` §11.2 B10's mark, and the ordering is the load-bearing half.**
+    // Three rungs on one cell: `bar_track` at rest, `bar` under a pointer,
+    // `bar_active` while a gesture is on it. Read as *styles* rather than as
+    // glyphs, because the ruling is about weight and a glyph gate would pass
+    // against any colour at all.
+    //
+    // The third assertion is the one worth having. #166 added the pressed mark
+    // for the case where nothing else can answer, since pressing *up* at the top
+    // of a diff moves no row; a hover that outranked a press would take that
+    // answer away in exactly the case it was built for. So `pressed` wins when
+    // both are true, and this fails if the branches are ever reordered.
+    let width = 64u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let x = width - 1;
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let button = laid.diff.top;
+
+    let fg = |chrome: &Chrome| {
+        screen(width, height, &view, chrome).buffer()[(x, button)]
+            .style()
+            .fg
+    };
+
+    assert_eq!(fg(&chrome()), theme.bar_track.fg, "a button at rest");
+
+    let hovered = Chrome {
+        hovered: Some(Hovered::Button((x, button))),
+        ..chrome()
+    };
+    assert_eq!(
+        fg(&hovered),
+        theme.bar.fg,
+        "a hovered button did not brighten, so the pointer is still invisible \
+         until it clicks"
+    );
+
+    let pressed = Chrome {
+        pressed: Some((x, button)),
+        ..chrome()
+    };
+    assert_eq!(fg(&pressed), theme.bar_active.fg, "a pressed button");
+
+    let both = Chrome {
+        hovered: Some(Hovered::Button((x, button))),
+        pressed: Some((x, button)),
+        ..chrome()
+    };
+    assert_eq!(
+        fg(&both),
+        theme.bar_active.fg,
+        "a hover outranked a press, which takes away the only answer a button \
+         has when pressing it moves no row"
+    );
+
+    // Three distinct rungs, asserted rather than assumed: on a palette where two
+    // of them coincided this test would pass while saying nothing.
+    assert_ne!(theme.bar_track.fg, theme.bar.fg);
+    assert_ne!(theme.bar.fg, theme.bar_active.fg);
+
+    // And the *other* button is untouched, so the mark is about a cell rather
+    // than about the bar. This is what `Hovered::Button` carrying a cell buys.
+    let other = laid.diff.top + laid.diff.rows - 1;
+    assert_eq!(
+        screen(width, height, &view, &hovered).buffer()[(x, other)]
+            .style()
+            .fg,
+        theme.bar_track.fg,
+        "hovering one button lit the one at the other end"
+    );
+}
+
+#[test]
+fn a_click_is_always_brighter_than_a_hover_and_the_thumb_carries_no_hover_mark() {
+    // **The rule this column is drawn to, asserted as a rule rather than per
+    // element.** A gesture has to outrank a pointer merely resting somewhere, or
+    // the mark that says *you are doing this* stops being distinguishable from
+    // the one that says *you could*. The buttons honour it with three weights;
+    // the thumb has only two, `bar` at rest and `bar_active` under a drag, so it
+    // carries **no** hover mark at all rather than one that ties with the drag.
+    //
+    // That is the same finding as a list row, one element over: a surface a
+    // click acts on, with nowhere to draw a mark until #189 rules a rung. This
+    // gate is what fails if someone later gives the thumb `bar_active` on hover
+    // because it looks like an easy win.
+    /// The thumb's glyph, restated rather than imported for [`CONTINUES`]' reason.
+    const THUMB: &str = "█";
+
+    let width = 64u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let x = width - 1;
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+
+    // Every row of a track, hovered in turn, leaves every thumb cell at its
+    // resting weight. Swept rather than sampled, because a resolver that
+    // answered `Some` for one row in the middle would otherwise slip through.
+    //
+    // Asserted against the *resolver* rather than against drawn styles, and that
+    // is the stronger place: a style assertion would pass the day someone gave
+    // the thumb a hover mark in a colour that happened to equal its resting one.
+    // What this forbids is the mark existing at all on a surface with no rung.
+    for region in [laid.list, laid.diff] {
+        for row in region.track.0..region.track.0 + region.track.1 {
+            let hovering = regions(Rect::new(0, 0, width, height), &chrome(), &view)
+                .hover_at(x, row)
+                .is_some();
+            assert!(
+                !hovering,
+                "row {row} of a track answered a hover, and the thumb has no \
+                 rung to draw one in that a drag would still outrank"
+            );
+        }
+    }
+
+    // And the resting column really does draw a thumb, so the sweep above is
+    // over rows that matter rather than over an empty column.
+    let resting = screen(width, height, &view, &chrome());
+    let thumbs = (laid.diff.track.0..laid.diff.track.0 + laid.diff.track.1)
+        .filter(|y| bar_at(&resting, *y) == THUMB)
+        .count();
+    assert!(
+        thumbs > 0,
+        "the fixture drew no thumb, so this proves nothing"
+    );
+}
+
+#[test]
+fn hovering_one_bars_button_leaves_the_other_bars_alone() {
+    // **#166's both-bars defect, one gesture over.** A mark that carried only a
+    // direction lit the matching arrow on *both* bars at once, because the two
+    // regions share a column and it had no way to say which. `Hovered::Button`
+    // carries the cell for that reason, so it names a bar by naming a row, and
+    // this is the gate that fails if it is ever reduced to "the pointer is on
+    // the bar".
+    let width = 64u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let x = width - 1;
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+
+    let ends = |region: Region| (region.top, region.top + region.rows - 1);
+    let (diff_up, diff_down) = ends(laid.diff);
+    let (list_up, list_down) = ends(laid.list);
+
+    for (name, lit, others) in [
+        ("the diff's up", diff_up, [diff_down, list_up, list_down]),
+        ("the list's down", list_down, [list_up, diff_up, diff_down]),
+    ] {
+        let hovered = Chrome {
+            hovered: Some(Hovered::Button((x, lit))),
+            ..chrome()
+        };
+        let backend = screen(width, height, &view, &hovered);
+        let fg = |y: u16| backend.buffer()[(x, y)].style().fg;
+
+        assert_eq!(
+            fg(lit),
+            theme.bar.fg,
+            "hovering {name} button did not brighten it"
+        );
+        for y in others {
+            assert_eq!(
+                fg(y),
+                theme.bar_track.fg,
+                "hovering {name} button lit row {y}, which is a different button \
+                 and possibly a different bar"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_painted_track_is_the_track_the_pointer_is_told_about() {
     // **The agreement the whole shape rests on.** `regions` tells the pointer
     // where a track is and `render` draws one, and the two are separate code
@@ -4999,6 +5189,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 frame: Some(Duration::from_secs(2)),
                 ..diagnostics_chrome()
@@ -5010,6 +5201,7 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 memory: Some(2 * 1024 * 1024 * 1024),
                 ..diagnostics_chrome()
@@ -5064,6 +5256,7 @@ fn a_notice_can_never_colour_the_follow_marker() {
         let chrome = Chrome {
             pressed: None,
             gripped: None,
+            hovered: None,
             scrolling: None,
             notice: Some("cannot read ▶.rs".to_owned()),
             following,
