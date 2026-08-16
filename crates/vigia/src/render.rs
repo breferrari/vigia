@@ -876,6 +876,22 @@ pub struct Chrome {
     /// costs no row, no rect and no wake: the frames it changes are frames the
     /// step was already painting.
     pub pressed: Option<(u16, u16)>,
+    /// The first row of the region whose bar is being **dragged**, when one is.
+    ///
+    /// A row rather than a region, because that is what the drawer already has
+    /// in hand: `scrollbar` is given its own `Rect` and compares `area.y`. It is
+    /// the same lifetime as [`Chrome::pressed`] and a different gesture: a press
+    /// on a step button lights one cell, a press on the track lights the thumb
+    /// it is moving.
+    pub gripped: Option<u16>,
+    /// Which way the keys are currently moving the diff, when they are.
+    ///
+    /// **The one case where the bar answers something nobody is touching.** A
+    /// reader scrolling with `j` or `d` gets the matching arrow lit for as long
+    /// as the burst lasts, so the same mark means *this is moving, that way*
+    /// whichever device asked. Negative is up, positive is down, `None` is at
+    /// rest.
+    pub scrolling: Option<isize>,
     /// Something the reader should see instead of the key hints.
     ///
     /// A monitor survives a failed frame rather than exiting, so this is where a
@@ -2418,6 +2434,8 @@ pub fn render(
         trailing: margins.1,
         paint: PaintStats::default(),
         pressed: chrome.pressed,
+        gripped: chrome.gripped,
+        scrolling: chrome.scrolling,
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -2535,6 +2553,10 @@ struct Painter<'a> {
     /// the whole screen, and a drawer that reached back into the chrome for it
     /// would be one more thing the two regions could answer differently.
     pressed: Option<(u16, u16)>,
+    /// The first row of the bar being dragged, from [`Chrome::gripped`].
+    gripped: Option<u16>,
+    /// Which way the keys are scrolling, from [`Chrome::scrolling`].
+    scrolling: Option<isize>,
 }
 
 impl Painter<'_> {
@@ -3215,10 +3237,20 @@ impl Painter<'_> {
         let start = (at.min(travel) * (rows - thumb)) / travel;
         let x = area.x + area.width - 1;
 
+        // **Lit while the reader is dragging this bar**, which is the same
+        // reading the step buttons already carry one block down: bright means
+        // *you are doing this now*. The thumb is the thing being moved, so it is
+        // the thing that answers.
+        let dragging = self.gripped == Some(area.y);
+        let thumb_style = if dragging {
+            self.theme.bar_active
+        } else {
+            self.theme.bar
+        };
         for row in 0..rows {
             let filled = row >= start && row < start + thumb;
             let (glyph, style) = if filled {
-                (BAR_THUMB, self.theme.bar)
+                (BAR_THUMB, thumb_style)
             } else {
                 (BAR_TRACK, self.theme.bar_track)
             };
@@ -3243,9 +3275,22 @@ impl Painter<'_> {
         // this the control is indistinguishable from a decoration.
         if matches!(bar, Bar::Stepped) {
             let bottom = area.y + area.height - 1;
-            for (y, glyph) in [(area.y, STEP_UP), (bottom, STEP_DOWN)] {
-                let style = if self.pressed == Some((x, y)) {
-                    self.theme.bar
+            for (y, glyph, way) in [(area.y, STEP_UP, -1isize), (bottom, STEP_DOWN, 1)] {
+                // Three ways an arrow lights, and they are one state rather than
+                // three: the reader is holding *this* button, the reader is
+                // dragging *this* bar, or the keys are moving this region *that*
+                // way. All three mean the same sentence, so all three take the
+                // same style and the eye learns it once.
+                //
+                // The key case is the only one with nothing under a finger, and
+                // it is why the arrows answer a keyboard at all: a reader holding
+                // `j` sees the mark that says which way, on the element whose
+                // whole job is which way.
+                let held = self.pressed == Some((x, y));
+                let keyed = self.scrolling.is_some_and(|by| by.signum() == way)
+                    && self.gripped != Some(area.y);
+                let style = if held || keyed {
+                    self.theme.bar_active
                 } else {
                     self.theme.bar_track
                 };

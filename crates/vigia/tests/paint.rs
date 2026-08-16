@@ -78,7 +78,7 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let area = Rect::new(0, 0, width, height);
-    let chrome = app.chrome("fixture", None, None);
+    let chrome = app.chrome("fixture", None, None, None, None);
     let screen = body_layout(area, &chrome, FILES);
     let rows = screen.diff;
     let view = app
@@ -314,7 +314,7 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
         files: 1,
         ..View::default()
     };
-    let chrome = App::new().chrome("fixture", None, None);
+    let chrome = App::new().chrome("fixture", None, None, None, None);
     let mut buf = Buffer::empty(area);
     let stats = render(&mut buf, area, &view, &Theme::default(), &chrome);
 
@@ -368,8 +368,10 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
     };
     let chrome = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         worktree: "fixture".to_owned(),
-        ..App::new().chrome("fixture", None, None)
+        ..App::new().chrome("fixture", None, None, None, None)
     };
     let mut buf = Buffer::empty(area);
     render(&mut buf, area, &view, &Theme::default(), &chrome);
@@ -423,7 +425,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let mut app = App::past_first_paint();
         let mut highlighter = Highlighter::new();
         let history = History::new();
-        let chrome = app.chrome("fixture", None, None);
+        let chrome = app.chrome("fixture", None, None, None, None);
         let screen = body_layout(area, &chrome, BURST_FILES);
         let rows = screen.diff;
         let mut buf = Buffer::empty(area);

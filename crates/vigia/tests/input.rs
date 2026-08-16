@@ -16,8 +16,8 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Held, LIST_ROWS, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
-    action_for,
+    Action, Grabbed, Held, LIST_ROWS, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT,
+    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, patience,
 };
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
@@ -1106,4 +1106,159 @@ fn a_list_drag_leaves_the_diff_alone_and_a_diff_drag_does_not() {
     // received a height of zero and the bottom of the track fell off the end.
     assert!(!Action::ListTo(0).needs_height());
     assert!(Action::DiffTo(0).needs_height());
+}
+
+#[test]
+fn a_drag_keeps_the_bar_it_started_on_however_far_the_pointer_goes() {
+    // **Reported from use: dragging off the bar's column ended the drag.** It
+    // should not. A one-column target is not something a hand stays inside while
+    // it moves, and `action_for` asks *what is under the pointer*, which is the
+    // right question for a press and the wrong one once a reader is already
+    // holding something. So a drag under way is resolved by `drag_action`
+    // against the region it began on, and the column is not consulted at all.
+    let regions = two_regions();
+
+    // Far off the bar in both directions, and against the left edge.
+    for column in [0u16, 40, 78, 79, 120] {
+        assert_eq!(
+            drag_action(
+                &at(MouseEventKind::Drag(MouseButton::Left), column, 12),
+                regions,
+                Grabbed::Diff
+            ),
+            Some(Action::DiffTo(TRACK_SCALE / 2)),
+            "a drag at column {column} stopped tracking the bar it began on"
+        );
+    }
+}
+
+#[test]
+fn a_drag_past_either_end_holds_that_end() {
+    // Pulling above the track is the first window and below it is the last,
+    // which is what every scrollbar does and what a reader dragging past the end
+    // is asking for. Without the clamp those rows resolve to nothing and the
+    // view stops wherever the pointer last crossed the track, which reads as the
+    // drag having come loose.
+    let regions = two_regions();
+
+    for row in [0u16, 3, 5, 6] {
+        assert_eq!(
+            drag_action(
+                &at(MouseEventKind::Drag(MouseButton::Left), 40, row),
+                regions,
+                Grabbed::Diff
+            ),
+            Some(Action::DiffTo(0)),
+            "a drag at row {row}, above the diff's track, did not hold the top"
+        );
+    }
+    for row in [18u16, 19, 23, 200] {
+        assert_eq!(
+            drag_action(
+                &at(MouseEventKind::Drag(MouseButton::Left), 40, row),
+                regions,
+                Grabbed::Diff
+            ),
+            Some(Action::DiffTo(TRACK_SCALE)),
+            "a drag at row {row}, below the diff's track, did not hold the bottom"
+        );
+    }
+}
+
+#[test]
+fn only_a_press_on_a_track_takes_hold_of_a_bar() {
+    // What a press *grabs* is the gesture that continues, so it is the track and
+    // never the buttons: a button is a step and is answered on the press itself.
+    let regions = two_regions();
+
+    assert_eq!(regions.grab_at(79, 12), Some(Grabbed::Diff));
+    assert_eq!(regions.grab_at(79, 2), Some(Grabbed::List));
+    // The diff's ends are its step buttons, which step rather than grab.
+    assert_eq!(regions.grab_at(79, 5), None);
+    assert_eq!(regions.grab_at(79, 19), None);
+    // And off the bar's column a press grabs nothing, because a drag has to
+    // begin somewhere real even though it may end anywhere.
+    assert_eq!(regions.grab_at(40, 12), None);
+}
+
+#[test]
+fn a_drag_answers_only_motion() {
+    // A release is not a position, so it falls through to the caller that ends
+    // the grip rather than being read as one last seek.
+    let regions = two_regions();
+
+    for kind in [
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::Moved,
+        MouseEventKind::ScrollDown,
+        MouseEventKind::Down(MouseButton::Left),
+    ] {
+        assert_eq!(
+            drag_action(&at(kind, 79, 12), regions, Grabbed::Diff),
+            None,
+            "{kind:?} was read as a drag"
+        );
+    }
+}
+
+#[test]
+fn a_direction_mark_expires_where_a_held_button_does_not() {
+    // The arrows light while the keys scroll, and a key burst has no release: it
+    // simply stops sending. So this is the one mark on the bar that needs an
+    // expiry, and `SCROLL_LINGER` is it. Without one the last arrow of a burst
+    // would stay lit on an idle tree, which is the staleness §11.2 B10 refused a
+    // hover highlight for and would be no better here.
+    //
+    // The clock is still bounded by the gesture that armed it: nothing schedules
+    // it but a scroll, it fires once, and it clears itself.
+    assert!(
+        SCROLL_LINGER > STEP_REPEAT,
+        "the direction mark expires faster than the repeat that drives it, so a \
+         held button would blink"
+    );
+    assert!(
+        SCROLL_LINGER < STEP_DELAY,
+        "the direction mark outlives the delay before a button repeats, which \
+         makes it a claim about the past rather than about now"
+    );
+}
+
+#[test]
+fn nothing_armed_means_no_deadline_at_all() {
+    // **The invariant both clocks share, and the one a source gate cannot see.**
+    // `Held::wait` already answers for the repeat; this answers for the repeat
+    // *and* the direction mark together, because two deadlines asked separately
+    // are two chances to leave one armed on an idle monitor. `None` here is what
+    // makes the loop's receive untimed, which is I1's *0 wakeups while idle* as
+    // a structural fact rather than as care taken at two call sites.
+    let now = Instant::now();
+
+    assert_eq!(
+        patience(None, None, now),
+        None,
+        "with nothing held and nothing lingering the loop was handed a deadline, \
+         which is a timer on an idle monitor"
+    );
+
+    // Either one alone arms it, and neither is allowed to hide the other.
+    let hold = Held::new(Action::Scroll(1), (79, 5), now);
+    assert_eq!(patience(Some(hold), None, now), Some(STEP_DELAY));
+    assert_eq!(
+        patience(None, Some(now + SCROLL_LINGER), now),
+        Some(SCROLL_LINGER)
+    );
+
+    // **The nearer of the two**, whichever it is, because the loop has to wake
+    // for the first thing due. Taking the wrong one lets the other run late.
+    assert_eq!(
+        patience(Some(hold), Some(now + SCROLL_LINGER), now),
+        Some(SCROLL_LINGER),
+        "the linger is due first and the loop was told to sleep past it"
+    );
+    let soon = Held::new(Action::Scroll(1), (79, 5), now - STEP_DELAY + STEP_REPEAT);
+    assert_eq!(
+        patience(Some(soon), Some(now + SCROLL_LINGER), now),
+        Some(STEP_REPEAT),
+        "the step is due first and the loop was told to sleep past it"
+    );
 }

@@ -355,9 +355,13 @@ impl App {
         worktree: &str,
         branch: Option<&str>,
         pressed: Option<(u16, u16)>,
+        gripped: Option<u16>,
+        scrolling: Option<isize>,
     ) -> Chrome {
         Chrome {
             pressed,
+            gripped,
+            scrolling,
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
             mode: self.mode,
@@ -829,10 +833,16 @@ mod tests {
         // type and therefore the only path that can be wrong. A bare accessor
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
-        assert_eq!(app.chrome("fixture", None, None).mode, Mode::Watching);
+        assert_eq!(
+            app.chrome("fixture", None, None, None, None).mode,
+            Mode::Watching
+        );
 
         app.watch_lost();
-        assert_eq!(app.chrome("fixture", None, None).mode, Mode::Lost);
+        assert_eq!(
+            app.chrome("fixture", None, None, None, None).mode,
+            Mode::Lost
+        );
 
         // One way, and asserted rather than left implied by the absence of a
         // setter. Nothing can revive a watch: the one handle that unblocks the
@@ -842,7 +852,10 @@ mod tests {
         // each other precisely because they arrive from one event.
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
-        assert_eq!(app.chrome("fixture", None, None).mode, Mode::Lost);
+        assert_eq!(
+            app.chrome("fixture", None, None, None, None).mode,
+            Mode::Lost
+        );
     }
 
     #[test]
@@ -852,9 +865,11 @@ mod tests {
         // that nothing invents one when there is none.
         let app = App::new();
         assert_eq!(
-            app.chrome("fixture", Some("main"), None).branch.as_deref(),
+            app.chrome("fixture", Some("main"), None, None, None)
+                .branch
+                .as_deref(),
             Some("main")
         );
-        assert_eq!(app.chrome("fixture", None, None).branch, None);
+        assert_eq!(app.chrome("fixture", None, None, None, None).branch, None);
     }
 }

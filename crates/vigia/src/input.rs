@@ -144,6 +144,28 @@ impl Region {
         }
         Some((u32::from(row - top) * TRACK_SCALE) / travel)
     }
+
+    /// The same, with a row outside the track pulled to whichever end it is past.
+    ///
+    /// **What a drag already in progress uses**, and the difference from
+    /// [`Region::along`] is the whole of it: `along` answers *is the pointer on
+    /// this track*, which is the right question for deciding what a fresh press
+    /// means, and the wrong one once a reader is already dragging. A hand does
+    /// not stay inside a one-column target while it moves, and a scrollbar that
+    /// let go the moment the pointer wandered would be unusable for the gesture
+    /// it exists for.
+    ///
+    /// Above the track is the first window and below it is the last, which is
+    /// what every scrollbar does and what a reader dragging past the end is
+    /// asking for.
+    fn along_clamped(self, row: u16) -> u32 {
+        let (top, rows) = self.track;
+        if rows == 0 {
+            return 0;
+        }
+        let last = top + rows - 1;
+        self.along(row.clamp(top, last)).unwrap_or(0)
+    }
 }
 
 /// Where the screen's regions are, so a pointer can be told what it is over.
@@ -205,6 +227,105 @@ impl Regions {
             return None;
         }
         self.step(row)
+    }
+
+    /// The bar a press at `column`, `row` takes hold of, or `None` off them.
+    ///
+    /// **The track and not the buttons.** A press on a step button is a step and
+    /// is already answered by [`Regions::step_at`]; what this reports is the
+    /// gesture that *continues*, so the loop knows to keep routing motion to this
+    /// region however far the pointer travels afterwards.
+    pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
+        if self.bar != Some(column) {
+            return None;
+        }
+        if self.list.along(row).is_some() {
+            return Some(Grabbed::List);
+        }
+        self.diff.along(row).is_some().then_some(Grabbed::Diff)
+    }
+}
+
+/// Which region a drag that is already under way belongs to.
+///
+/// **A gesture outlives the target it began on**, which is the whole reason this
+/// exists. `Regions` answers *what is under the pointer now*; once a button is
+/// down that question has stopped being the relevant one, and the answer that
+/// matters is *what did this drag start on*. Keeping the two apart is what lets
+/// the pointer wander off the bar's one column without the drag ending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grabbed {
+    /// The pinned list's bar.
+    List,
+    /// The diff's bar.
+    Diff,
+}
+
+impl Grabbed {
+    /// The region this drag is moving.
+    fn region(self, regions: Regions) -> Region {
+        match self {
+            Self::List => regions.list,
+            Self::Diff => regions.diff,
+        }
+    }
+
+    /// The first row of that region, which is what the paint compares against to
+    /// draw the gripped bar lit.
+    pub fn top(self, regions: Regions) -> u16 {
+        self.region(regions).top
+    }
+}
+
+/// What a drag already under way makes of `event`, **ignoring the column**.
+///
+/// A press on a track is answered by [`action_for`] like any other press. Every
+/// motion after it comes here instead, because by then the reader is holding
+/// something and the pointer's column has stopped being a question about intent.
+/// Dragging out of the one-column target is what a hand does; ending the gesture
+/// there was the defect this function exists to remove.
+///
+/// The row is clamped rather than tested, so pulling above the track holds the
+/// first window and pulling below it holds the last. Returns `None` for anything
+/// that is not a motion, so a release falls through to the caller that ends the
+/// grip.
+pub fn drag_action(event: &Event, regions: Regions, on: Grabbed) -> Option<Action> {
+    let Event::Mouse(mouse) = event else {
+        return None;
+    };
+    if !matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left)) {
+        return None;
+    }
+    let at = on.region(regions).along_clamped(mouse.row);
+    Some(match on {
+        Grabbed::List => Action::ListTo(at),
+        Grabbed::Diff => Action::DiffTo(at),
+    })
+}
+
+/// How long the loop may block before some clock here has to act.
+///
+/// **`None` is the whole invariant, and it is why both clocks are asked through
+/// one function.** With nothing held and nothing lingering this returns `None`,
+/// the loop's receive is untimed, and I1's *0 wakeups while idle* is a fact
+/// about the structure rather than about care taken at two call sites. Two
+/// deadlines asked separately would be two chances to leave one armed on an idle
+/// monitor, and the loop's own source gate can see which branch is taken but not
+/// what fed it.
+///
+/// A free function rather than a method on the shell so it can be driven by a
+/// test: the shell owns a terminal and three threads, and an invariant that can
+/// only be exercised by starting the program is an invariant with no gate.
+///
+/// Where both are armed it is the nearer, because the loop wakes for whichever
+/// comes first. Saturating, so a deadline already past asks for zero rather than
+/// panicking.
+pub fn patience(held: Option<Held>, linger: Option<Instant>, now: Instant) -> Option<Duration> {
+    let step = Held::wait(held, now);
+    let mark = linger.map(|until| until.saturating_duration_since(now));
+    match (step, mark) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (one, other) => one.or(other),
     }
 }
 

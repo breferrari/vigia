@@ -50,7 +50,7 @@ fn body() -> usize {
     // scroll arithmetic below is not entangled with I6's two-line footer.
     diff_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, None),
+        &App::new().chrome("fixture", None, None, None, None),
         FILES,
     )
 }

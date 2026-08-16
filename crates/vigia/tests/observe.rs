@@ -893,7 +893,9 @@ impl Pane<'_> {
     /// The buffer is a real one and `render` writes into it.
     fn paint(&mut self, worktree: &Worktree) {
         self.branch = branch_for(&self.frame, || worktree.branch());
-        let chrome = self.app.chrome(&self.name, self.branch.as_deref(), None);
+        let chrome = self
+            .app
+            .chrome(&self.name, self.branch.as_deref(), None, None, None);
         self.body = body_layout(self.area, &chrome, self.frame.files().len());
         match self.app.view(
             &mut self.frame,
@@ -910,7 +912,9 @@ impl Pane<'_> {
                 self.app.warn(e.to_string());
             }
         }
-        let chrome = self.app.chrome(&self.name, self.branch.as_deref(), None);
+        let chrome = self
+            .app
+            .chrome(&self.name, self.branch.as_deref(), None, None, None);
         let _regions = regions(self.area, &chrome, &self.view);
         render(
             &mut self.buffer,
@@ -925,7 +929,7 @@ impl Pane<'_> {
     /// see it.
     fn readout(&self) -> Option<Duration> {
         self.app
-            .chrome(&self.name, self.branch.as_deref(), None)
+            .chrome(&self.name, self.branch.as_deref(), None, None, None)
             .frame
     }
 }
