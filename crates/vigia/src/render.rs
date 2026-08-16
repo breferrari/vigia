@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -317,6 +317,28 @@ const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
 /// filled block or an inverted row would read as a selection, which is the
 /// reviewer-class affordance the ruling refuses.
 const CARET: char = '▸';
+
+/// The weight that row's **path** takes on top of whatever recency gave it.
+///
+/// **The caret's second channel, not a second mark**
+/// ([#193](https://github.com/breferrari/vigia/issues/193)). `SPEC.md` §5.3 makes
+/// every other durable distinction in that region a matter of weight, and the one
+/// row a reader most needs to find carried a glyph alone. This is drawn where and
+/// only where [`CARET`] is, so the two are one statement said twice: the tie is
+/// [`CARET_FLOOR`], and below it neither is drawn.
+///
+/// **A constant here rather than a [`Theme`] key**, which is the line this file
+/// already keeps: the theme owns colour and the shell owns structure, the same
+/// way [`CARET`]'s own glyph is not themeable while the [`Theme::pulse`] it is
+/// drawn in is. It is also the one channel that survives `NO_COLOR`, which §11.1
+/// rules is where a modifier earns its place.
+///
+/// **It shares `BOLD` with [`Theme::path`]'s pulse rung and that is not a
+/// collision**, because both readings carry a glyph of their own: a pulsing row
+/// draws `●` in its reserved slot and this one draws [`CARET`]. Where the pulse
+/// column is dropped the caret still is not, so *bold with a caret* and *bold
+/// without one* stay two different sentences at every width the caret survives.
+const CURRENT_WEIGHT: Modifier = Modifier::BOLD;
 
 /// How many slices the heat strip may show, widest rung first.
 ///
@@ -2460,6 +2482,9 @@ pub fn render(
         gripped: chrome.gripped,
         hovered: chrome.hovered,
         scrolling: chrome.scrolling,
+        // Nothing until the list is drawing, and nothing again afterwards. See
+        // the field.
+        current: None,
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -2584,6 +2609,20 @@ struct Painter<'a> {
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(u16, isize)>,
+    /// The row [`CARET`] is being drawn on, while the pinned list is drawing.
+    ///
+    /// **The one mark on this type that does not come from [`Chrome`]**, and it
+    /// is a fact about the *screen* rather than about the pointer:
+    /// [`Painter::list`] resolves which row the diff is inside and sets this from
+    /// the same predicate it draws the caret from, so the glyph and
+    /// [`CURRENT_WEIGHT`] cannot name two different rows.
+    ///
+    /// **Cleared when that loop ends**, which is what keeps the mark inside one
+    /// region. Both regions draw through [`Painter::file_row`], so a weight keyed
+    /// on a row alone would reach a heading in the stream the moment the two
+    /// shared a `y`. They cannot on the shipped layout, and a confinement that
+    /// rests on geometry is one an edit to the geometry silently removes.
+    current: Option<u16>,
 }
 
 impl Painter<'_> {
@@ -3159,9 +3198,16 @@ impl Painter<'_> {
             // a pane too short for a region hands the reader's request back
             // untouched, so `View::collect` can legitimately report `usize::MAX`
             // here. `position_of` guards the identical hazard one region up.
-            if caret && view.list_top.saturating_add(offset) == view.top.file {
+            // **One predicate, two channels.** The glyph and [`CURRENT_WEIGHT`]
+            // are the same statement said twice, so they are resolved once here
+            // rather than re-derived by the drawer. That also ties the weight to
+            // [`CARET_FLOOR`] for free: `caret` is false below it and neither
+            // mark is drawn.
+            let current = caret && view.list_top.saturating_add(offset) == view.top.file;
+            if current {
                 self.put(left, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
             }
+            self.current = current.then_some(y);
             self.file_row(
                 Rect {
                     y,
@@ -3178,6 +3224,8 @@ impl Painter<'_> {
                 &columns,
             );
         }
+        // Out of scope the moment the region is, which is the field's own rule.
+        self.current = None;
     }
 
     /// Draw this region's scrollbar if it has one, and hand back the room left
@@ -3784,29 +3832,37 @@ impl Painter<'_> {
             Some(pair) if width_of(pair) <= room => pair.as_str(),
             _ => heading.path,
         };
-        self.put(
-            x,
-            area.y,
-            &elide_head(label, room),
-            room,
-            // **The pointer's weight outranks the recency ladder, and it is a
-            // fourth reading rather than a louder one.** §5.3 rules that
-            // intensity carries recency and nothing else, so a hover that merely
-            // brightened would say *recent* about a file nothing had touched.
-            // [`Theme::path_hover`] sits above all three and underlines, which is
-            // a mark the ladder cannot produce at any depth, so the two stay
-            // tellable apart even on `ansi` where the colour headroom is nil.
-            //
-            // It answers on the **list's** rows only. `Hovered::Row` is resolved
-            // from the list region alone, and a diff heading's row is never
-            // inside it, so this comparison cannot light one: the diff is not
-            // clickable and a mark there would imply it is.
-            if self.hovered == Some(Hovered::Row(area.y)) {
-                self.theme.path_hover
-            } else {
-                self.theme.recency(heading.recency)
-            },
-        );
+        // **Two marks on one path, and they are resolved on two channels rather
+        // than as a priority order.** The pointer chooses the colour and the
+        // underline; the caret adds the weight. Ranking them would cost a fact
+        // the reader has on screen: whichever lost would take either *where the
+        // pointer is* or *which file the diff is in* off the row.
+        //
+        // §5.3 rules that intensity carries recency and nothing else, so a hover
+        // that merely brightened would say *recent* about a file nothing had
+        // touched. [`Theme::path_hover`] answers that with the **underline**,
+        // which no recency weight carries at any depth. It used to answer with
+        // brightness as well and that half is gone
+        // ([#193](https://github.com/breferrari/vigia/issues/193)): a mark that
+        // can go stale outranking every claim about the worktree is the thing
+        // §5.3's own B10 rule forbids.
+        //
+        // Hover answers on the **list's** rows only. `Hovered::Row` is resolved
+        // from the list region alone, and a diff heading's row is never inside
+        // it, so this comparison cannot light one: the diff is not clickable and
+        // a mark there would imply it is. [`Painter::current`] is confined the
+        // same way and says how.
+        let ink = if self.hovered == Some(Hovered::Row(area.y)) {
+            self.theme.path_hover
+        } else {
+            self.theme.recency(heading.recency)
+        };
+        let ink = if self.current == Some(area.y) {
+            ink.add_modifier(CURRENT_WEIGHT)
+        } else {
+            ink
+        };
+        self.put(x, area.y, &elide_head(label, room), room, ink);
     }
 
     /// Walk a line into styled runs, stopping at the pane's edge, and say

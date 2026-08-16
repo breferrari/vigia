@@ -131,25 +131,41 @@ palette! {
     path_cold,
     /// A listed path the pointer is resting on.
     ///
-    /// **A fourth weight beside a three-weight ladder, and the placement is the
-    /// whole of it.** §5.3 rules that intensity carries recency *and nothing
-    /// else*, so a hover mark that merely brightened a row would say **recent**
-    /// about a file nothing had touched. This sits **above** all three, brighter
-    /// than [`Theme::path`]'s pulse weight, so it is a reading the ladder never
-    /// produces rather than a louder version of one it does.
+    /// **The pointer's own colour, which is [`Theme::bar_hover`]'s**, so that
+    /// one reading means *the pointer is here* wherever it lands: a step button,
+    /// a thumb, a listed path. It holds that value in every built-in and keeps a
+    /// key of its own for [`Theme::spark_track`]'s reason, which is that a
+    /// distinct element has to be movable without moving the others.
     ///
-    /// That is what buys the exception §5.3 now carries: the ladder keeps its
-    /// three durable weights, and a transient mark that follows the pointer may
-    /// take a fourth that recency cannot reach.
-    ///
-    /// **It is underlined, and that is what makes it hold where colour runs
-    /// out.** `ansi`'s brightest path is already `White` with `BOLD` and has
-    /// nowhere further to go, so on sixteen colours a purely brighter mark would
-    /// be a pulsing row exactly. Nothing else in this palette underlines
-    /// anything, so the rule stays readable at every depth on every palette
-    /// rather than degrading to ambiguity on the default one. It is also what a
+    /// **It is underlined, and that is the whole of what keeps it off the
+    /// recency ladder.** §5.3 rules that intensity carries recency *and nothing
+    /// else*, so a mark that merely brightened a row would say **recent** about
+    /// a file nothing had touched. Nothing else in these palettes underlines
+    /// anything, so the separation survives every depth. It is also what a
     /// reader already reads as *the thing under the cursor* from every hyperlink
     /// they have ever pointed at.
+    ///
+    /// **This used to sit above all three rungs and that was wrong**
+    /// ([#193](https://github.com/breferrari/vigia/issues/193)), which is worth
+    /// keeping rather than editing out because the reason is not taste. §5.3's
+    /// own B10 principle rules that a pointer mark *"must be the quietest thing
+    /// still visible in that region"*, on the ground that a mark which can go
+    /// **stale** must never be read before the worktree is; the paragraph beside
+    /// it made this the brightest text on the pane. Both sentences were written
+    /// the same day. The brightness was never doing the anti-collision work, and
+    /// the underline above always was.
+    ///
+    /// **On `ansi` the foreground now equals [`Theme::path_cold`]'s outright**,
+    /// which is stated rather than left to be discovered: sixteen names hold
+    /// nothing between colour 8 and `Gray`, so a quiet mark on that palette *is*
+    /// the cold rung's colour and the modifier is the only channel left. That is
+    /// exactly the case §5.3 nominates the underline for.
+    ///
+    /// **It carries no `BOLD`.** That weight belongs to the row the caret marks,
+    /// which is `render.rs`'s `CURRENT_WEIGHT`, and the two are orthogonal on
+    /// purpose: colour and underline are the pointer, weight is the file the
+    /// diff is inside, so a hovered current row reads as both rather than as
+    /// whichever mark won.
     path_hover,
     /// The `●` marking a file that moved in the last tick.
     pulse,
@@ -532,9 +548,10 @@ impl Theme {
             path: fg(Color::White).add_modifier(Modifier::BOLD),
             path_live: fg(Color::White),
             path_cold: fg(Color::Gray),
-            path_hover: fg(Color::White)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED),
+            // `bar_hover`'s colour without its `BOLD`: the bar needs the weight
+            // to separate a hovered button from `bar_track` on a palette with
+            // nothing between them, and a path has the underline instead.
+            path_hover: fg(Color::Gray).add_modifier(Modifier::UNDERLINED),
             // Cyan rather than a diff colour. The pulse says *when*, and green or
             // red beside a path would read as *what*, which the sigil column
             // already means two rows below.
@@ -639,9 +656,9 @@ impl Theme {
             path: rgb(0xe6, 0xed, 0xf3).add_modifier(Modifier::BOLD),
             path_live: rgb(0xe6, 0xed, 0xf3),
             path_cold: rgb(0x7d, 0x85, 0x90),
-            path_hover: rgb(0xff, 0xff, 0xff)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED),
+            // `bar_hover`'s `#a8b1bb`, which is **8.71:1** on this pane: quieter
+            // than `path_live`'s `#e6edf3` and a long way clear of unreadable.
+            path_hover: rgb(0xa8, 0xb1, 0xbb).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x39, 0xc5, 0xcf),
             // Cyan, where the picture's sparkline is green. The picture draws a
             // *ramp* there and we draw one colour, so it does not answer this; what
@@ -772,9 +789,10 @@ impl Theme {
             path: rgb(0x1f, 0x23, 0x28).add_modifier(Modifier::BOLD),
             path_live: rgb(0x1f, 0x23, 0x28),
             path_cold: rgb(0x81, 0x8b, 0x98),
-            path_hover: rgb(0x00, 0x00, 0x00)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::UNDERLINED),
+            // `bar_hover`'s `#3d4650`, **9.59:1** on white. The direction flips
+            // with the palette and the rule does not: quieter here means lighter
+            // than `path`'s `#1f2328`, not darker.
+            path_hover: rgb(0x3d, 0x46, 0x50).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x0a, 0x62, 0x6b),
             spark: rgb(0x0a, 0x62, 0x6b),
             // **Darker** here where `dark`'s is brighter, which is the same rule
