@@ -235,3 +235,82 @@ fn the_window_is_exactly_the_buckets_it_is_divided_into() {
          one of them"
     );
 }
+
+/// A drawn column is the **sum** of the samples under it, not one of them.
+///
+/// **The gate [#198](https://github.com/breferrari/vigia/issues/198) exists
+/// for.** The store samples fifteen times finer than the sparkline draws, and
+/// the projection is what hides that. Two writes a second apart used to land in
+/// one bucket and add up because the bucket *was* the sample; now they land in
+/// two samples of one column, and only summing keeps the answer the same.
+///
+/// Every other spelling of the projection fails here and passes everything else:
+/// taking the newest sample draws one, taking the max draws one, taking the
+/// first draws one. That is why this is asserted on the total rather than on
+/// the shape.
+///
+/// Driven entirely through the public store, so it says nothing about how the
+/// samples are held and keeps saying it if that changes again.
+#[test]
+fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
+    let now = Instant::now();
+    let mut history = History::starting_at(now);
+
+    // Well inside one drawn bucket, and spread far enough apart that a
+    // one-second sampling grid puts them in different samples.
+    let writes = 5;
+    for step in 0..writes {
+        history.record(["src/a.rs"], now + HISTORY_BUCKET / 8 * step);
+    }
+
+    let drawn = history.churn("src/a.rs").expect("the path is tracked");
+    let newest = drawn[HISTORY_BUCKETS - 1];
+    assert_eq!(
+        newest,
+        u16::try_from(writes).expect("a small count"),
+        "the newest column holds {newest} of {writes} writes made inside it, so \
+         the projection is dropping samples rather than summing them: {drawn:?}"
+    );
+    assert_eq!(
+        drawn.iter().map(|&count| u32::from(count)).sum::<u32>(),
+        writes,
+        "writes leaked into a column they were not made in: {drawn:?}"
+    );
+}
+
+/// One [`HISTORY_BUCKET`] of elapsed time moves a write exactly one column.
+///
+/// The other half of the projection's contract, and the one that would break
+/// silently: a store sampling finer than it draws could roll on the fine grid and
+/// still report the coarse one, but only if the two agree about how many samples
+/// a column is. If they ever disagree, a write slides by the wrong number of
+/// columns and the sparkline becomes a different picture of the same worktree.
+///
+/// Asserted at the boundary rather than at a fraction of it, because that is
+/// where an off-by-one lives.
+#[test]
+fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
+    let now = Instant::now();
+    let mut history = History::starting_at(now);
+    history.record(["src/a.rs"], now);
+
+    for step in 1..HISTORY_BUCKETS {
+        // Nothing written, only time passing, which is what `record` with an
+        // empty iterator means.
+        history.record(
+            std::iter::empty::<&str>(),
+            now + HISTORY_BUCKET * step as u32,
+        );
+        let drawn = history.churn("src/a.rs").expect("still inside the window");
+        let at = HISTORY_BUCKETS - 1 - step;
+        assert_eq!(
+            drawn[at], 1,
+            "after {step} bucket(s) the write is not in column {at}: {drawn:?}"
+        );
+        assert_eq!(
+            drawn.iter().map(|&count| u32::from(count)).sum::<u32>(),
+            1,
+            "the write was duplicated or lost while sliding: {drawn:?}"
+        );
+    }
+}
