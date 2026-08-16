@@ -4264,45 +4264,95 @@ fn a_dragged_bar_lights_its_thumb_and_the_other_bar_stays_put() {
 }
 
 #[test]
-fn the_keys_light_the_arrow_they_are_moving_towards() {
-    // **The one lit thing on this screen nobody is touching.** The arrows are the
-    // element whose whole job is *which way*, so a reader scrolling with `j` or
-    // `d` gets the matching one lit and the opposite one left alone. Direction
-    // rather than magnitude: one row and half a page light the same arrow.
+fn a_scroll_lights_one_arrow_on_one_bar() {
+    // **Reported from use: a keypress lit the matching arrow on *both* bars.**
+    // The two regions move different things and answer different keys, so a mark
+    // that carried only a direction had no way to say which. `gripped` one field
+    // over had carried its region from the start, which is why a drag was right
+    // throughout and this was not: the correct shape was one field away.
+    //
+    // Four claims per case, and the third is the one that was failing: the arrow
+    // it moves towards is lit, the opposite one is not, **the other bar is
+    // untouched**, and direction is what decides rather than magnitude.
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
     let theme = Theme::default();
     let x = width - 1;
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-    let (up, down) = (laid.diff.top, laid.diff.top + laid.diff.rows - 1);
 
-    for (way, lit, dark) in [(-1isize, up, down), (1, down, up)] {
+    let ends = |region: Region| (region.top, region.top + region.rows - 1);
+    let (diff_up, diff_down) = ends(laid.diff);
+    let (list_up, list_down) = ends(laid.list);
+
+    for (name, scrolled, way, lit, dark, other) in [
+        (
+            "the diff",
+            laid.diff,
+            -1isize,
+            diff_up,
+            diff_down,
+            [list_up, list_down],
+        ),
+        (
+            "the diff",
+            laid.diff,
+            1,
+            diff_down,
+            diff_up,
+            [list_up, list_down],
+        ),
+        (
+            "the list",
+            laid.list,
+            -1,
+            list_up,
+            list_down,
+            [diff_up, diff_down],
+        ),
+        (
+            "the list",
+            laid.list,
+            1,
+            list_down,
+            list_up,
+            [diff_up, diff_down],
+        ),
+    ] {
         let scrolling = Chrome {
-            scrolling: Some(way),
+            scrolling: Some((scrolled.top, way)),
             ..chrome()
         };
         let backend = screen(width, height, &view, &scrolling);
+        let fg = |y: u16| backend.buffer()[(x, y)].style().fg;
+
         assert_eq!(
-            backend.buffer()[(x, lit)].style().fg,
+            fg(lit),
             theme.bar_active.fg,
-            "scrolling {way} did not light the arrow it is moving towards"
+            "scrolling {name} by {way} did not light the arrow it moves towards"
         );
         assert_eq!(
-            backend.buffer()[(x, dark)].style().fg,
+            fg(dark),
             theme.bar_track.fg,
-            "scrolling {way} lit the arrow it is moving away from"
+            "scrolling {name} by {way} lit the arrow it moves away from"
         );
+        for y in other {
+            assert_eq!(
+                fg(y),
+                theme.bar_track.fg,
+                "scrolling {name} by {way} lit row {y} on the *other* bar, which                  answers different keys and moves a different thing"
+            );
+        }
     }
 
     // Magnitude is not direction: a half page lights what a single row lights.
     for way in [-9isize, -1, 1, 9] {
         let scrolling = Chrome {
-            scrolling: Some(way),
+            scrolling: Some((laid.diff.top, way)),
             ..chrome()
         };
         let backend = screen(width, height, &view, &scrolling);
-        let expected = if way < 0 { up } else { down };
+        let expected = if way < 0 { diff_up } else { diff_down };
         assert_eq!(
             backend.buffer()[(x, expected)].style().fg,
             theme.bar_active.fg,

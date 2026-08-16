@@ -356,7 +356,7 @@ impl App {
         branch: Option<&str>,
         pressed: Option<(u16, u16)>,
         gripped: Option<u16>,
-        scrolling: Option<isize>,
+        scrolling: Option<(u16, isize)>,
     ) -> Chrome {
         Chrome {
             pressed,
