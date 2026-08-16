@@ -129,6 +129,28 @@ palette! {
     path_live,
     /// A path nothing has written since `vigia` started watching.
     path_cold,
+    /// A listed path the pointer is resting on.
+    ///
+    /// **A fourth weight beside a three-weight ladder, and the placement is the
+    /// whole of it.** §5.3 rules that intensity carries recency *and nothing
+    /// else*, so a hover mark that merely brightened a row would say **recent**
+    /// about a file nothing had touched. This sits **above** all three, brighter
+    /// than [`Theme::path`]'s pulse weight, so it is a reading the ladder never
+    /// produces rather than a louder version of one it does.
+    ///
+    /// That is what buys the exception §5.3 now carries: the ladder keeps its
+    /// three durable weights, and a transient mark that follows the pointer may
+    /// take a fourth that recency cannot reach.
+    ///
+    /// **It is underlined, and that is what makes it hold where colour runs
+    /// out.** `ansi`'s brightest path is already `White` with `BOLD` and has
+    /// nowhere further to go, so on sixteen colours a purely brighter mark would
+    /// be a pulsing row exactly. Nothing else in this palette underlines
+    /// anything, so the rule stays readable at every depth on every palette
+    /// rather than degrading to ambiguity on the default one. It is also what a
+    /// reader already reads as *the thing under the cursor* from every hyperlink
+    /// they have ever pointed at.
+    path_hover,
     /// The `●` marking a file that moved in the last tick.
     pulse,
     /// A churn sparkline's blocks.
@@ -216,6 +238,22 @@ palette! {
     /// lights the down arrow for as long as the burst lasts, so the bar answers
     /// the keyboard the way it answers the mouse.
     bar_active,
+    /// The same mark while the pointer is merely resting on it.
+    ///
+    /// **The middle rung of the column's three, and it exists because a click
+    /// has to be brighter than a hover.** A step button had somewhere to put a
+    /// hover already, since it rests at [`Theme::bar_track`] and only reaches
+    /// [`Theme::bar_active`] under a gesture. The **thumb** did not: it rests at
+    /// [`Theme::bar`] and is dragged at `bar_active`, with nothing in between,
+    /// so a hover drawn in `bar_active` would make a pointer resting on the
+    /// thumb indistinguishable from a hand dragging it.
+    ///
+    /// [#186](https://github.com/breferrari/vigia/issues/186) read that as *no
+    /// rung, therefore no mark* and shipped the thumb unmarked. That inverted
+    /// the question: if the mark is wanted, the rung is the thing to build.
+    /// Between `bar` and `bar_active` on every palette, so the ordering holds on
+    /// the button and on the thumb with one entry.
+    bar_hover,
     /// The unfilled part, which is drawn rather than left blank.
     ///
     /// A bar with no track is a mark floating in space: a reader cannot tell a
@@ -494,6 +532,9 @@ impl Theme {
             path: fg(Color::White).add_modifier(Modifier::BOLD),
             path_live: fg(Color::White),
             path_cold: fg(Color::Gray),
+            path_hover: fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
             // Cyan rather than a diff colour. The pulse says *when*, and green or
             // red beside a path would read as *what*, which the sigil column
             // already means two rows below.
@@ -512,6 +553,7 @@ impl Theme {
             // already uses for everything structural.
             bar: fg(Color::Gray),
             bar_active: fg(Color::White),
+            bar_hover: fg(Color::Gray).add_modifier(Modifier::BOLD),
             bar_track: fg(Color::DarkGray),
             // **The one place colour 8 is the right answer**, and the exception
             // proves the rule that sent everything else to `DIM`. A track is not
@@ -597,6 +639,9 @@ impl Theme {
             path: rgb(0xe6, 0xed, 0xf3).add_modifier(Modifier::BOLD),
             path_live: rgb(0xe6, 0xed, 0xf3),
             path_cold: rgb(0x7d, 0x85, 0x90),
+            path_hover: rgb(0xff, 0xff, 0xff)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x39, 0xc5, 0xcf),
             // Cyan, where the picture's sparkline is green. The picture draws a
             // *ramp* there and we draw one colour, so it does not answer this; what
@@ -619,6 +664,7 @@ impl Theme {
             spark_track: rgb(0x6e, 0x76, 0x81),
             bar: rgb(0x8b, 0x94, 0x9e),
             bar_active: rgb(0xc9, 0xd1, 0xd9),
+            bar_hover: rgb(0xa8, 0xb1, 0xbb),
             // **`#57606a`, and it was `#21262d` until 2026-08-16, which was
             // invisible.** Reported from use: the scrollbar's track and its step
             // buttons could not be seen at all, and a button appeared only while
@@ -726,6 +772,9 @@ impl Theme {
             path: rgb(0x1f, 0x23, 0x28).add_modifier(Modifier::BOLD),
             path_live: rgb(0x1f, 0x23, 0x28),
             path_cold: rgb(0x81, 0x8b, 0x98),
+            path_hover: rgb(0x00, 0x00, 0x00)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x0a, 0x62, 0x6b),
             spark: rgb(0x0a, 0x62, 0x6b),
             // **Darker** here where `dark`'s is brighter, which is the same rule
@@ -737,6 +786,7 @@ impl Theme {
             spark_track: rgb(0x7d, 0x85, 0x90),
             bar: rgb(0x59, 0x63, 0x6e),
             bar_active: rgb(0x24, 0x29, 0x2f),
+            bar_hover: rgb(0x3d, 0x46, 0x50),
             // `#8c959f` at 3.04:1 on white, where `#d0d7de` was **1.45:1** and
             // invisible for the same reason the dark palette's was. See the note
             // on `Theme::dark`'s `bar_track`; the two were wrong together and are

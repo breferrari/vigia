@@ -1306,10 +1306,11 @@ fn a_grip_ends_on_anything_that_is_not_more_of_the_same_drag() {
 }
 
 #[test]
-fn a_hover_resolves_to_a_step_button_and_to_nothing_else() {
-    // `SPEC.md` §11.2 B10's mark, resolved. The fixture's diff has buttons at
-    // rows 5 and 19 (its track is 6..18) and its list has none, which is the
-    // asymmetry worth testing over: a bare bar must still answer for its track.
+fn a_hover_resolves_to_a_button_a_bar_or_a_listed_file() {
+    // Every surface a click acts on, and nothing else. The fixture's diff has
+    // buttons at rows 5 and 19 (its track is 6..18) and its list has none, which
+    // is the asymmetry worth testing over: a bare bar must still answer for its
+    // track.
     let regions = two_regions();
 
     // A button answers as the cell it is drawn on, which is the key
@@ -1317,34 +1318,58 @@ fn a_hover_resolves_to_a_step_button_and_to_nothing_else() {
     assert_eq!(regions.hover_at(79, 5), Some(Hovered::Button(79, 5)));
     assert_eq!(regions.hover_at(79, 19), Some(Hovered::Button(79, 19)));
 
-    // **The track and the thumb answer nothing, and that is the ruling rather
-    // than an omission.** A mark on this column has to keep the rule that a
-    // click is brighter than a hover, and the thumb has only two weights: `bar`
-    // at rest and `bar_active` under a drag. A hover drawn in `bar_active` would
-    // make a drag look like a pointer resting there. So the thumb is a list row
-    // one element over, and waits on the same ruling (#189).
-    assert_eq!(regions.hover_at(79, 12), None, "the diff's track");
-    assert_eq!(regions.hover_at(79, 2), None, "the list's track");
+    // A track answers as its **region's first row**, which is the key
+    // `Chrome::gripped` uses, because what a hover on this column means is
+    // *this bar* and the thumb is what answers. The track and the thumb are one
+    // target: a press anywhere on a track seeks.
+    assert_eq!(
+        regions.hover_at(79, 12),
+        Some(Hovered::Track(5)),
+        "the diff's"
+    );
+    assert_eq!(
+        regions.hover_at(79, 2),
+        Some(Hovered::Track(1)),
+        "the list's"
+    );
 
     // The list's bar has no buttons at all in this fixture, so every row of it
     // is track. A resolver that assumed both bars were stepped would answer
     // `Button` here and light a cell that is drawing a thumb.
-    assert_eq!(regions.hover_at(79, 1), None);
-    assert_eq!(regions.hover_at(79, 3), None);
+    assert_eq!(regions.hover_at(79, 1), Some(Hovered::Track(1)));
+    assert_eq!(regions.hover_at(79, 3), Some(Hovered::Track(1)));
 
-    // Off both regions, and off the bar's column. The second is what keeps the
-    // mark out of the diff body, which §11.1 rules is not clickable and must not
-    // imply it is: every column but one answers `None` whatever the row.
-    assert_eq!(regions.hover_at(79, 0), None, "above both regions");
-    assert_eq!(regions.hover_at(79, 23), None, "below both regions");
-    for row in 0..24 {
+    // **A listed file, off the bar's column**, which is a surface a click acts
+    // on because it puts the diff at that file.
+    for row in 1..=3 {
+        assert_eq!(
+            regions.hover_at(40, row),
+            Some(Hovered::Row(row)),
+            "row {row} of the list did not answer"
+        );
+    }
+
+    // **The bar's column wins inside the list's own rows**, which is the
+    // ordering this resolver has to get right: the scrollbar is drawn inside the
+    // region that owns those rows, so asking the list first would mark a file
+    // the reader is pointing past.
+    assert_eq!(regions.hover_at(79, 2), Some(Hovered::Track(1)));
+
+    // **The diff's body answers nothing**, which §11.1 rules: it is not
+    // clickable and a mark would imply it is.
+    for row in 5..20 {
         assert_eq!(
             regions.hover_at(40, row),
             None,
-            "a column that is not the bar answered a hover at row {row}, so the \
-             mark reaches the diff body"
+            "row {row} of the diff answered a hover, so the mark reaches a body              nothing there is clickable in"
         );
     }
+
+    // Off every region entirely.
+    assert_eq!(regions.hover_at(79, 0), None, "above both regions");
+    assert_eq!(regions.hover_at(79, 23), None, "below both regions");
+    assert_eq!(regions.hover_at(40, 0), None, "above the list");
+    assert_eq!(regions.hover_at(40, 23), None, "below the diff");
 }
 
 #[test]
@@ -1377,16 +1402,26 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     );
 
     // **Motion onto nothing clears it**, which is the same rule and not a second
-    // one: the observation said "not over a target", and that is an answer. Both
-    // off the column and onto the track, which is a row on the bar that draws no
-    // mark until #189 rules one.
+    // one: the observation said "not over a target", and that is an answer. Row
+    // 12 off the bar is the diff's body, which is the one region with nothing
+    // clickable in it.
     assert_eq!(
         hover_after(&at(MouseEventKind::Moved, 40, 12), regions, button),
         None
     );
+
+    // **And motion between two different kinds of target replaces rather than
+    // clears**, which is worth asserting separately now that there are three:
+    // the same event that leaves a button arrives on a bar or on a file.
     assert_eq!(
         hover_after(&at(MouseEventKind::Moved, 79, 12), regions, button),
-        None
+        Some(Hovered::Track(5)),
+        "a pointer moving from a button onto the diff's bar lost the mark"
+    );
+    assert_eq!(
+        hover_after(&at(MouseEventKind::Moved, 40, 2), regions, button),
+        Some(Hovered::Row(2)),
+        "a pointer moving from a button onto a listed file lost the mark"
     );
 
     // **Every mouse event is an observation, not just `Moved`.** A press, a
