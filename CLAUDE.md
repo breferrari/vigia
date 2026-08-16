@@ -105,6 +105,20 @@ So, when a reader asks for something:
 
 Refusals deserve more scrutiny than builds, not less: a bad build is loud and a bad refusal is silent, so the mistake that survives longest here is the one no gate can see.
 
+## Releasing
+
+**Dispatch the `bump and release` workflow.** That is the whole procedure:
+
+```sh
+gh workflow run "bump and release" -f bump=<patch|minor|major> -f rehearse=false
+```
+
+It raises the version, commits it to `main`, builds the four target artifacts, creates the GitHub release, publishes the Homebrew formula, and runs `cargo publish --workspace`. Nothing else starts a release: `git tag && git push --tags` was removed as a trigger, and a tag pushed by a workflow cannot fire another one anyway.
+
+Pick the level from the diff. On `0.x` a new feature **and** a breaking public API change both go in the **minor**; `patch` is for fixes that change no signature. `rehearse=true` runs the whole path and publishes nothing, which is the way to check a change to the release machinery itself.
+
+**`RELEASE-SMOKE.md` is not this procedure and reading it as one wastes a session.** It is a human pre-flight against a built artifact: most of its boxes need a person at a terminal on three platforms, killing the process from another pane and looking at what the terminal does next. An agent cannot tick them. It is worth reading before a release that changes packaging, installation or the takeover; it is not a gate to clear before every dispatch, and it is not where the release is performed.
+
 ## House rules
 
 - **No agent-session artifacts in anything that lands in the repo.** No `claude.ai/code/session_*` URL, no `Claude-Session:` trailer, no local absolute path — not in commit messages, PR or issue bodies, or files. `Co-Authored-By:` is fine and wanted.
