@@ -805,14 +805,13 @@ struct Shell {
     /// clears it is bounded by the burst that armed it, fires once, and is the
     /// same one `Held` uses.
     ///
-    /// **What decides that is whether the subject can be observed ending**, and
-    /// §11.1 now states the marks as three instances of it rather than as one
-    /// rule with exceptions. A hold ends with an `Up`. A burst has no end, which
-    /// is this field. A hover mark (§11.2 B10, reversed 2026-08-16, ruled and
-    /// not yet drawn) has no end either, but its subject *moves* instead of
-    /// stopping, so it is cleared by the next observation of where the pointer
-    /// is and must not be given a clock: one would put the mark out while a
-    /// reader rests on a row, which is the single case hover exists for.
+    /// **Why this field and not the other marks**: §11.1 states the rule, which
+    /// is that a mark is retired by whatever the program can still observe about
+    /// its subject — its end, its replacement, or, failing both, a clock. A hold
+    /// has an end. A burst has neither, which is why the expiry lives here and
+    /// nowhere else. The rule is at one address on purpose, because the same
+    /// reasoning restated per field is what left `Regions::step`'s doc claiming
+    /// a held button cannot repeat for a day after it could.
     scrolling: Option<(u16, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,

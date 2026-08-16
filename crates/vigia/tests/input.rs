@@ -319,10 +319,13 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // here whether or not the mark has been built yet.
     //
     // `FocusGained` and `FocusLost` sit below for the same reason and will keep
-    // a second one once #186 lands. `TAKEOVER` does not request focus reporting
-    // today, so they arrive rarely; when it does, `FocusLost` is what clears a
-    // hover mark, and clearing it is the *loop's* job. An arm for either one
-    // here would be that job in the wrong module.
+    // a second one once #186 lands. How often they arrive today is per platform
+    // rather than rare: `TAKEOVER` does not request `?1004h`, so on Unix they
+    // never arrive at all, while on Windows the console API delivers a
+    // `FOCUS_EVENT` on every focus change whether or not anyone asked. Once
+    // #186 asks, `FocusLost` is what clears a hover mark, and clearing it is the
+    // *loop's* job. An arm for either one here would be that job in the wrong
+    // module.
     //
     // **This fixture cannot be the whole tripwire, and the sibling below is
     // why.** `Regions::default()` is a screen with no region and no bars, so a
