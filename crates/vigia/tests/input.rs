@@ -313,7 +313,16 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // before deciding this line is stale.** It is delivered because the mouse
     // bundle sets `?1003h`, any-event tracking, which nothing here consumes and
     // which cannot portably be switched off; `RULINGS.md`'s I1 section carries
-    // what it costs.
+    // what it costs. B10 was reversed on 2026-08-16 and the shell now marks what
+    // the pointer is over, which does **not** make this line stale: §11.1 rules
+    // the mark to be view state resolved in the loop, so `Moved` still means no
+    // action here and the two facts are not in tension.
+    //
+    // `FocusGained` and `FocusLost` sit below for the same reason and gained a
+    // second one with that reversal. They arrive rather than being ignored now,
+    // because `TAKEOVER` asks for focus reporting so a hover mark can be cleared
+    // when the window loses focus, and clearing it is the *loop's* job. An arm
+    // for either one here would be that job in the wrong module.
     //
     // **This fixture cannot be the whole tripwire, and the sibling below is
     // why.** `Regions::default()` is a screen with no region and no bars, so a
@@ -394,8 +403,19 @@ fn the_yank_key_is_refused_rather_than_unbound() {
 /// it.
 ///
 /// > B10 — a hover highlight on what the pointer is over. Ruled 2026-08-15: no.
+/// > Reversed 2026-08-16: yes.
 ///
-/// **The fixture is the whole point.** [`nothing_a_reader_did_not_ask_for_becomes_an_action`]
+/// **This gate outlived the reversal unchanged, and that is the thing to
+/// understand before touching it.** It was written to catch a hover being built
+/// while B10 said no. B10 now says yes, and the assertion is still exactly
+/// right, because §11.1 rules that **hover is view state and never an action**:
+/// the mark is resolved from `Regions` in the loop and drawn, the way a pressed
+/// step button is, and `action_for` never learns about it. So what this forbids
+/// is not the feature, it is the feature arriving in the wrong place. A gate
+/// that forbids a *mechanism* survives its ruling changing sign; one that
+/// forbids an *outcome* would have had to be deleted here.
+///
+/// **The fixture is the other half.** [`nothing_a_reader_did_not_ask_for_becomes_an_action`]
 /// hands `action_for` a `Regions::default()`, which is a screen with no list, no
 /// diff and no bar, so every region-gated arm in the map returns `None` against
 /// it whatever it does in production — `Down(Left)` sits in that same list and
@@ -406,14 +426,15 @@ fn the_yank_key_is_refused_rather_than_unbound() {
 /// would have something to say.
 ///
 /// **What this does and does not hold.** It holds that pointer motion produces
-/// no *action*, which is what B10 rests on and what reddens the day a hover
-/// binding lands. It does **not** hold that motion produces no *paint*, and
+/// no *action*. It does **not** hold that motion produces no *paint*, and
 /// nothing in this suite does: `vigia::run` draws once per drained batch whether
 /// or not any wake in it produced an action, so the honest count today is one
 /// paint per motion batch rather than zero. `RULINGS.md`'s I1 section carries
 /// that finding and [#154](https://github.com/breferrari/vigia/issues/154)
 /// tracks it; #123's exit criterion asked for a zero-paints gate and this is
 /// deliberately not one, because writing it today would assert something untrue.
+/// The reversal does not change that either: hover adds no paint, so the count
+/// it would have to assert is the same one.
 #[test]
 fn pointer_motion_over_a_laid_out_screen_is_still_no_action() {
     for (place, row) in [("the list", 2), ("the diff", 9), ("the scrollbar", 6)] {
@@ -421,8 +442,11 @@ fn pointer_motion_over_a_laid_out_screen_is_still_no_action() {
         assert_eq!(
             action_for(&event, two_regions()),
             None,
-            "motion over {place} became an action, so `SPEC.md` §11.2 B10 has \
-             been reversed without being reopened"
+            "motion over {place} became an action. `SPEC.md` §11.2 B10 adopts a \
+             hover mark, so this is not a stale refusal: §11.1 rules the mark to \
+             be view state resolved in the loop, never a keymap entry, and a \
+             hover arm inside `action_for` gives B4's `nothing is remembered` a \
+             second meaning to answer for"
         );
     }
 }
@@ -1206,8 +1230,15 @@ fn a_direction_mark_expires_where_a_held_button_does_not() {
     // The arrows light while the keys scroll, and a key burst has no release: it
     // simply stops sending. So this is the one mark on the bar that needs an
     // expiry, and `SCROLL_LINGER` is it. Without one the last arrow of a burst
-    // would stay lit on an idle tree, which is the staleness §11.2 B10 refused a
-    // hover highlight for and would be no better here.
+    // would stay lit on an idle tree as a claim about the past.
+    //
+    // §11.1 states the three marks as one rule and it is the reason this test is
+    // about *expiry* rather than about arrows: what decides whether a mark needs
+    // a clock is whether the program can observe its subject ending. A hold ends
+    // with an `Up`. A burst has no end, only a last member, so it needs this. A
+    // hover (§11.2 B10, reversed 2026-08-16) has no end either, but its subject
+    // *moves* rather than stopping, so the next motion clears it and it must not
+    // be given a clock: one would put the mark out while a reader rests on it.
     //
     // The clock is still bounded by the gesture that armed it: nothing schedules
     // it but a scroll, it fires once, and it clears itself.
