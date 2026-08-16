@@ -6421,3 +6421,57 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
         "hiding the masthead moved the list, which is not what was asked"
     );
 }
+
+
+#[test]
+fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
+    // **The seam #67 added its guard against, reached from a new direction.** A
+    // worktree whose name draws nothing is a non-empty string of invisible
+    // characters, and the guard measures the name rather than testing it for
+    // emptiness for exactly that reason.
+    //
+    // #158 added the branch as a third header fact, and the first spelling put
+    // the new rung *outside* that guard, so a nameless worktree on a branch drew
+    // a separator with nothing on its left. Found by review rather than by any
+    // gate, which is why this one exists: every fact is joined by one rule now,
+    // and a fourth fact cannot open the hole again.
+    let width = 80u16;
+    let view = a_list_of(3, 3, 0);
+    for worktree in ["", " ", "\u{200b}", "\u{7}"] {
+        let chrome = Chrome {
+            worktree: worktree.to_owned(),
+            branch: Some("main".to_owned()),
+            ..chrome()
+        };
+        let header = row_text(&screen(width, 24, &view, &chrome), 0);
+        let drawn = header.trim_start();
+        assert!(
+            !drawn.starts_with(FACT_JOIN.trim_start()),
+            "a worktree drawing nothing put a separator at the head of the pane: \
+             {drawn:?}"
+        );
+    }
+}
+
+#[test]
+fn a_populated_worktree_names_its_branch_in_the_header() {
+    // **The always-on rung, on a frame that has a diff in it**, which is the case
+    // #158 is about and the one the suite could not see: every populated fixture
+    // set `branch: None`, so the rung was exercised by one assertion about the
+    // empty state and by nothing else at all.
+    let width = 80u16;
+    let view = a_list_of(3, 3, 0);
+    let chrome = Chrome {
+        branch: Some("feature/band".to_owned()),
+        ..chrome()
+    };
+    let header = row_text(&screen(width, 24, &view, &chrome), 0);
+    assert!(
+        header.contains("feature/band"),
+        "a populated frame drew no branch: {header:?}"
+    );
+    assert!(
+        header.contains("vigia"),
+        "the branch arrived and the worktree name left: {header:?}"
+    );
+}

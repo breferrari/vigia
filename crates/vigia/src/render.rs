@@ -1343,24 +1343,43 @@ fn header_left(worktree: &str, branch: Option<&str>, files: usize) -> Vec<String
     // is the same refusal `empty_state` makes one function down: `HEAD@abc123`
     // would put a commit id in a monitor that shows no commits.
     let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
+
+    // **A separator is owed only between two facts that are both there**, which
+    // is [#67](https://github.com/breferrari/vigia/issues/67)'s rule and the
+    // reason the name is measured rather than tested for emptiness: a worktree
+    // called `a zero-width space` is a non-empty string that draws nothing, and joining it
+    // would head the pane with a leading separator.
+    //
+    // **Built by joining what exists rather than by branching on what does**,
+    // which is the correction #158 needed. Adding the branch as a third fact
+    // first spelled the rungs as an if/else-if/else, and the new rung sat outside
+    // the guard above: a nameless worktree on a branch drew `" · main"`, which is
+    // exactly the seam that guard exists to prevent. One rule applied to every
+    // rung cannot grow a second hole the next time a fact is added.
+    //
+    // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on stable.
+    // Noted because a reviewer read it as an unstable API: the `Pattern` *trait*
+    // is unstable to implement and its impls have been stable to use since 1.0.
+    let visible = worktree.trim().replace(|c: char| c.is_control(), "");
+    let name = (width_of(&visible) != 0).then_some(worktree);
+    let join = |facts: [Option<&str>; 3]| {
+        facts
+            .into_iter()
+            .flatten()
+            .filter(|fact| !fact.is_empty())
+            .collect::<Vec<_>>()
+            .join(FACT_SEPARATOR)
+    };
+
+    // Widest first, dropping one fact per rung in the order §11.1 rules: the
+    // count goes before the branch because the list below repeats it, and the
+    // branch before the name because B3's empty state leans on the name to say
+    // which repository this is.
     if !count.is_empty() {
-        // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on
-        // stable. Noted because a reviewer read it as an unstable API: the
-        // `Pattern` *trait* is unstable to implement and its impls have been
-        // stable to use since 1.0, which is a distinction worth one line here
-        // rather than the same question being asked again.
-        let visible = worktree.trim().replace(|c: char| c.is_control(), "");
-        let joined = if width_of(&visible) == 0 {
-            count
-        } else if let Some(branch) = named {
-            format!("{worktree}{FACT_SEPARATOR}{branch}{FACT_SEPARATOR}{count}")
-        } else {
-            format!("{worktree}{FACT_SEPARATOR}{count}")
-        };
-        rungs.push(joined);
+        rungs.push(join([name, named, Some(&count)]));
     }
-    if let Some(branch) = named {
-        rungs.push(format!("{worktree}{FACT_SEPARATOR}{branch}"));
+    if named.is_some() {
+        rungs.push(join([name, named, None]));
     }
     rungs.push(worktree.to_owned());
     rungs
