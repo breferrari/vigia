@@ -4701,13 +4701,34 @@ fn the_weight_arrives_and_leaves_with_the_caret() {
 fn a_diff_heading_never_takes_the_current_weight() {
     // **The same confinement `a_hovered_row_reads_as_the_pointer_and_never_as_recency`
     // asserts one mark over.** Both regions draw through one `Painter::file_row`,
-    // so a weight keyed on a row alone would reach a heading in the stream the
-    // moment the two regions shared a `y`. They cannot today, and that is
-    // geometry rather than a rule: `Painter::list` clears the mark after its
-    // loop, and this is what fails if it stops.
+    // and `Heading` deliberately carries no field saying which region asked,
+    // because which file the diff is inside is a fact about the **screen**. This
+    // is what fails if that ever changes: the obvious way to plumb the mark is to
+    // hang it off the entry, and an entry is shared by both regions.
+    //
+    // **So the fixture makes the list's caret row and the stream's heading the
+    // same file**, which is the ordinary case rather than a contrived one: follow
+    // mode puts the diff at the top of a file the list is also showing. A mark
+    // keyed on the file lights both; one keyed on the row lights neither, because
+    // `Painter::current` is set per drawn row and cleared when the region ends.
     let width = 80u16;
     let height = 24u16;
-    let view = a_stepped_screen();
+    let path = "src/engine/watch.rs";
+    let view = View {
+        list: vec![entry(path, 42, 7), entry("src/other.rs", 1, 0)],
+        list_top: 0,
+        current_span: 400,
+        total_rows: 4_000,
+        rows_above: 0,
+        rows: vec![
+            file(path, 42, 7),
+            line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
+        ],
+        files: 2,
+        top: Position::default(),
+        read: 2,
+        peak: 0,
+    };
     let theme = Theme::default();
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
     let backend = screen(width, height, &view, &chrome());
@@ -4715,25 +4736,25 @@ fn a_diff_heading_never_takes_the_current_weight() {
     let weight = |style: Style| (style.fg, style.add_modifier);
     let plain = weight(theme.recency(Recency::Cold));
     let marked = (plain.0, plain.1 | Modifier::BOLD);
+    let run = |y: u16| {
+        let start = column_of(&backend, y, "M") + 2;
+        (start..start + path.chars().count() as u16)
+            .map(|x| weight(backend.buffer()[(x, y)].style()))
+            .collect::<Vec<_>>()
+    };
 
-    let heading = laid.diff.top;
+    // The fixture drew what it claims to, or everything below is about the wrong
+    // rows.
     assert!(
-        (0..width)
-            .filter(|x| weight(backend.buffer()[(*x, heading)].style()) == plain)
-            .count()
-            > 0,
-        "the diff's first row is not a file heading, so this gate reads the \
-         wrong row"
+        run(laid.list.top).iter().all(|w| *w == marked),
+        "the caret's own row is not marked, so this gate cannot tell a confined \
+         mark from an absent one"
     );
-    for y in laid.diff.top..(laid.diff.top + laid.diff.rows) {
-        assert_eq!(
-            (0..width)
-                .filter(|x| weight(backend.buffer()[(*x, y)].style()) == marked)
-                .count(),
-            0,
-            "row {y} of the diff took the list's current-file weight"
-        );
-    }
+    assert!(
+        run(laid.diff.top).iter().all(|w| *w == plain),
+        "the diff's heading for the very file the caret marks took the list's \
+         weight, so the mark is keyed on the file instead of on the row"
+    );
 }
 
 #[test]
