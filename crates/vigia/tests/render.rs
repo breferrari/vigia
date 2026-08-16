@@ -34,7 +34,7 @@ use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
-    diff_height, regions, render,
+    body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -6266,4 +6266,92 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
              together at {rung} columns, which is a boundary of the margin ladder"
         );
     }
+}
+
+
+#[test]
+fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
+    // **Monotone in height**, which is the property a reader feels rather than
+    // sees: a pane dragged taller must not lose an element it had, and a
+    // threshold written as two comparisons is exactly where that breaks.
+    //
+    // The arrival height is asserted rather than observed, so a change to the
+    // floor fails here by name instead of silently moving when the band shows up.
+    let width = 80u16;
+    let view = a_list_of(3, 3, 0);
+    let mut arrived: Option<u16> = None;
+
+    for height in 1..=80u16 {
+        let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
+            .clamped_to(view.list.len());
+        match (arrived, body.graph > 0) {
+            (None, true) => arrived = Some(height),
+            (Some(at), false) => panic!(
+                "the band arrived at {at} rows and was gone again by {height}, so a                  taller pane lost an element a shorter one had"
+            ),
+            _ => {}
+        }
+    }
+
+    assert!(
+        arrived.is_some(),
+        "the band never arrived at any height up to eighty, so this gate is          about nothing"
+    );
+}
+
+#[test]
+fn the_band_never_takes_the_diff_below_a_whole_hunk() {
+    // **The clamp order, from the diff's side.** The band is the newest luxury
+    // and yields to both the list and the diff, so wherever it is drawn the diff
+    // still holds a whole default hunk: a header, three context, a change, three
+    // more and the file's own heading.
+    //
+    // Swept over height *and* file count, because the list is what competes with
+    // it for the same rows and a floor that held at one count could fail at
+    // another.
+    let width = 80u16;
+    for files in [1usize, 3, 6, 30] {
+        for height in 1..=80u16 {
+            let body = body_layout(Rect::new(0, 0, width, height), &chrome(), files);
+            if body.graph == 0 {
+                continue;
+            }
+            assert!(
+                body.diff >= 10,
+                "at {width}x{height} over {files} files the band left {} diff                  rows, under the whole hunk it must not take the pane below:                  {body:?}",
+                body.diff
+            );
+        }
+    }
+}
+
+#[test]
+fn an_empty_window_still_draws_the_bands_baseline() {
+    // #78's ruling one element over: an empty bucket draws a **track** rather
+    // than a gap, so the band keeps its own length and a quiet worktree reads as
+    // quiet rather than as absent. A worktree nobody has written to since launch
+    // is the ordinary first frame, not an edge.
+    let width = 80u16;
+    let height = 24u16;
+    let view = a_list_of(3, 3, 0);
+    let theme = Theme::default();
+    let backend = screen(width, height, &view, &chrome());
+    let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
+        .clamped_to(view.list.len());
+    assert!(body.graph > 0, "the fixture drew no band");
+
+    // The baseline is the band's last row; the air sits under the header.
+    let baseline = 1 + body.air as u16 / 2 + body.graph as u16 - 1;
+    let buffer = backend.buffer();
+    let track: Vec<u16> = (0..width)
+        .filter(|x| {
+            buffer[(*x, baseline)].symbol() == SPARK_TRACK
+                && buffer[(*x, baseline)].style().fg == theme.spark_track.fg
+        })
+        .collect();
+    assert!(
+        track.len() >= 8,
+        "an empty window drew {} baseline cells, so the band vanished rather          than drawing its own length",
+        track.len()
+    );
 }
