@@ -223,9 +223,15 @@ fn a_path_keeps_its_churn_after_it_stops_changing() {
 ///
 /// [`HISTORY_BUCKET`] is an integer division of [`HISTORY_WINDOW`], so a window
 /// that is not a multiple of the bucket count leaves a remainder no bucket
-/// covers: a sample could then fall outside every one of them, and the strip
-/// would silently describe a shorter span than the gradient's boundary uses.
-/// Cheap to check and impossible to notice by reading.
+/// covers, and the strip would silently describe a shorter span than the
+/// gradient's boundary uses. Cheap to check and impossible to notice by reading.
+///
+/// **This is the *drawn* grid, and since
+/// [#198](https://github.com/breferrari/vigia/issues/198) it is no longer the one
+/// the window rolls on.** That is the sample grid, which is private and therefore
+/// out of this crate's reach; it is asserted at compile time beside
+/// `SAMPLES_PER_BUCKET` instead, along with the exactness of the projection
+/// between the two.
 #[test]
 fn the_window_is_exactly_the_buckets_it_is_divided_into() {
     assert_eq!(
@@ -234,6 +240,15 @@ fn the_window_is_exactly_the_buckets_it_is_divided_into() {
         "the buckets do not tile the window, so a sample can fall outside every \
          one of them"
     );
+}
+
+/// Everything a path has inside the window, across every drawn column.
+///
+/// Named for the reason [`base`] and [`bulk_paths`] are: the gates below both ask
+/// "did anything leak or vanish", and a spelled-out fold in each is the third
+/// copy this file would carry.
+fn total(drawn: &[u16; HISTORY_BUCKETS]) -> u32 {
+    drawn.iter().map(|&count| u32::from(count)).sum()
 }
 
 /// A drawn column is the **sum** of the samples under it, not one of them.
@@ -253,7 +268,7 @@ fn the_window_is_exactly_the_buckets_it_is_divided_into() {
 /// samples are held and keeps saying it if that changes again.
 #[test]
 fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
-    let now = Instant::now();
+    let now = base();
     let mut history = History::starting_at(now);
 
     // Well inside one drawn bucket, and spread far enough apart that a
@@ -264,15 +279,14 @@ fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
     }
 
     let drawn = history.churn("src/a.rs").expect("the path is tracked");
-    let newest = drawn[HISTORY_BUCKETS - 1];
+    let newest = u32::from(drawn[HISTORY_BUCKETS - 1]);
     assert_eq!(
-        newest,
-        u16::try_from(writes).expect("a small count"),
+        newest, writes,
         "the newest column holds {newest} of {writes} writes made inside it, so \
          the projection is dropping samples rather than summing them: {drawn:?}"
     );
     assert_eq!(
-        drawn.iter().map(|&count| u32::from(count)).sum::<u32>(),
+        total(&drawn),
         writes,
         "writes leaked into a column they were not made in: {drawn:?}"
     );
@@ -290,17 +304,14 @@ fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
 /// where an off-by-one lives.
 #[test]
 fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
-    let now = Instant::now();
+    let now = base();
     let mut history = History::starting_at(now);
     history.record(["src/a.rs"], now);
 
     for step in 1..HISTORY_BUCKETS {
         // Nothing written, only time passing, which is what `record` with an
         // empty iterator means.
-        history.record(
-            std::iter::empty::<&str>(),
-            now + HISTORY_BUCKET * step as u32,
-        );
+        history.record(std::iter::empty(), now + HISTORY_BUCKET * step as u32);
         let drawn = history.churn("src/a.rs").expect("still inside the window");
         let at = HISTORY_BUCKETS - 1 - step;
         assert_eq!(
@@ -308,7 +319,7 @@ fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
             "after {step} bucket(s) the write is not in column {at}: {drawn:?}"
         );
         assert_eq!(
-            drawn.iter().map(|&count| u32::from(count)).sum::<u32>(),
+            total(&drawn),
             1,
             "the write was duplicated or lost while sliding: {drawn:?}"
         );

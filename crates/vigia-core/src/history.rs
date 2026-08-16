@@ -120,10 +120,32 @@ const HISTORY_SAMPLE: Duration =
 
 /// How many samples one drawn bucket is the sum of.
 ///
-/// Exact by construction, and asserted in `tests/history.rs` rather than left to a
-/// reader to check: an inexact division would make some drawn columns cover more
-/// time than others.
+/// **Exact, and asserted at compile time rather than by a test**, because a test
+/// is the wrong instrument here twice over: the constants are private, so the
+/// integration crate that would hold them cannot name them, and an inexact
+/// division is not a behaviour to observe but a shape that must never build.
+/// [`Track::drawn`] slices by this, so an inexact one would panic on the last
+/// group rather than quietly dropping it, and the assertion below means neither
+/// can happen.
+///
+/// The window's own tiling is asserted beside it for the same reason `roll`
+/// needs it: `opened` advances by whole [`HISTORY_SAMPLE`]s, so a window that is
+/// not a whole number of samples leaves a remainder no sample covers, which is
+/// the argument `tests/history.rs` already makes one grid up for
+/// [`HISTORY_BUCKET`].
 const SAMPLES_PER_BUCKET: usize = HISTORY_SAMPLES / HISTORY_BUCKETS;
+
+const _: () = {
+    assert!(
+        HISTORY_SAMPLES % HISTORY_BUCKETS == 0,
+        "the samples do not divide into the drawn buckets, so a drawn column \
+         would cover more time than its neighbours"
+    );
+    assert!(
+        HISTORY_WINDOW.as_nanos() % HISTORY_SAMPLES as u128 == 0,
+        "the samples do not tile the window, so a write can land in no sample"
+    );
+};
 
 /// The most paths history will track at once.
 ///
@@ -179,7 +201,13 @@ pub struct HistoryStats {
 }
 
 /// One path's churn, and when it last moved.
-#[derive(Debug, Clone, Copy)]
+///
+/// **`Clone` and not `Copy` since [#198](https://github.com/breferrari/vigia/issues/198)**,
+/// which took this from twenty-four bytes to two hundred and forty-eight.
+/// Nothing copies one today, and that is exactly why the trait comes off now: a
+/// `Copy` of this size makes the next accidental by-value use invisible at the
+/// call site and an order of magnitude more expensive than it reads.
+#[derive(Debug, Clone)]
 struct Track {
     /// Oldest sample first, so the array projects left to right as written.
     samples: [u16; HISTORY_SAMPLES],
@@ -209,8 +237,15 @@ impl Track {
         self.samples[HISTORY_SAMPLES - steps..].fill(0);
     }
 
+    /// Whether nothing at all is left inside the window for this path.
+    ///
+    /// **Walked newest-first**, which is not a style choice: `samples` is
+    /// oldest-first and a surviving track's writes are at the newest end, so a
+    /// forward scan reads almost the whole array before it can return `false`
+    /// for exactly the tracks that are kept. Reversed, the common case stops
+    /// within a few reads and the genuinely empty case is identical.
     fn empty(&self) -> bool {
-        self.samples.iter().all(|&count| count == 0)
+        self.samples.iter().rev().all(|&count| count == 0)
     }
 
     /// The samples summed into the buckets a sparkline draws, oldest first.
@@ -225,20 +260,26 @@ impl Track {
     /// past `u16` is already at the top of the ramp, and wrapping would draw the
     /// busiest file in the worktree as the quietest.
     fn drawn(&self) -> [u16; HISTORY_BUCKETS] {
-        let mut out = [0u16; HISTORY_BUCKETS];
-        for (bucket, group) in out.iter_mut().zip(self.samples.chunks(SAMPLES_PER_BUCKET)) {
-            *bucket = group
+        // Sliced rather than zipped against `chunks`, which **truncates**: a
+        // division that stopped being exact would silently drop the last group,
+        // and the last group is the newest, so every fresh write would vanish
+        // from the screen with nothing failing. Slicing panics instead, and the
+        // `const` assertion beside `SAMPLES_PER_BUCKET` means it cannot.
+        std::array::from_fn(|bucket| {
+            self.samples[bucket * SAMPLES_PER_BUCKET..][..SAMPLES_PER_BUCKET]
                 .iter()
-                .fold(0u16, |sum, &count| sum.saturating_add(count));
-        }
-        out
+                .copied()
+                .fold(0, u16::saturating_add)
+        })
     }
 
     fn bump(&mut self) {
         let newest = &mut self.samples[HISTORY_SAMPLES - 1];
         // Saturating rather than wrapping: a path written 65,536 times inside
-        // one bucket is already at the top of the ramp, and wrapping would draw
-        // the busiest file in the worktree as the quietest.
+        // one sample is already at the top of the ramp, and wrapping would draw
+        // the busiest file in the worktree as the quietest. `Track::drawn`
+        // saturates again when it sums a column, for the same reason one level
+        // up.
         *newest = newest.saturating_add(1);
     }
 }
@@ -276,19 +317,19 @@ pub struct History {
     /// on disk, and letting it advance the counter would clear the pulse off
     /// the file the reader was watching for a reason they cannot see.
     tick: u64,
-    /// When the newest bucket opened.
+    /// When the newest **sample** opened, which is the grid the window rolls on.
     opened: Instant,
     peak: u16,
     stats: HistoryStats,
 }
 
 impl History {
-    /// An empty history, with its first bucket opening now.
+    /// An empty history, with its first sample opening now.
     pub fn new() -> Self {
         Self::starting_at(Instant::now())
     }
 
-    /// An empty history whose first bucket opened at `now`.
+    /// An empty history whose first sample opened at `now`.
     ///
     /// Separate from [`History::new`] so a test can drive the window without
     /// sleeping through two minutes of it. `Instant` cannot be constructed from
@@ -459,7 +500,11 @@ impl History {
             !track.empty()
         });
         self.stats.evicted_by_window += (before - self.tracks.len()) as u64;
-        self.repeak();
+        // **No repeak here**, deliberately: `record` is this function's only
+        // caller and repeaks unconditionally after it returns, so a second full
+        // projection of every track would be pure duplicate work. That was
+        // survivable while a track held eight samples and is a quarter of the
+        // tick's cost now that it holds a hundred and twenty.
     }
 
     /// Drop the least recently changed path to make room for a new one.
@@ -469,10 +514,15 @@ impl History {
     /// arrival would throw it away in favour of something written once and
     /// forgotten.
     fn evict_one(&mut self) {
+        // Compared rather than keyed, because a key has to be **owned**: the
+        // keyed form cloned every path it looked at, so one eviction allocated
+        // two hundred and fifty-six strings and a burst that filled the cap
+        // allocated them again per victim. The ordering is identical, oldest
+        // tick first and the path breaking ties so the choice is deterministic.
         let victim = self
             .tracks
             .iter()
-            .min_by_key(|(path, track)| (track.tick, (*path).clone()))
+            .min_by(|a, b| a.1.tick.cmp(&b.1.tick).then_with(|| a.0.cmp(b.0)))
             .map(|(path, _)| path.clone());
         if let Some(path) = victim {
             self.tracks.remove(&path);
@@ -657,7 +707,6 @@ mod tests {
         track.samples[HISTORY_SAMPLES - 1] = u16::MAX;
         track.bump();
         assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
-        assert_eq!(track.drawn()[HISTORY_BUCKETS - 1], u16::MAX);
         track.samples[HISTORY_SAMPLES - 2] = 9;
         assert_eq!(
             track.drawn()[HISTORY_BUCKETS - 1],
@@ -686,7 +735,7 @@ mod tests {
     }
 
     /// Bucket boundaries stay on a fixed grid. Ticks arriving repeatedly just
-    /// inside one bucket must not walk the grid forward a fraction at a time,
+    /// inside one sample must not walk the grid forward a fraction at a time,
     /// which would make the window drift longer than it is specified to be.
     #[test]
     fn ticks_inside_one_bucket_do_not_move_the_boundary() {
