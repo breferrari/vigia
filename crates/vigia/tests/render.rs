@@ -1950,9 +1950,15 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
 }
 
 #[test]
-fn the_empty_state_names_the_branch_and_what_it_did_not_find() {
-    // B3's four facts, two of which are the header's, so the body spends one row
-    // rather than four.
+fn the_empty_state_says_what_it_did_not_find_and_leaves_the_branch_to_the_header() {
+    // B3's four facts, **three** of which are the header's since
+    // [#158](https://github.com/breferrari/vigia/issues/158), so the body spends
+    // one row on the one fact that is its own.
+    //
+    // The branch was here because nothing else on the pane named it. The
+    // masthead names it on every frame now, so this line drew it twice on the
+    // one screen where both are visible, and the header is the better owner: it
+    // is there always, where this line is there once.
     //
     // Not `working tree clean`, which is what this said before and which was
     // wrong rather than merely plain: that is git's phrase and git compares the
@@ -1961,20 +1967,35 @@ fn the_empty_state_names_the_branch_and_what_it_did_not_find() {
     let backend = screen(80, 6, &nothing_changed(), &empty_chrome());
     assert_eq!(
         content(row_text(&backend, 1).trim_end(), 80),
-        "no unstaged changes · main"
+        "no unstaged changes"
+    );
+    // And the branch is on the header rather than gone from the screen, which is
+    // the half that makes the move a move rather than a deletion.
+    assert!(
+        row_text(&backend, 0).contains("main"),
+        "the branch left the body and did not arrive in the header: {:?}",
+        row_text(&backend, 0)
     );
 }
 
 #[test]
-fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
+fn a_detached_head_names_no_branch_anywhere() {
     // Ordinary rather than exceptional: a rebase or a bisect leaves an agent
-    // here routinely. The line drops the branch instead of inventing one,
-    // because `HEAD@abc123` would put a commit id in a monitor that shows no
-    // commits.
+    // here routinely. Nothing invents one, because `HEAD@abc123` would put a
+    // commit id in a monitor that shows no commits.
+    //
+    // Both places since #158, which is what keeps the refusal one rule rather
+    // than two that could drift: the header's ladder simply has one fewer rung.
     let backend = screen(80, 6, &nothing_changed(), &chrome());
     assert_eq!(
         content(row_text(&backend, 1).trim_end(), 80),
         "no unstaged changes"
+    );
+    assert!(
+        !row_text(&backend, 0).contains(FACT_JOIN),
+        "a detached head drew a second header fact, so a branch was invented: \
+         {:?}",
+        row_text(&backend, 0)
     );
 }
 

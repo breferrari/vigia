@@ -1104,10 +1104,21 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
 }
 
 #[test]
-fn the_branch_is_read_only_on_a_frame_that_will_draw_it() {
-    // I4 for the one read the empty state added: never touch a file the frame
-    // does not draw. Only a worktree with nothing in it names a branch, so a
-    // frame with a diff must not go near `.git/HEAD`.
+fn the_branch_is_read_because_every_frame_draws_it() {
+    // I4 for the branch, and **the rule survived while its instance did not**
+    // ([#158](https://github.com/breferrari/vigia/issues/158)).
+    //
+    // It read *never touch a file the frame does not draw*, and the instance was
+    // that only the empty state names a branch, so a frame with a diff must not
+    // go near `.git/HEAD`. The masthead draws the branch on every frame now, so
+    // the premise is false and the guard it justified is gone: the read is a
+    // read the frame **is** going to draw, which is exactly what the rule
+    // permits.
+    //
+    // What is asserted therefore flips. Before: a populated frame must not read.
+    // Now: every frame must read, and must read **once**, because the branch is
+    // one fact and a second read per frame would be the frame path paying twice
+    // for it.
     //
     // **Driven by real frames rather than by a file count**, and that is the
     // whole reason this lives here instead of beside the code. When
@@ -1146,13 +1157,14 @@ fn the_branch_is_read_only_on_a_frame_that_will_draw_it() {
     };
 
     assert_eq!(vigia::branch_for(&empty, count), Some("main".to_owned()));
-    assert_eq!(reads.get(), 1, "the empty state did not ask for a branch");
+    assert_eq!(reads.get(), 1, "a clean frame did not ask for a branch");
 
-    assert_eq!(vigia::branch_for(&populated, count), None);
+    assert_eq!(vigia::branch_for(&populated, count), Some("main".to_owned()));
     assert_eq!(
         reads.get(),
-        1,
-        "a frame with a diff in it read HEAD for a line it will not draw"
+        2,
+        "a frame with a diff in it did not read HEAD, so the masthead would \
+         draw a branch from whatever the last clean frame left behind"
     );
 }
 

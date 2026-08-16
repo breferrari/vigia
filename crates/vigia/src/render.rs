@@ -1311,9 +1311,26 @@ fn count_of(files: usize) -> String {
 /// characters still escape and are left alone deliberately: `U+2800` and
 /// `U+115F` draw a real glyph that happens to be blank, and whether a *font*
 /// inks something is not a question this process can ask.
-fn header_left(worktree: &str, files: usize) -> Vec<String> {
-    let mut rungs = Vec::with_capacity(2);
+fn header_left(worktree: &str, branch: Option<&str>, files: usize) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(3);
     let count = count_of(files);
+
+    // **The branch is drawn always since
+    // [#158](https://github.com/breferrari/vigia/issues/158)**, where it was the
+    // empty state's alone. It answers *which line of work*, which is the one
+    // thing on this pane a reader cannot reconstruct from the body: the file list
+    // says what changed and the diff says how, and neither says against what.
+    //
+    // **Its rung sits between the count and the name**, which is the order
+    // §11.1's ladder already implies. The count goes first because the list
+    // below repeats it. The name goes last because B3's empty state leans on it
+    // to say which repository this is. The branch is in between: nowhere else on
+    // screen, but the name is what identifies the pane.
+    //
+    // A detached HEAD carries `None` and the ladder is what it always was, which
+    // is the same refusal `empty_state` makes one function down: `HEAD@abc123`
+    // would put a commit id in a monitor that shows no commits.
+    let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
     if !count.is_empty() {
         // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on
         // stable. Noted because a reviewer read it as an unstable API: the
@@ -1323,10 +1340,15 @@ fn header_left(worktree: &str, files: usize) -> Vec<String> {
         let visible = worktree.trim().replace(|c: char| c.is_control(), "");
         let joined = if width_of(&visible) == 0 {
             count
+        } else if let Some(branch) = named {
+            format!("{worktree}{FACT_SEPARATOR}{branch}{FACT_SEPARATOR}{count}")
         } else {
             format!("{worktree}{FACT_SEPARATOR}{count}")
         };
         rungs.push(joined);
+    }
+    if let Some(branch) = named {
+        rungs.push(format!("{worktree}{FACT_SEPARATOR}{branch}"));
     }
     rungs.push(worktree.to_owned());
     rungs
@@ -1341,18 +1363,24 @@ fn header_left(worktree: &str, files: usize) -> Vec<String> {
 /// rather than four, and the mode word is what makes the fourth fact sayable in
 /// none at all.
 ///
-/// **The branch is orientation, not the comparison.** Nothing about it changes
-/// what is diffed. It is named because two agents on two worktrees of one
-/// repository are otherwise identical on screen, which is the multi-worktree case
-/// `SPEC.md` §4 defers rather than rejects.
+/// **The branch left this line on 2026-08-17**
+/// ([#158](https://github.com/breferrari/vigia/issues/158)), and the ruling that
+/// put it here is what took it away. It was named because two agents on two
+/// worktrees of one repository are otherwise identical on screen, and B3 gave the
+/// empty state the job because nothing else on the pane was doing it. The header
+/// draws the branch on every frame now, so this line drew it **twice** on the one
+/// screen where both are visible.
 ///
-/// A detached HEAD drops it rather than inventing one: `HEAD@abc123` would put a
+/// The header is the right owner rather than this line: it is there on every
+/// frame, where the empty state is there on one, and orientation is a header fact
+/// beside the worktree's own name. It degrades with the rest of that ladder, so at
+/// a width too narrow for it nothing names the branch, which is what already
+/// happens to the changed count and the mode word.
+///
+/// A detached HEAD is still not invented anywhere: `HEAD@abc123` would put a
 /// commit id in a monitor that shows no commits.
-fn empty_state(branch: Option<&str>) -> String {
-    match branch {
-        Some(branch) => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{branch}"),
-        None => NOTHING_CHANGED.to_owned(),
-    }
+fn empty_state() -> String {
+    NOTHING_CHANGED.to_owned()
 }
 
 /// One file heading's parts, gathered so [`Painter::file_row`] takes a shape
@@ -2831,7 +2859,7 @@ pub fn render(
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
-        painter.body(region, view, chrome, area.width);
+        painter.body(region, view, area.width);
     }
 
     painter.paint
@@ -3200,7 +3228,7 @@ impl Painter<'_> {
         // subject now, so they are drawn as one.
         self.status_line(
             area,
-            &header_left(&chrome.worktree, view.files),
+            &header_left(&chrome.worktree, chrome.branch.as_deref(), view.files),
             self.theme.chrome,
             right,
             right_style,
@@ -3769,7 +3797,7 @@ impl Painter<'_> {
         }
     }
 
-    fn body(&mut self, area: Rect, view: &View, chrome: &Chrome, pane: u16) {
+    fn body(&mut self, area: Rect, view: &View, pane: u16) {
         // **Two rects, because this region draws both roles.** A heading is placed
         // against the pane through [`planning_width`]; everything else here keeps
         // the region's own right edge and only stands back from it, through
@@ -3783,7 +3811,7 @@ impl Painter<'_> {
             self.put_marked(
                 glyphs.x,
                 glyphs.y,
-                &empty_state(chrome.branch.as_deref()),
+                &empty_state(),
                 usize::from(glyphs.width),
                 self.theme.chrome_dim,
             );

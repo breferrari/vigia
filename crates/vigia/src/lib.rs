@@ -1180,12 +1180,9 @@ fn spawn_input(tx: Sender<Wake>) {
 /// can check out a branch, and a name held from startup would be a confident lie
 /// on exactly the screen that exists to orient the reader.
 pub fn branch_for(
-    frame: &vigia_core::Frame,
+    _frame: &vigia_core::Frame,
     read: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    if !frame.files().is_empty() {
-        return None;
-    }
     read()
 }
 

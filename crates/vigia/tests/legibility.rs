@@ -1877,7 +1877,10 @@ fn the_empty_state_line_marks_its_edge() {
     // path does, so the honest thing is to fill the room and mark the cut.
     //
     // Both directions, because a rule that only ever fires one way is not a rule.
-    const LINE: &str = "no unstaged changes · main";
+    // **No branch since #158**, which moved that fact to the header where it is
+    // drawn on every frame rather than on this one. The line is a token either
+    // way and the rule this gates is unchanged; only its length is.
+    const LINE: &str = "no unstaged changes";
     let view = empty();
     let (mut fitted, mut cut) = (0usize, 0usize);
 
