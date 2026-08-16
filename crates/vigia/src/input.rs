@@ -275,21 +275,22 @@ impl Regions {
     /// [#166](https://github.com/breferrari/vigia/issues/166) found two
     /// expressions of and reduced to one.
     ///
-    /// **Only a step button answers, and the limit is a missing rung rather
-    /// than a missing wire.** The rule a mark on this column has to keep is that
-    /// a click is brighter than a hover, and a button has three weights to spend
-    /// on it (`Theme::bar_track`, `Theme::bar`, `Theme::bar_active`) where the
-    /// thumb has two: it rests at `bar` and is dragged at `bar_active`, with
-    /// nothing in between. A hover drawn in `bar_active` would make a drag
-    /// indistinguishable from a pointer resting on the thumb.
+    /// **Three answers, and the order they are asked in is the whole of it.** A
+    /// step button, then the bar it sits on, then a listed file. The column is
+    /// tested before the list because the scrollbar is drawn *inside* whichever
+    /// region owns those rows, so asking the list first would mark a file the
+    /// reader is pointing past. That is [`Regions::grab_at`]'s ordering one
+    /// function up, for the same reason.
     ///
-    /// So the **thumb and the track are the same finding as a list row**, one
-    /// element over: surfaces a click acts on, licensed a mark by §11.1, with
-    /// nowhere to draw one until a rung is ruled. Both wait on
-    /// [#189](https://github.com/breferrari/vigia/issues/189), and this function
-    /// is where they will be added rather than a second one being written. When
-    /// they are, this stops being expressible through `step_at` alone, because a
-    /// track press seeks rather than steps.
+    /// **The diff's rows answer nothing**, which is the one region §11.1 keeps
+    /// unmarked: nothing there is clickable and a mark would imply it is.
+    ///
+    /// [#186](https://github.com/breferrari/vigia/issues/186) answered only for
+    /// a button, on the reasoning that the thumb rests at `Theme::bar` and drags
+    /// at `Theme::bar_active` with no rung between, so a hover there would tie
+    /// with a drag. The reasoning was right and the conclusion was not: *there is
+    /// no rung* is a reason to build one, which is what `Theme::bar_hover` and
+    /// `Theme::path_hover` are ([#189](https://github.com/breferrari/vigia/issues/189)).
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
         // **The bar's column first, for [`Regions::grab_at`]'s reason one
         // function up**: the scrollbar is drawn *inside* whichever region owns

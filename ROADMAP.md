@@ -431,7 +431,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | decision: OSC 8 links and a yank key — outbound affordances that write nothing | [#120](https://github.com/breferrari/vigia/issues/120) |
 | ✅ | decision: hover highlight, reopened because both reasons it was declined on were false | [#123](https://github.com/breferrari/vigia/issues/123) |
 | ✅ | A hover mark on the scrollbars' step buttons, and the mechanism the rest will reuse | [#186](https://github.com/breferrari/vigia/issues/186) |
-| ⬜ | The hover mark where no rung exists: a list row, the thumb, the track | [#189](https://github.com/breferrari/vigia/issues/189) |
+| ✅ | The hover mark where no rung existed, so one was built: a list row, the thumb, the track | [#189](https://github.com/breferrari/vigia/issues/189) |
 | ✅ | decision: the rule learns to speak — headings in the border line | [#124](https://github.com/breferrari/vigia/issues/124) |
 | ✅ | The counters are one dim grey where the picture draws them green and red | [#157](https://github.com/breferrari/vigia/issues/157) |
 | ⬜ | The worktree churn graph: the hero element nothing draws | [#158](https://github.com/breferrari/vigia/issues/158) |
