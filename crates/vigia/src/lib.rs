@@ -801,9 +801,17 @@ struct Shell {
     /// It needs an expiry where the other two gestures do not, and that is the
     /// honest cost: a release ends a hold and a key burst simply stops, sending
     /// nothing. Without `scrolling_until` the last arrow of a burst would stay
-    /// lit forever on an idle tree, which is exactly the staleness §11.2 B10
-    /// refused a hover highlight for. The clock that clears it is bounded by the
-    /// burst that armed it, fires once, and is the same one `Held` uses.
+    /// lit forever on an idle tree, as a claim about the past. The clock that
+    /// clears it is bounded by the burst that armed it, fires once, and is the
+    /// same one `Held` uses.
+    ///
+    /// **Why this field and not the other marks**: §11.1 states the rule, which
+    /// is that a mark is retired by whatever the program can still observe about
+    /// its subject — its end, its replacement, or, failing both, a clock. A hold
+    /// has an end. A burst has neither, which is why the expiry lives here and
+    /// nowhere else. The rule is at one address on purpose, because the same
+    /// reasoning restated per field is what left `Regions::step`'s doc claiming
+    /// a held button cannot repeat for a day after it could.
     scrolling: Option<(u16, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,

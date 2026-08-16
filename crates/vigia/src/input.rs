@@ -202,11 +202,19 @@ impl Regions {
     /// list's buttons step the window and the diff's step the viewport, exactly
     /// as the drag on the same column already does. `SPEC.md` §11.1.
     ///
-    /// **One step per press, and there is no other option.** No mouse protocol
+    /// **One step per press, and holding it repeats through a clock the loop
+    /// owns rather than through anything reported here.** No mouse protocol
     /// reports a button that is *still* down: `crossterm` has `Down`, `Up`,
-    /// `Drag` and `Moved`, and a drag needs motion, so repeat-while-held would
-    /// have to be driven by a clock I1 forbids. `RULINGS.md` carries the
-    /// measurement.
+    /// `Drag` and `Moved`, and a drag needs motion, so this function sees one
+    /// press and nothing further. That is why the repeat is [`Held`]'s and not
+    /// this module's, which keeps the map a pure function of an event and a
+    /// layout. `RULINGS.md`'s second I1 section carries the measurement.
+    ///
+    /// This doc said *"there is no other option"* and that repeat *"would have
+    /// to be driven by a clock I1 forbids* until 2026-08-16. Both halves were
+    /// wrong by then: `SPEC.md` §11.1 reversed that on 2026-08-15 and I1 now
+    /// states three conditions a gesture-bounded clock may meet. Corrected while
+    /// reversing §11.2 B10, which had gone the same way for the same reason.
     fn step(self, row: u16) -> Option<Action> {
         if let Some(rows) = self.list.button(row) {
             return Some(Action::ScrollList(rows));
@@ -891,10 +899,15 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     }
 
     match mouse.kind {
-        // **The wheel scrolls whatever it is over**, which is the one place this
-        // shell reads a pointer's position rather than only its kind. A reader
-        // hovering the map and turning the wheel means the map; `SPEC.md` §2
-        // makes `btop` the reference and that is what `btop` does.
+        // **The wheel scrolls whatever it is over.** A reader hovering the map
+        // and turning the wheel means the map; `SPEC.md` §2 makes `btop` the
+        // reference and that is what `btop` does.
+        //
+        // This used to claim it was "the one place this shell reads a pointer's
+        // position rather than only its kind", which was never true: the bar
+        // test above reads `mouse.column`, and the click arm below reads
+        // `mouse.row` through the same `over_list`. What is true is that reading
+        // the position never *remembers* it, which is what §11.2 B4 turns on.
         MouseEventKind::ScrollDown if regions.over_list(mouse.row) => Some(Action::ScrollList(1)),
         MouseEventKind::ScrollUp if regions.over_list(mouse.row) => Some(Action::ScrollList(-1)),
         MouseEventKind::ScrollDown => Some(Action::Scroll(WHEEL_ROWS)),
