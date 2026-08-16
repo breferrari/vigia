@@ -550,6 +550,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(u16, isize)> {
         | Action::ListTo(_)
         | Action::DiffTo(_)
         | Action::ToggleFollow
+        | Action::ToggleMasthead
         | Action::Redraw
         | Action::Quit => return None,
     };
@@ -788,6 +789,20 @@ pub enum Action {
     /// §11.1 makes re-engaging a jump as well as a state change: `f` moves to
     /// the newest change rather than waiting for the next one.
     ToggleFollow,
+    /// Draw the masthead, or stop drawing it.
+    ///
+    /// **A reader's own gesture, which is what licenses it to move content.**
+    /// `SPEC.md` §11.1 keeps the body split a function of pane height, footer
+    /// height and changed-file count, all of which change only when the diff
+    /// does, so that no transient thing jogs a reader's diff. A keypress is the
+    /// opposite of transient: it is an instruction, and the same ruling already
+    /// lets `f` change what the footer says and `J` move the map.
+    ///
+    /// Its own action rather than a flag, for [`Action::ToggleFollow`]'s reason
+    /// one element over: the band is worth four rows of diff on a short pane and
+    /// nothing at all on a tall one, and a reader who has decided which is what
+    /// this asks.
+    ToggleMasthead,
     /// Put the pinned list's window at this fraction of the changed set.
     ///
     /// From dragging or clicking the list's own scrollbar. A fraction over
@@ -873,6 +888,7 @@ impl Action {
             | Self::ListTo(_)
             | Self::DiffTo(_)
             | Self::ToggleFollow
+            | Self::ToggleMasthead
             | Self::Redraw
             | Self::Quit => self,
         }
@@ -913,7 +929,15 @@ impl Action {
             // resize does not. Browsing the changed set while the diff goes on
             // following what an agent is writing is the monitor behaviour, and
             // the two would fight if one disengaged the other. `SPEC.md` §11.1.
-            Self::Quit | Self::Redraw | Self::ToggleFollow | Self::ScrollList(_) => false,
+            Self::Quit
+            | Self::Redraw
+            | Self::ToggleFollow
+            // Showing or hiding the masthead resizes the diff's region and does
+            // not move the reader inside it, which is a resize by another name
+            // and the same answer §11.1 gives one: a resize expresses no intent
+            // about what the diff should show.
+            | Self::ToggleMasthead
+            | Self::ScrollList(_) => false,
             // Dragging the **list's** bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the **diff's**
             // moves the viewport and is a manual scroll like any other.
@@ -954,7 +978,9 @@ impl Action {
                 false
             }
             Self::ListTo(_) | Self::ListRow(_) => false,
-            Self::Quit | Self::Redraw | Self::ToggleFollow => false,
+            // A toggle changes the region's height; it does not need to be
+            // told one to decide what it means.
+            Self::Quit | Self::Redraw | Self::ToggleFollow | Self::ToggleMasthead => false,
         }
     }
 }
@@ -1071,6 +1097,11 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // matters, and folding case would hand `F` a meaning nobody asked for
         // next to a key where case is load bearing.
         KeyCode::Char('f') => Some(Action::ToggleFollow),
+        // `m` for masthead, and it was free. Reported from use: *"can we add a
+        // shortcut to hide and display this thing at the top? I see it is not
+        // always needed"*, which is the honest read of an element that costs
+        // four rows of the thing the tool exists to show.
+        KeyCode::Char('m') => Some(Action::ToggleMasthead),
         _ => None,
     }
 }

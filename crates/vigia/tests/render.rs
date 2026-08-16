@@ -34,7 +34,7 @@ use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
-    diff_height, regions, render,
+    body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -231,6 +231,7 @@ fn chrome() -> Chrome {
         mode: Mode::Watching,
         notice: None,
         following: false,
+        masthead: true,
         // The first paint's chrome: no frame has completed, so there is no p99
         // to draw. Every snapshot below inherits it, which keeps them comparing
         // the same screen they compared before the readouts existed, and
@@ -270,6 +271,7 @@ fn following_chrome() -> Chrome {
         gripped: None,
         scrolling: None,
         following: true,
+        masthead: true,
         ..chrome()
     }
 }
@@ -328,6 +330,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -432,6 +435,7 @@ fn one_file() -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -595,6 +599,7 @@ fn nothing_changed() -> View {
         top: Position::default(),
         read: 0,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -855,6 +860,7 @@ fn ragged_counts() -> View {
         top: Position::default(),
         read: 1,
         peak: 12,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -1706,7 +1712,7 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             // renderer's own arithmetic agreeing with itself.
             // Trailing blanks are trimmed off the match, because the clause and
             // the background agree on a space: at seventeen columns the row is
-            // `vigia   watching`, and the space after the name belongs to the
+            // `vigia watching`, and the space after the name belongs to the
             // gap rather than to the clause the ladder drew.
             // #119's inset off the head first, and through `content` so that the
             // strip is also the assertion: a `trim_start` here would let a row
@@ -1946,9 +1952,15 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
 }
 
 #[test]
-fn the_empty_state_names_the_branch_and_what_it_did_not_find() {
-    // B3's four facts, two of which are the header's, so the body spends one row
-    // rather than four.
+fn the_empty_state_says_what_it_did_not_find_and_leaves_the_branch_to_the_header() {
+    // B3's four facts, **three** of which are the header's since
+    // [#158](https://github.com/breferrari/vigia/issues/158), so the body spends
+    // one row on the one fact that is its own.
+    //
+    // The branch was here because nothing else on the pane named it. The
+    // masthead names it on every frame now, so this line drew it twice on the
+    // one screen where both are visible, and the header is the better owner: it
+    // is there always, where this line is there once.
     //
     // Not `working tree clean`, which is what this said before and which was
     // wrong rather than merely plain: that is git's phrase and git compares the
@@ -1957,20 +1969,35 @@ fn the_empty_state_names_the_branch_and_what_it_did_not_find() {
     let backend = screen(80, 6, &nothing_changed(), &empty_chrome());
     assert_eq!(
         content(row_text(&backend, 1).trim_end(), 80),
-        "no unstaged changes · main"
+        "no unstaged changes"
+    );
+    // And the branch is on the header rather than gone from the screen, which is
+    // the half that makes the move a move rather than a deletion.
+    assert!(
+        row_text(&backend, 0).contains("main"),
+        "the branch left the body and did not arrive in the header: {:?}",
+        row_text(&backend, 0)
     );
 }
 
 #[test]
-fn a_detached_head_leaves_the_empty_state_naming_no_branch() {
+fn a_detached_head_names_no_branch_anywhere() {
     // Ordinary rather than exceptional: a rebase or a bisect leaves an agent
-    // here routinely. The line drops the branch instead of inventing one,
-    // because `HEAD@abc123` would put a commit id in a monitor that shows no
-    // commits.
+    // here routinely. Nothing invents one, because `HEAD@abc123` would put a
+    // commit id in a monitor that shows no commits.
+    //
+    // Both places since #158, which is what keeps the refusal one rule rather
+    // than two that could drift: the header's ladder simply has one fewer rung.
     let backend = screen(80, 6, &nothing_changed(), &chrome());
     assert_eq!(
         content(row_text(&backend, 1).trim_end(), 80),
         "no unstaged changes"
+    );
+    assert!(
+        !row_text(&backend, 0).contains(FACT_JOIN),
+        "a detached head drew a second header fact, so a branch was invented: \
+         {:?}",
+        row_text(&backend, 0)
     );
 }
 
@@ -2017,6 +2044,7 @@ fn a_file_with_no_line_diff_says_why() {
         top: Position::default(),
         read: 3,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
 }
@@ -2041,6 +2069,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
 }
@@ -2074,6 +2103,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
     assert!(
@@ -2349,6 +2379,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
     let rendered = format!("{backend}");
@@ -2382,6 +2413,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
 
     for width in 6..48u16 {
@@ -2432,6 +2464,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
 
     let wide = format!("{}", screen(40, 3, &view, &chrome()));
@@ -2516,6 +2549,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         top: Position::default(),
         read: 1,
         peak: u16::MAX,
+        worktree_churn: Default::default(),
     };
 
     // Every heat and sparkline rung is reached inside this range, which is what
@@ -2981,6 +3015,7 @@ fn glancing() -> View {
         top: Position::default(),
         read: 3,
         peak: 12,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -3650,6 +3685,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         top: Position { file: current, row },
         read: 4,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -3857,7 +3893,16 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     // assertion about "moving within a file" can catch any of those.
     let width = 64u16;
     let height = 24u16;
-    let region = 5u16..height - 1;
+    // **Asked of the layout rather than counted.** This was `5..height - 1`,
+    // which is a header, three list rows and the rule added up by hand, and #158
+    // put a masthead above them. A gate about the *thumb* must not carry its own
+    // copy of the body split.
+    let laid = regions(
+        Rect::new(0, 0, width, height),
+        &chrome(),
+        &a_list_of(3, 3, 0),
+    );
+    let region = laid.diff.top..laid.diff.top + laid.diff.rows;
     let rows = usize::from(region.end - region.start);
 
     // A thumb that halves when the diff doubles, which is the proportionality no
@@ -4064,6 +4109,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         top: Position::default(),
         read: 2,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -4080,7 +4126,15 @@ fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
     // "measured at its cheapest position" shape §7 already records, one axis over.
     let width = 64u16;
     let shown = 6usize;
-    let region = 1u16..1 + shown as u16;
+    // The list's own rows, from the layout: #158's masthead sits above them.
+    let region = {
+        let laid = regions(
+            Rect::new(0, 0, width, 24),
+            &chrome(),
+            &a_list_of(30, shown, 0),
+        );
+        laid.list.top..laid.list.top + laid.list.rows
+    };
     // **Six rows is above the step floor, so both ends of this bar are buttons
     // and the thumb's ends are one row inside them.** The claim is unchanged: the
     // last window fills the last row the thumb can reach, and the first fills the
@@ -4406,7 +4460,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
             assert_eq!(
                 fg(y),
                 theme.bar_track.fg,
-                "scrolling {name} by {way} lit row {y} on the *other* bar, which                  answers different keys and moves a different thing"
+                "scrolling {name} by {way} lit row {y} on the *other* bar, which answers different keys and moves a different thing"
             );
         }
     }
@@ -5237,9 +5291,32 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         let mut view = a_list_of(3, 3, 0);
         view.files = 1;
         view.current_span = span;
-        // The diff region starts under three list rows and the rule.
-        let region = 5u16..height - 1;
+        // Asked of the layout for the reason
+        // `the_diff_scrollbar_is_proportional_to_the_rows_it_shows` gives: the
+        // regions above the diff are the body split's business, not this gate's.
+        let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+        let region = laid.diff.top..laid.diff.top + laid.diff.rows;
         let rows = usize::from(region.end - region.start);
+        // **The track, not the region.** This bar is tall enough for step
+        // buttons, so its two ends are one row inside the region, which is what
+        // `a_scrollbar_reaches_the_bottom_at_its_last_window` already says one
+        // region over. Comparing against the region asked the thumb to reach a
+        // button.
+        let track = stepped_track(region.clone());
+        // **The viewport actually on its last screenful**, which this fixture
+        // never was. It set `view.top` alone, and the diff's bar is scaled from
+        // `rows_above` over `total_rows`; `top` is where the walk landed and is
+        // read by the caret, not by the bar. So the thumb sat at the top for
+        // every span while the assertion below described the bottom.
+        //
+        // It never fired, which is why nobody noticed: the region was hardcoded
+        // to `5..height - 1` on the assumption of three list rows, and this
+        // fixture sets `files` to one, so the bar was drawn above the range
+        // being filtered and `marks` came back empty on every iteration. The
+        // `continue` above then skipped the only assertion in the loop. #158
+        // moved the region and made it correct, which is what surfaced this.
+        view.total_rows = span;
+        view.rows_above = span.saturating_sub(rows);
         view.top = Position {
             file: 0,
             row: span.saturating_sub(rows),
@@ -5252,7 +5329,7 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         }
         assert_eq!(
             *marks.last().expect("a thumb"),
-            region.end - 1,
+            track.end - 1,
             "span {span}: the last screenful's thumb ends at {:?}, not the \
              bottom of the track",
             marks.last()
@@ -5327,7 +5404,12 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         let backend = screen(width, 24, &view, &chrome());
         let buffer = backend.buffer();
 
-        let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
+        // The **list's** first row, from the layout: row one is #158's masthead
+        // air on any pane that affords a band, and the band draws no caret.
+        let laid = regions(Rect::new(0, 0, width, 24), &chrome(), &view);
+        let row: String = (0..width)
+            .map(|x| buffer[(x, laid.list.top)].symbol())
+            .collect();
         let caret = row.contains(CARET);
         let bar = row.ends_with(TRACK) || row.ends_with(THUMB);
 
@@ -5840,12 +5922,12 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
         compared += 1;
         assert!(
             deep.contains("258"),
-            "at {width} columns a diff taller than the pane lost its line              numbers entirely, so the gutter is sized from the diff's height:              {flat:?} became {deep:?}"
+            "at {width} columns a diff taller than the pane lost its line numbers entirely, so the gutter is sized from the diff's height:              {flat:?} became {deep:?}"
         );
     }
     assert!(
         compared > 40,
-        "only {compared} widths drew the line number at all, so this swept over          rows with no gutter to lose"
+        "only {compared} widths drew the line number at all, so this swept over rows with no gutter to lose"
     );
 }
 
@@ -6207,4 +6289,214 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
              together at {rung} columns, which is a boundary of the margin ladder"
         );
     }
+}
+
+#[test]
+fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
+    // **Monotone in height**, which is the property a reader feels rather than
+    // sees: a pane dragged taller must not lose an element it had, and a
+    // threshold written as two comparisons is exactly where that breaks.
+    //
+    // The arrival height is asserted rather than observed, so a change to any
+    // floor fails here by name instead of the band silently appearing somewhere
+    // else.
+    let width = 80u16;
+    let view = a_list_of(3, 3, 0);
+    let mut arrived: Option<u16> = None;
+
+    for height in 1..=80u16 {
+        let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
+            .clamped_to(view.list.len());
+        match (arrived, body.graph > 0) {
+            (None, true) => arrived = Some(height),
+            (Some(at), false) => panic!(
+                "the band arrived at {at} rows and was gone again by {height}, so a taller pane lost an element a shorter one had"
+            ),
+            _ => {}
+        }
+    }
+
+    // **The height, not merely that one exists.** The comment above claimed this
+    // was asserted while the code observed it and threw it away, which review
+    // caught: a floor moving would then change where the band appears and
+    // nothing would say so.
+    // Twenty: one header, one footer, three list rows and the rule leave the
+    // masthead's four and ten of diff, which is GRAPH_KEEP.
+    assert_eq!(
+        arrived,
+        Some(20),
+        "the band arrived at {arrived:?} rather than where the floors add up to"
+    );
+}
+
+#[test]
+fn the_band_never_takes_the_diff_below_a_whole_hunk() {
+    // **The clamp order, from the diff's side.** The band is the newest luxury
+    // and yields to both the list and the diff, so wherever it is drawn the diff
+    // still holds a whole default hunk: a header, three context, a change, three
+    // more and the file's own heading.
+    //
+    // Swept over height *and* file count, because the list is what competes with
+    // it for the same rows and a floor that held at one count could fail at
+    // another.
+    let width = 80u16;
+    for files in [1usize, 3, 6, 30] {
+        for height in 1..=80u16 {
+            let body = body_layout(Rect::new(0, 0, width, height), &chrome(), files);
+            if body.graph == 0 {
+                continue;
+            }
+            assert!(
+                body.diff >= 10,
+                "at {width}x{height} over {files} files the band left {} diff rows, under the whole hunk it must not take the pane below:                  {body:?}",
+                body.diff
+            );
+        }
+    }
+}
+
+#[test]
+fn an_empty_window_draws_no_band_at_all() {
+    // **#78 does not reach the band, and this is the gate that says so.** That
+    // ruling gives the sparkline's empty bucket a track because a gap would make
+    // an eight-column strip between two other elements ambiguous. The band spans
+    // the pane and the masthead's blank rows delimit it, so its extent is never
+    // in question, and a hundred columns of `_` is a dashed rule the pane did
+    // not ask for. Reported from use on the first real run.
+    //
+    // The rows are still **reserved**, which is the half that matters: the band
+    // is present at its height whether or not the window has anything in it, so
+    // the first write does not jog the list down a row.
+    let width = 80u16;
+    let height = 24u16;
+    let view = a_list_of(3, 3, 0);
+    let backend = screen(width, height, &view, &chrome());
+    let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
+        .clamped_to(view.list.len());
+    assert!(body.graph > 0, "the fixture reserved no band");
+
+    // Asked of the layout rather than counted, which is this branch's own
+    // lesson: `regions` publishes where the list starts, and everything above it
+    // is the masthead.
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let buffer = backend.buffer();
+    for y in 1..laid.list.top {
+        let drawn: String = (0..width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim()
+            .to_owned();
+        assert!(
+            drawn.is_empty(),
+            "an empty window drew {drawn:?} on masthead row {y}, so the band draws furniture where it has no data"
+        );
+    }
+}
+
+#[test]
+fn hiding_the_masthead_gives_its_rows_to_the_diff() {
+    // **Reported from use**: *"can we add a shortcut to hide and display this
+    // thing at the top? I see it is not always needed"*. The band costs four
+    // rows of the thing the tool exists to show, and a reader who has decided is
+    // the only one who can answer whether that is worth it.
+    //
+    // The claim is the trade, not the toggle: every row the masthead gives up
+    // goes to the diff, so nothing is left blank and no other region moves.
+    let width = 80u16;
+    let height = 24u16;
+    let view = a_list_of(3, 3, 0);
+    let shown = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files);
+    let hidden = body_layout(
+        Rect::new(0, 0, width, height),
+        &Chrome {
+            masthead: false,
+            ..chrome()
+        },
+        view.files,
+    );
+
+    assert!(shown.graph > 0, "the fixture drew no masthead to hide");
+    assert_eq!(hidden.graph, 0, "hiding the masthead left the band drawn");
+    assert_eq!(
+        hidden.air, 0,
+        "hiding the masthead left its blank rows behind"
+    );
+    assert_eq!(
+        hidden.diff,
+        shown.diff + shown.masthead(),
+        "the masthead's rows went somewhere other than the diff"
+    );
+    assert_eq!(
+        (hidden.list, hidden.rule),
+        (shown.list, shown.rule),
+        "hiding the masthead moved the list, which is not what was asked"
+    );
+}
+
+#[test]
+fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
+    // **The seam #67 added its guard against, reached from a new direction.** A
+    // worktree whose name draws nothing is a non-empty string of invisible
+    // characters, and the guard measures the name rather than testing it for
+    // emptiness for exactly that reason.
+    //
+    // #158 added the branch as a third header fact, and the first spelling put
+    // the new rung *outside* that guard, so a nameless worktree on a branch drew
+    // a separator with nothing on its left. Found by review rather than by any
+    // gate, which is why this one exists: every fact is joined by one rule now,
+    // and a fourth fact cannot open the hole again.
+    // **Swept, because the rung that had the hole is not the widest one.** The
+    // first version of this gate drew one 80-column screen, where the widest rung
+    // fits and the narrower ones are never reached, so it passed against the very
+    // defect it was written for. A ladder is only checked by walking it.
+    let view = a_list_of(3, 3, 0);
+    let mut narrowed = false;
+    for worktree in ["", " ", "\u{200b}", "\u{7}"] {
+        let chrome = Chrome {
+            worktree: worktree.to_owned(),
+            branch: Some("main".to_owned()),
+            ..chrome()
+        };
+        for width in 1..=120u16 {
+            let header = row_text(&screen(width, 24, &view, &chrome), 0);
+            let drawn = header.trim_start();
+            if drawn.is_empty() {
+                continue;
+            }
+            narrowed |= !drawn.contains("changed");
+            assert!(
+                !drawn.starts_with(FACT_JOIN.trim_start()),
+                "at {width} columns a worktree drawing nothing put a separator at \
+                 the head of the pane: {drawn:?}"
+            );
+        }
+    }
+    assert!(
+        narrowed,
+        "every width drew the widest rung, so the narrower ones this is about \
+         were never reached"
+    );
+}
+
+#[test]
+fn a_populated_worktree_names_its_branch_in_the_header() {
+    // **The always-on rung, on a frame that has a diff in it**, which is the case
+    // #158 is about and the one the suite could not see: every populated fixture
+    // set `branch: None`, so the rung was exercised by one assertion about the
+    // empty state and by nothing else at all.
+    let width = 80u16;
+    let view = a_list_of(3, 3, 0);
+    let chrome = Chrome {
+        branch: Some("feature/band".to_owned()),
+        ..chrome()
+    };
+    let header = row_text(&screen(width, 24, &view, &chrome), 0);
+    assert!(
+        header.contains("feature/band"),
+        "a populated frame drew no branch: {header:?}"
+    );
+    assert!(
+        header.contains("vigia"),
+        "the branch arrived and the worktree name left: {header:?}"
+    );
 }

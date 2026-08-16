@@ -112,7 +112,14 @@ pub const HISTORY_BUCKET: Duration =
 /// The cost is `paths * samples` `u16`s, which at the cap is sixty kibibytes, and
 /// a [`History::record`] walk fifteen times longer than it was. Both are measured
 /// in the issue rather than asserted to be small.
-const HISTORY_SAMPLES: usize = 120;
+///
+/// **Public since [#158](https://github.com/breferrari/vigia/issues/158)**, which
+/// is the second element and the one this resolution was raised for. It was kept
+/// private while [`History::churn`] was the only reader, on the ground that
+/// private is the reversible direction under semver and `pub` is not; the graph
+/// draws the whole series across a whole pane, so it needs the length to project
+/// against.
+pub const HISTORY_SAMPLES: usize = 120;
 
 /// How much time one **sample** covers, which is the grid the window rolls on.
 const HISTORY_SAMPLE: Duration =
@@ -198,6 +205,60 @@ pub struct HistoryStats {
     pub evicted_by_cap: u64,
     /// Paths dropped because nothing was left inside [`HISTORY_WINDOW`].
     pub evicted_by_window: u64,
+}
+
+/// Every tracked path's churn added together, oldest sample first.
+///
+/// **A newtype rather than a bare array, and the reason is `Default`.** Std only
+/// implements it for arrays up to thirty-two long, and [`HISTORY_SAMPLES`] is
+/// longer, so a bare array would take `Default` away from every type that holds
+/// one. That reaches further than it looks: the shell's `View` derives it, and
+/// most of the fixtures in its suite are struct-update literals that would all
+/// have to name a field they do not care about.
+///
+/// It also gives the series somewhere to say what it is. A bare `[u32; N]` on a
+/// struct is a length and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Churn(pub [u32; HISTORY_SAMPLES]);
+
+impl Default for Churn {
+    fn default() -> Self {
+        Self([0; HISTORY_SAMPLES])
+    }
+}
+
+impl Churn {
+    /// The series re-projected onto `width` columns, oldest first.
+    ///
+    /// **A projection re-projects; it does not drop items**, which is `heat_at`'s
+    /// ruling in the shell and [`Track::drawn`]'s one crate over. Every column is
+    /// the sum of the samples under it, so a narrow pane shows the same total
+    /// churn at a lower resolution rather than a suffix of the window.
+    ///
+    /// The remainder is spread rather than dropped: with a width that does not
+    /// divide [`HISTORY_SAMPLES`], the earlier columns take one extra sample
+    /// each. Every sample lands in exactly one column, which is the property that
+    /// matters, and no column is empty because the width is bounded by the caller
+    /// to at most [`HISTORY_SAMPLES`].
+    ///
+    /// Saturating for [`Track::drawn`]'s reason: a column already at the top of
+    /// the ramp must not wrap to the bottom of it.
+    pub fn projected(&self, width: usize) -> Vec<u32> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let width = width.min(HISTORY_SAMPLES);
+        (0..width)
+            .map(|column| {
+                let from = column * HISTORY_SAMPLES / width;
+                let to = (column + 1) * HISTORY_SAMPLES / width;
+                self.0[from..to]
+                    .iter()
+                    .copied()
+                    .fold(0u32, u32::saturating_add)
+            })
+            .collect()
+    }
 }
 
 /// One path's churn, and when it last moved.
@@ -320,6 +381,9 @@ pub struct History {
     /// When the newest **sample** opened, which is the grid the window rolls on.
     opened: Instant,
     peak: u16,
+    /// Every tracked path added together, kept current by the walk that finds
+    /// the peak. See [`History::worktree_churn`].
+    worktree: Churn,
     stats: HistoryStats,
 }
 
@@ -340,6 +404,7 @@ impl History {
             tick: 0,
             opened: now,
             peak: 0,
+            worktree: Churn::default(),
             stats: HistoryStats::default(),
         }
     }
@@ -530,20 +595,51 @@ impl History {
         }
     }
 
-    /// The busiest **drawn** bucket anywhere in the store.
+    /// Every tracked path's churn added together, oldest sample first.
     ///
-    /// Over the projection rather than over the raw samples, which is the half of
-    /// [#198](https://github.com/breferrari/vigia/issues/198) that would have
-    /// moved the sparkline if it were got wrong: heights are scaled against this,
-    /// so a peak measured one sample at a time would be smaller than the columns
-    /// it is the denominator for and every bar on screen would top out.
+    /// **The worktree's own series, which is what `SPEC.md` §5.3 calls the
+    /// worktree churn graph** ([#158](https://github.com/breferrari/vigia/issues/158)).
+    /// It invents nothing: it is arithmetic over state I10 already bounds, so it
+    /// needs no wake, no write and no clock, and it is drawn on frames that were
+    /// going to happen anyway.
+    ///
+    /// **Maintained rather than computed on demand, and it is free**, because
+    /// [`History::repeak`] already walks every sample of every track on every
+    /// [`History::record`]. Summing in that same pass costs one add per element
+    /// and the frame path pays nothing at all: a caller asking for this is a
+    /// field read.
+    ///
+    /// `u32` because the sum is over paths as well as time. At the cap that is
+    /// 256 paths of `u16`, which overflows `u16` and cannot overflow `u32`.
+    pub fn worktree_churn(&self) -> Churn {
+        self.worktree
+    }
+
+    /// Recompute the busiest drawn bucket and the worktree series, in one walk.
+    ///
+    /// **Two results from one pass, which is why the series is free.** This
+    /// already had to touch every sample of every track to find the peak, so
+    /// [`History::worktree_churn`]'s sum rides along at one add per element
+    /// rather than costing a walk of its own. Splitting them would double the
+    /// most expensive thing a tick does.
+    ///
+    /// The peak is over the **projection** rather than the raw samples, which is
+    /// the half of [#198](https://github.com/breferrari/vigia/issues/198) that
+    /// would have moved the sparkline if it were got wrong: heights are scaled
+    /// against it, so a denominator measured one sample at a time would be
+    /// smaller than the columns it divides and every bar on screen would top
+    /// out.
     fn repeak(&mut self) {
-        self.peak = self
-            .tracks
-            .values()
-            .flat_map(|track| track.drawn())
-            .max()
-            .unwrap_or(0);
+        let mut peak = 0u16;
+        let mut worktree = [0u32; HISTORY_SAMPLES];
+        for track in self.tracks.values() {
+            for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
+                *total += u32::from(count);
+            }
+            peak = peak.max(track.drawn().into_iter().max().unwrap_or(0));
+        }
+        self.peak = peak;
+        self.worktree = Churn(worktree);
     }
 }
 

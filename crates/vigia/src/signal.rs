@@ -137,7 +137,7 @@ const CAUGHT: [i32; 3] = [
 /// Send one [`Wake::Signalled`] per delivery, until the shell has hung up.
 ///
 /// A free function over an iterator rather than a loop inside [`forward`], for
-/// the reason [`drain`](crate::drain) and [`branch_for`](crate::branch_for) are
+/// the reason [`drain`](crate::drain) is
 /// functions: neither `run` nor a signal handler can be driven from a test, so a
 /// rule left inside either is a rule nothing can gate. What is left in
 /// [`forward`] is arming, which is the part a test genuinely cannot reach.

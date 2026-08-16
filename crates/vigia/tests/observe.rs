@@ -72,7 +72,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Theme, View, body_layout, branch_for, regions, render};
+use vigia::{App, Body, Theme, View, body_layout, regions, render};
 use vigia_core::{
     ChangeKind, FrameStats, HISTORY_PATHS, HighlightStats, Highlighter, History, HistoryStats,
     WARM_FILES, WatchOptions, WatchStats, Worktree,
@@ -877,9 +877,12 @@ impl Pane<'_> {
     /// because a number is only comparable to the product's if it was taken over
     /// the product's frame.
     ///
-    /// - [`branch_for`], which reads `.git/HEAD` on exactly the frames that draw
-    ///   the empty state. Over the recorded sessions the tree was clean about
-    ///   half the time, so this is not a rare path here.
+    /// - The **branch read**, one `.git/HEAD` at 56 to 69us. It used to happen
+    ///   on exactly the frames that drew the empty state, which over the
+    ///   recorded sessions was about half of them; since
+    ///   [#158](https://github.com/breferrari/vigia/issues/158) the header draws
+    ///   the branch always, so it happens on all of them and this instrument
+    ///   would under-state the frame by that much if it were left out.
     /// - The **second** `chrome`, rebuilt after the collect so a notice raised
     ///   during it reaches this frame rather than the next one.
     /// - [`regions`], which resolves the clickable areas from the drawn frame.
@@ -892,7 +895,11 @@ impl Pane<'_> {
     /// which is process-global and would arm this harness rather than a shell.
     /// The buffer is a real one and `render` writes into it.
     fn paint(&mut self, worktree: &Worktree) {
-        self.branch = branch_for(&self.frame, || worktree.branch());
+        // Every frame, matching `Shell::paint` since #158. This went through a
+        // `branch_for` seam whose guard was *only the empty state names a
+        // branch*; the header names it always, so the guard's premise went and
+        // the wrapper with it.
+        self.branch = worktree.branch();
         let chrome = self
             .app
             .chrome(&self.name, self.branch.as_deref(), None, None, None, None);
@@ -1329,40 +1336,59 @@ mod wiring {
 
     /// The other half, and it exists because a mutation survived the one above.
     ///
-    /// `branch_for` reads `.git/HEAD` on **exactly** the frames that draw the
-    /// empty state, so over a worktree with a changed file in it the read never
-    /// happens and deleting it entirely leaves the gate above green. That is not
-    /// a rare corner here: the recorded sessions had a clean tree about half the
-    /// time, and a clean tree is the state `SPEC.md` §11.2 B3 calls *"the state
-    /// the tool sits in most of the time"*. So the cost this harness has to
-    /// measure includes a file read per frame that the dirty fixture cannot
-    /// reach, and it takes a second fixture to hold it. The same "span the axis
-    /// rather than move along it" answer §7 reaches twice.
+    /// **The reason changed with [#158](https://github.com/breferrari/vigia/issues/158)
+    /// and the gate is worth more, not less.** The read used to happen on exactly
+    /// the frames that drew the empty state, so a dirty fixture could not reach
+    /// it and deleting the read outright left the gate above green: it took a
+    /// clean fixture to hold a cost the harness would otherwise under-measure on
+    /// about half the recorded sessions.
+    ///
+    /// The header draws the branch on every frame now, so **both** fixtures pay
+    /// it, and this asserts the pair rather than the clean case alone. That is
+    /// the same "span the axis rather than move along it" answer §7 reaches
+    /// twice, and spanning it is what would catch a future guard being
+    /// reintroduced on one side.
     #[test]
-    fn a_clean_tree_draws_its_branch_because_the_empty_state_names_it() {
-        let scratch = Scratch::new("observe-wiring-clean");
-        scratch.write("src/main.rs", "fn main() {}\n");
-        scratch.commit_all("base");
+    fn every_tree_draws_its_branch_because_the_header_names_it() {
+        for (name, dirty) in [
+            ("observe-branch-clean", false),
+            ("observe-branch-dirty", true),
+        ] {
+            let scratch = Scratch::new(name);
+            scratch.write("src/main.rs", "fn main() {}\n");
+            scratch.commit_all("base");
+            if dirty {
+                scratch.write("src/main.rs", "fn main() { let x = 1; }\n");
+            }
 
-        let worktree = scratch.worktree();
-        let mut pane = Pane::open(&worktree, "observe-wiring-clean".to_owned());
-        assert!(pane.frame.files().is_empty(), "the fixture is not clean");
+            let worktree = scratch.worktree();
+            let mut pane = Pane::open(&worktree, name.to_owned());
+            assert_eq!(
+                pane.frame.files().is_empty(),
+                !dirty,
+                "{name} is not in the state this case is about"
+            );
 
-        pane.draw(&worktree);
+            pane.draw(&worktree);
 
-        assert_eq!(pane.failed, 0, "the draw failed: {:?}", pane.last_error);
-        assert_eq!(
-            pane.branch,
-            worktree.branch(),
-            "the empty state names the branch, so the frame that draws it pays \
-             the read, and a harness that skipped it would under-measure every \
-             frame over a clean tree"
-        );
-        assert!(
-            pane.branch.is_some(),
-            "the fixture has a commit on a named branch, so a `None` here means \
-             the assertion above compared two nothings"
-        );
+            assert_eq!(
+                pane.failed, 0,
+                "{name}: the draw failed: {:?}",
+                pane.last_error
+            );
+            assert_eq!(
+                pane.branch,
+                worktree.branch(),
+                "{name}: the header names the branch on every frame, so every \
+                 frame pays the read, and a harness that skipped it would \
+                 under-measure them"
+            );
+            assert!(
+                pane.branch.is_some(),
+                "{name}: the fixture has a commit on a named branch, so a `None` \
+                 here means the assertion above compared two nothings"
+            );
+        }
     }
 }
 

@@ -1,7 +1,8 @@
-//! The pinned file list, which `SPEC.md` §11.1 makes the upper of two regions.
+//! The pinned file list, which `SPEC.md` §11.1 makes the middle of three
+//! regions.
 //!
-//! > The body is two regions: a pinned file list, a rule, and the scrolling
-//! > diff.
+//! > The body is three regions since 2026-08-17: a masthead, a pinned file list,
+//! > a rule, and the scrolling diff.
 //!
 //! Four claims live here, and they fail in different ways, which is why they are
 //! four tests rather than one screen inspected from four angles.
@@ -517,10 +518,13 @@ fn the_two_regions_tile_the_body_exactly() {
                     // The footer's own height is not exposed, so it is recovered
                     // from the unclamped split rather than restated: whatever it
                     // is, clamping must not change it.
-                    let footer = usize::from(height)
-                        .saturating_sub(1 + full.list + usize::from(full.rule) + full.diff);
+                    // Every region the body has, so the sum is the body rather
+                    // than a subset of it. #158 added the masthead and its air,
+                    // and a tiling check that missed a region would report the
+                    // pane as short by exactly that region.
+                    let footer = usize::from(height).saturating_sub(1 + full.rows());
                     assert_eq!(
-                        1 + body.list + usize::from(body.rule) + body.diff + footer,
+                        1 + body.rows() + footer,
                         usize::from(height),
                         "at {width}x{height} over {files} files with {have} \
                          entries, {body:?} plus a header and {footer} footer rows \

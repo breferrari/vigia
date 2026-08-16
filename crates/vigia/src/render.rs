@@ -489,6 +489,67 @@ const fn line_origin(gutter: usize) -> usize {
     }
 }
 
+/// Rows the worktree churn band takes when it is drawn at all.
+///
+/// **Two, which is sixteen levels over the [`SPARK_RAMP`]'s eight per row.** One
+/// row would be a sparkline, and the pane already has one of those per file; the
+/// band earns its place by being the thing no file row can be, which is the
+/// worktree at a resolution a single row cannot carry. Three was weighed and
+/// costs the diff a row for a resolution the eye does not spend.
+const GRAPH_ROWS: usize = 2;
+
+/// Rows the band leaves blank above and below itself.
+///
+/// **The band is the one drawn thing on this pane that is not text**, and a
+/// graph pressed against a header on one side and a file list on the other reads
+/// as a texture rather than as a chart. A blank rather than a rule, which is the
+/// opposite of the choice [`RULE`] records between the list and the diff, and the
+/// reason that ruling does not reach here is in its own docblock: a blank there
+/// *"reads as the diff having nothing at the top"*, and that argument is about a
+/// **scrolling text** region. A graph has a baseline and cannot be mistaken for
+/// an empty one.
+const GRAPH_AIR: usize = 1;
+
+/// Diff rows the band may not take the pane below.
+///
+/// **Derived rather than chosen.** `git diff -U3` at its smallest is a hunk
+/// header, three lines of context, one changed line, three more of context and
+/// the file's own heading, which is nine rows. Ten is that with one to spare, so
+/// a pane that draws the band still draws a whole hunk of the thing the tool
+/// exists to show. Below it the band is not drawn at all, which is the same
+/// order [`Body::split`] already applies to the list: the map gives way to the
+/// content, and the band gives way before the map does.
+const GRAPH_KEEP: usize = 10;
+
+/// The narrowest band that can draw every sample it holds.
+///
+/// A band narrower than this would have to drop columns, and a projection that
+/// drops items is the shape `SPEC.md` §5.1 refuses for the heat strip in as many
+/// words. Below it the band is not drawn.
+const GRAPH_FLOOR: usize = 8;
+
+/// Whether a pane this wide can carry the band at all.
+///
+/// **Asked by [`Body::split`] as well as by [`Painter::band`], and that is the
+/// point.** The floor lived only in the painter for one commit, so a pane below
+/// it reserved four rows for a region the drawer then declined to draw, and the
+/// masthead was four blank rows pushing the list down for nothing.
+/// `the_header_never_takes_a_second_line` is what found it, by asking the layout
+/// where the body starts and comparing that against where content actually is.
+///
+/// That is the same shape [`bar_for`] was consolidated for one element over: a
+/// threshold two expressions keep by hand is invisible to every test that reads
+/// what was drawn, because the drawn side stays correct and only the *width at
+/// which* it changes drifts.
+///
+/// Measured from the **pane** less its inset and less the scrollbar's column
+/// whether or not a bar is drawn, for [`CARET_FLOOR`]'s reason: a band whose
+/// presence depended on whether a seventh file had appeared would move the list
+/// under a reader for something that is not about the list.
+const fn band_fits(pane: u16) -> bool {
+    planning_width(pane, 0) as usize >= GRAPH_FLOOR
+}
+
 /// The smallest body a second footer line may leave behind.
 ///
 /// Two rows, because that is the shortest thing that still reads as a diff: a
@@ -915,7 +976,7 @@ pub struct Chrome {
     /// frame that has a diff to show and therefore never asked. The second is
     /// what keeps I4 true. Reading `.git/HEAD` on a frame that will not draw the
     /// answer is exactly the shape I4 forbids, so the shell asks only when the
-    /// diff is empty. See [`crate::branch_for`].
+    /// diff is empty.
     pub branch: Option<String>,
     /// Whether the watch is still live.
     ///
@@ -995,6 +1056,18 @@ pub struct Chrome {
     /// was switched off look identical, and the reader's next action differs
     /// completely between them.
     pub following: bool,
+    /// Whether the masthead is drawn at all, which `m` toggles.
+    ///
+    /// **On [`Chrome`] rather than passed to [`Body::split`] separately**, which
+    /// is where every other fact the layout needs about the reader already
+    /// lives: `following` is here for the same reason, because the footer's own
+    /// height depends on it.
+    ///
+    /// It is the one input to the body split that is not about the pane or the
+    /// diff, and §11.1 licenses exactly that: the split refuses to move for a
+    /// **transient** thing, so that a notice flickering cannot jog the reader's
+    /// diff. A keypress is an instruction rather than a flicker.
+    pub masthead: bool,
     /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
     ///
     /// `None` on the very first paint, when no frame has completed to have a
@@ -1250,22 +1323,63 @@ fn count_of(files: usize) -> String {
 /// characters still escape and are left alone deliberately: `U+2800` and
 /// `U+115F` draw a real glyph that happens to be blank, and whether a *font*
 /// inks something is not a question this process can ask.
-fn header_left(worktree: &str, files: usize) -> Vec<String> {
-    let mut rungs = Vec::with_capacity(2);
+fn header_left(worktree: &str, branch: Option<&str>, files: usize) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(3);
     let count = count_of(files);
+
+    // **The branch is drawn always since
+    // [#158](https://github.com/breferrari/vigia/issues/158)**, where it was the
+    // empty state's alone. It answers *which line of work*, which is the one
+    // thing on this pane a reader cannot reconstruct from the body: the file list
+    // says what changed and the diff says how, and neither says against what.
+    //
+    // **Its rung sits between the count and the name**, which is the order
+    // §11.1's ladder already implies. The count goes first because the list
+    // below repeats it. The name goes last because B3's empty state leans on it
+    // to say which repository this is. The branch is in between: nowhere else on
+    // screen, but the name is what identifies the pane.
+    //
+    // A detached HEAD carries `None` and the ladder is what it always was, which
+    // is the same refusal `empty_state` makes one function down: `HEAD@abc123`
+    // would put a commit id in a monitor that shows no commits.
+    let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
+
+    // **A separator is owed only between two facts that are both there**, which
+    // is [#67](https://github.com/breferrari/vigia/issues/67)'s rule and the
+    // reason the name is measured rather than tested for emptiness: a worktree
+    // called `a zero-width space` is a non-empty string that draws nothing, and joining it
+    // would head the pane with a leading separator.
+    //
+    // **Built by joining what exists rather than by branching on what does**,
+    // which is the correction #158 needed. Adding the branch as a third fact
+    // first spelled the rungs as an if/else-if/else, and the new rung sat outside
+    // the guard above: a nameless worktree on a branch drew `" · main"`, which is
+    // exactly the seam that guard exists to prevent. One rule applied to every
+    // rung cannot grow a second hole the next time a fact is added.
+    //
+    // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on stable.
+    // Noted because a reviewer read it as an unstable API: the `Pattern` *trait*
+    // is unstable to implement and its impls have been stable to use since 1.0.
+    let visible = worktree.trim().replace(|c: char| c.is_control(), "");
+    let name = (width_of(&visible) != 0).then_some(worktree);
+    let join = |facts: [Option<&str>; 3]| {
+        facts
+            .into_iter()
+            .flatten()
+            .filter(|fact| !fact.is_empty())
+            .collect::<Vec<_>>()
+            .join(FACT_SEPARATOR)
+    };
+
+    // Widest first, dropping one fact per rung in the order §11.1 rules: the
+    // count goes before the branch because the list below repeats it, and the
+    // branch before the name because B3's empty state leans on the name to say
+    // which repository this is.
     if !count.is_empty() {
-        // `replace` takes any `Pattern`, and `FnMut(char) -> bool` is one on
-        // stable. Noted because a reviewer read it as an unstable API: the
-        // `Pattern` *trait* is unstable to implement and its impls have been
-        // stable to use since 1.0, which is a distinction worth one line here
-        // rather than the same question being asked again.
-        let visible = worktree.trim().replace(|c: char| c.is_control(), "");
-        let joined = if width_of(&visible) == 0 {
-            count
-        } else {
-            format!("{worktree}{FACT_SEPARATOR}{count}")
-        };
-        rungs.push(joined);
+        rungs.push(join([name, named, Some(&count)]));
+    }
+    if named.is_some() {
+        rungs.push(join([name, named, None]));
     }
     rungs.push(worktree.to_owned());
     rungs
@@ -1280,18 +1394,24 @@ fn header_left(worktree: &str, files: usize) -> Vec<String> {
 /// rather than four, and the mode word is what makes the fourth fact sayable in
 /// none at all.
 ///
-/// **The branch is orientation, not the comparison.** Nothing about it changes
-/// what is diffed. It is named because two agents on two worktrees of one
-/// repository are otherwise identical on screen, which is the multi-worktree case
-/// `SPEC.md` §4 defers rather than rejects.
+/// **The branch left this line on 2026-08-17**
+/// ([#158](https://github.com/breferrari/vigia/issues/158)), and the ruling that
+/// put it here is what took it away. It was named because two agents on two
+/// worktrees of one repository are otherwise identical on screen, and B3 gave the
+/// empty state the job because nothing else on the pane was doing it. The header
+/// draws the branch on every frame now, so this line drew it **twice** on the one
+/// screen where both are visible.
 ///
-/// A detached HEAD drops it rather than inventing one: `HEAD@abc123` would put a
+/// The header is the right owner rather than this line: it is there on every
+/// frame, where the empty state is there on one, and orientation is a header fact
+/// beside the worktree's own name. It degrades with the rest of that ladder, so at
+/// a width too narrow for it nothing names the branch, which is what already
+/// happens to the changed count and the mode word.
+///
+/// A detached HEAD is still not invented anywhere: `HEAD@abc123` would put a
 /// commit id in a monitor that shows no commits.
-fn empty_state(branch: Option<&str>) -> String {
-    match branch {
-        Some(branch) => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{branch}"),
-        None => NOTHING_CHANGED.to_owned(),
-    }
+fn empty_state() -> String {
+    NOTHING_CHANGED.to_owned()
 }
 
 /// One file heading's parts, gathered so [`Painter::file_row`] takes a shape
@@ -2026,6 +2146,59 @@ impl Bucket {
     }
 }
 
+/// How many eighths of the band one column fills, out of `rows * 8`.
+///
+/// **Scaled against the band's own busiest column**, which is the right
+/// denominator for a single time series: the question `SPEC.md` §5.3 asks of this
+/// element is *was it hotter a minute ago*, and that is a comparison inside the
+/// series. A fixed scale would answer *how hot against what* with a number nobody
+/// chose, and the sparkline's screen-wide peak is a different question asked of a
+/// different element.
+///
+/// A zero peak is the empty store, which is every launch: nothing is written, so
+/// nothing is drawn but the baseline track. Guarded here rather than inside the
+/// loop for [`spark_of`]'s reason, because the two say different things.
+///
+/// Rounded **up**, so a column with anything in it is never drawn as empty. That
+/// is [`spark_of`]'s ruling and the same sentence applies: "one write" and "no
+/// writes" is the distinction the element exists to make.
+fn level_of(total: u32, peak: u32, rows: usize) -> usize {
+    if peak == 0 || total == 0 {
+        return 0;
+    }
+    let levels = rows * SPARK_RAMP.len();
+    let scaled = (total as u64 * levels as u64).div_ceil(peak as u64) as usize;
+    scaled.clamp(1, levels)
+}
+
+/// What one cell of the band draws, `row` counted up from the baseline.
+///
+/// `None` is a cell **above** the bar, which is left as the pane's own
+/// background rather than painted: a graph's empty upper rows are not a track,
+/// they are sky, and filling them would draw a solid block the height of the
+/// band on every column.
+///
+/// **An empty column draws nothing at all, and that is [#78](https://github.com/breferrari/vigia/issues/78)
+/// not reaching here rather than being overruled.** That ruling gives the
+/// sparkline's empty bucket a track because *"a gap would make the strip's own
+/// length ambiguous"*: eight columns sitting between a heat strip and a counts
+/// cell have no edges of their own, so a blank one is indistinguishable from the
+/// element being absent.
+///
+/// The band has edges. It spans the pane, and the masthead's blank rows delimit
+/// it above and below, so its extent is never in question and a baseline buys
+/// nothing to pay for how it looks. Reported from use on the first real run: a
+/// hundred columns of `_` reads as a dashed rule across the pane, which is
+/// furniture the pane did not ask for and which the band is not.
+///
+/// The floor rung of [`SPARK_RAMP`] is what an empty column would otherwise
+/// take, and that is exactly the collision `SPARK_TRACK`'s own docblock refuses:
+/// one write and no writes must not be the same shape.
+fn band_cell(level: usize, row: usize) -> Option<char> {
+    let filled = level.saturating_sub(row * SPARK_RAMP.len());
+    (filled > 0).then(|| SPARK_RAMP[filled.min(SPARK_RAMP.len()) - 1])
+}
+
 /// A path's buckets, every one of them drawn.
 ///
 /// `peak` is the busiest bucket **anywhere on the screen**, so two rows drawn
@@ -2056,18 +2229,18 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUC
         if count == 0 {
             continue;
         }
-        // The clamp's **upper** bound is the live one: a bucket busier than the
-        // screen's peak is an inconsistent view, and without it the index runs
-        // off the ramp and takes the pane with it. Its lower bound is defensive
-        // only, since `count >= 1` already puts the numerator at or above
-        // `SPARK_RAMP.len()`.
-        let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
+        // **Through [`level_of`], which is where this rule lives now.** The
+        // sparkline is one row, so its levels are one ramp's worth, and the band
+        // is the same arithmetic over more rows. Written twice, the rounding rule
+        // that keeps one write from drawing as empty could move in one element
+        // and not the other.
+        let scaled = level_of(u32::from(count), u32::from(peak), 1);
         // **Against the same `peak` the height is scaled from**, which is the
         // busiest bucket anywhere on screen rather than in this file. Height and
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
         let band = Band::of(u32::from(count), u32::from(peak));
-        *bucket = Bucket::Written(SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1], band);
+        *bucket = Bucket::Written(SPARK_RAMP[scaled - 1], band);
     }
     drawn
 }
@@ -2293,15 +2466,36 @@ impl<'a> Footer<'a> {
     }
 }
 
-/// How the body divides between the two regions `SPEC.md` §11.1 rules.
+/// How the body divides between the regions `SPEC.md` §11.1 rules.
 ///
-/// The rows between the header and the footer are a pinned file list, a rule,
-/// and the scrolling diff. All three numbers come from one function because they
-/// have to agree: a caller that derived the diff's height by subtracting its own
-/// idea of the list's would be a second layout rule, and the two would disagree
-/// on exactly the pane heights where the region is giving way.
+/// The rows between the header and the footer are a masthead, a pinned file
+/// list, a rule, and the scrolling diff. Every number comes from one function
+/// because they have to agree: a caller that derived the diff's height by
+/// subtracting its own idea of the others would be a second layout rule, and the
+/// two would disagree on exactly the pane heights where a region is giving way.
+///
+/// **Three regions since [#158](https://github.com/breferrari/vigia/issues/158)**,
+/// where it was two. [`Body::masthead`] and [`Body::rows`] exist so that a
+/// caller adding them up does not become the fourth place the geometry is
+/// written: six sites open-coded `graph + air` within a day of the region
+/// landing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Body {
+    /// Rows the worktree churn band takes, zero when the pane cannot spare them.
+    ///
+    /// **The newest luxury and the first thing to go**, which is the order
+    /// [`Body::split`] applies: the list is a map of the diff and the band is a
+    /// fact about the tree, so the band yields to both. `SPEC.md` §5.3 rules that
+    /// richness is the reward of space, and this is what earning it looks like
+    /// from the layout's side.
+    pub graph: usize,
+    /// Blank rows framing the band, zero whenever the band is.
+    ///
+    /// Counted separately from [`Body::graph`] so a caller can tell the drawn
+    /// rows from the ones deliberately left empty. **Ask [`Body::masthead`] for
+    /// the two together**, which is what every caller actually wants and what
+    /// stops the sum being written by hand in a seventh place.
+    pub air: usize,
     /// Rows the pinned file list takes, zero when there is no room for one.
     pub list: usize,
     /// Whether the rule under the list is drawn, which is exactly when there is
@@ -2326,6 +2520,8 @@ impl Body {
     /// [`body_layout`] instead, so the region is inside them.
     pub fn diff_only(rows: usize) -> Self {
         Self {
+            graph: 0,
+            air: 0,
             list: 0,
             rule: false,
             diff: rows,
@@ -2355,7 +2551,7 @@ impl Body {
     ///
     /// Saturating rather than clamped so a one-row terminal asks for nothing
     /// instead of underflowing.
-    pub fn split(area: Rect, footer_rows: u16, files: usize) -> Self {
+    pub fn split(area: Rect, footer_rows: u16, files: usize, masthead: bool) -> Self {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // The rule costs a row too, so the diff needs `MIN_BODY + 1` before the
@@ -2369,11 +2565,52 @@ impl Body {
         if list == 0 {
             return Self::diff_only(body);
         }
+        let after = body - list - 1;
+
+        // **The band is last in the clamp order and that is the ruling.** The
+        // list is a map of the diff and gives way to the diff; the band is a
+        // fact about the worktree and gives way to both, so it is paid for out
+        // of what is left rather than out of either. A pane that could afford a
+        // band by shrinking the list draws six rows of list and no band, on
+        // purpose: §5.3's "richness is the reward of space" means extra space,
+        // not space taken from the map.
+        //
+        // Tied to the **list's** presence as well, which is one branch rather
+        // than two: B3's empty state replaces the whole region with a sentence,
+        // and a graph above a sentence saying nothing changed is a graph of
+        // nothing. `diff_only` above is that path and draws neither.
+        let framed = GRAPH_ROWS + 2 * GRAPH_AIR;
+        let graph = if masthead && band_fits(area.width) && after >= framed + GRAPH_KEEP {
+            GRAPH_ROWS
+        } else {
+            0
+        };
+        let air = if graph > 0 { 2 * GRAPH_AIR } else { 0 };
         Self {
+            graph,
+            air,
             list,
             rule: true,
-            diff: body - list - 1,
+            diff: after - graph - air,
         }
+    }
+
+    /// Every row the masthead occupies, drawn and blank together.
+    ///
+    /// **Named because six sites open-coded `graph + air` within a day**, which
+    /// is the same hand-kept geometry [`band_fits`] was consolidated to remove
+    /// one layer down. `regions` and the painter now agree by construction
+    /// rather than by both being written correctly.
+    pub fn masthead(&self) -> usize {
+        self.graph + self.air
+    }
+
+    /// Every row the body holds, across every region it has.
+    ///
+    /// What a caller checking that the pane tiles wants, and what two test files
+    /// had each written out for themselves.
+    pub fn rows(&self) -> usize {
+        self.masthead() + self.list + usize::from(self.rule) + self.diff
     }
 
     /// Shrink the list to the rows a view actually carries, giving the rest back
@@ -2394,10 +2631,25 @@ impl Body {
     /// the diff.
     pub fn clamped_to(self, have: usize) -> Self {
         let list = self.list.min(have);
+        // **The band goes with the list**, for `Body::split`'s own reason: the
+        // two are one region saying what the worktree is doing, and a stale view
+        // with no entries draws B3's sentence rather than a graph over blank
+        // rows.
+        let (graph, air) = if list > 0 {
+            (self.graph, self.air)
+        } else {
+            (0, 0)
+        };
         Self {
+            graph,
+            air,
             list,
             rule: list > 0,
-            diff: self.diff + (self.list - list) + usize::from(self.rule && list == 0),
+            diff: self.diff
+                + (self.list - list)
+                + (self.graph - graph)
+                + (self.air - air)
+                + usize::from(self.rule && list == 0),
         }
     }
 }
@@ -2414,7 +2666,12 @@ impl Body {
 /// [`Body::split`] directly with the plan it made anyway; everything else comes
 /// through here. See [`Body::split`] for the ruling the arithmetic encodes.
 pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
-    Body::split(area, Footer::plan(area, chrome, files).rows, files)
+    Body::split(
+        area,
+        Footer::plan(area, chrome, files).rows,
+        files,
+        chrome.masthead,
+    )
 }
 
 /// Rows the **diff** gets, which is what a caller has to ask [`View::collect`]
@@ -2490,10 +2747,14 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         return Regions::default();
     }
     let footer = Footer::plan(area, chrome, view.files);
-    let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
+    let body =
+        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
     let wide = affords_bar(area.width);
 
-    let list_top = area.y + 1;
+    // The masthead sits between the header and the list, so both regions below
+    // it move down by whatever it takes. Derived from the same `Body` the
+    // painter uses, which is what keeps the pointer and the screen one answer.
+    let list_top = area.y + 1 + body.masthead() as u16;
     let diff_top = list_top + body.list as u16 + u16::from(body.rule);
 
     // **Asked through `bar_for`, which is what `render` asks.** A bar column only
@@ -2540,7 +2801,8 @@ pub fn render(
     // view, and `clamped_to` below is what makes that case draw honestly rather
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
-    let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
+    let body =
+        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
     let margins = margins_of(area.width);
 
     let mut painter = Painter {
@@ -2572,6 +2834,22 @@ pub fn render(
     // thirty thousand rows are different questions.
     let bars = affords_bar(area.width);
     let mut y = area.y + 1;
+
+    if body.graph > 0 {
+        // Air, band, air. The blanks are skipped rather than painted: the pane's
+        // own background is what a blank row is, and painting one would be
+        // furniture claiming a row it does not use.
+        y += GRAPH_AIR as u16;
+        painter.band(
+            Rect {
+                y,
+                height: body.graph as u16,
+                ..area
+            },
+            view,
+        );
+        y += body.graph as u16 + GRAPH_AIR as u16;
+    }
 
     if body.list > 0 {
         let region = Rect {
@@ -2647,7 +2925,7 @@ pub fn render(
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
-        painter.body(region, view, chrome, area.width);
+        painter.body(region, view, area.width);
     }
 
     painter.paint
@@ -3016,7 +3294,7 @@ impl Painter<'_> {
         // subject now, so they are drawn as one.
         self.status_line(
             area,
-            &header_left(&chrome.worktree, view.files),
+            &header_left(&chrome.worktree, chrome.branch.as_deref(), view.files),
             self.theme.chrome,
             right,
             right_style,
@@ -3177,6 +3455,69 @@ impl Painter<'_> {
             if self.buf[(x, row.y)].symbol() == glyph {
                 self.buf[(x, row.y)].set_style(self.theme.added);
                 return;
+            }
+        }
+    }
+
+    /// Draw the worktree churn band, `SPEC.md` §11.1's masthead.
+    ///
+    /// **The hero element, and the only drawn thing on this pane that is about
+    /// the worktree rather than about a file in it**
+    /// ([#158](https://github.com/breferrari/vigia/issues/158)). Every other
+    /// glance element answers *which file*; this answers *how hot is this tree
+    /// now, and was it hotter a minute ago*.
+    ///
+    /// **It invents nothing.** The series is arithmetic over state I10 already
+    /// bounds, kept current by a walk `History::record` was already making, so
+    /// the band costs no wake, no write and no clock and draws on frames that
+    /// were going to happen. That is §5.3's "ink is priced at zero" spent on the
+    /// rung §5.3 names.
+    ///
+    /// **Inset like text rather than bled like furniture**, which is the one
+    /// place this element could have gone either way. §5.3 rules washes and
+    /// rules to the pane's edge and glyphs inside it; a graph is made of glyphs
+    /// and is read rather than looked past, so it takes the same inset every row
+    /// of the pane takes and stops clear of the scrollbar's column whether or not
+    /// a bar is drawn. Bleeding it would put it under the bar at the one width
+    /// where the bar appears.
+    fn band(&mut self, area: Rect, view: &View) {
+        // The precondition, checked rather than assumed: `Body::split` owns
+        // this decision and hands down zero rows when it says no, so reaching
+        // here on a pane too narrow would mean the two had come apart.
+        debug_assert!(
+            band_fits(area.width),
+            "the band was given {} columns, under the floor the layout applies",
+            area.width
+        );
+        if !band_fits(area.width) || area.height == 0 {
+            return;
+        }
+        let left = area.x.saturating_add(self.inset);
+        let width = usize::from(planning_width(area.width, 0));
+
+        let series = view.worktree_churn.projected(width);
+        // Off the series rather than through a second projection of it. `Churn`
+        // had a `peak_at` that re-walked the whole window to return a number its
+        // only caller was already holding, which is the shape `History::repeak`
+        // rules against one crate over.
+        let peak = series.iter().copied().max().unwrap_or(0);
+        let rows = usize::from(area.height);
+
+        for (offset, total) in series.iter().enumerate() {
+            let x = left.saturating_add(offset as u16);
+            let level = level_of(*total, peak, rows);
+            // Ramped by height like the sparkline, and against the same
+            // denominator the height is scaled from, so colour and shape say one
+            // thing at one scale.
+            let band = Band::of(*total, peak);
+            for row in 0..rows {
+                // Drawn bottom up, so `row` counts from the baseline and the
+                // buffer's `y` counts down from the top.
+                let y = area.y + (rows - 1 - row) as u16;
+                let Some(glyph) = band_cell(level, row) else {
+                    continue;
+                };
+                self.bar_cell(x, y, glyph, self.theme.spark_at(band));
             }
         }
     }
@@ -3523,7 +3864,7 @@ impl Painter<'_> {
         }
     }
 
-    fn body(&mut self, area: Rect, view: &View, chrome: &Chrome, pane: u16) {
+    fn body(&mut self, area: Rect, view: &View, pane: u16) {
         // **Two rects, because this region draws both roles.** A heading is placed
         // against the pane through [`planning_width`]; everything else here keeps
         // the region's own right edge and only stands back from it, through
@@ -3537,7 +3878,7 @@ impl Painter<'_> {
             self.put_marked(
                 glyphs.x,
                 glyphs.y,
-                &empty_state(chrome.branch.as_deref()),
+                &empty_state(),
                 usize::from(glyphs.width),
                 self.theme.chrome_dim,
             );

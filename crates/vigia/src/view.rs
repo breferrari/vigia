@@ -463,6 +463,18 @@ pub struct View {
     /// every one of them is still drawn. `vigia_core::History::peak` carries the
     /// same correction, and this is the copy a renderer actually reads.
     pub peak: u16,
+    /// The whole worktree's churn over the window, oldest sample first.
+    ///
+    /// **What the masthead's band draws** ([#158](https://github.com/breferrari/vigia/issues/158)),
+    /// and the one thing on the pane that is about the worktree rather than
+    /// about a file in it. Every other glance element answers *which file*; this
+    /// answers *how hot is this tree right now, and was it hotter a minute ago*.
+    ///
+    /// Carried on the view rather than fetched by the painter, for the reason
+    /// [`View::peak`] is: the renderer is handed what to draw and does not reach
+    /// back into a store for it. It is a copy of a field the history keeps
+    /// current on a walk it was already making, so collecting it costs a move.
+    pub worktree_churn: vigia_core::Churn,
 }
 
 /// The letter shown for a kind of change.
@@ -787,6 +799,7 @@ impl View {
             },
             read: 0,
             peak: history.peak(),
+            worktree_churn: history.worktree_churn(),
         };
         if files == 0 {
             // Nothing to point at, so nothing to preserve either.
