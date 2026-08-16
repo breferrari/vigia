@@ -87,10 +87,11 @@ enum Step {
     /// Focus reporting, so a mark drawn from pointer state can be cleared when
     /// the reader looks away.
     ///
-    /// **Added 2026-08-16 for `SPEC.md` §11.2 B10**, which was declined for a
-    /// year on the claim that *"the takeover does not enable focus reporting"* —
-    /// a description of this array, written as though it were a fact about
-    /// terminals. It is the middle rung of §11.1's clearing ladder: motion
+    /// **Added 2026-08-16 for `SPEC.md` §11.2 B10**, which was declined one day
+    /// earlier on the claim that *"the takeover does not enable focus
+    /// reporting"* — a description of this array, written as though it were a
+    /// fact about terminals. The decline was a day old; the absence it rested on
+    /// had not been real for years, which is the part worth keeping. It is the middle rung of §11.1's clearing ladder: motion
     /// inside the pane retires a hover mark on its own, and this is what retires
     /// one when the window loses focus instead.
     ///

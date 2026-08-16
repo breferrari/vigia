@@ -225,11 +225,14 @@ impl Regions {
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
     ///
     /// **Geometry alone, with no event kind in it**, which is what makes it
-    /// usable by the two callers that ask different questions of the same cell:
-    /// [`action_for`] asks *what does this press mean*, and the loop asks *is the
-    /// pointer still on the button it is repeating*. Deriving the second from a
-    /// copy of this arithmetic is how the two would come to disagree about where
-    /// a button is.
+    /// usable by the three callers that ask different questions of the same
+    /// cell: [`action_for`] asks *what does this press mean*, the loop asks *is
+    /// the pointer still on the button it is repeating*, and [`Regions::hover_at`]
+    /// asks *is this a surface a press would act on at all*. Deriving any of
+    /// them from a copy of this arithmetic is how they would come to disagree
+    /// about where a button is, which is the defect
+    /// [#166](https://github.com/breferrari/vigia/issues/166) found two
+    /// expressions of and reduced to one.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
         if self.bar != Some(column) {
             return None;
