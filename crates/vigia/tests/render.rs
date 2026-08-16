@@ -73,6 +73,14 @@ const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
 /// sharing the renderer's constant agrees with it by construction.
 const BAR_GLYPHS: [char; 4] = ['│', '█', '▲', '▼'];
 
+/// The mark on the row the diff is inside.
+///
+/// **File level for [`RAMP`]'s reason, arrived at the same way**: four gates had
+/// declared this locally and a fifth was about to, and a copy beside a copy does
+/// not check the renderer, it checks the other copy. Restated rather than
+/// imported for [`CONTINUES`]'.
+const CARET: &str = "▸";
+
 /// Whether a cell's symbol is one of [`BAR_GLYPHS`].
 ///
 /// The length check is what keeps a wide character whose first `char` happens to
@@ -300,6 +308,37 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         read: 1,
         peak: 0,
     }
+}
+
+/// What a cell is drawn *in*, as the pair a rung is actually made of.
+///
+/// **Foreground and modifiers, never the whole [`Style`] and never `fg` alone.**
+/// A drawn cell carries `bg` and `underline_color` resets a theme entry does not,
+/// so whole-`Style` equality compares bookkeeping; and `fg` alone is not enough
+/// either, because on `ansi` a rung can be a modifier with no colour to spare
+/// (`Theme::path_hover` and `Theme::path_cold` share `Gray` there by design).
+///
+/// Written once because six gates had spelled it as a local closure and the
+/// paragraph above only existed on one of them.
+fn weight(style: Style) -> (Option<Color>, Modifier) {
+    (style.fg, style.add_modifier)
+}
+
+/// What each cell of `path`'s label on row `y` is drawn in.
+///
+/// A file row draws its kind letter as `"M "`, so the label begins two columns
+/// after it. Found from the letter rather than computed, for [`column_of`]'s
+/// reason.
+///
+/// **The label's own cells rather than the whole row**, which is the distinction
+/// that made this a function: a `-0` takes the row's dim grey by #157's ruling
+/// and lands on the same pair as the cold rung, so a gate counting matches across
+/// a row reads the counts cell as a path.
+fn path_weights(backend: &TestBackend, y: u16, path: &str) -> Vec<(Option<Color>, Modifier)> {
+    let start = column_of(backend, y, "M") + 2;
+    (start..start + path.chars().count() as u16)
+        .map(|x| weight(backend.buffer()[(x, y)].style()))
+        .collect()
 }
 
 /// The first column of row `y` holding `needle`.
@@ -3599,8 +3638,6 @@ fn the_caret_marks_the_file_the_diff_is_inside() {
     //
     // Both directions, per this file's own rule: the marked row has it and the
     // others do not.
-    const CARET: &str = "▸";
-
     for current in 0..3usize {
         let view = two_regions(current);
         let backend = screen(64, 18, &view, &chrome());
@@ -3669,8 +3706,6 @@ fn the_caret_degrades_once_and_never_flickers() {
     // renderer's own constant, and a test that restated it would agree with the
     // code by construction instead of checking it. This asserts the shape of the
     // ladder, which no constant can satisfy by accident.
-    const CARET: &str = "▸";
-
     let drawn: Vec<bool> = (1..=60u16)
         .map(|width| {
             let view = two_regions(1);
@@ -4444,16 +4479,21 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     // The reader chose "brighten the row's text", and SPEC.md 5.3 rules that
     // intensity carries recency *and nothing else*, so the obvious form of that
     // would say **recent** about a file nothing had touched. `Theme::path_hover`
-    // is a fourth weight the ladder cannot reach: above all three, and
-    // underlined, which none of them are.
+    // is a weight the ladder cannot reach, and what makes it unreachable is the
+    // **underline**.
     //
-    // Underline is what makes it hold where colour runs out. On `ansi` the
-    // brightest path is already `White` with `BOLD`, so a purely brighter mark
-    // would be a pulsing row exactly. That palette is the default, so this is
-    // the case the rule has to survive rather than an exotic one.
+    // **It used to be the brightness as well, and that was the half that was
+    // wrong** (#193). The mark sat above all three rungs, which made a stale
+    // thing about the pointer the loudest text on the pane and contradicted
+    // §5.3's own B10 rule in the paragraph beside it: a pointer mark *"must be
+    // the quietest thing still visible in that region"*. It takes
+    // `Theme::bar_hover`'s colour now, the one the bar's own marks use, so the
+    // separation below is carried by the modifier alone. On `ansi` the
+    // foreground is `Gray` in both places and therefore **equals**
+    // `Theme::path_cold`'s by design; that is the case the underline exists for
+    // and the reason the assertions here compare `(fg, modifiers)` rather than
+    // either half.
     let theme = Theme::default();
-    let weight = |style: Style| (style.fg, style.add_modifier);
-
     for (name, recency) in [
         ("pulse", Recency::Pulse),
         ("live", Recency::Live),
@@ -4468,12 +4508,11 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     }
 
     // And the distinguishing channel is the modifier rather than the colour,
-    // asserted directly because on the default palette it is the only one left:
-    // `path_hover` underlines and no recency weight does.
-    assert!(
-        theme.path_hover.add_modifier.contains(Modifier::UNDERLINED),
-        "the hover weight stopped underlining, so on `ansi` it is a pulsing row"
-    );
+    // which on the default palette is the only one left. The hover's half of
+    // that is `the_pointer_never_takes_the_weight_the_caret_row_does`, which
+    // makes it on all three built-ins rather than on this one; what is asserted
+    // here is the half that gate does not reach, which is that nothing on the
+    // ladder underlines back.
     for recency in [Recency::Pulse, Recency::Live, Recency::Cold] {
         assert!(
             !theme
@@ -4491,26 +4530,39 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     let height = 24u16;
     let view = a_stepped_screen();
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-    let row = laid.list.top;
+    // **The second list row, not the first, and the reason is #193.** The
+    // fixture's caret sits on the first, and the caret's row now adds `BOLD` to
+    // whatever it is drawn in, so hovering it produces the *pair* of marks. That
+    // composition is a claim of its own and
+    // `a_hovered_row_that_is_also_the_current_one_reads_as_both` is where it is
+    // made; this gate is about the pointer alone and wants a row the caret is
+    // not on.
+    let row = laid.list.top + 1;
 
-    let path_weight = |chrome: &Chrome, y: u16| {
-        let backend = screen(width, height, &view, chrome);
+    // **Two screens, drawn once each.** This used to draw one per row inside the
+    // loop below, which is the same picture five times over.
+    let want = weight(theme.path_hover);
+    let untouched = screen(width, height, &view, &chrome());
+    let hovering = screen(
+        width,
+        height,
+        &view,
+        &Chrome {
+            hovered: Some(Hovered::Row(row)),
+            ..chrome()
+        },
+    );
+    let path_weight = |backend: &TestBackend, y: u16| {
         (0..width)
-            .map(|x| weight(backend.buffer()[(x, y)].style()))
-            .filter(|w| *w == weight(theme.path_hover))
+            .filter(|x| weight(backend.buffer()[(*x, y)].style()) == want)
             .count()
     };
 
     assert_eq!(
-        path_weight(&chrome(), row),
+        path_weight(&untouched, row),
         0,
         "a row was drawn in the hover weight with nothing hovered"
     );
-
-    let hovering = Chrome {
-        hovered: Some(Hovered::Row(row)),
-        ..chrome()
-    };
     assert!(
         path_weight(&hovering, row) > 0,
         "a hovered row did not take the hover weight"
@@ -4518,13 +4570,239 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
 
     // Every other list row is untouched, so the mark is about one row and not
     // the region.
-    for other in (laid.list.top + 1)..(laid.list.top + laid.list.rows) {
+    for other in (laid.list.top..(laid.list.top + laid.list.rows)).filter(|y| *y != row) {
         assert_eq!(
             path_weight(&hovering, other),
             0,
             "hovering row {row} lit row {other} as well"
         );
     }
+}
+
+/// Every built-in palette, so a rule about the pointer is asserted on all three
+/// rather than on whichever one `Theme::default` happens to be.
+fn built_ins() -> [(&'static str, Theme); 3] {
+    [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ]
+}
+
+#[test]
+fn the_pointer_reads_the_same_colour_wherever_it_rests() {
+    // **One reading means *the pointer is here*, on a path and on a bar alike**
+    // (#193). A step button and a thumb have taken `Theme::bar_hover` since
+    // #189; a listed path took a colour of its own, chosen to sit above the
+    // whole recency ladder, which made the same gesture read as two different
+    // things depending on which column it landed in.
+    //
+    // Sharing the value rather than the key, which is `Theme::spark_track`'s
+    // ruling arriving one element over: a distinct element keeps a distinct key
+    // so a theme author can move one without moving the other. What this gate
+    // pins is where the built-ins start.
+    for (name, theme) in built_ins() {
+        assert_eq!(
+            theme.path_hover.fg, theme.bar_hover.fg,
+            "{name} draws a hovered path in a colour the bar's own hover does \
+             not use, so the pointer reads as two marks instead of one"
+        );
+    }
+}
+
+#[test]
+fn the_pointer_never_takes_the_weight_the_caret_row_does() {
+    // **The two channels, kept apart by construction** (#193). Colour and
+    // underline are the pointer; `BOLD` is the file the diff is inside. A hover
+    // that also bolded would be indistinguishable from the current row on any
+    // palette where the two colours are close, and on `ansi` it *was* the
+    // brightest reading on the pane.
+    //
+    // The underline is the half that has to hold at every depth, for the reason
+    // §5.3 gives: nothing else in these palettes underlines anything, and on
+    // `ansi` the hover's foreground now equals `path_cold`'s outright, so it is
+    // the only separation left there.
+    for (name, theme) in built_ins() {
+        assert!(
+            theme.path_hover.add_modifier.contains(Modifier::UNDERLINED),
+            "{name}'s hover weight stopped underlining, which is the whole of \
+             what keeps it off the recency ladder"
+        );
+        assert!(
+            !theme.path_hover.add_modifier.contains(Modifier::BOLD),
+            "{name}'s hover weight is bold, which is the weight the caret's row \
+             carries, so a pointer resting anywhere reads as the current file"
+        );
+    }
+}
+
+#[test]
+fn the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret() {
+    // **The mark #193 asked for, and it is a second channel on one statement
+    // rather than a second statement.** `▸` says which file the diff is in;
+    // every other durable distinction in that region is carried by weight, and
+    // the one row a reader most needs to find carried none.
+    //
+    // Read off the drawn cells rather than off the theme, because the claim is
+    // that the weight lands on the row the caret landed on. `Painter::list`
+    // resolves both from one predicate, and this is what fails if a future edit
+    // gives them two.
+    let width = 80u16;
+    let height = 24u16;
+    // Every entry is `Recency::Cold` and the caret sits on the first row, so the
+    // expected weight is one rung plus `BOLD` and nothing else on screen shares
+    // it: the pulse rung is a different foreground.
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let backend = screen(width, height, &view, &chrome());
+
+    let plain = weight(theme.recency(Recency::Cold));
+    let marked = (plain.0, plain.1 | Modifier::BOLD);
+    assert_ne!(plain, marked, "the fixture's rung is already bold");
+
+    let row = laid.list.top;
+    assert!(
+        (0..width).any(|x| backend.buffer()[(x, row)].symbol() == CARET),
+        "the fixture drew no caret, so this gate is about nothing"
+    );
+    assert!(
+        path_weights(&backend, row, "src/f0.rs")
+            .iter()
+            .all(|w| *w == marked),
+        "the row the caret marks drew no bold path, so the file the diff is \
+         inside is named by one channel where the region carries two"
+    );
+
+    for other in (laid.list.top + 1)..(laid.list.top + laid.list.rows) {
+        let path = format!("src/f{}.rs", other - laid.list.top);
+        assert!(
+            path_weights(&backend, other, &path)
+                .iter()
+                .all(|w| *w == plain),
+            "row {other} took the caret's weight without a caret"
+        );
+    }
+}
+
+#[test]
+fn the_weight_arrives_and_leaves_with_the_caret() {
+    // **The tie is to `CARET_FLOOR`, not to the current file** (#193). Below it
+    // the caret is dropped so that `MIN_PATH_WIDTH` survives, and a bold row
+    // with nothing pointing at it would be an unattributable weight: on a
+    // narrow pane the pulse's `●` has already been dropped too, so *bold* would
+    // have two readings and no glyph to tell them apart.
+    //
+    // Sixteen columns, which is under the eighteen the floor asks for and wide
+    // enough that the list still draws.
+    let width = 16u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let backend = screen(width, height, &view, &chrome());
+
+    let plain = weight(theme.recency(Recency::Cold));
+    let marked = (plain.0, plain.1 | Modifier::BOLD);
+
+    assert!(laid.list.rows > 0, "the pane drew no list to check");
+    for y in laid.list.top..(laid.list.top + laid.list.rows) {
+        assert!(
+            (0..width).all(|x| backend.buffer()[(x, y)].symbol() != CARET),
+            "row {y} drew a caret on a pane too narrow for the column"
+        );
+        assert_eq!(
+            (0..width)
+                .filter(|x| weight(backend.buffer()[(*x, y)].style()) == marked)
+                .count(),
+            0,
+            "row {y} kept the caret's weight after the caret was dropped, so a \
+             bold row says nothing a reader can attribute"
+        );
+    }
+}
+
+#[test]
+fn a_diff_heading_never_takes_the_current_weight() {
+    // **The same confinement `a_hovered_row_reads_as_the_pointer_and_never_as_recency`
+    // asserts one mark over.** Both regions draw through one `Painter::file_row`,
+    // and `Heading` deliberately carries no field saying which region asked,
+    // because which file the diff is inside is a fact about the **screen**. This
+    // is what fails if that ever changes: the obvious way to plumb the mark is to
+    // hang it off the entry, and an entry is shared by both regions.
+    //
+    // **The fixture is `two_regions`, because its caret row and its stream
+    // heading are already the same file**, which is the ordinary case rather
+    // than a contrived one: follow mode puts the diff at the top of a file the
+    // list is also showing. A mark keyed on the file lights both; the shipped
+    // one lights neither, because it is a `false` the stream's call site passes
+    // outright.
+    let width = 80u16;
+    let height = 24u16;
+    let path = "src/engine/watch.rs";
+    let view = two_regions(1);
+    let theme = Theme::default();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let backend = screen(width, height, &view, &chrome());
+
+    let plain = weight(theme.recency(Recency::Cold));
+    let marked = (plain.0, plain.1 | Modifier::BOLD);
+
+    // The fixture drew what it claims to, or everything below is about the wrong
+    // rows.
+    assert!(
+        path_weights(&backend, laid.list.top + 1, path)
+            .iter()
+            .all(|w| *w == marked),
+        "the caret's own row is not marked, so this gate cannot tell a confined \
+         mark from an absent one"
+    );
+    assert!(
+        path_weights(&backend, laid.diff.top, path)
+            .iter()
+            .all(|w| *w == plain),
+        "the diff's heading for the very file the caret marks took the list's \
+         weight, so the mark is keyed on the file instead of on the row"
+    );
+}
+
+#[test]
+fn a_hovered_row_that_is_also_the_current_one_reads_as_both() {
+    // **Orthogonal on purpose** (#193). The pointer chooses the colour and the
+    // underline; the caret adds the weight. A design that let either win would
+    // lose a fact the reader has on screen: which file the diff is in, or where
+    // the pointer is.
+    //
+    // This is the row the screenshot that filed the issue was of, so it is the
+    // one composition worth pinning by name.
+    let width = 80u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let row = laid.list.top;
+    let backend = screen(
+        width,
+        height,
+        &view,
+        &Chrome {
+            hovered: Some(Hovered::Row(row)),
+            ..chrome()
+        },
+    );
+
+    let both = (
+        theme.path_hover.fg,
+        theme.path_hover.add_modifier | Modifier::BOLD,
+    );
+    assert!(
+        (0..width)
+            .filter(|x| weight(backend.buffer()[(*x, row)].style()) == both)
+            .count()
+            > 0,
+        "the hovered caret row drew neither mark whole, so one of the two \
+         overwrote the other"
+    );
 }
 
 #[test]
@@ -4548,12 +4826,6 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     let theme = Theme::default();
     let x = width - 1;
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-
-    // **Foreground and modifiers, which are the two things a rung is made of.**
-    // A drawn cell carries `bg` and `underline_color` resets that a theme entry
-    // does not, so whole-`Style` equality compares bookkeeping; and `fg` alone
-    // is not enough either, because on `ansi` the middle rung is a modifier.
-    let weight = |style: Style| (style.fg, style.add_modifier);
 
     // Three distinct weights, asserted rather than assumed: on a palette where
     // two coincided, every ordering below would hold while saying nothing.
@@ -4973,8 +5245,6 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
     // exists to prevent, and it was blind to this because its fixture has
     // `files == list.len()` and is never scrollable. The file count is the second
     // axis.
-    const CARET: &str = "▸";
-
     for width in 1..=60u16 {
         let mut drawn = Vec::new();
         for files in [3usize, 30] {
@@ -5017,7 +5287,6 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
     const ROW_FLOOR: usize = 2 + 12; // the kind letter and its gap, plus MIN_PATH_WIDTH
     const BAR_COLUMNS: usize = 2;
     const CARET_COLUMNS: usize = 2;
-    const CARET: &str = "▸";
     const TRACK: &str = "│";
     const THUMB: &str = "█";
 

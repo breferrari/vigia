@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -316,7 +316,41 @@ const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
 /// keypress that is not a scroll; this points at where the diff already is. A
 /// filled block or an inverted row would read as a selection, which is the
 /// reviewer-class affordance the ruling refuses.
-const CARET: char = '▸';
+///
+/// A `&str` rather than a `char`, because the one place it is drawn wants one:
+/// it was `&CARET.to_string()` at that call, which is a heap allocation per frame
+/// for a literal the compiler already has.
+const CARET: &str = "▸";
+
+/// The weight that row's **path** takes on top of whatever recency gave it.
+///
+/// **The caret's second channel, not a second mark**
+/// ([#193](https://github.com/breferrari/vigia/issues/193)). `SPEC.md` §5.3 makes
+/// every other durable distinction in that region a matter of weight, and the one
+/// row a reader most needs to find carried a glyph alone. This is drawn where and
+/// only where [`CARET`] is, so the two are one statement said twice: the tie is
+/// [`CARET_FLOOR`], and below it neither is drawn.
+///
+/// **A constant here rather than a [`Theme`] key, and the reason is not the one
+/// that first stood here.** That said the theme owns colour and the shell owns
+/// structure, citing [`CARET`] and [`RULE`] as precedent; `theme.rs` falsifies it
+/// four lines at a time, because every other drawn modifier is themed
+/// ([`Theme::path`]'s `BOLD`, [`Theme::path_hover`]'s `UNDERLINED`,
+/// [`Theme::alert`]'s). Those constants are **glyphs**, and the theme grammar has
+/// no glyph vocabulary at all, so they mark where its vocabulary stops rather
+/// than a precedent for stopping here. The real reason is narrower: every key in
+/// that grammar is a **complete** style that replaces a value, and this is a
+/// **delta** composed on top of recency-or-hover, so a key for it would be the
+/// first of its kind and wants a ruling of its own rather than arriving as the
+/// side effect of a feel row. Tracked as
+/// [#195](https://github.com/breferrari/vigia/issues/195).
+///
+/// **It shares `BOLD` with [`Theme::path`]'s pulse rung and that is not a
+/// collision**, because both readings carry a glyph of their own: a pulsing row
+/// draws `●` in its reserved slot and this one draws [`CARET`]. Where the pulse
+/// column is dropped the caret still is not, so *bold with a caret* and *bold
+/// without one* stay two different sentences at every width the caret survives.
+const CURRENT_WEIGHT: Modifier = Modifier::BOLD;
 
 /// How many slices the heat strip may show, widest rung first.
 ///
@@ -3159,8 +3193,14 @@ impl Painter<'_> {
             // a pane too short for a region hands the reader's request back
             // untouched, so `View::collect` can legitimately report `usize::MAX`
             // here. `position_of` guards the identical hazard one region up.
-            if caret && view.list_top.saturating_add(offset) == view.top.file {
-                self.put(left, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
+            // **One predicate, two channels.** The glyph and [`CURRENT_WEIGHT`]
+            // are the same statement said twice, so they are resolved once here
+            // and the weight is handed down rather than re-derived by the drawer.
+            // That also ties the weight to [`CARET_FLOOR`] for free: `caret` is
+            // false below it and neither mark is drawn.
+            let current = caret && view.list_top.saturating_add(offset) == view.top.file;
+            if current {
+                self.put(left, y, CARET, CARET_WIDTH, self.theme.pulse);
             }
             self.file_row(
                 Rect {
@@ -3176,6 +3216,7 @@ impl Painter<'_> {
                 &Heading::of(entry),
                 view.peak,
                 &columns,
+                current,
             );
         }
     }
@@ -3477,6 +3518,13 @@ impl Painter<'_> {
                     &Heading::of(entry),
                     view.peak,
                     &columns,
+                    // **A literal, which is the whole reason this is a
+                    // parameter.** No heading in the stream is *the* file the
+                    // diff is inside; every one of them is a file the diff
+                    // contains. Saying so here confines the mark by
+                    // construction, where a mark the painter carried would be
+                    // confined only by the two regions never sharing a `y`.
+                    false,
                 ),
                 Row::Hunk {
                     old_start,
@@ -3584,7 +3632,14 @@ impl Painter<'_> {
     /// Nothing is allowed to take the path below [`MIN_PATH_WIDTH`]. A glance
     /// element that cost a reader the name of the file would be spending the
     /// content to decorate it.
-    fn file_row(&mut self, area: Rect, heading: &Heading<'_>, peak: u16, columns: &Columns) {
+    fn file_row(
+        &mut self,
+        area: Rect,
+        heading: &Heading<'_>,
+        peak: u16,
+        columns: &Columns,
+        current: bool,
+    ) {
         let mut right = area;
 
         // **Every slot is subtracted whether or not this row fills it**, which is
@@ -3784,29 +3839,38 @@ impl Painter<'_> {
             Some(pair) if width_of(pair) <= room => pair.as_str(),
             _ => heading.path,
         };
-        self.put(
-            x,
-            area.y,
-            &elide_head(label, room),
-            room,
-            // **The pointer's weight outranks the recency ladder, and it is a
-            // fourth reading rather than a louder one.** §5.3 rules that
-            // intensity carries recency and nothing else, so a hover that merely
-            // brightened would say *recent* about a file nothing had touched.
-            // [`Theme::path_hover`] sits above all three and underlines, which is
-            // a mark the ladder cannot produce at any depth, so the two stay
-            // tellable apart even on `ansi` where the colour headroom is nil.
-            //
-            // It answers on the **list's** rows only. `Hovered::Row` is resolved
-            // from the list region alone, and a diff heading's row is never
-            // inside it, so this comparison cannot light one: the diff is not
-            // clickable and a mark there would imply it is.
-            if self.hovered == Some(Hovered::Row(area.y)) {
-                self.theme.path_hover
-            } else {
-                self.theme.recency(heading.recency)
-            },
-        );
+        // **Two marks on one path, and they are resolved on two channels rather
+        // than as a priority order.** The pointer chooses the colour and the
+        // underline; the caret adds the weight. Ranking them would cost a fact
+        // the reader has on screen: whichever lost would take either *where the
+        // pointer is* or *which file the diff is in* off the row.
+        //
+        // §5.3 rules that intensity carries recency and nothing else, so a hover
+        // that merely brightened would say *recent* about a file nothing had
+        // touched. [`Theme::path_hover`] answers that with the **underline**,
+        // which no recency weight carries at any depth. It used to answer with
+        // brightness as well and that half is gone
+        // ([#193](https://github.com/breferrari/vigia/issues/193)): a mark that
+        // can go stale outranking every claim about the worktree is the thing
+        // §5.3's own B10 rule forbids.
+        //
+        // Hover answers on the **list's** rows only. `Hovered::Row` is resolved
+        // from the list region alone, and a diff heading's row is never inside
+        // it, so this comparison cannot light one: the diff is not clickable and
+        // a mark there would imply it is. `current` is confined more strongly
+        // still, being a literal `false` at the stream's call site rather than a
+        // comparison that happens never to match.
+        let ink = if self.hovered == Some(Hovered::Row(area.y)) {
+            self.theme.path_hover
+        } else {
+            self.theme.recency(heading.recency)
+        };
+        let ink = if current {
+            ink.add_modifier(CURRENT_WEIGHT)
+        } else {
+            ink
+        };
+        self.put(x, area.y, &elide_head(label, room), room, ink);
     }
 
     /// Walk a line into styled runs, stopping at the pane's edge, and say
