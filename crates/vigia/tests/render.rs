@@ -328,6 +328,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -432,6 +433,7 @@ fn one_file() -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -595,6 +597,7 @@ fn nothing_changed() -> View {
         top: Position::default(),
         read: 0,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -855,6 +858,7 @@ fn ragged_counts() -> View {
         top: Position::default(),
         read: 1,
         peak: 12,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -2017,6 +2021,7 @@ fn a_file_with_no_line_diff_says_why() {
         top: Position::default(),
         read: 3,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
 }
@@ -2041,6 +2046,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
 }
@@ -2074,6 +2080,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
     assert!(
@@ -2349,6 +2356,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
     let rendered = format!("{backend}");
@@ -2382,6 +2390,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
 
     for width in 6..48u16 {
@@ -2432,6 +2441,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
 
     let wide = format!("{}", screen(40, 3, &view, &chrome()));
@@ -2516,6 +2526,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         top: Position::default(),
         read: 1,
         peak: u16::MAX,
+        worktree_churn: Default::default(),
     };
 
     // Every heat and sparkline rung is reached inside this range, which is what
@@ -2981,6 +2992,7 @@ fn glancing() -> View {
         top: Position::default(),
         read: 3,
         peak: 12,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -3650,6 +3662,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         top: Position { file: current, row },
         read: 4,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -3857,7 +3870,16 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     // assertion about "moving within a file" can catch any of those.
     let width = 64u16;
     let height = 24u16;
-    let region = 5u16..height - 1;
+    // **Asked of the layout rather than counted.** This was `5..height - 1`,
+    // which is a header, three list rows and the rule added up by hand, and #158
+    // put a masthead above them. A gate about the *thumb* must not carry its own
+    // copy of the body split.
+    let laid = regions(
+        Rect::new(0, 0, width, height),
+        &chrome(),
+        &a_list_of(3, 3, 0),
+    );
+    let region = laid.diff.top..laid.diff.top + laid.diff.rows;
     let rows = usize::from(region.end - region.start);
 
     // A thumb that halves when the diff doubles, which is the proportionality no
@@ -4064,6 +4086,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         top: Position::default(),
         read: 2,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -4080,7 +4103,15 @@ fn a_scrollbar_reaches_the_bottom_at_its_last_window() {
     // "measured at its cheapest position" shape §7 already records, one axis over.
     let width = 64u16;
     let shown = 6usize;
-    let region = 1u16..1 + shown as u16;
+    // The list's own rows, from the layout: #158's masthead sits above them.
+    let region = {
+        let laid = regions(
+            Rect::new(0, 0, width, 24),
+            &chrome(),
+            &a_list_of(30, shown, 0),
+        );
+        laid.list.top..laid.list.top + laid.list.rows
+    };
     // **Six rows is above the step floor, so both ends of this bar are buttons
     // and the thumb's ends are one row inside them.** The claim is unchanged: the
     // last window fills the last row the thumb can reach, and the first fills the
@@ -5237,9 +5268,32 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         let mut view = a_list_of(3, 3, 0);
         view.files = 1;
         view.current_span = span;
-        // The diff region starts under three list rows and the rule.
-        let region = 5u16..height - 1;
+        // Asked of the layout for the reason
+        // `the_diff_scrollbar_is_proportional_to_the_rows_it_shows` gives: the
+        // regions above the diff are the body split's business, not this gate's.
+        let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+        let region = laid.diff.top..laid.diff.top + laid.diff.rows;
         let rows = usize::from(region.end - region.start);
+        // **The track, not the region.** This bar is tall enough for step
+        // buttons, so its two ends are one row inside the region, which is what
+        // `a_scrollbar_reaches_the_bottom_at_its_last_window` already says one
+        // region over. Comparing against the region asked the thumb to reach a
+        // button.
+        let track = stepped_track(region.clone());
+        // **The viewport actually on its last screenful**, which this fixture
+        // never was. It set `view.top` alone, and the diff's bar is scaled from
+        // `rows_above` over `total_rows`; `top` is where the walk landed and is
+        // read by the caret, not by the bar. So the thumb sat at the top for
+        // every span while the assertion below described the bottom.
+        //
+        // It never fired, which is why nobody noticed: the region was hardcoded
+        // to `5..height - 1` on the assumption of three list rows, and this
+        // fixture sets `files` to one, so the bar was drawn above the range
+        // being filtered and `marks` came back empty on every iteration. The
+        // `continue` above then skipped the only assertion in the loop. #158
+        // moved the region and made it correct, which is what surfaced this.
+        view.total_rows = span;
+        view.rows_above = span.saturating_sub(rows);
         view.top = Position {
             file: 0,
             row: span.saturating_sub(rows),
@@ -5252,7 +5306,7 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         }
         assert_eq!(
             *marks.last().expect("a thumb"),
-            region.end - 1,
+            track.end - 1,
             "span {span}: the last screenful's thumb ends at {:?}, not the \
              bottom of the track",
             marks.last()
@@ -5327,7 +5381,12 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         let backend = screen(width, 24, &view, &chrome());
         let buffer = backend.buffer();
 
-        let row: String = (0..width).map(|x| buffer[(x, 1)].symbol()).collect();
+        // The **list's** first row, from the layout: row one is #158's masthead
+        // air on any pane that affords a band, and the band draws no caret.
+        let laid = regions(Rect::new(0, 0, width, 24), &chrome(), &view);
+        let row: String = (0..width)
+            .map(|x| buffer[(x, laid.list.top)].symbol())
+            .collect();
         let caret = row.contains(CARET);
         let bar = row.ends_with(TRACK) || row.ends_with(THUMB);
 

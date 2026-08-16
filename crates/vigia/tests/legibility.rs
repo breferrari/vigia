@@ -280,6 +280,16 @@ fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme) -> usize {
         + cells_coloured(backend, y, &[track], &[TRACK]).len()
 }
 
+/// Every row the body holds, across every region it has.
+///
+/// **Named because two gates recover the footer's height by subtracting this**,
+/// and both got it wrong the same way when a region was added: they each summed
+/// `list + rule + diff` inline, so #158's masthead made them read the footer as
+/// four rows taller than it is. A region added to `Body` is one edit here now.
+fn body_rows(split: &vigia::Body) -> usize {
+    split.graph + split.air + split.list + usize::from(split.rule) + split.diff
+}
+
 /// Every foreground the heat strip can draw a slice in.
 fn heat_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
     [
@@ -460,6 +470,7 @@ fn every_row_kind() -> View {
         top: Position::default(),
         read: 3,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -489,6 +500,7 @@ fn awkward() -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -504,6 +516,7 @@ fn empty() -> View {
         top: Position::default(),
         read: 0,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -544,6 +557,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -817,6 +831,7 @@ fn glancing() -> View {
         top: Position::default(),
         read: 3,
         peak: 12,
+        worktree_churn: Default::default(),
     }
 }
 
@@ -975,10 +990,24 @@ fn the_header_never_takes_a_second_line() {
                         continue;
                     };
                     saw_a_body = true;
+                    // **Where the body starts, not where row one is.** #158 put
+                    // a masthead between the header and the list, so the first
+                    // content row is one plus whatever that region takes. Asked
+                    // of the layout rather than restated, which keeps this a
+                    // gate on the *header* rather than a second copy of the
+                    // body split.
+                    // Clamped to what the view actually holds, which is what `render`
+                    // does: the unclamped split answers what the *pane* affords,
+                    // and a view with no entries draws B3's sentence rather than
+                    // a masthead over blank rows.
+                    let body = body_layout(Rect::new(0, 0, width, height), &chrome, view.files)
+                        .clamped_to(view.list.len());
+                    let starts = 1 + body.graph + body.air;
                     assert_eq!(
-                        first, 1,
+                        first, starts,
                         "at {width}x{height} with {listed} listed, the body \
-                         started on row {first}, so the header took more than one"
+                         started on row {first} rather than {starts}, so the \
+                         header took more than one"
                     );
                 }
             }
@@ -1953,11 +1982,15 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
     // **The whole body, not the diff half.** This gate is about how many rows
     // the *footer* takes, and since §11.1 split the body in two, `diff_height`
     // answers a narrower question: it is the diff's share, which also moves when
-    // the file list grows. Summing the split back up isolates the footer again,
-    // which is what this has always been measuring.
+    // the file list grows, and since #158 when the masthead appears. Summing the
+    // split back up isolates the footer again, which is what this has always
+    // been measuring.
     let body = |width: u16, chrome: &Chrome| {
-        let split = body_layout(Rect::new(0, 0, width, tall), chrome, view.files);
-        split.list + usize::from(split.rule) + split.diff
+        body_rows(&body_layout(
+            Rect::new(0, 0, width, tall),
+            chrome,
+            view.files,
+        ))
     };
 
     assert_eq!(
@@ -2357,6 +2390,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
     let long_name = Chrome {
         pressed: None,
@@ -2488,6 +2522,7 @@ fn a_clipped_content_line_says_it_continues() {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     };
 
     let mut saw_fit = false;
@@ -2751,10 +2786,17 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
              sweep is not reading a full region"
         );
 
-        // The header owns row 0 and never takes a second line, which
-        // `the_header_never_takes_a_second_line` is what holds.
+        // **Skipped past the masthead as well as the header**, which #158 put
+        // between them. Taken from the layout rather than counted, for the
+        // reason this file gives everywhere else: a test that re-derived where
+        // the list starts would be a second copy of the body split agreeing
+        // with itself, and the band's own baseline draws `_`, so reading its
+        // row as a list row fails with a message about the wrong thing.
+        let split = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files)
+            .clamped_to(view.list.len());
+        let first = 1 + split.graph + split.air;
         let rows = rows_at(width, tall, &view, &chrome);
-        for (offset, row) in rows.iter().skip(1).take(listed).enumerate() {
+        for (offset, row) in rows.iter().skip(first).take(listed).enumerate() {
             let opening = content(row, width).chars().find(|c| !c.is_whitespace());
 
             // A `None` opening is a blank row, which `rows_at`'s `trim_end` has
@@ -3013,7 +3055,7 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     let tall = 24u16;
     let rows = |width: u16, chrome: &Chrome| {
         let split = body_layout(Rect::new(0, 0, width, tall), chrome, view.files);
-        usize::from(tall) - 1 - (split.list + usize::from(split.rule) + split.diff)
+        usize::from(tall) - 1 - body_rows(&split)
     };
 
     // The case that broke. Idle at forty columns, where the state is a bare
@@ -3206,11 +3248,24 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         let barred = rows_at(width, 24, &with_bar, &chrome());
         let bare = rows_at(width, 24, &without_bar, &chrome());
 
-        // Row one is the first list row. Trailing blanks are already trimmed by
-        // `rows_at`, and the bar's own column is the only thing that can follow
-        // the row's content, so it is stripped before comparing.
-        let barred_row = barred[1].trim_end_matches(['│', '█']).trim_end().to_owned();
-        let bare_row = bare[1].trim_end().to_owned();
+        // **Where each side's list actually starts**, asked of the layout per
+        // side because the two differ in file count and #158's masthead is
+        // decided from the same split. Hardcoding row one read the band's own
+        // baseline as a list row once the masthead existed.
+        let first = |files: usize| {
+            let split = body_layout(Rect::new(0, 0, width, 24), &chrome(), files).clamped_to(3);
+            1 + split.graph + split.air
+        };
+        let (barred_at, bare_at) = (first(10), first(3));
+
+        // Trailing blanks are already trimmed by `rows_at`, and the bar's own
+        // column is the only thing that can follow the row's content, so it is
+        // stripped before comparing.
+        let barred_row = barred[barred_at]
+            .trim_end_matches(['│', '█'])
+            .trim_end()
+            .to_owned();
+        let bare_row = bare[bare_at].trim_end().to_owned();
 
         // **Skip the widths where the caret's own ladder differs between the two
         // panes being compared.** The caret is decided against the pane width, so
@@ -3220,13 +3275,13 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // `the_caret_does_not_vanish_because_another_file_changed`; this gate is
         // about the bar and must not be measuring both at once.
         let caret = |row: &str| row.trim_start().len() != row.len();
-        if caret(&barred[1]) != caret(&bare[1]) {
+        if caret(&barred[barred_at]) != caret(&bare[bare_at]) {
             continue;
         }
 
         // Only where a bar is actually drawn, or the two screens are identical
         // and the comparison is vacuous.
-        if barred[1].ends_with('│') || barred[1].ends_with('█') {
+        if barred[barred_at].ends_with('│') || barred[barred_at].ends_with('█') {
             assert_eq!(
                 barred_row, bare_row,
                 "at {width} columns a list row with a bar reads {barred_row:?} \
@@ -3696,6 +3751,7 @@ fn overlong(rows: usize) -> View {
         top: Position::default(),
         read: 1,
         peak: 0,
+        worktree_churn: Default::default(),
     }
 }
 

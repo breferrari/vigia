@@ -517,10 +517,15 @@ fn the_two_regions_tile_the_body_exactly() {
                     // The footer's own height is not exposed, so it is recovered
                     // from the unclamped split rather than restated: whatever it
                     // is, clamping must not change it.
-                    let footer = usize::from(height)
-                        .saturating_sub(1 + full.list + usize::from(full.rule) + full.diff);
+                    // Every region the body has, so the sum is the body rather
+                    // than a subset of it. #158 added the masthead and its air,
+                    // and a tiling check that missed a region would report the
+                    // pane as short by exactly that region.
+                    let regions =
+                        |b: &vigia::Body| b.graph + b.air + b.list + usize::from(b.rule) + b.diff;
+                    let footer = usize::from(height).saturating_sub(1 + regions(&full));
                     assert_eq!(
-                        1 + body.list + usize::from(body.rule) + body.diff + footer,
+                        1 + regions(&body) + footer,
                         usize::from(height),
                         "at {width}x{height} over {files} files with {have} \
                          entries, {body:?} plus a header and {footer} footer rows \
