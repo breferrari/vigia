@@ -62,7 +62,9 @@ use std::sync::Once;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::cursor::{Hide, Show};
-use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use ratatui::crossterm::event::{
+    DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -82,6 +84,26 @@ enum Step {
     AlternateScreen,
     /// Mouse reporting, which `SPEC.md` §4 puts in scope for the wheel.
     MouseCapture,
+    /// Focus reporting, so a mark drawn from pointer state can be cleared when
+    /// the reader looks away.
+    ///
+    /// **Added 2026-08-16 for `SPEC.md` §11.2 B10**, which was declined one day
+    /// earlier on the claim that *"the takeover does not enable focus
+    /// reporting"* — a description of this array, written as though it were a
+    /// fact about terminals. The decline was a day old; the absence it rested on
+    /// had not been real for years, which is the part worth keeping. It is the middle rung of §11.1's clearing ladder: motion
+    /// inside the pane retires a hover mark on its own, and this is what retires
+    /// one when the window loses focus instead.
+    ///
+    /// **Its platform story is the opposite of [`Step::MouseCapture`]'s, which
+    /// is the trap this module's header would otherwise set.** `EnableMouseCapture`
+    /// overrides `is_ansi_code_supported` to `false` on Windows and writes zero
+    /// bytes; `EnableFocusChange` carries no such override, so with ANSI it
+    /// really does emit `?1004h`, and without it `execute_winapi` is a
+    /// deliberate no-op because the console API delivers `FOCUS_EVENT` records
+    /// unasked. Two mouse-adjacent commands, two answers: do not generalise from
+    /// whichever one you read first.
+    FocusChange,
     /// The cursor, which a monitor never places anywhere meaningful.
     Cursor,
 }
@@ -92,10 +114,11 @@ enum Step {
 /// effects than anything else here, and ratatui's own restore path orders it the
 /// same way for that reason: the escape sequences that leave the alternate screen
 /// should be written while the terminal is still in the mode they were written in.
-const TAKEOVER: [Step; 4] = [
+const TAKEOVER: [Step; 5] = [
     Step::RawMode,
     Step::AlternateScreen,
     Step::MouseCapture,
+    Step::FocusChange,
     Step::Cursor,
 ];
 
@@ -140,6 +163,7 @@ impl<W: Write> Console for Crossterm<W> {
             Step::RawMode => enable_raw_mode(),
             Step::AlternateScreen => execute!(self.out, EnterAlternateScreen),
             Step::MouseCapture => execute!(self.out, EnableMouseCapture),
+            Step::FocusChange => execute!(self.out, EnableFocusChange),
             Step::Cursor => execute!(self.out, Hide),
         }
     }
@@ -149,6 +173,7 @@ impl<W: Write> Console for Crossterm<W> {
             Step::RawMode => disable_raw_mode(),
             Step::AlternateScreen => execute!(self.out, LeaveAlternateScreen),
             Step::MouseCapture => execute!(self.out, DisableMouseCapture),
+            Step::FocusChange => execute!(self.out, DisableFocusChange),
             Step::Cursor => execute!(self.out, Show),
         };
     }
@@ -665,8 +690,18 @@ mod tests {
     fn every_command_is_the_escape_sequence_it_is_named_for() {
         // The oracle is DEC's own private mode numbers, not crossterm restating
         // itself: 1049 is the alternate screen buffer, 25 is cursor visibility,
-        // and 1000/1002/1003/1015/1006 are the mouse reporting modes. `h` sets a
-        // mode and `l` resets it, so a swapped pair is visible here as a letter.
+        // 1000/1002/1003/1015/1006 are the mouse reporting modes, and 1004 is
+        // focus reporting. `h` sets a mode and `l` resets it, so a swapped pair
+        // is visible here as a letter.
+        //
+        // **This list is written out rather than derived from `TAKEOVER`, so a
+        // step added there does not arrive here on its own.** That is the one
+        // gate in this module which does not adapt, and it is deliberate: the
+        // point of asserting bytes is that a human wrote down what the bytes
+        // should be. The two gates that *do* derive are the order walk and the
+        // real-console inverse below, and between them they catch a step that is
+        // taken out of order or not given back. Neither can catch a step wired
+        // to the wrong command, which is what this one is for.
         assert_eq!(ansi(&EnterAlternateScreen), "\x1b[?1049h");
         assert_eq!(ansi(&LeaveAlternateScreen), "\x1b[?1049l");
         assert_eq!(ansi(&Hide), "\x1b[?25l");
@@ -674,6 +709,86 @@ mod tests {
         assert_eq!(
             ansi(&EnableMouseCapture),
             "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h"
+        );
+        assert_eq!(ansi(&EnableFocusChange), "\x1b[?1004h");
+        assert_eq!(ansi(&DisableFocusChange), "\x1b[?1004l");
+    }
+
+    #[test]
+    fn the_takeover_takes_every_step_there_is() {
+        // **The assertion no other gate here can make, and it is general on
+        // purpose.** Every other test in this module *derives* from `TAKEOVER`:
+        // the order walk compares against the array itself, the give-back and the
+        // panic restore invert whatever it holds, and the byte gate is per
+        // command. So all of them stay green if a step is simply deleted, and
+        // nothing said the takeover has to contain anything at all.
+        //
+        // **Written as a rule rather than for the step that forced it.**
+        // `SPEC.md` §11.2 B10 needed `FocusChange` asserted, and the narrow
+        // version of this test asserted exactly that one — which is the shape
+        // `RULINGS.md`'s I1 entry records going wrong when an amendment is
+        // written as narrowly as the case in front of it. Deleting
+        // `Step::MouseCapture` would have left that version green while the
+        // mouse §4 requires vanished.
+        //
+        // The `match` is the witness that keeps this honest: a new variant fails
+        // to **compile** here, so the list below cannot silently fall behind the
+        // enum it is checking.
+        const EVERY: [Step; 5] = [
+            Step::RawMode,
+            Step::AlternateScreen,
+            Step::MouseCapture,
+            Step::FocusChange,
+            Step::Cursor,
+        ];
+        for step in EVERY {
+            // Exhaustive by construction: adding a variant to `Step` without
+            // adding it to `EVERY` is a non-exhaustive-match error right here.
+            let named = match step {
+                Step::RawMode => "raw mode, without which keys arrive line-buffered",
+                Step::AlternateScreen => {
+                    "the alternate screen, without which a reader loses scrollback"
+                }
+                Step::MouseCapture => {
+                    "mouse reporting, which SPEC.md 4 puts in scope for the wheel"
+                }
+                Step::FocusChange => "focus reporting, the middle rung of 11.1's clearing ladder",
+                Step::Cursor => "the cursor, which a monitor never places anywhere meaningful",
+            };
+            assert!(
+                TAKEOVER.contains(&step),
+                "the takeover no longer takes {named}"
+            );
+        }
+        assert_eq!(
+            TAKEOVER.len(),
+            EVERY.len(),
+            "TAKEOVER takes a step twice, or takes something not in `Step`"
+        );
+
+        // Focus reporting sits with the mouse rather than after the cursor, so
+        // the two modes that change how *input* is reported are taken together
+        // and given back together.
+        //
+        // **Indexed rather than compared as `Option`s**, which the first version
+        // got wrong in the silent direction: `position` returns `Option<usize>`,
+        // and `Some(2) > None` is `true`, so deleting `MouseCapture` made the
+        // ordering assert pass rather than fail. The loop above now guarantees
+        // both steps are present, so unwrapping here is honest.
+        let at = |step| {
+            TAKEOVER
+                .iter()
+                .position(|s| *s == step)
+                .expect("asserted present above")
+        };
+        assert!(
+            at(Step::MouseCapture) < at(Step::FocusChange),
+            "focus reporting is no longer taken beside the mouse"
+        );
+        assert!(
+            at(Step::FocusChange) < at(Step::Cursor),
+            "focus reporting is taken after the cursor rather than with the \
+             other input modes"
         );
     }
 
@@ -744,6 +859,25 @@ mod tests {
         assert!(
             !took.is_empty(),
             "the real console wrote no escape sequences at all, so this proves nothing"
+        );
+
+        // **The wiring, which is the one thing neither of the other two layers
+        // can see.** The recorder is blind to which crossterm command a `Step`
+        // is bound to, and `every_command_is_the_escape_sequence_it_is_named_for`
+        // asserts what each command emits without knowing that any step uses it.
+        // So `Step::FocusChange => execute!(out, EnableMouseCapture)` would leave
+        // both green, and the inverse check below would too, because it only
+        // demands that giving back undoes whatever taking did.
+        //
+        // Asserted on `?1004` specifically because that is the step this layer
+        // gained with #186, and because it is the one whose absence B10 was
+        // declined for. `?1049` and `?25` are covered by the same walk; the
+        // mouse bundle is deliberately not asserted here, since on Windows it
+        // writes zero bytes and this test runs on both.
+        assert!(
+            took.contains(&(1004, true)),
+            "the takeover wrote no `?1004h`, so `Step::FocusChange` is wired to \
+             something other than focus reporting: {took:?}"
         );
 
         // The inverse, derived from what was actually written rather than listed

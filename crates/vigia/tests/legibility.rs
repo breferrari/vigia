@@ -313,6 +313,7 @@ fn chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         // Only the empty state names a branch, so every populated fixture leaves
@@ -1236,6 +1237,7 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
             let chrome = Chrome {
                 pressed: None,
                 gripped: None,
+                hovered: None,
                 scrolling: None,
                 worktree: name.clone(),
                 ..chrome.clone()

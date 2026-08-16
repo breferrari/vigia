@@ -38,7 +38,7 @@ use ratatui::style::Style;
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
-use crate::input::{Region, Regions};
+use crate::input::{Hovered, Region, Regions};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
 
@@ -884,6 +884,20 @@ pub struct Chrome {
     /// on a step button lights one cell, a press on the track lights the thumb
     /// it is moving.
     pub gripped: Option<u16>,
+    /// What the pointer is resting on, when it is on something a click acts on.
+    ///
+    /// **Acknowledgment before action, which is the whole of `SPEC.md` §11.2
+    /// B10.** The two fields above answer *you are doing this*; this one answers
+    /// *you are about to be able to*, which is most of what a pointer feels like
+    /// on a modern surface and is the one thing this shell had no answer for.
+    ///
+    /// It is the quietest of the three marks by construction, because a hover
+    /// can go **stale**: §11.1's clearing ladder retires it on the next motion
+    /// and on `FocusLost`, and leaves a residual where a reader's pointer parks
+    /// outside a pane the window still has focus on. A stale mark that costs a
+    /// glance nothing is what pays for that, so a hovered button takes
+    /// [`Theme::bar`] rather than [`Theme::bar_active`] and a press still wins.
+    pub hovered: Option<Hovered>,
     /// Which bar is being scrolled and which way, when one is.
     ///
     /// **The one case where the bar answers something nobody is touching.** A
@@ -2444,6 +2458,7 @@ pub fn render(
         paint: PaintStats::default(),
         pressed: chrome.pressed,
         gripped: chrome.gripped,
+        hovered: chrome.hovered,
         scrolling: chrome.scrolling,
     };
 
@@ -2564,6 +2579,8 @@ struct Painter<'a> {
     pressed: Option<(u16, u16)>,
     /// The first row of the bar being dragged, from [`Chrome::gripped`].
     gripped: Option<u16>,
+    /// What the pointer is resting on, from [`Chrome::hovered`].
+    hovered: Option<Hovered>,
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(u16, isize)>,
@@ -3251,6 +3268,21 @@ impl Painter<'_> {
         // reading the step buttons already carry one block down: bright means
         // *you are doing this now*. The thumb is the thing being moved, so it is
         // the thing that answers.
+        // **The thumb carries no hover mark, and the reason is the rule rather
+        // than the element: a click has to be brighter than a hover.** The
+        // buttons below can honour that because they have three weights to spend
+        // — `bar_track` at rest, `bar` under a pointer, `bar_active` under a
+        // gesture. A thumb starts at `bar` and ends at `bar_active`, so there is
+        // no rung left between them, and using `bar_active` for a hover would
+        // make a drag indistinguishable from a pointer merely resting there.
+        //
+        // Inventing a fourth style is what `SPEC.md` §5.3 refuses (a colour is
+        // taken by taking a role, never by being distinct), and adding a theme
+        // key is exactly the cost that put the list rows in
+        // [#189](https://github.com/breferrari/vigia/issues/189) rather than
+        // here. **So the thumb is the same finding as a list row, one element
+        // over**: it is a surface a click acts on with nowhere to draw a mark,
+        // and it waits for the same ruling.
         let dragging = self.gripped == Some(area.y);
         let thumb_style = if dragging {
             self.theme.bar_active
@@ -3306,8 +3338,25 @@ impl Painter<'_> {
                     .scrolling
                     .is_some_and(|(top, by)| top == area.y && by.signum() == way)
                     && self.gripped != Some(area.y);
+                // **Three rungs, and a press beats a hover.** `bar_track` at
+                // rest, `bar` under a pointer, `bar_active` while a gesture is
+                // on it. The ordering is the load-bearing half: #166 added the
+                // pressed mark for the case where nothing else can answer, since
+                // pressing *up* at the top of a diff moves no row, and a hover
+                // that outranked it would take that answer away in exactly the
+                // case it was built for.
+                //
+                // The middle rung costs no theme field and no palette entry: it
+                // is [`Theme::bar`], which this column already draws the thumb
+                // in, so a reader who has learned what the column's weights mean
+                // has learned this too. `SPEC.md` §5.3's rule that a new element
+                // earns a colour by taking a role rather than by being distinct
+                // is what rules out inventing a fourth.
+                let hovered = self.hovered == Some(Hovered::Button(x, y));
                 let style = if held || keyed {
                     self.theme.bar_active
+                } else if hovered {
+                    self.theme.bar
                 } else {
                     self.theme.bar_track
                 };

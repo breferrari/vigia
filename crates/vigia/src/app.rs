@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
-use crate::input::Action;
+use crate::input::{Action, Hovered};
 use crate::memory;
 use crate::render::{Body, Chrome, Mode};
 use crate::view::{Position, View, Viewport, rows_in};
@@ -356,11 +356,13 @@ impl App {
         branch: Option<&str>,
         pressed: Option<(u16, u16)>,
         gripped: Option<u16>,
+        hovered: Option<Hovered>,
         scrolling: Option<(u16, isize)>,
     ) -> Chrome {
         Chrome {
             pressed,
             gripped,
+            hovered,
             scrolling,
             worktree: worktree.to_owned(),
             branch: branch.map(str::to_owned),
@@ -828,19 +830,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_chrome_carries_every_gesture_mark_it_is_handed() {
+        // **The wire nothing else covers, and it is invisible from both ends.**
+        // Every one of the thirty-odd `App::chrome` call sites in the suite
+        // passes `None` for all four marks, and every render gate builds a
+        // `Chrome` literal directly rather than going through here, so dropping
+        // a mark on the floor in this function leaves the whole workspace green
+        // while the feature does nothing on screen.
+        //
+        // All four rather than the one #186 added, for the reason
+        // `the_takeover_takes_every_step_there_is` covers every `Step`: a gate
+        // written for the mark in front of it is a gate the next mark has to
+        // remember to extend, and `scrolling` and `gripped` were each added
+        // without one.
+        let app = App::new();
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            Some((79, 5)),
+            Some(11),
+            Some(Hovered::Button(79, 19)),
+            Some((11, -1)),
+        );
+
+        assert_eq!(chrome.pressed, Some((79, 5)), "the pressed cell");
+        assert_eq!(chrome.gripped, Some(11), "the dragged bar");
+        assert_eq!(
+            chrome.hovered,
+            Some(Hovered::Button(79, 19)),
+            "the hover mark"
+        );
+        assert_eq!(chrome.scrolling, Some((11, -1)), "the scrolled bar");
+    }
+
+    #[test]
     fn a_shell_starts_watching_and_a_lost_watch_is_one_way() {
         // Asserted through `chrome`, which is the only way the mode leaves this
         // type and therefore the only path that can be wrong. A bare accessor
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
         assert_eq!(
-            app.chrome("fixture", None, None, None, None).mode,
+            app.chrome("fixture", None, None, None, None, None).mode,
             Mode::Watching
         );
 
         app.watch_lost();
         assert_eq!(
-            app.chrome("fixture", None, None, None, None).mode,
+            app.chrome("fixture", None, None, None, None, None).mode,
             Mode::Lost
         );
 
@@ -853,7 +889,7 @@ mod tests {
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(
-            app.chrome("fixture", None, None, None, None).mode,
+            app.chrome("fixture", None, None, None, None, None).mode,
             Mode::Lost
         );
     }
@@ -865,11 +901,14 @@ mod tests {
         // that nothing invents one when there is none.
         let app = App::new();
         assert_eq!(
-            app.chrome("fixture", Some("main"), None, None, None)
+            app.chrome("fixture", Some("main"), None, None, None, None)
                 .branch
                 .as_deref(),
             Some("main")
         );
-        assert_eq!(app.chrome("fixture", None, None, None, None).branch, None);
+        assert_eq!(
+            app.chrome("fixture", None, None, None, None, None).branch,
+            None
+        );
     }
 }

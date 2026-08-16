@@ -440,7 +440,7 @@ fn a_real_repository_draws() {
     // picture of a screen nobody gets.
     let split = body_layout(
         area,
-        &app.chrome("fixture", None, None, None, None),
+        &app.chrome("fixture", None, None, None, None, None),
         frame.files().len(),
     );
     let view = app
@@ -457,7 +457,7 @@ fn a_real_repository_draws() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, None, None, None);
+    let chrome = app.chrome("fixture", None, None, None, None, None);
     terminal
         .draw(|f| {
             let area = f.area();
@@ -504,7 +504,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     let area = Rect::new(0, 0, 80, 12);
     let split = body_layout(
         area,
-        &app.chrome("fixture", None, None, None, None),
+        &app.chrome("fixture", None, None, None, None, None),
         frame.files().len(),
     );
     let view = app
@@ -525,7 +525,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, None, None, None);
+    let chrome = app.chrome("fixture", None, None, None, None, None);
     terminal
         .draw(|f| {
             let drawn = f.area();

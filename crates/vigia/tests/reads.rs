@@ -73,7 +73,7 @@ fn listed() -> usize {
 fn layout() -> Body {
     body_layout(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, None, None, None),
+        &App::new().chrome("fixture", None, None, None, None, None),
         FILES,
     )
 }

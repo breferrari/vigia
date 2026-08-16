@@ -23,6 +23,7 @@ fn chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
+        hovered: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
         branch: None,

@@ -225,11 +225,14 @@ impl Regions {
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
     ///
     /// **Geometry alone, with no event kind in it**, which is what makes it
-    /// usable by the two callers that ask different questions of the same cell:
-    /// [`action_for`] asks *what does this press mean*, and the loop asks *is the
-    /// pointer still on the button it is repeating*. Deriving the second from a
-    /// copy of this arithmetic is how the two would come to disagree about where
-    /// a button is.
+    /// usable by the three callers that ask different questions of the same
+    /// cell: [`action_for`] asks *what does this press mean*, the loop asks *is
+    /// the pointer still on the button it is repeating*, and [`Regions::hover_at`]
+    /// asks *is this a surface a press would act on at all*. Deriving any of
+    /// them from a copy of this arithmetic is how they would come to disagree
+    /// about where a button is, which is the defect
+    /// [#166](https://github.com/breferrari/vigia/issues/166) found two
+    /// expressions of and reduced to one.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
         if self.bar != Some(column) {
             return None;
@@ -252,6 +255,154 @@ impl Regions {
         }
         self.diff.along(row).is_some().then_some(Grabbed::Diff)
     }
+
+    /// What a pointer at `column`, `row` is **over**, for the mark `SPEC.md`
+    /// §11.2 B10 adopts.
+    ///
+    /// **Geometry alone, like [`Regions::step_at`] above**, and the third caller
+    /// of the same arithmetic rather than a fourth copy of it: a button is
+    /// `Region::button`'s answer and a track row is `Region::along`'s, which are
+    /// the two the press path already asks. The #166 pass consolidated one such
+    /// copy and recorded why, so this deliberately composes rather than
+    /// re-deriving where a button ends.
+    ///
+    /// **Defined as *wherever a press would step*, which is the ruling rather
+    /// than an optimisation.** §11.1 licenses the mark on "the surfaces a click
+    /// already acts on", so this asks [`Regions::step_at`] the question it
+    /// already answers and marks the cell when the answer is yes. Spelling the
+    /// column guard and the two `Region::button` calls again would be a second
+    /// copy of where a button is, which is the defect
+    /// [#166](https://github.com/breferrari/vigia/issues/166) found two
+    /// expressions of and reduced to one.
+    ///
+    /// **Only a step button answers, and the limit is a missing rung rather
+    /// than a missing wire.** The rule a mark on this column has to keep is that
+    /// a click is brighter than a hover, and a button has three weights to spend
+    /// on it (`Theme::bar_track`, `Theme::bar`, `Theme::bar_active`) where the
+    /// thumb has two: it rests at `bar` and is dragged at `bar_active`, with
+    /// nothing in between. A hover drawn in `bar_active` would make a drag
+    /// indistinguishable from a pointer resting on the thumb.
+    ///
+    /// So the **thumb and the track are the same finding as a list row**, one
+    /// element over: surfaces a click acts on, licensed a mark by §11.1, with
+    /// nowhere to draw one until a rung is ruled. Both wait on
+    /// [#189](https://github.com/breferrari/vigia/issues/189), and this function
+    /// is where they will be added rather than a second one being written. When
+    /// they are, this stops being expressible through `step_at` alone, because a
+    /// track press seeks rather than steps.
+    pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
+        self.step_at(column, row)
+            .is_some()
+            .then_some(Hovered::Button(column, row))
+    }
+}
+
+/// What the pointer is resting on, when it is on something a click acts on.
+///
+/// **An enum with one variant, on purpose.** [`Hovered::Button`] carries a cell
+/// the way `Chrome::pressed` does, so the drawer compares one kind of thing;
+/// what is not here yet is a variant for the thumb and one for a list row, both
+/// of which are surfaces a click acts on and both of which are waiting on the
+/// same ruling ([#189](https://github.com/breferrari/vigia/issues/189)) about
+/// what mark a region with no spare rung gets. A bare `Option<(u16, u16)>` would
+/// say the mark is always a cell, which is the thing that is about to stop being
+/// true.
+///
+/// **This is view state and never an [`Action`]**, which is §11.1's ruling and
+/// the reason `action_for` never learns about it: the mark says where a pointer
+/// is, it is not a thing a reader asked for, and B4 stands because no key means
+/// anything different while it is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hovered {
+    /// A step button, by the cell it is drawn on.
+    Button(u16, u16),
+}
+
+/// The mark after `event`, given the one before it.
+///
+/// **A free function for the reason [`Held::ends`] is one**: the loop that owns
+/// this state cannot be driven by a test, so a rule written inline in `run` is a
+/// rule with no gate. Everything decidable about a hover mark is decidable from
+/// an event, a layout and the previous mark, so all of it lives here.
+///
+/// §11.1 states the rule this implements: a mark is retired by whatever the
+/// program can still observe about its subject, and a hover's subject **moves**
+/// rather than ending, so what retires it is the next observation of where the
+/// pointer is. Four cases, and the last two are the ones that are not obvious:
+///
+/// - **Any mouse event that is not a drag re-resolves.** Motion, press, release
+///   and the wheel all carry a column and a row, so all of them place the mark,
+///   and one that lands on no target clears it. There is no need to single out
+///   `Moved`: an event that says where the pointer is *is* the observation.
+/// - **A drag clears it, and is the one mouse event that does not re-resolve.**
+///   A reader pulling a grabbed thumb travels over the step button at that end
+///   of the track, and lighting it would promise a step that releasing there
+///   will not perform, because [`Grabbed`] owns the gesture until the button
+///   comes up. That is `Grabbed`'s own doctrine one mark over: a gesture
+///   outlives the target it began on. Nothing is left stuck dark, because the
+///   `Up` that ends the drag carries a position and re-arms the mark.
+/// - **[`Event::FocusLost`] clears it.** The window is gone, so the pointer's
+///   last known position has stopped being a claim about anything. This is the
+///   rung `TAKEOVER` gained a step for, and without that step this arm never
+///   fires on Unix.
+/// - **Everything else leaves it alone, and keys above all.** This is
+///   deliberately *not* [`Held::ends`]'s rule, which ends a hold on any key
+///   because a hand that has reached the keyboard is not holding a mouse button.
+///   That is evidence about a **button**; it is no evidence at all about where a
+///   pointer is resting, and clearing here would make the mark flicker off under
+///   a reader who is scrolling with `j` while the pointer sits on the bar.
+pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
+    match event {
+        // **A drag is not a hover, and it is the one mouse event that does not
+        // re-resolve.** A reader pulling a grabbed thumb travels over the step
+        // button at that end of the track, and lighting it would promise a step
+        // that releasing there will not perform: `Grabbed` owns the gesture
+        // until the button comes up, so a press on the button is not what the
+        // release means. This is [`Grabbed`]'s own doctrine one mark over, that
+        // a gesture outlives the target it began on.
+        Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(_)) => None,
+        Event::Mouse(mouse) => regions.hover_at(mouse.column, mouse.row),
+        Event::FocusLost => None,
+        _ => was,
+    }
+}
+
+/// The mark after a paint, given the layout before it and the layout it drew.
+///
+/// **A mark outlives a frame; it does not outlive a relayout.** [`hover_after`]
+/// resolves against the geometry on screen, so the mark is only ever a claim
+/// about *that* screen. When a tick moves the bars, every cell it named may now
+/// belong to something else, and §11.1's clearing ladder has an accepted
+/// residual where the pointer is no longer there to say so.
+///
+/// **Two narrower rules were tried first and both were wrong**, which is worth
+/// keeping because each looked sufficient:
+///
+/// - *Keep the cell and trust it.* The argument was that a cell the pointer
+///   rests on is the same cell whichever region comes to own it, so a relayout
+///   could only ever draw **no** mark. That holds while the pointer is there and
+///   fails in exactly the residual: a list of six with its down button on row 6,
+///   the pointer resting and leaving, two files reverted, and row 6 is now the
+///   *diff's up button*, lit without ever having been hovered.
+/// - *Re-validate the cell against the new layout.* That is what this replaced,
+///   and it was a **tautology**: `Regions::hover_at` builds its answer out of its
+///   own arguments, so `hover_at(c, r) == Some(mark)` reduces to
+///   `hover_at(c, r).is_some()`. It catches *this is no longer a button* and is
+///   blind to *this is now a different button*, which is the whole case.
+///
+/// So the rule does not try to tell one button from another: **any change to the
+/// layout retires the mark**, and the next motion re-arms it against geometry
+/// that is current. The cost is a mark dropped while it was still correct, when
+/// a write moves the bars under a pointer that has not left, and that is the
+/// conservative direction: the mark says *the pointer is here*, and after a
+/// relayout nothing in this process knows whether it still is.
+///
+/// Called from the paint rather than from the next frame's chrome, so the
+/// staleness cannot outlive the frame that caused it. That matters because on an
+/// idle tree there is no next frame: I1 means a wrong mark left for "one frame"
+/// could sit lit for as long as nobody writes to the worktree.
+pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) -> Option<Hovered> {
+    (before == after).then_some(was).flatten()
 }
 
 /// Which region a drag that is already under way belongs to.
@@ -270,6 +421,28 @@ pub enum Grabbed {
 }
 
 impl Grabbed {
+    /// Whether `event` ends the grip.
+    ///
+    /// **A free function's worth of rule, moved out of the loop for
+    /// [`Held::ends`]'s reason**: `run` cannot be driven by a test, so a
+    /// retirement rule written inline there is a rule with no gate. This one sat
+    /// inline from [#183](https://github.com/breferrari/vigia/issues/183) until
+    /// [#186](https://github.com/breferrari/vigia/issues/186) added a third mark
+    /// and made the omission visible, since the pass that argued the point for
+    /// `hover_after` had a counterexample one screen above it.
+    ///
+    /// **Only a left-drag continues a grip**, so a release, any key, and a
+    /// pointer that moved with nothing down all end it. That is deliberately
+    /// coarser than [`Held::ends`], which has to distinguish five cases: a grip
+    /// is *already* the answer to "what is this gesture about", so anything that
+    /// is not more of the same gesture finishes it.
+    pub fn ends(event: &Event) -> bool {
+        !matches!(
+            event,
+            Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
+        )
+    }
+
     /// The region this drag is moving.
     fn region(self, regions: Regions) -> Region {
         match self {
@@ -461,8 +634,8 @@ impl Held {
 
     /// Whether `event` ends the hold.
     ///
-    /// Four ways, and the third is the one that closes a hole rather than
-    /// stating the obvious:
+    /// Five ways, and the third and the fifth are the ones that close a hole
+    /// rather than stating the obvious:
     ///
     /// - **A release.** The ordinary case, and any button rather than the left
     ///   one, because a reader who has pressed a second button is done with this
@@ -481,6 +654,14 @@ impl Held {
     ///   control ends it. Resuming on re-entry is what a desktop scrollbar does
     ///   and is deliberately not done here, because it needs a suspended state
     ///   this module has nowhere to put.
+    /// - **The window losing focus.** The fifth, and the one this list was short
+    ///   by until [#186](https://github.com/breferrari/vigia/issues/186). A
+    ///   release is not the only way a gesture ends: a reader who tabs away with
+    ///   a button down sends no `Up`, and the repeat went on stepping and
+    ///   repainting a pane nobody was looking at. It is owed to I1's second
+    ///   condition, that a clock may not outlive the gesture that armed it, and
+    ///   it was reachable on Windows from the day the repeat shipped, because
+    ///   that console delivers the event whether or not anyone asks.
     pub fn ends(self, event: &Event, regions: Regions) -> bool {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => true,
@@ -492,6 +673,22 @@ impl Held {
                 }
                 _ => false,
             },
+            // **A window that lost focus has ended the gesture**, and this arm is
+            // owed to I1 rather than to tidiness. The clock a hold owns is
+            // licensed on three conditions, and the second is that it *may not
+            // outlive the gesture that armed it*: a reader who has tabbed away is
+            // not holding this button in any sense the repeat should honour, and
+            // without this the loop keeps stepping and repainting a pane nobody
+            // is looking at, on a timer, which is the state I1's measure exists
+            // to protect.
+            //
+            // **It became reachable on Unix with
+            // [#186](https://github.com/breferrari/vigia/issues/186)**, which put
+            // `Step::FocusChange` in the takeover so `FocusLost` arrives at all;
+            // on Windows the console has always delivered it. Of the four marks
+            // this shell keeps, three now retire here and the fourth is
+            // `scrolling`, which expires on its own clock.
+            Event::FocusLost => true,
             _ => false,
         }
     }

@@ -83,8 +83,8 @@ mod view;
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{
-    Action, Grabbed, Held, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
-    action_for, drag_action, patience, scroll_mark,
+    Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE,
+    WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
 };
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
@@ -353,6 +353,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         regions: Regions::default(),
         held: None,
         grabbed: None,
+        hovered: None,
         scrolling: None,
         scrolling_until: None,
     };
@@ -511,7 +512,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // **Checked before the event is interpreted**, because a
                     // release is not an action and would otherwise fall through
                     // the `else` below with the repeat still armed. `Held::ends`
-                    // carries the four ways a hold finishes and why.
+                    // carries the five ways a hold finishes and why.
                     // **The regions the last paint actually drew.** A pointer is
                     // told what it is over by asking the same function `render`
                     // asks, against the view that is on screen, so the wheel can
@@ -524,6 +525,28 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     if shell.held.is_some_and(|hold| hold.ends(&event, regions)) {
                         shell.held = None;
                     }
+                    // **What the pointer is over, before anything asks what it
+                    // meant.** A mark is not an action and never becomes one
+                    // (`SPEC.md` §11.1), so this sits outside the `action_for`
+                    // path entirely: the `continue` below drops events that
+                    // request nothing, and a motion is exactly such an event, so
+                    // resolving after it would leave the mark answering the
+                    // pointer's last *click* rather than its position.
+                    //
+                    // **The position is load-bearing against the drag block too,
+                    // and that is the less obvious half.** A `Drag` that
+                    // `drag_action` accepts `continue`s from inside that block,
+                    // so moving this below it would skip resolution on every
+                    // applied drag and leave the mark lit for the whole gesture,
+                    // which is exactly what `hover_after`'s drag arm exists to
+                    // prevent. Order against `Held::ends` above is free; order
+                    // against the block below is not.
+                    //
+                    // The whole rule is in `hover_after` rather than here, for
+                    // the reason `Held::ends` is a free function: this loop
+                    // cannot be driven by a test, and a rule written inline is a
+                    // rule with no gate.
+                    shell.hovered = hover_after(&event, regions, shell.hovered);
                     // **A drag under way answers before the column is consulted,
                     // and that ordering is the fix.** `action_for` asks what is
                     // under the pointer, which is the right question for a press
@@ -545,11 +568,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         }
                         // Anything that is not a motion ends it: a release, a
                         // key, a pointer that moved with nothing down.
-                        if !matches!(
-                            &event,
-                            Event::Mouse(mouse)
-                                if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
-                        ) {
+                        if Grabbed::ends(&event) {
                             shell.grabbed = None;
                         }
                     }
@@ -597,6 +616,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             shell.branch.as_deref(),
                             shell.pressed(),
                             shell.gripped(),
+                            shell.hovered(),
                             shell.scrolling,
                         );
                         diff_height(shell.area()?, &chrome, frame.files().len())
@@ -791,6 +811,29 @@ struct Shell {
     /// track seeks, and keeps seeking wherever the pointer goes until it is let
     /// go. Only one can be armed at a time, because only one press starts them.
     grabbed: Option<Grabbed>,
+    /// What the pointer is resting on, when it is on something a click acts on.
+    ///
+    /// **The mark `SPEC.md` §11.2 B10 adopts, and it is here for
+    /// [`Shell::held`]'s reason**: where a pointer is, is a fact about the
+    /// terminal rather than about the viewport, and `App` owns the viewport.
+    ///
+    /// It needs no clock, which is §11.1's three-mark rule arriving at its third
+    /// case: a hold ends with an `Up`, a key burst has no end and takes a clock,
+    /// and this is retired by its **replacement**, because the next mouse event
+    /// says where the pointer is now.
+    ///
+    /// **The rule is in two functions, and both are free functions so that both
+    /// have gates.** [`hover_after`] answers *what does this event do to the
+    /// mark*, and [`hover_repainted`] answers *what does a repaint do to it*,
+    /// which is a different question with a different subject: the first is
+    /// about the pointer moving, the second about the screen moving underneath a
+    /// pointer that did not.
+    ///
+    /// `None` is both *not over anything* and *the window is not focused*, which
+    /// are the same drawn result and are deliberately not distinguished: the
+    /// mark says the pointer is here, and it has nothing to say about why it is
+    /// not.
+    hovered: Option<Hovered>,
     /// Which way the viewport is currently being moved, and until when.
     ///
     /// **The one lit thing on this screen that nobody is touching.** A reader
@@ -827,6 +870,21 @@ impl Shell {
     /// draws its thumb lit.
     fn gripped(&self) -> Option<u16> {
         self.grabbed.map(|on| on.top(self.regions))
+    }
+
+    /// What the pointer is over, for the frame that marks it.
+    ///
+    /// A plain read. The staleness this would otherwise have to carry is handled
+    /// where the layout actually moves: [`hover_repainted`] retires the mark
+    /// inside the paint that changes the geometry, so anything reaching this
+    /// accessor was resolved against the screen that is on show.
+    ///
+    /// **Two narrower rules were tried in this function first and both were
+    /// wrong.** The reasoning is recorded on `hover_repainted` rather than here,
+    /// because the second of them was a tautology that read as a fix, and a
+    /// reader who finds this accessor plain deserves to know it was not always.
+    fn hovered(&self) -> Option<Hovered> {
+        self.hovered
     }
 
     /// How long the loop may block before something here has to act.
@@ -965,6 +1023,7 @@ impl Shell {
             self.branch.as_deref(),
             self.pressed(),
             self.gripped(),
+            self.hovered(),
             self.scrolling,
         );
         let body = body_layout(self.area()?, &chrome, frame.files().len());
@@ -997,11 +1056,12 @@ impl Shell {
         // that can disagree. Reading the branch from the stale view instead
         // would mean holding a name across frames, which is the confident lie
         // `branch_for` refuses.
-        let chrome = self.app.chrome(
+        let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
             self.pressed(),
             self.gripped(),
+            self.hovered(),
             self.scrolling,
         );
         // Borrowed out of `self` before the draw, not for style: the closure would
@@ -1009,6 +1069,7 @@ impl Shell {
         // the terminal.
         let (theme, screen) = (&self.theme, &self.screen);
         let mut painted = Regions::default();
+        let was = self.regions;
         self.session.screen().draw(|f| {
             let area = f.area();
             // Captured from inside the draw, because `Frame::area` is the size the
@@ -1016,8 +1077,23 @@ impl Shell {
             // between the two would leave a pointer told about a screen nobody
             // saw. Same seam #59 found on the other side.
             painted = render::regions(area, &chrome, screen);
+            // **A hover mark does not outlive a relayout, and it has to be
+            // retired here, between the layout and the paint that uses it.** The
+            // obvious placement is after the `draw`, and it does not work: the
+            // frame has already gone to the screen carrying the stale mark, and
+            // correcting the field only reaches the *next* paint. On an idle
+            // tree there is no next paint (I1), so a mark "wrong for one frame"
+            // is wrong until somebody writes to the worktree.
+            //
+            // The ordering here is not circular even though it looks it:
+            // `render::regions` reads the chrome's *heights* (the notice, the
+            // mode, the branch) and never its marks, so the layout is settled
+            // before the mark is judged against it, and the paint below sees the
+            // judged one.
+            chrome.hovered = hover_repainted(chrome.hovered, was, painted);
             render(f.buffer_mut(), area, screen, theme, &chrome);
         })?;
+        self.hovered = chrome.hovered;
         self.regions = painted;
         Ok(())
     }
@@ -1371,6 +1447,30 @@ mod tests {
             code.contains("Wake::Signalled => break 'awake"),
             "the signalled wake no longer unconditionally leaves the loop, which is \
              what makes `signal`'s one-way escalation latch safe"
+        );
+
+        // **Order, again, and this one fixes the state and not the screen when it
+        // is wrong.** `hover_repainted` retires a mark the new layout has
+        // invalidated, and it has to run between `render::regions` and `render`.
+        // Placed after the `draw` it still compiles, still passes every other
+        // gate, and still leaves the stale mark on the glass: the frame carrying
+        // it has already gone out, and the corrected field only reaches the next
+        // paint, which on an idle tree never comes. That was the shipped
+        // behaviour until an audit read the two lines in order.
+        let layout = code
+            .find("render::regions(area, &chrome, screen)")
+            .expect("`draw` no longer computes the layout it is about to paint");
+        let retire = code
+            .find("hover_repainted(chrome.hovered")
+            .expect("`draw` no longer retires a hover mark the new layout invalidated");
+        let paint = code
+            .find("render(f.buffer_mut()")
+            .expect("`draw` no longer paints");
+        assert!(
+            layout < retire && retire < paint,
+            "the hover mark is retired outside the window between the layout and \
+             the paint, so a relayout draws a mark against geometry it was never \
+             resolved against and nothing repaints to correct it"
         );
 
         // **The idle receive is untimed, and that is I1's budget as a structure
