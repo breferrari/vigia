@@ -75,11 +75,55 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 /// Eight, which is what the strip costs in columns. `SPEC.md` §11.1 makes a
 /// sparkline a thing made of items, so at narrow widths it drops whole buckets
 /// rather than being squeezed, and eight halves cleanly on the way down.
+///
+/// **This is what one element *draws*, and since
+/// [#198](https://github.com/breferrari/vigia/issues/198) it is no longer what
+/// the store *samples*.** The two were the same number for two phases, and the
+/// reason was this docblock's own first sentence: a sampling rate chosen from one
+/// element's column count. [`HISTORY_SAMPLES`] is the sampling rate now and
+/// [`History::churn`] projects one onto the other, so this constant keeps its
+/// exact meaning and its exact value.
 pub const HISTORY_BUCKETS: usize = 8;
 
-/// How much time one bucket covers.
+/// How much time one **drawn** bucket covers.
 pub const HISTORY_BUCKET: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_BUCKETS as u64);
+
+/// Samples the store keeps per path, oldest first.
+///
+/// **The resolution the store records at, which is not the resolution any one
+/// element draws at** ([#198](https://github.com/breferrari/vigia/issues/198)).
+/// It was [`HISTORY_BUCKETS`] until then, so one element's column count decided
+/// what the whole store could ever answer, and a worktree-wide graph across a wide
+/// pane had eight points to draw whatever glyph drew them.
+///
+/// **Not an I10 change.** That row bounds 256 paths and a 120-second window: the
+/// path cap and the window are the invariant, and how finely the window is divided
+/// sits underneath it. Nothing here changes how long a sample lives or how many
+/// paths are kept.
+///
+/// **One hundred and twenty, so a sample is exactly one second** and exactly
+/// fifteen of them make one drawn bucket. Both divisions are exact, which is what
+/// keeps [`HISTORY_BUCKET`] an honest fifteen seconds rather than a rounding of
+/// one: a projection that did not divide evenly would make some drawn columns
+/// cover more time than others, and a sparkline compared down a list would be
+/// comparing unequal windows.
+///
+/// The cost is `paths * samples` `u16`s, which at the cap is sixty kibibytes, and
+/// a [`History::record`] walk fifteen times longer than it was. Both are measured
+/// in the issue rather than asserted to be small.
+const HISTORY_SAMPLES: usize = 120;
+
+/// How much time one **sample** covers, which is the grid the window rolls on.
+const HISTORY_SAMPLE: Duration =
+    Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
+
+/// How many samples one drawn bucket is the sum of.
+///
+/// Exact by construction, and asserted in `tests/history.rs` rather than left to a
+/// reader to check: an inexact division would make some drawn columns cover more
+/// time than others.
+const SAMPLES_PER_BUCKET: usize = HISTORY_SAMPLES / HISTORY_BUCKETS;
 
 /// The most paths history will track at once.
 ///
@@ -137,8 +181,8 @@ pub struct HistoryStats {
 /// One path's churn, and when it last moved.
 #[derive(Debug, Clone, Copy)]
 struct Track {
-    /// Oldest bucket first, so the array is drawn left to right as written.
-    buckets: [u16; HISTORY_BUCKETS],
+    /// Oldest sample first, so the array projects left to right as written.
+    samples: [u16; HISTORY_SAMPLES],
     /// Ordinal of the last tick that named this path.
     ///
     /// A counter rather than an [`Instant`], because the only question asked of
@@ -150,27 +194,48 @@ struct Track {
 impl Track {
     fn new(tick: u64) -> Self {
         Self {
-            buckets: [0; HISTORY_BUCKETS],
+            samples: [0; HISTORY_SAMPLES],
             tick,
         }
     }
 
-    /// Slide `steps` buckets into the past, filling the newest end with zeroes.
+    /// Slide `steps` samples into the past, filling the newest end with zeroes.
     fn shift(&mut self, steps: usize) {
-        if steps >= HISTORY_BUCKETS {
-            self.buckets = [0; HISTORY_BUCKETS];
+        if steps >= HISTORY_SAMPLES {
+            self.samples = [0; HISTORY_SAMPLES];
             return;
         }
-        self.buckets.rotate_left(steps);
-        self.buckets[HISTORY_BUCKETS - steps..].fill(0);
+        self.samples.rotate_left(steps);
+        self.samples[HISTORY_SAMPLES - steps..].fill(0);
     }
 
     fn empty(&self) -> bool {
-        self.buckets.iter().all(|&count| count == 0)
+        self.samples.iter().all(|&count| count == 0)
+    }
+
+    /// The samples summed into the buckets a sparkline draws, oldest first.
+    ///
+    /// **A projection re-projects; it does not drop items.** That is `heat_at`'s
+    /// ruling in the shell, and it is the whole of why raising the sampling rate
+    /// leaves the sparkline where it was: every drawn column is the sum of the
+    /// [`SAMPLES_PER_BUCKET`] samples covering exactly the seconds it always
+    /// covered, so the same writes land in the same column.
+    ///
+    /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
+    /// past `u16` is already at the top of the ramp, and wrapping would draw the
+    /// busiest file in the worktree as the quietest.
+    fn drawn(&self) -> [u16; HISTORY_BUCKETS] {
+        let mut out = [0u16; HISTORY_BUCKETS];
+        for (bucket, group) in out.iter_mut().zip(self.samples.chunks(SAMPLES_PER_BUCKET)) {
+            *bucket = group
+                .iter()
+                .fold(0u16, |sum, &count| sum.saturating_add(count));
+        }
+        out
     }
 
     fn bump(&mut self) {
-        let newest = &mut self.buckets[HISTORY_BUCKETS - 1];
+        let newest = &mut self.samples[HISTORY_SAMPLES - 1];
         // Saturating rather than wrapping: a path written 65,536 times inside
         // one bucket is already at the top of the ramp, and wrapping would draw
         // the busiest file in the worktree as the quietest.
@@ -305,8 +370,16 @@ impl History {
     /// Copied rather than borrowed. It is [`HISTORY_BUCKETS`] `u16`s, which is
     /// smaller than the reference on every target, and returning it by value is
     /// what lets a caller hold one while asking about the next path.
+    ///
+    /// **Projected rather than stored since
+    /// [#198](https://github.com/breferrari/vigia/issues/198)**, which is what
+    /// keeps the sentence above true: the store holds [`HISTORY_SAMPLES`] of them
+    /// and this sums each drawn column's worth. Handing back the samples instead
+    /// would have made the array larger than a reference on every target and
+    /// pushed the projection out to every caller, where each would have had to
+    /// agree about it.
     pub fn churn(&self, path: &str) -> Option<[u16; HISTORY_BUCKETS]> {
-        self.tracks.get(path).map(|track| track.buckets)
+        self.tracks.get(path).map(Track::drawn)
     }
 
     /// Which rung of the recency ladder this path is on.
@@ -357,16 +430,16 @@ impl History {
         let elapsed = now.saturating_duration_since(self.opened);
         // Saturating into `usize` before the comparison below, so an instant far
         // in the future cannot overflow the multiplication that moves `opened`.
-        let steps = usize::try_from(elapsed.as_nanos() / HISTORY_BUCKET.as_nanos())
-            .unwrap_or(HISTORY_BUCKETS);
+        let steps = usize::try_from(elapsed.as_nanos() / HISTORY_SAMPLE.as_nanos())
+            .unwrap_or(HISTORY_SAMPLES);
         if steps == 0 {
             return;
         }
 
-        if steps >= HISTORY_BUCKETS {
+        if steps >= HISTORY_SAMPLES {
             // The whole window has turned over, so nothing tracked can have a
             // sample left in it. Clearing beats shifting every track by more
-            // buckets than it has, and it is the state a monitor left open
+            // samples than it has, and it is the state a monitor left open
             // overnight wakes up in.
             self.stats.evicted_by_window += self.tracks.len() as u64;
             self.tracks.clear();
@@ -375,10 +448,10 @@ impl History {
             return;
         }
 
-        // Advanced by whole buckets rather than set to `now`, so the boundaries
-        // stay on a fixed grid and a burst of ticks inside one bucket cannot
+        // Advanced by whole samples rather than set to `now`, so the boundaries
+        // stay on a fixed grid and a burst of ticks inside one sample cannot
         // walk it forward a fraction at a time.
-        self.opened += HISTORY_BUCKET * steps as u32;
+        self.opened += HISTORY_SAMPLE * steps as u32;
 
         let before = self.tracks.len();
         self.tracks.retain(|_, track| {
@@ -407,11 +480,18 @@ impl History {
         }
     }
 
+    /// The busiest **drawn** bucket anywhere in the store.
+    ///
+    /// Over the projection rather than over the raw samples, which is the half of
+    /// [#198](https://github.com/breferrari/vigia/issues/198) that would have
+    /// moved the sparkline if it were got wrong: heights are scaled against this,
+    /// so a peak measured one sample at a time would be smaller than the columns
+    /// it is the denominator for and every bar on screen would top out.
     fn repeak(&mut self) {
         self.peak = self
             .tracks
             .values()
-            .flat_map(|track| track.buckets)
+            .flat_map(|track| track.drawn())
             .max()
             .unwrap_or(0);
     }
@@ -563,16 +643,27 @@ mod tests {
         assert_eq!(history.churn("b").unwrap()[HISTORY_BUCKETS - 1], 1);
     }
 
-    /// A path written more than `u16::MAX` times in one bucket is already at the
+    /// A path written more than `u16::MAX` times in one sample is already at the
     /// top of the ramp; wrapping would draw the busiest file as the quietest.
+    ///
+    /// **Both halves, since #198 gave the projection its own saturating add.** A
+    /// sample that saturates and a drawn column that sums fifteen of them are two
+    /// places the same wrap could happen, and the second is the newer one.
     #[test]
     fn a_bucket_saturates_rather_than_wrapping() {
         let now = base();
         let mut history = History::starting_at(now);
         let mut track = Track::new(1);
-        track.buckets[HISTORY_BUCKETS - 1] = u16::MAX;
+        track.samples[HISTORY_SAMPLES - 1] = u16::MAX;
         track.bump();
-        assert_eq!(track.buckets[HISTORY_BUCKETS - 1], u16::MAX);
+        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
+        assert_eq!(track.drawn()[HISTORY_BUCKETS - 1], u16::MAX);
+        track.samples[HISTORY_SAMPLES - 2] = 9;
+        assert_eq!(
+            track.drawn()[HISTORY_BUCKETS - 1],
+            u16::MAX,
+            "a drawn column summing past u16 wrapped instead of topping out"
+        );
 
         history.record(["a"], now);
         assert!(history.peak() > 0);
