@@ -808,11 +808,11 @@ struct Shell {
     /// **What decides that is whether the subject can be observed ending**, and
     /// §11.1 now states the marks as three instances of it rather than as one
     /// rule with exceptions. A hold ends with an `Up`. A burst has no end, which
-    /// is this field. A hover mark (§11.2 B10, reversed 2026-08-16) has no end
-    /// either, but its subject *moves* instead of stopping, so it is cleared by
-    /// the next observation of where the pointer is and must not be given a
-    /// clock: one would put the mark out while a reader rests on a row, which is
-    /// the single case hover exists for.
+    /// is this field. A hover mark (§11.2 B10, reversed 2026-08-16, ruled and
+    /// not yet drawn) has no end either, but its subject *moves* instead of
+    /// stopping, so it is cleared by the next observation of where the pointer
+    /// is and must not be given a clock: one would put the mark out while a
+    /// reader rests on a row, which is the single case hover exists for.
     scrolling: Option<(u16, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,

@@ -313,16 +313,16 @@ fn nothing_a_reader_did_not_ask_for_becomes_an_action() {
     // before deciding this line is stale.** It is delivered because the mouse
     // bundle sets `?1003h`, any-event tracking, which nothing here consumes and
     // which cannot portably be switched off; `RULINGS.md`'s I1 section carries
-    // what it costs. B10 was reversed on 2026-08-16 and the shell now marks what
-    // the pointer is over, which does **not** make this line stale: §11.1 rules
-    // the mark to be view state resolved in the loop, so `Moved` still means no
-    // action here and the two facts are not in tension.
+    // what it costs. B10 was reversed on 2026-08-16 and a hover mark is adopted,
+    // which does **not** make this line stale in either direction: §11.1 rules
+    // the mark to be view state resolved in the loop, so `Moved` means no action
+    // here whether or not the mark has been built yet.
     //
-    // `FocusGained` and `FocusLost` sit below for the same reason and gained a
-    // second one with that reversal. They arrive rather than being ignored now,
-    // because `TAKEOVER` asks for focus reporting so a hover mark can be cleared
-    // when the window loses focus, and clearing it is the *loop's* job. An arm
-    // for either one here would be that job in the wrong module.
+    // `FocusGained` and `FocusLost` sit below for the same reason and will keep
+    // a second one once #186 lands. `TAKEOVER` does not request focus reporting
+    // today, so they arrive rarely; when it does, `FocusLost` is what clears a
+    // hover mark, and clearing it is the *loop's* job. An arm for either one
+    // here would be that job in the wrong module.
     //
     // **This fixture cannot be the whole tripwire, and the sibling below is
     // why.** `Regions::default()` is a screen with no region and no bars, so a
