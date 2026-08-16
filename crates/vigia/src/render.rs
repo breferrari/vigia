@@ -884,14 +884,23 @@ pub struct Chrome {
     /// on a step button lights one cell, a press on the track lights the thumb
     /// it is moving.
     pub gripped: Option<u16>,
-    /// Which way the keys are currently moving the diff, when they are.
+    /// Which bar is being scrolled and which way, when one is.
     ///
     /// **The one case where the bar answers something nobody is touching.** A
     /// reader scrolling with `j` or `d` gets the matching arrow lit for as long
     /// as the burst lasts, so the same mark means *this is moving, that way*
     /// whichever device asked. Negative is up, positive is down, `None` is at
     /// rest.
-    pub scrolling: Option<isize>,
+    ///
+    /// **The row is which region, and it was missing until 2026-08-16.** The two
+    /// bars move different things and answer different keys, so a bare direction
+    /// lit the matching arrow on *both* at once, which is what 0.5.0 shipped.
+    /// [`Chrome::gripped`] one field up had carried its region from the start and
+    /// was correct throughout, which is why a drag lit only its own bar while a
+    /// keypress lit both: the right shape was one field away and the newer mark
+    /// did not copy it. Same convention now, the region's first row, compared
+    /// against the `Rect` each bar is drawn into.
+    pub scrolling: Option<(u16, isize)>,
     /// Something the reader should see instead of the key hints.
     ///
     /// A monitor survives a failed frame rather than exiting, so this is where a
@@ -2555,8 +2564,9 @@ struct Painter<'a> {
     pressed: Option<(u16, u16)>,
     /// The first row of the bar being dragged, from [`Chrome::gripped`].
     gripped: Option<u16>,
-    /// Which way the keys are scrolling, from [`Chrome::scrolling`].
-    scrolling: Option<isize>,
+    /// Which bar the keys are scrolling and which way, from
+    /// [`Chrome::scrolling`].
+    scrolling: Option<(u16, isize)>,
 }
 
 impl Painter<'_> {
@@ -3287,7 +3297,14 @@ impl Painter<'_> {
                 // `j` sees the mark that says which way, on the element whose
                 // whole job is which way.
                 let held = self.pressed == Some((x, y));
-                let keyed = self.scrolling.is_some_and(|by| by.signum() == way)
+                // **This bar's own scroll, not any scroll.** The two regions move
+                // different things: `j` moves the diff's viewport and `J` moves
+                // the list's window, so a mark that carried only a direction lit
+                // the matching arrow on both bars at once. The row is what says
+                // which, exactly as it does for a drag one block up.
+                let keyed = self
+                    .scrolling
+                    .is_some_and(|(top, by)| top == area.y && by.signum() == way)
                     && self.gripped != Some(area.y);
                 let style = if held || keyed {
                     self.theme.bar_active

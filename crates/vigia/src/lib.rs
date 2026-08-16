@@ -84,7 +84,7 @@ pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{
     Action, Grabbed, Held, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
-    action_for, drag_action, patience,
+    action_for, drag_action, patience, scroll_mark,
 };
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
@@ -804,7 +804,7 @@ struct Shell {
     /// lit forever on an idle tree, which is exactly the staleness §11.2 B10
     /// refused a hover highlight for. The clock that clears it is bounded by the
     /// burst that armed it, fires once, and is the same one `Held` uses.
-    scrolling: Option<isize>,
+    scrolling: Option<(u16, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
 }
@@ -842,19 +842,13 @@ impl Shell {
     /// Only the actions that move it, and only their direction: a jump to a file
     /// or a drag of the thumb is not a direction the arrows can honestly draw.
     fn note_scroll(&mut self, action: Action, now: Instant) {
-        let way = match action {
-            Action::Scroll(by) | Action::Page(by) | Action::HalfPage(by) | Action::File(by) => {
-                by.signum()
-            }
-            Action::Top => -1,
-            Action::Bottom => 1,
-            _ => return,
-        };
-        if way == 0 {
-            return;
+        // The routing lives in `input::scroll_mark`, beside the key map it is a
+        // fact about, and is driven directly by a test there. What is left here
+        // is arming the clock that expires it.
+        if let Some(mark) = input::scroll_mark(action, self.regions) {
+            self.scrolling = Some(mark);
+            self.scrolling_until = Some(now + SCROLL_LINGER);
         }
-        self.scrolling = Some(way);
-        self.scrolling_until = Some(now + SCROLL_LINGER);
     }
 
     /// Clear the direction mark once its burst has stopped.

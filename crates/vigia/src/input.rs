@@ -303,6 +303,44 @@ pub fn drag_action(event: &Event, regions: Regions, on: Grabbed) -> Option<Actio
     })
 }
 
+/// Which bar an action scrolls, and which way, or `None` where it scrolls
+/// neither.
+///
+/// **The routing the arrows draw from, and it is a fact about the key map rather
+/// than about the screen**, which is why it lives here beside the map itself.
+/// The two regions move different things and answer different keys: `j`, `k`,
+/// `d`, `u`, `Space`, `g` and `G` move the diff's viewport, `J` and `K` move the
+/// list's window. An arrow that lit from a bare direction lit the matching one on
+/// both bars at once, which is what 0.5.0 shipped.
+///
+/// The `u16` is the region's first row, which is what a drawer compares its own
+/// `Rect` against. A region with no rows reports nothing: with no list on screen
+/// the two tops are the same number, so an unguarded answer would light the
+/// diff's arrows for a movement of a map nobody can see.
+///
+/// A free function rather than a method on the shell, for the reason
+/// [`patience`] is one: the shell owns a terminal and three threads, and the
+/// routing is exactly the part worth driving from a test.
+pub fn scroll_mark(action: Action, regions: Regions) -> Option<(u16, isize)> {
+    let (region, way) = match action {
+        Action::Scroll(by) | Action::Page(by) | Action::HalfPage(by) | Action::File(by) => {
+            (regions.diff, by.signum())
+        }
+        Action::Top => (regions.diff, -1),
+        Action::Bottom => (regions.diff, 1),
+        Action::ScrollList(by) => (regions.list, by.signum()),
+        // A jump to a listed file moves the diff to somewhere rather than by
+        // something, and a drag on either bar already lights its own thumb.
+        Action::ListRow(_)
+        | Action::ListTo(_)
+        | Action::DiffTo(_)
+        | Action::ToggleFollow
+        | Action::Redraw
+        | Action::Quit => return None,
+    };
+    (way != 0 && region.rows > 0).then_some((region.top, way))
+}
+
 /// How long the loop may block before some clock here has to act.
 ///
 /// **`None` is the whole invariant, and it is why both clocks are asked through

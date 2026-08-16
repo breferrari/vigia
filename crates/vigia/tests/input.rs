@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use vigia::{
     Action, Grabbed, Held, LIST_ROWS, Region, Regions, SCROLL_LINGER, STEP_DELAY, STEP_REPEAT,
-    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, patience,
+    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, patience, scroll_mark,
 };
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
@@ -1261,4 +1261,71 @@ fn nothing_armed_means_no_deadline_at_all() {
         Some(STEP_REPEAT),
         "the step is due first and the loop was told to sleep past it"
     );
+}
+
+#[test]
+fn each_bar_answers_only_the_keys_that_move_it() {
+    // **The routing behind the arrows, and the half a render gate cannot see.**
+    // A test that hands the painter a mark checks the drawing; this checks that
+    // the right mark is produced, which is where the 0.5.0 defect actually lived
+    // once the drawing was fixed.
+    //
+    // The two regions move different things: `j`/`k`/`d`/`u`/`Space`/`g`/`G` and
+    // the file steps move the diff's viewport, `J`/`K` move the list's window.
+    let regions = two_regions();
+    let (list, diff) = (regions.list.top, regions.diff.top);
+
+    for (action, want) in [
+        (Action::Scroll(1), Some((diff, 1))),
+        (Action::Scroll(-1), Some((diff, -1))),
+        (Action::Page(1), Some((diff, 1))),
+        (Action::HalfPage(-1), Some((diff, -1))),
+        (Action::File(1), Some((diff, 1))),
+        (Action::Top, Some((diff, -1))),
+        (Action::Bottom, Some((diff, 1))),
+        // The map's own keys, and the assertion that was missing: these must not
+        // reach the diff's bar.
+        (Action::ScrollList(1), Some((list, 1))),
+        (Action::ScrollList(-1), Some((list, -1))),
+        // Neither bar. A jump lands somewhere rather than moving by something,
+        // and a drag already lights its own thumb.
+        (Action::ListRow(2), None),
+        (Action::ListTo(0), None),
+        (Action::DiffTo(0), None),
+        (Action::ToggleFollow, None),
+        (Action::Redraw, None),
+        (Action::Quit, None),
+        // A step of nothing is not a direction.
+        (Action::Scroll(0), None),
+    ] {
+        assert_eq!(
+            scroll_mark(action, regions),
+            want,
+            "{action:?} lit the wrong bar, or the wrong way, or a bar at all"
+        );
+    }
+}
+
+#[test]
+fn a_region_with_no_rows_lights_nothing() {
+    // With no list on screen the two regions report the **same** top row, because
+    // the diff starts where the list would have. So an unguarded mark would light
+    // the diff's arrows for a movement of a map nobody can see.
+    let regions = Regions {
+        list: Region::bare(1, 0),
+        diff: Region::bare(1, 20),
+        bar: Some(79),
+    };
+    assert_eq!(
+        regions.list.top, regions.diff.top,
+        "the fixture is not the case"
+    );
+
+    assert_eq!(
+        scroll_mark(Action::ScrollList(1), regions),
+        None,
+        "scrolling a list that is not drawn lit the diff's bar, because the two \
+         share a top row when the list has no rows"
+    );
+    assert_eq!(scroll_mark(Action::Scroll(1), regions), Some((1, 1)));
 }
