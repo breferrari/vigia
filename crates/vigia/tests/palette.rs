@@ -411,6 +411,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("path", path),
         ("path_live", path_live),
         ("path_cold", path_cold),
+        ("path_hover", path_hover),
         ("gutter", gutter),
         ("kind", kind),
         ("hunk", hunk),
@@ -791,6 +792,11 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
                 ("path", theme.path),
                 ("path_live", theme.path_live),
                 ("path_cold", theme.path_cold),
+                // The fourth weight belongs here for the same reason the other
+                // three do: it is drawn on a path, so an underscore in a file
+                // name must not resolve to the sparkline's own track colour at
+                // any depth.
+                ("path_hover", theme.path_hover),
             ] {
                 // **Only the comparison that actually collides is skipped.**
                 // Skipping the whole rung would take `path` and `path_live` with
