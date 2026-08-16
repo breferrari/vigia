@@ -55,6 +55,7 @@ fn chrome() -> Chrome {
         mode: Mode::Watching,
         notice: None,
         following: false,
+        masthead: true,
         frame: None,
         memory: None,
     }

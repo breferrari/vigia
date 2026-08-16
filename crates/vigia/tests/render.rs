@@ -231,6 +231,7 @@ fn chrome() -> Chrome {
         mode: Mode::Watching,
         notice: None,
         following: false,
+        masthead: true,
         // The first paint's chrome: no frame has completed, so there is no p99
         // to draw. Every snapshot below inherits it, which keeps them comparing
         // the same screen they compared before the readouts existed, and
@@ -270,6 +271,7 @@ fn following_chrome() -> Chrome {
         gripped: None,
         scrolling: None,
         following: true,
+        masthead: true,
         ..chrome()
     }
 }
@@ -6289,7 +6291,6 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
     }
 }
 
-
 #[test]
 fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
     // **Monotone in height**, which is the property a reader feels rather than
@@ -6347,32 +6348,76 @@ fn the_band_never_takes_the_diff_below_a_whole_hunk() {
 }
 
 #[test]
-fn an_empty_window_still_draws_the_bands_baseline() {
-    // #78's ruling one element over: an empty bucket draws a **track** rather
-    // than a gap, so the band keeps its own length and a quiet worktree reads as
-    // quiet rather than as absent. A worktree nobody has written to since launch
-    // is the ordinary first frame, not an edge.
+fn an_empty_window_draws_no_band_at_all() {
+    // **#78 does not reach the band, and this is the gate that says so.** That
+    // ruling gives the sparkline's empty bucket a track because a gap would make
+    // an eight-column strip between two other elements ambiguous. The band spans
+    // the pane and the masthead's blank rows delimit it, so its extent is never
+    // in question, and a hundred columns of `_` is a dashed rule the pane did
+    // not ask for. Reported from use on the first real run.
+    //
+    // The rows are still **reserved**, which is the half that matters: the band
+    // is present at its height whether or not the window has anything in it, so
+    // the first write does not jog the list down a row.
     let width = 80u16;
     let height = 24u16;
     let view = a_list_of(3, 3, 0);
-    let theme = Theme::default();
     let backend = screen(width, height, &view, &chrome());
     let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
         .clamped_to(view.list.len());
-    assert!(body.graph > 0, "the fixture drew no band");
+    assert!(body.graph > 0, "the fixture reserved no band");
 
-    // The baseline is the band's last row; the air sits under the header.
-    let baseline = 1 + body.air as u16 / 2 + body.graph as u16 - 1;
     let buffer = backend.buffer();
-    let track: Vec<u16> = (0..width)
-        .filter(|x| {
-            buffer[(*x, baseline)].symbol() == SPARK_TRACK
-                && buffer[(*x, baseline)].style().fg == theme.spark_track.fg
-        })
-        .collect();
-    assert!(
-        track.len() >= 8,
-        "an empty window drew {} baseline cells, so the band vanished rather          than drawing its own length",
-        track.len()
+    for row in 0..(body.graph + body.air) as u16 {
+        let y = 1 + row;
+        let drawn: String = (0..width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim()
+            .to_owned();
+        assert!(
+            drawn.is_empty(),
+            "an empty window drew {drawn:?} on masthead row {y}, so the band              draws furniture where it has no data"
+        );
+    }
+}
+
+#[test]
+fn hiding_the_masthead_gives_its_rows_to_the_diff() {
+    // **Reported from use**: *"can we add a shortcut to hide and display this
+    // thing at the top? I see it is not always needed"*. The band costs four
+    // rows of the thing the tool exists to show, and a reader who has decided is
+    // the only one who can answer whether that is worth it.
+    //
+    // The claim is the trade, not the toggle: every row the masthead gives up
+    // goes to the diff, so nothing is left blank and no other region moves.
+    let width = 80u16;
+    let height = 24u16;
+    let view = a_list_of(3, 3, 0);
+    let shown = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files);
+    let hidden = body_layout(
+        Rect::new(0, 0, width, height),
+        &Chrome {
+            masthead: false,
+            ..chrome()
+        },
+        view.files,
+    );
+
+    assert!(shown.graph > 0, "the fixture drew no masthead to hide");
+    assert_eq!(hidden.graph, 0, "hiding the masthead left the band drawn");
+    assert_eq!(
+        hidden.air, 0,
+        "hiding the masthead left its blank rows behind"
+    );
+    assert_eq!(
+        hidden.diff,
+        shown.diff + shown.graph + shown.air,
+        "the masthead's rows went somewhere other than the diff"
+    );
+    assert_eq!(
+        (hidden.list, hidden.rule),
+        (shown.list, shown.rule),
+        "hiding the masthead moved the list, which is not what was asked"
     );
 }

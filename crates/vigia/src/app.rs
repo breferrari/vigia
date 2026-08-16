@@ -70,6 +70,14 @@ pub struct App {
     notice: Option<String>,
     /// Whether the viewport moves itself to what just changed.
     following: bool,
+    /// Whether the masthead is drawn, which `m` toggles.
+    ///
+    /// **On by default**, because the element is the answer to a question a
+    /// reader has not asked yet and an off-by-default glance element is one
+    /// nobody discovers. Off is a decision they make once, and it costs a
+    /// keystroke rather than a setting: `SPEC.md` §11.2 B6 keeps this tool
+    /// configured by gesture rather than by file.
+    masthead: bool,
     /// Whether the current position was reached by **scrolling** rather than by a
     /// jump, which is what decides whether the viewport may back up to fill the
     /// pane.
@@ -186,6 +194,7 @@ impl Default for App {
             position: Position::default(),
             notice: None,
             following: false,
+            masthead: true,
             // The opening position is the top of the diff, which is where a jump
             // would have put it, so nothing is owed a back-up before the reader
             // has moved.
@@ -369,6 +378,7 @@ impl App {
             mode: self.mode,
             notice: self.notice.clone(),
             following: self.following,
+            masthead: self.masthead,
             // `None` until a frame has completed, which is the honest first
             // paint: there is no p99 of nothing. The status bar simply has no
             // frame cell on the very first screen, and `Footer::plan` is written
@@ -470,6 +480,12 @@ impl App {
                     self.jump_to_newest(frame);
                 }
             }
+            // **No jump, unlike follow.** Re-engaging follow is a move as well
+            // as a state change because a reader asking to follow is asking to
+            // see what changed. Asking for the masthead back is asking for the
+            // masthead back: the diff keeps the row it was on, and the region
+            // above it grows or goes.
+            Action::ToggleMasthead => self.masthead = !self.masthead,
             Action::Scroll(rows) => {
                 self.scroll(rows, frame)?;
             }

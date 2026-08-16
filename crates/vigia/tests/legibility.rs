@@ -339,6 +339,7 @@ fn chrome() -> Chrome {
         mode: Mode::Watching,
         notice: None,
         following: false,
+        masthead: true,
         // Absent in the base fixture, so every sweep that inherits it keeps
         // measuring the chrome it measured before the status readouts existed.
         // [`diagnostics`] is the fixture that carries them, and it is added to
@@ -374,6 +375,7 @@ fn following() -> Chrome {
         gripped: None,
         scrolling: None,
         following: true,
+        masthead: true,
         ..chrome()
     }
 }
@@ -655,6 +657,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
                 gripped: None,
                 scrolling: None,
                 following: true,
+                masthead: true,
                 ..on_a_branch()
             },
         ),

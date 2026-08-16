@@ -1056,6 +1056,18 @@ pub struct Chrome {
     /// was switched off look identical, and the reader's next action differs
     /// completely between them.
     pub following: bool,
+    /// Whether the masthead is drawn at all, which `m` toggles.
+    ///
+    /// **On [`Chrome`] rather than passed to [`Body::split`] separately**, which
+    /// is where every other fact the layout needs about the reader already
+    /// lives: `following` is here for the same reason, because the footer's own
+    /// height depends on it.
+    ///
+    /// It is the one input to the body split that is not about the pane or the
+    /// diff, and §11.1 licenses exactly that: the split refuses to move for a
+    /// **transient** thing, so that a notice flickering cannot jog the reader's
+    /// diff. A keypress is an instruction rather than a flicker.
+    pub masthead: bool,
     /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
     ///
     /// `None` on the very first paint, when no frame has completed to have a
@@ -2147,16 +2159,25 @@ fn level_of(total: u32, peak: u32, rows: usize) -> usize {
 /// they are sky, and filling them would draw a solid block the height of the
 /// band on every column.
 ///
-/// The baseline is where an empty column says so, with [`SPARK_TRACK`], which is
-/// [#78](https://github.com/breferrari/vigia/issues/78)'s ruling one element over:
-/// an empty bucket draws a track rather than a gap, so the band keeps its own
-/// length and a quiet worktree reads as quiet rather than as absent. It is the
-/// same glyph the sparkline's empty bucket draws, so the pane says "nothing here"
-/// one way rather than two.
+/// **An empty column draws nothing at all, and that is [#78](https://github.com/breferrari/vigia/issues/78)
+/// not reaching here rather than being overruled.** That ruling gives the
+/// sparkline's empty bucket a track because *"a gap would make the strip's own
+/// length ambiguous"*: eight columns sitting between a heat strip and a counts
+/// cell have no edges of their own, so a blank one is indistinguishable from the
+/// element being absent.
+///
+/// The band has edges. It spans the pane, and the masthead's blank rows delimit
+/// it above and below, so its extent is never in question and a baseline buys
+/// nothing to pay for how it looks. Reported from use on the first real run: a
+/// hundred columns of `_` reads as a dashed rule across the pane, which is
+/// furniture the pane did not ask for and which the band is not.
+///
+/// The floor rung of [`SPARK_RAMP`] is what an empty column would otherwise
+/// take, and that is exactly the collision `SPARK_TRACK`'s own docblock refuses:
+/// one write and no writes must not be the same shape.
 fn band_cell(level: usize, row: usize, band: Band) -> Option<Bucket> {
     let filled = level.saturating_sub(row * SPARK_RAMP.len());
     match filled {
-        0 if row == 0 => Some(Bucket::Empty),
         0 => None,
         full if full >= SPARK_RAMP.len() => {
             Some(Bucket::Written(SPARK_RAMP[SPARK_RAMP.len() - 1], band))
@@ -2510,7 +2531,7 @@ impl Body {
     ///
     /// Saturating rather than clamped so a one-row terminal asks for nothing
     /// instead of underflowing.
-    pub fn split(area: Rect, footer_rows: u16, files: usize) -> Self {
+    pub fn split(area: Rect, footer_rows: u16, files: usize, masthead: bool) -> Self {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // The rule costs a row too, so the diff needs `MIN_BODY + 1` before the
@@ -2539,7 +2560,7 @@ impl Body {
         // and a graph above a sentence saying nothing changed is a graph of
         // nothing. `diff_only` above is that path and draws neither.
         let framed = GRAPH_ROWS + 2 * GRAPH_AIR;
-        let graph = if band_fits(area.width) && after >= framed + GRAPH_KEEP {
+        let graph = if masthead && band_fits(area.width) && after >= framed + GRAPH_KEEP {
             GRAPH_ROWS
         } else {
             0
@@ -2607,7 +2628,12 @@ impl Body {
 /// [`Body::split`] directly with the plan it made anyway; everything else comes
 /// through here. See [`Body::split`] for the ruling the arithmetic encodes.
 pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
-    Body::split(area, Footer::plan(area, chrome, files).rows, files)
+    Body::split(
+        area,
+        Footer::plan(area, chrome, files).rows,
+        files,
+        chrome.masthead,
+    )
 }
 
 /// Rows the **diff** gets, which is what a caller has to ask [`View::collect`]
@@ -2683,7 +2709,8 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         return Regions::default();
     }
     let footer = Footer::plan(area, chrome, view.files);
-    let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
+    let body =
+        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
     let wide = affords_bar(area.width);
 
     // The masthead sits between the header and the list, so both regions below
@@ -2736,7 +2763,8 @@ pub fn render(
     // view, and `clamped_to` below is what makes that case draw honestly rather
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
-    let body = Body::split(area, footer.rows, view.files).clamped_to(view.list.len());
+    let body =
+        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
     let margins = margins_of(area.width);
 
     let mut painter = Painter {

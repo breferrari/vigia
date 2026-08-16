@@ -1159,7 +1159,10 @@ fn the_branch_is_read_because_every_frame_draws_it() {
     assert_eq!(vigia::branch_for(&empty, count), Some("main".to_owned()));
     assert_eq!(reads.get(), 1, "a clean frame did not ask for a branch");
 
-    assert_eq!(vigia::branch_for(&populated, count), Some("main".to_owned()));
+    assert_eq!(
+        vigia::branch_for(&populated, count),
+        Some("main".to_owned())
+    );
     assert_eq!(
         reads.get(),
         2,
