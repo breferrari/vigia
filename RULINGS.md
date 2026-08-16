@@ -164,3 +164,26 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 **One citation is weaker than it looks and is stated at its real strength.** tmux issue 4909 reports terminal-level focus-out being absorbed rather than relayed with several panes and `focus-events on`. It was reported against 3.4 and the reporter said it reproduced on master; it was **closed for want of requested logs, never diagnosed and never reproduced by a maintainer**. So it is a report and not evidence, and it is kept only because a reader following the link would otherwise find a closed issue and quietly downgrade the whole survey.
 
 **What that changed in the ruling, stated so nobody re-derives it as an objection.** It did not restore the decline: inside the pane `?1003h` reports at cell granularity and retires the mark without any of this. It bounded the residual to one case (the pointer leaves the pane with the window still focused, on an idle tree) and made that case *ordinary* for one common setup rather than exotic, which is what forced the constraint the ruling turns on: the mark must be quiet enough that a stale one costs nothing. A survey that had come back clean would have produced a weaker ruling.
+
+## B10 — what the mark is drawn in, and the contradiction it shipped with
+
+> [!NOTE]
+> **Read 2026-08-16 while ruling [#193](https://github.com/breferrari/vigia/issues/193).** The section above is about whether a hover mark can be *cleared*. This one is about what it is *drawn in*, which the adoption pass got wrong in a way no gate could see, and it is here rather than in `SPEC.md` because the contrast numbers date.
+
+**§5.3 shipped two sentences that contradict each other, one day apart in the same section.** B10's derivation rules that a mark about an input device *"must be the quietest thing still visible in that region"*, and gives the reason: *"a glance has to reach the worktree first and the pointer never"*, because the mark can go stale where a recency cannot. The colour paragraph two below it ruled `Theme::path_hover` to sit *"above all three"* recency weights, *"brighter than `Theme::path`'s pulse weight"*. The shell implemented the second, so the pane's most perishable claim was its loudest text. Nothing failed. Every gate over it asserted **separation** from the recency ladder, which the loud form satisfies perfectly, so the defect was invisible to eleven green assertions and visible to one reader looking at the screen.
+
+**The correction keeps the half that had a reason and drops the half that had a placement.** Quietness is derived from staleness; *above all three* was derived from anti-collision, and anti-collision was never being done by the brightness. `SPEC.md` §5.3 already named the real channel in the same paragraph: *"it underlines, which is what keeps the two apart where colour runs out"*, and observed that on `ansi` the brightest path *"has nowhere further to go"*. That observation was treated as a difficulty the brightness had to survive; it is the proof the brightness was not load-bearing.
+
+**The value is `Theme::bar_hover`'s, so the pointer reads as one mark rather than as two.** A step button, a thumb and a listed path are three surfaces one gesture crosses, and until this they answered it in two different visual languages.
+
+**Measured rather than adjusted by eye**, on the same instrument `tests/palette.rs` uses:
+
+| palette | value | against the pane | for comparison |
+|---|---|---|---|
+| `dark` | `#a8b1bb` | **8.71:1** on `#0d1117` | `path_live`'s `#e6edf3` is brighter, `path_cold`'s `#7d8590` dimmer |
+| `light` | `#3d4650` | **9.59:1** on white | quieter here means *lighter* than `path`'s `#1f2328`, which is the same rule pointed the other way |
+| `ansi` | `Gray` | not measurable, and that is the point | it **equals** `path_cold`'s foreground, so the underline is the whole separation |
+
+The `ansi` row is the one to read twice. Sixteen names hold nothing between colour 8 and `Gray`, so a quiet mark on that palette is the cold rung's colour exactly, and a reader hovering an already-cold file sees only the underline change. That is a real narrowing and it is accepted rather than hidden: it is the case §5.3 nominates the underline for, and the alternative is the loud form that ranked the pointer above the worktree.
+
+**The lesson is the same one B10 has now taught three times**, and it is worth the third telling because the shape changed: the first two were a *reason* that expired, and this is two reasons that never agreed. A section can be internally inconsistent and every test still pass, because tests assert against the implementation and the implementation can only follow one of the sentences. **Where a document rules twice on one thing, the second ruling is not a restatement and should be read as a claim.**
