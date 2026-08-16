@@ -259,15 +259,6 @@ impl Churn {
             })
             .collect()
     }
-
-    /// The busiest column of this series at `width`, which is what scales it.
-    ///
-    /// Taken from the projection rather than from the samples, for
-    /// [`History::repeak`]'s reason: a denominator measured at a finer resolution
-    /// than the thing it divides makes every column top out.
-    pub fn peak_at(&self, width: usize) -> u32 {
-        self.projected(width).into_iter().max().unwrap_or(0)
-    }
 }
 
 /// One path's churn, and when it last moved.
@@ -624,20 +615,20 @@ impl History {
         self.worktree
     }
 
-    /// The busiest **drawn** bucket anywhere in the store.
+    /// Recompute the busiest drawn bucket and the worktree series, in one walk.
     ///
-    /// Over the projection rather than over the raw samples, which is the half of
-    /// [#198](https://github.com/breferrari/vigia/issues/198) that would have
-    /// moved the sparkline if it were got wrong: heights are scaled against this,
-    /// so a peak measured one sample at a time would be smaller than the columns
-    /// it is the denominator for and every bar on screen would top out.
-    /// Recompute everything derived from the whole store, in one walk.
-    ///
-    /// **Two results from one pass, which is why the worktree series is free.**
-    /// This already had to touch every sample of every track to find the peak, so
+    /// **Two results from one pass, which is why the series is free.** This
+    /// already had to touch every sample of every track to find the peak, so
     /// [`History::worktree_churn`]'s sum rides along at one add per element
     /// rather than costing a walk of its own. Splitting them would double the
     /// most expensive thing a tick does.
+    ///
+    /// The peak is over the **projection** rather than the raw samples, which is
+    /// the half of [#198](https://github.com/breferrari/vigia/issues/198) that
+    /// would have moved the sparkline if it were got wrong: heights are scaled
+    /// against it, so a denominator measured one sample at a time would be
+    /// smaller than the columns it divides and every bar on screen would top
+    /// out.
     fn repeak(&mut self) {
         let mut peak = 0u16;
         let mut worktree = [0u32; HISTORY_SAMPLES];
@@ -645,10 +636,6 @@ impl History {
             for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
                 *total += u32::from(count);
             }
-            // Over the **projection**, for the reason the old spelling of this
-            // gave: heights are scaled against the peak, so a peak measured one
-            // sample at a time would be smaller than the columns it is the
-            // denominator for and every bar on screen would top out.
             peak = peak.max(track.drawn().into_iter().max().unwrap_or(0));
         }
         self.peak = peak;

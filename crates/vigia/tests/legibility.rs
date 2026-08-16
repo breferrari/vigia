@@ -287,7 +287,7 @@ fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme) -> usize {
 /// `list + rule + diff` inline, so #158's masthead made them read the footer as
 /// four rows taller than it is. A region added to `Body` is one edit here now.
 fn body_rows(split: &vigia::Body) -> usize {
-    split.graph + split.air + split.list + usize::from(split.rule) + split.diff
+    split.rows()
 }
 
 /// Every foreground the heat strip can draw a slice in.
@@ -334,7 +334,8 @@ fn chrome() -> Chrome {
         worktree: "vigia".to_owned(),
         // Only the empty state names a branch, so every populated fixture leaves
         // this `None`. That is not tidiness: it is what a real frame carries,
-        // because `branch_for` never reads HEAD for a frame with a diff in it.
+        // because a detached head names no branch anywhere, which is the one
+        // case that draws none since #158.
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -1005,7 +1006,7 @@ fn the_header_never_takes_a_second_line() {
                     // a masthead over blank rows.
                     let body = body_layout(Rect::new(0, 0, width, height), &chrome, view.files)
                         .clamped_to(view.list.len());
-                    let starts = 1 + body.graph + body.air;
+                    let starts = 1 + body.masthead();
                     assert_eq!(
                         first, starts,
                         "at {width}x{height} with {listed} listed, the body \
@@ -2800,7 +2801,7 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
         // row as a list row fails with a message about the wrong thing.
         let split = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files)
             .clamped_to(view.list.len());
-        let first = 1 + split.graph + split.air;
+        let first = 1 + split.masthead();
         let rows = rows_at(width, tall, &view, &chrome);
         for (offset, row) in rows.iter().skip(first).take(listed).enumerate() {
             let opening = content(row, width).chars().find(|c| !c.is_whitespace());
@@ -3260,7 +3261,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // baseline as a list row once the masthead existed.
         let first = |files: usize| {
             let split = body_layout(Rect::new(0, 0, width, 24), &chrome(), files).clamped_to(3);
-            1 + split.graph + split.air
+            1 + split.masthead()
         };
         let (barred_at, bare_at) = (first(10), first(3));
 

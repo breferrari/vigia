@@ -1712,7 +1712,7 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
             // renderer's own arithmetic agreeing with itself.
             // Trailing blanks are trimmed off the match, because the clause and
             // the background agree on a space: at seventeen columns the row is
-            // `vigia   watching`, and the space after the name belongs to the
+            // `vigia watching`, and the space after the name belongs to the
             // gap rather than to the clause the ladder drew.
             // #119's inset off the head first, and through `content` so that the
             // strip is also the assertion: a `trim_start` here would let a row
@@ -4460,7 +4460,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
             assert_eq!(
                 fg(y),
                 theme.bar_track.fg,
-                "scrolling {name} by {way} lit row {y} on the *other* bar, which                  answers different keys and moves a different thing"
+                "scrolling {name} by {way} lit row {y} on the *other* bar, which answers different keys and moves a different thing"
             );
         }
     }
@@ -5922,12 +5922,12 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
         compared += 1;
         assert!(
             deep.contains("258"),
-            "at {width} columns a diff taller than the pane lost its line              numbers entirely, so the gutter is sized from the diff's height:              {flat:?} became {deep:?}"
+            "at {width} columns a diff taller than the pane lost its line numbers entirely, so the gutter is sized from the diff's height:              {flat:?} became {deep:?}"
         );
     }
     assert!(
         compared > 40,
-        "only {compared} widths drew the line number at all, so this swept over          rows with no gutter to lose"
+        "only {compared} widths drew the line number at all, so this swept over rows with no gutter to lose"
     );
 }
 
@@ -6297,8 +6297,9 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
     // sees: a pane dragged taller must not lose an element it had, and a
     // threshold written as two comparisons is exactly where that breaks.
     //
-    // The arrival height is asserted rather than observed, so a change to the
-    // floor fails here by name instead of silently moving when the band shows up.
+    // The arrival height is asserted rather than observed, so a change to any
+    // floor fails here by name instead of the band silently appearing somewhere
+    // else.
     let width = 80u16;
     let view = a_list_of(3, 3, 0);
     let mut arrived: Option<u16> = None;
@@ -6309,15 +6310,22 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
         match (arrived, body.graph > 0) {
             (None, true) => arrived = Some(height),
             (Some(at), false) => panic!(
-                "the band arrived at {at} rows and was gone again by {height}, so a                  taller pane lost an element a shorter one had"
+                "the band arrived at {at} rows and was gone again by {height}, so a taller pane lost an element a shorter one had"
             ),
             _ => {}
         }
     }
 
-    assert!(
-        arrived.is_some(),
-        "the band never arrived at any height up to eighty, so this gate is          about nothing"
+    // **The height, not merely that one exists.** The comment above claimed this
+    // was asserted while the code observed it and threw it away, which review
+    // caught: a floor moving would then change where the band appears and
+    // nothing would say so.
+    // Twenty: one header, one footer, three list rows and the rule leave the
+    // masthead's four and ten of diff, which is GRAPH_KEEP.
+    assert_eq!(
+        arrived,
+        Some(20),
+        "the band arrived at {arrived:?} rather than where the floors add up to"
     );
 }
 
@@ -6340,7 +6348,7 @@ fn the_band_never_takes_the_diff_below_a_whole_hunk() {
             }
             assert!(
                 body.diff >= 10,
-                "at {width}x{height} over {files} files the band left {} diff                  rows, under the whole hunk it must not take the pane below:                  {body:?}",
+                "at {width}x{height} over {files} files the band left {} diff rows, under the whole hunk it must not take the pane below:                  {body:?}",
                 body.diff
             );
         }
@@ -6367,9 +6375,12 @@ fn an_empty_window_draws_no_band_at_all() {
         .clamped_to(view.list.len());
     assert!(body.graph > 0, "the fixture reserved no band");
 
+    // Asked of the layout rather than counted, which is this branch's own
+    // lesson: `regions` publishes where the list starts, and everything above it
+    // is the masthead.
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
     let buffer = backend.buffer();
-    for row in 0..(body.graph + body.air) as u16 {
-        let y = 1 + row;
+    for y in 1..laid.list.top {
         let drawn: String = (0..width)
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>()
@@ -6377,7 +6388,7 @@ fn an_empty_window_draws_no_band_at_all() {
             .to_owned();
         assert!(
             drawn.is_empty(),
-            "an empty window drew {drawn:?} on masthead row {y}, so the band              draws furniture where it has no data"
+            "an empty window drew {drawn:?} on masthead row {y}, so the band draws furniture where it has no data"
         );
     }
 }
@@ -6412,7 +6423,7 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
     );
     assert_eq!(
         hidden.diff,
-        shown.diff + shown.graph + shown.air,
+        shown.diff + shown.masthead(),
         "the masthead's rows went somewhere other than the diff"
     );
     assert_eq!(
@@ -6421,7 +6432,6 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
         "hiding the masthead moved the list, which is not what was asked"
     );
 }
-
 
 #[test]
 fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
@@ -6435,22 +6445,37 @@ fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
     // a separator with nothing on its left. Found by review rather than by any
     // gate, which is why this one exists: every fact is joined by one rule now,
     // and a fourth fact cannot open the hole again.
-    let width = 80u16;
+    // **Swept, because the rung that had the hole is not the widest one.** The
+    // first version of this gate drew one 80-column screen, where the widest rung
+    // fits and the narrower ones are never reached, so it passed against the very
+    // defect it was written for. A ladder is only checked by walking it.
     let view = a_list_of(3, 3, 0);
+    let mut narrowed = false;
     for worktree in ["", " ", "\u{200b}", "\u{7}"] {
         let chrome = Chrome {
             worktree: worktree.to_owned(),
             branch: Some("main".to_owned()),
             ..chrome()
         };
-        let header = row_text(&screen(width, 24, &view, &chrome), 0);
-        let drawn = header.trim_start();
-        assert!(
-            !drawn.starts_with(FACT_JOIN.trim_start()),
-            "a worktree drawing nothing put a separator at the head of the pane: \
-             {drawn:?}"
-        );
+        for width in 1..=120u16 {
+            let header = row_text(&screen(width, 24, &view, &chrome), 0);
+            let drawn = header.trim_start();
+            if drawn.is_empty() {
+                continue;
+            }
+            narrowed |= !drawn.contains("changed");
+            assert!(
+                !drawn.starts_with(FACT_JOIN.trim_start()),
+                "at {width} columns a worktree drawing nothing put a separator at \
+                 the head of the pane: {drawn:?}"
+            );
+        }
     }
+    assert!(
+        narrowed,
+        "every width drew the widest rung, so the narrower ones this is about \
+         were never reached"
+    );
 }
 
 #[test]

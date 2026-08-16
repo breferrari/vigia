@@ -727,7 +727,7 @@ const DRAIN_CAP: usize = 64;
 /// Take the wake that woke the loop, plus everything already queued behind it.
 ///
 /// A pure function over the channel rather than a loop inline in [`run`], for the
-/// reason `branch_for` is one: `run` owns a terminal and cannot be driven from a
+/// reason [`drain`] is one: `run` owns a terminal and cannot be driven from a
 /// test, so a rule left inside it is a rule nothing can gate.
 ///
 /// **Nothing is dropped.** Coalescing here is about the *paint*, not about the
@@ -773,14 +773,16 @@ struct Shell {
     theme: Theme,
     /// What the header calls the working tree.
     name: String,
-    /// What the empty state calls the branch, or `None` when it will not draw
-    /// one.
+    /// What the header calls the branch, or `None` when there is none to call.
     ///
     /// Refreshed per draw rather than held for the session, because an agent in
     /// the other pane can check out a branch and a name cached at startup would
-    /// then be a confident lie. `None` whenever the diff is not empty, so a
-    /// populated frame never carries a stale answer it would not have drawn
-    /// anyway. See [`branch_for`].
+    /// then be a confident lie.
+    ///
+    /// **Every frame since [#158](https://github.com/breferrari/vigia/issues/158)**,
+    /// where it was the empty state's alone. `None` now means a detached HEAD
+    /// rather than a populated frame, which is the only case that draws no
+    /// branch anywhere.
     branch: Option<String>,
     /// The last view collected successfully.
     ///
@@ -1010,7 +1012,23 @@ impl Shell {
         // Before the chrome, because the chrome carries it, and from the frame's
         // own file count so the read happens on exactly the frames that draw the
         // answer. That is the whole of I4 for this read.
-        self.branch = branch_for(frame, || worktree.branch());
+        // **Read on every draw, because every frame draws it**
+        // ([#158](https://github.com/breferrari/vigia/issues/158)). This went
+        // through a `branch_for` seam whose whole job was the guard *only the
+        // empty state names a branch, so a populated frame must not read a file
+        // it will not draw*. The masthead draws it always, so that premise is
+        // false and the wrapper became the identity over its closure: a function
+        // taking a `&Frame` it did not read, with a docblock arguing for a
+        // parameter that no longer decided anything, and a gate asserting that
+        // `read()` calls `read`.
+        //
+        // The **rule** survives untouched and is now satisfied rather than
+        // guarded: this is a read the frame is going to draw. Reading `.git/HEAD`
+        // measures 56 to 69us against I9's 16ms, and it is not cached across
+        // frames on purpose, because an agent in the other pane can check out a
+        // branch and a name held from startup would be a confident lie on
+        // exactly the screen that exists to orient a reader.
+        self.branch = worktree.branch();
 
         // The chrome is built before the layout, not after, because the footer
         // takes a second line at narrow widths and `body_layout` has to know
@@ -1047,15 +1065,15 @@ impl Shell {
         // `view.files`, so what reaches the screen is self-consistent either way.
         //
         // The **branch** has that shape too, and one direction of it is visible
-        // rather than merely inconsistent. It was decided from the *frame's*
-        // count above, while the empty state is drawn from `view.files`, so a
-        // collect that fails on the way from a clean tree to a dirty one draws
-        // last frame's empty state with no branch on it. One line loses four
-        // words for one frame, on a path that has already reported a failure to
-        // the footer, and the alternative is deciding it twice from two counts
-        // that can disagree. Reading the branch from the stale view instead
-        // would mean holding a name across frames, which is the confident lie
-        // `branch_for` refuses.
+        // rather than merely inconsistent. **That discrepancy is gone with
+        // [#158](https://github.com/breferrari/vigia/issues/158)**: it existed
+        // because the branch was decided from the *frame's* count while the
+        // empty state was drawn from `view.files`, so a collect failing on the
+        // way from a clean tree to a dirty one drew last frame's empty state
+        // with no branch on it. The branch is not decided from a count any more.
+        // What stands is the reason it is re-read rather than held: a name kept
+        // across frames is a confident lie the moment the other pane checks
+        // something out.
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
@@ -1148,42 +1166,6 @@ fn spawn_input(tx: Sender<Wake>) {
         }
         let _ = tx.send(Wake::InputLost);
     });
-}
-
-/// The branch to draw, and whether to go and look for one at all.
-///
-/// **This is I4 for the empty state's branch**, expressed as a function so it can
-/// be gated rather than inspected. Only the empty state names a branch, so only a
-/// frame with nothing to diff may pay for reading `.git/HEAD`, and a populated
-/// frame must not read a file it is not going to draw.
-///
-/// `read` is a closure rather than a [`Worktree`] so a test can count the calls.
-/// Reaching the same assurance through a real repository would mean observing a
-/// read the frame path does not account for, which no counter here can see.
-///
-/// **It takes the frame rather than its file count, and that is what makes the
-/// rule gateable at all.** With a count, the expression deciding it lived at the
-/// call site inside `Shell::draw`, which owns a terminal and which no test can
-/// drive: hardcoding that argument to `0` and to `1` both passed the **entire
-/// suite**, in both directions, while every unit test of this function stayed
-/// green. The mutations killed the consumer and never touched the producer.
-/// Moving the count inside the boundary leaves nothing outside it to get wrong,
-/// and lets `tests/reads.rs` drive this with a real [`vigia_core::Frame`], so
-/// what is asserted is what production computes rather than a number someone
-/// typed.
-///
-/// Public for the reason [`rows_in`] and [`diff_height`] are: `SPEC.md` §7 makes
-/// the test suite the proof, and a rule reachable only from inside the crate is
-/// one the suite cannot hold against a real repository.
-///
-/// The read is not cached across frames on purpose: an agent in the other pane
-/// can check out a branch, and a name held from startup would be a confident lie
-/// on exactly the screen that exists to orient the reader.
-pub fn branch_for(
-    _frame: &vigia_core::Frame,
-    read: impl FnOnce() -> Option<String>,
-) -> Option<String> {
-    read()
 }
 
 /// The last component of the worktree path, which is what a reader recognises.

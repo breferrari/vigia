@@ -106,7 +106,7 @@ fn body(app: &App, files: usize) -> usize {
 /// One frame of the shell, timed whole: diff, collect, paint.
 ///
 /// The paint is the half that was missing. `Shell::draw` does exactly this plus
-/// a `branch_for` (which reads nothing on a populated frame, by I4) and a
+/// a branch read (one `.git/HEAD`, drawn on every frame since #158) and a
 /// terminal size query, so what is timed here is the shipped frame with the tty
 /// removed — which is the same carve-out `soak.rs` already names.
 ///

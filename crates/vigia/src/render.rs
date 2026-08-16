@@ -976,7 +976,7 @@ pub struct Chrome {
     /// frame that has a diff to show and therefore never asked. The second is
     /// what keeps I4 true. Reading `.git/HEAD` on a frame that will not draw the
     /// answer is exactly the shape I4 forbids, so the shell asks only when the
-    /// diff is empty. See [`crate::branch_for`].
+    /// diff is empty.
     pub branch: Option<String>,
     /// Whether the watch is still live.
     ///
@@ -2194,15 +2194,9 @@ fn level_of(total: u32, peak: u32, rows: usize) -> usize {
 /// The floor rung of [`SPARK_RAMP`] is what an empty column would otherwise
 /// take, and that is exactly the collision `SPARK_TRACK`'s own docblock refuses:
 /// one write and no writes must not be the same shape.
-fn band_cell(level: usize, row: usize, band: Band) -> Option<Bucket> {
+fn band_cell(level: usize, row: usize) -> Option<char> {
     let filled = level.saturating_sub(row * SPARK_RAMP.len());
-    match filled {
-        0 => None,
-        full if full >= SPARK_RAMP.len() => {
-            Some(Bucket::Written(SPARK_RAMP[SPARK_RAMP.len() - 1], band))
-        }
-        part => Some(Bucket::Written(SPARK_RAMP[part - 1], band)),
-    }
+    (filled > 0).then(|| SPARK_RAMP[filled.min(SPARK_RAMP.len()) - 1])
 }
 
 /// A path's buckets, every one of them drawn.
@@ -2235,18 +2229,18 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUC
         if count == 0 {
             continue;
         }
-        // The clamp's **upper** bound is the live one: a bucket busier than the
-        // screen's peak is an inconsistent view, and without it the index runs
-        // off the ramp and takes the pane with it. Its lower bound is defensive
-        // only, since `count >= 1` already puts the numerator at or above
-        // `SPARK_RAMP.len()`.
-        let scaled = (usize::from(count) * SPARK_RAMP.len()).div_ceil(usize::from(peak));
+        // **Through [`level_of`], which is where this rule lives now.** The
+        // sparkline is one row, so its levels are one ramp's worth, and the band
+        // is the same arithmetic over more rows. Written twice, the rounding rule
+        // that keeps one write from drawing as empty could move in one element
+        // and not the other.
+        let scaled = level_of(u32::from(count), u32::from(peak), 1);
         // **Against the same `peak` the height is scaled from**, which is the
         // busiest bucket anywhere on screen rather than in this file. Height and
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
         let band = Band::of(u32::from(count), u32::from(peak));
-        *bucket = Bucket::Written(SPARK_RAMP[scaled.clamp(1, SPARK_RAMP.len()) - 1], band);
+        *bucket = Bucket::Written(SPARK_RAMP[scaled - 1], band);
     }
     drawn
 }
@@ -2472,13 +2466,19 @@ impl<'a> Footer<'a> {
     }
 }
 
-/// How the body divides between the two regions `SPEC.md` §11.1 rules.
+/// How the body divides between the regions `SPEC.md` §11.1 rules.
 ///
-/// The rows between the header and the footer are a pinned file list, a rule,
-/// and the scrolling diff. All three numbers come from one function because they
-/// have to agree: a caller that derived the diff's height by subtracting its own
-/// idea of the list's would be a second layout rule, and the two would disagree
-/// on exactly the pane heights where the region is giving way.
+/// The rows between the header and the footer are a masthead, a pinned file
+/// list, a rule, and the scrolling diff. Every number comes from one function
+/// because they have to agree: a caller that derived the diff's height by
+/// subtracting its own idea of the others would be a second layout rule, and the
+/// two would disagree on exactly the pane heights where a region is giving way.
+///
+/// **Three regions since [#158](https://github.com/breferrari/vigia/issues/158)**,
+/// where it was two. [`Body::masthead`] and [`Body::rows`] exist so that a
+/// caller adding them up does not become the fourth place the geometry is
+/// written: six sites open-coded `graph + air` within a day of the region
+/// landing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Body {
     /// Rows the worktree churn band takes, zero when the pane cannot spare them.
@@ -2492,8 +2492,9 @@ pub struct Body {
     /// Blank rows framing the band, zero whenever the band is.
     ///
     /// Counted separately from [`Body::graph`] so a caller can tell the drawn
-    /// rows from the ones deliberately left empty, and so the arithmetic below
-    /// says which is which.
+    /// rows from the ones deliberately left empty. **Ask [`Body::masthead`] for
+    /// the two together**, which is what every caller actually wants and what
+    /// stops the sum being written by hand in a seventh place.
     pub air: usize,
     /// Rows the pinned file list takes, zero when there is no room for one.
     pub list: usize,
@@ -2592,6 +2593,24 @@ impl Body {
             rule: true,
             diff: after - graph - air,
         }
+    }
+
+    /// Every row the masthead occupies, drawn and blank together.
+    ///
+    /// **Named because six sites open-coded `graph + air` within a day**, which
+    /// is the same hand-kept geometry [`band_fits`] was consolidated to remove
+    /// one layer down. `regions` and the painter now agree by construction
+    /// rather than by both being written correctly.
+    pub fn masthead(&self) -> usize {
+        self.graph + self.air
+    }
+
+    /// Every row the body holds, across every region it has.
+    ///
+    /// What a caller checking that the pane tiles wants, and what two test files
+    /// had each written out for themselves.
+    pub fn rows(&self) -> usize {
+        self.masthead() + self.list + usize::from(self.rule) + self.diff
     }
 
     /// Shrink the list to the rows a view actually carries, giving the rest back
@@ -2735,7 +2754,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // The masthead sits between the header and the list, so both regions below
     // it move down by whatever it takes. Derived from the same `Body` the
     // painter uses, which is what keeps the pointer and the screen one answer.
-    let list_top = area.y + 1 + (body.graph + body.air) as u16;
+    let list_top = area.y + 1 + body.masthead() as u16;
     let diff_top = list_top + body.list as u16 + u16::from(body.rule);
 
     // **Asked through `bar_for`, which is what `render` asks.** A bar column only
@@ -3477,7 +3496,11 @@ impl Painter<'_> {
         let width = usize::from(planning_width(area.width, 0));
 
         let series = view.worktree_churn.projected(width);
-        let peak = view.worktree_churn.peak_at(width);
+        // Off the series rather than through a second projection of it. `Churn`
+        // had a `peak_at` that re-walked the whole window to return a number its
+        // only caller was already holding, which is the shape `History::repeak`
+        // rules against one crate over.
+        let peak = series.iter().copied().max().unwrap_or(0);
         let rows = usize::from(area.height);
 
         for (offset, total) in series.iter().enumerate() {
@@ -3491,13 +3514,10 @@ impl Painter<'_> {
                 // Drawn bottom up, so `row` counts from the baseline and the
                 // buffer's `y` counts down from the top.
                 let y = area.y + (rows - 1 - row) as u16;
-                let Some(cell) = band_cell(level, row, band) else {
+                let Some(glyph) = band_cell(level, row) else {
                     continue;
                 };
-                let (glyph, style) = cell.drawn(self.theme);
-                if let Some(cell) = self.buf.cell_mut((x, y)) {
-                    cell.set_char(glyph).set_style(style);
-                }
+                self.bar_cell(x, y, glyph, self.theme.spark_at(band));
             }
         }
     }
