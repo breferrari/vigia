@@ -190,6 +190,8 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 fn chrome() -> Chrome {
     Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         worktree: "vigia".to_owned(),
         // `None` because these views have a diff in them, and only the empty
         // state names a branch. A populated frame never asks, which is I4 and
@@ -211,6 +213,8 @@ fn chrome() -> Chrome {
 fn diagnostics_chrome() -> Chrome {
     Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         frame: Some(Duration::from_micros(800)),
         memory: Some(19 * 1024 * 1024),
         ..following_chrome()
@@ -221,6 +225,8 @@ fn diagnostics_chrome() -> Chrome {
 fn empty_chrome() -> Chrome {
     Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -230,6 +236,8 @@ fn empty_chrome() -> Chrome {
 fn following_chrome() -> Chrome {
     Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         following: true,
         ..chrome()
     }
@@ -579,6 +587,8 @@ fn the_header_says_which_mode_it_is_in() {
 
     let stopped = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         mode: Mode::Lost,
         ..chrome()
     };
@@ -1747,6 +1757,8 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
     for (label, name) in names {
         let nameless = Chrome {
             pressed: None,
+            gripped: None,
+            scrolling: None,
             worktree: name.to_owned(),
             ..chrome()
         };
@@ -1821,6 +1833,8 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     let live = style_of(&chrome());
     let lost = style_of(&Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         mode: Mode::Lost,
         ..chrome()
     });
@@ -1847,6 +1861,8 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
     let view = one_file();
     let stopped = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         mode: Mode::Lost,
         notice: Some("the watch ended; this diff is no longer live".to_owned()),
         ..chrome()
@@ -2001,6 +2017,8 @@ fn a_notice_takes_the_footer_from_the_key_hints() {
     let view = one_file();
     let chrome = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..chrome()
     };
@@ -2025,6 +2043,8 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
     let view = one_file();
     let chrome = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..following_chrome()
     };
@@ -2119,6 +2139,8 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
     // this screen changes width without the diff changing.
     let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         frame: Some(cost),
         ..diagnostics_chrome()
     }));
@@ -2137,6 +2159,8 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
     // `999MiB` to `1024MiB` and takes a column with it.
     let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         memory: Some(bytes),
         ..diagnostics_chrome()
     }));
@@ -2176,6 +2200,8 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
 
     let unavailable = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         memory: None,
         ..diagnostics_chrome()
     };
@@ -2201,6 +2227,8 @@ fn the_first_paint_draws_no_readouts_at_all() {
     let view = one_file();
     let first = Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         frame: None,
         memory: Some(19 * 1024 * 1024),
         ..following_chrome()
@@ -4149,7 +4177,7 @@ fn a_held_step_button_lights_and_only_that_one() {
         let backend = screen(width, height, &view, &held);
         for y in ends {
             let want = if y == pressed {
-                theme.bar.fg
+                theme.bar_active.fg
             } else {
                 theme.bar_track.fg
             };
@@ -4179,6 +4207,106 @@ fn a_held_step_button_lights_and_only_that_one() {
             backend.buffer()[(x, y)].style().fg,
             theme.bar_track.fg,
             "a press on the track lit the button at row {y}"
+        );
+    }
+}
+
+#[test]
+fn a_dragged_bar_lights_its_thumb_and_the_other_bar_stays_put() {
+    // The same reading the step buttons carry, on the element a drag is actually
+    // moving. Both bars share one column, so the gate that matters is that
+    // gripping one leaves the other alone.
+    const THUMB: &str = "█";
+    let width = 64u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let x = width - 1;
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+
+    for (name, gripped, other) in [
+        ("the list", laid.list, laid.diff),
+        ("the diff", laid.diff, laid.list),
+    ] {
+        let held = Chrome {
+            gripped: Some(gripped.top),
+            ..chrome()
+        };
+        let backend = screen(width, height, &view, &held);
+        let lit = |region: Region| {
+            (region.track.0..region.track.0 + region.track.1)
+                .filter(|y| bar_at(&backend, *y) == THUMB)
+                .all(|y| backend.buffer()[(x, y)].style().fg == theme.bar_active.fg)
+        };
+        assert!(
+            lit(gripped),
+            "{name} was dragged and its thumb did not light"
+        );
+        assert!(
+            !lit(other),
+            "dragging {name} lit the other bar's thumb, and they share a column"
+        );
+    }
+
+    // And with nothing gripped, neither is lit.
+    let resting = screen(width, height, &view, &chrome());
+    for region in [laid.list, laid.diff] {
+        for y in region.track.0..region.track.0 + region.track.1 {
+            if bar_at(&resting, y) == THUMB {
+                assert_eq!(
+                    resting.buffer()[(x, y)].style().fg,
+                    theme.bar.fg,
+                    "a thumb was lit with nothing being dragged"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_keys_light_the_arrow_they_are_moving_towards() {
+    // **The one lit thing on this screen nobody is touching.** The arrows are the
+    // element whose whole job is *which way*, so a reader scrolling with `j` or
+    // `d` gets the matching one lit and the opposite one left alone. Direction
+    // rather than magnitude: one row and half a page light the same arrow.
+    let width = 64u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let theme = Theme::default();
+    let x = width - 1;
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let (up, down) = (laid.diff.top, laid.diff.top + laid.diff.rows - 1);
+
+    for (way, lit, dark) in [(-1isize, up, down), (1, down, up)] {
+        let scrolling = Chrome {
+            scrolling: Some(way),
+            ..chrome()
+        };
+        let backend = screen(width, height, &view, &scrolling);
+        assert_eq!(
+            backend.buffer()[(x, lit)].style().fg,
+            theme.bar_active.fg,
+            "scrolling {way} did not light the arrow it is moving towards"
+        );
+        assert_eq!(
+            backend.buffer()[(x, dark)].style().fg,
+            theme.bar_track.fg,
+            "scrolling {way} lit the arrow it is moving away from"
+        );
+    }
+
+    // Magnitude is not direction: a half page lights what a single row lights.
+    for way in [-9isize, -1, 1, 9] {
+        let scrolling = Chrome {
+            scrolling: Some(way),
+            ..chrome()
+        };
+        let backend = screen(width, height, &view, &scrolling);
+        let expected = if way < 0 { up } else { down };
+        assert_eq!(
+            backend.buffer()[(x, expected)].style().fg,
+            theme.bar_active.fg,
+            "a scroll of {way} lit the wrong arrow"
         );
     }
 }
@@ -4820,6 +4948,8 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             "a frame over a second",
             Chrome {
                 pressed: None,
+                gripped: None,
+                scrolling: None,
                 frame: Some(Duration::from_secs(2)),
                 ..diagnostics_chrome()
             },
@@ -4829,6 +4959,8 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             "memory over a gigabyte",
             Chrome {
                 pressed: None,
+                gripped: None,
+                scrolling: None,
                 memory: Some(2 * 1024 * 1024 * 1024),
                 ..diagnostics_chrome()
             },
@@ -4881,6 +5013,8 @@ fn a_notice_can_never_colour_the_follow_marker() {
     for following in [false, true] {
         let chrome = Chrome {
             pressed: None,
+            gripped: None,
+            scrolling: None,
             notice: Some("cannot read ▶.rs".to_owned()),
             following,
             ..diagnostics_chrome()

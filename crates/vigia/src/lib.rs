@@ -83,7 +83,8 @@ mod view;
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{
-    Action, Held, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for,
+    Action, Grabbed, Held, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS,
+    action_for, drag_action, patience,
 };
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
@@ -351,6 +352,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         screen: View::default(),
         regions: Regions::default(),
         held: None,
+        grabbed: None,
+        scrolling: None,
+        scrolling_until: None,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -439,7 +443,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
         // still blocks rather than spinning.
-        let wake = match Held::wait(shell.held, Instant::now()) {
+        let wake = match shell.patience(Instant::now()) {
             None => match rx.recv() {
                 Ok(wake) => Some(wake),
                 Err(_) => break 'awake,
@@ -470,7 +474,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
         let Some(wake) = wake else {
             // A timeout woke this, so there is nothing to drain and the paint
-            // below is the whole of the frame.
+            // below is the whole of the frame. Either a step fell due, which the
+            // block above has already applied, or a scroll burst went quiet and
+            // the arrows stop claiming a direction.
+            shell.settle_scroll(Instant::now());
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree)?;
             continue;
@@ -517,6 +524,35 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     if shell.held.is_some_and(|hold| hold.ends(&event, regions)) {
                         shell.held = None;
                     }
+                    // **A drag under way answers before the column is consulted,
+                    // and that ordering is the fix.** `action_for` asks what is
+                    // under the pointer, which is the right question for a press
+                    // and the wrong one for a hand already moving: a reader
+                    // dragging a one-column bar leaves that column immediately,
+                    // and the gesture used to end there. Now the grip decides,
+                    // and the row is clamped so pulling past either end holds
+                    // that end.
+                    if let Some(on) = shell.grabbed {
+                        if let Some(drag) = drag_action(&event, regions, on) {
+                            match shell.app.apply(drag, &mut frame, 0) {
+                                Ok(true) => continue,
+                                Ok(false) => break 'awake,
+                                Err(e) => {
+                                    shell.app.warn(e.to_string());
+                                    continue;
+                                }
+                            }
+                        }
+                        // Anything that is not a motion ends it: a release, a
+                        // key, a pointer that moved with nothing down.
+                        if !matches!(
+                            &event,
+                            Event::Mouse(mouse)
+                                if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
+                        ) {
+                            shell.grabbed = None;
+                        }
+                    }
                     // **Armed from the same press that performs the first step**,
                     // so a click is one step and a hold is that step continued.
                     // `Regions::step_at` is the geometry both halves read, which
@@ -528,6 +564,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     {
                         shell.held =
                             Some(Held::new(step, (mouse.column, mouse.row), Instant::now()));
+                    }
+                    // A press on the **track** takes hold of that bar instead,
+                    // and keeps it until the button comes up.
+                    if let Event::Mouse(mouse) = &event
+                        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                    {
+                        shell.grabbed = regions.grab_at(mouse.column, mouse.row);
                     }
                     let Some(action) = action_for(&event, regions) else {
                         // Not every event is a request. Redrawing for a key release
@@ -549,14 +592,18 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
                     let height = if action.needs_height() {
-                        let chrome =
-                            shell
-                                .app
-                                .chrome(&shell.name, shell.branch.as_deref(), shell.pressed());
+                        let chrome = shell.app.chrome(
+                            &shell.name,
+                            shell.branch.as_deref(),
+                            shell.pressed(),
+                            shell.gripped(),
+                            shell.scrolling,
+                        );
                         diff_height(shell.area()?, &chrome, frame.files().len())
                     } else {
                         0
                     };
+                    shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
                         // Out of the batch *and* out of the loop, without the draw
@@ -630,6 +677,16 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     Ok(())
 }
+
+/// How long the direction arrows stay lit after the last scroll.
+///
+/// **Long enough to survive the gap between two key repeats, short enough that a
+/// reader who stopped does not see a claim about the past.** A terminal's own key
+/// repeat runs near 30ms once it gets going and its first gap is far longer, so
+/// this covers the steady stream and expires on the pause. It is the only number
+/// here that is a feel judgement rather than a measurement, and it is stated as
+/// one.
+pub const SCROLL_LINGER: std::time::Duration = std::time::Duration::from_millis(220);
 
 /// Wakes taken in one go, so one gesture costs one paint.
 ///
@@ -727,12 +784,90 @@ struct Shell {
     /// put a gesture's lifetime inside the thing the gesture moves. The paint
     /// reads it to light the pressed button and nothing else does.
     held: Option<Held>,
+    /// The bar a drag is currently moving, if one is.
+    ///
+    /// **Separate from [`Shell::held`] because they are different gestures on the
+    /// same column.** A press on a step button repeats on a clock; a press on the
+    /// track seeks, and keeps seeking wherever the pointer goes until it is let
+    /// go. Only one can be armed at a time, because only one press starts them.
+    grabbed: Option<Grabbed>,
+    /// Which way the viewport is currently being moved, and until when.
+    ///
+    /// **The one lit thing on this screen that nobody is touching.** A reader
+    /// scrolling with `j` or `d` gets the matching arrow lit, because the arrows
+    /// are the element whose whole job is *which way* and there is no reason the
+    /// keyboard should not reach them.
+    ///
+    /// It needs an expiry where the other two gestures do not, and that is the
+    /// honest cost: a release ends a hold and a key burst simply stops, sending
+    /// nothing. Without `scrolling_until` the last arrow of a burst would stay
+    /// lit forever on an idle tree, which is exactly the staleness §11.2 B10
+    /// refused a hover highlight for. The clock that clears it is bounded by the
+    /// burst that armed it, fires once, and is the same one `Held` uses.
+    scrolling: Option<isize>,
+    /// When the mark above stops being true.
+    scrolling_until: Option<Instant>,
 }
 
 impl Shell {
     /// The cell a step button is being held on, for the frame that draws it lit.
     fn pressed(&self) -> Option<(u16, u16)> {
         self.held.map(Held::at)
+    }
+
+    /// The first row of the region whose bar is being dragged, for the frame that
+    /// draws its thumb lit.
+    fn gripped(&self) -> Option<u16> {
+        self.grabbed.map(|on| on.top(self.regions))
+    }
+
+    /// How long the loop may block before something here has to act.
+    ///
+    /// **`None` is the whole invariant, and it is why both clocks are asked
+    /// through one function.** With nothing held and nothing lingering this
+    /// returns `None`, the receive below is untimed, and I1's *0 wakeups while
+    /// idle* is a fact about the structure rather than about care taken
+    /// elsewhere. Two clocks asked separately is two chances to leave a deadline
+    /// armed on an idle monitor; asked together there is one place to be wrong
+    /// and one place to gate.
+    ///
+    /// Where both are armed it is the nearer of the two, because the loop has to
+    /// wake for whichever comes first.
+    fn patience(&self, now: Instant) -> Option<std::time::Duration> {
+        input::patience(self.held, self.scrolling_until, now)
+    }
+
+    /// Note which way an action is moving the viewport, so the bar can say so.
+    ///
+    /// Only the actions that move it, and only their direction: a jump to a file
+    /// or a drag of the thumb is not a direction the arrows can honestly draw.
+    fn note_scroll(&mut self, action: Action, now: Instant) {
+        let way = match action {
+            Action::Scroll(by) | Action::Page(by) | Action::HalfPage(by) | Action::File(by) => {
+                by.signum()
+            }
+            Action::Top => -1,
+            Action::Bottom => 1,
+            _ => return,
+        };
+        if way == 0 {
+            return;
+        }
+        self.scrolling = Some(way);
+        self.scrolling_until = Some(now + SCROLL_LINGER);
+    }
+
+    /// Clear the direction mark once its burst has stopped.
+    ///
+    /// Returns whether anything changed, so the caller repaints only on the frame
+    /// that actually turns it off.
+    fn settle_scroll(&mut self, now: Instant) -> bool {
+        if self.scrolling_until.is_some_and(|until| now >= until) {
+            self.scrolling = None;
+            self.scrolling_until = None;
+            return true;
+        }
+        false
     }
 
     /// The drawable area of the terminal right now.
@@ -823,9 +958,13 @@ impl Shell {
         // number `View::collect` will report as `View::files`, which is what
         // keeps this row budget and the renderer's layout in agreement: `render`
         // recomputes the same split from the same two inputs.
-        let chrome = self
-            .app
-            .chrome(&self.name, self.branch.as_deref(), self.pressed());
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            self.pressed(),
+            self.gripped(),
+            self.scrolling,
+        );
         let body = body_layout(self.area()?, &chrome, frame.files().len());
         match self
             .app
@@ -856,9 +995,13 @@ impl Shell {
         // that can disagree. Reading the branch from the stale view instead
         // would mean holding a name across frames, which is the confident lie
         // `branch_for` refuses.
-        let chrome = self
-            .app
-            .chrome(&self.name, self.branch.as_deref(), self.pressed());
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            self.pressed(),
+            self.gripped(),
+            self.scrolling,
+        );
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
@@ -1249,8 +1392,16 @@ mod tests {
             "the loop reaches `recv_timeout` before it has decided whether \
              anything is held, so an idle monitor is being given a deadline"
         );
+        // **Two clocks now, and one function that answers for both.** A second
+        // deadline asked separately would be a second chance to leave one armed
+        // on an idle monitor, and the gate above can only see the branch, not
+        // what fed it.
         assert!(
-            code.contains("match Held::wait(shell.held, Instant::now())"),
+            code.contains("input::patience(self.held, self.scrolling_until, now)"),
+            "`Shell::patience` is gone, so the two clocks are being asked              separately and nothing decides *is there a timer at all* in one place"
+        );
+        assert!(
+            code.contains("match shell.patience(Instant::now())"),
             "the loop no longer decides how long to wait through `Held::wait`, so \
              the one function that can answer *is there a timer at all* is not the \
              one being asked"

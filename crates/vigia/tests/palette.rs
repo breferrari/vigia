@@ -22,6 +22,8 @@ use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 fn chrome() -> Chrome {
     Chrome {
         pressed: None,
+        gripped: None,
+        scrolling: None,
         worktree: "vigia".to_owned(),
         branch: None,
         mode: Mode::Watching,
@@ -362,6 +364,8 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         pulse: _,
         spark: _,
         bar: _,
+        // A gesture in progress, brighter than `bar` and never text.
+        bar_active: _,
         heat_added: _,
         heat_added_warm: _,
         heat_added_hot: _,

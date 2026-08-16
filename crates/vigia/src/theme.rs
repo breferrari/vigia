@@ -202,6 +202,20 @@ palette! {
     /// already collided with it once, and the first draft of this bar collided
     /// with it again the same day.
     bar,
+    /// The same mark while the reader is holding it.
+    ///
+    /// **Feedback for a gesture in progress, and it reuses a reading the eye has
+    /// already learned on this column.** A step button held down and a thumb
+    /// being dragged both take this, so *lit* means the same thing in both
+    /// places: you are doing this right now. Brighter than [`Theme::bar`] rather
+    /// than a different hue, because the element has not changed meaning, only
+    /// state.
+    ///
+    /// It is also what the arrows take while the keys scroll, which is the one
+    /// case where nothing is being held at all: `j` moving the viewport down
+    /// lights the down arrow for as long as the burst lasts, so the bar answers
+    /// the keyboard the way it answers the mouse.
+    bar_active,
     /// The unfilled part, which is drawn rather than left blank.
     ///
     /// A bar with no track is a mark floating in space: a reader cannot tell a
@@ -497,6 +511,7 @@ impl Theme {
             // would be one colour drawing two meanings. Grey is what this palette
             // already uses for everything structural.
             bar: fg(Color::Gray),
+            bar_active: fg(Color::White),
             bar_track: fg(Color::DarkGray),
             // **The one place colour 8 is the right answer**, and the exception
             // proves the rule that sent everything else to `DIM`. A track is not
@@ -603,6 +618,7 @@ impl Theme {
             // [#78](https://github.com/breferrari/vigia/issues/78) exists to remove.
             spark_track: rgb(0x6e, 0x76, 0x81),
             bar: rgb(0x8b, 0x94, 0x9e),
+            bar_active: rgb(0xc9, 0xd1, 0xd9),
             // **`#57606a`, and it was `#21262d` until 2026-08-16, which was
             // invisible.** Reported from use: the scrollbar's track and its step
             // buttons could not be seen at all, and a button appeared only while
@@ -720,6 +736,7 @@ impl Theme {
             // `#afb8c1` was 2.01:1, under the block it is meant to outrank.
             spark_track: rgb(0x7d, 0x85, 0x90),
             bar: rgb(0x59, 0x63, 0x6e),
+            bar_active: rgb(0x24, 0x29, 0x2f),
             // `#8c959f` at 3.04:1 on white, where `#d0d7de` was **1.45:1** and
             // invisible for the same reason the dark palette's was. See the note
             // on `Theme::dark`'s `bar_track`; the two were wrong together and are

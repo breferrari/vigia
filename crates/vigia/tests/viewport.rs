@@ -38,7 +38,7 @@ const SPAN: usize = 4;
 fn body() -> usize {
     diff_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, None),
+        &App::new().chrome("fixture", None, None, None, None),
         FILES,
     )
 }
