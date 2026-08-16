@@ -208,7 +208,7 @@ const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
 
 /// The block one heat slice is drawn as, restated for the same reason as
 /// [`RAMP`].
-const HEAT_SLICE: char = '▪';
+const HEAT_SLICE: char = '■';
 
 /// What a sparkline bucket nothing was written in draws, restated for [`RAMP`]'s
 /// reason.
@@ -2545,10 +2545,16 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
 
     for (name, view, chrome) in cases() {
         for width in WIDTHS {
+            // **Both hoisted out of the row loop**, which is where they were:
+            // neither depends on `y`, so the screen was being drawn six times per
+            // width to read six of its rows. Twelve cases over a hundred and
+            // twenty widths made that seventeen thousand renders where under
+            // three thousand say the same thing.
+            let backend = drawn(width, 6, &view, &chrome);
+            let rows = rows_at(width, 6, &view, &chrome);
             for y in 0..6u16 {
-                let backend = drawn(width, 6, &view, &chrome);
                 let buckets = spark_slot(&backend, y, &theme);
-                let row = rows_at(width, 6, &view, &chrome)[usize::from(y)].clone();
+                let row = &rows[usize::from(y)];
                 assert!(
                     buckets <= 8,
                     "{name}: {buckets} buckets at {width} columns, over the eight \

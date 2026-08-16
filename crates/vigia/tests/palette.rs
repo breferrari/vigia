@@ -13,7 +13,9 @@
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::style::Color;
+use std::collections::HashSet;
+
+use ratatui::style::{Color, Style};
 use vigia::{
     Chrome, Depth, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
 };
@@ -21,7 +23,26 @@ use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
 /// The heat strip's slice, restated rather than imported: a test sharing the
 /// renderer's constant agrees with it by construction instead of checking it.
-const HEAT_SLICE: &str = "▪";
+const HEAT_SLICE: &str = "■";
+
+/// The sparkline's ramp, shortest first, restated for [`HEAT_SLICE`]'s reason
+/// and declared **once** for `tests/render.rs`'s: two copies in one binary check
+/// each other rather than the renderer, and they drift independently.
+const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/// Every stop of the sparkline's ramp, quietest first, with the key it came from.
+///
+/// [`heat_stops`]' sibling and named for the same reason that one is: adding a
+/// stop to the theme should be one edit here rather than three, and a missed one
+/// makes a gate quietly stop seeing a colour rather than fail. Three sites in
+/// this file spelled the triple out before it had a name.
+fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
+    [
+        ("spark", theme.spark),
+        ("spark_warm", theme.spark_warm),
+        ("spark_hot", theme.spark_hot),
+    ]
+}
 
 fn chrome() -> Chrome {
     Chrome {
@@ -721,12 +742,11 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
     let backend = draw(60, 4, &climbing(), theme);
     let buffer = backend.buffer();
 
-    let ramp = "▁▂▃▄▅▆▇█";
     let drawn: Vec<(usize, Option<Color>)> = (0..60)
         .map(|x| &buffer[(x, HEADING)])
         .filter_map(|cell| {
-            ramp.chars()
-                .position(|glyph| cell.symbol() == glyph.to_string())
+            RAMP.iter()
+                .position(|glyph| *glyph == cell.symbol())
                 .map(|rung| (rung, cell.style().fg))
         })
         .collect();
@@ -737,23 +757,33 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
     );
 
     // Rank, not identity: the claim is monotone, so it survives the stops moving.
-    let rank = |fg: Option<Color>| {
-        [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg]
-            .iter()
-            .position(|stop| *stop == fg)
-            .unwrap_or_else(|| panic!("a bucket was drawn in {fg:?}, which is no stop of the ramp"))
-    };
-    for pair in drawn.windows(2) {
-        let (short, tall) = (pair[0], pair[1]);
+    // Ranked once per bucket rather than once per comparison, which also puts the
+    // "no stop of the ramp" panic on the bucket that caused it.
+    let stops = spark_stops(&theme);
+    let ranked: Vec<(usize, usize)> = drawn
+        .iter()
+        .map(|&(rung, fg)| {
+            let rank = stops
+                .iter()
+                .position(|(_, style)| style.fg == fg)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the bucket at rung {rung} is drawn in {fg:?}, which is no stop of the ramp"
+                    )
+                });
+            (rung, rank)
+        })
+        .collect();
+
+    for pair in ranked.windows(2) {
+        let ((short, cooler), (tall, hotter)) = (pair[0], pair[1]);
         assert!(
-            rank(tall.1) >= rank(short.1),
-            "a bucket at rung {} is drawn cooler than the shorter one at rung {}              beside it, so the ramp runs backwards",
-            tall.0,
-            short.0
+            hotter >= cooler,
+            "the bucket at rung {tall} is drawn cooler than the shorter one at              rung {short} beside it, so the ramp runs backwards"
         );
     }
     assert!(
-        rank(drawn.last().expect("a bucket").1) > rank(drawn[0].1),
+        ranked.last().expect("a bucket").1 > ranked[0].1,
         "every bucket on a climbing row took one stop, so the ramp is flat"
     );
 }
@@ -772,15 +802,17 @@ fn the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them() {
     for (name, base) in [("dark", Theme::dark()), ("light", Theme::light())] {
         for depth in [Depth::Truecolor, Depth::Ansi256] {
             let theme = base.resolve(depth);
-            // Pairwise rather than through a set, because `Color` is not `Ord` and
-            // three values are cheaper to compare than to teach a total order.
-            let stops = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
-            for (a, b) in [(0, 1), (1, 2), (0, 2)] {
-                assert_ne!(
-                    stops[a], stops[b],
-                    "{name} at {depth:?} draws two sparkline stops alike: {stops:?}"
-                );
-            }
+            // Deduped rather than compared pairwise: `Color` is `Hash` as well as
+            // `Eq`, so three-into-a-set says the same thing in one assertion and
+            // keeps saying it if a fourth stop is ever added.
+            let stops = spark_stops(&theme);
+            let distinct: HashSet<Option<Color>> =
+                stops.iter().map(|(_, style)| style.fg).collect();
+            assert_eq!(
+                distinct.len(),
+                stops.len(),
+                "{name} at {depth:?} draws two sparkline stops alike: {stops:?}"
+            );
         }
     }
 
@@ -831,11 +863,7 @@ fn a_sparkline_track_is_never_the_colour_of_a_bucket() {
             // three values where it was one, and a gate that checked the first
             // would have let the other two collide with the track they are drawn
             // beside.
-            for (stop, style) in [
-                ("spark", theme.spark),
-                ("spark_warm", theme.spark_warm),
-                ("spark_hot", theme.spark_hot),
-            ] {
+            for (stop, style) in spark_stops(&theme) {
                 assert_ne!(
                     theme.spark_track.fg, style.fg,
                     "{name} at {depth:?} draws a track in {stop}'s own colour"
@@ -1025,7 +1053,7 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
         "the fixture's path carries an underscore, which this gate counts as a \n         track cell"
     );
 
-    let bars = row.iter().filter(|s| "▁▂▃▄▅▆▇█".contains(**s)).count();
+    let bars = row.iter().filter(|s| RAMP.contains(s)).count();
     let track = row.iter().filter(|s| **s == "_").count();
 
     assert_eq!(

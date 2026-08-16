@@ -122,7 +122,7 @@ fn spark_colours(theme: &Theme) -> Vec<Option<Color>> {
 
 /// The heat strip's slice, restated rather than imported for [`CONTINUES`]'
 /// reason.
-const HEAT_SLICE: &str = "\u{25aa}";
+const HEAT_SLICE: &str = "■";
 
 /// Every foreground a heat slice can take.
 ///

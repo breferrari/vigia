@@ -493,9 +493,11 @@ impl Theme {
 
     /// One rung of a three-stop ramp.
     ///
-    /// Written once and called three times rather than nine match arms, so a ramp
-    /// that ever draws its middle stop where its top belongs is one line to find
-    /// instead of three places to compare.
+    /// Written once and called four times rather than twelve match arms, so a
+    /// ramp that ever draws its middle stop where its top belongs is one line to
+    /// find instead of four places to compare. Three of the callers are
+    /// [`Theme::heat`]'s arms and the fourth is [`Theme::spark_at`], which is what
+    /// made the count in this sentence worth keeping current.
     fn band(&self, band: Band, low: Style, warm: Style, hot: Style) -> Style {
         match band {
             Band::Low => low,
@@ -707,10 +709,12 @@ impl Theme {
             // than `path_live`'s `#e6edf3` and a long way clear of unreadable.
             path_hover: rgb(0xa8, 0xb1, 0xbb).add_modifier(Modifier::UNDERLINED),
             pulse: rgb(0x39, 0xc5, 0xcf),
-            // Cyan, where the picture's sparkline is green. The picture draws a
-            // *ramp* there and we draw one colour, so it does not answer this; what
-            // does is that green already means addition two rows down, and a churn
-            // sparkline is about *when*, not *what*.
+            // Cyan, where the picture's sparkline is green. What decides the hue
+            // is that green already means addition two rows down, and a churn
+            // sparkline is about *when*, not *what*. This used to add that the
+            // picture "draws a ramp there and we draw one colour, so it does not
+            // answer this", which was true of the hue and became false of the
+            // ramp: #196 draws one.
             // **The quietest stop keeps today's value**, so a worktree nobody
             // is writing to looks exactly as it did and only the busy buckets
             // gain. Brighter as it climbs, which is this palette's direction for
