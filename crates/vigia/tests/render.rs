@@ -103,6 +103,27 @@ fn is_bar_glyph(symbol: &str) -> bool {
 /// two constants rather than two elements.
 const SPARK_TRACK: &str = "_";
 
+/// Every foreground a **written** sparkline bucket can take.
+///
+/// Three since [#196](https://github.com/breferrari/vigia/issues/196), where it
+/// was one: the sparkline ramps by height now, so a gate matching cells against
+/// `Theme::spark` alone would see the quietest third of a busy row and call the
+/// rest absent. One list for [`heat_colours`]' reason, one element over.
+///
+/// The track is deliberately **not** in it. An empty bucket is told apart by
+/// glyph, `_` against a block, which is what `Theme::spark_track`'s own docblock
+/// rules keeps that distinction a matter of shape.
+fn spark_colours(theme: &Theme) -> Vec<Option<Color>> {
+    [theme.spark, theme.spark_warm, theme.spark_hot]
+        .into_iter()
+        .map(|style| style.fg)
+        .collect()
+}
+
+/// The heat strip's slice, restated rather than imported for [`CONTINUES`]'
+/// reason.
+const HEAT_SLICE: &str = "\u{25aa}";
+
 /// Every foreground a heat slice can take.
 ///
 /// One list, because adding a band to the theme should be one edit here rather
@@ -1198,18 +1219,23 @@ fn the_glance_columns_agree_down_the_list() {
     // with, which nothing else on a list row draws. Read off the cells rather
     // than computed, because recomputing where the renderer put them would be
     // its own arithmetic agreeing with itself.
-    let spark = theme.spark.fg;
+    let spark = spark_colours(&theme);
     let heats_fg = heat_colours(&theme);
 
     let sparks: Vec<(u16, u16)> = (1..4u16)
         .filter_map(|y| {
-            column_where(&backend, y, |sym, fg| fg == spark && RAMP.contains(&sym)).map(|x| (y, x))
+            column_where(&backend, y, |sym, fg| {
+                spark.contains(&fg) && RAMP.contains(&sym)
+            })
+            .map(|x| (y, x))
         })
         .collect();
     let heats: Vec<(u16, u16)> = (1..4u16)
         .filter_map(|y| {
-            column_where(&backend, y, |sym, fg| sym == "█" && heats_fg.contains(&fg))
-                .map(|x| (y, x))
+            column_where(&backend, y, |sym, fg| {
+                sym == HEAT_SLICE && heats_fg.contains(&fg)
+            })
+            .map(|x| (y, x))
         })
         .collect();
     // Both halves, by where each ends. The fixture's paths carry neither sigil,
@@ -1256,13 +1282,16 @@ fn the_glance_columns_agree_down_the_list() {
 ///
 /// Colour and glyph together, for the reason [`blocks_of`] gives: the heat strip
 /// and a full sparkline bucket draw the same block, and `Theme::pulse` shares a
-/// foreground with `Theme::spark`, so neither alone identifies anything.
+/// foreground with `Theme::spark`, so neither alone identifies anything. The
+/// sparkline's colour is a ramp of three since #196, so the match is against
+/// the whole of it rather than its quietest stop.
 /// Takes a drawn backend rather than a view, the way every other reader helper
 /// in this file does, so a caller that also needs the cells does not render the
 /// same screen twice.
 fn glance_columns(backend: &TestBackend) -> Vec<String> {
     let theme = Theme::default();
     let heats = heat_colours(&theme);
+    let spark = spark_colours(&theme);
     let buffer = backend.buffer();
 
     (1..4u16)
@@ -1271,9 +1300,9 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
                 .map(|x| {
                     let cell = &buffer[(x, y)];
                     let (sym, fg) = (cell.symbol(), cell.style().fg);
-                    if sym == "█" && heats.contains(&fg) {
+                    if sym == HEAT_SLICE && heats.contains(&fg) {
                         'h'
-                    } else if RAMP.contains(&sym) && fg == theme.spark.fg {
+                    } else if RAMP.contains(&sym) && spark.contains(&fg) {
                         's'
                     } else if sym == SPARK_TRACK && fg == theme.spark_track.fg {
                         // Its own class rather than folded into `s`. A track and
@@ -2961,11 +2990,11 @@ fn glancing() -> View {
 /// and every heat slice are both `█`, so a symbol-only scan of a heading counts
 /// one strip as part of the other. Two tests here were written before the heat
 /// strip existed and started reading thirteen blocks the moment it landed.
-fn blocks_of(backend: &TestBackend, y: u16, colour: ratatui::style::Color) -> Vec<char> {
+fn blocks_of(backend: &TestBackend, y: u16, colours: &[Option<Color>]) -> Vec<char> {
     let buffer = backend.buffer();
     (0..buffer.area.width)
         .map(|x| &buffer[(x, y)])
-        .filter(|cell| cell.style().fg == Some(colour))
+        .filter(|cell| colours.contains(&cell.style().fg))
         .filter_map(|cell| cell.symbol().chars().next())
         .filter(|glyph| "▁▂▃▄▅▆▇█".contains(*glyph))
         .collect()
@@ -3010,7 +3039,7 @@ fn bars_at(backend: &TestBackend, y: u16, theme: &Theme) -> Vec<u16> {
     (0..buffer.area.width)
         .filter(|&x| {
             let cell = &buffer[(x, y)];
-            RAMP.contains(&cell.symbol()) && cell.style().fg == theme.spark.fg
+            RAMP.contains(&cell.symbol()) && spark_colours(&theme).contains(&cell.style().fg)
         })
         .collect()
 }
@@ -3053,7 +3082,7 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
     // §5 names as one of four differentiators was absent exactly when it
     // mattered most.
     let theme = Theme::default();
-    let spark = theme.spark.fg.expect("the sparkline has a colour");
+    let spark = spark_colours(&theme);
     let backend = screen(80, 5, &launched(), &chrome());
 
     let mut starts = Vec::new();
@@ -3078,7 +3107,7 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
         // **Nothing invented.** The track says "no churn in the window", and a
         // single bar would be a number the store never recorded.
         assert!(
-            blocks_of(&backend, y, spark).is_empty(),
+            blocks_of(&backend, y, &spark).is_empty(),
             "row {y} drew a sparkline bar for a file with no history, which is \
              churn the store cannot have"
         );
@@ -3128,7 +3157,7 @@ fn the_first_tick_after_launch_moves_no_column() {
          track"
     );
     assert_eq!(
-        blocks_of(&after, 1, theme.spark.fg.expect("a colour")),
+        blocks_of(&after, 1, &spark_colours(&theme)),
         vec!['█'],
         "one write against a screen peak of one is not the top of the ramp"
     );
@@ -3217,7 +3246,7 @@ fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
     let theme = Theme::default();
     let backend = screen(80, 5, &view, &chrome());
     assert_eq!(
-        blocks_of(&backend, 1, theme.spark.fg.expect("a colour")),
+        blocks_of(&backend, 1, &spark_colours(&theme)),
         vec!['█'; HISTORY_BUCKETS],
         "a bucket far busier than the screen's peak did not simply top out"
     );
@@ -3311,7 +3340,7 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
     // Non-vacuity from the other side: row 2 really does draw the ramp's floor
     // somewhere, or "not a rung" is being asserted about a row with no rungs.
     assert!(
-        blocks_of(&backend, 2, theme.spark.fg.expect("a colour")).contains(&'▁'),
+        blocks_of(&backend, 2, &spark_colours(&theme)).contains(&'▁'),
         "the fixture no longer draws the ramp's floor, so the comparison above \
          is not against the glyph the ruling is about"
     );
@@ -3448,13 +3477,10 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     // same full block, so a scan of the row's text counts a heat slice as a
     // sparkline bucket; this test passed on symbols alone until that strip
     // landed. See [`blocks_of`].
-    let spark = Theme::default()
-        .spark
-        .fg
-        .expect("the sparkline has a colour");
+    let spark = spark_colours(&Theme::default());
     let backend = screen(80, 5, &glancing(), &chrome());
-    let busiest = blocks_of(&backend, 1, spark);
-    let quieter = blocks_of(&backend, 2, spark);
+    let busiest = blocks_of(&backend, 1, &spark);
+    let quieter = blocks_of(&backend, 2, &spark);
 
     assert!(
         busiest.contains(&'█'),
@@ -3479,7 +3505,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     // was the whole assertion until then and it stays green against a renderer
     // that draws nothing at all: `blocks_of` cannot see a track.
     assert!(
-        blocks_of(&backend, 3, spark).is_empty(),
+        blocks_of(&backend, 3, &spark).is_empty(),
         "a file with no churn drew a sparkline bar, which is churn the store \
          cannot have"
     );
@@ -3528,7 +3554,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     .collect();
     let strip: Vec<_> = (0..120)
         .map(|x| &buffer[(x, 1)])
-        .filter(|cell| cell.symbol() == "█")
+        .filter(|cell| cell.symbol() == HEAT_SLICE)
         .filter_map(|cell| cell.style().fg)
         .filter(|fg| palette.contains(fg))
         .collect();

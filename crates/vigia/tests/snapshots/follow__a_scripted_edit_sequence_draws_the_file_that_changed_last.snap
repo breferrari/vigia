@@ -3,11 +3,11 @@ source: crates/vigia/tests/follow.rs
 expression: terminal.backend()
 ---
 " fixture · 3 changed                                   watching "
-"   M README.md               ████████████ ________    +1    -1  "
-"   M src/first.rs            ████████████ ________    +1    -1  "
-" ▸ M src/second.rs           ████████████ ________    +1    -1  "
+"   M README.md               ▪▪▪▪▪▪▪▪▪▪▪▪ ________    +1    -1  "
+"   M src/first.rs            ▪▪▪▪▪▪▪▪▪▪▪▪ ________    +1    -1  "
+" ▸ M src/second.rs           ▪▪▪▪▪▪▪▪▪▪▪▪ ________    +1    -1  "
 "────────────────────────────────────────────────────────────────"
-" M src/second.rs             ████████████ ________    +1    -1 ▲"
+" M src/second.rs             ▪▪▪▪▪▪▪▪▪▪▪▪ ________    +1    -1 ▲"
 " @@ -1 +1 @@                                                   │"
 " 1 - fn second() {}                                            │"
 " 1 + fn second() { let b = 2; }                                │"

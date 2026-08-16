@@ -208,7 +208,7 @@ const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
 
 /// The block one heat slice is drawn as, restated for the same reason as
 /// [`RAMP`].
-const HEAT_BLOCK: char = '█';
+const HEAT_SLICE: char = '▪';
 
 /// What a sparkline bucket nothing was written in draws, restated for [`RAMP`]'s
 /// reason.
@@ -268,9 +268,15 @@ fn cells_coloured(
 /// colour, or a block in the track's. Neither is ever drawn, and a helper that
 /// would count them is the loose selector this file's own doc warns about.
 fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme) -> usize {
-    let bars = theme.spark.fg.expect("the sparkline has a colour");
+    // **Every stop of the ramp**, which is three since #196 and was one. A
+    // helper reading only the quietest would count a busy row as mostly empty
+    // and the slot would look narrower than it is.
+    let bars: Vec<_> = [theme.spark, theme.spark_warm, theme.spark_hot]
+        .into_iter()
+        .filter_map(|style| style.fg)
+        .collect();
     let track = theme.spark_track.fg.expect("the track has a colour");
-    cells_coloured(backend, y, &[bars], &RAMP).len()
+    cells_coloured(backend, y, &bars, &RAMP).len()
         + cells_coloured(backend, y, &[track], &[TRACK]).len()
 }
 
@@ -1321,7 +1327,7 @@ fn the_glance_columns_collapse_in_one_order() {
     // the same block, and the pulse shares a foreground with the sparkline.
     // Restated rather than imported, the way `CONTINUES` and `FACT_JOIN` are: a
     // test that read the renderer's own table would agree with it by
-    // construction instead of checking it. `RAMP` and `HEAT_BLOCK` are *not*
+    // construction instead of checking it. `RAMP` and `HEAT_SLICE` are *not*
     // restated here, because this file already declares them at the top and a
     // second copy would check the first copy rather than the renderer.
     const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
@@ -1422,7 +1428,7 @@ fn the_glance_columns_collapse_in_one_order() {
         // these two counts. A fourth hand-rolled walk would be a fourth spelling
         // of "is this cell a heat slice", and the one that drifts is the one
         // nobody is reading.
-        let heat = cells_coloured(&backend, y, &heats, &[HEAT_BLOCK]).len();
+        let heat = cells_coloured(&backend, y, &heats, &[HEAT_SLICE]).len();
         // The whole slot, bars and track together: the ladder is about how many
         // columns the element is given, and since #78 an empty bucket fills its
         // column rather than leaving it. Counting bars alone happens to agree
@@ -2075,7 +2081,7 @@ fn the_readouts_take_every_width_that_can_hold_them() {
     //
     // Written against what is drawn rather than against the arithmetic that
     // decides it, which would be the formula agreeing with itself. The rung
-    // widths are restated for the reason `RAMP` and `HEAT_BLOCK` are: a test
+    // widths are restated for the reason `RAMP` and `HEAT_SLICE` are: a test
     // sharing the renderer's own constants cannot disagree with it.
     const PAIR: usize = 11 + 2 + 6;
     const GAP: usize = 2;
@@ -2938,7 +2944,7 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
         let backend = drawn(width, 6, &view, &following());
 
         // Row 1 is the first file heading; the header is row 0.
-        let strip = cells_coloured(&backend, 1, &heat_colours(&theme), &[HEAT_BLOCK]);
+        let strip = cells_coloured(&backend, 1, &heat_colours(&theme), &[HEAT_SLICE]);
 
         if strip.is_empty() {
             continue;
