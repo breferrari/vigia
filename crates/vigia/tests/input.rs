@@ -956,7 +956,7 @@ fn a_repeat_that_falls_far_behind_never_asks_the_loop_to_spin() {
 
 #[test]
 fn a_hold_ends_on_release_on_a_key_and_on_a_pointer_that_moved() {
-    // The four ways out, and the third is the one that closes a hole. `Moved` is
+    // The five ways out, and the third and the fifth close holes. `Moved` is
     // motion *with no button down*, so it is positive evidence of a release
     // rather than an absence of evidence, and it is what catches an `Up` that
     // never arrived: without it a lost release leaves the loop stepping until
@@ -1283,7 +1283,7 @@ fn a_grip_ends_on_anything_that_is_not_more_of_the_same_drag() {
     //
     // Coarser than `Held::ends` on purpose: a grip is already the answer to
     // *what is this gesture about*, so anything that is not more of the same
-    // gesture finishes it, and there are no four cases to tell apart.
+    // gesture finishes it, and there are no five cases to tell apart.
     assert!(
         !Grabbed::ends(&at(MouseEventKind::Drag(MouseButton::Left), 79, 12)),
         "a left drag ended the grip it is continuing"

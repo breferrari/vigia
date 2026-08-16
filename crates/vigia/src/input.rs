@@ -430,7 +430,7 @@ impl Grabbed {
     ///
     /// **Only a left-drag continues a grip**, so a release, any key, and a
     /// pointer that moved with nothing down all end it. That is deliberately
-    /// coarser than [`Held::ends`], which has to distinguish four cases: a grip
+    /// coarser than [`Held::ends`], which has to distinguish five cases: a grip
     /// is *already* the answer to "what is this gesture about", so anything that
     /// is not more of the same gesture finishes it.
     pub fn ends(event: &Event) -> bool {
