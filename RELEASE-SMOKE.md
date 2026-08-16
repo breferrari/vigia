@@ -1,5 +1,17 @@
 # Release smoke — run against the built artifact, before the release is dispatched
 
+> [!IMPORTANT]
+> **This is not how a release is performed.** The release is one command, and it
+> lives in `CLAUDE.md`: dispatch the `bump and release` workflow. This file is
+> the **human pre-flight** that goes with it, and most of its boxes need a person
+> at a terminal on three platforms, killing the process from another pane and
+> watching what the terminal does next. Nothing here can be ticked by an agent.
+>
+> Read it before a release that changes packaging, installation or the terminal
+> takeover. It is not a gate to clear before every dispatch, and treating it as
+> the procedure has cost a session: it is the only release-shaped document in the
+> repository root, so it is what a reader finds first.
+
 CI green is necessary and not sufficient. A sibling project shipped two
 consecutive patches with a green matrix that broke the flagship install on day
 one, and its fix was this checklist's ancestor.
