@@ -84,7 +84,7 @@ pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{
     Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE,
-    WHEEL_ROWS, action_for, drag_action, hover_after, patience, scroll_mark,
+    WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
 };
 pub use render::{
     Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
@@ -533,6 +533,15 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // resolving after it would leave the mark answering the
                     // pointer's last *click* rather than its position.
                     //
+                    // **The position is load-bearing against the drag block too,
+                    // and that is the less obvious half.** A `Drag` that
+                    // `drag_action` accepts `continue`s from inside that block,
+                    // so moving this below it would skip resolution on every
+                    // applied drag and leave the mark lit for the whole gesture,
+                    // which is exactly what `hover_after`'s drag arm exists to
+                    // prevent. Order against `Held::ends` above is free; order
+                    // against the block below is not.
+                    //
                     // The whole rule is in `hover_after` rather than here, for
                     // the reason `Held::ends` is a free function: this loop
                     // cannot be driven by a test, and a rule written inline is a
@@ -808,11 +817,17 @@ struct Shell {
     /// [`Shell::held`]'s reason**: where a pointer is, is a fact about the
     /// terminal rather than about the viewport, and `App` owns the viewport.
     ///
-    /// It needs neither an expiry nor an end, which is the whole of §11.1's
-    /// three-mark rule arriving at its third case: a hold ends with an `Up`, a
-    /// key burst has no end and takes a clock, and this is retired by its
-    /// **replacement**, because the next mouse event says where the pointer is
-    /// now. [`hover_after`] is that rule and is where it is gated.
+    /// It needs no clock, which is §11.1's three-mark rule arriving at its third
+    /// case: a hold ends with an `Up`, a key burst has no end and takes a clock,
+    /// and this is retired by its **replacement**, because the next mouse event
+    /// says where the pointer is now.
+    ///
+    /// **The rule is in two functions, and both are free functions so that both
+    /// have gates.** [`hover_after`] answers *what does this event do to the
+    /// mark*, and [`hover_repainted`] answers *what does a repaint do to it*,
+    /// which is a different question with a different subject: the first is
+    /// about the pointer moving, the second about the screen moving underneath a
+    /// pointer that did not.
     ///
     /// `None` is both *not over anything* and *the window is not focused*, which
     /// are the same drawn result and are deliberately not distinguished: the
@@ -857,36 +872,19 @@ impl Shell {
         self.grabbed.map(|on| on.top(self.regions))
     }
 
-    /// What the pointer is over, for the frame that marks it, **re-validated
-    /// against the layout that is on screen**.
+    /// What the pointer is over, for the frame that marks it.
     ///
-    /// **The obvious version of this returned the field, and it was wrong.** The
-    /// argument for it was that keeping a *cell* rather than a target makes a
-    /// relayout harmless, since a cell the pointer rests on is the same cell
-    /// whichever region comes to own it, so the worst a moved layout could do is
-    /// draw no mark. That holds only while the pointer is still there, and
-    /// §11.1's clearing ladder has an accepted residual where it is not: a
-    /// reader whose pointer has left the pane keeps the mark until they come
-    /// back.
+    /// A plain read. The staleness this would otherwise have to carry is handled
+    /// where the layout actually moves: [`hover_repainted`] retires the mark
+    /// inside the paint that changes the geometry, so anything reaching this
+    /// accessor was resolved against the screen that is on show.
     ///
-    /// In that state a relayout **can** move a different control under the
-    /// stored cell. Concretely: the list is six rows and its down button is at
-    /// row 6, the pointer rests there and leaves; the agent reverts two files,
-    /// the list becomes four rows, and row 6 is now the *diff's up button*. The
-    /// mark would light a control on the other bar that was never hovered, which
-    /// is worse than a stale mark and is exactly what §11.1 does not price.
-    ///
-    /// So the cell is checked against the current layout before it is drawn, and
-    /// a cell that is no longer the button it was resolved as marks nothing.
-    /// **It closes the case one frame late**, because `regions` is the geometry
-    /// of the paint that already happened, so a relayout draws its own frame
-    /// before this can see it. That is a bounded, self-clearing wrongness where
-    /// the alternative was an unbounded one, and re-resolving the *position*
-    /// instead would answer against a layout the pointer was never over.
+    /// **Two narrower rules were tried in this function first and both were
+    /// wrong.** The reasoning is recorded on `hover_repainted` rather than here,
+    /// because the second of them was a tautology that read as a fix, and a
+    /// reader who finds this accessor plain deserves to know it was not always.
     fn hovered(&self) -> Option<Hovered> {
-        let mark = self.hovered?;
-        let Hovered::Button(column, row) = mark;
-        (self.regions.hover_at(column, row) == Some(mark)).then_some(mark)
+        self.hovered
     }
 
     /// How long the loop may block before something here has to act.
@@ -1080,6 +1078,13 @@ impl Shell {
             painted = render::regions(area, &chrome, screen);
             render(f.buffer_mut(), area, screen, theme, &chrome);
         })?;
+        // **A hover mark does not outlive a relayout, and this is where that is
+        // decided.** It has to be here rather than in `Shell::hovered` for a
+        // reason I1 supplies: a mark left wrong "for one frame" is left wrong
+        // until something writes to the worktree, and on an idle tree that is
+        // never. Retiring it inside the paint that moved the bars bounds the
+        // staleness by the event that caused it.
+        self.hovered = hover_repainted(self.hovered, self.regions, painted);
         self.regions = painted;
         Ok(())
     }

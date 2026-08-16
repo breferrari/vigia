@@ -325,12 +325,19 @@ pub enum Hovered {
 /// §11.1 states the rule this implements: a mark is retired by whatever the
 /// program can still observe about its subject, and a hover's subject **moves**
 /// rather than ending, so what retires it is the next observation of where the
-/// pointer is. Three cases, and the third is the one that is not obvious:
+/// pointer is. Four cases, and the last two are the ones that are not obvious:
 ///
-/// - **Any mouse event re-resolves.** Motion, press, drag, release and the wheel
-///   all carry a column and a row, so all of them place the mark, and one that
-///   lands on no target clears it. There is no need to single out `Moved`: an
-///   event that says where the pointer is *is* the observation.
+/// - **Any mouse event that is not a drag re-resolves.** Motion, press, release
+///   and the wheel all carry a column and a row, so all of them place the mark,
+///   and one that lands on no target clears it. There is no need to single out
+///   `Moved`: an event that says where the pointer is *is* the observation.
+/// - **A drag clears it, and is the one mouse event that does not re-resolve.**
+///   A reader pulling a grabbed thumb travels over the step button at that end
+///   of the track, and lighting it would promise a step that releasing there
+///   will not perform, because [`Grabbed`] owns the gesture until the button
+///   comes up. That is `Grabbed`'s own doctrine one mark over: a gesture
+///   outlives the target it began on. Nothing is left stuck dark, because the
+///   `Up` that ends the drag carries a position and re-arms the mark.
 /// - **[`Event::FocusLost`] clears it.** The window is gone, so the pointer's
 ///   last known position has stopped being a claim about anything. This is the
 ///   rung `TAKEOVER` gained a step for, and without that step this arm never
@@ -355,6 +362,44 @@ pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Opt
         Event::FocusLost => None,
         _ => was,
     }
+}
+
+/// The mark after a paint, given the layout before it and the layout it drew.
+///
+/// **A mark outlives a frame; it does not outlive a relayout.** [`hover_after`]
+/// resolves against the geometry on screen, so the mark is only ever a claim
+/// about *that* screen. When a tick moves the bars, every cell it named may now
+/// belong to something else, and §11.1's clearing ladder has an accepted
+/// residual where the pointer is no longer there to say so.
+///
+/// **Two narrower rules were tried first and both were wrong**, which is worth
+/// keeping because each looked sufficient:
+///
+/// - *Keep the cell and trust it.* The argument was that a cell the pointer
+///   rests on is the same cell whichever region comes to own it, so a relayout
+///   could only ever draw **no** mark. That holds while the pointer is there and
+///   fails in exactly the residual: a list of six with its down button on row 6,
+///   the pointer resting and leaving, two files reverted, and row 6 is now the
+///   *diff's up button*, lit without ever having been hovered.
+/// - *Re-validate the cell against the new layout.* That is what this replaced,
+///   and it was a **tautology**: `Regions::hover_at` builds its answer out of its
+///   own arguments, so `hover_at(c, r) == Some(mark)` reduces to
+///   `hover_at(c, r).is_some()`. It catches *this is no longer a button* and is
+///   blind to *this is now a different button*, which is the whole case.
+///
+/// So the rule does not try to tell one button from another: **any change to the
+/// layout retires the mark**, and the next motion re-arms it against geometry
+/// that is current. The cost is a mark dropped while it was still correct, when
+/// a write moves the bars under a pointer that has not left, and that is the
+/// conservative direction: the mark says *the pointer is here*, and after a
+/// relayout nothing in this process knows whether it still is.
+///
+/// Called from the paint rather than from the next frame's chrome, so the
+/// staleness cannot outlive the frame that caused it. That matters because on an
+/// idle tree there is no next frame: I1 means a wrong mark left for "one frame"
+/// could sit lit for as long as nobody writes to the worktree.
+pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) -> Option<Hovered> {
+    (before == after).then_some(was).flatten()
 }
 
 /// Which region a drag that is already under way belongs to.
@@ -586,8 +631,8 @@ impl Held {
 
     /// Whether `event` ends the hold.
     ///
-    /// Four ways, and the third is the one that closes a hole rather than
-    /// stating the obvious:
+    /// Five ways, and the third and the fifth are the ones that close a hole
+    /// rather than stating the obvious:
     ///
     /// - **A release.** The ordinary case, and any button rather than the left
     ///   one, because a reader who has pressed a second button is done with this

@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use vigia::{
     Action, Grabbed, Held, Hovered, LIST_ROWS, Region, Regions, SCROLL_LINGER, STEP_DELAY,
-    STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, patience,
-    scroll_mark,
+    STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
+    patience, scroll_mark,
 };
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
@@ -1221,6 +1221,61 @@ fn only_a_press_on_a_track_takes_hold_of_a_bar() {
 }
 
 #[test]
+fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
+    // **The rule that could not be gated until it moved out of `Shell`.** Round
+    // one put it in `Shell::hovered`, which owns a `Session` and can therefore
+    // never be reached by a test: mutating the body back to a plain field read
+    // passed the entire workspace. It is `hover_repainted` now, and this is what
+    // that bought.
+    //
+    // The mark is a claim about the screen it was resolved against. When a tick
+    // moves the bars, every cell it named may belong to something else, and
+    // §11.1's clearing ladder has an accepted residual where the pointer is no
+    // longer there to say otherwise.
+    let before = two_regions();
+    let mark = Some(Hovered::Button(79, 5));
+
+    // Same layout, same mark: a paint that changed nothing changes nothing.
+    assert_eq!(hover_repainted(mark, before, before), mark);
+
+    // **Any change at all retires it, and the rule deliberately does not try to
+    // tell one button from another.** The version that did was a tautology:
+    // `hover_at` builds its answer out of its own arguments, so re-validating a
+    // cell against the new layout reduces to "is this still a button" and is
+    // blind to "is this now a *different* button", which is the whole case.
+    let grown = Regions {
+        list: Region::bare(1, 5),
+        ..before
+    };
+    let moved_bar = Regions {
+        bar: Some(60),
+        ..before
+    };
+    let no_bar = Regions {
+        bar: None,
+        ..before
+    };
+    for (name, after) in [
+        ("the list grew", grown),
+        ("the bar moved column", moved_bar),
+        ("the bar went away", no_bar),
+        ("everything went away", Regions::default()),
+    ] {
+        assert_eq!(
+            hover_repainted(mark, before, after),
+            None,
+            "{name} and the mark survived, so it is a claim about a screen that \
+             is no longer on show"
+        );
+    }
+
+    // Nothing is not something: a paint with no mark to carry stays empty
+    // whatever the layout did.
+    assert_eq!(hover_repainted(None, before, grown), None);
+    assert_eq!(hover_repainted(None, before, before), None);
+}
+
+#[test]
 fn a_grip_ends_on_anything_that_is_not_more_of_the_same_drag() {
     // **The one retirement rule no test could drive until #186 moved it.** It
     // sat inline in `run` from #183, and the pass that argued a rule written
@@ -1354,16 +1409,19 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     // grabbed thumb travels over the step button at that end of the track;
     // lighting it would promise a step that releasing there does not perform,
     // because `Grabbed` owns the gesture until the button comes up.
-    assert_eq!(
-        hover_after(
-            &at(MouseEventKind::Drag(MouseButton::Left), 79, 19),
-            regions,
-            button
-        ),
-        None,
-        "a drag over a step button lit it, promising a step the release will \
-         not make"
-    );
+    //
+    // **Any button, not just the left one**, which is the mutation that survived
+    // the first version of this: `Drag(_)` narrowed to `Drag(MouseButton::Left)`
+    // passed the whole suite. A drag is a gesture whichever button is down, and
+    // `Held::ends` two functions over already takes that view of a release.
+    for held in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+        assert_eq!(
+            hover_after(&at(MouseEventKind::Drag(held), 79, 19), regions, button),
+            None,
+            "a drag with {held:?} down lit a step button, promising a step the \
+             release will not make"
+        );
+    }
 
     // **`FocusLost` clears it**, which is the rung `TAKEOVER` gained a step for.
     // Without `Step::FocusChange` this arm never fires on Unix, and a mark left
