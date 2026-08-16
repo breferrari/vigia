@@ -3283,9 +3283,22 @@ impl Painter<'_> {
         // here. **So the thumb is the same finding as a list row, one element
         // over**: it is a surface a click acts on with nowhere to draw a mark,
         // and it waits for the same ruling.
+        // **Three rungs here too, now that there is one to spend.** A drag beats
+        // a hover for the reason a press beats one on the buttons below: the
+        // brighter reading has to mean *you are doing this*, or the two states
+        // stop being tellable apart on the element a reader is actually moving.
+        //
+        // [#186](https://github.com/breferrari/vigia/issues/186) shipped this
+        // with no hover mark at all, reasoning that the thumb rests at
+        // [`Theme::bar`] and drags at [`Theme::bar_active`] with nothing
+        // between. That was true and the conclusion drawn from it was wrong: the
+        // missing rung was a thing to build rather than a reason to decline.
         let dragging = self.gripped == Some(area.y);
+        let hovering = self.hovered == Some(Hovered::Track(area.y));
         let thumb_style = if dragging {
             self.theme.bar_active
+        } else if hovering {
+            self.theme.bar_hover
         } else {
             self.theme.bar
         };
@@ -3356,7 +3369,7 @@ impl Painter<'_> {
                 let style = if held || keyed {
                     self.theme.bar_active
                 } else if hovered {
-                    self.theme.bar
+                    self.theme.bar_hover
                 } else {
                     self.theme.bar_track
                 };
@@ -3776,7 +3789,23 @@ impl Painter<'_> {
             area.y,
             &elide_head(label, room),
             room,
-            self.theme.recency(heading.recency),
+            // **The pointer's weight outranks the recency ladder, and it is a
+            // fourth reading rather than a louder one.** §5.3 rules that
+            // intensity carries recency and nothing else, so a hover that merely
+            // brightened would say *recent* about a file nothing had touched.
+            // [`Theme::path_hover`] sits above all three and underlines, which is
+            // a mark the ladder cannot produce at any depth, so the two stay
+            // tellable apart even on `ansi` where the colour headroom is nil.
+            //
+            // It answers on the **list's** rows only. `Hovered::Row` is resolved
+            // from the list region alone, and a diff heading's row is never
+            // inside it, so this comparison cannot light one: the diff is not
+            // clickable and a mark there would imply it is.
+            if self.hovered == Some(Hovered::Row(area.y)) {
+                self.theme.path_hover
+            } else {
+                self.theme.recency(heading.recency)
+            },
         );
     }
 

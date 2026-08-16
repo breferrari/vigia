@@ -344,6 +344,14 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         path,
         path_live,
         path_cold,
+        // Text, and the brightest of the four, so it is checked with the rest.
+        // It is also the one field here that carries a modifier as part of its
+        // meaning: `path_hover` underlines, which is what keeps it apart from
+        // `path` on this palette, where both are `White` with `BOLD` and colour
+        // has run out. `a_palette_never_draws_text_in_colour_8` is about the
+        // foreground, so the modifier rides along untested here and is gated in
+        // `tests/render.rs` where the row is actually drawn.
+        path_hover,
         kind,
         hunk,
         gutter,
@@ -367,6 +375,9 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         bar: _,
         // A gesture in progress, brighter than `bar` and never text.
         bar_active: _,
+        // A pointer at rest on the bar, between `bar` and `bar_active`, and a
+        // mark rather than text for the same reason they are.
+        bar_hover: _,
         heat_added: _,
         heat_added_warm: _,
         heat_added_hot: _,
@@ -400,6 +411,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         ("path", path),
         ("path_live", path_live),
         ("path_cold", path_cold),
+        ("path_hover", path_hover),
         ("gutter", gutter),
         ("kind", kind),
         ("hunk", hunk),
@@ -780,6 +792,11 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
                 ("path", theme.path),
                 ("path_live", theme.path_live),
                 ("path_cold", theme.path_cold),
+                // The fourth weight belongs here for the same reason the other
+                // three do: it is drawn on a path, so an underscore in a file
+                // name must not resolve to the sparkline's own track colour at
+                // any depth.
+                ("path_hover", theme.path_hover),
             ] {
                 // **Only the comparison that actually collides is skipped.**
                 // Skipping the whole rung would take `path` and `path_live` with

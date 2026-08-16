@@ -275,25 +275,44 @@ impl Regions {
     /// [#166](https://github.com/breferrari/vigia/issues/166) found two
     /// expressions of and reduced to one.
     ///
-    /// **Only a step button answers, and the limit is a missing rung rather
-    /// than a missing wire.** The rule a mark on this column has to keep is that
-    /// a click is brighter than a hover, and a button has three weights to spend
-    /// on it (`Theme::bar_track`, `Theme::bar`, `Theme::bar_active`) where the
-    /// thumb has two: it rests at `bar` and is dragged at `bar_active`, with
-    /// nothing in between. A hover drawn in `bar_active` would make a drag
-    /// indistinguishable from a pointer resting on the thumb.
+    /// **Three answers, and the order they are asked in is the whole of it.** A
+    /// step button, then the bar it sits on, then a listed file. The column is
+    /// tested before the list because the scrollbar is drawn *inside* whichever
+    /// region owns those rows, so asking the list first would mark a file the
+    /// reader is pointing past. That is [`Regions::grab_at`]'s ordering one
+    /// function up, for the same reason.
     ///
-    /// So the **thumb and the track are the same finding as a list row**, one
-    /// element over: surfaces a click acts on, licensed a mark by §11.1, with
-    /// nowhere to draw one until a rung is ruled. Both wait on
-    /// [#189](https://github.com/breferrari/vigia/issues/189), and this function
-    /// is where they will be added rather than a second one being written. When
-    /// they are, this stops being expressible through `step_at` alone, because a
-    /// track press seeks rather than steps.
+    /// **The diff's rows answer nothing**, which is the one region §11.1 keeps
+    /// unmarked: nothing there is clickable and a mark would imply it is.
+    ///
+    /// [#186](https://github.com/breferrari/vigia/issues/186) answered only for
+    /// a button, on the reasoning that the thumb rests at `Theme::bar` and drags
+    /// at `Theme::bar_active` with no rung between, so a hover there would tie
+    /// with a drag. The reasoning was right and the conclusion was not: *there is
+    /// no rung* is a reason to build one, which is what `Theme::bar_hover` and
+    /// `Theme::path_hover` are ([#189](https://github.com/breferrari/vigia/issues/189)).
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
-        self.step_at(column, row)
-            .is_some()
-            .then_some(Hovered::Button(column, row))
+        // **The bar's column first, for [`Regions::grab_at`]'s reason one
+        // function up**: the scrollbar is drawn *inside* whichever region owns
+        // those rows, so asking the list first would answer `Row` for a pointer
+        // resting on the bar and mark a file the reader is not pointing at.
+        if self.bar == Some(column) {
+            if self.step_at(column, row).is_some() {
+                return Some(Hovered::Button(column, row));
+            }
+            if self.list.along(row).is_some() {
+                return Some(Hovered::Track(self.list.top));
+            }
+            return self
+                .diff
+                .along(row)
+                .is_some()
+                .then_some(Hovered::Track(self.diff.top));
+        }
+        // A listed file, which is a surface a click acts on: it puts the diff at
+        // that file. The diff's own rows are deliberately absent, because
+        // nothing there is clickable and a mark would imply it is.
+        self.over_list(row).then_some(Hovered::Row(row))
     }
 }
 
@@ -316,6 +335,21 @@ impl Regions {
 pub enum Hovered {
     /// A step button, by the cell it is drawn on.
     Button(u16, u16),
+    /// A bar, by the first row of the region it belongs to.
+    ///
+    /// **The track and the thumb are one target**, because a press anywhere on a
+    /// track seeks: the surface a click acts on is the whole column, and the
+    /// thumb is what answers because it is what would move. Carried as the
+    /// region's first row rather than the pointer's, which is the key
+    /// `Chrome::gripped` already uses and what the drawer compares `area.y`
+    /// against.
+    Track(u16),
+    /// A listed file, by the screen row it is drawn on.
+    ///
+    /// A row rather than an index into the list, for the reason a button is a
+    /// cell: the drawer is handed a `Rect` per row and knows its own `y`, where
+    /// an index would make it re-derive which entry it was given.
+    Row(u16),
 }
 
 /// The mark after `event`, given the one before it.

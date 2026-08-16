@@ -31,6 +31,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use ratatui::style::{Modifier, Style};
 use vigia::{
     Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
     diff_height, regions, render,
@@ -4438,86 +4439,224 @@ fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
 }
 
 #[test]
-fn a_click_is_always_brighter_than_a_hover_and_the_thumb_carries_no_hover_mark() {
+fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
+    // **The anti-collision property, and the whole reason this design works.**
+    // The reader chose "brighten the row's text", and SPEC.md 5.3 rules that
+    // intensity carries recency *and nothing else*, so the obvious form of that
+    // would say **recent** about a file nothing had touched. `Theme::path_hover`
+    // is a fourth weight the ladder cannot reach: above all three, and
+    // underlined, which none of them are.
+    //
+    // Underline is what makes it hold where colour runs out. On `ansi` the
+    // brightest path is already `White` with `BOLD`, so a purely brighter mark
+    // would be a pulsing row exactly. That palette is the default, so this is
+    // the case the rule has to survive rather than an exotic one.
+    let theme = Theme::default();
+    let weight = |style: Style| (style.fg, style.add_modifier);
+
+    for (name, recency) in [
+        ("pulse", Recency::Pulse),
+        ("live", Recency::Live),
+        ("cold", Recency::Cold),
+    ] {
+        assert_ne!(
+            weight(theme.path_hover),
+            weight(theme.recency(recency)),
+            "a hovered row reads exactly like a {name} one, so the mark says \
+             something about the worktree instead of about the pointer"
+        );
+    }
+
+    // And the distinguishing channel is the modifier rather than the colour,
+    // asserted directly because on the default palette it is the only one left:
+    // `path_hover` underlines and no recency weight does.
+    assert!(
+        theme.path_hover.add_modifier.contains(Modifier::UNDERLINED),
+        "the hover weight stopped underlining, so on `ansi` it is a pulsing row"
+    );
+    for recency in [Recency::Pulse, Recency::Live, Recency::Cold] {
+        assert!(
+            !theme
+                .recency(recency)
+                .add_modifier
+                .contains(Modifier::UNDERLINED),
+            "a recency weight underlines, so it collides with the hover mark"
+        );
+    }
+
+    // **Drawn, and on the list's row rather than the diff's heading.** A diff
+    // heading goes through the same `file_row` drawer, so a mark keyed on the
+    // row alone would light one if the regions were ever confused.
+    let width = 80u16;
+    let height = 24u16;
+    let view = a_stepped_screen();
+    let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
+    let row = laid.list.top;
+
+    let path_weight = |chrome: &Chrome, y: u16| {
+        let backend = screen(width, height, &view, chrome);
+        (0..width)
+            .map(|x| weight(backend.buffer()[(x, y)].style()))
+            .filter(|w| *w == weight(theme.path_hover))
+            .count()
+    };
+
+    assert_eq!(
+        path_weight(&chrome(), row),
+        0,
+        "a row was drawn in the hover weight with nothing hovered"
+    );
+
+    let hovering = Chrome {
+        hovered: Some(Hovered::Row(row)),
+        ..chrome()
+    };
+    assert!(
+        path_weight(&hovering, row) > 0,
+        "a hovered row did not take the hover weight"
+    );
+
+    // Every other list row is untouched, so the mark is about one row and not
+    // the region.
+    for other in (laid.list.top + 1)..(laid.list.top + laid.list.rows) {
+        assert_eq!(
+            path_weight(&hovering, other),
+            0,
+            "hovering row {row} lit row {other} as well"
+        );
+    }
+}
+
+#[test]
+fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     // **The rule this column is drawn to, asserted as a rule rather than per
     // element.** A gesture has to outrank a pointer merely resting somewhere, or
     // the mark that says *you are doing this* stops being distinguishable from
-    // the one that says *you could*. The buttons honour it with three weights;
-    // the thumb has only two, `bar` at rest and `bar_active` under a drag, so it
-    // carries **no** hover mark at all rather than one that ties with the drag.
+    // the one that says *you could*.
     //
-    // That is the same finding as a list row, one element over: a surface a
-    // click acts on, with nowhere to draw a mark until #189 rules a rung. This
-    // gate is what fails if someone later gives the thumb `bar_active` on hover
-    // because it looks like an easy win.
+    // This replaced a gate asserting the thumb carried **no** hover mark, which
+    // was #186's reading of the same rule: the thumb rests at `bar` and drags at
+    // `bar_active`, so there was no rung between them and it shipped unmarked.
+    // The reader overturned that, and the fix was to build the rung
+    // (`Theme::bar_hover`) rather than keep declining for want of one.
     /// The thumb's glyph, restated rather than imported for [`CONTINUES`]' reason.
     const THUMB: &str = "█";
 
     let width = 64u16;
     let height = 24u16;
     let view = a_stepped_screen();
+    let theme = Theme::default();
     let x = width - 1;
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
 
-    // Every row of a track, hovered in turn, leaves every thumb cell at its
-    // resting weight. Swept rather than sampled, because a resolver that
-    // answered `Some` for one row in the middle would otherwise slip through.
-    //
-    // Asserted against the *resolver* rather than against drawn styles, and that
-    // is the stronger place: a style assertion would pass the day someone gave
-    // the thumb a hover mark in a colour that happened to equal its resting one.
-    // What this forbids is the mark existing at all on a surface with no rung.
-    for region in [laid.list, laid.diff] {
-        for row in region.track.0..region.track.0 + region.track.1 {
-            let hovering = laid.hover_at(x, row).is_some();
-            assert!(
-                !hovering,
-                "row {row} of a track answered a hover, and the thumb has no \
-                 rung to draw one in that a drag would still outrank"
-            );
-        }
-    }
+    // **Foreground and modifiers, which are the two things a rung is made of.**
+    // A drawn cell carries `bg` and `underline_color` resets that a theme entry
+    // does not, so whole-`Style` equality compares bookkeeping; and `fg` alone
+    // is not enough either, because on `ansi` the middle rung is a modifier.
+    let weight = |style: Style| (style.fg, style.add_modifier);
 
-    // And the resting column really does draw a thumb, so the sweep above is
-    // over rows that matter rather than over an empty column. Both regions,
-    // because the sweep covers both and an empty track would make its half a
-    // silent no-op.
-    let resting = screen(width, height, &view, &chrome());
-    let theme = Theme::default();
-    let thumb_rows = |region: Region| {
-        (region.track.0..region.track.0 + region.track.1)
-            .filter(|y| bar_at(&resting, *y) == THUMB)
-            .collect::<Vec<_>>()
+    // Three distinct weights, asserted rather than assumed: on a palette where
+    // two coincided, every ordering below would hold while saying nothing.
+    // **Whole styles rather than foregrounds, because on `ansi` the rung is a
+    // modifier.** Sixteen colours have nothing between `Gray` and `White`, so
+    // there the middle weight is `Gray` made bold, which reads brighter and is a
+    // different `Style` while being the same `fg`. A gate comparing foregrounds
+    // would have declared the ladder broken on the default palette.
+    assert_ne!(
+        weight(theme.bar_track),
+        weight(theme.bar_hover),
+        "rest vs hover"
+    );
+    assert_ne!(
+        weight(theme.bar_hover),
+        weight(theme.bar_active),
+        "hover vs gesture"
+    );
+    assert_ne!(
+        weight(theme.bar),
+        weight(theme.bar_hover),
+        "thumb rest vs hover"
+    );
+
+    // **The button, where a press has to win.** #166 added the pressed mark for
+    // the case where nothing else can answer, since pressing *up* at the top of
+    // a diff moves no row, and a hover outranking it would take that answer away
+    // in the one case it exists for.
+    let button = laid.diff.top;
+    let fg = |chrome: &Chrome| {
+        weight(screen(width, height, &view, chrome).buffer()[(x, button)].style())
     };
-    for (name, region) in [("the diff", laid.diff), ("the list", laid.list)] {
-        assert!(
-            !thumb_rows(region).is_empty(),
-            "the fixture drew no thumb on {name}, so sweeping its track proves \
-             nothing"
-        );
-    }
+    assert_eq!(fg(&chrome()), weight(theme.bar_track), "a button at rest");
+    assert_eq!(
+        fg(&Chrome {
+            hovered: Some(Hovered::Button(x, button)),
+            ..chrome()
+        }),
+        weight(theme.bar_hover),
+        "a hovered button did not take the middle rung"
+    );
+    assert_eq!(
+        fg(&Chrome {
+            hovered: Some(Hovered::Button(x, button)),
+            pressed: Some((x, button)),
+            ..chrome()
+        }),
+        weight(theme.bar_active),
+        "a hover outranked a press, which takes away the only answer a button \
+         has when pressing it moves no row"
+    );
 
-    // **The painter's half, and `SPEC.md` §11.1 names this test for it.** The
-    // sweep above asserts the *resolver* never answers on a track, which a
-    // painter is free to ignore: a drawer that lit a thumb whenever `hovered`
-    // held any cell inside its region would keep every assertion so far green.
-    // So hand the paint a mark pointing straight at a thumb row, the way a
-    // future `Hovered::Track` would, and require the thumb to stay at rest.
-    for region in [laid.diff, laid.list] {
-        for row in thumb_rows(region) {
-            let hovered = Chrome {
-                hovered: Some(Hovered::Button(x, row)),
-                ..chrome()
-            };
-            let backend = screen(width, height, &view, &hovered);
-            assert_eq!(
-                backend.buffer()[(x, row)].style().fg,
-                theme.bar.fg,
-                "a mark on thumb row {row} lit it, so a click on the thumb is no \
-                 longer brighter than a hover over it"
-            );
-        }
-    }
+    // **The thumb, where a drag has to win**, which is the half #186 could not
+    // express and the reason `bar_hover` exists.
+    let thumb_fg = |chrome: &Chrome, region: Region| {
+        let backend = screen(width, height, &view, chrome);
+        let seen: Vec<_> = (region.track.0..region.track.0 + region.track.1)
+            .filter(|y| bar_at(&backend, *y) == THUMB)
+            .map(|y| weight(backend.buffer()[(x, y)].style()))
+            .collect();
+        assert!(!seen.is_empty(), "the fixture drew no thumb to read");
+        seen
+    };
+
+    assert!(
+        thumb_fg(&chrome(), laid.diff)
+            .iter()
+            .all(|f| *f == weight(theme.bar)),
+        "a thumb was lit with nothing touching it"
+    );
+
+    let hovering = Chrome {
+        hovered: Some(Hovered::Track(laid.diff.top)),
+        ..chrome()
+    };
+    assert!(
+        thumb_fg(&hovering, laid.diff)
+            .iter()
+            .all(|f| *f == weight(theme.bar_hover)),
+        "a hovered bar did not light its thumb"
+    );
+    assert!(
+        thumb_fg(
+            &Chrome {
+                gripped: Some(laid.diff.top),
+                ..hovering.clone()
+            },
+            laid.diff
+        )
+        .iter()
+        .all(|f| *f == weight(theme.bar_active)),
+        "a hover outranked a drag on the thumb, so a hand moving the view reads \
+         the same as a pointer resting on it"
+    );
+
+    // **And hovering one bar leaves the other's thumb alone**, which is #166's
+    // both-bars defect one gesture over.
+    assert!(
+        thumb_fg(&hovering, laid.list)
+            .iter()
+            .all(|f| *f == weight(theme.bar)),
+        "hovering the diff's bar lit the list's thumb, and they share a column"
+    );
 }
 
 #[test]
