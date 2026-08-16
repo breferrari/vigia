@@ -512,7 +512,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // **Checked before the event is interpreted**, because a
                     // release is not an action and would otherwise fall through
                     // the `else` below with the repeat still armed. `Held::ends`
-                    // carries the four ways a hold finishes and why.
+                    // carries the five ways a hold finishes and why.
                     // **The regions the last paint actually drew.** A pointer is
                     // told what it is over by asking the same function `render`
                     // asks, against the view that is on screen, so the wheel can
@@ -1056,7 +1056,7 @@ impl Shell {
         // that can disagree. Reading the branch from the stale view instead
         // would mean holding a name across frames, which is the confident lie
         // `branch_for` refuses.
-        let chrome = self.app.chrome(
+        let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
             self.pressed(),
@@ -1069,6 +1069,7 @@ impl Shell {
         // the terminal.
         let (theme, screen) = (&self.theme, &self.screen);
         let mut painted = Regions::default();
+        let was = self.regions;
         self.session.screen().draw(|f| {
             let area = f.area();
             // Captured from inside the draw, because `Frame::area` is the size the
@@ -1076,15 +1077,23 @@ impl Shell {
             // between the two would leave a pointer told about a screen nobody
             // saw. Same seam #59 found on the other side.
             painted = render::regions(area, &chrome, screen);
+            // **A hover mark does not outlive a relayout, and it has to be
+            // retired here, between the layout and the paint that uses it.** The
+            // obvious placement is after the `draw`, and it does not work: the
+            // frame has already gone to the screen carrying the stale mark, and
+            // correcting the field only reaches the *next* paint. On an idle
+            // tree there is no next paint (I1), so a mark "wrong for one frame"
+            // is wrong until somebody writes to the worktree.
+            //
+            // The ordering here is not circular even though it looks it:
+            // `render::regions` reads the chrome's *heights* (the notice, the
+            // mode, the branch) and never its marks, so the layout is settled
+            // before the mark is judged against it, and the paint below sees the
+            // judged one.
+            chrome.hovered = hover_repainted(chrome.hovered, was, painted);
             render(f.buffer_mut(), area, screen, theme, &chrome);
         })?;
-        // **A hover mark does not outlive a relayout, and this is where that is
-        // decided.** It has to be here rather than in `Shell::hovered` for a
-        // reason I1 supplies: a mark left wrong "for one frame" is left wrong
-        // until something writes to the worktree, and on an idle tree that is
-        // never. Retiring it inside the paint that moved the bars bounds the
-        // staleness by the event that caused it.
-        self.hovered = hover_repainted(self.hovered, self.regions, painted);
+        self.hovered = chrome.hovered;
         self.regions = painted;
         Ok(())
     }
@@ -1438,6 +1447,30 @@ mod tests {
             code.contains("Wake::Signalled => break 'awake"),
             "the signalled wake no longer unconditionally leaves the loop, which is \
              what makes `signal`'s one-way escalation latch safe"
+        );
+
+        // **Order, again, and this one fixes the state and not the screen when it
+        // is wrong.** `hover_repainted` retires a mark the new layout has
+        // invalidated, and it has to run between `render::regions` and `render`.
+        // Placed after the `draw` it still compiles, still passes every other
+        // gate, and still leaves the stale mark on the glass: the frame carrying
+        // it has already gone out, and the corrected field only reaches the next
+        // paint, which on an idle tree never comes. That was the shipped
+        // behaviour until an audit read the two lines in order.
+        let layout = code
+            .find("render::regions(area, &chrome, screen)")
+            .expect("`draw` no longer computes the layout it is about to paint");
+        let retire = code
+            .find("hover_repainted(chrome.hovered")
+            .expect("`draw` no longer retires a hover mark the new layout invalidated");
+        let paint = code
+            .find("render(f.buffer_mut()")
+            .expect("`draw` no longer paints");
+        assert!(
+            layout < retire && retire < paint,
+            "the hover mark is retired outside the window between the layout and \
+             the paint, so a relayout draws a mark against geometry it was never \
+             resolved against and nothing repaints to correct it"
         );
 
         // **The idle receive is untimed, and that is I1's budget as a structure

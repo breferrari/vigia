@@ -651,6 +651,14 @@ impl Held {
     ///   control ends it. Resuming on re-entry is what a desktop scrollbar does
     ///   and is deliberately not done here, because it needs a suspended state
     ///   this module has nowhere to put.
+    /// - **The window losing focus.** The fifth, and the one this list was short
+    ///   by until [#186](https://github.com/breferrari/vigia/issues/186). A
+    ///   release is not the only way a gesture ends: a reader who tabs away with
+    ///   a button down sends no `Up`, and the repeat went on stepping and
+    ///   repainting a pane nobody was looking at. It is owed to I1's second
+    ///   condition, that a clock may not outlive the gesture that armed it, and
+    ///   it was reachable on Windows from the day the repeat shipped, because
+    ///   that console delivers the event whether or not anyone asks.
     pub fn ends(self, event: &Event, regions: Regions) -> bool {
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => true,
