@@ -714,31 +714,75 @@ mod tests {
     }
 
     #[test]
-    fn the_takeover_asks_for_focus_reporting() {
-        // **The assertion `SPEC.md` §11.2 B10 needs, and the one neither gate
-        // beside it can make.** `takeover_order_is_raw_mode_first_then_the_screen`
-        // compares the walk against `TAKEOVER` itself, so it stays green whatever
-        // that array contains, and the byte gate above proves only that the
-        // command means what it is named. What nothing else says is that the
-        // takeover *contains* the step at all.
+    fn the_takeover_takes_every_step_there_is() {
+        // **The assertion no other gate here can make, and it is general on
+        // purpose.** Every other test in this module *derives* from `TAKEOVER`:
+        // the order walk compares against the array itself, the give-back and the
+        // panic restore invert whatever it holds, and the byte gate is per
+        // command. So all of them stay green if a step is simply deleted, and
+        // nothing said the takeover has to contain anything at all.
         //
-        // It matters because the missing step is exactly what B10 was declined
-        // for: "the takeover does not enable focus reporting" was true, and was
-        // written as though it were a fact about terminals rather than about
-        // this array. Without focus reporting a hover mark loses the middle rung
-        // of §11.1's clearing ladder and goes stale whenever a reader tabs away.
-        assert!(
-            TAKEOVER.contains(&Step::FocusChange),
-            "the takeover no longer asks for focus reporting, so a hover mark \
-             has no way to learn the window lost focus (SPEC.md 11.1)"
+        // **Written as a rule rather than for the step that forced it.**
+        // `SPEC.md` §11.2 B10 needed `FocusChange` asserted, and the narrow
+        // version of this test asserted exactly that one — which is the shape
+        // `RULINGS.md`'s I1 entry records going wrong when an amendment is
+        // written as narrowly as the case in front of it. Deleting
+        // `Step::MouseCapture` would have left that version green while the
+        // mouse §4 requires vanished.
+        //
+        // The `match` is the witness that keeps this honest: a new variant fails
+        // to **compile** here, so the list below cannot silently fall behind the
+        // enum it is checking.
+        const EVERY: [Step; 5] = [
+            Step::RawMode,
+            Step::AlternateScreen,
+            Step::MouseCapture,
+            Step::FocusChange,
+            Step::Cursor,
+        ];
+        for step in EVERY {
+            // Exhaustive by construction: adding a variant to `Step` without
+            // adding it to `EVERY` is a non-exhaustive-match error right here.
+            let named = match step {
+                Step::RawMode => "raw mode, without which keys arrive line-buffered",
+                Step::AlternateScreen => {
+                    "the alternate screen, without which a reader loses scrollback"
+                }
+                Step::MouseCapture => {
+                    "mouse reporting, which SPEC.md 4 puts in scope for the wheel"
+                }
+                Step::FocusChange => "focus reporting, the middle rung of 11.1's clearing ladder",
+                Step::Cursor => "the cursor, which a monitor never places anywhere meaningful",
+            };
+            assert!(
+                TAKEOVER.contains(&step),
+                "the takeover no longer takes {named}"
+            );
+        }
+        assert_eq!(
+            TAKEOVER.len(),
+            EVERY.len(),
+            "TAKEOVER takes a step twice, or takes something not in `Step`"
         );
 
-        // Before the cursor, so the modes that change how input is *reported*
-        // are taken together and given back together.
-        let at = |step| TAKEOVER.iter().position(|s| *s == step);
+        // Focus reporting sits with the mouse rather than after the cursor, so
+        // the two modes that change how *input* is reported are taken together
+        // and given back together.
+        //
+        // **Indexed rather than compared as `Option`s**, which the first version
+        // got wrong in the silent direction: `position` returns `Option<usize>`,
+        // and `Some(2) > None` is `true`, so deleting `MouseCapture` made the
+        // ordering assert pass rather than fail. The loop above now guarantees
+        // both steps are present, so unwrapping here is honest.
+        let at = |step| {
+            TAKEOVER
+                .iter()
+                .position(|s| *s == step)
+                .expect("asserted present above")
+        };
         assert!(
-            at(Step::FocusChange) > at(Step::MouseCapture),
-            "focus reporting is taken before the mouse it belongs beside"
+            at(Step::MouseCapture) < at(Step::FocusChange),
+            "focus reporting is no longer taken beside the mouse"
         );
         assert!(
             at(Step::FocusChange) < at(Step::Cursor),

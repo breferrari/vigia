@@ -263,6 +263,15 @@ impl Regions {
     /// copy and recorded why, so this deliberately composes rather than
     /// re-deriving where a button ends.
     ///
+    /// **Defined as *wherever a press would step*, which is the ruling rather
+    /// than an optimisation.** §11.1 licenses the mark on "the surfaces a click
+    /// already acts on", so this asks [`Regions::step_at`] the question it
+    /// already answers and marks the cell when the answer is yes. Spelling the
+    /// column guard and the two `Region::button` calls again would be a second
+    /// copy of where a button is, which is the defect
+    /// [#166](https://github.com/breferrari/vigia/issues/166) found two
+    /// expressions of and reduced to one.
+    ///
     /// **Only a step button answers, and the limit is a missing rung rather
     /// than a missing wire.** The rule a mark on this column has to keep is that
     /// a click is brighter than a hover, and a button has three weights to spend
@@ -275,17 +284,13 @@ impl Regions {
     /// element over: surfaces a click acts on, licensed a mark by §11.1, with
     /// nowhere to draw one until a rung is ruled. Both wait on
     /// [#189](https://github.com/breferrari/vigia/issues/189), and this function
-    /// is where they will be added rather than a second one being written.
+    /// is where they will be added rather than a second one being written. When
+    /// they are, this stops being expressible through `step_at` alone, because a
+    /// track press seeks rather than steps.
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
-        if self.bar != Some(column) {
-            return None;
-        }
-        // Either region's button, and the cell is the answer because that is the
-        // key `Chrome::pressed` already uses. `Region::button` is asked rather
-        // than a floor being re-derived here, so the mark and the press can never
-        // disagree about where a button ends.
-        (self.list.button(row).is_some() || self.diff.button(row).is_some())
-            .then_some(Hovered::Button((column, row)))
+        self.step_at(column, row)
+            .is_some()
+            .then_some(Hovered::Button(column, row))
     }
 }
 
@@ -307,7 +312,7 @@ impl Regions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hovered {
     /// A step button, by the cell it is drawn on.
-    Button((u16, u16)),
+    Button(u16, u16),
 }
 
 /// The mark after `event`, given the one before it.
@@ -360,6 +365,28 @@ pub enum Grabbed {
 }
 
 impl Grabbed {
+    /// Whether `event` ends the grip.
+    ///
+    /// **A free function's worth of rule, moved out of the loop for
+    /// [`Held::ends`]'s reason**: `run` cannot be driven by a test, so a
+    /// retirement rule written inline there is a rule with no gate. This one sat
+    /// inline from [#183](https://github.com/breferrari/vigia/issues/183) until
+    /// [#186](https://github.com/breferrari/vigia/issues/186) added a third mark
+    /// and made the omission visible, since the pass that argued the point for
+    /// `hover_after` had a counterexample one screen above it.
+    ///
+    /// **Only a left-drag continues a grip**, so a release, any key, and a
+    /// pointer that moved with nothing down all end it. That is deliberately
+    /// coarser than [`Held::ends`], which has to distinguish four cases: a grip
+    /// is *already* the answer to "what is this gesture about", so anything that
+    /// is not more of the same gesture finishes it.
+    pub fn ends(event: &Event) -> bool {
+        !matches!(
+            event,
+            Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
+        )
+    }
+
     /// The region this drag is moving.
     fn region(self, regions: Regions) -> Region {
         match self {

@@ -1210,7 +1210,37 @@ fn only_a_press_on_a_track_takes_hold_of_a_bar() {
 }
 
 #[test]
-fn a_hover_resolves_to_the_button_the_track_and_nothing_else() {
+fn a_grip_ends_on_anything_that_is_not_more_of_the_same_drag() {
+    // **The one retirement rule no test could drive until #186 moved it.** It
+    // sat inline in `run` from #183, and the pass that argued a rule written
+    // inline is a rule with no gate had that counterexample one screen above it.
+    //
+    // Coarser than `Held::ends` on purpose: a grip is already the answer to
+    // *what is this gesture about*, so anything that is not more of the same
+    // gesture finishes it, and there are no four cases to tell apart.
+    assert!(
+        !Grabbed::ends(&at(MouseEventKind::Drag(MouseButton::Left), 79, 12)),
+        "a left drag ended the grip it is continuing"
+    );
+
+    for event in [
+        at(MouseEventKind::Up(MouseButton::Left), 79, 12),
+        at(MouseEventKind::Moved, 79, 12),
+        at(MouseEventKind::Drag(MouseButton::Right), 79, 12),
+        at(MouseEventKind::ScrollDown, 79, 12),
+        press(KeyCode::Char('q')),
+        Event::FocusLost,
+    ] {
+        assert!(
+            Grabbed::ends(&event),
+            "{event:?} did not end a grip, so a drag outlives the gesture that \
+             started it"
+        );
+    }
+}
+
+#[test]
+fn a_hover_resolves_to_a_step_button_and_to_nothing_else() {
     // `SPEC.md` §11.2 B10's mark, resolved. The fixture's diff has buttons at
     // rows 5 and 19 (its track is 6..18) and its list has none, which is the
     // asymmetry worth testing over: a bare bar must still answer for its track.
@@ -1218,8 +1248,8 @@ fn a_hover_resolves_to_the_button_the_track_and_nothing_else() {
 
     // A button answers as the cell it is drawn on, which is the key
     // `Chrome::pressed` already uses, so the drawer compares one kind of thing.
-    assert_eq!(regions.hover_at(79, 5), Some(Hovered::Button((79, 5))));
-    assert_eq!(regions.hover_at(79, 19), Some(Hovered::Button((79, 19))));
+    assert_eq!(regions.hover_at(79, 5), Some(Hovered::Button(79, 5)));
+    assert_eq!(regions.hover_at(79, 19), Some(Hovered::Button(79, 19)));
 
     // **The track and the thumb answer nothing, and that is the ruling rather
     // than an omission.** A mark on this column has to keep the rule that a
@@ -1259,14 +1289,14 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     // function precisely so this test can exist: the loop that owns the state
     // cannot be driven by a test.
     let regions = two_regions();
-    let button = Some(Hovered::Button((79, 5)));
+    let button = Some(Hovered::Button(79, 5));
 
     // **Replacement.** Motion onto another target is the ordinary case and the
     // one that makes the residual rung tolerable: the mark follows the pointer
     // for free, per cell, because `?1003h` is any-event tracking.
     assert_eq!(
         hover_after(&at(MouseEventKind::Moved, 79, 19), regions, button),
-        Some(Hovered::Button((79, 19)))
+        Some(Hovered::Button(79, 19))
     );
 
     // **Motion onto nothing clears it**, which is the same rule and not a second
@@ -1294,7 +1324,7 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     ] {
         assert_eq!(
             hover_after(&at(kind, 79, 19), regions, button),
-            Some(Hovered::Button((79, 19))),
+            Some(Hovered::Button(79, 19)),
             "{kind:?} did not place the mark, so it can only follow a bare move"
         );
     }

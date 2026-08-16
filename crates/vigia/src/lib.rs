@@ -559,11 +559,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         }
                         // Anything that is not a motion ends it: a release, a
                         // key, a pointer that moved with nothing down.
-                        if !matches!(
-                            &event,
-                            Event::Mouse(mouse)
-                                if matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left))
-                        ) {
+                        if Grabbed::ends(&event) {
                             shell.grabbed = None;
                         }
                     }
@@ -863,11 +859,20 @@ impl Shell {
 
     /// What the pointer is over, for the frame that marks it.
     ///
-    /// Stored resolved rather than as a position, unlike [`Shell::pressed`],
-    /// because the resolution is against the regions of the paint the pointer
-    /// was actually over. Re-resolving here would answer against the *next*
-    /// layout, so a frame that changed the bar's geometry would move a mark the
-    /// reader had not moved.
+    /// **Resolved once, against the layout the pointer was actually over, and
+    /// then held as a cell.** That pairing is what makes a relayout safe, and it
+    /// is worth stating because the opposite arrangement is the tempting one.
+    /// The mark is decided by [`hover_after`] against `regions`, which is the
+    /// geometry of the paint on screen; what it keeps is the **cell**, and the
+    /// drawer lights it only by comparing against the cell it is itself
+    /// painting.
+    ///
+    /// So a frame that moves the bars can leave the mark pointing at a cell that
+    /// is no longer a button, and the worst that produces is **no mark at all**
+    /// until the next motion event. It cannot produce a mark somewhere the
+    /// pointer is not, because a cell the pointer is resting on is the same cell
+    /// whichever region has come to own it. Re-resolving here instead would
+    /// answer against the *next* layout and lose that property.
     fn hovered(&self) -> Option<Hovered> {
         self.hovered
     }

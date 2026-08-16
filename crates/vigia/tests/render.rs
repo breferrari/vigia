@@ -215,7 +215,6 @@ fn diagnostics_chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         frame: Some(Duration::from_micros(800)),
         memory: Some(19 * 1024 * 1024),
@@ -228,7 +227,6 @@ fn empty_chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         branch: Some("main".to_owned()),
         ..chrome()
@@ -240,7 +238,6 @@ fn following_chrome() -> Chrome {
     Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         following: true,
         ..chrome()
@@ -592,7 +589,6 @@ fn the_header_says_which_mode_it_is_in() {
     let stopped = Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         ..chrome()
@@ -1763,7 +1759,6 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
         let nameless = Chrome {
             pressed: None,
             gripped: None,
-            hovered: None,
             scrolling: None,
             worktree: name.to_owned(),
             ..chrome()
@@ -1840,7 +1835,6 @@ fn a_lost_watch_is_loud_and_a_live_one_is_quiet() {
     let lost = style_of(&Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         ..chrome()
@@ -1869,7 +1863,6 @@ fn a_lost_watch_reaches_the_header_and_not_only_the_footer() {
     let stopped = Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         mode: Mode::Lost,
         notice: Some("the watch ended; this diff is no longer live".to_owned()),
@@ -2026,7 +2019,6 @@ fn a_notice_takes_the_footer_from_the_key_hints() {
     let chrome = Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..chrome()
@@ -2053,7 +2045,6 @@ fn a_notice_keeps_the_follow_marker_because_state_is_not_a_hint() {
     let chrome = Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         notice: Some("the index entry for src/lib.rs points at a missing blob".to_owned()),
         ..following_chrome()
@@ -2150,7 +2141,6 @@ fn the_frame_cell_never_shifts_what_is_beside_it() {
     let columns = follow_marker_columns(FRAME_TIMES.map(|cost| Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         frame: Some(cost),
         ..diagnostics_chrome()
@@ -2171,7 +2161,6 @@ fn the_memory_cell_never_shifts_what_is_beside_it() {
     let columns = follow_marker_columns(MEMORY_SIZES.map(|bytes| Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         memory: Some(bytes),
         ..diagnostics_chrome()
@@ -2213,7 +2202,6 @@ fn the_memory_readout_is_drawn_wherever_the_read_is_a_syscall() {
     let unavailable = Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         memory: None,
         ..diagnostics_chrome()
@@ -2241,7 +2229,6 @@ fn the_first_paint_draws_no_readouts_at_all() {
     let first = Chrome {
         pressed: None,
         gripped: None,
-        hovered: None,
         scrolling: None,
         frame: None,
         memory: Some(19 * 1024 * 1024),
@@ -4405,7 +4392,7 @@ fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
     assert_eq!(fg(&chrome()), theme.bar_track.fg, "a button at rest");
 
     let hovered = Chrome {
-        hovered: Some(Hovered::Button((x, button))),
+        hovered: Some(Hovered::Button(x, button)),
         ..chrome()
     };
     assert_eq!(
@@ -4422,7 +4409,7 @@ fn a_hovered_step_button_is_brighter_than_the_track_and_dimmer_than_a_press() {
     assert_eq!(fg(&pressed), theme.bar_active.fg, "a pressed button");
 
     let both = Chrome {
-        hovered: Some(Hovered::Button((x, button))),
+        hovered: Some(Hovered::Button(x, button)),
         pressed: Some((x, button)),
         ..chrome()
     };
@@ -4482,9 +4469,7 @@ fn a_click_is_always_brighter_than_a_hover_and_the_thumb_carries_no_hover_mark()
     // What this forbids is the mark existing at all on a surface with no rung.
     for region in [laid.list, laid.diff] {
         for row in region.track.0..region.track.0 + region.track.1 {
-            let hovering = regions(Rect::new(0, 0, width, height), &chrome(), &view)
-                .hover_at(x, row)
-                .is_some();
+            let hovering = laid.hover_at(x, row).is_some();
             assert!(
                 !hovering,
                 "row {row} of a track answered a hover, and the thumb has no \
@@ -4529,7 +4514,7 @@ fn hovering_one_bars_button_leaves_the_other_bars_alone() {
         ("the list's down", list_down, [list_up, diff_up, diff_down]),
     ] {
         let hovered = Chrome {
-            hovered: Some(Hovered::Button((x, lit))),
+            hovered: Some(Hovered::Button(x, lit)),
             ..chrome()
         };
         let backend = screen(width, height, &view, &hovered);
@@ -5189,7 +5174,6 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             Chrome {
                 pressed: None,
                 gripped: None,
-                hovered: None,
                 scrolling: None,
                 frame: Some(Duration::from_secs(2)),
                 ..diagnostics_chrome()
@@ -5201,7 +5185,6 @@ fn an_over_magnitude_readout_is_tinted_whole_and_terminates() {
             Chrome {
                 pressed: None,
                 gripped: None,
-                hovered: None,
                 scrolling: None,
                 memory: Some(2 * 1024 * 1024 * 1024),
                 ..diagnostics_chrome()
@@ -5256,7 +5239,6 @@ fn a_notice_can_never_colour_the_follow_marker() {
         let chrome = Chrome {
             pressed: None,
             gripped: None,
-            hovered: None,
             scrolling: None,
             notice: Some("cannot read ▶.rs".to_owned()),
             following,

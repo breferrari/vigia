@@ -3352,7 +3352,7 @@ impl Painter<'_> {
                 // has learned this too. `SPEC.md` §5.3's rule that a new element
                 // earns a colour by taking a role rather than by being distinct
                 // is what rules out inventing a fourth.
-                let hovered = self.hovered == Some(Hovered::Button((x, y)));
+                let hovered = self.hovered == Some(Hovered::Button(x, y));
                 let style = if held || keyed {
                     self.theme.bar_active
                 } else if hovered {
