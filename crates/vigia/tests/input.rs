@@ -976,6 +976,17 @@ fn a_hold_ends_on_release_on_a_key_and_on_a_pointer_that_moved() {
         ("a pointer move", at(MouseEventKind::Moved, 79, 5)),
         ("a key press", press(KeyCode::Char('j'))),
         ("the quit key", press(KeyCode::Char('q'))),
+        // **The fifth way, and it is owed to I1 rather than to symmetry.** The
+        // clock a hold owns is licensed on the condition that it may not outlive
+        // the gesture that armed it, and a reader who has tabbed away is not
+        // holding this button in any sense the repeat should honour. Without it
+        // the loop keeps stepping and repainting a pane nobody is looking at, on
+        // a timer, which is the state I1's measure exists to protect.
+        //
+        // It became reachable on Unix with #186, which put `Step::FocusChange`
+        // in the takeover so `FocusLost` arrives at all; on Windows the console
+        // has always delivered it, so this hole was open there the whole time.
+        ("the window losing focus", Event::FocusLost),
     ] {
         assert!(
             hold.ends(&event, regions),
@@ -1291,6 +1302,17 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     let regions = two_regions();
     let button = Some(Hovered::Button(79, 5));
 
+    // **Arming, from nothing.** The first case and the easiest to leave
+    // untested, because every other assertion here starts from a mark that
+    // already exists. Without it, `hover_after` gated on `was.is_some()` would
+    // be a mark that can never light at all and the whole feature would be
+    // invisible on screen, with every other test in this file still green.
+    assert_eq!(
+        hover_after(&at(MouseEventKind::Moved, 79, 5), regions, None),
+        button,
+        "a pointer arriving on a button from nowhere did not arm the mark"
+    );
+
     // **Replacement.** Motion onto another target is the ordinary case and the
     // one that makes the residual rung tolerable: the mark follows the pointer
     // for free, per cell, because `?1003h` is any-event tracking.
@@ -1319,7 +1341,6 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     for kind in [
         MouseEventKind::Down(MouseButton::Left),
         MouseEventKind::Up(MouseButton::Left),
-        MouseEventKind::Drag(MouseButton::Left),
         MouseEventKind::ScrollDown,
     ] {
         assert_eq!(
@@ -1328,6 +1349,21 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
             "{kind:?} did not place the mark, so it can only follow a bare move"
         );
     }
+
+    // **A drag is the exception, and it clears rather than places.** Pulling a
+    // grabbed thumb travels over the step button at that end of the track;
+    // lighting it would promise a step that releasing there does not perform,
+    // because `Grabbed` owns the gesture until the button comes up.
+    assert_eq!(
+        hover_after(
+            &at(MouseEventKind::Drag(MouseButton::Left), 79, 19),
+            regions,
+            button
+        ),
+        None,
+        "a drag over a step button lit it, promising a step the release will \
+         not make"
+    );
 
     // **`FocusLost` clears it**, which is the rung `TAKEOVER` gained a step for.
     // Without `Step::FocusChange` this arm never fires on Unix, and a mark left

@@ -343,6 +343,14 @@ pub enum Hovered {
 ///   a reader who is scrolling with `j` while the pointer sits on the bar.
 pub fn hover_after(event: &Event, regions: Regions, was: Option<Hovered>) -> Option<Hovered> {
     match event {
+        // **A drag is not a hover, and it is the one mouse event that does not
+        // re-resolve.** A reader pulling a grabbed thumb travels over the step
+        // button at that end of the track, and lighting it would promise a step
+        // that releasing there will not perform: `Grabbed` owns the gesture
+        // until the button comes up, so a press on the button is not what the
+        // release means. This is [`Grabbed`]'s own doctrine one mark over, that
+        // a gesture outlives the target it began on.
+        Event::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Drag(_)) => None,
         Event::Mouse(mouse) => regions.hover_at(mouse.column, mouse.row),
         Event::FocusLost => None,
         _ => was,
@@ -609,6 +617,22 @@ impl Held {
                 }
                 _ => false,
             },
+            // **A window that lost focus has ended the gesture**, and this arm is
+            // owed to I1 rather than to tidiness. The clock a hold owns is
+            // licensed on three conditions, and the second is that it *may not
+            // outlive the gesture that armed it*: a reader who has tabbed away is
+            // not holding this button in any sense the repeat should honour, and
+            // without this the loop keeps stepping and repainting a pane nobody
+            // is looking at, on a timer, which is the state I1's measure exists
+            // to protect.
+            //
+            // **It became reachable on Unix with
+            // [#186](https://github.com/breferrari/vigia/issues/186)**, which put
+            // `Step::FocusChange` in the takeover so `FocusLost` arrives at all;
+            // on Windows the console has always delivered it. Of the four marks
+            // this shell keeps, three now retire here and the fourth is
+            // `scrolling`, which expires on its own clock.
+            Event::FocusLost => true,
             _ => false,
         }
     }

@@ -830,6 +830,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_chrome_carries_every_gesture_mark_it_is_handed() {
+        // **The wire nothing else covers, and it is invisible from both ends.**
+        // Every one of the thirty-odd `App::chrome` call sites in the suite
+        // passes `None` for all four marks, and every render gate builds a
+        // `Chrome` literal directly rather than going through here, so dropping
+        // a mark on the floor in this function leaves the whole workspace green
+        // while the feature does nothing on screen.
+        //
+        // All four rather than the one #186 added, for the reason
+        // `the_takeover_takes_every_step_there_is` covers every `Step`: a gate
+        // written for the mark in front of it is a gate the next mark has to
+        // remember to extend, and `scrolling` and `gripped` were each added
+        // without one.
+        let app = App::new();
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            Some((79, 5)),
+            Some(11),
+            Some(Hovered::Button(79, 19)),
+            Some((11, -1)),
+        );
+
+        assert_eq!(chrome.pressed, Some((79, 5)), "the pressed cell");
+        assert_eq!(chrome.gripped, Some(11), "the dragged bar");
+        assert_eq!(
+            chrome.hovered,
+            Some(Hovered::Button(79, 19)),
+            "the hover mark"
+        );
+        assert_eq!(chrome.scrolling, Some((11, -1)), "the scrolled bar");
+    }
+
+    #[test]
     fn a_shell_starts_watching_and_a_lost_watch_is_one_way() {
         // Asserted through `chrome`, which is the only way the mode leaves this
         // type and therefore the only path that can be wrong. A bare accessor

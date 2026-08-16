@@ -4479,15 +4479,45 @@ fn a_click_is_always_brighter_than_a_hover_and_the_thumb_carries_no_hover_mark()
     }
 
     // And the resting column really does draw a thumb, so the sweep above is
-    // over rows that matter rather than over an empty column.
+    // over rows that matter rather than over an empty column. Both regions,
+    // because the sweep covers both and an empty track would make its half a
+    // silent no-op.
     let resting = screen(width, height, &view, &chrome());
-    let thumbs = (laid.diff.track.0..laid.diff.track.0 + laid.diff.track.1)
-        .filter(|y| bar_at(&resting, *y) == THUMB)
-        .count();
-    assert!(
-        thumbs > 0,
-        "the fixture drew no thumb, so this proves nothing"
-    );
+    let theme = Theme::default();
+    let thumb_rows = |region: Region| {
+        (region.track.0..region.track.0 + region.track.1)
+            .filter(|y| bar_at(&resting, *y) == THUMB)
+            .collect::<Vec<_>>()
+    };
+    for (name, region) in [("the diff", laid.diff), ("the list", laid.list)] {
+        assert!(
+            !thumb_rows(region).is_empty(),
+            "the fixture drew no thumb on {name}, so sweeping its track proves \
+             nothing"
+        );
+    }
+
+    // **The painter's half, and `SPEC.md` §11.1 names this test for it.** The
+    // sweep above asserts the *resolver* never answers on a track, which a
+    // painter is free to ignore: a drawer that lit a thumb whenever `hovered`
+    // held any cell inside its region would keep every assertion so far green.
+    // So hand the paint a mark pointing straight at a thumb row, the way a
+    // future `Hovered::Track` would, and require the thumb to stay at rest.
+    for region in [laid.diff, laid.list] {
+        for row in thumb_rows(region) {
+            let hovered = Chrome {
+                hovered: Some(Hovered::Button(x, row)),
+                ..chrome()
+            };
+            let backend = screen(width, height, &view, &hovered);
+            assert_eq!(
+                backend.buffer()[(x, row)].style().fg,
+                theme.bar.fg,
+                "a mark on thumb row {row} lit it, so a click on the thumb is no \
+                 longer brighter than a hover over it"
+            );
+        }
+    }
 }
 
 #[test]
@@ -4508,6 +4538,17 @@ fn hovering_one_bars_button_leaves_the_other_bars_alone() {
     let ends = |region: Region| (region.top, region.top + region.rows - 1);
     let (diff_up, diff_down) = ends(laid.diff);
     let (list_up, list_down) = ends(laid.list);
+
+    // Every row this sweeps is really a button, asserted rather than assumed: a
+    // layout change that left the list's bar bare would quietly turn its case
+    // into a comparison between two track cells, which passes and proves
+    // nothing.
+    for row in [diff_up, diff_down, list_up, list_down] {
+        assert!(
+            laid.hover_at(x, row).is_some(),
+            "row {row} is not a step button, so asserting its style proves nothing"
+        );
+    }
 
     for (name, lit, others) in [
         ("the diff's up", diff_up, [diff_down, list_up, list_down]),

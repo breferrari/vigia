@@ -857,24 +857,36 @@ impl Shell {
         self.grabbed.map(|on| on.top(self.regions))
     }
 
-    /// What the pointer is over, for the frame that marks it.
+    /// What the pointer is over, for the frame that marks it, **re-validated
+    /// against the layout that is on screen**.
     ///
-    /// **Resolved once, against the layout the pointer was actually over, and
-    /// then held as a cell.** That pairing is what makes a relayout safe, and it
-    /// is worth stating because the opposite arrangement is the tempting one.
-    /// The mark is decided by [`hover_after`] against `regions`, which is the
-    /// geometry of the paint on screen; what it keeps is the **cell**, and the
-    /// drawer lights it only by comparing against the cell it is itself
-    /// painting.
+    /// **The obvious version of this returned the field, and it was wrong.** The
+    /// argument for it was that keeping a *cell* rather than a target makes a
+    /// relayout harmless, since a cell the pointer rests on is the same cell
+    /// whichever region comes to own it, so the worst a moved layout could do is
+    /// draw no mark. That holds only while the pointer is still there, and
+    /// §11.1's clearing ladder has an accepted residual where it is not: a
+    /// reader whose pointer has left the pane keeps the mark until they come
+    /// back.
     ///
-    /// So a frame that moves the bars can leave the mark pointing at a cell that
-    /// is no longer a button, and the worst that produces is **no mark at all**
-    /// until the next motion event. It cannot produce a mark somewhere the
-    /// pointer is not, because a cell the pointer is resting on is the same cell
-    /// whichever region has come to own it. Re-resolving here instead would
-    /// answer against the *next* layout and lose that property.
+    /// In that state a relayout **can** move a different control under the
+    /// stored cell. Concretely: the list is six rows and its down button is at
+    /// row 6, the pointer rests there and leaves; the agent reverts two files,
+    /// the list becomes four rows, and row 6 is now the *diff's up button*. The
+    /// mark would light a control on the other bar that was never hovered, which
+    /// is worse than a stale mark and is exactly what §11.1 does not price.
+    ///
+    /// So the cell is checked against the current layout before it is drawn, and
+    /// a cell that is no longer the button it was resolved as marks nothing.
+    /// **It closes the case one frame late**, because `regions` is the geometry
+    /// of the paint that already happened, so a relayout draws its own frame
+    /// before this can see it. That is a bounded, self-clearing wrongness where
+    /// the alternative was an unbounded one, and re-resolving the *position*
+    /// instead would answer against a layout the pointer was never over.
     fn hovered(&self) -> Option<Hovered> {
-        self.hovered
+        let mark = self.hovered?;
+        let Hovered::Button(column, row) = mark;
+        (self.regions.hover_at(column, row) == Some(mark)).then_some(mark)
     }
 
     /// How long the loop may block before something here has to act.

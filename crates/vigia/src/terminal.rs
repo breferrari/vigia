@@ -860,6 +860,25 @@ mod tests {
             "the real console wrote no escape sequences at all, so this proves nothing"
         );
 
+        // **The wiring, which is the one thing neither of the other two layers
+        // can see.** The recorder is blind to which crossterm command a `Step`
+        // is bound to, and `every_command_is_the_escape_sequence_it_is_named_for`
+        // asserts what each command emits without knowing that any step uses it.
+        // So `Step::FocusChange => execute!(out, EnableMouseCapture)` would leave
+        // both green, and the inverse check below would too, because it only
+        // demands that giving back undoes whatever taking did.
+        //
+        // Asserted on `?1004` specifically because that is the step this layer
+        // gained with #186, and because it is the one whose absence B10 was
+        // declined for. `?1049` and `?25` are covered by the same walk; the
+        // mouse bundle is deliberately not asserted here, since on Windows it
+        // writes zero bytes and this test runs on both.
+        assert!(
+            took.contains(&(1004, true)),
+            "the takeover wrote no `?1004h`, so `Step::FocusChange` is wired to \
+             something other than focus reporting: {took:?}"
+        );
+
         // The inverse, derived from what was actually written rather than listed
         // again. Polarity flipped and order reversed, per mode.
         //
