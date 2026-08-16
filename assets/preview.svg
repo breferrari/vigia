@@ -28,8 +28,10 @@
       <text class="m cyn" x="16" y="92">▸</text>
       <text class="m dim" x="32" y="92">M</text>
       <!-- The caret's row draws its whole path bold: the weight is the caret's
-           second channel, and it subsumes the basename emphasis every other row
-           carries. #193. -->
+           second channel, #193. The tspan every other row carries is a separate
+           promise about the basename, older than this and still undrawn by the
+           shell, so this row loses it to the row weight rather than resolving
+           it. -->
       <text class="m fg" x="50" y="92" font-weight="700">src/engine/watch.rs</text>
       <g>
         <rect x="300" y="86" width="7" height="4" rx="1.5" fill="#1f6f3f"/>

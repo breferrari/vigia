@@ -344,13 +344,19 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         path,
         path_live,
         path_cold,
-        // Text, and the brightest of the four, so it is checked with the rest.
-        // It is also the one field here that carries a modifier as part of its
-        // meaning: `path_hover` underlines, which is what keeps it apart from
-        // `path` on this palette, where both are `White` with `BOLD` and colour
-        // has run out. `a_palette_never_draws_text_in_colour_8` is about the
-        // foreground, so the modifier rides along untested here and is gated in
-        // `tests/render.rs` where the row is actually drawn.
+        // Text, so it is checked with the rest, and the one field here that
+        // carries a modifier as part of its meaning: `path_hover` underlines,
+        // which is the whole of what keeps it apart from the recency ladder.
+        //
+        // **It is the quietest of the four rather than the brightest, corrected
+        // 2026-08-16** ([#193](https://github.com/breferrari/vigia/issues/193)).
+        // It holds `bar_hover`'s value now, which on this palette is `Gray` and
+        // therefore `path_cold`'s foreground **exactly**, so the modifier is not
+        // merely the last separation left, it is the only one. That is why it is
+        // still checked here: `Gray` is not colour 8 and must not become it, and
+        // `a_palette_never_draws_text_in_colour_8` is about the foreground
+        // alone. The modifier rides along untested here and is gated in
+        // `tests/render.rs`, where the row is actually drawn.
         path_hover,
         kind,
         hunk,
@@ -792,10 +798,12 @@ fn a_sparkline_track_is_never_the_colour_of_a_path() {
                 ("path", theme.path),
                 ("path_live", theme.path_live),
                 ("path_cold", theme.path_cold),
-                // The fourth weight belongs here for the same reason the other
-                // three do: it is drawn on a path, so an underscore in a file
-                // name must not resolve to the sparkline's own track colour at
-                // any depth.
+                // `path_hover` belongs here for the same reason the other three
+                // do: it is drawn on a path, so an underscore in a file name
+                // must not resolve to the sparkline's own track colour at any
+                // depth. It read "the fourth weight" until #193, which is a
+                // framing that no longer describes it: it is a fourth entry in
+                // this list and no longer a fourth rung above the ladder.
                 ("path_hover", theme.path_hover),
             ] {
                 // **Only the comparison that actually collides is skipped.**

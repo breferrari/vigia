@@ -316,7 +316,11 @@ const STEP_FLOOR: u16 = STEP_ROWS + MIN_TRACK;
 /// keypress that is not a scroll; this points at where the diff already is. A
 /// filled block or an inverted row would read as a selection, which is the
 /// reviewer-class affordance the ruling refuses.
-const CARET: char = '▸';
+///
+/// A `&str` rather than a `char`, because the one place it is drawn wants one:
+/// it was `&CARET.to_string()` at that call, which is a heap allocation per frame
+/// for a literal the compiler already has.
+const CARET: &str = "▸";
 
 /// The weight that row's **path** takes on top of whatever recency gave it.
 ///
@@ -327,11 +331,19 @@ const CARET: char = '▸';
 /// only where [`CARET`] is, so the two are one statement said twice: the tie is
 /// [`CARET_FLOOR`], and below it neither is drawn.
 ///
-/// **A constant here rather than a [`Theme`] key**, which is the line this file
-/// already keeps: the theme owns colour and the shell owns structure, the same
-/// way [`CARET`]'s own glyph is not themeable while the [`Theme::pulse`] it is
-/// drawn in is. It is also the one channel that survives `NO_COLOR`, which §11.1
-/// rules is where a modifier earns its place.
+/// **A constant here rather than a [`Theme`] key, and the reason is not the one
+/// that first stood here.** That said the theme owns colour and the shell owns
+/// structure, citing [`CARET`] and [`RULE`] as precedent; `theme.rs` falsifies it
+/// four lines at a time, because every other drawn modifier is themed
+/// ([`Theme::path`]'s `BOLD`, [`Theme::path_hover`]'s `UNDERLINED`,
+/// [`Theme::alert`]'s). Those constants are **glyphs**, and the theme grammar has
+/// no glyph vocabulary at all, so they mark where its vocabulary stops rather
+/// than a precedent for stopping here. The real reason is narrower: every key in
+/// that grammar is a **complete** style that replaces a value, and this is a
+/// **delta** composed on top of recency-or-hover, so a key for it would be the
+/// first of its kind and wants a ruling of its own rather than arriving as the
+/// side effect of a feel row. Tracked as
+/// [#195](https://github.com/breferrari/vigia/issues/195).
 ///
 /// **It shares `BOLD` with [`Theme::path`]'s pulse rung and that is not a
 /// collision**, because both readings carry a glyph of their own: a pulsing row
@@ -2482,9 +2494,6 @@ pub fn render(
         gripped: chrome.gripped,
         hovered: chrome.hovered,
         scrolling: chrome.scrolling,
-        // Nothing until the list is drawing, and nothing again afterwards. See
-        // the field.
-        current: None,
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -2609,20 +2618,6 @@ struct Painter<'a> {
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(u16, isize)>,
-    /// The row [`CARET`] is being drawn on, while the pinned list is drawing.
-    ///
-    /// **The one mark on this type that does not come from [`Chrome`]**, and it
-    /// is a fact about the *screen* rather than about the pointer:
-    /// [`Painter::list`] resolves which row the diff is inside and sets this from
-    /// the same predicate it draws the caret from, so the glyph and
-    /// [`CURRENT_WEIGHT`] cannot name two different rows.
-    ///
-    /// **Cleared when that loop ends**, which is what keeps the mark inside one
-    /// region. Both regions draw through [`Painter::file_row`], so a weight keyed
-    /// on a row alone would reach a heading in the stream the moment the two
-    /// shared a `y`. They cannot on the shipped layout, and a confinement that
-    /// rests on geometry is one an edit to the geometry silently removes.
-    current: Option<u16>,
 }
 
 impl Painter<'_> {
@@ -3200,14 +3195,13 @@ impl Painter<'_> {
             // here. `position_of` guards the identical hazard one region up.
             // **One predicate, two channels.** The glyph and [`CURRENT_WEIGHT`]
             // are the same statement said twice, so they are resolved once here
-            // rather than re-derived by the drawer. That also ties the weight to
-            // [`CARET_FLOOR`] for free: `caret` is false below it and neither
-            // mark is drawn.
+            // and the weight is handed down rather than re-derived by the drawer.
+            // That also ties the weight to [`CARET_FLOOR`] for free: `caret` is
+            // false below it and neither mark is drawn.
             let current = caret && view.list_top.saturating_add(offset) == view.top.file;
             if current {
-                self.put(left, y, &CARET.to_string(), CARET_WIDTH, self.theme.pulse);
+                self.put(left, y, CARET, CARET_WIDTH, self.theme.pulse);
             }
-            self.current = current.then_some(y);
             self.file_row(
                 Rect {
                     y,
@@ -3222,10 +3216,9 @@ impl Painter<'_> {
                 &Heading::of(entry),
                 view.peak,
                 &columns,
+                current,
             );
         }
-        // Out of scope the moment the region is, which is the field's own rule.
-        self.current = None;
     }
 
     /// Draw this region's scrollbar if it has one, and hand back the room left
@@ -3525,6 +3518,13 @@ impl Painter<'_> {
                     &Heading::of(entry),
                     view.peak,
                     &columns,
+                    // **A literal, which is the whole reason this is a
+                    // parameter.** No heading in the stream is *the* file the
+                    // diff is inside; every one of them is a file the diff
+                    // contains. Saying so here confines the mark by
+                    // construction, where a mark the painter carried would be
+                    // confined only by the two regions never sharing a `y`.
+                    false,
                 ),
                 Row::Hunk {
                     old_start,
@@ -3632,7 +3632,14 @@ impl Painter<'_> {
     /// Nothing is allowed to take the path below [`MIN_PATH_WIDTH`]. A glance
     /// element that cost a reader the name of the file would be spending the
     /// content to decorate it.
-    fn file_row(&mut self, area: Rect, heading: &Heading<'_>, peak: u16, columns: &Columns) {
+    fn file_row(
+        &mut self,
+        area: Rect,
+        heading: &Heading<'_>,
+        peak: u16,
+        columns: &Columns,
+        current: bool,
+    ) {
         let mut right = area;
 
         // **Every slot is subtracted whether or not this row fills it**, which is
@@ -3850,14 +3857,15 @@ impl Painter<'_> {
         // Hover answers on the **list's** rows only. `Hovered::Row` is resolved
         // from the list region alone, and a diff heading's row is never inside
         // it, so this comparison cannot light one: the diff is not clickable and
-        // a mark there would imply it is. [`Painter::current`] is confined the
-        // same way and says how.
+        // a mark there would imply it is. `current` is confined more strongly
+        // still, being a literal `false` at the stream's call site rather than a
+        // comparison that happens never to match.
         let ink = if self.hovered == Some(Hovered::Row(area.y)) {
             self.theme.path_hover
         } else {
             self.theme.recency(heading.recency)
         };
-        let ink = if self.current == Some(area.y) {
+        let ink = if current {
             ink.add_modifier(CURRENT_WEIGHT)
         } else {
             ink

@@ -73,6 +73,14 @@ const RAMP: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
 /// sharing the renderer's constant agrees with it by construction.
 const BAR_GLYPHS: [char; 4] = ['│', '█', '▲', '▼'];
 
+/// The mark on the row the diff is inside.
+///
+/// **File level for [`RAMP`]'s reason, arrived at the same way**: four gates had
+/// declared this locally and a fifth was about to, and a copy beside a copy does
+/// not check the renderer, it checks the other copy. Restated rather than
+/// imported for [`CONTINUES`]'.
+const CARET: &str = "▸";
+
 /// Whether a cell's symbol is one of [`BAR_GLYPHS`].
 ///
 /// The length check is what keeps a wide character whose first `char` happens to
@@ -300,6 +308,37 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         read: 1,
         peak: 0,
     }
+}
+
+/// What a cell is drawn *in*, as the pair a rung is actually made of.
+///
+/// **Foreground and modifiers, never the whole [`Style`] and never `fg` alone.**
+/// A drawn cell carries `bg` and `underline_color` resets a theme entry does not,
+/// so whole-`Style` equality compares bookkeeping; and `fg` alone is not enough
+/// either, because on `ansi` a rung can be a modifier with no colour to spare
+/// (`Theme::path_hover` and `Theme::path_cold` share `Gray` there by design).
+///
+/// Written once because six gates had spelled it as a local closure and the
+/// paragraph above only existed on one of them.
+fn weight(style: Style) -> (Option<Color>, Modifier) {
+    (style.fg, style.add_modifier)
+}
+
+/// What each cell of `path`'s label on row `y` is drawn in.
+///
+/// A file row draws its kind letter as `"M "`, so the label begins two columns
+/// after it. Found from the letter rather than computed, for [`column_of`]'s
+/// reason.
+///
+/// **The label's own cells rather than the whole row**, which is the distinction
+/// that made this a function: a `-0` takes the row's dim grey by #157's ruling
+/// and lands on the same pair as the cold rung, so a gate counting matches across
+/// a row reads the counts cell as a path.
+fn path_weights(backend: &TestBackend, y: u16, path: &str) -> Vec<(Option<Color>, Modifier)> {
+    let start = column_of(backend, y, "M") + 2;
+    (start..start + path.chars().count() as u16)
+        .map(|x| weight(backend.buffer()[(x, y)].style()))
+        .collect()
 }
 
 /// The first column of row `y` holding `needle`.
@@ -3599,8 +3638,6 @@ fn the_caret_marks_the_file_the_diff_is_inside() {
     //
     // Both directions, per this file's own rule: the marked row has it and the
     // others do not.
-    const CARET: &str = "▸";
-
     for current in 0..3usize {
         let view = two_regions(current);
         let backend = screen(64, 18, &view, &chrome());
@@ -3669,8 +3706,6 @@ fn the_caret_degrades_once_and_never_flickers() {
     // renderer's own constant, and a test that restated it would agree with the
     // code by construction instead of checking it. This asserts the shape of the
     // ladder, which no constant can satisfy by accident.
-    const CARET: &str = "▸";
-
     let drawn: Vec<bool> = (1..=60u16)
         .map(|width| {
             let view = two_regions(1);
@@ -4459,8 +4494,6 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     // and the reason the assertions here compare `(fg, modifiers)` rather than
     // either half.
     let theme = Theme::default();
-    let weight = |style: Style| (style.fg, style.add_modifier);
-
     for (name, recency) in [
         ("pulse", Recency::Pulse),
         ("live", Recency::Live),
@@ -4475,12 +4508,11 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     }
 
     // And the distinguishing channel is the modifier rather than the colour,
-    // asserted directly because on the default palette it is the only one left:
-    // `path_hover` underlines and no recency weight does.
-    assert!(
-        theme.path_hover.add_modifier.contains(Modifier::UNDERLINED),
-        "the hover weight stopped underlining, so on `ansi` it is a pulsing row"
-    );
+    // which on the default palette is the only one left. The hover's half of
+    // that is `the_pointer_never_takes_the_weight_the_caret_row_does`, which
+    // makes it on all three built-ins rather than on this one; what is asserted
+    // here is the half that gate does not reach, which is that nothing on the
+    // ladder underlines back.
     for recency in [Recency::Pulse, Recency::Live, Recency::Cold] {
         assert!(
             !theme
@@ -4507,24 +4539,30 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
     // not on.
     let row = laid.list.top + 1;
 
-    let path_weight = |chrome: &Chrome, y: u16| {
-        let backend = screen(width, height, &view, chrome);
+    // **Two screens, drawn once each.** This used to draw one per row inside the
+    // loop below, which is the same picture five times over.
+    let want = weight(theme.path_hover);
+    let untouched = screen(width, height, &view, &chrome());
+    let hovering = screen(
+        width,
+        height,
+        &view,
+        &Chrome {
+            hovered: Some(Hovered::Row(row)),
+            ..chrome()
+        },
+    );
+    let path_weight = |backend: &TestBackend, y: u16| {
         (0..width)
-            .map(|x| weight(backend.buffer()[(x, y)].style()))
-            .filter(|w| *w == weight(theme.path_hover))
+            .filter(|x| weight(backend.buffer()[(*x, y)].style()) == want)
             .count()
     };
 
     assert_eq!(
-        path_weight(&chrome(), row),
+        path_weight(&untouched, row),
         0,
         "a row was drawn in the hover weight with nothing hovered"
     );
-
-    let hovering = Chrome {
-        hovered: Some(Hovered::Row(row)),
-        ..chrome()
-    };
     assert!(
         path_weight(&hovering, row) > 0,
         "a hovered row did not take the hover weight"
@@ -4540,9 +4578,6 @@ fn a_hovered_row_reads_as_the_pointer_and_never_as_recency() {
         );
     }
 }
-
-/// The caret, restated rather than imported for [`CONTINUES`]' reason.
-const CARET: &str = "▸";
 
 /// Every built-in palette, so a rule about the pointer is asserted on all three
 /// rather than on whichever one `Theme::default` happens to be.
@@ -4622,23 +4657,9 @@ fn the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret() {
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
     let backend = screen(width, height, &view, &chrome());
 
-    let weight = |style: Style| (style.fg, style.add_modifier);
     let plain = weight(theme.recency(Recency::Cold));
     let marked = (plain.0, plain.1 | Modifier::BOLD);
     assert_ne!(plain, marked, "the fixture's rung is already bold");
-
-    // **The path's own cells, found rather than counted across the row.** A `-0`
-    // takes the row's dim grey by #157's ruling and lands on the same
-    // `(fg, modifiers)` the cold rung does, so a whole-row count would read the
-    // counts cell as a path that missed the weight. The kind letter is drawn as
-    // `"M "`, so the label begins two columns after it.
-    let path = "src/f0.rs";
-    let run = |y: u16| {
-        let start = column_of(&backend, y, "M") + 2;
-        (start..start + path.chars().count() as u16)
-            .map(|x| weight(backend.buffer()[(x, y)].style()))
-            .collect::<Vec<_>>()
-    };
 
     let row = laid.list.top;
     assert!(
@@ -4646,14 +4667,19 @@ fn the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret() {
         "the fixture drew no caret, so this gate is about nothing"
     );
     assert!(
-        run(row).iter().all(|w| *w == marked),
+        path_weights(&backend, row, "src/f0.rs")
+            .iter()
+            .all(|w| *w == marked),
         "the row the caret marks drew no bold path, so the file the diff is \
          inside is named by one channel where the region carries two"
     );
 
     for other in (laid.list.top + 1)..(laid.list.top + laid.list.rows) {
+        let path = format!("src/f{}.rs", other - laid.list.top);
         assert!(
-            run(other).iter().all(|w| *w == plain),
+            path_weights(&backend, other, &path)
+                .iter()
+                .all(|w| *w == plain),
             "row {other} took the caret's weight without a caret"
         );
     }
@@ -4676,7 +4702,6 @@ fn the_weight_arrives_and_leaves_with_the_caret() {
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
     let backend = screen(width, height, &view, &chrome());
 
-    let weight = |style: Style| (style.fg, style.add_modifier);
     let plain = weight(theme.recency(Recency::Cold));
     let marked = (plain.0, plain.1 | Modifier::BOLD);
 
@@ -4706,52 +4731,36 @@ fn a_diff_heading_never_takes_the_current_weight() {
     // is what fails if that ever changes: the obvious way to plumb the mark is to
     // hang it off the entry, and an entry is shared by both regions.
     //
-    // **So the fixture makes the list's caret row and the stream's heading the
-    // same file**, which is the ordinary case rather than a contrived one: follow
-    // mode puts the diff at the top of a file the list is also showing. A mark
-    // keyed on the file lights both; one keyed on the row lights neither, because
-    // `Painter::current` is set per drawn row and cleared when the region ends.
+    // **The fixture is `two_regions`, because its caret row and its stream
+    // heading are already the same file**, which is the ordinary case rather
+    // than a contrived one: follow mode puts the diff at the top of a file the
+    // list is also showing. A mark keyed on the file lights both; the shipped
+    // one lights neither, because it is a `false` the stream's call site passes
+    // outright.
     let width = 80u16;
     let height = 24u16;
     let path = "src/engine/watch.rs";
-    let view = View {
-        list: vec![entry(path, 42, 7), entry("src/other.rs", 1, 0)],
-        list_top: 0,
-        current_span: 400,
-        total_rows: 4_000,
-        rows_above: 0,
-        rows: vec![
-            file(path, 42, 7),
-            line(LineKind::Context, 38, "fn coalesce(&mut self) {"),
-        ],
-        files: 2,
-        top: Position::default(),
-        read: 2,
-        peak: 0,
-    };
+    let view = two_regions(1);
     let theme = Theme::default();
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
     let backend = screen(width, height, &view, &chrome());
 
-    let weight = |style: Style| (style.fg, style.add_modifier);
     let plain = weight(theme.recency(Recency::Cold));
     let marked = (plain.0, plain.1 | Modifier::BOLD);
-    let run = |y: u16| {
-        let start = column_of(&backend, y, "M") + 2;
-        (start..start + path.chars().count() as u16)
-            .map(|x| weight(backend.buffer()[(x, y)].style()))
-            .collect::<Vec<_>>()
-    };
 
     // The fixture drew what it claims to, or everything below is about the wrong
     // rows.
     assert!(
-        run(laid.list.top).iter().all(|w| *w == marked),
+        path_weights(&backend, laid.list.top + 1, path)
+            .iter()
+            .all(|w| *w == marked),
         "the caret's own row is not marked, so this gate cannot tell a confined \
          mark from an absent one"
     );
     assert!(
-        run(laid.diff.top).iter().all(|w| *w == plain),
+        path_weights(&backend, laid.diff.top, path)
+            .iter()
+            .all(|w| *w == plain),
         "the diff's heading for the very file the caret marks took the list's \
          weight, so the mark is keyed on the file instead of on the row"
     );
@@ -4782,7 +4791,6 @@ fn a_hovered_row_that_is_also_the_current_one_reads_as_both() {
         },
     );
 
-    let weight = |style: Style| (style.fg, style.add_modifier);
     let both = (
         theme.path_hover.fg,
         theme.path_hover.add_modifier | Modifier::BOLD,
@@ -4818,12 +4826,6 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     let theme = Theme::default();
     let x = width - 1;
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
-
-    // **Foreground and modifiers, which are the two things a rung is made of.**
-    // A drawn cell carries `bg` and `underline_color` resets that a theme entry
-    // does not, so whole-`Style` equality compares bookkeeping; and `fg` alone
-    // is not enough either, because on `ansi` the middle rung is a modifier.
-    let weight = |style: Style| (style.fg, style.add_modifier);
 
     // Three distinct weights, asserted rather than assumed: on a palette where
     // two coincided, every ordering below would hold while saying nothing.
@@ -5243,8 +5245,6 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
     // exists to prevent, and it was blind to this because its fixture has
     // `files == list.len()` and is never scrollable. The file count is the second
     // axis.
-    const CARET: &str = "▸";
-
     for width in 1..=60u16 {
         let mut drawn = Vec::new();
         for files in [3usize, 30] {
@@ -5287,7 +5287,6 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
     const ROW_FLOOR: usize = 2 + 12; // the kind letter and its gap, plus MIN_PATH_WIDTH
     const BAR_COLUMNS: usize = 2;
     const CARET_COLUMNS: usize = 2;
-    const CARET: &str = "▸";
     const TRACK: &str = "│";
     const THUMB: &str = "█";
 
