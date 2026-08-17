@@ -196,6 +196,15 @@ fn the_rungs_are_two_densities() {
     // columns. A row that reserved for one and drew the other would slide.
     assert_eq!(Glyphs::Octant.density(), Glyphs::Braille.density());
     assert_eq!(Glyphs::Octant.levels(), Glyphs::Braille.levels());
+
+    // **Three above the baseline, not four, and the number is the whole price of
+    // the track rule.** A 2x4 cell has four dot rows and the bottom one is spent
+    // so that "one write" and "no writes" differ in *height*. Asserting only
+    // that the two dense rungs agree would let both drift to four together,
+    // which is the one change that would silently put the track back on the
+    // ramp's floor and leave colour alone carrying the distinction.
+    assert_eq!(Glyphs::Braille.levels(), 3);
+    assert_eq!(Glyphs::Block.levels(), 8);
 }
 
 #[test]
