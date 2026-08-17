@@ -16,8 +16,9 @@ use ratatui::backend::TestBackend;
 use std::collections::HashSet;
 
 use ratatui::style::{Color, Style};
-use vigia::{Glyphs, 
-    Chrome, Depth, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
+use vigia::{
+    Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View,
+    render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 

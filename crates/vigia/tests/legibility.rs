@@ -25,9 +25,9 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use vigia::{Glyphs, 
-    Body, Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme,
-    View, body_layout, diff_height, render,
+use vigia::{
+    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row,
+    Theme, View, body_layout, diff_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -4688,10 +4688,7 @@ fn the_glyph_rung_buys_columns_and_never_costs_them() {
     let y = 1u16;
 
     let slot = |width: u16, glyphs: Glyphs| -> (usize, usize) {
-        let chrome = Chrome {
-            glyphs,
-            ..chrome()
-        };
+        let chrome = Chrome { glyphs, ..chrome() };
         let backend = drawn(width, 8, &view, &chrome);
         let cells = spark_slot(&backend, y, &theme, glyphs);
         (cells, cells * glyphs.density())
@@ -4752,10 +4749,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
     let view = glancing();
 
     for glyphs in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
-        let chrome = Chrome {
-            glyphs,
-            ..chrome()
-        };
+        let chrome = Chrome { glyphs, ..chrome() };
         let mut widest = 0usize;
         for width in WIDTHS {
             let backend = drawn(width, 8, &view, &chrome);
@@ -4770,8 +4764,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
         // The sweep has to end somewhere useful, or "never decreased" is true of
         // a ladder that never rose either.
         assert_eq!(
-            widest,
-            HISTORY_BUCKETS,
+            widest, HISTORY_BUCKETS,
             "{glyphs:?}: the sweep never reached a full window"
         );
     }
@@ -4859,7 +4852,10 @@ fn a_pair_takes_the_busier_buckets_band() {
     // rather than about which side of the cell the count happens to land on.
     let backend = drawn(120, 8, &sparked([12, 1, 1, 1, 1, 1, 1, 1]), &chrome);
     let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
-    assert_eq!(hots, 1, "the busier bucket decides the band from either side");
+    assert_eq!(
+        hots, 1,
+        "the busier bucket decides the band from either side"
+    );
 }
 
 /// Columns on row `y` holding one of `symbols` in one of `colours`.
@@ -4914,10 +4910,7 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     // direction nothing else bounds: the strip then draws four cells into a slot
     // reserved for two and walks into the heat strip.
     let gap = |width: u16, glyphs: Glyphs| -> Option<u16> {
-        let chrome = Chrome {
-            glyphs,
-            ..chrome()
-        };
+        let chrome = Chrome { glyphs, ..chrome() };
         let backend = drawn(width, 8, &view, &chrome);
         let (ramp, _) = alphabet(glyphs);
         let spark = columns_of(&backend, 1, &bars, &ramp);

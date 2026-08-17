@@ -32,9 +32,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
-use vigia::{Glyphs, 
-    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
-    body_layout, diff_height, regions, render,
+use vigia::{
+    Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row,
+    Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 

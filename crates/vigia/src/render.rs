@@ -244,10 +244,22 @@ const fn spark_cells(buckets: usize, glyphs: Glyphs) -> usize {
 // block is the right instrument precisely because the case is unreachable at
 // run time, and it starts failing the build the day the window becomes odd.
 const _: () = {
-    assert!(spark_cells(7, Glyphs::Braille) == 4, "an odd window rounds up");
-    assert!(spark_cells(1, Glyphs::Braille) == 1, "one bucket keeps a cell");
-    assert!(spark_cells(0, Glyphs::Braille) == 0, "no buckets take no cells");
-    assert!(spark_cells(8, Glyphs::Block) == 8, "the floor is the identity");
+    assert!(
+        spark_cells(7, Glyphs::Braille) == 4,
+        "an odd window rounds up"
+    );
+    assert!(
+        spark_cells(1, Glyphs::Braille) == 1,
+        "one bucket keeps a cell"
+    );
+    assert!(
+        spark_cells(0, Glyphs::Braille) == 0,
+        "no buckets take no cells"
+    );
+    assert!(
+        spark_cells(8, Glyphs::Block) == 8,
+        "the floor is the identity"
+    );
 };
 
 /// The pulse, widest rung first.
@@ -2306,10 +2318,7 @@ impl Bucket {
     /// answer, so the two halves of that fall out of one call.
     fn drawn(self, theme: &Theme, glyphs: Glyphs) -> (char, Style) {
         match self {
-            Self::Empty => (
-                glyphs.cell(0, 0).unwrap_or(SPARK_TRACK),
-                theme.spark_track,
-            ),
+            Self::Empty => (glyphs.cell(0, 0).unwrap_or(SPARK_TRACK), theme.spark_track),
             Self::Written(glyph, band) => (glyph, theme.spark_at(band)),
         }
     }
