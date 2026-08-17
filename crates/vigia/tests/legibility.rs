@@ -341,6 +341,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
+        sheet: false,
         // Absent in the base fixture, so every sweep that inherits it keeps
         // measuring the chrome it measured before the status readouts existed.
         // [`diagnostics`] is the fixture that carries them, and it is added to
@@ -3077,23 +3078,31 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     // Non-vacuity, and it is the half that would otherwise let this pass against
     // a ladder that simply never draws the extra hint: somewhere wide enough, the
     // bar really is wider than the baseline.
-    let baseline = rows_at(40, tall, &view, &chrome())
-        .last()
-        .expect("a footer")
-        .trim_end()
-        .to_owned();
-    let wide = rows_at(120, tall, &view, &chrome())
-        .last()
-        .expect("a footer")
-        .to_owned();
-    // #119's inset off the head first. Split on two spaces without it and the
-    // very first field is the inset itself, so `hints` came back empty and this
-    // gate reported that the widest pane draws no hint bar at all.
-    let hints = content(&wide, 120)
-        .split("  ")
-        .next()
-        .unwrap_or_default()
-        .trim_end();
+    //
+    // **Both sides are extracted the same way, which is a correction B12 forced.**
+    // The forty-column side used to be the whole trimmed footer *line*, state
+    // included, and it was compared against the hint bar alone at 120. That
+    // passed only while the bonus bar was wide enough to beat a narrow bar plus
+    // its state: swapping `JK files` for the two-columns-shorter `? keys` made a
+    // real bonus rung read as no bonus rung at all. A comparison whose two sides
+    // are not the same quantity is a gate that happens to be green.
+    let bar_at = |width: u16| {
+        let line = rows_at(width, tall, &view, &chrome())
+            .last()
+            .expect("a footer")
+            .to_owned();
+        // #119's inset off the head first. Split on two spaces without it and the
+        // very first field is the inset itself, so `hints` came back empty and this
+        // gate reported that the widest pane draws no hint bar at all.
+        content(&line, width)
+            .split("  ")
+            .next()
+            .unwrap_or_default()
+            .trim_end()
+            .to_owned()
+    };
+    let baseline = bar_at(40);
+    let hints = bar_at(120);
     assert!(
         hints.len() > baseline.len(),
         "the widest pane drew {hints:?}, no more than the forty-column bar \
@@ -3132,14 +3141,21 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
 /// stops a bonus rung from buying a footer **row** and stops nothing else, and
 /// these two numbers are what make the next layer visible.
 ///
-/// Derived rather than chosen: at 68 columns the drawn bar is 40 wide, the state
-/// and its gap take 14, and 66 − 14 − 2 − 40 leaves 10, which holds neither cell;
+/// Derived rather than chosen: at 66 columns the drawn bar is 38 wide, the state
+/// and its gap take 14, and 64 − 14 − 2 − 38 leaves 10, which holds neither cell;
 /// one column of pane later it holds the frame's 11. Change the state ladder, the
 /// diagnostics ladder or the margins and these move legitimately, so a failure
 /// here is a question rather than a verdict. Change the **hints** and they move
 /// because a hint was paid for out of a readout, which is the case this exists
 /// for.
-const READOUT_RUNGS: [(u16, usize); 2] = [(69, 1), (77, 2)];
+///
+/// **They moved inward on 2026-08-17, from 69 and 77, and that is a hint being
+/// paid *back*.** B12 swapped the bonus rung `JK files` for `? keys`, which is two
+/// columns narrower, so both cells arrive two columns of pane earlier than
+/// [#147](https://github.com/breferrari/vigia/issues/147) measured them. That
+/// issue's question is untouched: this is which rung is bonus, not whether a bonus
+/// rung may cost a readout.
+const READOUT_RUNGS: [(u16, usize); 2] = [(67, 1), (75, 2)];
 
 #[test]
 fn a_wider_hint_bar_cannot_quietly_push_the_readouts_out() {

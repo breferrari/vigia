@@ -187,6 +187,45 @@ pub struct Regions {
     pub diff: Region,
     /// The column both scrollbars are drawn in, when either is.
     pub bar: Option<u16>,
+    /// The gestures sheet, when it is drawn.
+    ///
+    /// **The only region here that is *over* the others rather than beside
+    /// them**, so it is tested first and it swallows what lands on it. `SPEC.md`
+    /// §11.1's B12 rules that a click on the close control dismisses and a click
+    /// inside the sheet that is not on the control does nothing; the wheel is
+    /// swallowed for the same reason, because scrolling a diff a reader cannot
+    /// see is worse than doing nothing.
+    pub sheet: Option<Sheet>,
+}
+
+/// Where the gestures sheet is, so a pointer can be told it is over one.
+///
+/// Absolute within the pane, like every other row and column in this module.
+/// Carried as its own type rather than as a pair of `Option`s on [`Regions`],
+/// because the rect and the close control inside it are one fact and two fields
+/// could disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sheet {
+    /// Left column, inclusive.
+    pub left: u16,
+    /// Top row, inclusive.
+    pub top: u16,
+    /// Columns the sheet occupies.
+    pub width: u16,
+    /// Rows the sheet occupies.
+    pub height: u16,
+    /// The close control's own cell.
+    pub close: (u16, u16),
+}
+
+impl Sheet {
+    /// Whether this cell is the sheet's, control included.
+    pub fn covers(self, column: u16, row: u16) -> bool {
+        column >= self.left
+            && column < self.left.saturating_add(self.width)
+            && row >= self.top
+            && row < self.top.saturating_add(self.height)
+    }
 }
 
 impl Regions {
@@ -551,6 +590,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(u16, isize)> {
         | Action::DiffTo(_)
         | Action::ToggleFollow
         | Action::ToggleMasthead
+        | Action::ToggleSheet
         | Action::Redraw
         | Action::Quit => return None,
     };
@@ -803,6 +843,17 @@ pub enum Action {
     /// nothing at all on a tall one, and a reader who has decided which is what
     /// this asks.
     ToggleMasthead,
+    /// Draw the gestures sheet, or stop drawing it.
+    ///
+    /// `SPEC.md` §11.1's B12 ruling, from `?` or from a click on the sheet's own
+    /// close control. **The one action on this map that moves nothing**: the
+    /// sheet composites over cells that are already drawn, so unlike
+    /// [`Action::ToggleMasthead`] it does not even resize a region, which is the
+    /// whole reason the keymap went over the pane rather than into the footer.
+    ///
+    /// It is not a mode. Every other key keeps its meaning while the sheet is
+    /// up, so nothing here becomes context-dependent and `Esc` still quits.
+    ToggleSheet,
     /// Put the pinned list's window at this fraction of the changed set.
     ///
     /// From dragging or clicking the list's own scrollbar. A fraction over
@@ -889,6 +940,7 @@ impl Action {
             | Self::DiffTo(_)
             | Self::ToggleFollow
             | Self::ToggleMasthead
+            | Self::ToggleSheet
             | Self::Redraw
             | Self::Quit => self,
         }
@@ -937,6 +989,9 @@ impl Action {
             // and the same answer §11.1 gives one: a resize expresses no intent
             // about what the diff should show.
             | Self::ToggleMasthead
+            // And the sheet moves nothing at all: it composites over rows that
+            // are already drawn, so it does not even resize a region. B12.
+            | Self::ToggleSheet
             | Self::ScrollList(_) => false,
             // Dragging the **list's** bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the **diff's**
@@ -980,7 +1035,11 @@ impl Action {
             Self::ListTo(_) | Self::ListRow(_) => false,
             // A toggle changes the region's height; it does not need to be
             // told one to decide what it means.
-            Self::Quit | Self::Redraw | Self::ToggleFollow | Self::ToggleMasthead => false,
+            Self::Quit
+            | Self::Redraw
+            | Self::ToggleFollow
+            | Self::ToggleMasthead
+            | Self::ToggleSheet => false,
         }
     }
 }
@@ -1102,6 +1161,14 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // always needed"*, which is the honest read of an element that costs
         // four rows of the thing the tool exists to show.
         KeyCode::Char('m') => Some(Action::ToggleMasthead),
+        // **`?` and nothing else**, which is `SPEC.md` §11.1's B12: `btop`,
+        // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
+        // is refused because it is a vi motion everywhere else on a pane with no
+        // horizontal scroll. `Esc` is refused too, and that one is a fact about
+        // *this* keymap rather than about the convention: `Esc` is Quit four rows
+        // up, so teaching it to dismiss would put *dismiss this* one keystroke
+        // from *end the program*.
+        KeyCode::Char('?') => Some(Action::ToggleSheet),
         _ => None,
     }
 }
@@ -1123,6 +1190,21 @@ fn row_of(digit: char) -> u16 {
 }
 
 fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
+    // **The sheet is checked before everything, because it is drawn over
+    // everything.** `SPEC.md` §11.1's B12: the close control dismisses, and any
+    // other event landing on the sheet does nothing at all. Falling through would
+    // let a click seek a scrollbar the reader cannot see and a wheel scroll a
+    // diff the sheet is covering, which is the one way an overlay that moves no
+    // content could still move content.
+    if let Some(sheet) = regions.sheet {
+        if sheet.covers(mouse.column, mouse.row) {
+            return matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                .then_some(())
+                .filter(|()| (mouse.column, mouse.row) == sheet.close)
+                .map(|()| Action::ToggleSheet);
+        }
+    }
+
     // **The bar is checked before the region it sits in.** A press on the
     // scrollbar column is a gesture about position, and the same column is inside
     // whichever region drew it, so testing the region first would turn every drag

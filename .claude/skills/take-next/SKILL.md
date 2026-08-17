@@ -199,9 +199,9 @@ Three rules, and they are about *when* and *how hard*, not about being agreeable
 
 **And the ruling's prose is sized to the ruling, not to the effort.** A decline that took an afternoon does not earn four paragraphs in `SPEC.md` because it took an afternoon. Long justification of a "no" is the same failure one layer over: it makes the refusal harder to revisit, because the next reader has to argue with a wall of text instead of with one checkable sentence. State the reason in the fewest words that can be falsified, and put the evidence trail in `RULINGS.md` where it belongs.
 
-### A `decision` issue is done when the ruling is written, not when code lands
+### A `decision` issue is ruled first and built second, in the same pass
 
-Check the label before planning. An issue labelled **`decision`** is one whose acceptance is **a ruling recorded in `SPEC.md`**, not a diff. Three exist today ([#74](https://github.com/breferrari/vigia/issues/74), [#50](https://github.com/breferrari/vigia/issues/50), [#89](https://github.com/breferrari/vigia/issues/89)) and they were already written that way — #74's exit criteria read *"a ruling: build the seam, or record that direct consumption is accepted"*, and *"if declined: a line in `SPEC.md` §6 saying so, so the next reviewer finds a decision instead of an omission."*
+Check the label before planning. An issue labelled **`decision`** is one whose acceptance is **a ruling recorded in `SPEC.md`** rather than a diff — and, when the ruling is *yes*, the build that makes the ruling true, which is the correction 2026-08-17 forced into this section after a ruling shipped in a release that changed nothing a reader could see. Three exist today ([#74](https://github.com/breferrari/vigia/issues/74), [#50](https://github.com/breferrari/vigia/issues/50), [#89](https://github.com/breferrari/vigia/issues/89)) and they were already written that way — #74's exit criteria read *"a ruling: build the seam, or record that direct consumption is accepted"*, and *"if declined: a line in `SPEC.md` §6 saying so, so the next reviewer finds a decision instead of an omission."*
 
 **They had no route, which is the actual defect.** Every step below assumes a diff: plan a build, ship it, scope the checks to the changed files, prove it with gates. Handed a `decision` issue, this skill plans a build for something whose answer might be *"do not build it"* — and #50 sits in a phase that gets **taken in sequence**, so this is reachable rather than hypothetical.
 
@@ -209,7 +209,9 @@ When the issue is labelled `decision`:
 
 - **The deliverable is the ruling and its reasoning**, written where the next reader will hit it — the `SPEC.md` section the issue names, plus its §10 bullet closed. A ruling filed only in the issue is not filed: the issue closes and `SPEC.md` still reads as an omission.
 - **Both branches get written.** *"Declined"* is a result, and the case for the road not taken is recorded rather than dropped, because it will be raised again. #50 says this in its own acceptance and it is the general rule.
-- **Code is allowed but it is not the point.** If the ruling is *build the seam*, the build is a **separate issue** the ruling unblocks. Do not fold it in: the ruling is what the next session needs and it should not wait behind an implementation.
+- **A ruling of *yes* is the first half of the pass, not the end of it.** The build gets its **own issue and its own PR**, so the ruling is never blocked by an implementation, and then **this same pass takes that issue and ships it**. Stopping at the ruling is what this bullet used to say and it was wrong: #167 ruled that `?` opens a gestures sheet, filed #206 for the build, and released **0.11.1 with nothing on screen**. The reader pressed `?`, got nothing, and had to go and find out that the tool had been *told* about a feature it did not have. Two PRs, one pass, in that order.
+- **The only reason to stop after the ruling is size, and it is a claim about the build rather than about the rules.** If the build genuinely will not fit one fresh context (the test three sections down), stop there and say so — but say it in the **first line of the report**, in the form *"nothing the reader can see has changed yet; the build is #N"*. A pass that ends with the tool doing exactly what it did before is allowed. A pass that ends that way quietly is not.
+- **The report opens with what a reader can now do that they could not before.** If the honest answer is *nothing*, that is the first sentence, not a detail three paragraphs down. This is the line that would have caught the case above, and no gate can see it: the suite was green, the plan was delivered in full, and the feature did not exist.
 - **The gate is different.** There is no diff to scope checks to and nothing for `/harden` to audit, so step 5's docs-vs-code split resolves to docs and the fidelity check in step 6 runs against the *plan's promises about the ruling*: every question the issue asked is answered, and each answer names what it rests on.
 - **A ruling that cannot be made is a finding, not a failure.** If it needs a measurement nobody has run or a week of use nobody has had, say so, record what would settle it, and leave the issue open with that written down. #50 needs exactly that, and pretending otherwise produces a guess wearing a ruling's clothes.
 
@@ -547,7 +549,9 @@ Skipping any of these is how the next session loses time.
 
 ## 9. Report
 
-What was taken, what shipped, the numbers, what moved on the roadmap, and what the next task is. Then stop. Do not start it.
+**The first line is what a reader can now do that they could not before.** One sentence, in the tool's own terms — *"`?` opens a sheet of every gesture"* — and if the honest answer is *nothing yet*, that is the first line instead, naming the issue that will change it. Everything below is evidence for that sentence, and a report that buries it has hidden the only fact the reader was waiting for. It is here because no gate can check it: a pass once ended green, complete against its plan, and shipped a release in which nothing on screen had changed.
+
+Then what was taken, what shipped, the numbers, what moved on the roadmap, and what the next task is. Then stop. Do not start it.
 
 Name the **review outcome** too: whether Copilot commented, how many, and what happened to each. A review whose result nobody states is one nobody can tell you skipped — the same reason step 6's plan diff has to be said out loud.
 
@@ -570,6 +574,8 @@ Say what the record gave you, too: which recorded decisions the work stood on, o
 - Reporting a deviation instead of correcting it
 - Taking a task while an open `SPEC.md` §10 bullet says something else comes first
 - Closing an issue whose invariant has no failing test
+- Stopping at a ruling of *yes* and leaving the build for a later pass without saying, in the report's first line, that nothing a reader can see has changed
+- Releasing a version whose only content is a ruling, without saying that the binary does what the last one did
 - Filing a follow-up issue to avoid fixing something in scope
 - Running the full suite on a markdown diff, or skipping it on a manifest diff
 - Reporting green without naming what ran

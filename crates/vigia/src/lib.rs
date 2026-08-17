@@ -83,7 +83,7 @@ mod view;
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use input::{
-    Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, TRACK_SCALE,
+    Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
     WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
 };
 pub use render::{
