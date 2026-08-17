@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Worktree};
+use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Samples, Worktree};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -73,6 +73,134 @@ pub fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
     let start = Instant::now();
     let value = work();
     (value, start.elapsed())
+}
+
+/// Assert an absolute p99 budget, **re-measuring once before believing a breach**.
+///
+/// [#178](https://github.com/breferrari/vigia/issues/178). The gates that use this
+/// take a p99 over a few hundred wall-clock samples, and wall clock on a shared
+/// runner includes time the process was not running: on a two-vCPU hosted runner a
+/// single descheduling quantum lands two samples of two hundred and fifty outside
+/// the budget, which **is** the ninety-ninth percentile. So the statistic cannot
+/// tell *the frame path got slower* from *the host took the CPU away*, and the
+/// failure text reported the second as though it were the first. Three occurrences
+/// are on the record, each with a median comfortably inside budget and a tail an
+/// order of magnitude out.
+///
+/// **Two rounds, and the second only happens on a breach.** Interference is
+/// independent between rounds, so a stall has to recur to fail the gate, while a
+/// regression recurs by construction. This weakens the statistic by **nothing**:
+/// it is the same hypothesis tested twice, not a trimmed percentile or a raised
+/// budget, both of which hide a regression as effectively as they hide a stall. The
+/// cost is one extra measurement round, paid only when a round breaches.
+///
+/// **This is the estimator `first_paint.rs` already uses**, where the same problem
+/// was recognised when that gate was written: it takes the best of three runs,
+/// because interference only ever inflates a duration. The frame budgets were the
+/// place it was missing.
+///
+/// **A second breach fails**, and it fails with the diagnosis rather than with a
+/// number. If the median is inside budget in both rounds, the shape is a stall and
+/// the message says so; if the median is out too, the frame path is what moved.
+/// Both are failures on purpose: a rare pathological frame is exactly what a p99
+/// exists to catch, so passing on *"only the tail is out"* would trade a flake for
+/// a gate that cannot fail.
+pub fn holds_p99(
+    claim: &str,
+    budget: Duration,
+    first: &Samples,
+    detail: impl Fn() -> String,
+    mut resample: impl FnMut() -> Duration,
+) {
+    let taken = first.len();
+    holds_p99_rounds(claim, budget, first, detail, || {
+        let mut again = Samples::new(taken.max(1));
+        for _ in 0..taken {
+            again.push(resample());
+        }
+        again
+    });
+}
+
+/// [`holds_p99`] where a round is produced whole rather than a sample at a time.
+///
+/// The scroll gates are the callers: a round there is a scripted motion whose
+/// samples are partitioned into cold and warm, so the unit that can be repeated is
+/// the run and not the frame. Same two rounds, same diagnosis, and the same reason
+/// for both.
+pub fn holds_p99_rounds(
+    claim: &str,
+    budget: Duration,
+    first: &Samples,
+    detail: impl Fn() -> String,
+    round: impl FnOnce() -> Samples,
+) {
+    let one = Shape::of(first);
+    if one.p99 <= budget {
+        return;
+    }
+
+    let again = round();
+    let two = Shape::of(&again);
+    if two.p99 <= budget {
+        // Reported rather than swallowed, so the flake rate stays visible in the
+        // log even when the gate goes green. #178 exists because two occurrences
+        // were only found by reading PR bodies.
+        eprintln!(
+            "note: {claim} breached on the first round and held on the second, \
+             which is #178's stall shape: {one} then {two}, against {budget:?}. \
+             {}",
+            detail()
+        );
+        return;
+    }
+
+    let diagnosis = if one.p50 <= budget && two.p50 <= budget {
+        "**The median is inside budget in both rounds and only the tail is out**, \
+         which is a stall rather than a regression: a slower frame path moves the \
+         median. Two rounds of it means either this runner cannot be measured or \
+         the tail is genuinely ours, and the numbers above are what to argue with. \
+         Re-running is not a fix (#178)."
+    } else {
+        "**The median is over budget too**, so this is the frame path rather than \
+         the host: interference moves a tail and leaves a median alone."
+    };
+    panic!(
+        "{claim} was over the {budget:?} budget twice: {one} then {two}. {} {diagnosis}",
+        detail()
+    );
+}
+
+/// The three numbers a timed gate argues with, and how they read as a sentence.
+struct Shape {
+    p50: Duration,
+    p99: Duration,
+    max: Duration,
+}
+
+impl Shape {
+    fn of(samples: &Samples) -> Self {
+        Self {
+            p50: samples.percentile(0.50).unwrap_or_default(),
+            p99: samples.percentile(0.99).unwrap_or_default(),
+            max: samples.max().unwrap_or_default(),
+        }
+    }
+}
+
+impl std::fmt::Display for Shape {
+    /// **The spread is printed because it is the diagnosis.** A frame path on a
+    /// quiet machine draws p99 within about a third of p50; a stalled sample puts
+    /// the ratio into double figures, which is a fact about the host and reads
+    /// straight off the line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let spread = self.p99.as_secs_f64() / self.p50.as_secs_f64().max(f64::MIN_POSITIVE);
+        write!(
+            f,
+            "p99 {:?} (p50 {:?}, max {:?}, spread {spread:.0}x)",
+            self.p99, self.p50, self.max
+        )
+    }
 }
 
 /// Whether the absolute wall-clock tier should assert.

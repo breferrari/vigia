@@ -25,10 +25,12 @@
 
 mod support;
 
+use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    Scratch, absolute_gates_apply, budget, delta, highlight_delta, materialise, settle, time,
+    Scratch, absolute_gates_apply, budget, delta, highlight_delta, holds_p99, materialise, settle,
+    time,
 };
 use vigia_core::{
     FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
@@ -344,13 +346,12 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
     for _ in 0..SAMPLED_FRAMES {
         frames.push(frame());
     }
-    let p99 = frames.percentile(0.99).expect("samples");
-    assert!(
-        p99 <= budget(I9_FRAME),
-        "I9: frame p99 was {p99:?}, over the {:?} budget (p50 {:?}, max {:?})",
+    holds_p99(
+        "I9: an enumeration plus the file that changed",
         budget(I9_FRAME),
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples")
+        &frames,
+        String::new,
+        frame,
     );
 }
 
@@ -376,10 +377,13 @@ fn a_real_frame_holds_the_frame_budget() {
     }
 
     let mut edits = 0usize;
-    let mut marker = String::new();
+    // A cell rather than a `String`, because `holds_p99` re-measures on a breach,
+    // so this closure is still live where the marker is read below. See the same
+    // note in the shell's `budgets.rs`.
+    let marker = RefCell::new(String::new());
     let mut next_frame = |frame: &mut vigia_core::Frame| {
-        marker = format!("fn edited_{edits}() {{ }}");
-        scratch.edit_line(SHARED_PATH, 0, &marker);
+        *marker.borrow_mut() = format!("fn edited_{edits}() {{ }}");
+        scratch.edit_line(SHARED_PATH, 0, &marker.borrow());
         edits += 1;
         time(|| materialise(frame))
     };
@@ -403,7 +407,7 @@ fn a_real_frame_holds_the_frame_budget() {
     //
     // What cannot be manufactured by the margin is the *content*: the frame has
     // to be handing back the last edit actually made.
-    let last = marker.clone();
+    let last = marker.borrow().clone();
     let shared = frame
         .files()
         .iter()
@@ -426,17 +430,17 @@ fn a_real_frame_holds_the_frame_budget() {
         cost.computed
     );
 
-    let p99 = frames.percentile(0.99).expect("samples");
-    assert!(
-        p99 <= budget(I9_FRAME),
-        "I9: a real frame over {FILES} files was {p99:?} p99, over the {:?} \
-         budget (p50 {:?}, max {:?}, {} recomputed, {} reused, {} read)",
+    holds_p99(
+        &format!("I9: a real frame over {FILES} files"),
         budget(I9_FRAME),
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples"),
-        cost.computed,
-        cost.reused,
-        cost.bytes
+        &frames,
+        || {
+            format!(
+                "({} recomputed, {} reused, {} read)",
+                cost.computed, cost.reused, cost.bytes
+            )
+        },
+        || next_frame(&mut frame),
     );
 }
 
@@ -968,5 +972,90 @@ fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
         cost.lines > 0,
         "the changed hunk was reported as parsed and cost no lines, so nothing \
          was actually re-read"
+    );
+}
+
+/// A distribution of `slow` samples among `n`, the rest at 1ms.
+///
+/// Ten samples, because nearest-rank p99 over ten *is* the maximum, so one slow
+/// sample moves the tail and leaves the median alone. That is the shape the whole
+/// retry exists for, in the smallest fixture that can express it.
+fn spiked(n: usize, slow: usize) -> Samples {
+    let mut samples = Samples::new(n);
+    for at in 0..n {
+        samples.push(if at < n - slow {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_millis(500)
+        });
+    }
+    samples
+}
+
+#[test]
+fn a_breached_p99_is_re_measured_before_it_is_believed() {
+    // **The instrument gets its own gate**, because #178's fix is a claim about the
+    // measurement rather than about the code, and prose about a measurement proves
+    // nothing. One stalled sample in the first round, a clean second round: the
+    // gate holds, and it says in the log that it had to look twice.
+    holds_p99(
+        "a probe that stalled once",
+        Duration::from_millis(10),
+        &spiked(10, 1),
+        String::new,
+        || Duration::from_millis(1),
+    );
+}
+
+#[test]
+#[should_panic(expected = "budget twice")]
+fn a_p99_that_breaches_twice_still_fails() {
+    // The half that keeps this a gate rather than a retry loop. #178's own
+    // acceptance: the unchanged code must still fail when the budget is genuinely
+    // breached, or the flake has been traded for a gate that cannot fire.
+    holds_p99(
+        "a probe that is simply slow",
+        Duration::from_millis(10),
+        &spiked(10, 10),
+        String::new,
+        || Duration::from_millis(500),
+    );
+}
+
+#[test]
+#[should_panic(expected = "median is over budget too")]
+fn a_p99_gate_names_a_regression_when_the_median_moved() {
+    holds_p99(
+        "a probe whose median moved",
+        Duration::from_millis(10),
+        &spiked(10, 10),
+        String::new,
+        || Duration::from_millis(500),
+    );
+}
+
+#[test]
+#[should_panic(expected = "median is inside budget in both rounds")]
+fn a_p99_gate_names_a_stall_when_only_the_tail_moved() {
+    // Two stalled rounds fail, and the failure text is the diagnosis rather than a
+    // number: this is the message a reviewer acts on, so it is asserted.
+    holds_p99(
+        "a probe on a runner that cannot be measured",
+        Duration::from_millis(10),
+        &spiked(10, 1),
+        String::new,
+        {
+            let mut round = 0usize;
+            move || {
+                round += 1;
+                // Every tenth sample stalls, so the second round has the same shape
+                // as the first: median inside budget, tail far outside.
+                if round % 10 == 0 {
+                    Duration::from_millis(500)
+                } else {
+                    Duration::from_millis(1)
+                }
+            }
+        },
     );
 }
