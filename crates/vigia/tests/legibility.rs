@@ -341,18 +341,23 @@ fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> u
 /// the renderer. What gates the packing is `tests/glyphs.rs`, which pins the
 /// corners and the climb against literal characters.
 fn alphabet(glyphs: Glyphs) -> (Vec<char>, char) {
-    match glyphs.cell(0, 0) {
-        None => (RAMP.to_vec(), TRACK),
-        Some(empty) => {
-            let levels = glyphs.levels();
-            let ramp = (0..=levels)
-                .flat_map(|left| (0..=levels).map(move |right| (left, right)))
-                .filter(|pair| *pair != (0, 0))
-                .filter_map(|(left, right)| glyphs.cell(left, right))
-                .collect();
-            (ramp, empty)
+    // **The block rung keeps the restated constants rather than deriving them**,
+    // so the gates above still check the renderer against eight literal
+    // characters this file names itself. Only the dense alphabet is derived, for
+    // the reason the docblock gives.
+    if glyphs.density() == 1 {
+        return (RAMP.to_vec(), TRACK);
+    }
+    let levels = glyphs.levels();
+    let mut ramp = Vec::new();
+    for left in 0..=levels {
+        for right in 0..=levels {
+            if (left, right) != (0, 0) {
+                ramp.push(glyphs.glyph(left, right));
+            }
         }
     }
+    (ramp, glyphs.glyph(0, 0))
 }
 
 /// Every row the body holds, across every region it has.
@@ -4800,7 +4805,7 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
         ..chrome()
     };
     let track = theme.spark_track.fg.expect("the track has a colour");
-    let empty = Glyphs::Braille.cell(0, 0).expect("a dense cell");
+    let empty = Glyphs::Braille.glyph(0, 0);
 
     // Two buckets of every pair empty, the rest busy: the first cell is the
     // track and no other cell is.

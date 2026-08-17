@@ -64,6 +64,52 @@ use crate::colour::names;
 /// Environment variable that overrides detection outright.
 pub const GLYPHS_VAR: &str = "VIGIA_GLYPHS";
 
+/// A churn bucket's height, emptiest first.
+///
+/// The eighth-blocks every sparkline in every terminal is drawn from.
+///
+/// **Six of the eight are outside CP437 and two are not**, which this said
+/// wrongly for three phases and `SPEC.md` §10 now records measured rather than
+/// assumed: `▄` and `█` are 0xDC and 0xDB in that code page, the other six are
+/// not there at all. So a legacy Windows console does not lose the sparkline, it
+/// loses its *resolution*: the top and half rungs still draw and the other six
+/// do not, which is worse than losing the element, because a strip that renders
+/// some buckets and drops others is a shape that lies. Three of the six sit
+/// between the two survivors and three sit below them, so what is left is not
+/// even a coarser version of the same shape. The
+/// `▶` the footer has carried since I5 is genuinely outside, and so is the
+/// pulse's `●`.
+pub(crate) const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// A bucket nothing happened in.
+///
+/// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
+/// the heat strip and [`Theme::bar_track`] the scrollbar, reaching it last
+/// though §5 lists it first
+/// ([#78](https://github.com/breferrari/vigia/issues/78)).
+/// A file with no history at all is the *all*-empty case, so a worktree that was
+/// already dirty when `vigia` started draws a full track on every row, which is
+/// the ordinary first frame: history is fed from the watch, so nothing a reader
+/// opens the pane to look at has a tick behind it yet.
+///
+/// This used to be a space, and the sentence that argued for one still holds:
+/// `▁` would say "a little happened", which is a different claim from "nothing
+/// did", and over eight buckets that difference is what tells a settling file
+/// from a busy one. **So the track is not `▁` either.** The heat strip may reuse
+/// `█` between a live slice and its track because colour is its only channel; a
+/// sparkline's channel is *height*, and spending the ramp's floor on "no data"
+/// would leave colour alone carrying the one distinction this element exists to
+/// make.
+///
+/// `_` rather than `·`, which the hint bar already draws: a middle dot sits
+/// mid-cell, so an empty bucket would be drawn *higher* than a bucket holding
+/// one write, which is backwards for a thing read as a bar chart. `_` sits where
+/// a bar stands. It is also ASCII, which puts it on the surviving side of the
+/// legacy-console question §10 records: six of [`SPARK_RAMP`]'s eight rungs are
+/// outside CP437 and this is not, so on such a console an empty window still
+/// reads as an empty window even where a busy one loses its shape.
+pub(crate) const SPARK_TRACK: char = '_';
+
 /// Rows of dots a 2x4 cell has.
 const DENSE_ROWS: usize = 4;
 
@@ -243,26 +289,47 @@ impl Glyphs {
     /// `row * 2 + col` with the top row first. Confirmed against both:
     /// `BRAILLE[4]` is `⠂`, dot 2, the second row's left cell, and `OCTANTS[192]`
     /// is `▂`, the bottom row across.
-    pub fn cell(self, left: usize, right: usize) -> Option<char> {
+    /// **Total at every rung, which is what lets the drawer have no branch in
+    /// it.** The block rung is one bucket per cell, so it ignores `right` and
+    /// answers from [`SPARK_RAMP`], with level zero taking [`SPARK_TRACK`]. That
+    /// this function is total is the whole reason the sparkline is drawn by one
+    /// loop rather than by a dense path beside a block one: the two differ only
+    /// in how a level pair is spelled, and spelling is this type's job.
+    pub fn glyph(self, left: usize, right: usize) -> char {
         let table: &[char; 256] = match self {
-            Self::Block => return None,
+            Self::Block => {
+                // The ramp has no rung for "nothing happened", by
+                // [`SPARK_TRACK`]'s own ruling, so the floor is a different
+                // glyph rather than the ramp's lowest.
+                return match left.min(self.levels()) {
+                    0 => SPARK_TRACK,
+                    level => SPARK_RAMP[level - 1],
+                };
+            }
             Self::Braille => &symbols::braille::BRAILLE,
             Self::Octant => &symbols::pixel::OCTANTS,
         };
-        let mask = self.column(left, 0) | self.column(right, 1);
-        Some(table[usize::from(mask)])
+        table[usize::from(Self::column(left, 0) | Self::column(right, 1))]
     }
 
     /// One column of a dense cell: the baseline, plus `level` rows climbing it.
-    fn column(self, level: usize, col: u8) -> u8 {
-        // Row 3 across, which is bits 6 and 7. Always lit, so an empty bucket
-        // draws a track rather than a gap.
-        let mut mask = 1u8 << (6 + col);
-        for step in 0..level.min(self.levels()) as u8 {
-            // Rows 2, 1 then 0, which is two bits down the mask per step.
-            mask |= 1u8 << (4 - 2 * step + col);
-        }
-        mask
+    ///
+    /// **A table rather than shift arithmetic**, so that a reader checking it
+    /// does not have to prove the shifts stay inside a `u8` in both directions.
+    /// Bit 6 is the baseline and is set in every entry, which is the track rule:
+    /// an empty bucket draws its own floor rather than a gap.
+    const fn column(level: usize, col: u8) -> u8 {
+        /// Left column, emptiest first: baseline, then rows 2, 1 and 0.
+        const CLIMB: [u8; DENSE_ROWS] = [0b0100_0000, 0b0101_0000, 0b0101_0100, 0b0101_0101];
+        // Clamped rather than trusted: the caller scales against a peak, and a
+        // peak is data. Shifting by an unclamped level would index a bit that
+        // means another row entirely.
+        let level = if level < DENSE_ROWS {
+            level
+        } else {
+            DENSE_ROWS - 1
+        };
+        CLIMB[level] << col
     }
 }
 

@@ -208,19 +208,24 @@ fn the_rungs_are_two_densities() {
 }
 
 #[test]
-fn the_block_rung_packs_nothing() {
-    // `None` is what tells the painter to spell the track `_`, so this is the
-    // block rung's track rule as much as it is an absence.
-    assert_eq!(Glyphs::Block.cell(0, 0), None);
-    assert_eq!(Glyphs::Block.cell(3, 3), None);
+fn the_block_rung_answers_from_the_eighth_blocks() {
+    // **Total at the block rung too**, which is what lets the drawer have no
+    // branch in it. Level zero is the track and every level above indexes the
+    // ramp, so one function spells both rungs and `right` is simply unread where
+    // a cell holds a single bucket.
+    assert_eq!(Glyphs::Block.glyph(0, 0), '_');
+    assert_eq!(Glyphs::Block.glyph(1, 0), '▁');
+    assert_eq!(Glyphs::Block.glyph(8, 0), '█');
+    // `right` is ignored rather than packed, since a block cell holds one.
+    assert_eq!(Glyphs::Block.glyph(4, 3), Glyphs::Block.glyph(4, 0));
 }
 
 #[test]
 fn an_empty_cell_draws_the_baseline_and_not_a_gap() {
     // #78 at this rung: a gap would make the strip's own length ambiguous, so
     // the bottom dot row is lit even where nothing happened.
-    assert_eq!(Glyphs::Braille.cell(0, 0), Some('⣀'));
-    assert_eq!(Glyphs::Octant.cell(0, 0), Some('▂'));
+    assert_eq!(Glyphs::Braille.glyph(0, 0), '⣀');
+    assert_eq!(Glyphs::Octant.glyph(0, 0), '▂');
 }
 
 #[test]
@@ -229,8 +234,8 @@ fn one_write_and_no_writes_are_different_heights() {
     // baseline costs a level. If these two were equal the rung would be spending
     // colour alone on it, which `SPARK_TRACK`'s docblock refuses.
     for glyphs in [Glyphs::Braille, Glyphs::Octant] {
-        let empty = glyphs.cell(0, 0);
-        let one = glyphs.cell(1, 0);
+        let empty = glyphs.glyph(0, 0);
+        let one = glyphs.glyph(1, 0);
         assert_ne!(empty, one, "{glyphs:?} draws one write as empty");
     }
 }
@@ -242,22 +247,22 @@ fn a_dense_column_climbs_one_row_per_level() {
     // artifact: the empty neighbour still draws its own baseline, so a cell
     // never has a blank half.
     let left: Vec<char> = (0..=3)
-        .map(|level| Glyphs::Braille.cell(level, 0).expect("a dense cell"))
+        .map(|level| Glyphs::Braille.glyph(level, 0))
         .collect();
     assert_eq!(left, vec!['⣀', '⣄', '⣆', '⣇']);
 
     // And the right column is the mirror, which is what makes one cell carry two
     // buckets that can be told apart.
     let right: Vec<char> = (0..=3)
-        .map(|level| Glyphs::Braille.cell(0, level).expect("a dense cell"))
+        .map(|level| Glyphs::Braille.glyph(0, level))
         .collect();
     assert_eq!(right, vec!['⣀', '⣠', '⣰', '⣸']);
 }
 
 #[test]
 fn a_full_cell_is_every_dot() {
-    assert_eq!(Glyphs::Braille.cell(3, 3), Some('⣿'));
-    assert_eq!(Glyphs::Octant.cell(3, 3), Some('█'));
+    assert_eq!(Glyphs::Braille.glyph(3, 3), '⣿');
+    assert_eq!(Glyphs::Octant.glyph(3, 3), '█');
 }
 
 #[test]
@@ -266,7 +271,7 @@ fn a_level_past_the_ramp_is_clamped_rather_than_wrapping() {
     // by arithmetic rather than only by a programming error. Wrapping the shift
     // would index the table at a bit that means something else entirely.
     for glyphs in [Glyphs::Braille, Glyphs::Octant] {
-        assert_eq!(glyphs.cell(99, 99), glyphs.cell(3, 3), "{glyphs:?}");
+        assert_eq!(glyphs.glyph(99, 99), glyphs.glyph(3, 3), "{glyphs:?}");
     }
 }
 
@@ -277,13 +282,13 @@ fn the_two_tables_agree_about_geometry() {
     // indexed differently, a reader switching rungs would see the bars flip.
     for left in 0..=3 {
         for right in 0..=3 {
-            let braille = Glyphs::Braille.cell(left, right).expect("braille");
-            let octant = Glyphs::Octant.cell(left, right).expect("octant");
+            let braille = Glyphs::Braille.glyph(left, right);
+            let octant = Glyphs::Octant.glyph(left, right);
             assert_ne!(braille, octant, "the rungs are not distinct glyphs");
         }
     }
     // The corners are the check that they agree: empty and full are the two
     // shapes whose meaning is fixed rather than conventional.
-    assert_eq!(Glyphs::Braille.cell(3, 3), Some('⣿'));
-    assert_eq!(Glyphs::Octant.cell(3, 3), Some('█'));
+    assert_eq!(Glyphs::Braille.glyph(3, 3), '⣿');
+    assert_eq!(Glyphs::Octant.glyph(3, 3), '█');
 }
