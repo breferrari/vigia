@@ -352,7 +352,7 @@ fn spark_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
 /// Every glyph a sparkline can draw at `glyphs`, and the one that means empty.
 ///
 /// **Derived from the ladder rather than restated**, which is the opposite of
-/// [`RAMP`]'s rule two hundred lines up, and the difference is worth stating
+/// [`RAMP`]'s rule a hundred lines up, and the difference is worth stating
 /// because it looks like an inconsistency. A restated `RAMP` gates the renderer:
 /// there are eight eighth-blocks and a test naming them checks that the renderer
 /// still uses those eight. A dense rung's alphabet is sixteen packed cells
@@ -5114,6 +5114,12 @@ fn a_dense_strip_draws_its_buckets_at_different_heights() {
             drawn_cells.contains(&busy.to_string()),
             "{glyphs:?}: the busiest pair did not draw a full cell: {drawn_cells:?}"
         );
-        assert_ne!(quiet, busy, "{glyphs:?}: quiet and busy pack identically");
+        // **And the quiet pair is on screen too**, which is the half a
+        // `assert_ne!(quiet, busy)` could never reach: two pure calls disagreeing
+        // says nothing about what was drawn, and injectivity already covers it.
+        assert!(
+            drawn_cells.contains(&quiet.to_string()),
+            "{glyphs:?}: the quiet pairs did not draw their own height: {drawn_cells:?}"
+        );
     }
 }

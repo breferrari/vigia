@@ -2207,7 +2207,7 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// What it buys is what [`Painter::scrollbar`] gets from its `filled` boolean:
 /// **the style is chosen from the variant rather than read back off the
 /// glyph.** [`spark_of`] briefly returned bare `char`s and the painter decided
-/// the style by testing against [`SPARK_TRACK`](crate::glyphs::SPARK_TRACK), which worked only while that
+/// the style by testing against `SPARK_TRACK`, which worked only while that
 /// glyph stayed outside [`SPARK_RAMP`] — a convention a test defends rather than
 /// one the compiler does. It also had a live failure case in the other
 /// direction: on the `peak == 0` path every bucket draws the track *whatever its
@@ -2237,7 +2237,11 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// to the height ramp and change what is drawn.
 #[derive(Clone, Copy)]
 enum Bucket {
-    /// Nothing was written in this bucket's slice of the window.
+    /// Nothing was written in this cell's slice of the window.
+    ///
+    /// **A cell rather than a bucket since the ladder landed**, the same
+    /// correction [`Bucket::Written`] carries: at a dense rung one of these
+    /// stands for *two* buckets, and it is `Empty` only when both are.
     Empty,
     /// Written: the glyph [`Glyphs::glyph`] spelled it with, and its stop of the
     /// ramp.
@@ -2334,13 +2338,20 @@ fn band_cell(level: usize, row: usize) -> Option<char> {
     (filled > 0).then(|| SPARK_RAMP[filled.min(SPARK_RAMP.len()) - 1])
 }
 
-/// A path's buckets, every one of them drawn.
+/// A path's buckets, packed into the cells this rung draws them in.
+///
+/// **Only the first `spark_cells(HISTORY_BUCKETS, glyphs)` entries are
+/// meaningful.** At a dense rung four cells carry all eight buckets and the tail
+/// stays `Empty`, so a caller iterating the whole array paints spurious track
+/// cells. The count is derivable from `glyphs` alone rather than returned,
+/// because returning it made every caller destructure a pair to learn something
+/// it already knew.
 ///
 /// `peak` is the busiest bucket **anywhere on the screen**, so two rows drawn
 /// side by side can be compared by height. A bucket with anything in it is never
 /// blank: it takes the lowest block, because "one write" and "no writes" are the
 /// distinction the strip exists to make and rounding the first down to nothing
-/// would erase it. A bucket with nothing in it takes [`SPARK_TRACK`](crate::glyphs::SPARK_TRACK), which is
+/// would erase it. A bucket with nothing in it takes `SPARK_TRACK`, which is
 /// what keeps that distinction a matter of *shape*.
 ///
 /// **Total, where this returned an `Option` before
@@ -2368,8 +2379,7 @@ fn spark_of(
     // A block cell holds one bucket and a dense cell holds two, which is a
     // chunk width rather than a second algorithm: the levels, the band and the
     // track rule are identical either side, and the glyph is
-    // [`Glyphs::glyph`]'s business. Written as two functions first, and the
-    // duplicate was every line but one.
+    // [`Glyphs::glyph`]'s business.
     for (cell, pair) in drawn.iter_mut().zip(buckets.chunks(glyphs.density())) {
         let (left, right) = (pair[0], pair.get(1).copied().unwrap_or(0));
         // **The busier of the pair decides both**, and at the block rung the
@@ -4808,18 +4818,15 @@ impl Painter<'_> {
             // guarantees `right.width` exceeds every reserved slot, so the two
             // clamps are the same number today. They are not the same *promise*:
             // one says the strip fits the window, the other says it fits the
-            // rect it was handed. **The reason recorded here was wrong and is
-            // corrected rather than deleted**: it claimed `Painter::list` hands
-            // an area this function did not plan because it insets a caret
-            // column, and `list` in fact passes the same `inner` width `plan`
-            // used, moving `x` rather than the width. So the third term is
-            // unreachable today, and removing it survives the suite. It stays
-            // because what it guards is not a claim about callers but about
-            // arithmetic: a bare subtraction here does not even panic in
-            // release, since `u16` wraps, `x` lands near the top of the range
-            // and `x + offset` wraps back into the pane, so a strip wider than
-            // its rect would be drawn in the wrong column rather than not at
-            // all. The heat strip below has the identical expression.
+            // rect it was handed. The third term is unreachable today, since
+            // `Painter::list` passes the same `inner` width `plan` used and
+            // moves `x` rather than the width. It stays because what it guards
+            // is arithmetic rather than a claim about callers: a bare
+            // subtraction does not even panic in release, since `u16` wraps,
+            // `x` lands near the top of the range and `x + offset` wraps back
+            // into the pane, so a strip wider than its rect would draw in the
+            // wrong column rather than not at all. The heat strip below has the
+            // identical expression.
             // **Counted in cells rather than buckets, which is the one thing the
             // glyph rung changes here.** `columns.spark` is a slice of the
             // *window*, and how many columns that costs is the terminal's
@@ -4850,7 +4857,8 @@ impl Painter<'_> {
                 }
             }
         }
-        // **`columns.spark` here and `take` above, deliberately.** They differ
+        // **`slot` here and `take` above, deliberately.** `slot` is
+        // `columns.spark` measured in cells, and the two differ
         // only in the impossible case the clamp exists for, and there the layout
         // is what everything left of this must agree with: the slot was reserved
         // at the planned width, so the cursor moves past the planned width or

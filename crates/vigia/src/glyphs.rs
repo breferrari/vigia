@@ -108,7 +108,7 @@ pub(crate) const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '�
 /// legacy-console question §10 records: six of [`SPARK_RAMP`]'s eight rungs are
 /// outside CP437 and this is not, so on such a console an empty window still
 /// reads as an empty window even where a busy one loses its shape.
-pub(crate) const SPARK_TRACK: char = '_';
+const SPARK_TRACK: char = '_';
 
 /// Rows of dots a 2x4 cell has.
 const DENSE_ROWS: usize = 4;
