@@ -2492,8 +2492,10 @@ version = "0.13.0"
 dependencies = [
  "criterion",
  "gix",
+ "libc",
  "notify",
  "syntect",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
