@@ -3,8 +3,9 @@ source: crates/vigia/tests/rows.rs
 expression: terminal.backend()
 ---
 " fixture · 2 changed                                   watching "
-" ▸ A src/added.rs            ■■■■■■■■■■■■ ________    +2    -0  "
-"   M src/lib.rs              ■■■■■■■■■■■■ ________    +1    -1  "
+"                                                                "
+"▸A src/added.rs              ■■■■■■■■■■■■ ________    +2    -0  "
+" M src/lib.rs                ■■■■■■■■■■■■ ________    +1    -1  "
 "────────────────────────────────────────────────────────────────"
 " A src/added.rs              ■■■■■■■■■■■■ ________    +2    -0 ▲"
 " @@ -0,0 +1,2 @@                                               █"
@@ -15,8 +16,7 @@ expression: terminal.backend()
 " @@ -3,7 +3,7 @@                                               █"
 " 3   line 3                                                    █"
 " 4   line 4                                                    █"
-" 5   line 5                                                    █"
+" 5   line 5                                                    │"
 " 6 - line 6                                                    │"
-" 6 + let changed = true;                                       │"
-" 7   line 7                                                    ▼"
+" 6 + let changed = true;                                       ▼"
 " q quit · f follow · ? keys                       follow ▶  1/2 "
