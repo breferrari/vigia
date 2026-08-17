@@ -38,3 +38,16 @@ criterion.workspace = true
 [[bench]]
 name = "engine"
 harness = false
+
+# **Test-only, and that is the whole point of them being here.** `SPEC.md` §7's
+# absolute tier attributes a wall-clock overshoot to the host or to us by reading
+# thread CPU time beside it, and `std` exposes no CPU clock on any platform. These
+# are `dev-dependencies`, so the published crate's graph and the shipped binary are
+# untouched and the purity gate (which walks `-e normal,build`) cannot see them.
+# Both are pure Rust bindings, so they would not breach §6's no-C-toolchain rule
+# even if they were normal.
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true

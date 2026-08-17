@@ -29,8 +29,8 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    Scratch, absolute_gates_apply, budget, delta, highlight_delta, holds_p99, materialise, settle,
-    time,
+    Scratch, absolute_gates_apply, budget, delta, highlight_delta, holds_p99, holds_p99_rounds,
+    materialise, settle, time, time_cpu,
 };
 use vigia_core::{
     FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
@@ -329,7 +329,7 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
     // monitor actually drives. p99 rather than a mean, because the budget is a
     // tail claim.
     let frame = || {
-        time(|| {
+        time_cpu(|| {
             let change = worktree
                 .changes()
                 .expect("enumerate")
@@ -344,7 +344,7 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
     }
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
-        frames.push(frame());
+        frames.push(frame().0);
     }
     holds_p99(
         "I9: an enumeration plus the file that changed",
@@ -385,7 +385,7 @@ fn a_real_frame_holds_the_frame_budget() {
         *marker.borrow_mut() = format!("fn edited_{edits}() {{ }}");
         scratch.edit_line(SHARED_PATH, 0, &marker.borrow());
         edits += 1;
-        time(|| materialise(frame))
+        time_cpu(|| materialise(frame))
     };
 
     for _ in 0..WARMUP_FRAMES {
@@ -395,7 +395,7 @@ fn a_real_frame_holds_the_frame_budget() {
     let before = frame.stats();
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
-        frames.push(next_frame(&mut frame));
+        frames.push(next_frame(&mut frame).0);
     }
     let cost = delta(before, frame.stats());
 
@@ -992,70 +992,117 @@ fn spiked(n: usize, slow: usize) -> Samples {
     samples
 }
 
+/// Every sample slow on the wall clock, and `cpu` of CPU time each.
+///
+/// The pair is the whole subject of the gates below: a stall is a wall clock nobody
+/// can explain from the work that was done.
+fn every_sample(wall: u64, cpu: u64) -> impl FnMut() -> (Duration, Duration) {
+    move || (Duration::from_millis(wall), Duration::from_millis(cpu))
+}
+
 #[test]
 fn a_breached_p99_is_re_measured_before_it_is_believed() {
-    // **The instrument gets its own gate**, because #178's fix is a claim about the
-    // measurement rather than about the code, and prose about a measurement proves
-    // nothing. One stalled sample in the first round, a clean second round: the
-    // gate holds, and it says in the log that it had to look twice.
+    // **The instrument gets its own gates**, because #178's fix is a claim about
+    // the measurement rather than about the code, and prose about a measurement
+    // proves nothing. One stalled sample in the first round, a clean second round:
+    // the gate holds, and the log says it had to look twice.
     holds_p99(
         "a probe that stalled once",
         Duration::from_millis(10),
         &spiked(10, 1),
         String::new,
-        || Duration::from_millis(1),
+        every_sample(1, 1),
     );
 }
 
 #[test]
-#[should_panic(expected = "budget twice")]
-fn a_p99_that_breaches_twice_still_fails() {
-    // The half that keeps this a gate rather than a retry loop. #178's own
+fn a_wall_clock_breach_the_cpu_clock_acquits_is_reported_and_not_failed() {
+    // **The attribution, and it is why the CPU clock was worth two test-only
+    // dependencies.** Every sample in the second round is 500ms of wall clock and
+    // 1ms of work: the process was not running, and no frame path getting slower
+    // could produce that shape. This is what #178's three occurrences were, and it
+    // is the only weakening in the whole ruling.
+    holds_p99(
+        "a probe on a runner that took the CPU away",
+        Duration::from_millis(10),
+        &spiked(10, 10),
+        String::new,
+        every_sample(500, 1),
+    );
+}
+
+#[test]
+#[should_panic(expected = "work done")]
+fn a_p99_that_breaches_twice_on_work_done_still_fails() {
+    // The half that keeps this a gate rather than a retry loop, and #178's own
     // acceptance: the unchanged code must still fail when the budget is genuinely
-    // breached, or the flake has been traded for a gate that cannot fire.
+    // breached. Wall and CPU both out, so the frame path is what moved, and the
+    // message says which.
     holds_p99(
         "a probe that is simply slow",
         Duration::from_millis(10),
         &spiked(10, 10),
         String::new,
-        || Duration::from_millis(500),
+        every_sample(500, 500),
     );
 }
 
 #[test]
-#[should_panic(expected = "median is over budget too")]
-fn a_p99_gate_names_a_regression_when_the_median_moved() {
-    holds_p99(
-        "a probe whose median moved",
+#[should_panic(expected = "no CPU clock")]
+fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
+    // The fallback, asserted rather than assumed: where there is no thread clock an
+    // overshoot cannot be attributed, and an unattributable breach is ours. Failing
+    // closed is the only safe direction for a gate.
+    holds_p99_rounds(
+        "a probe on a platform with no clock",
         Duration::from_millis(10),
         &spiked(10, 10),
         String::new,
-        || Duration::from_millis(500),
+        || (spiked(10, 10), None),
     );
 }
 
 #[test]
-#[should_panic(expected = "median is inside budget in both rounds")]
-fn a_p99_gate_names_a_stall_when_only_the_tail_moved() {
-    // Two stalled rounds fail, and the failure text is the diagnosis rather than a
-    // number: this is the message a reviewer acts on, so it is asserted.
-    holds_p99(
-        "a probe on a runner that cannot be measured",
-        Duration::from_millis(10),
-        &spiked(10, 1),
-        String::new,
-        {
-            let mut round = 0usize;
-            move || {
-                round += 1;
-                // Every tenth sample stalls, so the second round has the same shape
-                // as the first: median inside budget, tail far outside.
-                if round % 10 == 0 {
-                    Duration::from_millis(500)
-                } else {
-                    Duration::from_millis(1)
-                }
+fn the_cpu_clock_tells_waiting_from_working() {
+    // **Non-vacuity for the two gates above, and the only thing here that touches
+    // the platform.** A clock stuck at zero would make every breach look like
+    // somebody else's load; a clock that returned the wall clock would make every
+    // stall look like a regression. Both directions are checked, and the second is
+    // a sleep, because a sleep is exactly the case the attribution rests on.
+    // **Bounded by a deadline rather than by an iteration count**, and that is a
+    // correction: eighty million multiplications is a closed form, so release folded
+    // the whole loop and the gate measured two hundred nanoseconds of nothing. A
+    // wall-clock deadline with an opaque accumulator is busy for as long as it says
+    // whatever the optimiser does.
+    //
+    // Eighty milliseconds because of the coarsest clock in play: `GetThreadTimes` is
+    // quantized to the scheduler tick, about 15.6ms, so a few milliseconds of work
+    // reports zero CPU on Windows and would say nothing about the clock.
+    let busy = Duration::from_millis(80);
+    let (wall, cpu) = time_cpu(|| {
+        let deadline = std::time::Instant::now() + busy;
+        let mut sum = 0u64;
+        while std::time::Instant::now() < deadline {
+            for at in 0..10_000u64 {
+                sum = sum.wrapping_add(std::hint::black_box(at).wrapping_mul(2_654_435_761));
             }
-        },
+        }
+        std::hint::black_box(sum);
+    });
+    assert!(
+        cpu >= busy / 2,
+        "the CPU clock reported {cpu:?} for {wall:?} of work that never waited for \
+         anything, so a real overshoot would read as somebody else's load"
+    );
+
+    let (slept_wall, slept_cpu) = time_cpu(|| std::thread::sleep(Duration::from_millis(60)));
+    assert!(
+        slept_wall >= Duration::from_millis(50),
+        "a sixty millisecond sleep measured {slept_wall:?} of wall clock"
+    );
+    assert!(
+        slept_cpu < Duration::from_millis(20),
+        "a sixty millisecond sleep measured {slept_cpu:?} of CPU time, so this clock \
+         cannot tell waiting from working and the whole attribution is unsound"
     );
 }

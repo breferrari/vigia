@@ -38,7 +38,8 @@ use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Sampl
 
 use support::{
     Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta, exclusively_timed,
-    generated, highlight_delta, holds_p99, holds_p99_rounds, settle, settle_spans, time, timed,
+    generated, highlight_delta, holds_p99, holds_p99_rounds, settle, settle_spans, time, time_cpu,
+    timed_cpu,
 };
 
 /// I9: steady-state frame time.
@@ -402,7 +403,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
             *marker.borrow_mut() = format!("fn edited_{edits}() {{ let value = {edits}; }}");
             scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
             edits += 1;
-            time(|| {
+            time_cpu(|| {
                 // Inside the timed region on purpose. `vigia::run` samples the
                 // history on the same wake that advances the frame, so a gate that
                 // recorded outside `time` would be timing a frame path the product
@@ -420,12 +421,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     let before = highlighter.stats();
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
-        frames.push(next_frame(
-            &mut frame,
-            &mut app,
-            &mut highlighter,
-            &mut history,
-        ));
+        frames.push(next_frame(&mut frame, &mut app, &mut highlighter, &mut history).0);
     }
     let cost = highlight_delta(before, highlighter.stats());
 
@@ -557,7 +553,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
             *marker.borrow_mut() = format!("fn edited_{edits}() {{ let value = {edits}; }}");
             scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
             edits += 1;
-            time(|| {
+            time_cpu(|| {
                 history.record([EDITED_PATH], Instant::now());
                 shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
@@ -570,12 +566,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     let before = frame.stats();
     let mut frames = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
-        frames.push(next_frame(
-            &mut frame,
-            &mut app,
-            &mut highlighter,
-            &mut history,
-        ));
+        frames.push(next_frame(&mut frame, &mut app, &mut highlighter, &mut history).0);
     }
     let cost = delta(before, frame.stats());
 
@@ -895,7 +886,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let mut buf = Buffer::empty(area());
     let mut draw =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
-            time(|| {
+            time_cpu(|| {
                 history.record([EDITED_PATH], Instant::now());
                 shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
@@ -941,7 +932,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
             0,
             &format!("fn bulk_edited_{at}() {{ let value = {at}; }}"),
         );
-        frames.push(draw(&mut frame, &mut app, &mut highlighter, &mut history));
+        frames.push(draw(&mut frame, &mut app, &mut highlighter, &mut history).0);
     }
     let cost = delta(before, frame.stats());
     let parsed = highlight_delta(highlighted, highlighter.stats());
@@ -1141,6 +1132,11 @@ impl Scroll {
 struct Scrolled {
     /// Frames that reused every hunk they drew: the steady state I9 is about.
     warm: Samples,
+    /// The same frames, in thread CPU time rather than wall clock.
+    ///
+    /// What #178 attributes a wall-clock overshoot with: contention inflates the
+    /// ring above and cannot inflate this one.
+    warm_cpu: Samples,
     /// Frames that entered a hunk nothing had parsed: `SPEC.md` §7's cold path.
     cold: Samples,
     collect: Samples,
@@ -1439,6 +1435,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
     // is held against, so nothing is counted twice.
     let mut run = Scrolled {
         warm: Samples::new(SAMPLED_FRAMES),
+        warm_cpu: Samples::new(SAMPLED_FRAMES),
         cold: Samples::new(SAMPLED_FRAMES),
         collect: Samples::new(SAMPLED_FRAMES),
         paint: Samples::new(SAMPLED_FRAMES),
@@ -1459,12 +1456,17 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             .expect("scroll");
 
         let before = highlighter.stats();
-        let (screen, collect) = timed(|| {
+        // Wall and CPU for both stages, because #178's attribution is per sample:
+        // the question is whether the work in *this* round was inside budget, and a
+        // total taken around the loop would fold in the untimed scrolling between
+        // frames.
+        let (screen, collect, collect_cpu) = timed_cpu(|| {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
         let chrome = app.chrome("fixture", None, None, None, None, None);
-        let (painted, paint) = timed(|| render(&mut buf, area(), &screen, &theme, &chrome));
+        let (painted, paint, paint_cpu) =
+            timed_cpu(|| render(&mut buf, area(), &screen, &theme, &chrome));
         let parsed = highlight_delta(before, highlighter.stats());
 
         if screen.top.file != at_file {
@@ -1509,6 +1511,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             run.cold_lines = run.cold_lines.max(parsed.lines);
         } else {
             run.warm.push(collect + paint);
+            run.warm_cpu.push(collect_cpu + paint_cpu);
         }
     }
 
@@ -1602,9 +1605,9 @@ fn hold_the_scroll_budget(run: &Scrolled, what: &str, again: impl FnOnce() -> Op
         // entered a hunk and the ones that did not, and a single extra frame
         // belongs to neither.
         || {
-            again()
-                .expect("the re-measure skipped the absolute tier the first round ran")
-                .warm
+            let again =
+                again().expect("the re-measure skipped the absolute tier the first round ran");
+            (again.warm, Some(again.warm_cpu))
         },
     );
 }

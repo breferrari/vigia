@@ -331,6 +331,15 @@ impl Regions {
     /// no rung* is a reason to build one, which is what `Theme::bar_hover` and
     /// `Theme::path_hover` are ([#189](https://github.com/breferrari/vigia/issues/189)).
     pub fn hover_at(self, column: u16, row: u16) -> Option<Hovered> {
+        // **The sheet first, because it is drawn over everything.** Its close
+        // control is the only thing on it a click acts on, and the rest of the
+        // sheet swallows gestures rather than passing them down, so a pointer
+        // resting anywhere on it must not mark a bar or a listed file underneath.
+        if let Some(sheet) = self.sheet {
+            if sheet.covers(column, row) {
+                return ((column, row) == sheet.close).then_some(Hovered::Button(column, row));
+            }
+        }
         // **The bar's column first, for [`Regions::grab_at`]'s reason one
         // function up**: the scrollbar is drawn *inside* whichever region owns
         // those rows, so asking the list first would answer `Row` for a pointer
@@ -372,7 +381,12 @@ impl Regions {
 /// anything different while it is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hovered {
-    /// A step button, by the cell it is drawn on.
+    /// A one-cell control, by the cell it is drawn on.
+    ///
+    /// **The scrollbars' step buttons and the sheet's close control**, which are
+    /// the same thing from a pointer's side: one cell, a glyph in the chrome's own
+    /// weight, and a click that acts immediately. Named for the shape rather than
+    /// for the scrollbar since B12 gave the pane its second one.
     Button(u16, u16),
     /// A bar, by the first row of the region it belongs to.
     ///

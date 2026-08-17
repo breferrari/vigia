@@ -78,3 +78,11 @@ signal-hook.workspace = true
 # above breaks harder and earlier, at compile time.
 [dev-dependencies]
 insta.workspace = true
+
+# The same test-only pair `vigia-core`'s manifest explains: the shared support
+# module compiles into this crate's test binaries too, so both need them.
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true

@@ -100,4 +100,18 @@ impl Samples {
     pub fn max(&self) -> Option<Duration> {
         self.values[..self.len()].iter().copied().max()
     }
+
+    /// Every retained sample added together.
+    ///
+    /// **What the budget gates attribute an overshoot with** (`SPEC.md` §7,
+    /// [#178](https://github.com/breferrari/vigia/issues/178)): a round's wall clock
+    /// less the same round's thread CPU time is the time the process spent not
+    /// running, and a sum is the only form in which that comparison survives
+    /// Windows' scheduler-tick granularity. Saturating, so a ring of long samples
+    /// cannot overflow the answer.
+    pub fn total(&self) -> Duration {
+        self.values[..self.len()]
+            .iter()
+            .fold(Duration::ZERO, |sum, each| sum.saturating_add(*each))
+    }
 }

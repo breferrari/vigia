@@ -75,6 +75,93 @@ pub fn timed<T>(work: impl FnOnce() -> T) -> (T, Duration) {
     (value, start.elapsed())
 }
 
+/// [`time`], and the thread CPU time the same work spent.
+///
+/// **The pair is what makes a wall-clock overshoot attributable.** Wall clock
+/// answers *how long did the reader wait*, which is the claim I9 makes, and it
+/// includes time the process was not running at all. CPU time answers *how much
+/// work did we do*, and no amount of host contention inflates it. A frame whose
+/// wall clock is out of budget while its CPU time is inside it did not get slower;
+/// it got descheduled. That is the difference between the two hypotheses
+/// [#178](https://github.com/breferrari/vigia/issues/178)'s three occurrences could
+/// not be told apart on, and it is now measured rather than inferred from the shape
+/// of a distribution.
+///
+/// **What it cannot separate**, stated because the gate leans on it: preemption and
+/// our own blocking both show up as wall minus CPU. A frame path that started
+/// waiting on the disk would read as a busy host here. What covers that is the
+/// structural tier, which counts reads and probes exactly and takes no slack, so an
+/// I/O regression reddens `reads.rs` and I4's own gates rather than hiding behind
+/// this one.
+///
+/// Falls back to reporting CPU **equal to wall** where no clock is available, which
+/// is the conservative direction: an unattributable overshoot is then treated as
+/// ours.
+pub fn time_cpu(work: impl FnOnce()) -> (Duration, Duration) {
+    let (_, wall, cpu) = timed_cpu(work);
+    (wall, cpu)
+}
+
+/// [`time_cpu`], for a stage that produces something the next stage needs.
+pub fn timed_cpu<T>(work: impl FnOnce() -> T) -> (T, Duration, Duration) {
+    let before = thread_cpu();
+    let (value, wall) = timed(work);
+    let cpu = match (before, thread_cpu()) {
+        (Some(before), Some(after)) => after.saturating_sub(before),
+        _ => wall,
+    };
+    (value, wall, cpu)
+}
+
+/// This thread's CPU time so far, or `None` where the platform has no clock.
+///
+/// `std` has none, which is why the two test-only bindings in both manifests
+/// exist. Per **thread** rather than per process, because the frame path is
+/// single-threaded and a process clock would fold in the test harness's other
+/// threads.
+#[cfg(unix)]
+fn thread_cpu() -> Option<Duration> {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `clock_gettime` writes a `timespec` through the pointer and reads
+    // nothing else. The clock id is a constant from the same crate as the struct.
+    let ok = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } == 0;
+    ok.then(|| Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32))
+}
+
+#[cfg(windows)]
+fn thread_cpu() -> Option<Duration> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+
+    let mut created = FILETIME::default();
+    let mut exited = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    // SAFETY: four out-parameters, all owned here, and a pseudo-handle that needs
+    // no close. The call writes only through those pointers.
+    let ok = unsafe {
+        GetThreadTimes(
+            GetCurrentThread(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    } != 0;
+    // Both halves, in units of a hundred nanoseconds. Kernel time is ours: a
+    // syscall the frame makes is work the frame did.
+    let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    ok.then(|| Duration::from_nanos((ticks(kernel) + ticks(user)) * 100))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn thread_cpu() -> Option<Duration> {
+    None
+}
+
 /// Assert an absolute p99 budget, **re-measuring once before believing a breach**.
 ///
 /// [#178](https://github.com/breferrari/vigia/issues/178). The gates that use this
@@ -110,15 +197,18 @@ pub fn holds_p99(
     budget: Duration,
     first: &Samples,
     detail: impl Fn() -> String,
-    mut resample: impl FnMut() -> Duration,
+    mut resample: impl FnMut() -> (Duration, Duration),
 ) {
     let taken = first.len();
     holds_p99_rounds(claim, budget, first, detail, || {
-        let mut again = Samples::new(taken.max(1));
+        let mut wall = Samples::new(taken.max(1));
+        let mut cpu = Samples::new(taken.max(1));
         for _ in 0..taken {
-            again.push(resample());
+            let (one_wall, one_cpu) = resample();
+            wall.push(one_wall);
+            cpu.push(one_cpu);
         }
-        again
+        (wall, Some(cpu))
     });
 }
 
@@ -133,14 +223,14 @@ pub fn holds_p99_rounds(
     budget: Duration,
     first: &Samples,
     detail: impl Fn() -> String,
-    round: impl FnOnce() -> Samples,
+    round: impl FnOnce() -> (Samples, Option<Samples>),
 ) {
     let one = Shape::of(first);
     if one.p99 <= budget {
         return;
     }
 
-    let again = round();
+    let (again, cpu) = round();
     let two = Shape::of(&again);
     if two.p99 <= budget {
         // Reported rather than swallowed, so the flake rate stays visible in the
@@ -155,18 +245,48 @@ pub fn holds_p99_rounds(
         return;
     }
 
-    let diagnosis = if one.p50 <= budget && two.p50 <= budget {
-        "**The median is inside budget in both rounds and only the tail is out**, \
-         which is a stall rather than a regression: a slower frame path moves the \
-         median. Two rounds of it means either this runner cannot be measured or \
-         the tail is genuinely ours, and the numbers above are what to argue with. \
-         Re-running is not a fix (#178)."
-    } else {
-        "**The median is over budget too**, so this is the frame path rather than \
-         the host: interference moves a tail and leaves a median alone."
-    };
+    // **The second round's CPU time is what decides, where the first version of
+    // this guessed from the shape.** A p50 inside budget with a tail outside it is
+    // *consistent with* a stall and does not establish one; thread CPU time
+    // establishes it, because no amount of host contention inflates work done.
+    //
+    // **Totals rather than a CPU percentile, and that is forced by Windows.**
+    // `GetThreadTimes` is quantized to the scheduler tick, about 15.6ms, so a 3ms
+    // frame reports zero CPU and a per-sample CPU p99 would be noise. Summed over a
+    // round of two hundred and fifty frames the quantisation is a couple of percent,
+    // so the question is asked of the round: **is the time this process spent
+    // off-CPU enough to explain the overshoot?** Deficit at least overshoot and the
+    // host is a sufficient explanation; well under it, and the work is ours. That is
+    // a sufficient-explanation test rather than a ratio, which matters because a
+    // round can be 95% on-CPU and still have lost sixty milliseconds in the two
+    // samples that made the tail.
+    if let Some(cpu) = cpu.as_ref() {
+        let deficit = again.total().saturating_sub(cpu.total());
+        let overshoot = two.p99.saturating_sub(budget);
+        if deficit >= overshoot {
+            eprintln!(
+                "note: {claim} was over the {budget:?} budget on wall clock twice \
+                 ({one} then {two}) and the round spent {deficit:?} **off-CPU**, \
+                 which covers the {overshoot:?} it went over by, so the overshoot is \
+                 time this process was not running rather than work it did. Reported \
+                 and not failed, and that is the whole of #178's weakening. {}",
+                detail()
+            );
+            return;
+        }
+        panic!(
+            "{claim} was over the {budget:?} budget twice on wall clock ({one} then \
+             {two}) and the round spent only {deficit:?} off-CPU against a \
+             {overshoot:?} overshoot, so the time went into **work done** and this is \
+             the frame path rather than the host: contention cannot inflate a CPU \
+             clock. {}",
+            detail()
+        );
+    }
+
     panic!(
-        "{claim} was over the {budget:?} budget twice: {one} then {two}. {} {diagnosis}",
+        "{claim} was over the {budget:?} budget twice: {one} then {two}, with no CPU \
+         clock to attribute it with, so it is treated as ours. {}",
         detail()
     );
 }
