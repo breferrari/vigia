@@ -231,7 +231,14 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, chrome);
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                chrome,
+            );
         })
         .expect("draw");
     terminal.backend().clone()
@@ -248,9 +255,6 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 /// one. The follow state gets its own snapshots instead, below.
 fn chrome() -> Chrome {
     Chrome {
-        // The floor, so every gate that does not ask for a rung keeps measuring
-        // the picture this shell drew before the glyph ladder existed.
-        glyphs: Glyphs::default(),
         pressed: None,
         gripped: None,
         hovered: None,
@@ -5579,7 +5583,14 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
                     let area = Rect::new(origin.0, origin.1, width, height);
                     let mut buf = ratatui::buffer::Buffer::empty(area);
                     // Panics inside ratatui if anything writes out of range.
-                    render(&mut buf, area, view, &Theme::default(), &chrome());
+                    render(
+                        &mut buf,
+                        area,
+                        view,
+                        &Theme::default(),
+                        Glyphs::default(),
+                        &chrome(),
+                    );
                     assert_eq!(
                         *buf.area(),
                         area,
@@ -5617,7 +5628,14 @@ fn a_wash_stops_before_the_scrollbar_column() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    view,
+                    &theme,
+                    Glyphs::default(),
+                    chrome,
+                );
             })
             .expect("draw");
         terminal.backend().clone()
@@ -6094,6 +6112,7 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                 Rect::new(0, 0, area.0, area.1),
                 &view,
                 &theme,
+                Glyphs::default(),
                 &chrome(),
             );
         }
@@ -6125,7 +6144,14 @@ fn the_wash_bleeds_under_the_inset() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    view,
+                    &theme,
+                    Glyphs::default(),
+                    chrome,
+                );
             })
             .expect("draw");
         terminal.backend().clone()

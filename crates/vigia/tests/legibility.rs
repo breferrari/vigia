@@ -170,12 +170,23 @@ fn theme() -> Theme {
 /// Draw one screen and hand back the backend, which is both a picture and a
 /// grid of cells.
 fn drawn(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+    drawn_at(width, height, view, chrome, Glyphs::default())
+}
+
+/// [`drawn`], at a named rung of the glyph ladder.
+///
+/// **The default is the floor**, so every gate that does not ask for a rung goes
+/// on measuring the picture this shell drew before the ladder existed, and the
+/// handful that sweep the second axis say which rung they mean. A `Chrome` field
+/// would have been the other way round: every caller carrying a value only three
+/// of them have an opinion about.
+fn drawn_at(width: u16, height: u16, view: &View, chrome: &Chrome, glyphs: Glyphs) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
     let theme = theme();
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, chrome);
+            render(f.buffer_mut(), area, view, &theme, glyphs, chrome);
         })
         .expect("draw");
     terminal.backend().clone()
@@ -407,9 +418,6 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// of dropping it.
 fn chrome() -> Chrome {
     Chrome {
-        // The floor, so every gate that does not ask for a rung keeps measuring
-        // the picture this shell drew before the glyph ladder existed.
-        glyphs: Glyphs::default(),
         pressed: None,
         gripped: None,
         hovered: None,
@@ -4580,7 +4588,14 @@ fn the_band_gets_a_left_bar_wherever_the_pane_lends_a_column() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                render(f.buffer_mut(), area, &view, &theme, &chrome);
+                render(
+                    f.buffer_mut(),
+                    area,
+                    &view,
+                    &theme,
+                    Glyphs::default(),
+                    &chrome,
+                );
             })
             .expect("draw");
         let buffer = terminal.backend().buffer().clone();
@@ -4693,8 +4708,7 @@ fn the_glyph_rung_buys_columns_and_never_costs_them() {
     let y = 1u16;
 
     let slot = |width: u16, glyphs: Glyphs| -> (usize, usize) {
-        let chrome = Chrome { glyphs, ..chrome() };
-        let backend = drawn(width, 8, &view, &chrome);
+        let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
         let cells = spark_slot(&backend, y, &theme, glyphs);
         (cells, cells * glyphs.density())
     };
@@ -4754,10 +4768,9 @@ fn widening_never_takes_the_window_away_at_any_rung() {
     let view = glancing();
 
     for glyphs in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
-        let chrome = Chrome { glyphs, ..chrome() };
         let mut widest = 0usize;
         for width in WIDTHS {
-            let backend = drawn(width, 8, &view, &chrome);
+            let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
             let buckets = spark_slot(&backend, 1, &theme, glyphs) * glyphs.density();
             assert!(
                 buckets >= widest,
@@ -4800,16 +4813,18 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     // `tests/glyphs.rs` proves the glyph; this proves the renderer reaches for
     // it, which is the half a packing test cannot see.
     let theme = theme();
-    let chrome = Chrome {
-        glyphs: Glyphs::Braille,
-        ..chrome()
-    };
     let track = theme.spark_track.fg.expect("the track has a colour");
     let empty = Glyphs::Braille.glyph(0, 0);
 
     // Two buckets of every pair empty, the rest busy: the first cell is the
     // track and no other cell is.
-    let backend = drawn(120, 8, &sparked([0, 0, 4, 6, 8, 9, 11, 12]), &chrome);
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([0, 0, 4, 6, 8, 9, 11, 12]),
+        &chrome(),
+        Glyphs::Braille,
+    );
     let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
     assert_eq!(
         tracks, 1,
@@ -4819,7 +4834,13 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     // And with nothing anywhere, every cell is the track. This is the ordinary
     // first frame: history is fed from the watch, so a worktree already dirty at
     // launch has no ticks behind it yet.
-    let backend = drawn(120, 8, &sparked([0; HISTORY_BUCKETS]), &chrome);
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([0; HISTORY_BUCKETS]),
+        &chrome(),
+        Glyphs::Braille,
+    );
     let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
     assert_eq!(
         tracks,
@@ -4836,16 +4857,18 @@ fn a_pair_takes_the_busier_buckets_band() {
     // hot. Taking the flatter one would hide exactly what the element is for,
     // and nothing else in the suite would notice.
     let theme = theme();
-    let chrome = Chrome {
-        glyphs: Glyphs::Braille,
-        ..chrome()
-    };
     let hot = theme.spark_hot.fg.expect("the hot stop has a colour");
     let (ramp, _) = alphabet(Glyphs::Braille);
 
     // The screen's peak is 12, so a bucket of 12 is hot. Pair it with a bucket
     // of 1, which alone would be the flattest stop there is.
-    let backend = drawn(120, 8, &sparked([1, 12, 1, 1, 1, 1, 1, 1]), &chrome);
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([1, 12, 1, 1, 1, 1, 1, 1]),
+        &chrome(),
+        Glyphs::Braille,
+    );
     let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
     assert_eq!(
         hots, 1,
@@ -4855,7 +4878,13 @@ fn a_pair_takes_the_busier_buckets_band() {
 
     // And the same pair the other way round, so the rule is about the maximum
     // rather than about which side of the cell the count happens to land on.
-    let backend = drawn(120, 8, &sparked([12, 1, 1, 1, 1, 1, 1, 1]), &chrome);
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([12, 1, 1, 1, 1, 1, 1, 1]),
+        &chrome(),
+        Glyphs::Braille,
+    );
     let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
     assert_eq!(
         hots, 1,
@@ -4915,8 +4944,7 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     // direction nothing else bounds: the strip then draws four cells into a slot
     // reserved for two and walks into the heat strip.
     let gap = |width: u16, glyphs: Glyphs| -> Option<u16> {
-        let chrome = Chrome { glyphs, ..chrome() };
-        let backend = drawn(width, 8, &view, &chrome);
+        let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
         let (ramp, _) = alphabet(glyphs);
         let spark = columns_of(&backend, 1, &bars, &ramp);
         let heat = columns_of(&backend, 1, &heats, &[HEAT_SLICE]);

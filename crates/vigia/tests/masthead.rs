@@ -23,7 +23,7 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Chrome, Theme, body_layout, render};
+use vigia::{Action, App, Chrome, Glyphs, Theme, body_layout, render};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -165,7 +165,14 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
     let mut buf = Buffer::empty(area());
-    render(&mut buf, area(), &view, &Theme::default(), &drawn);
+    render(
+        &mut buf,
+        area(),
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &drawn,
+    );
 
     let header: String = (0..WIDE).map(|x| buf[(x, 0)].symbol()).collect();
     assert!(

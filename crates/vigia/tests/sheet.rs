@@ -27,7 +27,7 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    Action, App, Chrome, Hovered, Regions, Theme, action_for, body_layout, regions, render,
+    Action, App, Chrome, Glyphs, Hovered, Regions, Theme, action_for, body_layout, regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -117,7 +117,7 @@ fn paint_with(
         .view(frame, highlighter, history, body)
         .expect("collect a view");
     let mut buf = Buffer::empty(at);
-    render(&mut buf, at, &view, theme, &chrome);
+    render(&mut buf, at, &view, theme, Glyphs::default(), &chrome);
     let laid = regions(at, &chrome, &view);
     (buf, laid)
 }
@@ -421,7 +421,14 @@ fn drawn_close(
         .view(frame, highlighter, history, body)
         .expect("collect a view");
     let mut buf = Buffer::empty(area());
-    render(&mut buf, area(), &view, &Theme::default(), &chrome);
+    render(
+        &mut buf,
+        area(),
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
     let sheet = regions(area(), &chrome, &view)
         .sheet
         .expect("no sheet published");

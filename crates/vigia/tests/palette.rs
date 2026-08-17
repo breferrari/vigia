@@ -47,9 +47,6 @@ fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
 
 fn chrome() -> Chrome {
     Chrome {
-        // The floor, so every gate that does not ask for a rung keeps measuring
-        // the picture this shell drew before the glyph ladder existed.
-        glyphs: Glyphs::default(),
         pressed: None,
         gripped: None,
         hovered: None,
@@ -139,7 +136,14 @@ fn draw(width: u16, height: u16, view: &View, theme: Theme) -> TestBackend {
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, &chrome());
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                &chrome(),
+            );
         })
         .expect("draw");
     terminal.backend().clone()

@@ -32,7 +32,9 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Chrome, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render};
+use vigia::{
+    Action, App, Chrome, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
+};
 use vigia_core::{Highlighter, History};
 
 use support::{
@@ -93,7 +95,14 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     );
 
     let mut buf = Buffer::empty(area);
-    let stats = render(&mut buf, area, &view, &Theme::default(), &chrome);
+    let stats = render(
+        &mut buf,
+        area,
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
     Painted {
         stats,
         highlight: highlighter.stats(),
@@ -316,7 +325,14 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
     };
     let chrome = App::new().chrome("fixture", None, None, None, None, None);
     let mut buf = Buffer::empty(area);
-    let stats = render(&mut buf, area, &view, &Theme::default(), &chrome);
+    let stats = render(
+        &mut buf,
+        area,
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
 
     // A looser bound than `a_drawn_row_costs_the_pane_rather_than_the_line`'s,
     // deliberately, and the two are not in tension. That gate holds real text to
@@ -374,7 +390,14 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
         ..App::new().chrome("fixture", None, None, None, None, None)
     };
     let mut buf = Buffer::empty(area);
-    render(&mut buf, area, &view, &Theme::default(), &chrome);
+    render(
+        &mut buf,
+        area,
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
 
     // `\tab\tcd\tefgh\tij` expands to four columns, `ab`, two to the next stop,
     // `cd`, two more, `efgh`, four more, `ij`: the row reads
@@ -440,7 +463,14 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
             let fresh = app
                 .view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view");
-            total += render(&mut buf, area, &fresh, &Theme::default(), &chrome);
+            total += render(
+                &mut buf,
+                area,
+                &fresh,
+                &Theme::default(),
+                Glyphs::default(),
+                &chrome,
+            );
         }
         // `App::view` writes the resolved top back as the position, and both
         // arms always draw on the last notch, so this is where the gesture ended

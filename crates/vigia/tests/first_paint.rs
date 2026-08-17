@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Row, Theme, body_layout, render};
+use vigia::{App, Body, Glyphs, Row, Theme, body_layout, render};
 use vigia_core::{Highlighter, History, Worktree};
 
 use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_delta};
@@ -130,7 +130,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
-    render(&mut buf, area(), &view, &theme, &chrome);
+    render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
     let first = began.elapsed();
     let parsed_first = highlight_delta(before, highlighter.stats()).lines;
     let plain = stripped(&view.rows);
@@ -145,7 +145,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
     let chrome = app.chrome("fixture", None, None, None, None, None);
-    render(&mut buf, area(), &view, &theme, &chrome);
+    render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
     let second = began.elapsed();
     let parsed_second = highlight_delta(before, highlighter.stats()).lines;
     let coloured = stripped(&view.rows);

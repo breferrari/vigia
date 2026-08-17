@@ -1152,22 +1152,6 @@ pub struct Chrome {
     /// **transient** thing, so that a notice flickering cannot jog the reader's
     /// diff. A keypress is an instruction rather than a flicker.
     pub masthead: bool,
-    /// Which glyphs the sparkline may be drawn from.
-    ///
-    /// **Resolved once at startup and stamped on by the loop**, which is why it
-    /// arrives here rather than through [`App::chrome`](crate::App::chrome).
-    /// It is a fact about the terminal, so it is no more [`App`](crate::App)'s
-    /// state than the branch is, and that method's docblock already argues the
-    /// case for exactly this class of value. Adding a seventh positional mark to
-    /// it would also make [#191](https://github.com/breferrari/vigia/issues/191)
-    /// worse for a value that never changes after the first frame.
-    ///
-    /// **The default is the floor on purpose.** A caller that never stamps it
-    /// draws precisely what this shell drew before the ladder existed, so
-    /// forgetting it degrades rather than breaks, which is the direction
-    /// [`Depth`](crate::Depth) picks for the same reason: an under-claim only
-    /// looks flatter than it had to, where an over-claim here paints tofu.
-    pub glyphs: Glyphs,
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     ///
     /// **Unlike [`Chrome::masthead`] this is not an input to the body split at
@@ -3018,6 +3002,7 @@ pub fn render(
     area: Rect,
     view: &View,
     theme: &Theme,
+    glyphs: Glyphs,
     chrome: &Chrome,
 ) -> PaintStats {
     if area.width == 0 || area.height == 0 {
@@ -3042,12 +3027,14 @@ pub fn render(
     let mut painter = Painter {
         buf,
         theme,
-        // Copied onto the painter for `inset`'s reason, one line down: it is
-        // decided once for the whole screen, and a drawer reaching back into the
-        // chrome for it would be one more thing the two regions could answer
-        // differently. The layout and the strip must agree about it exactly, or
-        // a row reserves cells in one rung and fills them in another.
-        glyphs: chrome.glyphs,
+        // A parameter beside `theme` rather than a field on `chrome`, and for
+        // the same reason `theme` is one: both are properties of the terminal,
+        // resolved once before the screen was taken and unchanged for the
+        // session, where `chrome` carries what *this frame* says. Nothing in the
+        // layout below `render` reads it, so putting it on the per-frame struct
+        // meant two of its three callers stamping a field the function they fed
+        // never looked at.
+        glyphs,
         gutter: 0,
         // **From the pane, once, before anything is drawn.** Every row below is
         // handed a `Rect` that has already lost the bar's columns on the screens

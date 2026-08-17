@@ -621,17 +621,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
                     let height = if action.needs_height() {
-                        let chrome = Chrome {
-                            glyphs: shell.glyphs,
-                            ..shell.app.chrome(
-                                &shell.name,
-                                shell.branch.as_deref(),
-                                shell.pressed(),
-                                shell.gripped(),
-                                shell.hovered(),
-                                shell.scrolling,
-                            )
-                        };
+                        let chrome = shell.app.chrome(
+                            &shell.name,
+                            shell.branch.as_deref(),
+                            shell.pressed(),
+                            shell.gripped(),
+                            shell.hovered(),
+                            shell.scrolling,
+                        );
                         diff_height(shell.area()?, &chrome, frame.files().len())
                     } else {
                         0
@@ -1064,17 +1061,14 @@ impl Shell {
         // number `View::collect` will report as `View::files`, which is what
         // keeps this row budget and the renderer's layout in agreement: `render`
         // recomputes the same split from the same two inputs.
-        let chrome = Chrome {
-            glyphs: self.glyphs,
-            ..self.app.chrome(
-                &self.name,
-                self.branch.as_deref(),
-                self.pressed(),
-                self.gripped(),
-                self.hovered(),
-                self.scrolling,
-            )
-        };
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            self.pressed(),
+            self.gripped(),
+            self.hovered(),
+            self.scrolling,
+        );
         let body = body_layout(self.area()?, &chrome, frame.files().len());
         match self
             .app
@@ -1105,21 +1099,18 @@ impl Shell {
         // What stands is the reason it is re-read rather than held: a name kept
         // across frames is a confident lie the moment the other pane checks
         // something out.
-        let mut chrome = Chrome {
-            glyphs: self.glyphs,
-            ..self.app.chrome(
-                &self.name,
-                self.branch.as_deref(),
-                self.pressed(),
-                self.gripped(),
-                self.hovered(),
-                self.scrolling,
-            )
-        };
+        let mut chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            self.pressed(),
+            self.gripped(),
+            self.hovered(),
+            self.scrolling,
+        );
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
-        let (theme, screen) = (&self.theme, &self.screen);
+        let (theme, screen, glyphs) = (&self.theme, &self.screen, self.glyphs);
         let mut painted = Regions::default();
         let was = self.regions;
         self.session.screen().draw(|f| {
@@ -1143,7 +1134,7 @@ impl Shell {
             // before the mark is judged against it, and the paint below sees the
             // judged one.
             chrome.hovered = hover_repainted(chrome.hovered, was, painted);
-            render(f.buffer_mut(), area, screen, theme, &chrome);
+            render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
         self.hovered = chrome.hovered;
         self.regions = painted;
