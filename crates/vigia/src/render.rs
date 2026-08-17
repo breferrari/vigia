@@ -2594,7 +2594,7 @@ impl<'a> Footer<'a> {
 /// two would disagree on exactly the pane heights where a region is giving way.
 ///
 /// **Three regions since [#158](https://github.com/breferrari/vigia/issues/158)**,
-/// where it was two. [`Body::masthead`] and [`Body::rows`] exist so that a
+/// where it was two. [`Body::band_rows`], [`Body::above_list`] and [`Body::rows`] exist so that a
 /// caller adding them up does not become the fourth place the geometry is
 /// written: six sites open-coded `graph + air` within a day of the region
 /// landing.
@@ -2800,18 +2800,21 @@ impl Body {
         } else {
             (0, 0, 0)
         };
+        // **The diff takes what is left of the body, rather than a give-back
+        // term per field.** This was a sum of five differences, one added every
+        // time the body gained a row category, and it is the shape
+        // [`Body::air`]'s own doc argues against one field earlier: a hand-kept
+        // total is only as good as whoever remembers to extend it. Subtracting
+        // the new regions from the old body cannot omit a term, because there is
+        // no term to omit.
+        let rule = list > 0;
         Self {
             lead,
             graph,
             air,
             list,
-            rule: list > 0,
-            diff: self.diff
-                + (self.list - list)
-                + (self.lead - lead)
-                + (self.graph - graph)
-                + (self.air - air)
-                + usize::from(self.rule && list == 0),
+            rule,
+            diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
         }
     }
 }
@@ -4028,6 +4031,12 @@ impl Painter<'_> {
         let shown = usize::from(area.height);
         let inner = planning_width(pane, gutter);
         let columns = Columns::plan(inner);
+        // Hoisted beside the width it goes with, because it is a property of the
+        // pane and not of any row. Saturating for the reason `left` above is:
+        // `render` contracts that any area is legal, and an origin near the top
+        // of the range is the one part of that contract nothing on screen would
+        // ever exercise.
+        let origin = area.x.saturating_add(self.inset).saturating_add(gutter);
 
         for (offset, entry) in view.list.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
@@ -4048,14 +4057,15 @@ impl Painter<'_> {
                 Rect {
                     y,
                     height: 1,
+                    // `area.x` is the pane's own leading column, not the region's: `render`
+                    // builds this rect with `..area` and `with_bar` narrows the *width* on
+                    // the right without moving the origin. Worth saying, because everything
+                    // else in this function reads `pane` precisely because `area` cannot be
+                    // trusted for a width.
                     // **The pane's inset plus whatever the caret could not take
                     // out of it**, which is the stream's own origin exactly
-                    // whenever `gutter` is zero. Saturating like the `left` it is
-                    // added to, rather than half-defended: `render` contracts that
-                    // any area is legal, and an origin near the top of the range
-                    // is the one part of that contract nothing on screen would
-                    // ever exercise.
-                    x: area.x.saturating_add(self.inset).saturating_add(gutter),
+                    // whenever `gutter` is zero.
+                    x: origin,
                     width: inner,
                 },
                 &Heading::of(entry),

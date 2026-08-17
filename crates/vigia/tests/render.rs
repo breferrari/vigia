@@ -88,11 +88,24 @@ const CARET: &str = "▸";
 /// draws a list at all. Most fixtures here are short panes, where `Body::split`
 /// affords no band and the list follows that blank directly.
 ///
-/// **Not a general answer, and the ones it does not answer ask the layout.** A
-/// 24-row pane puts the band and its own trailing air in between, so the gates
-/// that draw at that height go through `body_layout(..).above_list()` rather than
-/// through this. Named here for the short-pane majority, which had the number
-/// written out at roughly twenty sites.
+/// **Three categories, and this answers one of them.** Named here for the
+/// short-pane majority, which had the number written out at roughly twenty sites.
+///
+/// The second is a pane tall enough for the band: a 24-row pane puts the graph
+/// and its own trailing air in between, so gates drawing at that height go
+/// through `body_layout(..).above_list()` or `regions(..).list.top` rather than
+/// through this.
+///
+/// **The third is the one the surviving literal `1`s belong to, and it is about
+/// the fixture rather than the pane.** A view whose `list` is empty (`glancing`,
+/// `one_file`, `nothing_changed`) collapses to `Body::diff_only` at *any* height:
+/// no list, so no rule and no lead blank, and the stream starts directly under
+/// the header. Those reads are correct at `1` and a sweep of this constant across
+/// them would be wrong. Said out loud because several of them assert an
+/// **absence**, so a fixture that later gains a list would slide them onto the
+/// lead blank and they would go green rather than red, which is how
+/// `the_caret_does_not_vanish_because_another_file_changed` spent two phases
+/// proving nothing.
 ///
 /// Restated rather than imported, for [`CARET`]'s reason one constant up.
 const LIST_TOP: u16 = 2;
@@ -2757,8 +2770,9 @@ fn the_palette_reaches_the_cells() {
         );
     };
 
-    // Body rows start at y = 1: the header is y = 0. The gutter occupies the
-    // first columns, so the sigil and its colour are found past it.
+    // Row five of a listless fixture: see [`LIST_TOP`]'s third category. The
+    // gutter occupies the first columns, so the sigil and its colour are found
+    // past it.
     let sigil_x = inset + 4;
     let removed = &buffer[(sigil_x, 5)];
     let added = &buffer[(sigil_x, 6)];
@@ -3483,7 +3497,11 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     let theme = Theme::default();
     let backend = screen(80, 5, &glancing(), &chrome());
 
-    // Body rows start at y = 1; the header is y = 0.
+    // **Row one, and the reason is the fixture rather than the height.**
+    // `glancing()` carries an empty `list`, so `clamped_to` collapses the body to
+    // `diff_only` at *any* pane size: no list, no rule, and no lead blank, so the
+    // stream starts directly under the header. See [`LIST_TOP`], whose docblock
+    // names this as the third category.
     let pulsing = row_text(&backend, 1);
     assert!(
         pulsing.contains('●'),
@@ -5388,19 +5406,36 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
     // exists to prevent, and it was blind to this because its fixture has
     // `files == list.len()` and is never scrollable. The file count is the second
     // axis.
+    // **The row comes from the layout, and reading a literal had already killed
+    // this gate.** It read `buffer[(x, 1)]`, which was the list's first row when
+    // it was written and has not been since #158 put the band between the header
+    // and the list. [#174](https://github.com/breferrari/vigia/issues/174) made
+    // it dead *unconditionally*, because the body now opens with a blank whenever
+    // it draws a list at all, so row one is blank on every pane this sweeps and
+    // the assertion compared `false` against `false` at all sixty widths. The
+    // defect it is named for could have shipped underneath it.
+    //
+    // Caught by review rather than by a run, which is the whole shape of it: a
+    // gate that reads the wrong row does not fail, it agrees with itself. The
+    // non-vacuity check below is what makes that impossible to repeat here, and
+    // `the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret` is the gate in
+    // this file that already took the row from `regions` for the same reason.
+    let mut ever = false;
     for width in 1..=60u16 {
         let mut drawn = Vec::new();
         for files in [3usize, 30] {
             let view = a_list_of(files, 3, 0);
+            let laid = regions(Rect::new(0, 0, width, 24), &chrome(), &view);
             let backend = screen(width, 24, &view, &chrome());
             let buffer = backend.buffer();
             drawn.push(
                 (0..width)
-                    .map(|x| buffer[(x, 1)].symbol())
+                    .map(|x| buffer[(x, laid.list.top)].symbol())
                     .collect::<String>()
                     .contains(CARET),
             );
         }
+        ever |= drawn[0] || drawn[1];
         assert_eq!(
             drawn[0],
             drawn[1],
@@ -5410,6 +5445,15 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
             if drawn[1] { "drawn" } else { "absent" }
         );
     }
+
+    // **Or the sweep agreed about an absence.** Two screens that both draw no
+    // caret satisfy the equality above at every width, which is exactly how this
+    // gate spent two phases proving nothing.
+    assert!(
+        ever,
+        "no width in the sweep drew a caret on either screen, so the equality \
+         above compared two absences"
+    );
 }
 
 #[test]
