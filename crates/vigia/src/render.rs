@@ -4150,6 +4150,14 @@ impl Painter<'_> {
     /// optional: without it the table's own gaps would show the diff through, and
     /// a half-transparent sheet reads as a rendering fault rather than as a
     /// window.
+    ///
+    /// **`Cell::reset` and not `set_style`, which is the defect this shipped
+    /// with.** `set_style` *patches*: it merges the style it is given into the one
+    /// already in the cell, so a background nothing overwrites survives. Every
+    /// added and removed row under the sheet kept its wash, and the sheet drew as
+    /// green and red bands with the table's text on top. `Theme::chrome_dim`
+    /// carries a foreground and no background, so there was nothing in the patch to
+    /// displace them. Reported from use within an hour of the release.
     fn sheet(&mut self, plan: &SheetPlan) {
         let area = plan.area;
         let frame = self.theme.chrome_dim;
@@ -4162,6 +4170,12 @@ impl Painter<'_> {
                 // any area is legal here, including one the buffer has shrunk
                 // under.
                 if let Some(cell) = self.buf.cell_mut((x, y)) {
+                    // **Reset first, then style.** `reset` puts the cell back to a
+                    // space with default colours and no modifiers, which is the
+                    // pane's own background: the sheet is a hole punched in the
+                    // diff rather than a tint over it. Styling without resetting is
+                    // what let the rows beneath show through.
+                    cell.reset();
                     cell.set_symbol(" ").set_style(frame);
                 }
             }
@@ -4181,7 +4195,28 @@ impl Painter<'_> {
         }
         top.push_str("   ┐");
         self.put(area.x, area.y, &top, width, frame);
-        self.put(plan.close.0, plan.close.1, &SHEET_CLOSE.to_string(), 1, lit);
+        // **The control takes a hover rung, which is what says it is clickable.**
+        // B10's ladder, and the same three weights the step buttons use one element
+        // over: chrome at rest, [`Theme::bar_hover`] under the pointer, and
+        // [`Theme::bar_active`] while it is being pressed. A close control that
+        // never brightened was a glyph a reader had to guess at, reported from use
+        // with the wash defect above.
+        let pressed = self.pressed == Some(plan.close);
+        let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
+        let control = if pressed {
+            self.theme.bar_active
+        } else if hovered {
+            self.theme.bar_hover
+        } else {
+            lit
+        };
+        self.put(
+            plan.close.0,
+            plan.close.1,
+            &SHEET_CLOSE.to_string(),
+            1,
+            control,
+        );
 
         let mut y = area.y + 1;
         let rows = KEYBOARD[plan.from..].iter();

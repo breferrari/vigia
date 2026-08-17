@@ -25,7 +25,10 @@ use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Rect;
-use vigia::{Action, App, Chrome, Regions, Theme, action_for, body_layout, regions, render};
+use ratatui::style::Color;
+use vigia::{
+    Action, App, Chrome, Hovered, Regions, Theme, action_for, body_layout, regions, render,
+};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -40,6 +43,9 @@ const FILES: usize = 3;
 /// construction, which is the rule this suite already follows for the sparkline's
 /// ramp, the rule glyph and the hint separator.
 const TITLE: &str = "gestures";
+
+/// The close control's glyph, restated for [`TITLE`]'s reason.
+const SHEET_CLOSE: char = '✕';
 
 fn area() -> Rect {
     Rect::new(0, 0, WIDE, TALL)
@@ -89,13 +95,29 @@ fn paint(
     history: &History,
     at: Rect,
 ) -> (Buffer, Regions) {
+    paint_with(app, frame, highlighter, history, at, &Theme::default())
+}
+
+/// [`paint`] with a palette of the caller's choosing.
+///
+/// One gate needs a theme that washes its rows, because the defect it covers is
+/// about a background surviving underneath the sheet and `Theme::default` sets
+/// none.
+fn paint_with(
+    app: &mut App,
+    frame: &mut Frame<'_>,
+    highlighter: &mut Highlighter,
+    history: &History,
+    at: Rect,
+    theme: &Theme,
+) -> (Buffer, Regions) {
     let chrome = chrome(app);
     let body = body_layout(at, &chrome, FILES);
     let view = app
         .view(frame, highlighter, history, body)
         .expect("collect a view");
     let mut buf = Buffer::empty(at);
-    render(&mut buf, at, &view, &Theme::default(), &chrome);
+    render(&mut buf, at, &view, theme, &chrome);
     let laid = regions(at, &chrome, &view);
     (buf, laid)
 }
@@ -212,6 +234,199 @@ fn the_sheet_moves_no_content() {
         }
     }
     assert!(compared > 0, "the sweep compared nothing");
+}
+
+#[test]
+fn the_sheet_is_opaque() {
+    // **The defect this shipped with, as a gate.** `Cell::set_style` *patches*: it
+    // merges into whatever is already in the cell, so a background nothing
+    // overwrites survives. `Theme::chrome_dim` carries a foreground and no
+    // background, so every added and removed row under the sheet kept its wash and
+    // the table drew as green and red bands. Reported from use within an hour of
+    // the release that shipped it.
+    let scratch = Scratch::large_diff("sheet-opaque", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // **The wash is injected rather than borrowed from the shipped palette**, and
+    // that is the difference between gating the mechanism and gating a theme: what
+    // failed in the field is `set_style` patching, which shows up wherever *any*
+    // theme puts a background on a row. `Theme::default` happens not to, so a gate
+    // written against it would have been green while the reported screen was
+    // striped green and red.
+    let mut washed_theme = Theme::default();
+    washed_theme.added_row = washed_theme.added_row.bg(Color::Green);
+    washed_theme.removed_row = washed_theme.removed_row.bg(Color::Red);
+
+    // Non-vacuity: the pane has to be drawing washed rows, or a sheet with no wash
+    // under it proves nothing about a sheet that covers one.
+    let (closed, _) = paint_with(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        area(),
+        &washed_theme,
+    );
+    let washed = (0..TALL)
+        .flat_map(|y| (0..WIDE).map(move |x| (x, y)))
+        .filter(|&(x, y)| !matches!(closed[(x, y)].style().bg, None | Some(Color::Reset)))
+        .count();
+    assert!(
+        washed > 0,
+        "no cell on the pane carries a background, so this fixture cannot show a \
+         wash through the sheet"
+    );
+
+    toggle(&mut app, &mut frame);
+    let (open, laid) = paint_with(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        area(),
+        &washed_theme,
+    );
+    let sheet = laid.sheet.expect("no sheet published");
+
+    for y in sheet.top..sheet.top + sheet.height {
+        for x in sheet.left..sheet.left + sheet.width {
+            assert!(
+                matches!(open[(x, y)].style().bg, None | Some(Color::Reset)),
+                "cell {x},{y} inside the sheet kept the background {:?} from what \
+                 it covers, so the sheet is a tint rather than a window",
+                open[(x, y)].style().bg
+            );
+        }
+    }
+}
+
+#[test]
+fn closing_the_sheet_restores_every_cell() {
+    // The other half of *it moves nothing*: not only must the pane outside the
+    // sheet be untouched while it is up, the pane must come back **exactly** when
+    // it goes. Cell for cell, symbol and style, including the washes the bug above
+    // was destroying.
+    let scratch = Scratch::large_diff("sheet-restores", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
+    toggle(&mut app, &mut frame);
+    let _ = paint(&mut app, &mut frame, &mut highlighter, &history, area());
+    toggle(&mut app, &mut frame);
+    let (after, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
+
+    for y in 0..TALL {
+        for x in 0..WIDE {
+            assert_eq!(
+                (before[(x, y)].symbol(), before[(x, y)].style()),
+                (after[(x, y)].symbol(), after[(x, y)].style()),
+                "cell {x},{y} did not come back when the sheet closed"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_close_control_brightens_under_the_pointer() {
+    // **A control that never brightened is a glyph a reader has to guess at**, and
+    // B10's ladder already had the rungs: chrome at rest, `bar_hover` under the
+    // pointer, `bar_active` while pressed. The same three the step buttons use.
+    let scratch = Scratch::large_diff("sheet-hover", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    toggle(&mut app, &mut frame);
+    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
+    let sheet = laid.sheet.expect("no sheet published");
+    let (cx, cy) = sheet.close;
+
+    // The pointer's own answer first: resting on the control marks it, and resting
+    // anywhere else on the sheet marks nothing, because the sheet must not mark a
+    // bar or a listed file it is covering.
+    assert_eq!(
+        laid.hover_at(cx, cy),
+        Some(Hovered::Button(cx, cy)),
+        "the close control does not answer the pointer"
+    );
+    assert_eq!(
+        laid.hover_at(sheet.left + 1, sheet.top + 2),
+        None,
+        "a pointer on the sheet marked something underneath it"
+    );
+
+    let theme = Theme::default();
+    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None);
+    let hovered = drawn_close(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Some(Hovered::Button(cx, cy)),
+    );
+
+    assert_ne!(
+        at_rest, hovered,
+        "the close control draws the same under the pointer as at rest, so nothing \
+         says it is clickable"
+    );
+    // **Compared by weight rather than by whole `Style`**, because the drawer resets
+    // the cell before styling it, so the drawn style carries an explicit
+    // `Color::Reset` background where the theme's leaves it unset. Same ink, two
+    // spellings, and it is the ink that is the ruling.
+    assert_eq!(
+        weight(hovered.1),
+        weight(theme.bar_hover),
+        "the hovered control is not on B10's hover rung"
+    );
+    assert_eq!(
+        at_rest.0, SHEET_CLOSE,
+        "the control stopped being the glyph this gate is about"
+    );
+}
+
+/// What a style says in ink: its foreground and its modifiers.
+///
+/// The two spellings of an unset background compare unequal as `Style`s, and this
+/// suite cares about which rung of B10's ladder a cell is on rather than about how
+/// the drawer got there.
+fn weight(style: ratatui::style::Style) -> (Option<Color>, ratatui::style::Modifier) {
+    (style.fg, style.add_modifier)
+}
+
+/// The close control's glyph and style, with `hovered` handed to the chrome.
+fn drawn_close(
+    app: &mut App,
+    frame: &mut Frame<'_>,
+    highlighter: &mut Highlighter,
+    history: &History,
+    hovered: Option<Hovered>,
+) -> (char, ratatui::style::Style) {
+    let chrome = app.chrome("fixture", Some("main"), None, None, hovered, None);
+    let body = body_layout(area(), &chrome, FILES);
+    let view = app
+        .view(frame, highlighter, history, body)
+        .expect("collect a view");
+    let mut buf = Buffer::empty(area());
+    render(&mut buf, area(), &view, &Theme::default(), &chrome);
+    let sheet = regions(area(), &chrome, &view)
+        .sheet
+        .expect("no sheet published");
+    let cell = &buf[sheet.close];
+    (cell.symbol().chars().next().expect("a glyph"), cell.style())
 }
 
 #[test]
