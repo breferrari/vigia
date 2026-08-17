@@ -19,4 +19,4 @@ expression: terminal.backend()
 " 6 - line 6                                                    │"
 " 6 + let changed = true;                                       │"
 " 7   line 7                                                    ▼"
-" q quit · f follow · jk scroll · ? keys           follow ▶  1/2 "
+" q quit · f follow · ? keys                       follow ▶  1/2 "

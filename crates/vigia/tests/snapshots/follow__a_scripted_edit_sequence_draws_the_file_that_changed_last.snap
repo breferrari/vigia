@@ -13,4 +13,4 @@ expression: terminal.backend()
 " 1 + fn second() { let b = 2; }                                │"
 "                                                               █"
 "                                                               ▼"
-" q quit · f follow · jk scroll · ? keys           follow ▶  3/3 "
+" q quit · f follow · ? keys                       follow ▶  3/3 "

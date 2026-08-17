@@ -6,4 +6,4 @@ expression: "screen(40, 5, &view, &chrome())"
 "M docs/読み方.md              +2    -0  " Hidden by multi-width symbols: [(8, " "), (10, " "), (12, " ")]
 "1 + 見出し a 見出し b 見出し c          " Hidden by multi-width symbols: [(5, " "), (7, " "), (9, " "), (14, " "), (16, " "), (18, " "), (23, " "), (25, " "), (27, " ")]
 "2 + 🙂🙂🙂 tail                         " Hidden by multi-width symbols: [(5, " "), (7, " "), (9, " ")]
-"q quit · f follow · jk scroll        1/1"
+"q quit · f follow · ? keys           1/1"
