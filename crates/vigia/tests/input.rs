@@ -600,6 +600,7 @@ fn two_regions() -> Regions {
             track: (6, 13),
         },
         bar: Some(79),
+        sheet: None,
     }
 }
 
@@ -784,6 +785,7 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             track: (9, 10),
         },
         bar: Some(79),
+        sheet: None,
     };
     let press = MouseEventKind::Down(MouseButton::Left);
 
@@ -1112,6 +1114,7 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
             track: (9, 10),
         },
         bar: Some(79),
+        sheet: None,
     };
     let press = MouseEventKind::Down(MouseButton::Left);
 
@@ -1624,6 +1627,7 @@ fn a_region_with_no_rows_lights_nothing() {
         list: Region::bare(1, 0),
         diff: Region::bare(1, 20),
         bar: Some(79),
+        sheet: None,
     };
     assert_eq!(
         regions.list.top, regions.diff.top,

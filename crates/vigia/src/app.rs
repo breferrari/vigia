@@ -86,6 +86,16 @@ pub struct App {
     /// [#121](https://github.com/breferrari/vigia/issues/121) and
     /// [#147](https://github.com/breferrari/vigia/issues/147) leave where it is.
     masthead: bool,
+    /// Whether the gestures sheet is drawn, which `?` toggles.
+    ///
+    /// **Retained here rather than lived for one frame, and that is the whole
+    /// reason it is a field.** The pane wakes on filesystem events, so an agent's
+    /// write redraws the frame underneath the sheet; a sheet that were not carried
+    /// between frames would be dismissed at random by somebody else's build,
+    /// which `SPEC.md` §11.1's B12 names as the constraint most likely to be
+    /// missed. Off by default for the reason every reader starts with the diff
+    /// rather than with instructions about it.
+    sheet: bool,
     /// Whether the current position was reached by **scrolling** rather than by a
     /// jump, which is what decides whether the viewport may back up to fill the
     /// pane.
@@ -206,6 +216,8 @@ impl Default for App {
             // [#204](https://github.com/breferrari/vigia/issues/204), unlike
             // `following`: a shell nobody has pressed `m` on draws no band.
             masthead: false,
+            // Derived, and for once trivially so: nobody has pressed `?`.
+            sheet: false,
             // The opening position is the top of the diff, which is where a jump
             // would have put it, so nothing is owed a back-up before the reader
             // has moved.
@@ -390,6 +402,7 @@ impl App {
             notice: self.notice.clone(),
             following: self.following,
             masthead: self.masthead,
+            sheet: self.sheet,
             // `None` until a frame has completed, which is the honest first
             // paint: there is no p99 of nothing. The status bar simply has no
             // frame cell on the very first screen, and `Footer::plan` is written
@@ -497,6 +510,12 @@ impl App {
             // masthead back: the diff keeps the row it was on, and the region
             // above it grows or goes.
             Action::ToggleMasthead => self.masthead = !self.masthead,
+            // **No jump and no move at all**, which is one better than the
+            // masthead: that toggle resizes the diff's region, and this one draws
+            // over rows the diff keeps. Nothing about the viewport changes, so a
+            // reader who opens the sheet and closes it is looking at exactly the
+            // screen they left.
+            Action::ToggleSheet => self.sheet = !self.sheet,
             Action::Scroll(rows) => {
                 self.scroll(rows, frame)?;
             }

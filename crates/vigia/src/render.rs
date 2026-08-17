@@ -38,7 +38,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
-use crate::input::{Hovered, Region, Regions};
+use crate::input::{Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
 
@@ -95,19 +95,28 @@ const CONTINUES: &str = "›";
 /// has least to go on. `tests/legibility.rs` gates both properties over the
 /// rungs it observes by rendering, so this table cannot drift from what ships.
 ///
-/// The drop order is `SPEC.md` §11.1's ruling. `JK files` goes first, then
+/// The drop order is `SPEC.md` §11.1's ruling. `? keys` goes first, then
 /// `jk scroll`, and `f follow` is last standing: `q` and `jk` are pager reflexes
 /// and four keys reach quit, while `f` is the one nobody would guess and the
 /// only one that restores a state a reader can lose without noticing. It only
 /// fires below twenty-nine columns, because above that [`Footer`] gives the bar
 /// a line of its own rather than shortening it.
 ///
-/// **`JK files` is here rather than left undiscoverable**, and it goes first
-/// rather than last for the reason `f` goes last: the pinned list is drawn on
-/// every screen wide and tall enough to have one, so a reader can see that the
-/// region exists without being told, and it slides on its own besides. `f`
-/// restores a state whose *absence* is invisible, which is a different and worse
-/// thing to have to guess.
+/// **The bonus rung is `? keys` since B12, where it was `JK files`**, and the
+/// swap is the smallest form of that ruling's second-order effect: the bar's job
+/// stops being to carry the keymap and becomes to point at the sheet that does.
+/// `JK files` is not lost, it moved, and it is one of sixteen rows there instead
+/// of one of four items here. Two columns came back with the trade, since the
+/// widest bar is thirty-eight where it was forty, so the frame and memory cells
+/// now arrive two columns earlier than
+/// [#147](https://github.com/breferrari/vigia/issues/147) measured them.
+/// What that issue asks is still open: this changes which rung is bonus, not
+/// whether a bonus rung may cost a readout.
+///
+/// **The rest of [#80](https://github.com/breferrari/vigia/issues/80) is
+/// deliberately untouched**, which is the line B12 drew: whether the arrows stay
+/// unadvertised and whether an item may express a modifier relationship are that
+/// issue's to rule, and neither is answered by moving one item.
 ///
 /// It is a **bonus rung**, and [`HINT_BASELINE`] is what makes that true rather
 /// than a hope: adding it made the widest bar forty columns, which is exactly the
@@ -116,7 +125,7 @@ const CONTINUES: &str = "›";
 /// on advice at the pane's worst width, for every reader, including the ones who
 /// never press `J`.
 const HINT_RUNGS: [&str; 5] = [
-    "q quit · f follow · jk scroll · JK files",
+    "q quit · f follow · jk scroll · ? keys",
     "q quit · f follow · jk scroll",
     "q quit · f follow",
     "f follow",
@@ -1068,6 +1077,14 @@ pub struct Chrome {
     /// **transient** thing, so that a notice flickering cannot jog the reader's
     /// diff. A keypress is an instruction rather than a flicker.
     pub masthead: bool,
+    /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
+    ///
+    /// **Unlike [`Chrome::masthead`] this is not an input to the body split at
+    /// all**, and that difference is the whole of `SPEC.md` §11.1's B12: the sheet
+    /// composites over cells the regions have already drawn, so no rect moves and
+    /// no row is spent. It is read by the painter last and by [`regions`] so a
+    /// pointer can be told it is over one.
+    pub sheet: bool,
     /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
     ///
     /// `None` on the very first paint, when no frame has completed to have a
@@ -2771,6 +2788,16 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         list: list_bar.region(list_top, list_rows),
         diff: diff_bar.region(diff_top, diff_rows),
         bar: (list_bar.drawn() || diff_bar.drawn()).then(|| area.x + area.width - 1),
+        // **From the same plan the painter draws**, which is what keeps the
+        // pointer and the screen one answer: a sheet the reader can see but the
+        // pointer cannot would swallow nothing and let a click seek a bar behind
+        // it. `None` when it is not up, and also when it is up on a pane too small
+        // to draw it, since a target nobody can see must not eat a gesture.
+        sheet: chrome
+            .sheet
+            .then(|| sheet_plan(area, footer.rows, margins_of(area.width)))
+            .flatten()
+            .map(|plan| plan.target()),
     }
 }
 
@@ -2928,7 +2955,242 @@ pub fn render(
         painter.body(region, view, area.width);
     }
 
+    // **Last, over everything, and only if a reader asked.** `SPEC.md` §11.1's
+    // B12: the sheet is the one drawn thing on this pane that takes no row from
+    // any region, so it is composited after all of them and the plan above is
+    // untouched by whether it is up.
+    if chrome.sheet {
+        if let Some(plan) = sheet_plan(area, footer.rows, margins) {
+            painter.sheet(&plan);
+        }
+    }
+
     painter.paint
+}
+
+/// One row of the gestures sheet: how to ask for a thing, and what it does.
+///
+/// Both fields carry **two spellings, the wide one first**, and the ladder picks
+/// one level for the whole sheet rather than per row: a table whose rows each
+/// chose their own width would not be a table. `SPEC.md` §11.1's B12.
+struct Gesture {
+    /// The keys cell. Aliases live inside it rather than in rows of their own.
+    keys: [&'static str; 2],
+    /// What the gesture does.
+    verb: [&'static str; 2],
+}
+
+/// The keyboard half, in the order a reader meets it.
+///
+/// **Aliases are spelled inside the keys cell**, which is the README table's
+/// shape and B12's answer to *gestures or keys*: `j`, `k`, `↓` and `↑` are one
+/// gesture with four spellings, not four gestures.
+///
+/// **The last three rows are the ones the ladder keeps**, and that order is
+/// §11.1's own rather than a preference: the unguessable outlives the reflexive.
+/// `f` restores a state whose absence is invisible, `m` names a region a reader
+/// may not know exists, and `?` is this sheet, which is how everything above it
+/// is found at all.
+const KEYBOARD: [Gesture; 11] = [
+    Gesture {
+        keys: ["q  Esc  Ctrl+C  Ctrl+D", "q  Esc"],
+        verb: ["quit", "quit"],
+    },
+    Gesture {
+        keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
+        verb: ["scroll a row", "scroll a row"],
+    },
+    Gesture {
+        keys: ["Space  PgDn  PgUp", "Space  PgDn"],
+        verb: ["page", "page"],
+    },
+    Gesture {
+        keys: ["d  u", "d  u"],
+        verb: ["half a page", "half a page"],
+    },
+    Gesture {
+        keys: ["g  Home  /  G  End", "g  /  G"],
+        verb: ["first / last changed file", "first / last file"],
+    },
+    Gesture {
+        keys: ["n  /  p", "n  /  p"],
+        verb: ["next / previous changed file", "next / prev file"],
+    },
+    Gesture {
+        keys: ["1  to  6", "1  to  6"],
+        verb: ["jump to that row of the list", "jump to a list row"],
+    },
+    Gesture {
+        keys: ["J  K  Shift+↑  Shift+↓", "J  K"],
+        verb: ["scroll the pinned file list", "scroll the list"],
+    },
+    Gesture {
+        keys: ["f", "f"],
+        verb: ["follow the newest change", "follow the newest"],
+    },
+    Gesture {
+        keys: ["m", "m"],
+        verb: ["show or hide the churn band", "the churn band"],
+    },
+    Gesture {
+        keys: ["?", "?"],
+        verb: ["this sheet", "this sheet"],
+    },
+];
+
+/// The mouse half, which is the first thing the height ladder drops.
+///
+/// It goes before any keyboard row for the reason the hint bar drops `JK files`
+/// first: a mouse gesture announces itself by being tried, where a key does not
+/// exist until somebody says it does.
+const MOUSE: [Gesture; 5] = [
+    Gesture {
+        keys: ["wheel", "wheel"],
+        verb: ["scroll what you point at", "scroll what you point at"],
+    },
+    Gesture {
+        keys: ["drag a scrollbar", "drag a bar"],
+        verb: ["move that region", "move that region"],
+    },
+    Gesture {
+        keys: ["click a track", "click a track"],
+        verb: ["send that region there", "send it there"],
+    },
+    Gesture {
+        keys: ["click  ▲ ▼", "click  ▲ ▼"],
+        verb: ["one row, and repeats held", "one row, repeats held"],
+    },
+    Gesture {
+        keys: ["click a listed file", "click a file"],
+        verb: ["jump the diff to it", "jump the diff to it"],
+    },
+];
+
+/// Keyboard rows the ladder may never drop: `f`, `m` and `?`.
+const SHEET_KEEP: usize = 3;
+
+/// Rows the sheet's frame costs, one border at each end.
+const SHEET_FRAME: usize = 2;
+
+/// What the sheet's own title bar spells, corner excluded.
+const SHEET_TITLE: &str = "─ gestures ";
+
+/// The close control, which is the pane's first.
+///
+/// **Outside CP437**, exactly as the scrollbar's `▲` and `▼` are, and inheriting
+/// that ruling rather than reopening it: shape is what tells a control from the
+/// frame it sits in, and no ASCII glyph reads as *close* without a legend.
+const SHEET_CLOSE: char = '✕';
+
+/// The three widths a rung of the sheet needs: keys field, verb field, and the
+/// whole sheet.
+///
+/// The fields are measured over the rows that rung actually draws, which is what
+/// makes dropping the mouse group narrow the sheet as well as shorten it: its
+/// `drag a scrollbar` is the widest keys cell on the whole table.
+fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize) {
+    let drawn = KEYBOARD[from..]
+        .iter()
+        .chain(mouse.then_some(&MOUSE[..]).into_iter().flatten());
+    let (mut keys, mut verb) = (0, 0);
+    for row in drawn {
+        keys = keys.max(width_of(row.keys[level]));
+        verb = verb.max(width_of(row.verb[level]));
+    }
+    // Border, space, keys, two of gap, verb, space, border. Floored at the width
+    // the title bar needs, so a narrow table cannot draw a truncated heading.
+    let total = (keys + verb + 6).max(width_of(SHEET_TITLE) + 6);
+    (keys, verb, total)
+}
+
+/// Rows a rung draws, frame excluded.
+fn sheet_rows(from: usize, mouse: bool) -> usize {
+    (KEYBOARD.len() - from) + if mouse { 1 + MOUSE.len() } else { 0 }
+}
+
+/// Where the gestures sheet goes, or `None` on a pane that cannot hold one.
+///
+/// **Two axes, in the order B12 rules them.** Width picks the spelling level,
+/// because the alternative is a table with a truncated verb and §11.1 forbids
+/// truncating an item that has no identifying half. Height then drops the mouse
+/// group, and after that keyboard rows from the top down, which leaves the three
+/// [`KEYBOARD`] names its own docblock says survive.
+///
+/// **Centred in the body, never over the header or the footer**, which is B12's
+/// reason for a box rather than a full-pane sheet: a reader reading instructions
+/// must still be able to see that the tool is alive behind them.
+///
+/// Both floors live here rather than in [`Painter::sheet`], which is
+/// [#158](https://github.com/breferrari/vigia/issues/158)'s correction inherited
+/// rather than re-earned: a floor known only to the drawer lets the layout
+/// promise a region the painter then declines to draw.
+fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<SheetPlan> {
+    let body = area.height.saturating_sub(1 + footer_rows);
+    let room = area.width.saturating_sub(margins.0 + margins.1);
+    let level = usize::from(sheet_fields(0, 0, true).2 > usize::from(room));
+
+    // The order is the ruling's: the mouse group before any keyboard row.
+    let rungs = std::iter::once((true, 0))
+        .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(|from| (false, from)));
+    for (mouse, from) in rungs {
+        let (keys, verb, total) = sheet_fields(level, from, mouse);
+        let height = sheet_rows(from, mouse) + SHEET_FRAME;
+        if total > usize::from(room) || height > usize::from(body) {
+            continue;
+        }
+        let width = total as u16;
+        let height = height as u16;
+        let left = area.x + margins.0 + (room - width) / 2;
+        let top = area.y + 1 + (body - height) / 2;
+        return Some(SheetPlan {
+            area: Rect {
+                x: left,
+                y: top,
+                width,
+                height,
+            },
+            level,
+            from,
+            mouse,
+            keys,
+            verb,
+            // Three in from the right edge: `┐`, the space before it, and this.
+            close: (left + width - 3, top),
+        });
+    }
+    None
+}
+
+/// A laid-out gestures sheet: where it goes and which rung it draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SheetPlan {
+    /// The whole sheet, frame included.
+    area: Rect,
+    /// Which spelling every cell takes: 0 wide, 1 tight.
+    level: usize,
+    /// First keyboard row drawn. Rows above it were dropped for height.
+    from: usize,
+    /// Whether the mouse group is drawn.
+    mouse: bool,
+    /// The keys field's width.
+    keys: usize,
+    /// The verb field's width.
+    verb: usize,
+    /// The close control's cell.
+    close: (u16, u16),
+}
+
+impl SheetPlan {
+    /// What a pointer needs to know about it.
+    fn target(&self) -> Sheet {
+        Sheet {
+            left: self.area.x,
+            top: self.area.y,
+            width: self.area.width,
+            height: self.area.height,
+            close: self.close,
+        }
+    }
 }
 
 /// A buffer, a palette, and the one measurement the body rows share.
@@ -3862,6 +4124,114 @@ impl Painter<'_> {
             };
             cell.set_symbol(glyph).set_style(style);
         }
+    }
+
+    /// Draw the gestures sheet over whatever the regions already drew.
+    ///
+    /// **Last of everything, and that is the whole mechanism** (`SPEC.md` §11.1's
+    /// B12). Nothing above this method knows the sheet exists: no rect is smaller
+    /// for it, no region yielded a row to it, and closing it needs no relayout,
+    /// because the cells it covered are redrawn by the next frame like every other
+    /// cell on the pane.
+    ///
+    /// The blank pass is `ratatui::widgets::Clear`'s job done cell by cell, for
+    /// the reason [`Painter::rule`] gives about building strings, and it is not
+    /// optional: without it the table's own gaps would show the diff through, and
+    /// a half-transparent sheet reads as a rendering fault rather than as a
+    /// window.
+    fn sheet(&mut self, plan: &SheetPlan) {
+        let area = plan.area;
+        let frame = self.theme.chrome_dim;
+        let lit = self.theme.chrome;
+        let width = usize::from(area.width);
+
+        for y in area.y..area.y.saturating_add(area.height) {
+            for x in area.x..area.x.saturating_add(area.width) {
+                // Clipped rather than assumed, for the reason the heat strip is:
+                // any area is legal here, including one the buffer has shrunk
+                // under.
+                if let Some(cell) = self.buf.cell_mut((x, y)) {
+                    cell.set_symbol(" ").set_style(frame);
+                }
+            }
+        }
+
+        // The title bar, with the close control's cell left blank and written
+        // after it in its own weight: a control is not part of the frame it sits
+        // in, which is [#166](https://github.com/breferrari/vigia/issues/166)'s
+        // rule for the step buttons one element over.
+        let mut top = String::with_capacity(width * 3);
+        top.push('┌');
+        top.push_str(SHEET_TITLE);
+        // Corner, title, dashes, then the three cells the control sits in and the
+        // closing corner: `width - 16` of rule for an eleven-column title.
+        for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + 5) {
+            top.push(RULE);
+        }
+        top.push_str("   ┐");
+        self.put(area.x, area.y, &top, width, frame);
+        self.put(plan.close.0, plan.close.1, &SHEET_CLOSE.to_string(), 1, lit);
+
+        let mut y = area.y + 1;
+        let rows = KEYBOARD[plan.from..].iter();
+        for row in rows {
+            self.sheet_row(area, y, row, plan);
+            y += 1;
+        }
+
+        if plan.mouse {
+            // The group's own rule, which is the same shape the title bar has and
+            // for the same reason: a heading inside a table is furniture, so it
+            // runs to the frame rather than standing back from it.
+            let mut label = String::with_capacity(width * 3);
+            label.push('│');
+            label.push_str(" mouse ");
+            for _ in 0..width.saturating_sub(width_of(" mouse ") + 3) {
+                label.push(RULE);
+            }
+            label.push_str(" │");
+            self.put(area.x, y, &label, width, frame);
+            y += 1;
+            for row in MOUSE.iter() {
+                self.sheet_row(area, y, row, plan);
+                y += 1;
+            }
+        }
+
+        let mut bottom = String::with_capacity(width * 3);
+        bottom.push('└');
+        for _ in 0..width.saturating_sub(2) {
+            bottom.push(RULE);
+        }
+        bottom.push('┘');
+        self.put(area.x, area.y + area.height - 1, &bottom, width, frame);
+    }
+
+    /// One row of the sheet: the keys cell lit, the verb dim, the frame at both
+    /// ends.
+    ///
+    /// **Both cells are clipped to their planned field and never truncated with a
+    /// mark**, which is the difference between this table and a line of content:
+    /// the plan measured every row it was going to draw, so a cell that did not
+    /// fit would mean the plan was wrong rather than that the pane is narrow.
+    fn sheet_row(&mut self, area: Rect, y: u16, row: &Gesture, plan: &SheetPlan) {
+        let right = area.x + area.width - 1;
+        self.put(area.x, y, "│", 1, self.theme.chrome_dim);
+        self.put(
+            area.x + 2,
+            y,
+            row.keys[plan.level],
+            plan.keys,
+            self.theme.chrome,
+        );
+        self.put(
+            area.x + 2 + plan.keys as u16 + 2,
+            y,
+            row.verb[plan.level],
+            plan.verb,
+            self.theme.chrome_dim,
+        );
+        self.put(right, y, "│", 1, self.theme.chrome_dim);
     }
 
     fn body(&mut self, area: Rect, view: &View, pane: u16) {

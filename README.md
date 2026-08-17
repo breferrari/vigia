@@ -69,6 +69,7 @@ vigia --version        # the only option there is
 | `J` `K` `Shift+↑` `Shift+↓` | scroll the pinned file list |
 | `f` | follow the newest change, or stop following |
 | `m` | show the worktree churn band above the list, or hide it |
+| `?` | all of this, as a sheet over the pane |
 
 | Mouse | |
 |---|---|
@@ -77,6 +78,9 @@ vigia --version        # the only option there is
 | click a scrollbar track | send that region to where you clicked |
 | click `▲` or `▼` | one row, and it repeats while you hold it |
 | click a listed file | jump the diff to it |
+| click `✕` on the sheet | close it |
+
+**You do not have to keep any of that.** `?` draws it as a table in the middle of the pane, `?` again takes it away, and the `✕` in its corner does the same. It costs the diff nothing: the sheet is drawn over rows that are already there, so nothing moves when it opens and nothing moves when it goes. No key changes meaning while it is up, either, so `q` still quits and `j` still scrolls the diff behind it.
 
 The band `m` draws is the whole tree rather than one file: the last two minutes of churn projected across the pane, oldest on the left. It starts hidden, because it costs four rows of the diff and is not wanted on every pane.
 

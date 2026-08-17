@@ -232,6 +232,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
+        sheet: false,
         // The first paint's chrome: no frame has completed, so there is no p99
         // to draw. Every snapshot below inherits it, which keeps them comparing
         // the same screen they compared before the readouts existed, and
