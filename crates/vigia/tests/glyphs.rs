@@ -276,15 +276,59 @@ fn a_level_past_the_ramp_is_clamped_rather_than_wrapping() {
 }
 
 #[test]
+fn the_octant_column_climbs_one_row_per_level() {
+    // **Octants had no geometry gate at all**, and that is the shape this whole
+    // ladder is most exposed to: `the_tables_index_the_same_way` below used to
+    // assert only that the two rungs draw *different* characters, which any
+    // indexing satisfies. Mirroring the octant cell's halves passed the entire
+    // suite, so the strip could read backwards in time at that rung and nothing
+    // would say so.
+    let left: Vec<char> = (0..=3)
+        .map(|level| Glyphs::Octant.glyph(level, 0))
+        .collect();
+    assert_eq!(
+        left,
+        vec!['\u{2582}', '\u{1cdbb}', '\u{1cdbf}', '\u{1cdc0}']
+    );
+
+    let right: Vec<char> = (0..=3)
+        .map(|level| Glyphs::Octant.glyph(0, level))
+        .collect();
+    assert_eq!(
+        right,
+        vec!['\u{2582}', '\u{1cdcb}', '\u{1cdd3}', '\u{1cdd5}']
+    );
+}
+
+#[test]
 fn the_two_tables_agree_about_geometry() {
     // One geometry drives both, so every level pair must land on the same
     // *shape* in each table even though the glyphs differ. If the two were
     // indexed differently, a reader switching rungs would see the bars flip.
+    // **Agreement, not mere difference.** This asserted only `assert_ne!` and
+    // that is satisfied by *any* indexing, including one rung reading its pair
+    // backwards. What actually has to hold is that a level pair means the same
+    // *shape* in both tables, so a reader switching rungs sees the same strip
+    // drawn differently rather than a different strip.
     for left in 0..=3 {
         for right in 0..=3 {
             let braille = Glyphs::Braille.glyph(left, right);
             let octant = Glyphs::Octant.glyph(left, right);
             assert_ne!(braille, octant, "the rungs are not distinct glyphs");
+            // The pair read the other way round must be the other cell, at both
+            // rungs, or one of them is symmetric where it must not be.
+            if left != right {
+                assert_ne!(
+                    braille,
+                    Glyphs::Braille.glyph(right, left),
+                    "braille ({left},{right}) is its own mirror"
+                );
+                assert_ne!(
+                    octant,
+                    Glyphs::Octant.glyph(right, left),
+                    "octant ({left},{right}) is its own mirror"
+                );
+            }
         }
     }
     // The corners are the check that they agree: empty and full are the two
@@ -313,4 +357,82 @@ fn a_refusal_quotes_what_was_typed_rather_than_what_it_was_folded_to() {
     // other half of the same split and would otherwise be untested.
     let rung = Glyphs::from_env(false, env(&[(GLYPHS_VAR, "  BRAILLE  ")])).expect("a rung");
     assert_eq!(rung, Glyphs::Braille);
+}
+
+#[test]
+fn a_term_merely_containing_a_terminals_name_is_not_it() {
+    // Swapping `names()` for a bare `contains` survived the suite. The boundary
+    // is the `-` terminfo itself uses, so a variant is the same terminal and a
+    // word that merely has the name inside it is not.
+    assert_eq!(
+        Glyphs::from_env(false, env(&[("TERM", "foot-extra")])).expect("a rung"),
+        Glyphs::Braille,
+        "a suffixed variant is the same terminal"
+    );
+    assert_eq!(
+        Glyphs::from_env(true, env(&[("TERM", "notfoot")])).expect("a rung"),
+        Glyphs::Block,
+        "a TERM that merely contains the name is a different terminal"
+    );
+}
+
+#[test]
+fn the_linux_console_is_matched_by_name_and_not_by_prefix() {
+    // `starts_with("linux")` survived. `TERM=linuxconsole` is not the VT, and
+    // taking the floor for it would cost a reader the rung their font supports.
+    assert_eq!(
+        Glyphs::from_env(false, env(&[("TERM", "linux")])).expect("a rung"),
+        Glyphs::Block
+    );
+    assert_eq!(
+        Glyphs::from_env(false, env(&[("TERM", "linuxconsole")])).expect("a rung"),
+        Glyphs::Braille,
+        "a TERM merely starting with linux took the console's floor"
+    );
+    // Same shape one rung up: `dumbterm` is not `dumb`.
+    assert_eq!(
+        Glyphs::from_env(false, env(&[("TERM", "dumbterm")])).expect("a rung"),
+        Glyphs::Braille
+    );
+}
+
+#[test]
+fn a_term_in_capitals_is_the_same_terminal() {
+    // Dropping the fold on `TERM` survived. `TERM` is conventionally lower case
+    // and this is the forgiving reading, which matters because the cost of
+    // getting it wrong is a reader on a VT drawing tofu.
+    for spelling in ["LINUX", "Linux", "linux"] {
+        assert_eq!(
+            Glyphs::from_env(false, env(&[("TERM", spelling)])).expect("a rung"),
+            Glyphs::Block,
+            "TERM={spelling} is the linux console"
+        );
+    }
+    assert_eq!(
+        Glyphs::from_env(false, env(&[("TERM", "XTERM-KITTY")])).expect("a rung"),
+        Glyphs::Braille
+    );
+}
+
+#[test]
+fn a_named_program_on_windows_outranks_the_console_floor() {
+    // **No row of `TABLE` reaches `TERM_PROGRAM` on Windows**, because the only
+    // `windows: true` row above it short-circuits on the override. That left the
+    // interesting Windows case ungated: `vscode` rasterises braille itself
+    // rather than taking it from Consolas, so it is braille on the platform
+    // whose fallthrough is blocks.
+    assert_eq!(
+        Glyphs::from_env(
+            true,
+            env(&[("TERM_PROGRAM", "vscode"), ("TERM", "xterm-256color")])
+        )
+        .expect("a rung"),
+        Glyphs::Braille,
+        "a terminal that names itself outranks the platform floor under it"
+    );
+    // And the floor still applies when nothing names itself.
+    assert_eq!(
+        Glyphs::from_env(true, env(&[("TERM", "xterm-256color")])).expect("a rung"),
+        Glyphs::Block
+    );
 }

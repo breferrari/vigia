@@ -190,7 +190,12 @@ impl Depth {
             return Ok(Self::None);
         }
 
-        let term = lookup("TERM").unwrap_or_default();
+        // **Folded once, here.** `term_depth` folds again below and this arm did
+        // not fold at all, so `TERM=DUMB` was a terminal saying it cannot draw
+        // that this ladder heard and the glyph ladder did not. `TERM` is
+        // conventionally lower case and the forgiving reading is the right one
+        // when the cost of mishearing is colour a reader switched off.
+        let term = lookup("TERM").unwrap_or_default().to_ascii_lowercase();
         if term == "dumb" {
             return Ok(Self::None);
         }

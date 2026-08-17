@@ -135,6 +135,17 @@ pub enum Glyphs {
     ///
     /// **Never returned by [`Glyphs::from_env`] without the override**, because
     /// no font measured carries them. See the module docs.
+    ///
+    /// **And a second reason to keep it override-only**, found while auditing:
+    /// this rung is the one element here whose glyphs are not all the same width
+    /// class. `ratatui`'s table reuses the eighth-blocks for four of the sixteen
+    /// cells this draws (`U+2582`, `84`, `86`, `88`), and those are East Asian
+    /// *ambiguous* where the twelve `U+1CDxx` are neutral. Every one measures a
+    /// single column under the default rules, so nothing here is wrong today,
+    /// but on a terminal configured to draw ambiguous glyphs double-width the
+    /// strip would break **inside** the element rather than shifting as a unit,
+    /// which is what the block ramp does. A reader who sets this is choosing a
+    /// rung whose fonts are new enough to be worth checking anyway.
     Octant,
 }
 

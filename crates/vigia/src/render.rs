@@ -4808,14 +4808,18 @@ impl Painter<'_> {
             // guarantees `right.width` exceeds every reserved slot, so the two
             // clamps are the same number today. They are not the same *promise*:
             // one says the strip fits the window, the other says it fits the
-            // rect it was handed, and `Painter::list` hands an area this function
-            // did not plan (it insets a caret column). A bare subtraction is the
-            // shape that has bitten this file before, and in release it does not
-            // even panic: `u16` wraps, `x` lands near the top of the range, and
-            // `x + offset` wraps back into the pane, so the strip would be drawn
-            // in the wrong column rather than not at all. Raised by review on
-            // the sparkline; the heat strip below has the identical expression
-            // and is left for a pass that can change both with one argument.
+            // rect it was handed. **The reason recorded here was wrong and is
+            // corrected rather than deleted**: it claimed `Painter::list` hands
+            // an area this function did not plan because it insets a caret
+            // column, and `list` in fact passes the same `inner` width `plan`
+            // used, moving `x` rather than the width. So the third term is
+            // unreachable today, and removing it survives the suite. It stays
+            // because what it guards is not a claim about callers but about
+            // arithmetic: a bare subtraction here does not even panic in
+            // release, since `u16` wraps, `x` lands near the top of the range
+            // and `x + offset` wraps back into the pane, so a strip wider than
+            // its rect would be drawn in the wrong column rather than not at
+            // all. The heat strip below has the identical expression.
             // **Counted in cells rather than buckets, which is the one thing the
             // glyph rung changes here.** `columns.spark` is a slice of the
             // *window*, and how many columns that costs is the terminal's
