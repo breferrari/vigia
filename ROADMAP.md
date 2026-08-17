@@ -450,6 +450,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | decision: the keymap outgrew the hint bar, so does it get an overlay | [#167](https://github.com/breferrari/vigia/issues/167) |
 | ✅ | Build B12: `?` toggles a centred gestures sheet over the pane | [#206](https://github.com/breferrari/vigia/issues/206) |
 | ✅ | The sheet keeps the diff colours it covers, and its close control never brightens | [#211](https://github.com/breferrari/vigia/issues/211) |
+| ⬜ | The sheet is 56 by 19 whatever the pane is, and a short one drops thirteen gestures in silence | [#220](https://github.com/breferrari/vigia/issues/220) |
 | ✅ | Attribute a wall-clock overshoot with thread CPU time | [#212](https://github.com/breferrari/vigia/issues/212) |
 | ✅ | The status sigil sits two columns apart between the list and the diff's headings | [#173](https://github.com/breferrari/vigia/issues/173) |
 | ✅ | The header stands against the first list row, the one boundary drawn with nothing | [#174](https://github.com/breferrari/vigia/issues/174) |
