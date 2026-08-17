@@ -4032,14 +4032,9 @@ fn sigil_column(row: &str) -> Option<usize> {
 /// after it and the elision are all single-width.
 fn path_column(row: &str) -> Option<usize> {
     let sigil = sigil_column(row)?;
-    let mut column = sigil + 1;
-    for glyph in row.chars().skip(sigil + 1) {
-        if glyph != ' ' {
-            return Some(column);
-        }
-        column += 1;
-    }
-    None
+    let after = sigil + 1;
+    let blanks = row.chars().skip(after).take_while(|c| *c == ' ').count();
+    row.chars().nth(after + blanks).map(|_| after + blanks)
 }
 
 /// The row a pinned list starts on, given its layout.
