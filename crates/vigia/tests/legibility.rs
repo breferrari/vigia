@@ -4840,6 +4840,20 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
         "one pair is empty, so exactly one cell should draw the track"
     );
 
+    // **A pair is empty only when *both* halves are**, and testing the older
+    // half alone survived the suite. That mutation loses the newer bucket of
+    // every pair whose older half is quiet, which is exactly the shape a file
+    // that has just started being written has: the strip would draw a track
+    // over the activity a reader opened the pane to see.
+    for pattern in [[0, 12, 0, 9, 0, 6, 0, 4], [12, 0, 9, 0, 6, 0, 4, 0]] {
+        let backend = drawn_at(120, 8, &sparked(pattern), &chrome(), Glyphs::Braille);
+        let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
+        assert_eq!(
+            tracks, 0,
+            "every pair has a busy half, so none should draw the track: {pattern:?}"
+        );
+    }
+
     // And with nothing anywhere, every cell is the track. This is the ordinary
     // first frame: history is fed from the watch, so a worktree already dirty at
     // launch has no ticks behind it yet.
@@ -5056,4 +5070,50 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
 /// Cells a full window occupies at `glyphs`, restated for [`RAMP`]'s reason.
 fn spark_cells_for(glyphs: Glyphs) -> usize {
     HISTORY_BUCKETS.div_ceil(glyphs.density())
+}
+
+#[test]
+fn a_dense_strip_draws_its_buckets_at_different_heights() {
+    // **The feature's own claim, and nothing gated it.** Every other dense gate
+    // counts cells or reads colours, and `tests/glyphs.rs` gates the packer
+    // rather than the renderer, so forcing every non-empty column to full height
+    // survived the entire suite: the strip flat-topped and no gate cared. A
+    // sparkline whose heights do not scale is not a sparkline, it is a
+    // presence indicator.
+    //
+    // Read off the screen rather than off the packer, because the scaling
+    // happens in `spark_of` and only a drawn row can see it.
+    for glyphs in [Glyphs::Braille, Glyphs::Octant] {
+        // **Mid-range on purpose.** Against a screen peak of 12 a bucket of 4 is
+        // level 1 of 3, and scaling to the block ramp's eight levels and then
+        // clamping to three would make it level 3, which is the busiest pair's
+        // answer. Quiet buckets of 1 do not separate those two spellings, so a
+        // gate built on them passes against a rung that has lost its middle
+        // entirely: 4 and 12 do.
+        let view = sparked([4, 4, 12, 12, 4, 4, 4, 4]);
+        let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
+        let (ramp, _) = alphabet(glyphs);
+        let bars = spark_colours(&theme());
+        let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)
+            .into_iter()
+            .map(|x| backend.buffer()[(x, 1)].symbol().to_owned())
+            .collect();
+
+        let distinct: std::collections::BTreeSet<&String> = drawn_cells.iter().collect();
+        assert!(
+            distinct.len() > 1,
+            "{glyphs:?}: every drawn cell is {drawn_cells:?}, so the heights do \
+             not scale with the buckets"
+        );
+
+        // And specifically: the busy pair is taller than the quiet one. Ordering
+        // the two by their level is what a reader actually does with the strip.
+        let quiet = glyphs.glyph(1, 1);
+        let busy = glyphs.glyph(glyphs.levels(), glyphs.levels());
+        assert!(
+            drawn_cells.contains(&busy.to_string()),
+            "{glyphs:?}: the busiest pair did not draw a full cell: {drawn_cells:?}"
+        );
+        assert_ne!(quiet, busy, "{glyphs:?}: quiet and busy pack identically");
+    }
 }

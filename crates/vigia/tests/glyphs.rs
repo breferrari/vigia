@@ -305,31 +305,31 @@ fn the_two_tables_agree_about_geometry() {
     // One geometry drives both, so every level pair must land on the same
     // *shape* in each table even though the glyphs differ. If the two were
     // indexed differently, a reader switching rungs would see the bars flip.
-    // **Agreement, not mere difference.** This asserted only `assert_ne!` and
-    // that is satisfied by *any* indexing, including one rung reading its pair
-    // backwards. What actually has to hold is that a level pair means the same
-    // *shape* in both tables, so a reader switching rungs sees the same strip
-    // drawn differently rather than a different strip.
-    for left in 0..=3 {
-        for right in 0..=3 {
-            let braille = Glyphs::Braille.glyph(left, right);
-            let octant = Glyphs::Octant.glyph(left, right);
-            assert_ne!(braille, octant, "the rungs are not distinct glyphs");
-            // The pair read the other way round must be the other cell, at both
-            // rungs, or one of them is symmetric where it must not be.
-            if left != right {
-                assert_ne!(
-                    braille,
-                    Glyphs::Braille.glyph(right, left),
-                    "braille ({left},{right}) is its own mirror"
-                );
-                assert_ne!(
-                    octant,
-                    Glyphs::Octant.glyph(right, left),
-                    "octant ({left},{right}) is its own mirror"
-                );
+    // **This asserted nothing for two rounds and the second one caught it.** It
+    // began as `assert_ne!(braille, octant)`, which is true by construction
+    // because the two tables are disjoint Unicode blocks, and the mirror checks
+    // that replaced it duplicate the two climb gates above. What is actually
+    // worth holding is **injectivity**: sixteen level pairs must land on sixteen
+    // distinct characters at each rung, or two different histories draw the same
+    // cell and the strip is ambiguous in a way no colour can recover.
+    for glyphs in [Glyphs::Braille, Glyphs::Octant] {
+        let mut seen = std::collections::BTreeMap::new();
+        for left in 0..=glyphs.levels() {
+            for right in 0..=glyphs.levels() {
+                let glyph = glyphs.glyph(left, right);
+                if let Some(other) = seen.insert(glyph, (left, right)) {
+                    panic!(
+                        "{glyphs:?}: {other:?} and {:?} both draw {glyph:?}",
+                        (left, right)
+                    );
+                }
             }
         }
+        assert_eq!(
+            seen.len(),
+            (glyphs.levels() + 1) * (glyphs.levels() + 1),
+            "{glyphs:?} does not spell every level pair distinctly"
+        );
     }
     // The corners are the check that they agree: empty and full are the two
     // shapes whose meaning is fixed rather than conventional.
@@ -434,5 +434,54 @@ fn a_named_program_on_windows_outranks_the_console_floor() {
     assert_eq!(
         Glyphs::from_env(true, env(&[("TERM", "xterm-256color")])).expect("a rung"),
         Glyphs::Block
+    );
+}
+
+#[test]
+fn every_named_program_answers() {
+    // **Most of `program_glyphs` was unexercised**, and deleting an entry
+    // survived: `TABLE` uses `ghostty` only as the *higher* signal a lower rung
+    // must lose to, so it never supplies the answer. A table of terminals
+    // somebody checked is worth nothing if the entries are never read, and this
+    // is the list a wrong addition would sit in unnoticed.
+    for program in [
+        "Apple_Terminal",
+        "ghostty",
+        "Hyper",
+        "iTerm.app",
+        "rio",
+        "Tabby",
+        "vscode",
+        "WarpTerminal",
+        "WezTerm",
+    ] {
+        // **On Windows, and that is what makes each entry load-bearing.** Off
+        // Windows the fallthrough is braille anyway, so deleting a name from the
+        // table changes no answer and the gate passes against a table that has
+        // lost it. Here the platform floor under the program is blocks, so only
+        // the table can supply this answer.
+        let rung = Glyphs::from_env(
+            true,
+            env(&[("TERM_PROGRAM", program), ("TERM", "xterm-256color")]),
+        )
+        .expect("a rung");
+        assert_eq!(
+            rung,
+            Glyphs::Braille,
+            "TERM_PROGRAM={program} should name a terminal whose font has braille"
+        );
+    }
+
+    // And a program nobody has checked falls through rather than capping
+    // anything, which is the table's stated discipline.
+    let rung = Glyphs::from_env(
+        false,
+        env(&[("TERM_PROGRAM", "someterm"), ("TERM", "linux")]),
+    )
+    .expect("a rung");
+    assert_eq!(
+        rung,
+        Glyphs::Block,
+        "an unknown program should fall through to the signals under it"
     );
 }
