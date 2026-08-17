@@ -32,7 +32,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
-use vigia::{
+use vigia::{Glyphs, 
     Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
     body_layout, diff_height, regions, render,
 };
@@ -248,6 +248,9 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 /// one. The follow state gets its own snapshots instead, below.
 fn chrome() -> Chrome {
     Chrome {
+        // The floor, so every gate that does not ask for a rung keeps measuring
+        // the picture this shell drew before the glyph ladder existed.
+        glyphs: Glyphs::default(),
         pressed: None,
         gripped: None,
         hovered: None,

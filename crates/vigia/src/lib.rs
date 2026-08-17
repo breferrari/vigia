@@ -62,6 +62,7 @@
 
 mod app;
 mod colour;
+mod glyphs;
 mod input;
 /// Public where its seven siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
@@ -82,6 +83,7 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
+pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
     WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
@@ -291,6 +293,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
 
+    // Beside the depth and for the same reason: a property of the terminal,
+    // resolved once before the screen is taken, so the frame path never asks the
+    // environment anything. Refused rather than defaulted when the variable is
+    // unreadable, which is `VIGIA_COLOR`'s rule and reaches the reader on a
+    // terminal they can still see, exactly as the line above does.
+    let glyphs = Glyphs::detect()?;
+
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
     // sees it. Built here because the handler on it is armed on the next line,
     // before the terminal is taken, and the other two senders are armed after the
@@ -347,6 +356,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // inventing a recency for it would light up rows nothing has touched.
         history: History::new(),
         theme,
+        glyphs,
         name: short_name(worktree.workdir()),
         branch: None,
         screen: View::default(),
@@ -611,14 +621,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
                     let height = if action.needs_height() {
-                        let chrome = shell.app.chrome(
-                            &shell.name,
-                            shell.branch.as_deref(),
-                            shell.pressed(),
-                            shell.gripped(),
-                            shell.hovered(),
-                            shell.scrolling,
-                        );
+                        let chrome = Chrome {
+                            glyphs: shell.glyphs,
+                            ..shell.app.chrome(
+                                &shell.name,
+                                shell.branch.as_deref(),
+                                shell.pressed(),
+                                shell.gripped(),
+                                shell.hovered(),
+                                shell.scrolling,
+                            )
+                        };
                         diff_height(shell.area()?, &chrome, frame.files().len())
                     } else {
                         0
@@ -771,6 +784,14 @@ struct Shell {
     /// the session.
     history: History,
     theme: Theme,
+    /// Which glyphs the sparkline may draw from, resolved once at startup.
+    ///
+    /// Held beside [`Shell::theme`] because it is the same kind of value: a
+    /// property of the terminal, decided before the screen was taken and
+    /// unchanged for the session. It is stamped onto each frame's
+    /// [`Chrome`] rather than passed to [`App::chrome`], which that field's
+    /// own docblock explains.
+    glyphs: Glyphs,
     /// What the header calls the working tree.
     name: String,
     /// What the header calls the branch, or `None` when there is none to call.
@@ -1043,14 +1064,17 @@ impl Shell {
         // number `View::collect` will report as `View::files`, which is what
         // keeps this row budget and the renderer's layout in agreement: `render`
         // recomputes the same split from the same two inputs.
-        let chrome = self.app.chrome(
-            &self.name,
-            self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
-        );
+        let chrome = Chrome {
+            glyphs: self.glyphs,
+            ..self.app.chrome(
+                &self.name,
+                self.branch.as_deref(),
+                self.pressed(),
+                self.gripped(),
+                self.hovered(),
+                self.scrolling,
+            )
+        };
         let body = body_layout(self.area()?, &chrome, frame.files().len());
         match self
             .app
@@ -1081,14 +1105,17 @@ impl Shell {
         // What stands is the reason it is re-read rather than held: a name kept
         // across frames is a confident lie the moment the other pane checks
         // something out.
-        let mut chrome = self.app.chrome(
-            &self.name,
-            self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
-        );
+        let mut chrome = Chrome {
+            glyphs: self.glyphs,
+            ..self.app.chrome(
+                &self.name,
+                self.branch.as_deref(),
+                self.pressed(),
+                self.gripped(),
+                self.hovered(),
+                self.scrolling,
+            )
+        };
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.

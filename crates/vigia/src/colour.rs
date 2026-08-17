@@ -402,7 +402,13 @@ const TRUECOLOR_TERMS: [&str; 7] = [
 /// Entries are suffixed rather than substringed: `foot-extra` and `alacritty-direct`
 /// are the same terminal, and a bare `contains` would also match a `TERM` that
 /// merely has the word in it. The boundary is the `-` the database itself uses.
-fn names(term: &str, name: &str) -> bool {
+///
+/// **Shared with [`glyphs`](crate::glyphs), which is the one thing the two
+/// ladders do share.** The *tables* are deliberately separate, because a colour
+/// depth and a font's coverage are different questions about the same name; how
+/// a `TERM` entry is matched against a table is the same question in both, and
+/// two copies of this would be two chances to disagree about `foot-extra`.
+pub(crate) fn names(term: &str, name: &str) -> bool {
     term.strip_prefix(name)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
 }

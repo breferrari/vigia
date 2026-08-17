@@ -25,7 +25,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
-use vigia::{
+use vigia::{Glyphs, 
     Body, Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme,
     View, body_layout, diff_height, render,
 };
@@ -371,6 +371,9 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// of dropping it.
 fn chrome() -> Chrome {
     Chrome {
+        // The floor, so every gate that does not ask for a rung keeps measuring
+        // the picture this shell drew before the glyph ladder existed.
+        glyphs: Glyphs::default(),
         pressed: None,
         gripped: None,
         hovered: None,

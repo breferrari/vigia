@@ -38,6 +38,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
+use crate::glyphs::Glyphs;
 use crate::input::{Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
@@ -219,6 +220,21 @@ const SPARK_TRACK: char = '_';
 /// where shaving one bucket at a time would leave widths where the picture is
 /// neither the full window nor an obvious fraction of it.
 const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+
+/// Columns `buckets` of sparkline occupy at this rung.
+///
+/// **The rungs stay a count of buckets and the *cost* is what the glyph
+/// changes**, which is what keeps [`SPARK_RUNGS`] meaning one thing: a rung is
+/// how much of the window a row shows, and how many columns that takes is a
+/// property of the terminal rather than of the ladder. At
+/// [`Glyphs::Block`] this is the identity and every width boundary in
+/// [`ROW_LAYOUTS`] is exactly where it was.
+///
+/// Rounded **up**, so an odd bucket count still gets a whole cell to sit in
+/// rather than being dropped for not filling one.
+const fn spark_cells(buckets: usize, glyphs: Glyphs) -> usize {
+    buckets.div_ceil(glyphs.density())
+}
 
 /// The pulse, widest rung first.
 ///
@@ -1156,6 +1172,22 @@ pub struct Chrome {
     /// **transient** thing, so that a notice flickering cannot jog the reader's
     /// diff. A keypress is an instruction rather than a flicker.
     pub masthead: bool,
+    /// Which glyphs the sparkline may be drawn from.
+    ///
+    /// **Resolved once at startup and stamped on by the loop**, which is why it
+    /// arrives here rather than through [`App::chrome`](crate::App::chrome).
+    /// It is a fact about the terminal, so it is no more [`App`](crate::App)'s
+    /// state than the branch is, and that method's docblock already argues the
+    /// case for exactly this class of value. Adding a seventh positional mark to
+    /// it would also make [#191](https://github.com/breferrari/vigia/issues/191)
+    /// worse for a value that never changes after the first frame.
+    ///
+    /// **The default is the floor on purpose.** A caller that never stamps it
+    /// draws precisely what this shell drew before the ladder existed, so
+    /// forgetting it degrades rather than breaks, which is the direction
+    /// [`Depth`](crate::Depth) picks for the same reason: an under-claim only
+    /// looks flatter than it had to, where an over-claim here paints tofu.
+    pub glyphs: Glyphs,
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     ///
     /// **Unlike [`Chrome::masthead`] this is not an input to the body split at
@@ -2036,21 +2068,28 @@ impl Columns {
     /// exactly one thing and never gains any**. That makes the whole ladder
     /// monotone by construction rather than by argument, which is the property a
     /// reader dragging a pane edge actually notices.
-    fn plan(width: u16) -> Self {
+    /// **`glyphs` enters here rather than changing the table**, and that is what
+    /// keeps the ladder one ladder. The rungs are slices of the *window* and
+    /// their order is unchanged at every rung of the glyph ladder; what a denser
+    /// glyph moves is the *width* each one costs, so the same six steps are
+    /// simply reached earlier. Monotonicity is therefore still by construction
+    /// rather than by argument, and it holds separately at each rung, which is
+    /// what `tests/legibility.rs` sweeps rather than assumes.
+    fn plan(width: u16, glyphs: Glyphs) -> Self {
         let budget = usize::from(width).saturating_sub(ROW_FLOOR);
         ROW_LAYOUTS
             .iter()
             .copied()
-            .find(|layout| layout.width() <= budget)
+            .find(|layout| layout.width(glyphs) <= budget)
             .unwrap_or(Self::NOTHING)
     }
 
     /// Columns this layout needs, every gap included.
-    fn width(&self) -> usize {
+    fn width(&self, glyphs: Glyphs) -> usize {
         reserved(counts_width(self.cell))
             + reserved(width_of(self.pulse))
             + reserved(self.heat)
-            + reserved(self.spark)
+            + reserved(spark_cells(self.spark, glyphs))
     }
 }
 
@@ -2242,9 +2281,21 @@ enum Bucket {
 
 impl Bucket {
     /// What this bucket draws and what it is drawn in, together.
-    fn drawn(self, theme: &Theme) -> (char, Style) {
+    ///
+    /// **The rung reaches only the track's glyph, never its style**, and that
+    /// split is this type's whole contract kept rather than bent: the *variant*
+    /// still decides the ink, so nothing here reads a style back off a
+    /// character. What a rung changes is how "nothing happened" is spelled,
+    /// because `_` sits under an eighth-block ramp and has no meaning inside a
+    /// 2x4 cell, where the baseline row is the track. [`Glyphs::cell`] returns
+    /// `None` at the block rung, which is exactly where [`SPARK_TRACK`] is the
+    /// answer, so the two halves of that fall out of one call.
+    fn drawn(self, theme: &Theme, glyphs: Glyphs) -> (char, Style) {
         match self {
-            Self::Empty => (SPARK_TRACK, theme.spark_track),
+            Self::Empty => (
+                glyphs.cell(0, 0).unwrap_or(SPARK_TRACK),
+                theme.spark_track,
+            ),
             Self::Written(glyph, band) => (glyph, theme.spark_at(band)),
         }
     }
@@ -2267,10 +2318,22 @@ impl Bucket {
 /// is [`spark_of`]'s ruling and the same sentence applies: "one write" and "no
 /// writes" is the distinction the element exists to make.
 fn level_of(total: u32, peak: u32, rows: usize) -> usize {
-    if peak == 0 || total == 0 {
+    level_to(total, peak, rows * SPARK_RAMP.len())
+}
+
+/// [`level_of`] against a level count named directly rather than in rows.
+///
+/// **One implementation, which is the whole reason this exists as its own
+/// function.** [`level_of`]'s own docblock already worried that writing the
+/// round-up twice would let the rule that keeps one write from drawing as empty
+/// move in one element and not the other. The glyph ladder makes that concrete:
+/// a dense rung's ramp is three levels rather than a multiple of
+/// [`SPARK_RAMP`]'s eight, so it cannot be expressed in rows at all, and the
+/// arithmetic underneath is identical.
+fn level_to(total: u32, peak: u32, levels: usize) -> usize {
+    if peak == 0 || total == 0 || levels == 0 {
         return 0;
     }
-    let levels = rows * SPARK_RAMP.len();
     let scaled = (total as u64 * levels as u64).div_ceil(peak as u64) as usize;
     scaled.clamp(1, levels)
 }
@@ -2319,7 +2382,14 @@ fn band_cell(level: usize, row: usize) -> Option<char> {
 /// with it. What is left of that guard is the `peak == 0` line below, which is
 /// the one state where the ramp has no denominator: an empty store, which is
 /// every launch.
-fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUCKETS] {
+fn spark_of(
+    buckets: &[u16; HISTORY_BUCKETS],
+    peak: u16,
+    glyphs: Glyphs,
+) -> ([Bucket; HISTORY_BUCKETS], usize) {
+    if glyphs.density() > 1 {
+        return dense_spark(buckets, peak, glyphs);
+    }
     let mut drawn = [Bucket::Empty; HISTORY_BUCKETS];
     // Nothing anywhere on screen has been written, so every bucket is empty and
     // the division below has no denominator. Returning here rather than guarding
@@ -2327,7 +2397,7 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUC
     // no scale yet", and the loop's `count == 0` is "this bucket is empty on a
     // screen that has one".
     if peak == 0 {
-        return drawn;
+        return (drawn, HISTORY_BUCKETS);
     }
     for (bucket, &count) in drawn.iter_mut().zip(buckets.iter()) {
         if count == 0 {
@@ -2346,7 +2416,56 @@ fn spark_of(buckets: &[u16; HISTORY_BUCKETS], peak: u16) -> [Bucket; HISTORY_BUC
         let band = Band::of(u32::from(count), u32::from(peak));
         *bucket = Bucket::Written(SPARK_RAMP[scaled - 1], band);
     }
-    drawn
+    (drawn, HISTORY_BUCKETS)
+}
+
+/// [`spark_of`] at a rung whose cell carries two buckets.
+///
+/// The window is unchanged: the same [`HISTORY_BUCKETS`] are drawn, packed two
+/// to a cell, so the answer is the same shape in half the columns. Cells are
+/// filled from the **left** of the returned array so that the caller's
+/// drop-the-oldest rule reads identically at both rungs.
+///
+/// **The pair shares one style, and that is the cost this rung is bought at.**
+/// A `Cell` carries a single [`Style`], so two buckets in one cell cannot hold
+/// two bands. The pair takes the band of the **busier** of the two, which is the
+/// direction that never understates activity: a hot bucket beside a flat one
+/// reads hot, where taking the flatter one would hide the very thing the element
+/// exists to show. Both are still separately visible as *height*, which is the
+/// channel `SPEC.md` §5.1 gives this element; only the ramp's three colour stops
+/// are merged.
+///
+/// **A cell whose two buckets are both empty is the track**, and it draws the
+/// baseline rather than nothing, which is
+/// [#78](https://github.com/breferrari/vigia/issues/78) reaching this rung
+/// unchanged.
+fn dense_spark(
+    buckets: &[u16; HISTORY_BUCKETS],
+    peak: u16,
+    glyphs: Glyphs,
+) -> ([Bucket; HISTORY_BUCKETS], usize) {
+    let mut drawn = [Bucket::Empty; HISTORY_BUCKETS];
+    let cells = spark_cells(HISTORY_BUCKETS, glyphs);
+    for (cell, pair) in drawn.iter_mut().take(cells).zip(buckets.chunks(2)) {
+        let (left, right) = (pair[0], pair.get(1).copied().unwrap_or(0));
+        // Both levels first, because the glyph needs the pair even where the
+        // band comes from one of them.
+        let levels = |count: u16| level_to(u32::from(count), u32::from(peak), glyphs.levels());
+        let glyph = glyphs
+            .cell(levels(left), levels(right))
+            .expect("a rung with density above one packs a cell");
+        // **`Empty` when neither bucket has anything**, so the style comes off
+        // the variant exactly as it does at the block rung and the track is not
+        // a glyph the painter has to recognise. `peak == 0` reaches this too and
+        // wants the same answer: an empty store draws a full track.
+        *cell = if left == 0 && right == 0 {
+            Bucket::Empty
+        } else {
+            let busier = left.max(right);
+            Bucket::Written(glyph, Band::of(u32::from(busier), u32::from(peak)))
+        };
+    }
+    (drawn, cells)
 }
 
 /// The widest rung of `ladder` that fits in `room`.
@@ -2985,6 +3104,12 @@ pub fn render(
     let mut painter = Painter {
         buf,
         theme,
+        // Copied onto the painter for `inset`'s reason, one line down: it is
+        // decided once for the whole screen, and a drawer reaching back into the
+        // chrome for it would be one more thing the two regions could answer
+        // differently. The layout and the strip must agree about it exactly, or
+        // a row reserves cells in one rung and fills them in another.
+        glyphs: chrome.glyphs,
         gutter: 0,
         // **From the pane, once, before anything is drawn.** Every row below is
         // handed a `Rect` that has already lost the bar's columns on the screens
@@ -3363,6 +3488,8 @@ impl SheetPlan {
 struct Painter<'a> {
     buf: &'a mut Buffer,
     theme: &'a Theme,
+    /// Which glyphs the sparkline draws from, from [`Chrome::glyphs`].
+    glyphs: Glyphs,
     /// Digits reserved for line numbers, or zero when there is no room.
     gutter: usize,
     /// Blank columns the pane keeps on its left and on its right, from
@@ -4040,7 +4167,7 @@ impl Painter<'_> {
         // documents.
         let shown = usize::from(area.height);
         let inner = planning_width(pane, gutter);
-        let columns = Columns::plan(inner);
+        let columns = Columns::plan(inner, self.glyphs);
         // Hoisted beside the width it goes with, because it is a property of the
         // pane and not of any row. Saturating for the reason `left` above is:
         // `render` contracts that any area is legal, and an origin near the top
@@ -4498,7 +4625,7 @@ impl Painter<'_> {
         // let the diff's own height decide the layout of every heading in it.
         let shown = usize::from(area.height);
         let inner = planning_width(pane, 0);
-        let columns = Columns::plan(inner);
+        let columns = Columns::plan(inner, self.glyphs);
 
         // **The gutter comes from the same width, and that is
         // [#77](https://github.com/breferrari/vigia/issues/77)'s ruling one
@@ -4751,12 +4878,20 @@ impl Painter<'_> {
             // in the wrong column rather than not at all. Raised by review on
             // the sparkline; the heat strip below has the identical expression
             // and is left for a pass that can change both with one argument.
-            let take = columns.spark.min(HISTORY_BUCKETS).min(right.width as usize);
-            let strip = spark_of(heading.spark, peak);
+            // **Counted in cells rather than buckets, which is the one thing the
+            // glyph rung changes here.** `columns.spark` is a slice of the
+            // *window*, and how many columns that costs is the terminal's
+            // business: at a dense rung eight buckets arrive in four cells, so a
+            // strip measured in buckets would advance the cursor twice as far as
+            // it drew and slide every element left of it.
+            let strip = spark_of(heading.spark, peak, self.glyphs);
+            let (strip, filled) = strip;
+            let cells = spark_cells(columns.spark, self.glyphs);
+            let take = cells.min(filled).min(right.width as usize);
             let x = right.x + right.width.saturating_sub(take as u16);
-            for (offset, bucket) in strip[HISTORY_BUCKETS - take..].iter().enumerate() {
+            for (offset, bucket) in strip[filled - take..filled].iter().enumerate() {
                 // Both out of the one value, which is [`Bucket`]'s whole reason.
-                let (glyph, style) = bucket.drawn(self.theme);
+                let (glyph, style) = bucket.drawn(self.theme, self.glyphs);
                 // `set_char` rather than an `encode_utf8` into a local buffer,
                 // which is what `Cell::set_char` does internally: the heat strip
                 // below can hoist its encode out of the loop because every slice
@@ -4778,7 +4913,7 @@ impl Painter<'_> {
         // every element inside it shifts. A rung wider than the window would
         // then draw eight cells in a wider slot and leave the remainder blank,
         // which is a degraded row rather than a corrupted one.
-        past(&mut right, columns.spark);
+        past(&mut right, spark_cells(columns.spark, self.glyphs));
 
         // Unguarded, because `heat_at` opens by returning nothing for a zero
         // width, so an outer `if` would be the same precondition twice.

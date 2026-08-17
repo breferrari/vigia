@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
+use crate::glyphs::Glyphs;
 use crate::input::{Action, Hovered};
 use crate::memory;
 use crate::render::{Body, Chrome, Mode};
@@ -392,6 +393,11 @@ impl App {
         scrolling: Option<(u16, isize)>,
     ) -> Chrome {
         Chrome {
+            // The floor, which the loop stamps over with what it detected at
+            // startup. It is not this type's state, for the reason the docblock
+            // above gives `branch`, and `Chrome::glyphs` carries the rest of the
+            // argument including why the safe rung is the one to default to.
+            glyphs: Glyphs::default(),
             pressed,
             gripped,
             hovered,

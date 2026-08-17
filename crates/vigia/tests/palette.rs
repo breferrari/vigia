@@ -16,7 +16,7 @@ use ratatui::backend::TestBackend;
 use std::collections::HashSet;
 
 use ratatui::style::{Color, Style};
-use vigia::{
+use vigia::{Glyphs, 
     Chrome, Depth, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
@@ -46,6 +46,9 @@ fn spark_stops(theme: &Theme) -> [(&'static str, Style); 3] {
 
 fn chrome() -> Chrome {
     Chrome {
+        // The floor, so every gate that does not ask for a rung keeps measuring
+        // the picture this shell drew before the glyph ladder existed.
+        glyphs: Glyphs::default(),
         pressed: None,
         gripped: None,
         hovered: None,
