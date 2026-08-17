@@ -72,11 +72,19 @@ pub struct App {
     following: bool,
     /// Whether the masthead is drawn, which `m` toggles.
     ///
-    /// **On by default**, because the element is the answer to a question a
-    /// reader has not asked yet and an off-by-default glance element is one
-    /// nobody discovers. Off is a decision they make once, and it costs a
-    /// keystroke rather than a setting: `SPEC.md` §11.2 B6 keeps this tool
-    /// configured by gesture rather than by file.
+    /// **Hidden by default**, which is
+    /// [#204](https://github.com/breferrari/vigia/issues/204) reversing the
+    /// ruling the toggle shipped under, from use and by the reader who asked for
+    /// the toggle. The band costs four rows of the thing this tool exists to
+    /// show, and an element that costs them should be asked for rather than
+    /// dismissed. On is a keystroke rather than a setting, which is `SPEC.md`
+    /// §11.2 B6 keeping this tool configured by gesture rather than by file.
+    ///
+    /// What the first ruling was right about is that an element nobody discovers
+    /// may as well not exist. That is paid in the README's key table, which named
+    /// neither the band nor `m`, rather than in the hint bar, which
+    /// [#121](https://github.com/breferrari/vigia/issues/121) and
+    /// [#147](https://github.com/breferrari/vigia/issues/147) leave where it is.
     masthead: bool,
     /// Whether the current position was reached by **scrolling** rather than by a
     /// jump, which is what decides whether the viewport may back up to fill the
@@ -194,7 +202,10 @@ impl Default for App {
             position: Position::default(),
             notice: None,
             following: false,
-            masthead: true,
+            // Genuinely the derived answer since
+            // [#204](https://github.com/breferrari/vigia/issues/204), unlike
+            // `following`: a shell nobody has pressed `m` on draws no band.
+            masthead: false,
             // The opening position is the top of the diff, which is where a jump
             // would have put it, so nothing is owed a back-up before the reader
             // has moved.

@@ -53,10 +53,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 13;
+const ESCAPING_FILES: usize = 14;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "thirteen";
+const ESCAPING_FILES_SPELLED: &str = "fourteen";
 
 /// The repository root, two levels above this package.
 ///
@@ -92,12 +92,12 @@ fn test_files() -> Vec<(String, String)> {
         })
         .collect();
     found.sort();
-    // Nineteen today. The floor is set just under that rather than at some round
+    // Twenty today. The floor is set just under that rather than at some round
     // number well below it, because the only thing this guards is the scan
     // pointing at the wrong directory, and a loose floor makes that survivable:
     // `> 10` would still pass if half the suite went missing.
     assert!(
-        found.len() >= 18,
+        found.len() >= 19,
         "found only {} test files, which means the scan is looking in the wrong \
          place and every assertion built on it is vacuous",
         found.len()
@@ -139,10 +139,10 @@ fn escaping_tests() -> Vec<String> {
         .map(|(name, _)| name)
         .collect();
 
-    // **Exactly thirteen, not at least.** A floor was the first spelling and it
-    // reopens the very defect this file exists to close: adding a fourteenth
+    // **Exactly fourteen, not at least.** A floor was the first spelling and it
+    // reopens the very defect this file exists to close: adding a fifteenth
     // escaping test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml`
-    // and `RELEASE-SMOKE.md` all go on saying "thirteen" with nothing red. The
+    // and `RELEASE-SMOKE.md` all go on saying "fourteen" with nothing red. The
     // whole point is that a count in prose cannot notice a new test, and a
     // floor is a count that cannot notice one either.
     //
@@ -616,7 +616,7 @@ fn repo_file(relative: &str) -> String {
 /// reader who did nothing wrong.
 ///
 /// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: thirteen of the nineteen test files escape
+/// per-file, and that is deliberate: fourteen of the twenty test files escape
 /// already, a per-file list would need editing every time a test is added, and
 /// the failure mode of forgetting is silent. This gate holds either shape,
 /// because it asks whether each escaping file is *covered*, not how.
@@ -667,15 +667,16 @@ fn the_spec_names_every_test_that_escapes_the_package() {
     // **And every document that states the count states the right one.**
     // Asserting the number in a test and leaving the three files to agree with
     // it by hand is the same defect with a smaller radius: bumping the constant
-    // for a fourteenth escaping test would otherwise leave all three saying
-    // "thirteen", green.
-    // Each document's own sentence, not the bare numeral. `contains("thirteen")`
-    // was the first spelling and it proves nothing even today, being satisfied
-    // twice over by "thirteen**th**" in the manifest. Worse, the *next* bump
-    // finds "fourteen" already sitting in SPEC.md about column widths and in the
-    // manifest about "a fourteenth escape", so two of the three would pass
-    // untouched while still saying thirteen. A count assertion an unrelated
-    // numeral satisfies is the same failure as a count in prose.
+    // for a fifteenth escaping test would otherwise leave all three saying
+    // "fourteen", green.
+    // Each document's own sentence, not the bare numeral. `contains("fourteen")`
+    // was the shape of the first spelling and it proves nothing: it is satisfied
+    // twice over by "fourteen**th**" in the manifest, and the numeral was
+    // already sitting in SPEC.md about column widths before the count ever
+    // reached it, so two of the three would pass untouched on documents nobody
+    // had updated. That hazard was found at thirteen and is why these are
+    // phrases: a count assertion an unrelated numeral satisfies is the same
+    // failure as a count in prose.
     for (path, text, phrase) in [
         (
             "SPEC.md",

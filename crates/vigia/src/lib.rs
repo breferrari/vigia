@@ -1016,11 +1016,18 @@ impl Shell {
         // ([#158](https://github.com/breferrari/vigia/issues/158)). This went
         // through a `branch_for` seam whose whole job was the guard *only the
         // empty state names a branch, so a populated frame must not read a file
-        // it will not draw*. The masthead draws it always, so that premise is
+        // it will not draw*. The **header** draws it always, so that premise is
         // false and the wrapper became the identity over its closure: a function
         // taking a `&Frame` it did not read, with a docblock arguing for a
         // parameter that no longer decided anything, and a gate asserting that
         // `read()` calls `read`.
+        //
+        // **The header rather than the masthead**, which
+        // [#204](https://github.com/breferrari/vigia/issues/204) makes load
+        // bearing rather than a nicety of wording: the band is hidden until a
+        // reader presses `m`, so a branch that lived up there would put this back
+        // to reading a file most frames do not draw. The header's ladder draws it
+        // on every frame whatever the masthead is doing.
         //
         // The **rule** survives untouched and is now satisfied rather than
         // guarded: this is a read the frame is going to draw. Reading `.git/HEAD`
