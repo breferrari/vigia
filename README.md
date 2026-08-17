@@ -16,7 +16,7 @@
 
 </div>
 
-<img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files with sparklines and heat bars above a syntax highlighted diff, and a status bar showing frame time and memory." width="100%">
+<img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
 
 ---
 

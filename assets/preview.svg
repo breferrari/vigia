@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" role="img"
-     aria-label="Mockup of the vigia terminal interface: a pinned list of changed files with sparklines, heat strips and line counts, the file being read marked with a caret, above a syntax highlighted diff with a scrollbar and a heading whose dot marks the file that just changed, and a status bar showing frame time, resident memory and the follow state.">
+     aria-label="Mockup of the vigia terminal interface: a pinned list of changed files with sparklines, heat strips and line counts, the file being read marked with a caret, above a syntax highlighted diff with a scrollbar and a heading that repeats the same row for the file being read, its dot marking the file that just changed, and a status bar showing frame time, resident memory and the follow state.">
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="884" height="454" rx="12"/></clipPath>
     <style>
