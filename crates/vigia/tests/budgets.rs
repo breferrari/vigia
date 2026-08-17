@@ -28,6 +28,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
@@ -37,7 +38,7 @@ use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Sampl
 
 use support::{
     Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta, exclusively_timed,
-    generated, highlight_delta, settle, settle_spans, time, timed,
+    generated, highlight_delta, holds_p99, holds_p99_rounds, settle, settle_spans, time, timed,
 };
 
 /// I9: steady-state frame time.
@@ -388,13 +389,18 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // re-highlights the one hunk on screen. The edit stands in for the agent in
     // the other pane and is deliberately outside the timed region.
     let mut edits = 0usize;
-    let mut marker = String::new();
+    // **A cell rather than a `String`, because the sampler now outlives the
+    // reader.** `holds_p99` re-measures on a breach, so this closure is still live
+    // when `the_edits_still_land` below reads the last marker; a plain `String`
+    // would be mutably borrowed by the closure at that point and the read would not
+    // compile. Sharing it through a `RefCell` keeps both borrows short.
+    let marker = RefCell::new(String::new());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
     let mut next_frame =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
-            marker = format!("fn edited_{edits}() {{ let value = {edits}; }}");
-            scratch.edit_line(EDITED_PATH, 0, &marker);
+            *marker.borrow_mut() = format!("fn edited_{edits}() {{ let value = {edits}; }}");
+            scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
             edits += 1;
             time(|| {
                 // Inside the timed region on purpose. `vigia::run` samples the
@@ -449,7 +455,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // one rewrites every line, so a file's hunk is five hundred removals
     // followed by five hundred additions and the newest line sits far below any
     // viewport. A screen assertion here would fail while the code was perfect.
-    the_edits_still_land(&mut frame, EDITED_PATH, &marker);
+    the_edits_still_land(&mut frame, EDITED_PATH, &marker.borrow());
 
     // The highlighter has to be re-parsing every frame, which is what says the
     // edits reach *it* and not merely the diff. One hunk is on screen and its
@@ -479,19 +485,17 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
          cost, so a frame is parsing more of the hunk than it draws"
     );
 
-    let p99 = frames.percentile(0.99).expect("samples");
-    assert!(
-        p99 <= budget(I9_FRAME),
-        "I9: a real frame with highlighting over {FILES} files was {p99:?} p99, \
-         over the {:?} budget (p50 {:?}, max {:?}, {} hunks parsed, {} reused, \
-         {} lines, {} bytes)",
+    holds_p99(
+        &format!("I9: a real frame with highlighting over {FILES} files"),
         budget(I9_FRAME),
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples"),
-        cost.parsed,
-        cost.reused,
-        cost.lines,
-        cost.bytes
+        &frames,
+        || {
+            format!(
+                "({} hunks parsed, {} reused, {} lines, {} bytes)",
+                cost.parsed, cost.reused, cost.lines, cost.bytes
+            )
+        },
+        || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
 }
 
@@ -540,13 +544,18 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     let _timed = exclusively_timed();
 
     let mut edits = 0usize;
-    let mut marker = String::new();
+    // **A cell rather than a `String`, because the sampler now outlives the
+    // reader.** `holds_p99` re-measures on a breach, so this closure is still live
+    // when `the_edits_still_land` below reads the last marker; a plain `String`
+    // would be mutably borrowed by the closure at that point and the read would not
+    // compile. Sharing it through a `RefCell` keeps both borrows short.
+    let marker = RefCell::new(String::new());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
     let mut next_frame =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
-            marker = format!("fn edited_{edits}() {{ let value = {edits}; }}");
-            scratch.edit_line(EDITED_PATH, 0, &marker);
+            *marker.borrow_mut() = format!("fn edited_{edits}() {{ let value = {edits}; }}");
+            scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
             edits += 1;
             time(|| {
                 history.record([EDITED_PATH], Instant::now());
@@ -603,19 +612,22 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     );
 
     // And the edits have to still be landing.
-    the_edits_still_land(&mut frame, EDITED_PATH, &marker);
+    the_edits_still_land(&mut frame, EDITED_PATH, &marker.borrow());
 
-    let p99 = frames.percentile(0.99).expect("samples");
-    assert!(
-        p99 <= budget(I9_FRAME),
-        "I9: a tick over {FILES} changed files of which the viewport has drawn a \
-         screenful was {p99:?} p99, over the {:?} budget (p50 {:?}, max {:?}; \
-         {} files measured and {} bytes read across {SAMPLED_FRAMES} ticks)",
+    holds_p99(
+        &format!(
+            "I9: a tick over {FILES} changed files of which the viewport has drawn \
+             a screenful"
+        ),
         budget(I9_FRAME),
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples"),
-        cost.measured,
-        cost.bytes
+        &frames,
+        || {
+            format!(
+                "({} files measured and {} bytes read across {SAMPLED_FRAMES} ticks)",
+                cost.measured, cost.bytes
+            )
+        },
+        || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
 }
 
@@ -1003,18 +1015,39 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
         view.top.file + view.read
     );
 
-    let p99 = frames.percentile(0.99).expect("samples");
-    assert!(
-        p99 <= budget(I9_FRAME),
-        "I9: a frame inside the settle margin after every one of {FILES} files \
-         was rewritten at once was {p99:?} p99, over the {:?} budget (p50 {:?}, \
-         max {:?}, {} diffs recomputed, {} reused, {} bytes)",
+    // **The re-measure continues the sequence rather than restarting it**, which
+    // matters more here than on the steady-state gates: what this one measures is a
+    // frame *inside the settle margin* after a bulk rewrite, so a second round that
+    // only edited one line would be measuring a cheaper condition and could mask a
+    // real breach. Carrying `at` forward keeps the periodic rewrite on the same
+    // cadence, so round two is the same experiment as round one.
+    let mut at = SAMPLED_FRAMES;
+    holds_p99(
+        &format!(
+            "I9: a frame inside the settle margin after every one of {FILES} files \
+             was rewritten at once"
+        ),
         budget(I9_FRAME),
-        frames.percentile(0.50).expect("samples"),
-        frames.max().expect("samples"),
-        cost.computed,
-        cost.reused,
-        cost.bytes
+        &frames,
+        || {
+            format!(
+                "({} diffs recomputed, {} reused, {} bytes)",
+                cost.computed, cost.reused, cost.bytes
+            )
+        },
+        || {
+            if at % REWRITE_EVERY == 0 {
+                scratch.rewrite_all(FILES, LINES, at / REWRITE_EVERY + 1);
+                draw(&mut frame, &mut app, &mut highlighter, &mut history);
+            }
+            scratch.edit_line(
+                EDITED_PATH,
+                0,
+                &format!("fn bulk_edited_{at}() {{ let value = {at}; }}"),
+            );
+            at += 1;
+            draw(&mut frame, &mut app, &mut highlighter, &mut history)
+        },
     );
 }
 
@@ -1203,7 +1236,9 @@ fn scrolling_down_wide_lines_holds_the_frame_budget() {
     let Some(run) = scroll("wide-down", Scroll::wide(Motion::Down, WIDE_EXT)) else {
         return;
     };
-    hold_the_scroll_budget(&run, "scroll down");
+    hold_the_scroll_budget(&run, "scroll down", || {
+        scroll("wide-down-again", Scroll::wide(Motion::Down, WIDE_EXT))
+    });
 }
 
 #[test]
@@ -1240,7 +1275,18 @@ fn scrolling_a_hundred_files_from_the_first_frame_holds_the_frame_budget() {
     ) else {
         return;
     };
-    hold_the_scroll_budget(&run, "scroll down from the first frame");
+    hold_the_scroll_budget(&run, "scroll down from the first frame", || {
+        scroll(
+            "wide-many-first-again",
+            Scroll {
+                motion: Motion::Down,
+                ext: WIDE_EXT,
+                files: WIDE_MANY_FILES,
+                warmup: 0,
+                prime: Prime::Launched,
+            },
+        )
+    });
 }
 
 #[test]
@@ -1253,7 +1299,9 @@ fn scrolling_up_wide_lines_holds_the_frame_budget() {
     let Some(run) = scroll("wide-up", Scroll::wide(Motion::Up, WIDE_EXT)) else {
         return;
     };
-    hold_the_scroll_budget(&run, "scroll up");
+    hold_the_scroll_budget(&run, "scroll up", || {
+        scroll("wide-up-again", Scroll::wide(Motion::Up, WIDE_EXT))
+    });
 }
 
 #[test]
@@ -1261,7 +1309,9 @@ fn scrolling_back_over_ground_already_read_holds_the_frame_budget() {
     let Some(run) = scroll("wide-back", Scroll::wide(Motion::Back, WIDE_EXT)) else {
         return;
     };
-    hold_the_scroll_budget(&run, "scroll back");
+    hold_the_scroll_budget(&run, "scroll back", || {
+        scroll("wide-back-again", Scroll::wide(Motion::Back, WIDE_EXT))
+    });
 }
 
 #[test]
@@ -1466,7 +1516,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
 }
 
 /// The assertions both directions share.
-fn hold_the_scroll_budget(run: &Scrolled, what: &str) {
+fn hold_the_scroll_budget(run: &Scrolled, what: &str, again: impl FnOnce() -> Option<Scrolled>) {
     run.report(what);
 
     let height = run.height;
@@ -1532,19 +1582,29 @@ fn hold_the_scroll_budget(run: &Scrolled, what: &str) {
         run.cold_lines
     );
 
-    let p99 = run.warm.percentile(0.99).expect("samples");
-    assert!(
-        p99 <= budget(I9_FRAME),
-        "I9: {what} through wide lines was {p99:?} p99 over {} steady frames, \
-         past the {:?} budget (p50 {:?}, max {:?}; collect p99 {:?}, paint p99 \
-         {:?}; {} cold frames at {:?} p99)",
-        run.warm.len(),
+    holds_p99_rounds(
+        &format!("I9: {what} through wide lines"),
         budget(I9_FRAME),
-        run.warm.percentile(0.50).expect("samples"),
-        run.warm.max().expect("samples"),
-        run.collect.percentile(0.99).unwrap_or_default(),
-        run.paint.percentile(0.99).unwrap_or_default(),
-        run.cold.len(),
-        run.cold.percentile(0.99).unwrap_or_default(),
+        &run.warm,
+        || {
+            format!(
+                "over {} steady frames (collect p99 {:?}, paint p99 {:?}; {} cold \
+                 frames at {:?} p99)",
+                run.warm.len(),
+                run.collect.percentile(0.99).unwrap_or_default(),
+                run.paint.percentile(0.99).unwrap_or_default(),
+                run.cold.len(),
+                run.cold.percentile(0.99).unwrap_or_default(),
+            )
+        },
+        // A whole scripted motion rather than a frame, because that is the unit
+        // this gate samples: the run partitions its own frames into the ones that
+        // entered a hunk and the ones that did not, and a single extra frame
+        // belongs to neither.
+        || {
+            again()
+                .expect("the re-measure skipped the absolute tier the first round ran")
+                .warm
+        },
     );
 }
