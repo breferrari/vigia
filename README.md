@@ -68,12 +68,17 @@ vigia --version        # the only option there is
 | `1` to `6` | jump to that row of the pinned list |
 | `J` `K` `Shift+↑` `Shift+↓` | scroll the pinned file list |
 | `f` | follow the newest change, or stop following |
+| `m` | show the worktree churn band above the list, or hide it |
 
 | Mouse | |
 |---|---|
 | wheel | scroll whichever region the pointer is over |
 | drag a scrollbar | move that region, and both bars are exact |
+| click a scrollbar track | send that region to where you clicked |
+| click `▲` or `▼` | one row, and it repeats while you hold it |
 | click a listed file | jump the diff to it |
+
+The band `m` draws is the whole tree rather than one file: the last two minutes of churn projected across the pane, oldest on the left. It starts hidden, because it costs four rows of the diff and is not wanted on every pane.
 
 The digits count the rows on screen, not the files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and so does `n` at the last changed file or `p` at the first.
 
