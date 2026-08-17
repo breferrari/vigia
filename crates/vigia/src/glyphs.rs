@@ -217,9 +217,9 @@ impl Glyphs {
         // a copy here would be a second place for a later correction to miss.
         if let Some((raw, value)) = override_of(&lookup, GLYPHS_VAR) {
             match value.as_str() {
-                "block" | "blocks" => return Ok(Self::Block),
+                "block" => return Ok(Self::Block),
                 "braille" => return Ok(Self::Braille),
-                "octant" | "octants" => return Ok(Self::Octant),
+                "octant" => return Ok(Self::Octant),
                 "auto" => {}
                 _ => return Err(GlyphsError { value: raw }),
             }

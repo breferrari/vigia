@@ -102,6 +102,16 @@ fn depth_is_decided_by_the_first_variable_that_answers() {
             Depth::None,
         ),
         (
+            // `term_depth`'s `contains("truecolor")` arm had no case at all:
+            // dropping it survived the suite. A `TERM` naming direct colour in
+            // words rather than in terminfo's `-direct` spelling is the reader
+            // who set it by hand.
+            "a TERM that says truecolour in words is believed",
+            false,
+            &[("TERM", "xterm-truecolor")],
+            Depth::Truecolor,
+        ),
+        (
             "COLORTERM outranks TERM's 256",
             false,
             &[("COLORTERM", "24bit"), ("TERM", "xterm-256color")],

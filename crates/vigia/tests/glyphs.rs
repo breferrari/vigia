@@ -273,6 +273,13 @@ fn a_level_past_the_ramp_is_clamped_rather_than_wrapping() {
     for glyphs in [Glyphs::Braille, Glyphs::Octant] {
         assert_eq!(glyphs.glyph(99, 99), glyphs.glyph(3, 3), "{glyphs:?}");
     }
+    // **The block rung was missing from this loop, and it is the one that
+    // panics.** The dense rungs index a 256-entry table through a `u8` mask, so
+    // an unclamped level is merely a wrong glyph; `SPARK_RAMP` has eight entries
+    // and `glyph` is public, so `Block.glyph(9, 0)` without the clamp is an
+    // out-of-bounds index on a released API.
+    assert_eq!(Glyphs::Block.glyph(99, 0), Glyphs::Block.glyph(8, 0));
+    assert_eq!(Glyphs::Block.glyph(9, 0), '█');
 }
 
 #[test]
@@ -480,4 +487,47 @@ fn every_named_program_answers() {
         Glyphs::Block,
         "an unknown program should fall through to the signals under it"
     );
+}
+
+#[test]
+fn a_program_name_with_room_around_it_is_still_that_program() {
+    // Dropping the trim on `TERM_PROGRAM` survived. A value with surrounding
+    // space is what an environment file or a shell export leaves behind, and the
+    // cost of not trimming is a reader on a terminal that names itself getting
+    // the platform floor instead.
+    let rung = Glyphs::from_env(
+        true,
+        env(&[("TERM_PROGRAM", "  WezTerm  "), ("TERM", "xterm-256color")]),
+    )
+    .expect("a rung");
+    assert_eq!(rung, Glyphs::Braille);
+}
+
+#[test]
+fn every_self_naming_term_answers() {
+    // **The sibling trap `program_glyphs` had, and fixing one did not fix the
+    // other.** Off Windows the fallthrough is braille anyway, so breaking any
+    // `BRAILLE_TERMS` entry changes no answer there and the table could rot
+    // entry by entry. Driven on Windows, where the floor under it is blocks, so
+    // only the table can supply this answer.
+    for term in [
+        "alacritty",
+        "contour",
+        "foot",
+        "rio",
+        "wezterm",
+        "xterm-ghostty",
+        "xterm-kitty",
+    ] {
+        let rung = Glyphs::from_env(true, env(&[("TERM", term)])).expect("a rung");
+        assert_eq!(rung, Glyphs::Braille, "TERM={term} ships its own entry");
+        // And a suffixed variant is the same terminal, which is `names`' rule.
+        let variant = format!("{term}-direct");
+        let rung = Glyphs::from_env(true, env(&[("TERM", variant.as_str())])).expect("a rung");
+        assert_eq!(
+            rung,
+            Glyphs::Braille,
+            "TERM={variant} is a variant of {term}"
+        );
+    }
 }

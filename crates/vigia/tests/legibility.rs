@@ -5123,3 +5123,89 @@ fn a_dense_strip_draws_its_buckets_at_different_heights() {
         );
     }
 }
+
+#[test]
+fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
+    // **The rule the dense rung exists to keep, and only the packer gated it.**
+    // `level_to`'s `total == 0` guard is what holds it: without it an empty
+    // bucket scales to level 1, so inside a cell whose other half is busy the
+    // empty column climbs a dot and "one write" and "no writes" become the same
+    // height. `tests/glyphs.rs` proves `glyph(0, n)` differs from `glyph(1, n)`;
+    // nothing proved the renderer asks for the first of those.
+    //
+    // Removing that guard survived the whole suite, as did clamping the level to
+    // a minimum of one.
+    let theme = theme();
+    let bars = spark_colours(&theme);
+
+    for glyphs in [Glyphs::Braille, Glyphs::Octant] {
+        // Every pair is one empty bucket beside a full one, so every drawn cell
+        // must be the glyph for (0, top) and never (1, top).
+        let view = sparked([0, 12, 0, 12, 0, 12, 0, 12]);
+        let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
+        let (ramp, _) = alphabet(glyphs);
+        let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)
+            .into_iter()
+            .map(|x| backend.buffer()[(x, 1)].symbol().to_owned())
+            .collect();
+
+        let floor = glyphs.glyph(0, glyphs.levels()).to_string();
+        let climbed = glyphs.glyph(1, glyphs.levels()).to_string();
+        assert_ne!(
+            floor, climbed,
+            "{glyphs:?}: the fixture cannot tell these apart"
+        );
+        assert!(
+            !drawn_cells.is_empty(),
+            "{glyphs:?}: no cell was drawn, so this gate proved nothing"
+        );
+        for cell in &drawn_cells {
+            assert_eq!(
+                *cell, floor,
+                "{glyphs:?}: an empty bucket climbed off the floor beside a busy                  one, so no writes and one write draw the same height"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_churn_band_stacks_its_rows_from_the_bottom() {
+    // **The band's heights were ungated in either direction.** Mutating its row
+    // stacking (`row * SPARK_RAMP.len()` to `row`) and its rung index both
+    // survived the suite, so the hero element of the pane could draw an
+    // arbitrary shape and only an eye would know. The band is out of the glyph
+    // ladder's scope by ruling, but `level_of` is the function this branch split
+    // in two, and a gate that pins the arithmetic belongs with the split.
+    //
+    // A worktree written hard, so the band has a full column to stack.
+    let theme = theme();
+    let bars = spark_colours(&theme);
+    let view = View {
+        peak: 12,
+        ..sparked([12, 12, 12, 12, 12, 12, 12, 12])
+    };
+    let chrome = Chrome {
+        masthead: true,
+        ..chrome()
+    };
+    let backend = drawn_at(120, 24, &view, &chrome, Glyphs::default());
+
+    // The band draws above the list. Its bottom row must carry the tallest
+    // glyphs and the row above it must be no taller, which is what "stacks from
+    // the bottom" means and what an inverted stack would fail.
+    let rows: Vec<usize> = (1..6)
+        .map(|y| columns_of(&backend, y, &bars, &RAMP).len())
+        .collect();
+    assert!(
+        rows.iter().any(|drawn| *drawn > 0),
+        "the band drew nothing at all, so this gate proved nothing: {rows:?}"
+    );
+    let lowest = rows
+        .iter()
+        .rposition(|drawn| *drawn > 0)
+        .expect("a drawn row");
+    assert!(
+        rows[lowest] >= rows[..lowest].iter().copied().max().unwrap_or(0),
+        "the band's lowest drawn row is narrower than one above it, so it does          not stack from the bottom: {rows:?}"
+    );
+}
