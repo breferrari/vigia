@@ -296,8 +296,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Beside the depth and for the same reason: a property of the terminal,
     // resolved once before the screen is taken, so the frame path never asks the
     // environment anything. Refused rather than defaulted when the variable is
-    // unreadable, which is `VIGIA_COLOR`'s rule and reaches the reader on a
-    // terminal they can still see, exactly as the line above does.
+    // set to something this does not recognise, which is `VIGIA_COLOR`'s rule and
+    // reaches the reader on a terminal they can still see, exactly as the line
+    // above does. **Not** when the variable is unreadable: `env::var` drops a
+    // non-UTF-8 value, so that case falls through to detection rather than
+    // refusing, which is the same behaviour the depth ladder has and is stated
+    // here because the two are easy to conflate.
     let glyphs = Glyphs::detect()?;
 
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never

@@ -5016,3 +5016,44 @@ fn the_block_rung_spells_an_empty_bucket_with_its_own_track() {
          SPARK_TRACK exists to refuse"
     );
 }
+
+#[test]
+fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
+    // **The state `spark_of`'s `peak == 0` return exists for**, and deleting that
+    // return is a mutation the rest of the suite survives. `View::peak` is a
+    // public field, so a screen-wide peak of zero beside a nonzero bucket is
+    // constructible rather than hypothetical: the level then scales to nothing
+    // while `Band::of` divides by no denominator and answers `Hot`, which would
+    // paint a track glyph in the busiest colour on the row.
+    //
+    // Both rungs, because the two reach that return by different routes.
+    let theme = theme();
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    let hot = theme.spark_hot.fg.expect("the hot stop has a colour");
+
+    for glyphs in [Glyphs::Block, Glyphs::Braille] {
+        let view = View {
+            peak: 0,
+            ..sparked([1, 2, 4, 6, 8, 9, 11, 12])
+        };
+        let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
+        let (ramp, empty) = alphabet(glyphs);
+
+        let cells = spark_cells_for(glyphs);
+        let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
+        assert_eq!(
+            tracks, cells,
+            "{glyphs:?}: with no scale yet every cell should be the track"
+        );
+        let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
+        assert_eq!(
+            hots, 0,
+            "{glyphs:?}: a bucket with no denominator drew a bar, and the hottest one"
+        );
+    }
+}
+
+/// Cells a full window occupies at `glyphs`, restated for [`RAMP`]'s reason.
+fn spark_cells_for(glyphs: Glyphs) -> usize {
+    HISTORY_BUCKETS.div_ceil(glyphs.density())
+}

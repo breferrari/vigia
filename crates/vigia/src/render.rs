@@ -2219,8 +2219,8 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// worth stating rather than implying: `Written(SPARK_TRACK, ..)` is
 /// constructible and would draw the track glyph in the bar's style. What rules it
 /// out is that [`spark_of`] is the only producer and fills it from
-/// [`SPARK_RAMP`], not the type. An index would move the same hole one level down
-/// rather than close it.
+/// [`Glyphs::glyph`], not the type. An index would move the same hole one level
+/// down rather than close it.
 ///
 /// **The payload is a pair since [#196](https://github.com/breferrari/vigia/issues/196)**,
 /// because the sparkline ramps now and height alone no longer decides the ink.
@@ -2239,7 +2239,14 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 enum Bucket {
     /// Nothing was written in this bucket's slice of the window.
     Empty,
-    /// Written, at this rung of [`SPARK_RAMP`] and this stop of the ramp.
+    /// Written: the glyph [`Glyphs::glyph`] spelled it with, and its stop of the
+    /// ramp.
+    ///
+    /// **The glyph is no longer always an eighth-block**, which this said until
+    /// the ladder landed: at a dense rung it is a packed 2x4 cell standing for
+    /// *two* buckets, so nothing may read a single bucket's height back out of
+    /// it. That is the same rule the paragraphs above give the [`Band`], now
+    /// true of the character as well.
     Written(char, Band),
 }
 

@@ -292,3 +292,25 @@ fn the_two_tables_agree_about_geometry() {
     assert_eq!(Glyphs::Braille.glyph(3, 3), '⣿');
     assert_eq!(Glyphs::Octant.glyph(3, 3), '█');
 }
+
+#[test]
+fn a_refusal_quotes_what_was_typed_rather_than_what_it_was_folded_to() {
+    // **The raw half of the override, which the shared reader made possible to
+    // lose.** `override_of` hands back a normalised spelling to match on and the
+    // raw one to quote, and every other gate here passes a value that is already
+    // normalised, so a helper that returned only the folded string would satisfy
+    // all of them. A reader who typed a capital and a stray space needs to see
+    // that, because the whitespace is usually the mistake.
+    let error = Glyphs::from_env(false, env(&[(GLYPHS_VAR, "  Sixel  ")]))
+        .expect_err("an unknown rung is refused");
+    assert_eq!(error.value, "  Sixel  ");
+    assert!(
+        error.to_string().contains("  Sixel  "),
+        "the refusal folded the value before quoting it: {error}"
+    );
+
+    // And the match itself is case- and whitespace-insensitive, which is the
+    // other half of the same split and would otherwise be untested.
+    let rung = Glyphs::from_env(false, env(&[(GLYPHS_VAR, "  BRAILLE  ")])).expect("a rung");
+    assert_eq!(rung, Glyphs::Braille);
+}
