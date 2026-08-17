@@ -2207,7 +2207,7 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// What it buys is what [`Painter::scrollbar`] gets from its `filled` boolean:
 /// **the style is chosen from the variant rather than read back off the
 /// glyph.** [`spark_of`] briefly returned bare `char`s and the painter decided
-/// the style by testing against [`SPARK_TRACK`], which worked only while that
+/// the style by testing against [`SPARK_TRACK`](crate::glyphs::SPARK_TRACK), which worked only while that
 /// glyph stayed outside [`SPARK_RAMP`] — a convention a test defends rather than
 /// one the compiler does. It also had a live failure case in the other
 /// direction: on the `peak == 0` path every bucket draws the track *whatever its
@@ -2333,7 +2333,7 @@ fn band_cell(level: usize, row: usize) -> Option<char> {
 /// side by side can be compared by height. A bucket with anything in it is never
 /// blank: it takes the lowest block, because "one write" and "no writes" are the
 /// distinction the strip exists to make and rounding the first down to nothing
-/// would erase it. A bucket with nothing in it takes [`SPARK_TRACK`], which is
+/// would erase it. A bucket with nothing in it takes [`SPARK_TRACK`](crate::glyphs::SPARK_TRACK), which is
 /// what keeps that distinction a matter of *shape*.
 ///
 /// **Total, where this returned an `Option` before
@@ -3413,7 +3413,7 @@ impl SheetPlan {
 struct Painter<'a> {
     buf: &'a mut Buffer,
     theme: &'a Theme,
-    /// Which glyphs the sparkline draws from, from [`Chrome::glyphs`].
+    /// Which glyphs the sparkline draws from, from [`render`]'s own parameter.
     glyphs: Glyphs,
     /// Digits reserved for line numbers, or zero when there is no room.
     gutter: usize,

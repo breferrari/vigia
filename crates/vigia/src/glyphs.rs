@@ -84,7 +84,7 @@ pub(crate) const SPARK_RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '�
 /// A bucket nothing happened in.
 ///
 /// **A track rather than a gap**, which is the rule `SPEC.md` §5.1 already gives
-/// the heat strip and [`Theme::bar_track`] the scrollbar, reaching it last
+/// the heat strip and [`Theme::bar_track`](crate::Theme::bar_track) the scrollbar, reaching it last
 /// though §5 lists it first
 /// ([#78](https://github.com/breferrari/vigia/issues/78)).
 /// A file with no history at all is the *all*-empty case, so a worktree that was

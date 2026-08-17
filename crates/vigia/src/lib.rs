@@ -785,9 +785,10 @@ struct Shell {
     ///
     /// Held beside [`Shell::theme`] because it is the same kind of value: a
     /// property of the terminal, decided before the screen was taken and
-    /// unchanged for the session. It is stamped onto each frame's
-    /// [`Chrome`] rather than passed to [`App::chrome`], which that field's
-    /// own docblock explains.
+    /// unchanged for the session. It reaches the renderer the way `theme` does,
+    /// as its own [`render`] parameter, rather than riding [`Chrome`]: nothing
+    /// in the layout reads it, so a per-frame field meant two of its three
+    /// callers stamping something the function they fed never looked at.
     glyphs: Glyphs,
     /// What the header calls the working tree.
     name: String,

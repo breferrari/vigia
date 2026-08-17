@@ -266,7 +266,7 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 
 ## 🎨 Make it yours
 
-Two independent settings, and most confusion here is the two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. Both have to allow a thing before it appears.
+Three independent settings, and most confusion here is any two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three have to allow a thing before it appears.
 
 | | First answer wins |
 |---|---|
@@ -281,7 +281,7 @@ VIGIA_THEME=light    # the same design for a light terminal
 VIGIA_THEME=~/themes/mine
 ```
 
-Nothing else is read. There is no flag for either, and no setting in one can change the other.
+Nothing else is read. There is no flag for any of them, and no setting in one can change another.
 
 A theme file is usually about three lines. `base` picks a palette to start from and every line after it overrides one thing, so this keeps your terminal's own sixteen colours and adds the two backgrounds `ansi` declines to guess:
 
@@ -347,6 +347,8 @@ VIGIA_GLYPHS=auto            # decide for me, which is the default
 **If the sparkline is a row of boxes, you want `block`.** That is a font without the braille patterns U+2800 to U+28FF, and it is the one direction detection cannot see. Windows is where this is most likely: the old console draws with Consolas, which carries none of them, so a bare `conhost` gets blocks and Windows Terminal gets braille.
 
 `octant` is deliberately never chosen for you. The Unicode 16 octants are newer than most fonts, including the current Cascadia, and terminals that draw them do so themselves rather than from your font, which nothing in the environment advertises.
+
+</details>
 
 <details>
 <summary><b>🔦 Colour depth, and why your rows might be unwashed</b></summary>
