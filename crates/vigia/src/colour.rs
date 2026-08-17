@@ -169,8 +169,7 @@ impl Depth {
         // has some way to leave an empty value behind, and a reader who cleared a
         // variable has said "decide for me", not "here is a value you will not
         // recognise".
-        if let Some(raw) = lookup(DEPTH_VAR).filter(|value| !value.trim().is_empty()) {
-            let value = raw.trim().to_ascii_lowercase();
+        if let Some((raw, value)) = override_of(&lookup, DEPTH_VAR) {
             match value.as_str() {
                 "never" | "none" | "0" => return Ok(Self::None),
                 "16" | "ansi" => return Ok(Self::Ansi16),
@@ -396,6 +395,35 @@ const TRUECOLOR_TERMS: [&str; 7] = [
     "xterm-ghostty",
     "xterm-kitty",
 ];
+
+/// What a rung-override variable was set to, raw and normalised, or nothing.
+///
+/// **Set-but-empty is the same as unset**, and that rule is here rather than in
+/// each ladder because it is a discovered gotcha rather than a choice: `$env:X =
+/// ''` in PowerShell leaves the variable **set and empty** and a child process
+/// sees it, verified on 7.6.3 where `GetEnvironmentVariable` returns an empty
+/// string rather than null. (The sibling spelling `$env:X = $null` does remove
+/// it, which is worth knowing because the two look interchangeable.) Without
+/// this filter a reader who *cleared* a variable stops the shell from starting,
+/// over a value nobody gave. Written twice, a later correction to it (a BOM, a
+/// different whitespace class) would land in one ladder and not the other.
+///
+/// Both spellings come back because both are needed and neither derives from the
+/// other: the **normalised** one is matched against, and the **raw** one is what
+/// a refusal quotes, since a reader who typed `Braille ` needs to see what they
+/// typed rather than what it was folded to.
+///
+/// `NO_COLOR` deliberately does not come through here and the asymmetry is the
+/// point: it has no valid values at all, so presence is the whole signal and an
+/// empty one still means what it says.
+pub(crate) fn override_of(
+    lookup: &impl Fn(&str) -> Option<String>,
+    var: &str,
+) -> Option<(String, String)> {
+    let raw = lookup(var).filter(|value| !value.trim().is_empty())?;
+    let normalised = raw.trim().to_ascii_lowercase();
+    Some((raw, normalised))
+}
 
 /// Whether `term` is `name` or one of its variants.
 ///

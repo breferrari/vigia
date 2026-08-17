@@ -298,14 +298,14 @@ fn cells_coloured(
     symbols: &[char],
 ) -> Vec<ratatui::style::Style> {
     let buffer = backend.buffer();
-    (0..buffer.area.width)
-        .map(|x| &buffer[(x, y)])
-        .filter(|cell| {
-            let symbol = cell.symbol();
-            symbols.iter().any(|glyph| symbol == glyph.to_string())
-                && cell.style().fg.is_some_and(|fg| colours.contains(&fg))
-        })
-        .map(|cell| cell.style())
+    // **Through [`columns_of`], so the selector this docblock argues for exists
+    // once.** The two differ only in what they hand back, and a second copy of
+    // the predicate would be a second place for the symbol-and-colour rule to be
+    // corrected, with the correction landing in whichever one the next reader
+    // happened to open.
+    columns_of(backend, y, colours, symbols)
+        .into_iter()
+        .map(|x| buffer[(x, y)].style())
         .collect()
 }
 
@@ -323,13 +323,7 @@ fn cells_coloured(
 /// colour, or a block in the track's. Neither is ever drawn, and a helper that
 /// would count them is the loose selector this file's own doc warns about.
 fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> usize {
-    // **Every stop of the ramp**, which is three since #196 and was one. A
-    // helper reading only the quietest would count a busy row as mostly empty
-    // and the slot would look narrower than it is.
-    let bars: Vec<_> = [theme.spark, theme.spark_warm, theme.spark_hot]
-        .into_iter()
-        .filter_map(|style| style.fg)
-        .collect();
+    let bars = spark_colours(theme);
     let track = theme.spark_track.fg.expect("the track has a colour");
     // **The rung decides which alphabet to count**, and the two halves stay
     // separate calls for the reason above: one set with both colours would
@@ -338,6 +332,21 @@ fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> u
     let (ramp, empty) = alphabet(glyphs);
     cells_coloured(backend, y, &bars, &ramp).len()
         + cells_coloured(backend, y, &[track], &[empty]).len()
+}
+
+/// Every stop of the sparkline's ramp, for a caller matching cells by colour.
+///
+/// **Three since [#196](https://github.com/breferrari/vigia/issues/196), and it
+/// was one.** A helper reading only the quietest stop counts a busy row as
+/// mostly empty and reads the slot as narrower than it is, which is a gate
+/// under-counting rather than failing. Named for [`heat_colours`]'s reason, one
+/// element over: two callers now want this list and a fourth stop must not have
+/// to be remembered in two places.
+fn spark_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
+    [theme.spark, theme.spark_warm, theme.spark_hot]
+        .into_iter()
+        .filter_map(|style| style.fg)
+        .collect()
 }
 
 /// Every glyph a sparkline can draw at `glyphs`, and the one that means empty.
@@ -4928,10 +4937,7 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     // would gate this file against itself.
     let theme = theme();
     let heats = heat_colours(&theme);
-    let bars: Vec<_> = [theme.spark, theme.spark_warm, theme.spark_hot]
-        .into_iter()
-        .filter_map(|style| style.fg)
-        .collect();
+    let bars = spark_colours(&theme);
     // Buckets all busy, so every cell of the strip is a bar and the leftmost one
     // is the slot's own left edge rather than a track the bar colours miss.
     let view = sparked([12, 11, 9, 8, 6, 4, 2, 1]);
@@ -4981,5 +4987,32 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     assert!(
         compared > 0,
         "no width drew both elements at both rungs, so this gate compared nothing"
+    );
+}
+
+#[test]
+fn the_block_rung_spells_an_empty_bucket_with_its_own_track() {
+    // **The default rung's track, which nothing else in this file covers.**
+    // Every ladder gate here reads `glancing`'s first row, and that row has no
+    // empty bucket, so a renderer drawing the ramp's floor for "nothing
+    // happened" was invisible to the whole suite. Mutating the track glyph
+    // survived every gate until this existed, and it is the rung most readers
+    // are on: `#78` and `SPARK_TRACK` both turn on one write and no writes being
+    // different *shapes*, and the ramp's floor is what that must not collapse
+    // onto.
+    let theme = theme();
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    let backend = drawn(120, 8, &sparked([0, 0, 4, 6, 8, 9, 11, 12]), &chrome());
+
+    let tracks = cells_coloured(&backend, 1, &[track], &[TRACK]).len();
+    assert_eq!(tracks, 2, "two empty buckets should draw two track cells");
+
+    // And the floor of the ramp is not what they drew, which is the half a
+    // count alone cannot say.
+    let floors = cells_coloured(&backend, 1, &[track], &[RAMP[0]]).len();
+    assert_eq!(
+        floors, 0,
+        "an empty bucket drew the ramp's lowest rung, which is the collision \
+         SPARK_TRACK exists to refuse"
     );
 }

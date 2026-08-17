@@ -59,7 +59,7 @@ use std::fmt;
 
 use ratatui::symbols;
 
-use crate::colour::names;
+use crate::colour::{names, override_of};
 
 /// Environment variable that overrides detection outright.
 pub const GLYPHS_VAR: &str = "VIGIA_GLYPHS";
@@ -201,13 +201,10 @@ impl Glyphs {
         windows: bool,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, GlyphsError> {
-        // **Set-but-empty is the same as unset**, which `VIGIA_COLOR` learned
-        // the hard way: PowerShell's `$env:X = ''` leaves the variable set and
-        // empty and a child process sees it, so without this filter a reader who
-        // cleared the variable stops the shell from starting over a value nobody
-        // gave.
-        if let Some(raw) = lookup(GLYPHS_VAR).filter(|value| !value.trim().is_empty()) {
-            let value = raw.trim().to_ascii_lowercase();
+        // Through [`override_of`], which owns the set-but-empty rule for both
+        // ladders: it is a discovered PowerShell gotcha rather than a choice, and
+        // a copy here would be a second place for a later correction to miss.
+        if let Some((raw, value)) = override_of(&lookup, GLYPHS_VAR) {
             match value.as_str() {
                 "block" | "blocks" => return Ok(Self::Block),
                 "braille" => return Ok(Self::Braille),
