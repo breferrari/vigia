@@ -97,7 +97,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
            │    38    fn coalesce(&mut self, ev: Event) -> Option<Frame> {
            │    39 +      if self.pending.is_empty() {
            │    40 +          self.deadline = Instant::now() + DEBOUNCE;
-   status  │  q quit · f follow · ? keys        0.8ms frame   19MiB  follow ▶
+   status  │  q quit · f follow · ? keys   0.8ms frame   19MiB  follow ▶  1/3
 ```
 
 The list is **pinned**, so the signals stay on screen while you read the diff under them. Every file gets the same row in both regions:
@@ -297,7 +297,7 @@ removed_row = on #45222a
 
 `~/.config/vigia/theme` is read when it exists, on every platform, resolved from `HOME` or `USERPROFILE`. No file is the ordinary case and is not an error. A file that exists and does **not parse** is: `vigia` says which line and exits *before* it takes the screen, because an error painted inside a full-screen program that then hands the terminal back is an error nobody reads.
 
-`base` names the palette to start from and every other line overrides one thing. A key it does not recognise is an error naming the line, never a line quietly ignored.
+A key it does not recognise is an error naming the line, never a line quietly ignored.
 
 A value is `[colour] [on colour] [modifiers]`:
 
@@ -313,12 +313,15 @@ Every key the shell draws with:
 | Group | Keys |
 |---|---|
 | Chrome | `chrome` `chrome_dim` |
-| Scrollbars | `bar` `bar_track` |
-| File rows | `path` `path_live` `path_cold` `pulse` `spark` `spark_track` `kind` |
+| Scrollbars | `bar` `bar_track` `bar_active` `bar_hover` |
+| File rows | `path` `path_live` `path_cold` `path_hover` `pulse` `kind` |
+| Sparkline | `spark` `spark_warm` `spark_hot` `spark_track` |
 | Heat strip | `heat_track`, and `heat_added` `heat_removed` `heat_mixed` each with a `_warm` and `_hot` twin |
 | Diff | `hunk` `gutter` `added` `removed` `context` `note` `alert` |
 | Row wash | `added_row` `removed_row` `added_bar` `removed_bar` |
 | Syntax | `keyword` `type_name` `function` `variable` `constant` `string` `number` `comment` |
+
+The `_warm` and `_hot` twins are the intensity rungs: a sparkline column and a heat slice both ramp through three levels, so the two glance elements on one row read through one mechanism. `bar_active` is a bar being dragged, `bar_hover` and `path_hover` are the marks under the pointer.
 
 **`ansi` is the default and draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. The cost is the wash, which is why the three-line file above exists: keep `ansi` for the sixteen names your scheme already defines, and add the two backgrounds it declines to guess. Pick your own if your pane is lighter or darker. The only rule is that they stay far enough from your background to read as bands, and far enough from each other that an addition never looks like a removal.
 
