@@ -189,13 +189,6 @@
     </g>
     <circle cx="862" cy="197" r="4" fill="#39c5cf"/>
 
-    <!-- diff scrollbar: file-granular plus the fraction within the current
-         file, which is all SPEC.md 11.1 lets it know without reading every
-         file's height. The pinned list above has no bar because all three of
-         its rows are on screen. -->
-    <rect x="872" y="190" width="6" height="250" rx="3" fill="#21262d"/>
-    <rect x="872" y="190" width="6" height="82" rx="3" fill="#8b949e"/>
-
     <!-- diff -->
     <!-- Indentation is carried by explicit x offsets, never by leading spaces:
          xml:space="preserve" is honoured inconsistently and leading whitespace
@@ -241,6 +234,25 @@
       <text class="m faint" x="60" y="420" text-anchor="end">45</text>
       <text class="m fg" x="88" y="420">}</text>
     </g>
+
+    <!-- diff scrollbar: file-granular plus the fraction within the current
+         file, which is all SPEC.md 11.1 lets it know without reading every
+         file's height. The pinned list above has no bar because all three of
+         its rows are on screen.
+
+         **Drawn after the diff, and that is load bearing rather than tidy.**
+         SVG paints in document order, and a row wash spans x=8 width=884, which
+         reaches x=892 and therefore covers this bar's x=872..878. Sitting where
+         it used to, above the diff group, the washes buried it: the track showed
+         on context rows and vanished on every added and removed one, so the bar
+         read as dashes rather than as a column. Reported from the picture.
+
+         A terminal cannot express the same mistake, because a cell holds one
+         thing: the shell draws the bar and then hands the *narrowed* rect to the
+         content. What it can express is the wash reaching into the bar's columns
+         and overwriting cells already drawn, which is what #214 is open about. -->
+    <rect x="872" y="190" width="6" height="250" rx="3" fill="#21262d"/>
+    <rect x="872" y="190" width="6" height="82" rx="3" fill="#8b949e"/>
 
     <!-- status bar -->
     <rect x="8" y="432" width="884" height="30" fill="#161b22"/>
