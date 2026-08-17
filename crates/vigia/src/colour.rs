@@ -368,6 +368,11 @@ fn program_depth(program: &str) -> Option<Depth> {
 /// **Promotes only**, which is `SPEC.md` §11.1's standing rule for `TERM`: an entry
 /// that names none of these yields nothing and leaves the floor where it is.
 fn term_depth(term: &str) -> Option<Depth> {
+    // **Folded again, and deliberately.** The one caller folds before calling,
+    // so this is idempotent and redundant on that path; it stays because the
+    // alternative is a precondition living in a caller rather than in a
+    // signature, on a private function whose next caller has no way to know.
+    // It runs once at startup, so the cost is not a consideration.
     let term = term.to_ascii_lowercase();
     // `contains` rather than `ends_with`, for `xterm-direct2` and friends: the
     // database numbers the direct entries by how many bits they hand each channel,

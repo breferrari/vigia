@@ -283,13 +283,15 @@ impl Glyphs {
         }
     }
 
-    /// The glyph one dense cell draws, its two buckets at `left` and `right`.
+    /// The glyph one cell draws, for the buckets at `left` and `right`.
     ///
-    /// `None` at [`Glyphs::Block`], where a bucket **is** a cell and the
-    /// eighth-block ramp indexes it directly with no packing to do.
+    /// At [`Glyphs::Block`] a bucket **is** a cell, so `right` is not read and
+    /// the answer comes from the eighth-block ramp with no packing to do.
     ///
-    /// Both levels are clamped into `0..=levels()` rather than trusted, because
-    /// the caller's arithmetic scales against a peak and a peak is data.
+    /// Levels are clamped rather than trusted, because the caller's arithmetic
+    /// scales against a peak and a peak is data. At the dense rungs that clamp
+    /// is [`Glyphs::column`]'s and covers both halves; at the block rung it is
+    /// `left.min(levels())`.
     ///
     /// **The two tables are indexed identically**, which is what makes one
     /// geometry serve both: `ratatui`'s own docs say the symbols are listed
@@ -297,6 +299,7 @@ impl Glyphs {
     /// `row * 2 + col` with the top row first. Confirmed against both:
     /// `BRAILLE[4]` is `⠂`, dot 2, the second row's left cell, and `OCTANTS[192]`
     /// is `▂`, the bottom row across.
+    ///
     /// **Total at every rung, which is what lets the drawer have no branch in
     /// it.** The block rung is one bucket per cell, so it ignores `right` and
     /// answers from [`SPARK_RAMP`], with level zero taking [`SPARK_TRACK`]. That
