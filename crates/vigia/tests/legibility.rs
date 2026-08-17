@@ -4489,3 +4489,150 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
         "no pane in the sweep drew a band, so this gate asserts nothing"
     );
 }
+
+/// A screen whose diff carries one added, one removed and one context line, so
+/// the band's two edges can be read against a row that has neither.
+fn three_kinds_of_line() -> View {
+    View {
+        rows: vec![
+            Row::File(entry("src/engine/watch.rs")),
+            line(LineKind::Context, 38, "    fn coalesce(&mut self) {"),
+            line(LineKind::Added, 39, "        self.pending.clear();"),
+            line(LineKind::Removed, 40, "        self.flush();"),
+            line(LineKind::Context, 41, "    }"),
+        ],
+        ..pinned_and_streamed()
+    }
+}
+
+/// `SPEC.md` §5.1's left bar, which the picture has drawn from the start and no
+/// palette ever did.
+///
+/// > A **tinted row** with a coloured left bar on every added and removed line.
+///
+/// The tint shipped and the bar did not: `added_bar` and `removed_bar` existed as
+/// keys, `Painter::line_row` consumed them, and all three built-ins left them
+/// empty for three phases ([#218](https://github.com/breferrari/vigia/issues/218)).
+///
+/// **The claim that makes it affordable is that it costs no column**, and that is
+/// the half asserted hardest here. The bar lands on the pane's leading cell, which
+/// [#119](https://github.com/breferrari/vigia/issues/119)'s ladder already keeps
+/// blank and the wash already bleeds under, so a changed row and a context row
+/// must begin their text in the *same* column. If that ever stops holding, the
+/// element has started charging I6 for decoration, which is the refusal it was
+/// reinstated against.
+///
+/// **A width rung, and swept as one.** The margin exists from forty-three columns
+/// up and the bar with it; below that the wash and the sigil carry the signal
+/// alone, which is what the narrow pane already did. Both sides are counted, so a
+/// sweep that never crossed the rung fails rather than passing quietly.
+#[test]
+fn the_band_gets_a_left_bar_wherever_the_pane_lends_a_column() {
+    let view = three_kinds_of_line();
+    let chrome = chrome();
+    let theme = Theme::dark();
+    let (mut lent, mut bare) = (0usize, 0usize);
+
+    for width in WIDTHS {
+        let Some((_, diff_row)) = region_rows(width, 24, &view, &chrome) else {
+            continue;
+        };
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).expect("terminal");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render(f.buffer_mut(), area, &view, &theme, &chrome);
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+
+        // The heading is `diff_row`; the three lines follow it in order.
+        let (context, added, removed) = (
+            diff_row as u16 + 1,
+            diff_row as u16 + 2,
+            diff_row as u16 + 3,
+        );
+        if usize::from(removed) >= 24 {
+            continue;
+        }
+
+        let lead = |y: u16| buffer[(0, y)].bg;
+        let wash = |y: u16| buffer[(inset_at(width) as u16, y)].bg;
+
+        if inset_at(width) > 0 {
+            // **Present, distinct, and brighter than the band it edges.** Equal to
+            // the wash would be a band that merely got wider; equal to each other
+            // would be an addition and a removal saying the same thing.
+            for (label, y) in [("added", added), ("removed", removed)] {
+                assert_ne!(
+                    lead(y),
+                    ratatui::style::Color::Reset,
+                    "at {width} columns the {label} row's leading cell carries \
+                     nothing, so the band has no left edge"
+                );
+                assert_ne!(
+                    lead(y),
+                    wash(y),
+                    "at {width} columns the {label} row's bar is the wash colour, \
+                     so it reads as a wider band rather than an edge"
+                );
+            }
+            assert_ne!(
+                lead(added),
+                lead(removed),
+                "at {width} columns an addition and a removal draw one bar colour"
+            );
+            lent += 1;
+        } else {
+            // Below the ladder there is no column to lend and the bar is absent,
+            // which is the ruling rather than a shortfall.
+            for (label, y) in [("added", added), ("removed", removed)] {
+                assert_eq!(
+                    lead(y),
+                    wash(y),
+                    "at {width} columns, where the pane lends no margin, the \
+                     {label} row drew a bar anyway and it has taken a column"
+                );
+            }
+            bare += 1;
+        }
+
+        // **Never on a context row**, at any width. The bar *is* the diff signal
+        // once the sigil column stops being it, so one on an unchanged line would
+        // say a line changed that did not.
+        assert_eq!(
+            lead(context),
+            ratatui::style::Color::Reset,
+            "at {width} columns a context row carries a bar"
+        );
+
+        // **And it costs no column**, which is the whole reason it is affordable:
+        // a changed row and a context row begin in the same place.
+        //
+        // **Only where the bar is drawn**, because below that the claim is vacuous
+        // and the comparison is not even valid: at widths too narrow for a gutter
+        // the leftmost glyph is the *sigil*, and a context row's sigil is a space
+        // where a changed row's is `+`, so the two legitimately differ by one for
+        // a reason that has nothing to do with this element. The first draft
+        // asserted it at every width and reddened at two columns, which is a gate
+        // measuring the thing beside the thing it is about.
+        if inset_at(width) > 0 {
+            let first = |y: u16| (0..width).find(|x| buffer[(*x, y)].symbol() != " ");
+            for (label, y) in [("added", added), ("removed", removed)] {
+                assert_eq!(
+                    first(y),
+                    first(context),
+                    "at {width} columns the {label} row's text starts in a \
+                     different column than a context row's, so the bar has \
+                     bought itself one"
+                );
+            }
+        }
+    }
+
+    assert!(
+        lent > 0 && bare > 0,
+        "the sweep saw {lent} widths where the pane lends the bar a column and \
+         {bare} where it does not, so it never crossed the rung it is about"
+    );
+}

@@ -3101,6 +3101,7 @@ pub fn render(
         // Zero total means the caller did not ask for one, which is a pane too
         // short for a bar, and `with_bar` draws nothing when told a whole of
         // zero.
+        let full = region;
         let region = painter.with_bar(
             region,
             bars,
@@ -3108,7 +3109,16 @@ pub fn render(
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
-        painter.body(region, view, area.width);
+        // **The wash spans one column more than the content**, which is the blank
+        // `reserved` keeps in front of the bar
+        // ([#214](https://github.com/breferrari/vigia/issues/214)). That reserve is
+        // about glyph adjacency, so a full-block thumb never reads as part of a
+        // `-6`, and a blank cell whose background matches the band is still a blank
+        // cell. Left unwashed it was a column of pane background between the band
+        // and the bar, invisible on a context row and a notch on every changed one.
+        // Zero where no bar was drawn, since there is then no reserve to fill.
+        let washed = region.width + (full.width - region.width).saturating_sub(1);
+        painter.body(region, washed, view, area.width);
     }
 
     // **Last, over everything, and only if a reader asked.** `SPEC.md` §11.1's
@@ -4456,7 +4466,7 @@ impl Painter<'_> {
         self.put(right, y, "│", 1, self.theme.chrome_dim);
     }
 
-    fn body(&mut self, area: Rect, view: &View, pane: u16) {
+    fn body(&mut self, area: Rect, washed: u16, view: &View, pane: u16) {
         // **Two rects, because this region draws both roles.** A heading is placed
         // against the pane through [`planning_width`]; everything else here keeps
         // the region's own right edge and only stands back from it, through
@@ -4593,6 +4603,7 @@ impl Painter<'_> {
                         Rect {
                             y,
                             height: 1,
+                            width: washed,
                             ..area
                         },
                         Rect {
@@ -4987,31 +4998,38 @@ impl Painter<'_> {
             LineKind::Context => (self.theme.context, ' '),
         };
 
-        // Patched onto the diff style rather than replacing it, so a palette whose
-        // bar is unset leaves the sigil exactly as it was. Writing the bar straight
-        // into the run would blank the sigil's own colour on every palette that
-        // declines to draw one, which is the default.
-        //
-        // **And the bar is only meaningful as a pair**, which is the part that had
-        // to be found by a gate rather than by reading. Its foreground is the row's
-        // own wash, chosen to sit legibly *on* the diff hue behind it. A depth that
-        // drops backgrounds keeps that foreground, so patching unconditionally
-        // paints the sigil in a near-black wash colour on no background at all, and
-        // the one thing still separating an addition from a context line at sixteen
-        // colours disappears. So the bar applies only where its background
-        // survived.
         let (wash, bar) = match kind {
             LineKind::Added => self.theme.row(true),
             LineKind::Removed => self.theme.row(false),
             LineKind::Context => (Style::new(), Style::new()),
         };
-        let sigil_style = if bar.bg.is_some() {
-            diff.patch(bar)
-        } else {
-            diff
-        };
+        let sigil_style = diff;
         if wash.bg.is_some() {
             self.buf.set_style(area, wash);
+        }
+
+        // **§5.1's left bar, and it costs no column**
+        // ([#218](https://github.com/breferrari/vigia/issues/218)). The pane's
+        // leading cell is blank margin that the wash above has already bled under,
+        // so setting its background spends nothing that was carrying content. It is
+        // therefore a **width rung**: drawn wherever [`inset_of`] lends a column,
+        // absent below forty-three where it does not and where the wash and the
+        // sigil carry the signal alone.
+        //
+        // **The leading cell of the inset, never all of it.** At eighty columns the
+        // margin is two and the bar takes the first, which is the picture's own
+        // proportion: three pixels of a cell, hard against the window's edge, with
+        // clear space between it and the text.
+        //
+        // Background only, and gated on the background surviving: a bar whose
+        // colour was dropped by the depth ladder would otherwise paint a blank cell
+        // in nothing at all, which is a no-op that still costs a write. `area.x` is
+        // the pane's own leading column here, because `render` builds this region
+        // with `..area` and `with_bar` narrows the width without moving the origin.
+        if bar.bg.is_some() && self.inset > 0 {
+            if let Some(cell) = self.buf.cell_mut((area.x, area.y)) {
+                cell.set_style(bar);
+            }
         }
 
         // **The wash above took the whole row and the glyphs take the inset

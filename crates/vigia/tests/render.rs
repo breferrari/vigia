@@ -5664,12 +5664,28 @@ fn a_wash_stops_before_the_scrollbar_column() {
         width - 1
     );
 
-    // And the gap beside it, which is what `BAR_WIDTH` reserves so the thumb does
-    // not sit flush against a count.
-    assert_ne!(
+    // **And the gap beside it *is* washed, which this asserted the other way
+    // until [#214](https://github.com/breferrari/vigia/issues/214).**
+    // `BAR_WIDTH` reserves that column so the thumb does not sit flush against
+    // a count, and that reserve is about **glyph adjacency**: a full-block thumb
+    // next to `-6` reads as `-6█`. A blank cell whose background matches the
+    // band is still a blank cell, so nothing becomes adjacent to anything it was
+    // not before. Left unwashed it was a column of pane background between the
+    // band and the bar: invisible on a context row, a notch on every changed
+    // one. Reported from a real pane, against a ruling this gate held correctly.
+    assert_eq!(
         buffer[(width - 2, washed)].bg,
         wash,
-        "the wash reached the column reserved beside the bar"
+        "the reserved column beside the bar is unwashed, so the band stops a column short and reads as notched"
+    );
+
+    // The reserve itself still holds, which is the half that must not be lost
+    // in widening the wash: the cell carries no glyph, so a thumb still cannot
+    // sit flush against a count.
+    assert_eq!(
+        buffer[(width - 2, washed)].symbol(),
+        " ",
+        "the column reserved beside the bar drew a glyph"
     );
 }
 
@@ -6158,7 +6174,24 @@ fn the_wash_bleeds_under_the_inset() {
              gate proves nothing"
         );
 
-        for x in 0..inset {
+        // **Column zero is §5.1's left bar, not the wash**
+        // ([#218](https://github.com/breferrari/vigia/issues/218)). The band still
+        // reaches the pane's edge, which is this gate's whole claim; what changed
+        // is that its leading cell is the brighter of the two colours. Asserted as
+        // *different from the wash* rather than skipped, so a bar that quietly
+        // became the wash colour fails here instead of reading as a wider band.
+        assert_ne!(
+            buffer[(0, row)].bg,
+            inside,
+            "at {width} columns the pane's leading cell carries the wash rather than the bar"
+        );
+        assert_ne!(
+            buffer[(0, row)].bg,
+            ratatui::style::Color::Reset,
+            "at {width} columns the pane's leading cell carries nothing, so the band starts a column late"
+        );
+
+        for x in 1..inset {
             assert_eq!(
                 buffer[(x, row)].bg,
                 inside,
