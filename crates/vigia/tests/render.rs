@@ -81,6 +81,35 @@ const BAR_GLYPHS: [char; 4] = ['│', '█', '▲', '▼'];
 /// imported for [`CONTINUES`]'.
 const CARET: &str = "▸";
 
+/// The row a pinned list starts on, on a pane with no room for the masthead.
+///
+/// **Two since [#174](https://github.com/breferrari/vigia/issues/174)**, where it
+/// was one: the header, then the blank row the body now opens with whenever it
+/// draws a list at all. Most fixtures here are short panes, where `Body::split`
+/// affords no band and the list follows that blank directly.
+///
+/// **Three categories, and this answers one of them.** Named here for the
+/// short-pane majority, which had the number written out at roughly twenty sites.
+///
+/// The second is a pane tall enough for the band: a 24-row pane puts the graph
+/// and its own trailing air in between, so gates drawing at that height go
+/// through `body_layout(..).above_list()` or `regions(..).list.top` rather than
+/// through this.
+///
+/// **The third is the one the surviving literal `1`s belong to, and it is about
+/// the fixture rather than the pane.** A view whose `list` is empty (`glancing`,
+/// `one_file`, `nothing_changed`) collapses to `Body::diff_only` at *any* height:
+/// no list, so no rule and no lead blank, and the stream starts directly under
+/// the header. Those reads are correct at `1` and a sweep of this constant across
+/// them would be wrong. Said out loud because several of them assert an
+/// **absence**, so a fixture that later gains a list would slide them onto the
+/// lead blank and they would go green rather than red, which is how
+/// `the_caret_does_not_vanish_because_another_file_changed` spent two phases
+/// proving nothing.
+///
+/// Restated rather than imported, for [`CARET`]'s reason one constant up.
+const LIST_TOP: u16 = 2;
+
 /// Whether a cell's symbol is one of [`BAR_GLYPHS`].
 ///
 /// The length check is what keeps a wide character whose first `char` happens to
@@ -1011,8 +1040,8 @@ fn the_counters_take_the_pictures_green_and_red() {
     // Both regions, found rather than assumed, and counted separately: a gate
     // that totalled the counts cells it found would be satisfied by four list
     // rows and never reach the stream.
-    let list_rows = counting_rows(&backend, 1..4);
-    let stream_rows = counting_rows(&backend, 4..10);
+    let list_rows = counting_rows(&backend, LIST_TOP..LIST_TOP + 3);
+    let stream_rows = counting_rows(&backend, LIST_TOP + 3..10);
     assert_eq!(
         list_rows.len(),
         3,
@@ -1142,7 +1171,7 @@ fn a_zero_counter_stays_grey_because_it_restates_no_change() {
         .iter()
         .enumerate()
         .filter(|(_, entry)| entry.churn.is_some_and(|(_, removed)| removed == 0))
-        .map(|(index, _)| index as u16 + 1)
+        .map(|(index, _)| index as u16 + LIST_TOP)
         .collect();
     // Bound in the pattern rather than asserted and then iterated, so "there is
     // exactly one" is what the code says and not something it checks and then
@@ -1229,7 +1258,7 @@ fn the_glance_columns_agree_down_the_list() {
     let spark = spark_colours(&theme);
     let heats_fg = heat_colours(&theme);
 
-    let sparks: Vec<(u16, u16)> = (1..4u16)
+    let sparks: Vec<(u16, u16)> = (LIST_TOP..LIST_TOP + 3)
         .filter_map(|y| {
             column_where(&backend, y, |sym, fg| {
                 spark.contains(&fg) && RAMP.contains(&sym)
@@ -1237,7 +1266,7 @@ fn the_glance_columns_agree_down_the_list() {
             .map(|x| (y, x))
         })
         .collect();
-    let heats: Vec<(u16, u16)> = (1..4u16)
+    let heats: Vec<(u16, u16)> = (LIST_TOP..LIST_TOP + 3)
         .filter_map(|y| {
             column_where(&backend, y, |sym, fg| {
                 sym == HEAT_SLICE && heats_fg.contains(&fg)
@@ -1248,10 +1277,10 @@ fn the_glance_columns_agree_down_the_list() {
     // Both halves, by where each ends. The fixture's paths carry neither sigil,
     // so a run found here came from the counts cell.
     guard_sigil_free_paths(&view);
-    let added: Vec<(u16, u16)> = (1..4u16)
+    let added: Vec<(u16, u16)> = (LIST_TOP..LIST_TOP + 3)
         .filter_map(|y| run_end(&backend, y, "+").map(|x| (y, x)))
         .collect();
-    let removed: Vec<(u16, u16)> = (1..4u16)
+    let removed: Vec<(u16, u16)> = (LIST_TOP..LIST_TOP + 3)
         .filter_map(|y| run_end(&backend, y, "-").map(|x| (y, x)))
         .collect();
 
@@ -1301,7 +1330,7 @@ fn glance_columns(backend: &TestBackend) -> Vec<String> {
     let spark = spark_colours(&theme);
     let buffer = backend.buffer();
 
-    (1..4u16)
+    (LIST_TOP..LIST_TOP + 3)
         .map(|y| {
             (0..buffer.area.width)
                 .map(|x| {
@@ -1529,7 +1558,7 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
     // the whole counts cell off every row of the list, for no reason a reader
     // could see and on the exact frame they were looking at.
     //
-    // The repo had already ruled this hazard once: `CARET_FLOOR` counts
+    // The repo had already ruled this hazard once: the caret's floor counts
     // `BAR_WIDTH` on a screen with no bar so that the caret's presence cannot
     // depend on the file count. The columns pay it for the same reason now.
     //
@@ -1651,7 +1680,7 @@ fn a_pulse_does_not_move_the_columns() {
     // Non-vacuity: the pulse really is drawn, so this is not comparing a screen
     // against itself. Read off the backend already rendered above rather than
     // drawing the same screen a second time.
-    let row = row_text(&drawn, 1);
+    let row = row_text(&drawn, LIST_TOP);
     assert!(
         row.contains('●'),
         "no pulse reached the row, so nothing was asserted: {row:?}"
@@ -2597,7 +2626,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
     let mut saw_pair = 0usize;
     let mut saw_alone = 0usize;
     for width in 1..=120u16 {
-        let row = row_text(&screen(width, 8, &view, &chrome()), 1);
+        let row = row_text(&screen(width, 8, &view, &chrome()), LIST_TOP);
         if row.contains('←') {
             // Drawn as a pair: both names have to be on the row whole.
             saw_pair += 1;
@@ -2673,7 +2702,7 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
             ..ragged_counts()
         };
         let backend = screen(80, 8, &view, &chrome());
-        let row = row_text(&backend, 1);
+        let row = row_text(&backend, LIST_TOP);
         assert!(
             draws(&row, want),
             "a file of {lines} added lines draws something other than {want:?}: \
@@ -2685,12 +2714,12 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
             draws(&row, "-0"),
             "the removed half went missing at {lines} added lines: {row:?}"
         );
-        removed_at.push(column_of(&backend, 1, "-"));
+        removed_at.push(column_of(&backend, LIST_TOP, "-"));
         // Where the *added* half starts, which is the half a content-sized cell
         // actually moves. The removed half is right-anchored at the row's edge
         // and cannot move however the cell is sized, so recording only that
         // would state a property the layout gets for free.
-        added_at.push(column_of(&backend, 1, "+"));
+        added_at.push(column_of(&backend, LIST_TOP, "+"));
     }
 
     // **The field is fixed, which is the whole reason `COUNT_CELL` is a constant
@@ -2741,8 +2770,9 @@ fn the_palette_reaches_the_cells() {
         );
     };
 
-    // Body rows start at y = 1: the header is y = 0. The gutter occupies the
-    // first columns, so the sigil and its colour are found past it.
+    // Row five of a listless fixture: see [`LIST_TOP`]'s third category. The
+    // gutter occupies the first columns, so the sigil and its colour are found
+    // past it.
     let sigil_x = inset + 4;
     let removed = &buffer[(sigil_x, 5)];
     let added = &buffer[(sigil_x, 6)];
@@ -3124,6 +3154,13 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
     let spark = spark_colours(&theme);
     let backend = screen(80, 5, &launched(), &chrome());
 
+    // **Row one, not [`LIST_TOP`], and the difference is the point.** A five-row
+    // pane cannot afford a list at all — `Body::split` returns `diff_only` — so
+    // these are the *stream's* headings under the header, and neither the lead
+    // blank [#174](https://github.com/breferrari/vigia/issues/174) added nor the
+    // list it separates exists here. The rows this gate is about are file
+    // headings either way, which is why it reads the same three cells it always
+    // did while every listed fixture in this file moved down one.
     let mut starts = Vec::new();
     for y in 1..=3u16 {
         let track = track_at(&backend, y, &theme);
@@ -3221,7 +3258,7 @@ fn the_first_tick_after_launch_moves_no_column() {
         columns.sort_unstable();
         columns
     };
-    for y in 1..=3u16 {
+    for y in LIST_TOP..=LIST_TOP + 2 {
         assert_eq!(
             slot(&after, y),
             slot(&launch, y),
@@ -3460,7 +3497,11 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     let theme = Theme::default();
     let backend = screen(80, 5, &glancing(), &chrome());
 
-    // Body rows start at y = 1; the header is y = 0.
+    // **Row one, and the reason is the fixture rather than the height.**
+    // `glancing()` carries an empty `list`, so `clamped_to` collapses the body to
+    // `diff_only` at *any* pane size: no list, no rule, and no lead blank, so the
+    // stream starts directly under the header. See [`LIST_TOP`], whose docblock
+    // names this as the third category.
     let pulsing = row_text(&backend, 1);
     assert!(
         pulsing.contains('●'),
@@ -3710,12 +3751,16 @@ fn the_caret_marks_the_file_the_diff_is_inside() {
         let buffer = backend.buffer();
 
         for row in 0..3u16 {
-            // The list starts on row 1, immediately under the single header line,
-            // and the caret sits at the pane's first content column rather than
-            // at its edge: #119 moves the marker with the text it points into,
-            // which is what `assets/preview.svg` draws (window edge `x=8`, caret
-            // `x=16`, kind letter `x=32`).
-            let marked = buffer[(inset_at(64), row + 1)].symbol() == CARET;
+            // The list starts at [`LIST_TOP`], under the header and the blank
+            // [#174](https://github.com/breferrari/vigia/issues/174) put beneath
+            // it, and the caret sits on the pane's **own leading column** rather
+            // than at its first content column
+            // ([#173](https://github.com/breferrari/vigia/issues/173)). The
+            // marker stands outside the text it points into instead of pushing
+            // it right, which is what `assets/preview.svg` draws (window edge
+            // `x=8`, caret `x=8`, every content origin `x=32`) and what puts
+            // this region's sigil in the same column as a heading's.
+            let marked = buffer[(0, row + LIST_TOP)].symbol() == CARET;
             assert_eq!(
                 marked,
                 row as usize == current,
@@ -3739,8 +3784,9 @@ fn the_rule_separates_the_regions_and_spans_the_pane() {
         let backend = screen(width, 18, &view, &chrome());
         let buffer = backend.buffer();
 
-        // Three list rows under the header, so the rule is row four.
-        let y = 4u16;
+        // The header, the lead blank #174 put under it, then three list rows,
+        // so the rule is row five.
+        let y = LIST_TOP + 3;
         let drawn: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
         assert_eq!(
             drawn,
@@ -3777,8 +3823,10 @@ fn the_caret_degrades_once_and_never_flickers() {
             let view = two_regions(1);
             let backend = screen(width, 18, &view, &chrome());
             let buffer = backend.buffer();
+            // The list's **second** row, which is where `two_regions(1)` puts
+            // the current file, offset past the header and the lead blank.
             (0..width)
-                .map(|x| buffer[(x, 2)].symbol())
+                .map(|x| buffer[(x, LIST_TOP + 1)].symbol())
                 .collect::<String>()
                 .contains(CARET)
         })
@@ -3843,7 +3891,7 @@ fn the_list_scrollbar_spans_the_visible_window() {
             ..two_regions(list_top)
         };
         let backend = screen(width, 18, &view, &chrome());
-        let marks = thumb_rows(&backend, width - 1, 1..4);
+        let marks = thumb_rows(&backend, width - 1, LIST_TOP..LIST_TOP + 3);
         assert!(
             !marks.is_empty(),
             "the list bar drew no thumb at all with the window at {list_top}"
@@ -3855,7 +3903,7 @@ fn the_list_scrollbar_spans_the_visible_window() {
         // And the rest of the column is track, not blank: a mark with no extent
         // around it cannot be read as a position.
         let buffer = backend.buffer();
-        for y in 1..4u16 {
+        for y in LIST_TOP..LIST_TOP + 3 {
             let symbol = buffer[(width - 1, y)].symbol();
             assert!(
                 symbol == TRACK || marks.contains(&y),
@@ -3982,7 +4030,7 @@ fn a_region_with_nothing_to_scroll_spends_no_column_on_a_bar() {
     let backend = screen(width, 18, &view, &chrome());
     let buffer = backend.buffer();
 
-    for y in 1..4u16 {
+    for y in LIST_TOP..LIST_TOP + 3 {
         let symbol = buffer[(width - 1, y)].symbol();
         assert!(
             symbol != TRACK && symbol != THUMB,
@@ -4771,14 +4819,20 @@ fn the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret() {
 
 #[test]
 fn the_weight_arrives_and_leaves_with_the_caret() {
-    // **The tie is to `CARET_FLOOR`, not to the current file** (#193). Below it
+    // **The tie is to `affords_caret`, not to the current file** (#193). Below it
     // the caret is dropped so that `MIN_PATH_WIDTH` survives, and a bold row
     // with nothing pointing at it would be an unattributable weight: on a
     // narrow pane the pulse's `●` has already been dropped too, so *bold* would
     // have two readings and no glyph to tell them apart.
     //
-    // Sixteen columns, which is under the eighteen the floor asks for and wide
-    // enough that the list still draws.
+    // Sixteen columns, which is under the seventeen the floor asks for and wide
+    // enough that the list still draws. **The floor moved from eighteen to
+    // seventeen** when the caret came to bill the row one column rather than two
+    // ([#173](https://github.com/breferrari/vigia/issues/173)), and sixteen is
+    // still under it, so this fixture kept its width rather than being nudged to
+    // stay red. Worth stating, because a width picked as "one under the floor"
+    // silently becomes a width picked as "two under" and then stops exercising
+    // the boundary at all.
     let width = 16u16;
     let height = 24u16;
     let view = a_stepped_screen();
@@ -5352,19 +5406,36 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
     // exists to prevent, and it was blind to this because its fixture has
     // `files == list.len()` and is never scrollable. The file count is the second
     // axis.
+    // **The row comes from the layout, and reading a literal had already killed
+    // this gate.** It read `buffer[(x, 1)]`, which was the list's first row when
+    // it was written and has not been since #158 put the band between the header
+    // and the list. [#174](https://github.com/breferrari/vigia/issues/174) made
+    // it dead *unconditionally*, because the body now opens with a blank whenever
+    // it draws a list at all, so row one is blank on every pane this sweeps and
+    // the assertion compared `false` against `false` at all sixty widths. The
+    // defect it is named for could have shipped underneath it.
+    //
+    // Caught by review rather than by a run, which is the whole shape of it: a
+    // gate that reads the wrong row does not fail, it agrees with itself. The
+    // non-vacuity check below is what makes that impossible to repeat here, and
+    // `the_file_the_diff_is_inside_is_drawn_bold_beside_its_caret` is the gate in
+    // this file that already took the row from `regions` for the same reason.
+    let mut ever = false;
     for width in 1..=60u16 {
         let mut drawn = Vec::new();
         for files in [3usize, 30] {
             let view = a_list_of(files, 3, 0);
+            let laid = regions(Rect::new(0, 0, width, 24), &chrome(), &view);
             let backend = screen(width, 24, &view, &chrome());
             let buffer = backend.buffer();
             drawn.push(
                 (0..width)
-                    .map(|x| buffer[(x, 1)].symbol())
+                    .map(|x| buffer[(x, laid.list.top)].symbol())
                     .collect::<String>()
                     .contains(CARET),
             );
         }
+        ever |= drawn[0] || drawn[1];
         assert_eq!(
             drawn[0],
             drawn[1],
@@ -5374,28 +5445,48 @@ fn the_caret_does_not_vanish_because_another_file_changed() {
             if drawn[1] { "drawn" } else { "absent" }
         );
     }
+
+    // **Or the sweep agreed about an absence.** Two screens that both draw no
+    // caret satisfy the equality above at every width, which is exactly how this
+    // gate spent two phases proving nothing.
+    assert!(
+        ever,
+        "no width in the sweep drew a caret on either screen, so the equality \
+         above compared two absences"
+    );
 }
 
 #[test]
 fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
-    // What `CARET_FLOOR`'s `BAR_WIDTH` term buys, which is not the same property
-    // as `the_caret_does_not_vanish_because_another_file_changed`. That one says
-    // the caret's presence depends on the pane alone; this one says the caret is
-    // never drawn on a row too narrow to still name its file afterwards, on a
-    // screen where the bar has already taken its columns.
+    // What `affords_caret`'s `BAR_WIDTH` term buys, which is not the same
+    // property as `the_caret_does_not_vanish_because_another_file_changed`. That
+    // one says the caret's presence depends on the pane alone; this one says the
+    // caret is never drawn on a row too narrow to still name its file afterwards,
+    // on a screen where the bar has already taken its columns.
     //
     // Found by mutation: dropping the `BAR_WIDTH` term left the consistency gate
     // green, because both file counts then lost the caret at the same widths and
     // agreed with each other while the row underneath was two columns short.
     //
-    // Constants restated for the reason this file always restates them: sharing
-    // the renderer's own would make the assertion agree with the code by
-    // construction.
+    // **What the caret costs a row is now a function of the width**
+    // ([#173](https://github.com/breferrari/vigia/issues/173)), where it was a
+    // flat two. The marker stands in the pane's own margin wherever there is one,
+    // so from forty-three columns up it bills the row nothing and only the inset
+    // comes off; below that the ladder lends nothing and it takes one column. A
+    // restated flat `2` would have kept this gate green *and* wrong in both
+    // directions at once: two columns too mean above the ladder's floor, one too
+    // generous below it.
     const ROW_FLOOR: usize = 2 + 12; // the kind letter and its gap, plus MIN_PATH_WIDTH
     const BAR_COLUMNS: usize = 2;
-    const CARET_COLUMNS: usize = 2;
+    const CARET_GLYPH: usize = 1;
     const TRACK: &str = "│";
     const THUMB: &str = "█";
+
+    // Constants restated for the reason this file always restates them: sharing
+    // the renderer's own would make the assertion agree with the code by
+    // construction. The same goes for this expression, which is `caret_gutter`
+    // written out rather than imported.
+    let caret_columns = |width: u16| CARET_GLYPH.saturating_sub(usize::from(inset_at(width)));
 
     let mut saw_both = false;
     for width in 1..=60u16 {
@@ -5426,7 +5517,7 @@ fn a_row_keeps_its_floor_after_both_the_bar_and_the_caret() {
         // closest to being breached, which are the only widths it is about.
         let left = usize::from(width)
             - if bar { BAR_COLUMNS } else { 0 }
-            - CARET_COLUMNS
+            - caret_columns(width)
             - usize::from(inset_at(width));
         assert!(
             left >= ROW_FLOOR,
@@ -6420,11 +6511,22 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
     assert_eq!(hidden.graph, 0, "hiding the masthead left the band drawn");
     assert_eq!(
         hidden.air, 0,
-        "hiding the masthead left its blank rows behind"
+        "hiding the masthead left its blank row behind"
+    );
+    // **The lead blank is not the masthead's to give**, since #174. The band
+    // borrows it while it is drawn and the header's separator is what it is the
+    // rest of the time, so hiding the band hands back three rows rather than
+    // four. Asserted rather than folded into the sum below, because a lead that
+    // vanished with the band would put the header back against the list on the
+    // one screen a reader chose deliberately.
+    assert_eq!(
+        (hidden.lead, shown.lead),
+        (1, 1),
+        "the lead blank moved with the masthead, so the header lost its air"
     );
     assert_eq!(
         hidden.diff,
-        shown.diff + shown.masthead(),
+        shown.diff + shown.band_rows(),
         "the masthead's rows went somewhere other than the diff"
     );
     assert_eq!(

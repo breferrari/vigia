@@ -26,8 +26,8 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme, View,
-    body_layout, diff_height, render,
+    Body, Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme,
+    View, body_layout, diff_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -68,6 +68,20 @@ const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 /// odd rungs at 43 and 79 are the step between the two even ones #119 names.
 const MARGIN_RUNGS: [(u16, u16); 4] = [(80, 4), (79, 3), (44, 2), (43, 1)];
 
+/// What marks the row for the file the diff is inside.
+///
+/// Restated rather than imported, on this file's own rule two docblocks up.
+const CARET: &str = "▸";
+
+/// Columns that mark occupies.
+///
+/// **One since [#173](https://github.com/breferrari/vigia/issues/173)**, where it
+/// was two: a glyph and a trailing space, which the list was indented by and
+/// which put its status sigil two columns right of the same sigil on a diff
+/// heading. The gap after it is [`MARGIN_RUNGS`]'s now, so it is a column wide at
+/// every width and the pane's own ladder decides what follows it.
+const CARET_WIDTH: usize = 1;
+
 /// Columns a pane this wide spends on margins, both sides together. What a row's
 /// text loses off the pane's own width.
 fn margin_at(width: u16) -> usize {
@@ -89,6 +103,25 @@ fn inset_at(width: u16) -> usize {
     margin_at(width).div_ceil(2)
 }
 
+/// A row with its caret taken off, and the columns the caret took.
+///
+/// **Written once because three sites had it by hand.** [`content`], the inset
+/// sweep and [`sigil_column`] each matched `strip_prefix(CARET)` and each
+/// adjusted an offset by [`CARET_WIDTH`], which is three places that have to
+/// agree about what a marked row's head looks like with no compiler help if the
+/// marker ever changes width or regains a trailing space. `content`'s own
+/// docblock argues exactly this about the callers *it* consolidated, and the
+/// diff that added it then hand-wrote the same shape twice more.
+///
+/// An unmarked row comes back untouched with a cost of zero, so a caller can use
+/// the pair unconditionally.
+fn past_caret(row: &str) -> (&str, usize) {
+    match row.strip_prefix(CARET) {
+        Some(rest) => (rest, CARET_WIDTH),
+        None => (row, 0),
+    }
+}
+
 /// A drawn row with the pane's inset taken off its head, having first checked
 /// that the inset is exactly what is there.
 ///
@@ -105,7 +138,18 @@ fn content(row: &str, width: u16) -> &str {
     if row.is_empty() {
         return row;
     }
-    let inset = inset_at(width);
+    // **The caret stands in the pane's margin by licence**
+    // ([#173](https://github.com/breferrari/vigia/issues/173)), so it is taken
+    // off here along with the blank the margin still has left. Done in the shared
+    // reader rather than at each caller, because a rule about what a row's head
+    // looks like belongs where every read of a head goes through, and the
+    // alternative is thirty call sites that each remember it or quietly stop
+    // covering the marked row.
+    //
+    // The remaining inset is still **asserted** below, not trimmed: a marked row
+    // that also lost its margin fails here exactly as an unmarked one would.
+    let (row, taken) = past_caret(row);
+    let inset = inset_at(width).saturating_sub(taken);
     let head: Vec<char> = row.chars().take(inset).collect();
     assert!(
         head.len() == inset && head.iter().all(|c| *c == ' '),
@@ -633,15 +677,13 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     // because the caret column is an inset. Every sweep in this file would
     // otherwise measure the wide path only and report I6 as holding on a row
     // shape that never ships alone.
+    // **Built from [`pinned_and_streamed`] rather than beside it.** The two were
+    // field-for-field identical apart from `top`, so adding a fourth file here
+    // or changing a path's length would have left the gates that read the other
+    // copy measuring a shape this file's own sweeps no longer use.
     let pinned = View {
-        list: vec![
-            entry("crates/vigia-core/src/frame.rs"),
-            entry("src/engine/watch.rs"),
-            entry("Cargo.toml"),
-        ],
-        list_top: 0,
         top: Position { file: 1, row: 0 },
-        ..every_row_kind()
+        ..pinned_and_streamed()
     };
     vec![
         ("every row kind, idle", every_row_kind(), chrome()),
@@ -1007,7 +1049,7 @@ fn the_header_never_takes_a_second_line() {
                     // a masthead over blank rows.
                     let body = body_layout(Rect::new(0, 0, width, height), &chrome, view.files)
                         .clamped_to(view.list.len());
-                    let starts = 1 + body.masthead();
+                    let starts = list_top(&body);
                     assert_eq!(
                         first, starts,
                         "at {width}x{height} with {listed} listed, the body \
@@ -2713,11 +2755,15 @@ fn the_pulse_draws_a_mark_and_never_a_label() {
 ///
 /// > The list does not draw the rank the digits address.
 ///
-/// **The refusal is the whole reason this exists, because the change is cheap.**
-/// The caret column is two columns wide on every pane at or above `CARET_FLOOR`
-/// and blank on every row but the one the diff is inside, so `1`-`6` could be
-/// drawn there for no column and no frame time, and a session that reads only
-/// that far will find it free. §11.1 refuses it on what a rank *says* (the
+/// **The refusal is the whole reason this exists, because the change looked
+/// cheap.** The caret gutter was two columns wide on every pane the old
+/// `CARET_FLOOR` admitted and blank on every row but the one the diff is inside,
+/// so `1`-`6` could be drawn there for no column and no frame time, and a session
+/// that read only that far would find it free. **That gutter is gone since
+/// [#173](https://github.com/breferrari/vigia/issues/173)** and a rank would now
+/// have to buy a column of its own, which cuts *for* the ruling and is exactly
+/// why this gate is written against what opens a row rather than against the
+/// gutter. §11.1 refuses it on what a rank *says* (the
 /// region is a map, and a numbered list is a menu), which is an argument no
 /// budget gate can hold.
 ///
@@ -2731,10 +2777,11 @@ fn the_pulse_draws_a_mark_and_never_a_label() {
 /// the same job `a_wider_hint_bar_cannot_quietly_push_the_readouts_out` does one
 /// region down.
 ///
-/// **The claim is written against what opens a row rather than against the
-/// gutter's two columns**, so it needs no restated `CARET_FLOOR` and stays true
-/// below one: whatever the width, the first glyph on a list row is the mark or
-/// that file's own kind letter, and a rank makes it a digit.
+/// **The claim is written against what opens a row rather than against any
+/// gutter**, so it needed no restated floor and survived the gutter's removal
+/// unchanged: whatever the width, a list row opens with that file's own kind
+/// letter and carries the mark on the pane's leading column, and a rank makes
+/// either one a digit.
 ///
 /// **It sweeps because §11.1 refuses a rank drawn only where there is room for
 /// one**, which is the same reason the pulse's label is swept one test up: a
@@ -2760,8 +2807,6 @@ fn the_pulse_draws_a_mark_and_never_a_label() {
 /// one, which is what catches a region going blank again on a *wider* pane.
 #[test]
 fn the_caret_column_draws_a_mark_and_never_a_rank() {
-    /// The marker, restated rather than imported for [`CONTINUES`]' reason.
-    const CARET: char = '▸';
     /// The fixture's files, its list, and what the layout has to afford.
     const FILES: usize = 6;
 
@@ -2802,9 +2847,18 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
         // row as a list row fails with a message about the wrong thing.
         let split = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files)
             .clamped_to(view.list.len());
-        let first = 1 + split.masthead();
+        let first = list_top(&split);
         let rows = rows_at(width, tall, &view, &chrome);
         for (offset, row) in rows.iter().skip(first).take(listed).enumerate() {
+            // **The mark and the content are read from two different places
+            // now** ([#173](https://github.com/breferrari/vigia/issues/173)). The
+            // caret stands on the pane's own leading column, outside the region,
+            // so [`content`] strips it with the margin it sits in and what is
+            // left is the row proper. That splits one observation into two and
+            // makes the assertion below **stronger** rather than weaker: the
+            // region's opening glyph is now always the kind letter, with no
+            // "or the mark" escape hatch for a digit to hide behind.
+            let marked = row.starts_with(CARET);
             let opening = content(row, width).chars().find(|c| !c.is_whitespace());
 
             // A `None` opening is a blank row, which `rows_at`'s `trim_end` has
@@ -2822,20 +2876,29 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
                 // the same one.
                 let kind = view.list[offset].kind;
                 assert!(
-                    glyph == kind || (glyph == CARET && offset == 0),
+                    glyph == kind,
                     "at {width} columns list row {offset} opens with {glyph:?} \
-                     rather than its kind letter {kind:?} or, on the current \
-                     file, the mark: {row:?}"
+                     rather than its kind letter {kind:?}: {row:?}"
                 );
             }
+
+            // **Only the current file may carry the mark.** Free to assert now
+            // that the caret is read off the row's own head rather than out of
+            // the region's first glyph, and it is what stops a caret drawn on
+            // every row from reading as a ladder that merely climbed early.
+            assert!(
+                !marked || offset == 0,
+                "at {width} columns list row {offset} carries the mark, which \
+                 belongs to the file the diff is inside: {row:?}"
+            );
 
             if offset == 0 {
                 seen.push((
                     width,
-                    match opening {
-                        None => Band::Blank,
-                        Some(glyph) if glyph == CARET => Band::Marked,
-                        Some(_) => Band::Named,
+                    match (opening, marked) {
+                        (None, _) => Band::Blank,
+                        (Some(_), true) => Band::Marked,
+                        (Some(_), false) => Band::Named,
                     },
                 ));
             }
@@ -2854,8 +2917,8 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
     }
 
     // And the ladder only ever climbs. A caret that came and went with the width
-    // would read as the current file changing, which is the failure
-    // `CARET_FLOOR` was written against.
+    // would read as the current file changing, which is the failure the caret's
+    // floor was written against.
     for pair in seen.windows(2) {
         let ((below, was), (above, band)) = (pair[0], pair[1]);
         assert!(
@@ -3291,7 +3354,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // baseline as a list row once the masthead existed.
         let first = |files: usize| {
             let split = body_layout(Rect::new(0, 0, width, 24), &chrome(), files).clamped_to(3);
-            1 + split.masthead()
+            list_top(&split)
         };
         let (barred_at, bare_at) = (first(10), first(3));
 
@@ -3307,11 +3370,22 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // **Skip the widths where the caret's own ladder differs between the two
         // panes being compared.** The caret is decided against the pane width, so
         // the wide side can have one where the narrow side does not, and a row
-        // indented by two columns is not the same row. That is the caret's
-        // ladder, gated by `the_caret_degrades_once_and_never_flickers` and
+        // carrying a marker is not the same row. That is the caret's ladder,
+        // gated by `the_caret_degrades_once_and_never_flickers` and
         // `the_caret_does_not_vanish_because_another_file_changed`; this gate is
         // about the bar and must not be measuring both at once.
-        let caret = |row: &str| row.trim_start().len() != row.len();
+        //
+        // **Asked of the glyph, not of the indent, and it used to be the indent**
+        // ([#173](https://github.com/breferrari/vigia/issues/173)). This read
+        // `row.trim_start().len() != row.len()`, which meant *has a caret* only
+        // while the caret was a two-column inset on the row. The marker sits on
+        // the pane's own leading column now, so a caret row has **no** leading
+        // blank and a plain one has the pane's inset: the proxy inverted, and the
+        // guard went on compiling, running and skipping exactly the wrong widths.
+        // It is not a live failure here, because both sides of the comparison are
+        // the same pane width and the skip is a no-op either way, which is
+        // precisely why nothing went red.
+        let caret = |row: &str| row.starts_with(CARET);
         if caret(&barred[barred_at]) != caret(&bare[bare_at]) {
             continue;
         }
@@ -3445,9 +3519,26 @@ fn the_pane_insets_its_text_at_every_rung() {
                     if row.starts_with('─') {
                         continue;
                     }
-                    let first = row.chars().take_while(|c| *c == ' ').count();
+                    // **The caret is the one *glyph* licensed to stand on the
+                    // pane's own edge** ([#173](https://github.com/breferrari/vigia/issues/173)),
+                    // and `SPEC.md` §11.1 records it as such so it reads as a
+                    // decision rather than as drift. The reader asked for the
+                    // marker flush against the edge with no margin of its own,
+                    // and that is what puts it inside the ladder this gate pins.
+                    //
+                    // **Exempted by stripping it, never by skipping the row**,
+                    // which is the difference between narrowing this gate and
+                    // holing it. Everything after the caret is still measured,
+                    // from the column the caret left off at rather than from
+                    // zero, so a list row that lost its inset *and* happened to
+                    // draw a caret still fails. Skipping the row outright would
+                    // have let exactly that through, on the one row of the one
+                    // region this whole ruling touches.
+                    let (measured, taken) = past_caret(row);
+                    let floor = inset.saturating_sub(taken);
+                    let first = measured.chars().take_while(|c| *c == ' ').count();
                     assert!(
-                        first >= inset,
+                        first >= floor,
                         "{label} at {width}x{height}: row {y} starts at column \
                          {first}, inside the pane's {inset}-column inset: {row:?}"
                     );
@@ -3457,7 +3548,15 @@ fn the_pane_insets_its_text_at_every_rung() {
                     // defensive and would in fact drop that rung's coverage in
                     // silence, which is the failure mode this whole test exists
                     // to refuse. Out of range panics and names the width.
-                    if first == inset {
+                    //
+                    // **Only the unexempted rows count towards coverage.** A
+                    // caret row is measured against a shifted floor, so letting
+                    // one mark a rung would record the ladder as stood on by a
+                    // row that is standing a column short of it by licence. The
+                    // plain rows of both regions reach every rung on their own,
+                    // and the loop below fails loudly if that ever stops being
+                    // true.
+                    if taken == 0 && first == inset {
                         touched[inset] = true;
                     }
                 }
@@ -3875,5 +3974,518 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
         checked > 0 && dropped > 0,
         "the sweep saw the gutter drawn at {checked} widths and dropped at \
          {dropped}, so it never crossed the boundary it is about"
+    );
+}
+
+/// A screen with **both** regions drawing file rows through `Painter::file_row`.
+///
+/// The list carries three files and the stream opens on a heading, so the two
+/// sigils the gates below compare are drawn by one function through two areas,
+/// which is the whole thing [#173](https://github.com/breferrari/vigia/issues/173)
+/// is about. `cases()` builds the same shape for the sweeps above; it is named
+/// here because these gates need the two regions specifically rather than a
+/// representative screen.
+fn pinned_and_streamed() -> View {
+    View {
+        list: vec![
+            entry("crates/vigia-core/src/frame.rs"),
+            entry("src/engine/watch.rs"),
+            entry("Cargo.toml"),
+        ],
+        list_top: 0,
+        top: Position { file: 0, row: 0 },
+        ..every_row_kind()
+    }
+}
+
+/// The column a file row's status sigil sits in, or `None` on a row that draws
+/// none.
+///
+/// **The caret is skipped and counted rather than searched for**, which is what
+/// makes one function usable on both regions: since
+/// [#173](https://github.com/breferrari/vigia/issues/173) the marker stands on
+/// the pane's own leading column, outside the row it points at, so it is part of
+/// the offset and never part of the content. A helper that trimmed it instead
+/// would report the marked row a column left of its neighbours, and the gates
+/// below would be asserting the caret's absence rather than the sigil's column.
+fn sigil_column(row: &str) -> Option<usize> {
+    let (rest, from) = past_caret(row);
+    let blanks = rest.chars().take_while(|c| *c == ' ').count();
+    rest.chars().nth(blanks).map(|_| from + blanks)
+}
+
+/// The column a file row's path starts in, or `None` on a row that names no
+/// file.
+///
+/// **Found by walking, never derived as `sigil + KIND`**, and the difference is
+/// the whole reason this exists. The first draft of
+/// `the_path_starts_in_one_column_in_both_regions` asserted
+/// `listed + KIND == streamed + KIND + owed`, which cancels to the assertion the
+/// gate above it already makes: it added a constant to both sides and never
+/// looked at a path at all, so the failure its own docblock claimed (a region
+/// whose paths were narrowed) could not reach it. Caught by review rather than
+/// by any run, because a gate that restates its neighbour is green for the same
+/// reason its neighbour is.
+///
+/// Every glyph a row can open with is one column wide, so a `char` index and a
+/// pane column are the same number here: the caret, the kind letter, the blank
+/// after it and the elision are all single-width.
+fn path_column(row: &str) -> Option<usize> {
+    let sigil = sigil_column(row)?;
+    let after = sigil + 1;
+    let blanks = row.chars().skip(after).take_while(|c| *c == ' ').count();
+    row.chars().nth(after + blanks).map(|_| after + blanks)
+}
+
+/// The row a pinned list starts on, given its layout.
+///
+/// **One line, and it is the fourth site to have written it out.** [`body_rows`]
+/// exists for exactly this reason one region over, and its own doc records that
+/// two gates open-coded that sum and both got it wrong the same way when a
+/// region was added. The masthead is the region that did it, and the lead blank
+/// [#174](https://github.com/breferrari/vigia/issues/174) added is the second,
+/// so the sum has now moved twice under call sites that spell it by hand.
+fn list_top(split: &Body) -> usize {
+    1 + split.above_list()
+}
+
+/// Where each region's first file row is drawn, on a pane that draws both.
+///
+/// Asked of the layout rather than counted, for the reason this file gives
+/// everywhere else: a test that re-derived the row offsets would be a second copy
+/// of the body split agreeing with itself. What the gates below assert is the
+/// **column**, which the layout has no opinion about at all.
+fn region_rows(width: u16, height: u16, view: &View, chrome: &Chrome) -> Option<(usize, usize)> {
+    let split =
+        body_layout(Rect::new(0, 0, width, height), chrome, view.files).clamped_to(view.list.len());
+    if split.list == 0 || !split.rule {
+        return None;
+    }
+    let list = list_top(&split);
+    Some((list, list + split.list + 1))
+}
+
+/// What the caret costs the list's own row at this width.
+///
+/// **Derived from [`MARGIN_RUNGS`] rather than restated as a width.** The first
+/// draft of these gates carried `const CARET_LENDS_AT: u16 = 43`, the ladder's
+/// floor written out by hand beside a file that already resolves the same rung
+/// the derived way. That is the drift shape `affords_caret` was rewritten to
+/// remove one crate over, reintroduced in the tests that watch it: move a rung
+/// in [`MARGIN_RUNGS`] and the constant would have gone on reading 43 while
+/// every gate around it moved.
+///
+/// Zero once the pane has a margin to lend, one below that. `row` decides
+/// whether anything is owed at all, because under the caret's own floor the
+/// marker is dropped and the list charges nothing for it.
+fn caret_owes(row: &str, width: u16) -> usize {
+    if !row.starts_with(CARET) {
+        return 0;
+    }
+    CARET_WIDTH.saturating_sub(inset_at(width))
+}
+
+/// Whether the pane's margin can lend the caret its column at this width.
+///
+/// The other half of [`caret_owes`], named so a sweep can say which side of the
+/// rung it counted without restating the rung.
+fn caret_is_lent(width: u16) -> bool {
+    inset_at(width) >= CARET_WIDTH
+}
+
+/// `SPEC.md` §11.1, and the defect was visible in a committed snapshot for
+/// months before anyone read it as one.
+///
+/// > The status sigil starts at a different column in the pinned list than it
+/// > does on the diff's file headings. They should line up.
+/// > -- [#173](https://github.com/breferrari/vigia/issues/173)
+///
+/// The gap was the old two-column `CARET_WIDTH`: the list was indented by the
+/// caret and its trailing space, so every glance element downstream of the path
+/// inherited the same offset. The caret is one column standing in the pane's own
+/// margin now, so wherever [`caret_is_lent`] holds the two regions share an
+/// origin.
+///
+/// **The ruled rung is inside the assertion rather than around it.** Below that
+/// width the ladder lends nothing and the caret takes one column of the list's
+/// own row, so the regions differ by one. Writing that as `<= 1` would let the
+/// two-column defect back in at exactly the widths where the pane can least
+/// afford it; asserting an equality per rung is what makes the residual a
+/// decision instead of a tolerance.
+///
+/// **Both sides of the rung, or the sweep proves nothing.** A gate that only saw
+/// wide panes would pass against a build that never touched the narrow case, and
+/// one that only saw narrow panes would pass against the original defect.
+#[test]
+fn the_sigil_sits_in_one_column_in_both_regions() {
+    let view = pinned_and_streamed();
+    let chrome = chrome();
+    let (mut above, mut below) = (0usize, 0usize);
+
+    for width in WIDTHS {
+        let Some((list_row, diff_row)) = region_rows(width, 24, &view, &chrome) else {
+            continue;
+        };
+        let rows = rows_at(width, 24, &view, &chrome);
+        let (Some(listed), Some(streamed)) = (
+            rows.get(list_row).and_then(|row| sigil_column(row)),
+            rows.get(diff_row).and_then(|row| sigil_column(row)),
+        ) else {
+            continue;
+        };
+
+        // **Owed only while a caret is actually drawn.** Below the caret's own
+        // floor the marker is dropped and the list charges nothing for it, so
+        // the two regions agree at those widths as well. Read off the drawn row
+        // rather than re-derived, which keeps this gate about the *column* and
+        // leaves whether the caret exists at all to
+        // `the_caret_threshold_is_the_row_floor_it_claims`.
+        let owed = caret_owes(&rows[list_row], width);
+        assert_eq!(
+            listed,
+            streamed + owed,
+            "at {width} columns the list's sigil is in column {listed} and the \
+             heading's in column {streamed}, where the caret is owed {owed} \
+             column(s) of the row's own\n  list: {:?}\n  diff: {:?}",
+            rows[list_row],
+            rows[diff_row]
+        );
+        if caret_is_lent(width) {
+            above += 1;
+        } else {
+            below += 1;
+        }
+    }
+
+    assert!(
+        above > 0 && below > 0,
+        "the sweep compared {above} widths where the pane lends the caret its column \
+         and {below} where it does not, so it never crossed the rung it is about"
+    );
+}
+
+/// The same claim one element over, and what it reaches is stated narrowly
+/// because the first draft of it reached nothing at all.
+///
+/// A sigil that moved without the path following would be a **new** departure
+/// rather than the fix. `Painter::file_row` draws the kind letter and then the
+/// path from one origin, so the two travel together only for as long as nothing
+/// pulls them apart.
+///
+/// **Two claims, and each has a mutation that kills it and leaves the sigil gate
+/// green.** Widening the kind letter's own gap (`format!("{} ")` to `"{}  "` in
+/// `Painter::file_row`) moves every path without moving a sigil, and only the
+/// per-row `path - sigil` assertion below sees it. Moving one region's origin
+/// reddens this and the sigil gate together, which is the overlap being paid for
+/// rather than hidden.
+///
+/// **What it does not reach, said out loud.** Narrowing a region's *width* moves
+/// the right-anchored glance elements and truncates the path sooner; it does not
+/// move the path's origin, so nothing here fires. That is `MIN_PATH_WIDTH`'s
+/// property and `Columns`' gates hold it. An earlier version of this docblock
+/// claimed the narrowing case, and the claim was false in a way no run could
+/// show: the assertion then read `listed + KIND == streamed + KIND + owed`, which
+/// cancels to the gate above it, so the test could not fail alone whatever it
+/// claimed. Found by review, not by a run, because a gate that restates its
+/// neighbour is green for its neighbour's reasons.
+#[test]
+fn the_path_starts_in_one_column_in_both_regions() {
+    /// Columns the kind letter and its gap take at the head of a file row.
+    /// Restated rather than imported, on this file's rule.
+    const KIND: usize = 2;
+
+    let view = pinned_and_streamed();
+    let chrome = chrome();
+    let mut compared = (0usize, 0usize);
+
+    for width in WIDTHS {
+        let Some((list_row, diff_row)) = region_rows(width, 24, &view, &chrome) else {
+            continue;
+        };
+        let rows = rows_at(width, 24, &view, &chrome);
+        let (Some(listed), Some(streamed)) = (
+            rows.get(list_row).and_then(|row| path_column(row)),
+            rows.get(diff_row).and_then(|row| path_column(row)),
+        ) else {
+            continue;
+        };
+
+        // **Owed only while a caret is actually drawn.** Below the caret's own
+        // floor the marker is dropped and the list charges nothing for it, so
+        // the two regions agree at those widths as well. Read off the drawn row
+        // rather than re-derived, which keeps this gate about the *column* and
+        // leaves whether the caret exists at all to
+        // `the_caret_threshold_is_the_row_floor_it_claims`.
+        let owed = caret_owes(&rows[list_row], width);
+
+        assert_eq!(
+            listed,
+            streamed + owed,
+            "at {width} columns the list's path starts in column {listed} and the \
+             heading's in column {streamed}, where the caret is owed {owed} \
+             column(s) of the row's own\n  list: {:?}\n  diff: {:?}",
+            rows[list_row],
+            rows[diff_row]
+        );
+
+        // **And the path really is a path's width from its own sigil**, which is
+        // the half that makes this more than the gate above restated. The two
+        // could agree with each other while both had lost the blank after the
+        // kind letter, and a sweep over the *difference* alone cannot see that:
+        // it cancels. `sigil_column` is read again here rather than threaded
+        // down, because what is being checked is the distance between two
+        // independently found columns on one row.
+        for (label, row) in [("list", &rows[list_row]), ("diff", &rows[diff_row])] {
+            let sigil = sigil_column(row).expect("a row with a path has a sigil");
+            let path = path_column(row).expect("checked above");
+            assert_eq!(
+                path - sigil,
+                KIND,
+                "at {width} columns the {label} row's path starts {} columns after \
+                 its sigil rather than {KIND}, so the kind letter and its gap \
+                 changed width: {row:?}",
+                path - sigil
+            );
+        }
+
+        if caret_is_lent(width) {
+            compared.0 += 1;
+        } else {
+            compared.1 += 1;
+        }
+    }
+
+    let (above, below) = compared;
+    assert!(
+        above > 0 && below > 0,
+        "the sweep compared {above} widths where the pane lends the caret its column \
+         and {below} where it does not, so it never crossed the rung it is about"
+    );
+}
+
+/// The **threshold**, which nothing that reads the drawn output can see.
+///
+/// `SPEC.md` §11.1 drops the caret on a pane too narrow to carry it and still
+/// name the file, and the comparison that decides is made before anything is
+/// drawn. Every other caret gate in this repository asserts the branch that was
+/// taken; this one asserts the branch **condition**. That is the shape the
+/// recorded lesson about hand-kept thresholds names: the drawn side stays correct
+/// and only the width at which the element vanishes drifts, invisibly.
+///
+/// It matters more since [#173](https://github.com/breferrari/vigia/issues/173),
+/// because what the caret costs a row is a function of the width now. A restated
+/// flat two would be wrong above the margin ladder's floor and a restated flat
+/// one wrong below it, and neither would show up in any rendered row.
+///
+/// **Both directions.** *Never drawn where the row cannot afford it* is what
+/// `a_row_keeps_its_floor_after_both_the_bar_and_the_caret` holds in
+/// `tests/render.rs`. What is only here is the converse, *always drawn where it
+/// can be*, which is what fails when a floor is left overstated after the pieces
+/// it sums get cheaper. The constant this replaced read eighteen columns and
+/// would have gone on reading eighteen while the caret had come to cost one.
+#[test]
+fn the_caret_threshold_is_the_row_floor_it_claims() {
+    /// The kind letter and its gap, plus `MIN_PATH_WIDTH`. Restated.
+    const ROW_FLOOR: usize = 2 + 12;
+    /// The bar's column and the blank in front of it, paid whether or not a bar
+    /// is drawn. Restated.
+    const BAR: usize = 2;
+
+    let view = pinned_and_streamed();
+    let chrome = chrome();
+    let (mut drawn, mut dropped) = (0usize, 0usize);
+
+    for width in WIDTHS {
+        let Some((list_row, _)) = region_rows(width, 24, &view, &chrome) else {
+            continue;
+        };
+        let rows = rows_at(width, 24, &view, &chrome);
+        let Some(row) = rows.get(list_row) else {
+            continue;
+        };
+
+        // `caret_gutter` written out rather than imported: what the marker takes
+        // off the row is only what the pane's own margin cannot lend it.
+        let inset = inset_at(width);
+        let gutter = CARET_WIDTH.saturating_sub(inset);
+        let left = usize::from(width)
+            .saturating_sub(BAR)
+            .saturating_sub(inset)
+            .saturating_sub(gutter);
+        let affordable = left >= ROW_FLOOR;
+        let marked = row.starts_with(CARET);
+
+        assert_eq!(
+            marked,
+            affordable,
+            "at {width} columns the row {} a caret while its floor says it {}: \
+             the pane leaves {left} columns after the bar's {BAR}, the inset's \
+             {inset} and the caret's {gutter}, against the {ROW_FLOOR} the row \
+             needs to name its file: {row:?}",
+            if marked { "draws" } else { "draws no" },
+            if affordable { "can" } else { "cannot" },
+        );
+
+        if affordable {
+            drawn += 1;
+        } else {
+            dropped += 1;
+        }
+    }
+
+    assert!(
+        drawn > 0 && dropped > 0,
+        "the sweep saw the caret affordable at {drawn} widths and unaffordable \
+         at {dropped}, so it never crossed the threshold it is about"
+    );
+}
+
+/// `SPEC.md` §11.1, and the one boundary on this pane that was drawn with
+/// nothing at all.
+///
+/// > The header row sits directly against the first row of the pinned list, with
+/// > nothing between them. It should have a row, or half a row, of separation.
+/// > -- [#174](https://github.com/breferrari/vigia/issues/174)
+///
+/// **Coextensive with the list, exactly as the rule under it is.** §11.2 B11
+/// rests on `rule: list > 0` making the rule and the list one thing, and the lead
+/// blank is given that same shape: a body with no map has nothing to separate the
+/// header from. So this asserts the row is blank wherever a list is drawn **and**
+/// that the layout keeps no lead where one is not, which is what stops the fix
+/// from being a row spent unconditionally on chrome announcing an absent region.
+#[test]
+fn the_body_opens_with_one_blank_row_under_the_header() {
+    let chrome = chrome();
+    let (mut separated, mut joined) = (0usize, 0usize);
+
+    // Both fixtures at every height, so the two sides of the claim are swept
+    // rather than sampled at one pane each. `empty()` is B3's screen, which draws
+    // one line of prose and no map at all.
+    for (view, drawable) in [(pinned_and_streamed(), true), (empty(), false)] {
+        for height in 2..=40u16 {
+            for width in [40u16, 64, 80, 120] {
+                let split = body_layout(Rect::new(0, 0, width, height), &chrome, view.files)
+                    .clamped_to(view.list.len());
+                if split.list > 0 {
+                    assert!(
+                        drawable,
+                        "at {width}x{height} the empty state drew a list, so this \
+                         sweep is not reading the screen it thinks it is"
+                    );
+                    // **Rendered only on the branch that reads a row.** The
+                    // `else` below asserts a fact about `Body` alone, and
+                    // `empty()` takes it at every pane in the sweep, so drawing
+                    // before the branch threw a whole screen away on half of it.
+                    // Indexed rather than guarded, too: `rows_at` returns exactly
+                    // `height` rows and this loop starts at two, so `rows.get(1)`
+                    // could never be `None` and the guard read as a case that
+                    // does not exist.
+                    let rows = rows_at(width, height, &view, &chrome);
+                    let under = &rows[1];
+                    // `rows_at` trims trailing blanks, so a wholly blank row is
+                    // the empty string. Asserted that way rather than by counting
+                    // spaces, which would also pass on a row the renderer had
+                    // painted furniture into and then blanked at the end.
+                    assert!(
+                        under.is_empty(),
+                        "at {width}x{height} the row under the header is \
+                         {under:?} rather than the blank a drawn list is owed"
+                    );
+                    separated += 1;
+                } else {
+                    assert_eq!(
+                        split.lead, 0,
+                        "at {width}x{height} the layout kept a lead blank with no \
+                         list under it, so a row went to chrome announcing an \
+                         absent region"
+                    );
+                    joined += 1;
+                }
+            }
+        }
+    }
+
+    assert!(
+        separated > 0 && joined > 0,
+        "the sweep saw {separated} screens with a list and {joined} without, so \
+         it never exercised both sides of the rule"
+    );
+}
+
+/// What the whole of [#174](https://github.com/breferrari/vigia/issues/174)'s
+/// design rests on, and what no snapshot in this repository states.
+///
+/// The blank the body opens with **is** the masthead's leading air when a band is
+/// drawn, rather than a row on top of it. So a masthead screen spends exactly the
+/// rows it spent before the separator existed, and #174's cost falls only on the
+/// masthead-off screen, which is the default since
+/// [#204](https://github.com/breferrari/vigia/issues/204).
+///
+/// **Asserted as the total, because the total is the claim.** How the four rows
+/// divide between `lead`, `graph` and `air` is an arrangement that may reasonably
+/// move; that a band pane keeps four rows between its header and its list, so the
+/// list starts where it always did, is the promise. Folding the lead on top of
+/// the band instead of into it would leave every field looking sensible and push
+/// the list down a row on the one screen a reader turned the band on for.
+#[test]
+fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
+    /// Rows a band pane keeps between the header and the list: two of band with a
+    /// blank either side. Restated rather than imported, and it is the number
+    /// that shipped before the header had a separator at all.
+    const BAND_AND_AIR: usize = 4;
+
+    let view = pinned_and_streamed();
+    let with = Chrome {
+        masthead: true,
+        ..chrome()
+    };
+    let without = Chrome {
+        masthead: false,
+        ..chrome()
+    };
+    let mut banded = 0usize;
+
+    for height in 2..=40u16 {
+        for width in [40u16, 64, 80, 120] {
+            let area = Rect::new(0, 0, width, height);
+            let shown = body_layout(area, &with, view.files).clamped_to(view.list.len());
+            if shown.graph == 0 {
+                continue;
+            }
+
+            assert_eq!(
+                shown.above_list(),
+                BAND_AND_AIR,
+                "at {width}x{height} a band pane keeps {} rows between its header \
+                 and its list rather than the {BAND_AND_AIR} it kept before the \
+                 header gained a separator, so the band grew a row nobody asked \
+                 it for",
+                shown.above_list()
+            );
+            assert_eq!(
+                shown.lead, 1,
+                "at {width}x{height} the band swallowed the header's own blank, \
+                 so hiding the band would put the header back against the list"
+            );
+
+            // And the trade is one-directional: hiding the band gives back the
+            // band and its own air, never the lead. The row *counts* are what
+            // `hiding_the_masthead_gives_its_rows_to_the_diff` holds in
+            // `tests/render.rs`; what is only here is that the separator survives
+            // the toggle at every pane that can draw a band at all.
+            let hidden = body_layout(area, &without, view.files).clamped_to(view.list.len());
+            assert_eq!(
+                hidden.lead, shown.lead,
+                "at {width}x{height} turning the masthead off took the header's \
+                 separator with it"
+            );
+
+            banded += 1;
+        }
+    }
+
+    assert!(
+        banded > 0,
+        "no pane in the sweep drew a band, so this gate asserts nothing"
     );
 }
