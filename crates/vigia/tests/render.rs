@@ -3740,7 +3740,7 @@ fn the_caret_marks_the_file_the_diff_is_inside() {
             // ([#173](https://github.com/breferrari/vigia/issues/173)). The
             // marker stands outside the text it points into instead of pushing
             // it right, which is what `assets/preview.svg` draws (window edge
-            // `x=8`, caret `x=16`, every content origin `x=32`) and what puts
+            // `x=8`, caret `x=8`, every content origin `x=32`) and what puts
             // this region's sigil in the same column as a heading's.
             let marked = buffer[(0, row + LIST_TOP)].symbol() == CARET;
             assert_eq!(

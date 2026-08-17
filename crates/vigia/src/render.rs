@@ -731,8 +731,12 @@ const fn affords_bar(width: u16) -> bool {
 /// `assets/preview.svg` draws its **furniture** to the window's edge and its
 /// **text** one to three cells inside it. Measured off the file: the nine row
 /// washes span `x=8 width=884` and the region rule runs `x1=8` to `x2=892`, which
-/// is the window exactly, while the nearest glyph is the caret at `x=16` and the
-/// text proper begins at `x=32`. The shell drew everything from column 0, and by
+/// is the window exactly, while the text proper begins at `x=32`. (The caret was
+/// at `x=16` when this was written and is at `x=8` since
+/// [#173](https://github.com/breferrari/vigia/issues/173) put it on the pane's own
+/// edge, which is a *licensed* glyph outside the margin rather than a counterexample
+/// to it: the ladder is about text, and the sentence above is still what the picture
+/// says about text.) The shell drew everything from column 0, and by
 /// §5.1's own law a picture in a public README is a specification, so that was a
 /// fourth undocumented departure from it rather than a choice
 /// ([#119](https://github.com/breferrari/vigia/issues/119)).
@@ -3973,7 +3977,7 @@ impl Painter<'_> {
 
         // **The caret sits on the pane's own leading column, and the row starts
         // after whatever margin is left over.** `assets/preview.svg` puts the
-        // window edge at `x=8`, the caret at `x=16` and every content origin at
+        // window edge at `x=8`, the caret at `x=8` and every content origin at
         // `x=32`: the marker stands *outside* the text rather than pushing it
         // right, which is the arrangement
         // [#173](https://github.com/breferrari/vigia/issues/173) restores. The

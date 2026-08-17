@@ -153,7 +153,7 @@ The counters lend colour only where it says something: a `-0` stays grey, becaus
 
 Every signal above is about **one file**. Press `m` and the **masthead** opens under the header: the same two-minute window, summed across **every** file at once.
 
-*(Two names, one thing: the* masthead *is the block at the top of the page, in the newspaper sense, and the* churn band *is the graph drawn in it.)*
+Two names for one thing, and both are used: **masthead** is the block at the top of the page, in the newspaper sense, and **churn band** is the graph drawn in it.
 
 ```
                  ▂▃▅▇▅▃▂
@@ -194,8 +194,8 @@ The blank above the band is the row the header keeps between itself and the list
 | `n` `p` | next / previous file |
 | `1` to `6` | jump to that list row |
 | `J` `K` | scroll the pinned list |
-| `f` | follow the newest change |
-| `m` | the churn band |
+| `f` | follow the newest change, or stop |
+| `m` | show or hide the masthead |
 | `?` | **all of this, on screen** |
 
 </td><td valign="top" width="50%">
@@ -280,7 +280,9 @@ VIGIA_THEME=light    # the same design for a light terminal
 VIGIA_THEME=~/themes/mine
 ```
 
-A three-line file is a normal size for one:
+Nothing else is read. There is no flag for either, and no setting in one can change the other.
+
+A theme file is usually about three lines. `base` picks a palette to start from and every line after it overrides one thing, so this keeps your terminal's own sixteen colours and adds the two backgrounds `ansi` declines to guess:
 
 ```ini
 base        = ansi
@@ -383,11 +385,12 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 **It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows and their left bars, the highlighted diff, and the status bar.
 
-**The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. Three are written down:
+**The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. Two are:
 
 - The left of the header reads the **worktree's name** rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree.
-- Both regions draw a file the **same way**, where the mockup gives the diff's own heading no counters. A file scrolled out of a capped list would otherwise take its counters with it and leave nowhere to read them.
 - The mockup orders a row's right-hand side differently from the renderer. That is a question about reading order rather than about elements, and it is open rather than settled.
+
+Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the caret standing on the pane's own edge, and the diff's heading drawing the same row as the list above it.
 
 </details>
 
