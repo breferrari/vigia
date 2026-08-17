@@ -95,69 +95,65 @@ const CONTINUES: &str = "›";
 /// has least to go on. `tests/legibility.rs` gates both properties over the
 /// rungs it observes by rendering, so this table cannot drift from what ships.
 ///
-/// The drop order is `SPEC.md` §11.1's ruling. `? keys` goes first, then
-/// `jk scroll`, and `f follow` is last standing: `q` and `jk` are pager reflexes
-/// and four keys reach quit, while `f` is the one nobody would guess and the
-/// only one that restores a state a reader can lose without noticing. It only
-/// fires below twenty-nine columns, because above that [`Footer`] gives the bar
-/// a line of its own rather than shortening it.
+/// **Three items, and that is the whole bar** ([#80](https://github.com/breferrari/vigia/issues/80),
+/// ruled 2026-08-17 from use: *"keep only q f and ? on the bottom bar"*). The
+/// widest rung was forty columns of advice when the keymap lived here, and B12
+/// moved the keymap to a sheet, so the bar's job is now to name the way out, the
+/// state a reader can lose invisibly, and the door to everything else. `jk scroll`
+/// went with `JK files`: both are on the sheet, and a scroll key is the gesture a
+/// pager reader tries first without being told.
 ///
-/// **The bonus rung is `? keys` since B12, where it was `JK files`**, and the
-/// swap is the smallest form of that ruling's second-order effect: the bar's job
-/// stops being to carry the keymap and becomes to point at the sheet that does.
-/// `JK files` is not lost, it moved, and it is one of sixteen rows there instead
-/// of one of four items here. Two columns came back with the trade, since the
-/// widest bar is thirty-eight where it was forty, so the frame and memory cells
-/// now arrive two columns earlier than
-/// [#147](https://github.com/breferrari/vigia/issues/147) measured them.
-/// What that issue asks is still open: this changes which rung is bonus, not
-/// whether a bonus rung may cost a readout.
+/// The drop order is `SPEC.md` §11.1's, unchanged in its reasoning and shorter in
+/// its list: `q quit` goes first because `q` is a pager reflex and four keys reach
+/// quit, then `? keys`, and `f follow` is last standing because it is the one that
+/// restores a state whose *absence* is invisible.
 ///
-/// **The rest of [#80](https://github.com/breferrari/vigia/issues/80) is
-/// deliberately untouched**, which is the line B12 drew: whether the arrows stay
-/// unadvertised and whether an item may express a modifier relationship are that
-/// issue's to rule, and neither is answered by moving one item.
+/// **`? keys` outranks `q quit` and yields to `f follow`**, which is the one
+/// ordering decision this table adds. It sits above quit because a reader who
+/// cannot find the keymap cannot find anything else either, and below follow
+/// because a sheet a reader has not opened costs them nothing while a follow mode
+/// they cannot see costs them the screen.
 ///
-/// It is a **bonus rung**, and [`HINT_BASELINE`] is what makes that true rather
-/// than a hope: adding it made the widest bar forty columns, which is exactly the
-/// width I6 is named for, and the footer immediately took a second line there
-/// against a gate that had asserted otherwise since I6 landed. One body row spent
-/// on advice at the pane's worst width, for every reader, including the ones who
-/// never press `J`.
-const HINT_RUNGS: [&str; 5] = [
-    "q quit · f follow · jk scroll · ? keys",
-    "q quit · f follow · jk scroll",
-    "q quit · f follow",
+/// The widest bar is twenty-three columns where it was thirty-eight, so both
+/// status readouts arrive far earlier than
+/// [#147](https://github.com/breferrari/vigia/issues/147) measured them, and the
+/// footer no longer takes a second line at forty columns at all. That issue's own
+/// question is *still* not answered: with this table there is no bonus rung to
+/// argue about, since [`HINT_BASELINE`] is rung zero and every rung is one a
+/// reader is owed.
+const HINT_RUNGS: [&str; 4] = [
+    "q quit · f follow · ? keys",
+    "f follow · ? keys",
     "f follow",
     "",
 ];
 
 /// The rung whose fit decides whether the footer takes a second line.
 ///
-/// **Not rung zero, and that is the whole point of it being named.** The footer
-/// grows when the bar cannot sit beside the state on one line, and measuring that
-/// against the *widest* rung would let any hint added above this one change the
-/// footer's height at widths where the old bar fitted perfectly well. Rungs above
-/// this are drawn where there happens to be room and are never worth a row.
+/// **Rung zero since [#80](https://github.com/breferrari/vigia/issues/80), and it
+/// used to be rung one.** The constant exists because the footer grows when the bar
+/// cannot sit beside the state on one line, and measuring that against a rung
+/// nobody is owed would let an optional hint buy a body row: `JK files` did exactly
+/// that, making the widest bar forty columns so the footer took a second line at
+/// the width I6 is named for, for every reader including the ones who never
+/// pressed `J`.
 ///
-/// Everything from here down is what `SPEC.md` §11.1 rules a reader is owed at
-/// forty columns; above it is what a wider pane can afford.
+/// **There is no bonus rung left to guard.** The bar is three items a reader is
+/// owed at every width that can hold them, twenty-three columns at its widest, and
+/// twenty-three plus the state's thirteen plus a gap fits the forty-column pane
+/// with two columns to spare. So the thing this constant was invented to prevent
+/// cannot happen from this table, and it stays named rather than inlined because
+/// what it prevents is a *future* hint added above the baseline without anyone
+/// noticing what it spent.
 ///
-/// **A bonus rung is free of a row and not free of columns, and this is the
-/// sentence to read before adding one.** [`Footer::plan`] hands the diagnostics
-/// whatever survives the state, the gap and the hints, so every column a wider
-/// bar takes is a column the readouts lose, and nothing here stops that. What it
-/// costs today: `JK files` is why the frame cell first arrives at 69 columns and
-/// the pair at 77. A fifth hint of ten columns was measured at 81 and 89, which
-/// is what [#121](https://github.com/breferrari/vigia/issues/121) refused, and
+/// [`Footer::plan`] still hands the diagnostics whatever survives the state, the
+/// gap and the hints, so a wider bar still costs the readouts columns:
 /// `crates/vigia/tests/legibility.rs::a_wider_hint_bar_cannot_quietly_push_the_readouts_out`
-/// is the gate that will say so rather than letting it pass quietly.
-///
-/// Whether that ordering is *right* is deliberately not settled here:
-/// §11.1's drop order puts advice above instrumentation at every width, and
-/// whether a rung nobody is owed is exempt from it is
-/// [#147](https://github.com/breferrari/vigia/issues/147).
-const HINT_BASELINE: usize = 1;
+/// pins where each cell arrives, and
+/// [#147](https://github.com/breferrari/vigia/issues/147)'s question survives this
+/// change with nothing to point at, which is worth saying plainly rather than
+/// letting it read as answered.
+const HINT_BASELINE: usize = 0;
 
 /// What joins two hints.
 ///
@@ -2402,7 +2398,22 @@ impl<'a> Footer<'a> {
         ));
         // The gap keeps the state from touching the hints, and is only owed when
         // there is a state to keep away from them.
-        let taken = if reserved == 0 { 0 } else { reserved + 1 };
+        //
+        // **[`CELL_GAP`] rather than one column, corrected 2026-08-17 by
+        // [#80](https://github.com/breferrari/vigia/issues/80).** One column was
+        // invisible while the baseline rung was twenty-nine wide, because
+        // `29 + 13 + 1` overflows a forty-column pane and the footer took its
+        // second line before the two could ever meet. A three-item bar is
+        // twenty-six, `26 + 13 + 1` is exactly forty, and the pane drew
+        // `? keys follow ▶` with a single space between them, where the hint
+        // separator is ` · ` and every group on this row is two columns from the
+        // next. State read as a fourth hint. The gap the diagnostics group already
+        // uses is the one this owes too.
+        let taken = if reserved == 0 {
+            0
+        } else {
+            reserved + CELL_GAP.len()
+        };
 
         // A second line is worth taking only if it buys something: there has to
         // be a state to move up to it, and a body still worth showing

@@ -3079,13 +3079,20 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     // a ladder that simply never draws the extra hint: somewhere wide enough, the
     // bar really is wider than the baseline.
     //
-    // **Both sides are extracted the same way, which is a correction B12 forced.**
-    // The forty-column side used to be the whole trimmed footer *line*, state
-    // included, and it was compared against the hint bar alone at 120. That
-    // passed only while the bonus bar was wide enough to beat a narrow bar plus
-    // its state: swapping `JK files` for the two-columns-shorter `? keys` made a
-    // real bonus rung read as no bonus rung at all. A comparison whose two sides
-    // are not the same quantity is a gate that happens to be green.
+    // **The claim inverted on 2026-08-17, and this is the same fact from the other
+    // side.** It used to be *somewhere wide enough the bar really is wider than
+    // the baseline*, which is what made the rule above worth gating: a bonus rung
+    // existed and had to be kept from buying a row. [#80](https://github.com/breferrari/vigia/issues/80)
+    // cut the bar to three items a reader is owed at every width, so `HINT_BASELINE`
+    // is rung zero and **no rung above it exists**. The assertion is therefore that
+    // the widest pane draws exactly what the forty-column pane draws: nothing is
+    // held back for a wide screen, so nothing can be spent on a row.
+    //
+    // Both sides are extracted the same way, which is a correction B12 forced: the
+    // forty-column side used to be the whole trimmed footer *line*, state included,
+    // compared against the hint bar alone at 120. That passed only while the bonus
+    // bar was wide enough to beat a narrow bar plus its state, and a comparison
+    // whose two sides are not the same quantity is a gate that happens to be green.
     let bar_at = |width: u16| {
         let line = rows_at(width, tall, &view, &chrome())
             .last()
@@ -3103,10 +3110,15 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     };
     let baseline = bar_at(40);
     let hints = bar_at(120);
+    assert_eq!(
+        hints, baseline,
+        "the widest pane drew {hints:?} where forty columns drew {baseline:?}, so \
+         a rung is being held back for wide screens and the constant that stops it \
+         buying a footer row is load bearing again rather than structural"
+    );
     assert!(
-        hints.len() > baseline.len(),
-        "the widest pane drew {hints:?}, no more than the forty-column bar \
-         {baseline:?}, so there is no bonus rung to protect"
+        !baseline.is_empty(),
+        "neither pane drew a hint bar at all, so the comparison above proves nothing"
     );
 
     // And the height never grows as a pane gets wider, which is the general
@@ -3141,21 +3153,23 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
 /// stops a bonus rung from buying a footer **row** and stops nothing else, and
 /// these two numbers are what make the next layer visible.
 ///
-/// Derived rather than chosen: at 66 columns the drawn bar is 38 wide, the state
-/// and its gap take 14, and 64 − 14 − 2 − 38 leaves 10, which holds neither cell;
+/// Derived rather than chosen: at 55 columns the drawn bar is 26 wide, the state
+/// and its gap take 15, and 53 − 15 − 2 − 26 leaves 10, which holds neither cell;
 /// one column of pane later it holds the frame's 11. Change the state ladder, the
 /// diagnostics ladder or the margins and these move legitimately, so a failure
 /// here is a question rather than a verdict. Change the **hints** and they move
 /// because a hint was paid for out of a readout, which is the case this exists
 /// for.
 ///
-/// **They moved inward on 2026-08-17, from 69 and 77, and that is a hint being
-/// paid *back*.** B12 swapped the bonus rung `JK files` for `? keys`, which is two
-/// columns narrower, so both cells arrive two columns of pane earlier than
-/// [#147](https://github.com/breferrari/vigia/issues/147) measured them. That
-/// issue's question is untouched: this is which rung is bonus, not whether a bonus
-/// rung may cost a readout.
-const READOUT_RUNGS: [(u16, usize); 2] = [(67, 1), (75, 2)];
+/// **They have moved twice on 2026-08-17, from 69 and 77 to 67 and 75 and then to
+/// here, and both moves are hints being paid *back*.** B12 swapped `JK files` for
+/// the two-columns-narrower `? keys`, and [#80](https://github.com/breferrari/vigia/issues/80)
+/// then cut `jk scroll` as well, taking the widest bar from 38 columns to 26, so
+/// each cell arrives about eleven columns of pane earlier than
+/// [#147](https://github.com/breferrari/vigia/issues/147) measured it. **That issue
+/// is not answered, it has lost its subject**: with every rung one a reader is owed,
+/// there is no bonus rung whose precedence over a readout could be argued.
+const READOUT_RUNGS: [(u16, usize); 2] = [(56, 1), (64, 2)];
 
 #[test]
 fn a_wider_hint_bar_cannot_quietly_push_the_readouts_out() {
