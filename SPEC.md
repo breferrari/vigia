@@ -1103,3 +1103,71 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 **What reopens it is not #125, and saying so is the correction that matters most for whoever reads this next.** An earlier draft named #125 on the ground that a speaking rule *"earns where many regions compete for identity"*. #125 proposes no such thing: its widest rung turns the list from a strip above the diff into a **left rail**, which is the same two regions rearranged, and it says outright *"Not the borders — #124 owns the chrome question … Ruled apart they still stand alone."* A left rail has no horizontal rule at all, so #125 does not reopen B11, it **dissolves** it: the subject stops existing and the question becomes a different one. What would genuinely reopen this is [#72](https://github.com/breferrari/vigia/issues/72) measuring the quantity the ruling turns on — how much of a real session is spent at a file boundary against scrolled inside one — because that is what decides whether the row is usually there, and the structural objection in the first paragraph is what a reopening has to answer first.
 
 **Declining costs the picture nothing, which the issue made a deliverable of the other branch.** `assets/preview.svg` draws the rule at `y=178` and the heading at `y=202`, two separate rows, so the artifact and the shell already agree and no departure is created. The count of standing departures is left alone here rather than asserted, because §5.1 records a first, a second, a third and a fourth while two other sentences still say the total is two, and reconciling that is its own question ([#156](https://github.com/breferrari/vigia/issues/156)). `crates/vigia/tests/render.rs::the_rule_separates_the_regions_and_spans_the_pane` is what fails if the rule ever speaks: it asserts the rule row **equals** the rule glyph repeated across the pane at 40, 64 and 120 columns, and asserts the rows above and below do not contain that glyph, so a title in the line reddens it on the first character.
+
+**B12 — where the keymap lives once it outgrows the hint bar: a gestures sheet drawn over the pane. Ruled 2026-08-17: yes, on a ground that is structural rather than spatial.** ([#167](https://github.com/breferrari/vigia/issues/167); the build is [#206](https://github.com/breferrari/vigia/issues/206).) `?` toggles a centred, bordered sheet of the keymap, composited over cells that are already drawn. *It buys space* is true and is the weaker half of the case. The stronger half is that **an overlay is the only form of a cheatsheet that cannot move content**, and §11.1 has already ruled that a transient thing may not: the footer refuses to grow for a notice so that a file vanishing between being named and being read cannot jog a reader's diff. Every answer that lives in the footer runs at that rule from the other side, because more items is more width, more width brings the second footer line at more pane widths, and the second line takes a row off the diff. That route is not merely tight, it is **full**: [#121](https://github.com/breferrari/vigia/issues/121) measured the eighty-column footer at 40 columns of hints, 2, 19 of readouts, 2 and 13 of state, which is exactly the 76 that eighty leaves after the inset. An overlay changes no rect and takes no row.
+
+**The key is `?`, and the reference class is unanimous.** `btop`, which §2 makes the reference for what monitor-class feels like, opens its help on `?`; so does `bottom`, which runs the same `ratatui` plus `crossterm` pair §6 names; `rtop` uses `?` or F1, `htop` uses F1, `less` uses `h`. It is also unbound here, so nothing is overloaded. **`h` is refused**: it is a vi *motion* everywhere else and this pane has no horizontal scroll to give it, so the one reader who guesses would guess wrong.
+
+**`Esc` does not close it, and that is a fact about this keymap rather than about the convention.** `bottom` closes its help with `Esc` and can afford to, because its own binding table reads `q`, `Q`, `Ctrl-c` for **Quit** and `Esc` for *"close dialog windows, search, widgets, or exit expanded mode"*, which is dismissal and never departure. This pane binds `Esc` to Quit. Adopting the convention here would teach a reader that `Esc` means *dismiss the thing in front of me*, one keystroke from the meaning it carries on every other frame, which is *end the program*. So dismissal is the toggle and the close control, and the convention is declined on the specific ground that `Esc` is already spent.
+
+**The sheet is not a mode, which is what reconciles it with B4.** No key changes meaning while it is up: `q` still quits, `j` still scrolls the diff behind it, a digit still jumps. Only `?` and the close control dismiss it. B4 refused selection and focus because *"selection implies focus, focus implies a second mode, and modes are reviewer-class"*, and what makes that defect real is keys meaning different things depending on where focus sits. Here that is impossible by construction rather than by discipline, so this is a third thing the pane can be **drawing**, which it already is with the masthead, and not a third thing it can **be**.
+
+**What it costs is stated rather than softened: it covers the content this tool exists to show.** That is the real objection to it and the answer is not that the cost is small, it is that the cost is **held by the reader**: a sheet is asked for and dismissed in the same second, where chrome that takes rows takes them from everybody on every frame. The rows the masthead spends are the comparison, and they are why `m` exists.
+
+**Centred rather than full pane**, so the header, the footer and the edges of the diff stay visible and a reader can see the tool is still alive behind the sheet. A full-pane sheet hides the state a monitor exists for, which is the one thing that must not go dark while someone reads instructions about it.
+
+**It is retained state rather than a one-frame draw, and this is the constraint most likely to be missed.** The pane wakes on filesystem events, so an agent's write redraws the frame underneath the sheet, and a sheet that lived for one frame would be dismissed at random by somebody else's build. The mechanism is one issue old and is followed rather than invented: `m` gave the masthead a private `App` field, a `Chrome` field the drawers read and an `Action` the keymap resolves to. **It snaps** in both directions, which is §5.3's *snap, never ease* and not a preference: an animation needs a clock, and a clock needs the timer I1 forbids.
+
+**It degrades on two axes, and both floors live in the layout rather than in the painter.** Width drops the second column of pairs first, then the alias spellings from the right of a keys cell, then whole rows. Height drops the mouse group before the keyboard group, then rows from the top of the keyboard group down, leaving `f`, `m` and `?` last. That order is §11.1's own reason applied one surface over: the unguessable outlives the reflexive, which is why `f follow` is the hint bar's last rung standing. The floors belong to the body's split for the reason [#158](https://github.com/breferrari/vigia/issues/158) paid for once already, where the band's width floor lived only in the drawer for one commit and a narrow pane reserved four rows for a region the painter then declined to draw. **Below its floor `?` still toggles and nothing is drawn**, which is exactly what `m` does on a pane that cannot carry the band: a key whose effect is sometimes invisible is better than one that is sometimes not a key.
+
+**I1 is untouched, and the frame budget is quoted with its headroom rather than as a ceiling.** A reader pressing `?` is not idle, so I1's *0 wakeups while idle* does not reach this in either direction, and §5.3 prices ink at zero. The frame path sits at 2.4ms p50 and 3.1ms p99 against I9's 16ms, and the sheet **covers** diff rows carrying highlighted spans with about nineteen rows of plain text, so the expectation is that it costs less than what it hides. That is an expectation and #206 owes the measurement.
+
+**The shape, at eighty columns.** Fifty-six columns wide and nineteen rows, centred, with a twenty-two column keys field and a twenty-eight column verb field. One row per **gesture**, aliases spelled inside the keys cell, which is the shape the README's table already has and which answers half of [#80](https://github.com/breferrari/vigia/issues/80)'s open question about whether an item may express a relationship rather than a key: here it may, because here there is room.
+
+```
+┌─ gestures ──────────────────────────────────────── ✕ ┐
+│ q  Esc  Ctrl+C  Ctrl+D  quit                         │
+│ j  k  ↓  ↑              scroll a row                 │
+│ Space  PgDn  PgUp       page                         │
+│ d  u                    half a page                  │
+│ g  Home  /  G  End      first / last changed file    │
+│ n  /  p                 next / previous changed file │
+│ 1  to  6                jump to that row of the list │
+│ J  K  Shift+↑  Shift+↓  scroll the pinned file list  │
+│ f                       follow the newest change     │
+│ m                       show or hide the churn band  │
+│ ?                       this sheet                   │
+│ mouse ────────────────────────────────────────────── │
+│ wheel                   scroll what you point at     │
+│ drag a scrollbar        move that region             │
+│ click a track           send that region there       │
+│ click  ▲ ▼              one row, and repeats held    │
+│ click a listed file     jump the diff to it          │
+└──────────────────────────────────────────────────────┘
+```
+
+**And at forty columns**, thirty-eight wide and thirteen rows, with a fourteen column keys field and eighteen for the verb. Two rungs of the ladder are visible here rather than described: the mouse group is gone, and the alias cells have dropped from the right, so `q  Esc  Ctrl+C  Ctrl+D` is `q  Esc` while the arrows survive on `j  k`, because they are the alias a reader is likeliest to try.
+
+```
+┌─ gestures ────────────────────── ✕ ┐
+│ q  Esc          quit               │
+│ j  k  ↓  ↑      scroll a row       │
+│ Space  PgDn     page               │
+│ d  u            half a page        │
+│ g  /  G         first / last file  │
+│ n  /  p         next / prev file   │
+│ 1  to  6        jump to a list row │
+│ J  K            scroll the list    │
+│ f               follow the newest  │
+│ m               the churn band     │
+│ ?               this sheet         │
+└────────────────────────────────────┘
+```
+
+**The close control is the pane's first, and it inherits a vocabulary rather than inventing one**: [#166](https://github.com/breferrari/vigia/issues/166) settled that a button is a glyph in the chrome's own weight, with shape rather than colour telling it from what it sits on, and B10 settled that a click is always brighter than a hover. Which glyph is #206's to settle, on the same CP437 argument the step buttons had, since the `✕` drawn above is outside it exactly as `▲` and `▼` are.
+
+**What this does to [#80](https://github.com/breferrari/vigia/issues/80) is the second-order effect that made it worth ruling first.** Once the sheet exists, the hint bar's job stops being to carry the keymap and becomes to **point at it**, so #80 is re-scoped from *thirteen gestures do not fit at any width* to *which three items, and where does `? keys` sit in the ladder*. Something of the shape `q quit · f follow · ? keys` is three items where there are four today, so the bar gets **shorter** while the pane advertises more. The rung table stays #80's to write and is not ruled here. **[#147](https://github.com/breferrari/vigia/issues/147) is not settled either**, and it is worth saying plainly: whether a bonus rung may cost a status readout is the same question after this ruling as before it, only cheaper to answer in the readouts' favour, because a bar that points rather than lists competes for fewer columns.
+
+**The number stays in this section rather than moving to §11.1, against the convention stated at the top of §11.2, and deliberately**: §11.1 is *what the shell does today* and the sheet does not exist yet. It moves when #206 lands. Recording that here is cheaper than a reader finding a ruled behaviour absent from §11.1 and having to work out which of the two is wrong.
+
+**Declined, and what that would have cost, because the case for the road not taken gets raised again.** The keymap stays in the footer, #80 has to fit thirteen gestures into a bar that cannot grow without buying a second footer line at more widths, and #147 gets worse rather than better, since every item added to the bar is a column taken from the diagnostics group that already yields first. The honest summary of that branch is that the pane goes on advertising four gestures of the sixteen the sheet above lists, while the other twelve live only in the README, which is the state that produced this issue.
