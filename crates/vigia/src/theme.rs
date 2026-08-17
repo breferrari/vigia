@@ -355,13 +355,34 @@ palette! {
     added_row,
     /// The same, behind a removed line.
     removed_row,
-    /// The sigil cell of an added line, which is §5.1's left bar.
+    /// The pane's leading cell on an added line, which is §5.1's left bar.
     ///
-    /// The mockup's bar is three pixels of a nine-pixel cell, so it has no terminal
-    /// equivalent that does not spend a column, and I6 forbids spending one on
-    /// decoration. The sigil cell is the one cell that already means *this line
-    /// changed*, so it carries the bar by inverting: the diff hue behind, the row's
-    /// own wash in front.
+    /// **Background only, and it costs no column**
+    /// ([#218](https://github.com/breferrari/vigia/issues/218)). It is one cell of
+    /// the blank margin [`crate::render`]'s inset ladder already keeps, and the row
+    /// wash already bleeds under, so setting its background spends nothing that was
+    /// carrying content. Drawn wherever that margin exists, which is forty-three
+    /// columns up, and absent below it, where the wash and the sigil carry the
+    /// signal alone.
+    ///
+    /// **The reason it used to live on the sigil is recorded because it expired
+    /// rather than because it was wrong.** It read: *"the mockup's bar is three
+    /// pixels of a nine-pixel cell, so it has no terminal equivalent that does not
+    /// spend a column, and I6 forbids spending one on decoration"*, and the sigil
+    /// cell carried it by inverting. That was the best answer available when the
+    /// pane drew from column zero. [#119](https://github.com/breferrari/vigia/issues/119)
+    /// gave the pane a margin, the premise stopped being true, and nobody re-read
+    /// the refusal. It also never drew: every built-in left this key empty, so the
+    /// element §5.1 lists as *a tinted row with a coloured left bar* shipped as the
+    /// tint alone for three phases.
+    ///
+    /// **It reaches `ansi` and every depth, where the wash reaches neither**, and
+    /// the distinction is the whole reason this is a separate key. What rules the
+    /// wash out below 24-bit is stated about text: *a quantised background is a
+    /// solid block, and a block behind highlighted code destroys the colours on
+    /// it.* This cell has no code on it. It is one blank column, so there is
+    /// nothing for a background to destroy, and the default palette gets a
+    /// row-level diff signal §11.1 records it as having lost.
     added_bar,
     /// The same, on a removed line.
     removed_bar,
@@ -532,7 +553,10 @@ impl Theme {
     /// declines to draw one.
     ///
     /// Two styles rather than one lookup because they land on different cells: the
-    /// wash covers the row and the bar covers only the sigil.
+    /// wash covers the row and the bar covers the pane's own leading cell. They
+    /// also degrade separately, which is why neither can be derived from the other:
+    /// a wash is dropped below 24-bit because it sits behind highlighted code, and
+    /// a bar is not, because it sits behind nothing.
     pub fn row(&self, added: bool) -> (Style, Style) {
         if added {
             (self.added_row, self.added_bar)
@@ -653,8 +677,14 @@ impl Theme {
             // Unset, which is what "this palette draws no tint" is spelled as.
             added_row: Style::new(),
             removed_row: Style::new(),
-            added_bar: Style::new(),
-            removed_bar: Style::new(),
+            // **The bar, in names, and it is the one row-level diff signal this
+            // palette can carry.** §11.1 records the loss it is fixing: at sixteen
+            // colours the signal degrades to the sigil column, because a wash has
+            // to assume a background and this palette assumes none. That argument
+            // is about text on a background, and the bar has none: one blank cell
+            // of the pane's own margin, so there is nothing behind it to destroy.
+            added_bar: Style::new().bg(Color::Green),
+            removed_bar: Style::new().bg(Color::Red),
             note: fg(Color::Magenta),
             alert: fg(Color::Red).add_modifier(Modifier::BOLD),
             // The mockup's hues, mapped onto the sixteen names every terminal
@@ -811,13 +841,22 @@ impl Theme {
             // So the sigil keeps its own colour on the wash, which is what every
             // diff tool does and what the mockup itself draws: its bar is a
             // separate 3px sliver *beside* a green `+`, not a recolouring of it.
-            // The wash carries the band; the sigil carries the sign. The bar has
-            // no terminal equivalent that does not spend a column I6 forbids, and
-            // that is now recorded as a refusal instead of paid for by the sigil.
+            // The wash carries the band; the sigil carries the sign.
             //
-            // The keys stay, so a theme file can still ask for one.
-            added_bar: Style::new(),
-            removed_bar: Style::new(),
+            // **The bar itself was then refused, on a reason that has since
+            // expired** ([#218](https://github.com/breferrari/vigia/issues/218)).
+            // It read: *the bar has no terminal equivalent that does not spend a
+            // column I6 forbids.* True when the pane drew from column zero, false
+            // once [#119](https://github.com/breferrari/vigia/issues/119) gave it a
+            // margin, and nobody re-read the refusal. The margin is blank, the wash
+            // already bleeds under it, so the bar is a background on a cell that
+            // was carrying nothing.
+            //
+            // The picture's own colours, which is the point: the sliver beside the
+            // `+` is `#3fb950` and the one beside the `−` is `#f85149`, the same
+            // hues `added` and `removed` draw the sigils in.
+            added_bar: Style::new().bg(Color::Rgb(0x3f, 0xb9, 0x50)),
+            removed_bar: Style::new().bg(Color::Rgb(0xf8, 0x51, 0x49)),
             note: rgb(0xd2, 0xa8, 0xff),
             alert: rgb(0xf8, 0x51, 0x49).add_modifier(Modifier::BOLD),
             keyword: rgb(0xff, 0x7b, 0x72),
@@ -904,9 +943,11 @@ impl Theme {
             // lighter, for the reason every ramp in this palette is reversed.
             added_row: Style::new().bg(Color::Rgb(0xc0, 0xf0, 0xcd)),
             removed_row: Style::new().bg(Color::Rgb(0xff, 0xd4, 0xd1)),
-            // Unset, for the reason `dark` gives at length.
-            added_bar: Style::new(),
-            removed_bar: Style::new(),
+            // Set, for the reason `dark` gives at length, in this palette's own
+            // diff hues rather than the dark one's: a bar is a background on a
+            // blank cell, so what it has to clear is the page behind it.
+            added_bar: Style::new().bg(Color::Rgb(0x1a, 0x7f, 0x37)),
+            removed_bar: Style::new().bg(Color::Rgb(0xcf, 0x22, 0x2e)),
             note: rgb(0x82, 0x50, 0xdf),
             alert: rgb(0xcf, 0x22, 0x2e).add_modifier(Modifier::BOLD),
             keyword: rgb(0xcf, 0x22, 0x2e),

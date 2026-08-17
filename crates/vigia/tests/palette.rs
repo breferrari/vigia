@@ -143,8 +143,20 @@ fn draw(width: u16, height: u16, view: &View, theme: Theme) -> TestBackend {
 
 /// Every background on row `y`, one per cell, left to right.
 fn backgrounds(backend: &TestBackend, y: u16) -> Vec<Option<Color>> {
+    backgrounds_from(backend, y, 0)
+}
+
+/// The same, from a given column, so a gate can ask about the row **without** the
+/// pane's leading cell.
+///
+/// **That cell stopped being part of the wash's question**
+/// ([#218](https://github.com/breferrari/vigia/issues/218)): it carries §5.1's
+/// left bar, which is a background on a blank column of margin and degrades on its
+/// own terms. A gate asking *does this palette wash* has to skip it or it is
+/// asking two questions and failing the one it did not mean.
+fn backgrounds_from(backend: &TestBackend, y: u16, from: u16) -> Vec<Option<Color>> {
     let buffer = backend.buffer();
-    (0..buffer.area.width)
+    (from..buffer.area.width)
         .map(|x| {
             let bg = buffer[(x, y)].style().bg;
             // `Reset` and unset are the same claim from a palette's side: neither
@@ -292,14 +304,44 @@ fn the_readme_recipe_for_terminal_colours_plus_a_wash_draws_one() {
 }
 
 #[test]
-fn a_palette_that_declines_a_bar_leaves_the_sigil_alone() {
-    // The `_bar` keys still exist so a theme file can ask for one. What must hold
-    // is that leaving them unset changes nothing: patching an empty style over the
-    // diff style has to be the identity, or every built-in silently loses its
-    // sigil colour.
-    for theme in [Theme::ansi(), Theme::dark(), Theme::light()] {
-        assert_eq!(theme.added_bar, ratatui::style::Style::new());
-        assert_eq!(theme.removed_bar, ratatui::style::Style::new());
+fn every_palette_draws_a_bar_and_draws_it_as_a_background() {
+    // **This gate used to assert the opposite**
+    // ([#218](https://github.com/breferrari/vigia/issues/218)). It read
+    // `a_palette_that_declines_a_bar_leaves_the_sigil_alone` and pinned every
+    // built-in's `_bar` keys as unset, which is how §5.1's *tinted row with a
+    // coloured left bar* shipped as the tint alone for three phases: the key
+    // existed, the renderer consumed it, and a gate held it empty.
+    //
+    // The refusal it encoded rested on *the bar has no terminal equivalent that
+    // does not spend a column I6 forbids*, which stopped being true when
+    // [#119](https://github.com/breferrari/vigia/issues/119) gave the pane a
+    // margin. So the gate inverts, and it inverts on the premise rather than on
+    // taste.
+    //
+    // **Background, never foreground**, which is the property that makes it free:
+    // the bar lands on a blank column of that margin, so it recolours no glyph and
+    // needs no contrast against one. A foreground here would be a colour on a
+    // space, which is nothing, and would mean the element had quietly gone back to
+    // riding the sigil.
+    for (name, theme) in [
+        ("ansi", Theme::ansi()),
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+    ] {
+        for (label, bar) in [("added", theme.added_bar), ("removed", theme.removed_bar)] {
+            assert!(
+                bar.bg.is_some(),
+                "{name}'s {label} bar is unset, so the row band has no left edge"
+            );
+            assert!(
+                bar.fg.is_none(),
+                "{name}'s {label} bar sets a foreground, which is a colour on a                  blank cell and means it is riding a glyph again"
+            );
+        }
+        assert_ne!(
+            theme.added_bar.bg, theme.removed_bar.bg,
+            "{name} draws an addition and a removal in one bar colour, which is              the one thing the element exists to distinguish"
+        );
     }
 }
 
@@ -492,11 +534,23 @@ fn the_ansi_palette_draws_no_wash_at_any_depth() {
     // The ruling that keeps palette and depth genuinely independent axes. A wash
     // has to assume a background; `ansi` resolves to the reader's own scheme and so
     // assumes none, and it refuses at truecolour just as firmly as at sixteen.
+    //
+    // **Read past the pane's leading cell, because the bar is not the wash**
+    // ([#218](https://github.com/breferrari/vigia/issues/218)). A wash has to be a
+    // *tint*, and a tint is the thing that cannot be chosen without knowing the
+    // background behind it. The bar is a **saturated block on a blank column**,
+    // which is what the mockup draws and what needs no such knowledge, so this
+    // palette can carry one and the loss §11.1 records at sixteen colours is
+    // smaller than it was. The two are separate keys precisely so they can degrade
+    // apart, and a gate that read them together would report a ruling it was not
+    // asked about.
     for depth in [Depth::Truecolor, Depth::Ansi256, Depth::Ansi16, Depth::None] {
         let backend = draw(60, 8, &three_kinds(), Theme::ansi().resolve(depth));
         for row in [CONTEXT, ADDED, REMOVED] {
             assert!(
-                backgrounds(&backend, row).iter().all(Option::is_none),
+                backgrounds_from(&backend, row, 1)
+                    .iter()
+                    .all(Option::is_none),
                 "ansi washed row {row} at {depth:?}"
             );
         }
