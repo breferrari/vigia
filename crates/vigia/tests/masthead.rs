@@ -27,7 +27,7 @@ use vigia::{
     Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Row, Theme, View,
     body_layout, render,
 };
-use vigia_core::{Churn, HISTORY_SAMPLES, Highlighter, History, Recency};
+use vigia_core::{Churn, HISTORY_BUCKETS, HISTORY_SAMPLES, Highlighter, History, Recency};
 
 use support::{Scratch, materialise};
 
@@ -46,6 +46,33 @@ const TALL: u16 = 24;
 /// A gate reading the renderer's own constant would agree with it by
 /// construction, which is this suite's standing rule for every rung table.
 const GRAPH_COLUMNS: usize = 15;
+
+/// Columns the scrollbar reserves, restated for [`GRAPH_COLUMNS`]'s reason.
+const BAR_COLUMNS: usize = 2;
+
+/// Runs of one glyph in a drawn row, which is how many bars it carries.
+///
+/// **Walked rather than windowed.** The first version used `windows(2)`, which
+/// has no window before the first character and therefore under-counted a bar
+/// starting at column zero; it passed only because the pane's inset happens to
+/// blank that column, which is a property of the fixture rather than of the
+/// band. It also collected into a `Vec` to get the windows at all.
+fn drawn_runs(row: &str) -> usize {
+    let mut runs = 0;
+    let mut previous = ' ';
+    for glyph in row.chars() {
+        if glyph != previous && !glyph.is_whitespace() {
+            runs += 1;
+        }
+        previous = glyph;
+    }
+    runs
+}
+
+/// Cells of any glyph in a drawn row.
+fn drawn_ink(row: &str) -> usize {
+    row.chars().filter(|glyph| !glyph.is_whitespace()).count()
+}
 
 /// Changed files in every fixture here, which is what `assets/preview.svg` draws.
 const FILES: usize = 3;
@@ -199,31 +226,34 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
 /// at a band gate was withdrawn for exactly this, having read the file list's
 /// sparkline and concluded the band drew nothing.
 fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
-    let heat = [HeatBucket {
-        added: 4,
-        removed: 1,
-    }; HEAT_BUCKETS];
+    // **One list row and nothing else specified**, because the band draws above
+    // the list and no gate here reads a glance element. The two sibling fixtures
+    // in `tests/render.rs` and `tests/legibility.rs` are empty in the same
+    // fields for the same reason.
     let entry = FileEntry {
         path: "crates/vigia/src/render.rs".to_owned(),
         from: None,
         kind: 'M',
-        churn: Some((45, 12)),
-        spark: [1, 2, 4, 6, 8, 9, 11, 12],
-        recency: Recency::Live,
-        heat,
+        churn: None,
+        spark: [0; HISTORY_BUCKETS],
+        recency: Recency::Cold,
+        heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     View {
         list: vec![entry.clone()],
         rows: vec![Row::File(entry)],
         files: 1,
-        peak: 12,
         worktree_churn: Churn(series),
         ..View::default()
     }
 }
 
 /// The band's own rows, drawn at `width`, as strings.
-fn band_rows(width: u16, series: [u32; HISTORY_SAMPLES]) -> Vec<String> {
+///
+/// **Not `band_rows`, which this crate already uses for something else**:
+/// `Body::band_rows` returns a row *count*. One grep, two meanings, and the
+/// count is the older claim.
+fn band_strip(width: u16, series: [u32; HISTORY_SAMPLES]) -> Vec<String> {
     let shown = Chrome {
         masthead: true,
         ..chrome(&App::new())
@@ -268,51 +298,51 @@ const BURSTY: [u32; HISTORY_SAMPLES] = {
 
 #[test]
 fn a_wider_pane_buys_wider_bars_and_not_finer_time() {
+    /// One pane width and what the band drew at it.
+    #[derive(Debug)]
+    struct Drawn {
+        width: u16,
+        ink: usize,
+        bars: usize,
+    }
+
     // **The defect, stated as a property.** `Churn::projected` clamped the drawn
     // width to the sample count, so past 120 columns one column was one second
     // and a save drew a hairline between two blanks. Widening must buy bar
     // width; the time resolution is the element's own and does not move.
     let mut widths = Vec::new();
     for width in [60u16, 80, 120, 160, 200] {
-        let rows = band_rows(width, BURSTY);
-        let drawn: usize = rows[0].chars().filter(|c| !c.is_whitespace()).count()
-            + rows[1].chars().filter(|c| !c.is_whitespace()).count();
-        // Runs of one glyph are bars; counting distinct runs counts columns.
-        let bars = rows
-            .iter()
-            .map(|row| {
-                row.chars()
-                    .collect::<Vec<_>>()
-                    .windows(2)
-                    .filter(|w| w[0] != w[1] && !w[1].is_whitespace())
-                    .count()
-            })
-            .max()
-            .unwrap_or(0);
-        widths.push((width, drawn, bars));
+        let rows = band_strip(width, BURSTY);
+        // Summed over every row the band was given rather than two named ones,
+        // which restated `GRAPH_ROWS` silently.
+        let ink: usize = rows.iter().map(|row| drawn_ink(row)).sum();
+        let bars = rows.iter().map(|row| drawn_runs(row)).max().unwrap_or(0);
+        widths.push(Drawn { width, ink, bars });
     }
 
     // Ink grows with the pane.
     for pair in widths.windows(2) {
         assert!(
-            pair[1].1 >= pair[0].1,
+            pair[1].ink >= pair[0].ink,
             "widening from {} to {} drew less ink: {widths:?}",
-            pair[0].0,
-            pair[1].0
+            pair[0].width,
+            pair[1].width
         );
     }
     // And the column count never exceeds the element's own resolution, however
     // wide the pane gets. This is what stops a wide pane sampling per second.
-    for (width, _, bars) in &widths {
+    for drawn in &widths {
         assert!(
-            *bars <= GRAPH_COLUMNS,
-            "at {width} columns the band drew {bars} bars, past its own resolution"
+            drawn.bars <= GRAPH_COLUMNS,
+            "at {} columns the band drew {} bars, past its own resolution",
+            drawn.width,
+            drawn.bars
         );
     }
     // Non-vacuity: the widest pane must actually be wider in ink than the
     // narrowest, or "never exceeds" is true of a band that never grew.
     assert!(
-        widths.last().expect("a width").1 > widths[0].1,
+        widths.last().expect("a width").ink > widths[0].ink,
         "the sweep never grew, so this gate compared nothing: {widths:?}"
     );
 }
@@ -324,7 +354,7 @@ fn a_burst_and_its_neighbour_land_in_one_column() {
     let mut near = [0u32; HISTORY_SAMPLES];
     near[40] = 5;
     near[46] = 5;
-    let rows = band_rows(WIDE, near);
+    let rows = band_strip(WIDE, near);
     let bars = rows[1]
         .split(|c: char| c.is_whitespace())
         .filter(|run| !run.is_empty())
@@ -341,7 +371,7 @@ fn a_burst_and_its_neighbour_land_in_one_column() {
 fn an_empty_column_still_draws_nothing() {
     // #158, unchanged by the coarser period and worth a gate precisely because
     // coarser columns could look like an excuse to revisit it.
-    let rows = band_rows(WIDE, BURSTY);
+    let rows = band_strip(WIDE, BURSTY);
     assert!(
         rows.iter().any(|row| row.contains("  ")),
         "no run of blank columns survived, so the band filled its gaps:\n{}",
@@ -356,17 +386,26 @@ fn the_band_reaches_both_edges_of_its_slot() {
     // divide by the column count still reaches the last cell.
     let full = [7u32; HISTORY_SAMPLES];
     for width in [60u16, 83, 120, 137] {
-        let rows = band_rows(width, full);
+        let rows = band_strip(width, full);
         let widest = rows
             .iter()
             .map(|row| row.trim_end().chars().count())
             .max()
             .unwrap_or(0);
-        let inset = rows[1].len() - rows[1].trim_start().len();
-        assert!(
-            widest + 2 >= usize::from(width) - inset,
-            "at {width} columns the band stopped {} short of its slot",
-            usize::from(width) - widest
+        // **Exact rather than within a fudge**, which is what `+ 2` was: the
+        // last column's span ends at the width itself, so the band stops
+        // precisely where the scrollbar's reserve begins. Counted in `char`s on
+        // both sides, since a byte length would disagree the moment a glyph is
+        // not ASCII.
+        let last = rows.last().expect("a band row");
+        let inset = last
+            .chars()
+            .take_while(|glyph| glyph.is_whitespace())
+            .count();
+        assert_eq!(
+            widest,
+            usize::from(width) - BAR_COLUMNS,
+            "at {width} columns the band did not end at the bar's reserve,              inset {inset}"
         );
     }
 }

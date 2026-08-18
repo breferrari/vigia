@@ -60,8 +60,8 @@ pub use highlight::{
     WARM_FILES, WARM_PER_GRAMMAR, WARM_TOTAL,
 };
 pub use history::{
-    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
-    History, HistoryStats, Recency,
+    Churn, GRAPH_COLUMNS, GRAPH_PERIOD, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS,
+    HISTORY_SAMPLES, HISTORY_WINDOW, History, HistoryStats, Recency,
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
