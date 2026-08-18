@@ -54,7 +54,7 @@ pub struct FileEntry {
     /// Raw counts rather than heights. Which glyph a count becomes is the
     /// renderer's, the same way a [`Row::Line`] carries its spans as classes
     /// and lets the renderer pick the colour: the scale is shared across the
-    /// screen and lives on [`View::peak`].
+    /// screen and lives on [`View::scale`].
     ///
     /// All zeroes for a file `vigia` has not seen change, which is the
     /// ordinary case for a worktree that was already dirty at startup.
@@ -473,7 +473,7 @@ pub struct View {
     /// divide by.** It used to say a renderer must read zero as "draw no
     /// sparkline", and that is the ruling
     /// [#78](https://github.com/breferrari/vigia/issues/78) reversed: an empty
-    /// bucket draws a track, so a peak of zero means every bucket is empty and
+    /// bucket draws a track, so a scale of zero means every bucket is empty and
     /// every one of them is still drawn. `vigia_core::History::peak` carries the
     /// same correction, and this is the copy a renderer actually reads.
     pub scale: u32,
@@ -485,7 +485,7 @@ pub struct View {
     /// answers *how hot is this tree right now, and was it hotter a minute ago*.
     ///
     /// Carried on the view rather than fetched by the painter, for the reason
-    /// [`View::peak`] is: the renderer is handed what to draw and does not reach
+    /// [`View::scale`] is: the renderer is handed what to draw and does not reach
     /// back into a store for it. It is a copy of a field the history keeps
     /// current on a walk it was already making, so collecting it costs a move.
     pub worktree_churn: vigia_core::Churn,

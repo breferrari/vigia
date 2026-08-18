@@ -23,7 +23,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, Recency,
+    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
+    History, Recency, scale_of,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -516,4 +517,147 @@ fn two_large_writes_of_different_sizes_do_not_both_peg() {
          {small}, so both saturated and the graph cannot tell them apart"
     );
     assert_eq!((small, large), (1 + 100_000, 1 + 300_000));
+}
+
+/// The worktree sum saturates rather than wrapping.
+///
+/// **The widening put this back in play** ([#232](https://github.com/breferrari/vigia/issues/232)).
+/// While a sample was a `u16` and the sum a `u32`, 256 paths at their ceiling
+/// could not reach it and a plain `+=` was safe by arithmetic. A sample is a
+/// `u32` of bytes now, so two paths at [`Track::bump`]'s own ceiling in one
+/// second overflow the sum: a panic in debug, and in release the busiest worktree
+/// there has ever been drawn as the quietest.
+#[test]
+fn the_worktree_sum_saturates_rather_than_wrapping() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    // Two paths, each written far past what a `u32` sample can hold, in one
+    // second. `wrote` floors a first sighting at one, so each takes two writes:
+    // one to set the baseline and one to move it by the whole range.
+    for path in ["src/a.rs", "src/b.rs"] {
+        history.record_sized([(path, Some(0))], now);
+        history.record_sized([(path, Some(u64::from(u32::MAX)))], now);
+    }
+
+    let newest = history.worktree_churn().0[HISTORY_SAMPLES - 1];
+    assert_eq!(
+        newest,
+        u32::MAX,
+        "the worktree sum wrapped instead of topping out, so the busiest second \
+         this store has ever held draws as one of its quietest"
+    );
+}
+
+/// `scale_of` at its edges, driven directly rather than through a rendered frame.
+///
+/// It is public API and every other gate reaches it through a screen, which is
+/// how the empty case and the floor stayed unexercised.
+#[test]
+fn the_scale_rule_holds_at_its_edges() {
+    assert_eq!(
+        scale_of(std::iter::empty()),
+        0,
+        "nothing tracked is no scale"
+    );
+    assert_eq!(scale_of([0, 0, 0].into_iter()), 0, "all idle is no scale");
+
+    // The floor: any non-empty input divides to at least one, or a single small
+    // write would be measured against zero.
+    assert_eq!(scale_of([1].into_iter()), 1);
+    assert_eq!(
+        scale_of([0, 0, 1].into_iter()),
+        1,
+        "the zeroes do not dilute it"
+    );
+
+    // 1.3 of the mean, floored, over the non-empty values only.
+    assert_eq!(scale_of([10, 10, 10].into_iter()), 13);
+    assert_eq!(scale_of([0, 10, 0, 10].into_iter()), 13);
+
+    // **Above every input by design**, which is what stops a uniformly busy
+    // worktree drawing as a solid block, and is `btop`'s own behaviour.
+    assert!(scale_of([10, 10].into_iter()) > 10);
+
+    // And it saturates rather than wrapping on a window full of ceilings.
+    assert_eq!(scale_of([u32::MAX; 8].into_iter()), u32::MAX);
+}
+
+/// A projection returns exactly the width it was asked for.
+///
+/// **The contract this gained in #232**, and the reason: the band asks for one
+/// value per sub-column, which past a wide pane is more than the window holds
+/// samples. It used to clamp and hand back a short `Vec`, and the band drew a
+/// graph that stopped partway across the pane with bare axis after it.
+#[test]
+fn a_projection_returns_the_width_it_was_asked_for() {
+    let mut samples = [0u32; HISTORY_SAMPLES];
+    samples[0] = 5;
+    samples[HISTORY_SAMPLES - 1] = 7;
+    let churn = Churn(samples);
+
+    for width in [
+        1usize,
+        7,
+        HISTORY_SAMPLES - 1,
+        HISTORY_SAMPLES,
+        HISTORY_SAMPLES * 2 + 3,
+    ] {
+        let drawn = churn.projected(width);
+        assert_eq!(
+            drawn.len(),
+            width,
+            "a projection onto {width} was not {width} wide"
+        );
+    }
+
+    // Below the sample count every sample lands in exactly one column, so the
+    // total is conserved. Above it, values repeat instead, which is the honest
+    // answer: the window holds what it holds.
+    let exact: u32 = churn.projected(HISTORY_SAMPLES).iter().sum();
+    assert_eq!(
+        exact, 12,
+        "a projection at the sample count lost or invented churn"
+    );
+    let narrow: u32 = churn.projected(10).iter().sum();
+    assert_eq!(narrow, 12, "a narrower projection lost or invented churn");
+
+    // The oldest value stays oldest however wide the ask, which is what stops a
+    // wide pane drawing the window mirrored.
+    let wide = churn.projected(HISTORY_SAMPLES * 2);
+    assert_eq!(wide.first().copied(), Some(5));
+    assert_eq!(wide.last().copied(), Some(7));
+}
+
+/// A deletion weighs what it removed, and the file after it weighs itself.
+///
+/// **`Track::wrote`'s docblock claimed this and only the shrink half was gated**
+/// ([#232](https://github.com/breferrari/vigia/issues/232)). A path that vanishes
+/// has a size of zero rather than an unknown one, and treating the two the same
+/// left the baseline at whatever the file last held: the delete weighed the floor
+/// and the *next* file at that path weighed the dead one's whole size. The
+/// largest edit a reader can make drawn as the smallest, and a trivial one drawn
+/// as a spike.
+#[test]
+fn deleting_a_file_weighs_what_it_removed() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(2_000))], now);
+    let baseline = newest(&history, "src/a.rs");
+    history.record_sized([("src/a.rs", Some(0))], now);
+    let after_delete = newest(&history, "src/a.rs") - baseline;
+    history.record_sized([("src/a.rs", Some(50))], now);
+    let after_recreate = newest(&history, "src/a.rs") - baseline - after_delete;
+
+    assert_eq!(
+        after_delete, 2_000,
+        "the deletion weighed {after_delete} rather than the two thousand bytes \
+         it removed"
+    );
+    assert_eq!(
+        after_recreate, 50,
+        "the file that replaced it weighed {after_recreate} rather than its own \
+         fifty bytes, so the baseline was still the dead file's"
+    );
 }

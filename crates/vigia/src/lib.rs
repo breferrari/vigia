@@ -669,13 +669,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // store. It does not follow links, for `fingerprint`'s
                     // reason one crate over: the thing weighed has to be the
                     // thing that was written.
-                    let workdir = worktree.workdir();
-                    shell.history.record_sized(
-                        paths
-                            .iter()
-                            .map(|path| (path.as_str(), weigh(workdir, path))),
-                        Instant::now(),
-                    );
+                    shell
+                        .history
+                        .record_sized(sized(worktree.workdir(), &paths), Instant::now());
                     // The core leaves the frame exactly as it was on failure, so the
                     // previous diff is still valid to draw. Saying so on the footer
                     // beats blanking a pane for a reason the reader cannot see.
@@ -731,6 +727,54 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
+/// Paths one wake weighs by size before the rest fall back to the count.
+///
+/// **A bound, and the measurement that justifies it was taken twice.** A burst
+/// reports up to `HISTORY_PATHS` paths on one coalesced wake, and sizing all of
+/// them measures **2.33ms of wall and 2.60ms of thread CPU** per burst on the
+/// reference machine, against I9's 16ms, on a wake already spending most of that
+/// budget walking status for a bulk rewrite.
+///
+/// **The first measurement said `0ns` of CPU and it was the instrument, not the
+/// cost.** `GetThreadTimes` reports in 15.625ms steps on Windows, so a burst
+/// timed on its own reads zero and therefore reads as time spent waiting rather
+/// than working. That is `SPEC.md` §7's own rule turned against itself: an
+/// off-CPU overshoot is the host's, and a clock too coarse to see the work says
+/// off-CPU for everything. Timed across enough rounds to clear the quantum, the
+/// cost is CPU. The cap was removed on the blind reading and is back on the
+/// sighted one.
+///
+/// Sixty-four, which measures about 0.65ms, a twenty-fifth of the frame. **What
+/// the remainder gives up is precision where precision matters least**: the
+/// defect reported from a live pane is a worktree where *one* file is saved
+/// repeatedly, drawing every column at full height because a sample counted files
+/// rather than bytes. A wake naming more than sixty-four paths is an agent or a
+/// build rewriting the tree, and there the count is already a magnitude. The
+/// overflow weighs the store's floor of one, which is what every path weighed
+/// before this existed.
+///
+/// The honest improvement is to stop paying for the size at all: `Frame::advance`
+/// walks status on the same wake and has already stat'd every one of these paths.
+/// `gix` does not surface it, which is [#233](https://github.com/breferrari/vigia/issues/233).
+pub const SIZED_PATHS: usize = 64;
+
+/// What each path in one wake's burst now holds, for [`vigia_core::History::record_sized`].
+///
+/// **The cap lives here rather than at the call site, so the budget gate prices
+/// what ships.** `crates/vigia/tests/budgets.rs` times this inside the frame it
+/// measures, and a gate applying no cap would report a cost the product does not
+/// pay, while one reimplementing the cap could drift from it. What a gate leaves
+/// out gets cheaper, so that drift would never fail.
+pub fn sized<'p>(
+    workdir: &'p Path,
+    paths: &'p [String],
+) -> impl Iterator<Item = (&'p str, Option<u64>)> + 'p {
+    paths.iter().enumerate().map(move |(at, path)| {
+        let bytes = (at < SIZED_PATHS).then(|| weigh(workdir, path)).flatten();
+        (path.as_str(), bytes)
+    })
+}
+
 /// What a written path now holds on disk, for [`vigia_core::History::record_sized`].
 ///
 /// **Exported so the budget gates can call the one the product calls**
@@ -749,9 +793,23 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 /// the watch naming it and this call. The store weighs that at its floor rather
 /// than at nothing, because it was still written.
 pub fn weigh(workdir: &Path, path: &str) -> Option<u64> {
-    std::fs::symlink_metadata(workdir.join(path))
-        .ok()
-        .map(|meta| meta.len())
+    match std::fs::symlink_metadata(workdir.join(path)) {
+        Ok(meta) => Some(meta.len()),
+        // **A file that is gone weighs zero bytes, not "no size"**, and the
+        // difference is the largest edit a reader can make. Mapping both to
+        // `None` kept the store's baseline at whatever the file last held, so a
+        // deletion weighed the floor of one and the *recreation* after it weighed
+        // the dead file's whole size: the biggest change drawn as the smallest
+        // and a trivial one drawn as a spike. Measured at two million bytes: the
+        // delete scored 1 and the fifty-byte file that replaced it scored
+        // 1,999,950.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(0),
+        // Anything else is a size that could not be read rather than a file that
+        // is not there: a permission change, a path that stopped being valid
+        // Unicode under us. The store weighs those at its floor, because the
+        // write happened and its magnitude is genuinely unknown.
+        Err(_) => None,
+    }
 }
 
 /// How long the direction arrows stay lit after the last scroll.

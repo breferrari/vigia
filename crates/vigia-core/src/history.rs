@@ -86,7 +86,7 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 pub const HISTORY_BUCKETS: usize = 12;
 
 // Twelve since 2026-08-18 ([#161](https://github.com/breferrari/vigia/issues/161)),
-// from eight, and the reason is the one [`GRAPH_COLUMNS`] was tuned against one
+// from eight, and the reason is the one the band's own period was tuned against one
 // element over. A bucket was fifteen seconds, which is coarse enough that a
 // steady worktree drew only five and a half of the ramp's nine rungs and the
 // strip read as a solid block rather than a shape. Ten seconds is finer without
@@ -140,7 +140,7 @@ pub const HISTORY_BUCKET: Duration =
 /// cover more time than others, and a sparkline compared down a list would be
 /// comparing unequal windows.
 ///
-/// The cost is `paths * samples` `u16`s, which at the cap is sixty kibibytes, and
+/// The cost is `paths * samples` `u16`s, which at the cap is a hundred and twenty kibibytes, and
 /// a [`History::record`] walk fifteen times longer than it was. Both are measured
 /// in the issue rather than asserted to be small.
 ///
@@ -269,7 +269,8 @@ impl Churn {
     /// The remainder is spread rather than dropped: with a width that does not
     /// divide [`HISTORY_SAMPLES`], the earlier columns take one extra sample
     /// each. Every sample lands in exactly one column, which is the property that
-    /// matters.
+    /// matters at or below [`HISTORY_SAMPLES`], which is the range every caller
+    /// but the churn band asks for.
     ///
     /// **Exactly `width` values, whatever `width` is.** This used to clamp to
     /// [`HISTORY_SAMPLES`] and hand back a short `Vec`, which was fine while
@@ -423,7 +424,7 @@ impl Track {
     /// covered, so the same writes land in the same column.
     ///
     /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
-    /// past `u16` is already at the top of the ramp, and wrapping would draw the
+    /// past its type is already at the top of the ramp, and wrapping would draw the
     /// busiest file in the worktree as the quietest.
     fn drawn(&self) -> [u32; HISTORY_BUCKETS] {
         // Sliced rather than zipped against `chunks`, which **truncates**: a
@@ -837,14 +838,24 @@ impl History {
         // are measured across. Collected rather than folded, because
         // [`scale_of`] needs two passes' worth of information and a bounded
         // `Vec` here is `HISTORY_PATHS` times [`HISTORY_BUCKETS`] of `u32`.
-        let mut buckets = Vec::with_capacity(self.tracks.len() * HISTORY_BUCKETS);
         for track in self.tracks.values() {
             for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
-                *total += count;
+                // **Saturating, like every other add on this path.** It was a
+                // plain `+=` while a sample was a `u16` and the sum a `u32`, where
+                // 256 paths of `u16::MAX` could not reach the ceiling. A sample is
+                // a `u32` of bytes now and [`Track::bump`] saturates at its own
+                // ceiling, so two large writes in one second would panic in debug
+                // and wrap in release, drawing the busiest worktree there has ever
+                // been as the quietest. That is the exact failure `bump` and
+                // `drawn` already saturate against, reached through the widening
+                // rather than through a count.
+                *total = total.saturating_add(count);
             }
-            buckets.extend(track.drawn());
         }
-        self.scale = scale_of(buckets.into_iter());
+        // Streamed rather than collected: this used to build a `Vec` of every
+        // drawn bucket of every path on the frame path, per tick, and `scale_of`
+        // takes an iterator precisely so it need not.
+        self.scale = scale_of(self.tracks.values().flat_map(Track::drawn));
         self.worktree = Churn(worktree);
     }
 }

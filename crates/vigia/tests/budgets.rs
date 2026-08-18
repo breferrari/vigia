@@ -103,7 +103,7 @@ const SAMPLED_FRAMES: usize = 250;
 /// comment beside every call site here already names, arriving through a new
 /// door: what gets left out gets *cheaper*, so the omission would never fail.
 fn sample(history: &mut History, root: &Path, path: &str) {
-    sample_all(history, root, &[path]);
+    sample_all(history, root, &[path.to_owned()]);
 }
 
 /// [`sample`] over a whole burst, which is what a bulk rewrite delivers.
@@ -114,16 +114,13 @@ fn sample(history: &mut History, root: &Path, path: &str) {
 /// gates below are the only place in this file where a burst is more than one
 /// file. Sampling `EDITED_PATH` alone there would have left the widest tick this
 /// tool has unmeasured while reporting a number that looked like it covered it.
-fn sample_all(history: &mut History, root: &Path, paths: &[&str]) {
+fn sample_all(history: &mut History, root: &Path, paths: &[String]) {
     // **`vigia::weigh`, which is the one `run` calls.** These three lines used to
     // be copied here, and the copy is the drift surface: what a gate leaves out
     // gets cheaper, so it would go on passing while pricing a tick the product no
     // longer has, which is the failure the comment beside every call site in this
     // file already names.
-    history.record_sized(
-        paths.iter().map(|path| (*path, vigia::weigh(root, path))),
-        Instant::now(),
-    );
+    history.record_sized(vigia::sized(root, paths), Instant::now());
 }
 
 /// Rounds the burst gate times before taking a median.
@@ -350,8 +347,7 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
 
     let budget = I9_FRAME / 10;
     let scratch = Scratch::large_diff("burst-sizing", FILES, LINES);
-    let burst = bulk_burst();
-    let paths: Vec<&str> = burst.iter().map(String::as_str).collect();
+    let paths = bulk_burst();
     let mut history = History::new();
 
     // Warmed, for the memory read's reason one gate up: the first `stat` of a
@@ -364,15 +360,21 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
     // **Sampled rather than timed once**, which is the instrument rule the
     // gates below already follow. A single `time` call against a sub-millisecond
     // quantity is one scheduler hiccup away from a red build.
-    let mut runs = Samples::new(SAMPLED_BURSTS);
-    let mut cpu = Samples::new(SAMPLED_BURSTS);
-    for _ in 0..SAMPLED_BURSTS {
-        let (wall, spent) = time_cpu(|| sample_all(&mut history, scratch.root(), &paths));
-        runs.push(wall);
-        cpu.push(spent);
-    }
-    let wall = runs.percentile(0.5).expect("a sampled round");
-    let taken = cpu.percentile(0.5).expect("a sampled round");
+    // **Timed as one block rather than per round, because the thread clock has a
+    // quantum.** `GetThreadTimes` reports in 15.625ms steps on Windows, so a
+    // sub-millisecond burst measured on its own reads `0ns`, and a budget
+    // compared against that is trivially true for every implementation. This gate
+    // shipped in exactly that state, and the cap in `vigia::SIZED_PATHS` was
+    // *removed* on the reading: zero CPU said the cost was time spent waiting,
+    // which `SPEC.md` §7 attributes to the host. Rolling the rounds into one
+    // measurement clears the quantum, and the cost is CPU after all.
+    let (wall, spent) = time_cpu(|| {
+        for _ in 0..SAMPLED_BURSTS {
+            sample_all(&mut history, scratch.root(), &paths);
+        }
+    });
+    let rounds = u32::try_from(SAMPLED_BURSTS).expect("a sane round count");
+    let (wall, taken) = (wall / rounds, spent / rounds);
 
     // Non-vacuity, and it is the assertion that matters most: a burst that sized
     // nothing would post a very fast time and pass a budget it never spent.
@@ -395,11 +397,18 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
     // the reference machine this burst measures about 2.3ms of wall against
     // **0ns** of CPU, and a bound read off the wall number would have capped the
     // feature to buy back time the frame never spent.
+    // **Both clocks, and neither may read zero.** The CPU figure is the one that
+    // survives contention; the wall figure is the one a reader waits through. The
+    // non-vacuity assertion is the half this gate shipped without: with a clock
+    // too coarse to see the burst, `taken <= budget` was `0ns <= 1.6ms` and could
+    // not fail for any implementation.
     assert!(
-        taken <= budget,
-        "sizing a {HISTORY_PATHS}-path burst spent {taken:?} of thread CPU time \
-         at p50 against {budget:?}, a tenth of the {I9_FRAME:?} frame it shares \
-         (wall {wall:?}, which contention inflates and this does not)"
+        taken > Duration::ZERO,
+        "the thread clock reported no time for {SAMPLED_BURSTS} bursts, so it          cannot see this cost and the budget below asserts nothing"
+    );
+    assert!(
+        taken <= budget && wall <= budget,
+        "sizing a {HISTORY_PATHS}-path burst spent {taken:?} of thread CPU and          {wall:?} of wall against {budget:?}, a tenth of the {I9_FRAME:?} frame          it shares"
     );
 }
 

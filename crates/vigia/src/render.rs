@@ -517,7 +517,7 @@ const fn line_origin(gutter: usize) -> usize {
 
 /// Rows the worktree churn band takes when it is drawn at all.
 ///
-/// **Two, which is sixteen levels over the [`SPARK_RAMP`]'s eight per row.** One
+/// **Two, which is sixteen levels over the [`crate::glyphs::SPARK_RAMP`]'s eight per row.** One
 /// row would be a sparkline, and the pane already has one of those per file; the
 /// band earns its place by being the thing no file row can be, which is the
 /// worktree at a resolution a single row cannot carry. Three was weighed and
@@ -2313,7 +2313,7 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// **the style is chosen from the variant rather than read back off the
 /// glyph.** [`spark_of`] briefly returned bare `char`s and the painter decided
 /// the style by testing against `SPARK_TRACK`, which worked only while that
-/// glyph stayed outside [`SPARK_RAMP`] — a convention a test defends rather than
+/// glyph stayed outside [`crate::glyphs::SPARK_RAMP`] — a convention a test defends rather than
 /// one the compiler does. It also had a live failure case in the other
 /// direction: on the `scale == 0` path every bucket draws the track *whatever its
 /// count says*, so a painter branching on the count instead would have drawn a
@@ -2456,8 +2456,9 @@ fn spark_of(
         // Written twice, the rule that keeps one write from drawing as empty
         // could move at one rung and not the other.
         let level = |count: u32| level_to(count, scale, glyphs.levels());
-        // **Against the same `scale` the heights are scaled from**, which is the
-        // busiest bucket anywhere on screen rather than in this file. Height and
+        // **Against the same `scale` the heights are scaled from**, which is
+        // `scale_of`'s figure over every bucket on screen rather than over this
+        // file. Height and
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
         let band = Band::of(busiest, scale);

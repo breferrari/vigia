@@ -40,12 +40,16 @@ use support::{Scratch, materialise};
 /// assertion rather than in this comment.
 const WIDE: u16 = 80;
 
-/// A pane narrow enough that a dense cell's two halves are two stored samples.
+/// A pane whose sub-columns are the stored samples, one for one.
 ///
-/// The window holds [`HISTORY_SAMPLES`], so a pane asking for more sub-columns
-/// than that feeds neighbouring halves from one sample. Sixty columns asks for
-/// 114 of them.
-const NARROW: u16 = 60;
+/// **Exact, not merely narrow, and the difference is what the gate below rests
+/// on.** A dense cell holds two sub-columns, so a pane asks for `planning * 2` of
+/// them; at sixty-three columns that is exactly [`HISTORY_SAMPLES`], so
+/// sub-column `s` is sample `s` with no phase drift. Measured at sixty, sixty-two,
+/// sixty-three, sixty-four and sixty-six: every other width slides, an
+/// alternating fixture lands both ways round, and a gate asking which half is
+/// older cannot then tell a correct band from a mirrored one.
+const NARROW: u16 = 63;
 
 /// A dense cell whose newer half is taller than its older one, and its mirror.
 ///
@@ -268,6 +272,16 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
 /// `Body::band_rows` returns a row *count*. One grep, two meanings, and the
 /// count is the older claim.
 fn band_strip(width: u16, series: [u32; HISTORY_SAMPLES]) -> Vec<String> {
+    band_at(width, series, Glyphs::default())
+}
+
+/// [`band_strip`] at a chosen glyph rung.
+///
+/// **Parameterised rather than copied**, because a gate that rebuilt the chrome,
+/// the rect and the buffer to pass one different argument also dropped the
+/// `body.graph > 0` assertion below, which is the fixture trap `banded`'s own
+/// docblock records a withdrawn gate for.
+fn band_at(width: u16, series: [u32; HISTORY_SAMPLES], glyphs: Glyphs) -> Vec<String> {
     let shown = Chrome {
         masthead: true,
         ..chrome(&App::new())
@@ -285,7 +299,7 @@ fn band_strip(width: u16, series: [u32; HISTORY_SAMPLES]) -> Vec<String> {
         area,
         &banded(series),
         &Theme::default(),
-        Glyphs::default(),
+        glyphs,
         &shown,
     );
     let top = 1 + body.lead as u16;
@@ -488,7 +502,7 @@ fn the_band_stacks_its_rows_from_the_bottom() {
     //
     // **Structural rather than a pinned rung**, because the denominator is no
     // longer the window's maximum: heights are scaled against
-    // [`band_scale`]'s mean-based figure, so "a quarter of the peak" is not a
+    // [`vigia_core::scale_of`]'s mean-based figure, so "a quarter of the peak" is not a
     // thing a fixture can state any more. What it can state, and what the rule
     // actually is, is that a short column stays in one row and a tall one does
     // not.
@@ -592,34 +606,67 @@ fn a_dense_cell_carries_two_samples() {
         *sample = if at % 2 == 0 { 0 } else { 100 };
     }
 
-    let shown = Chrome {
-        masthead: true,
-        ..chrome(&App::new())
-    };
-    let area = Rect::new(0, 0, NARROW, TALL);
-    let body = body_layout(area, &shown, 1);
-    let mut buf = Buffer::empty(area);
-    render(
-        &mut buf,
-        area,
-        &banded(alternating),
-        &Theme::default(),
-        Glyphs::Braille,
-        &shown,
-    );
-    let top = 1 + body.lead as u16;
-    let drawn: String = (0..NARROW)
-        .map(|x| buf[(x, top + body.graph as u16 - 1)].symbol().to_owned())
-        .collect();
+    let rows = band_at(NARROW, alternating, Glyphs::Braille);
+    let drawn = rows.last().expect("a band row").clone();
 
-    // A cell whose newer half is taller than its older one, and one the other way
-    // round. Both have to appear, or a single asymmetric glyph could be an edge
-    // of the series rather than the rule.
-    for glyph in [LEFT_HEAVY, RIGHT_HEAVY] {
+    // **Every cell is (idle, busy), so exactly one of the two glyphs may appear.**
+    // The fixture is zero on even samples and busy on odd ones, and at this width
+    // sub-column `s` is sample `s`, so a cell's older half is always the idle one.
+    // Asserting only that both appear was the weaker gate this replaced: swapping
+    // the halves draws the same pair and passes, which is a band mirrored in time
+    // and a burst that just landed drawn where a reader reads history.
+    assert!(
+        drawn.contains(RIGHT_HEAVY),
+        "the dense band never drew {RIGHT_HEAVY:?}, so a cell's two halves are          not carrying two samples:
+{drawn}"
+    );
+    assert!(
+        !drawn.contains(LEFT_HEAVY),
+        "the dense band drew {LEFT_HEAVY:?} for a cell whose older half is idle,          so its two halves are the wrong way round in time:
+{drawn}"
+    );
+}
+
+#[test]
+fn the_band_draws_the_newest_writes_on_the_right() {
+    // **Nothing gated time order, and a mirrored graph is a silent lie.**
+    // `a_dense_cell_carries_two_samples` proves a cell carries *two* values and
+    // cannot prove which is which: its fixture alternates, so swapping the halves
+    // draws the same two glyphs and the gate passes. A band drawn backwards would
+    // put a burst that just landed at the far left, where a reader reads history,
+    // and nothing on screen would say so.
+    //
+    // Busy only in the newest quarter of the window, so the ink has one honest
+    // place to be. `Churn::projected` is oldest-first and `Glyphs::glyph` takes
+    // the older half first, which is the pair this checks end to end.
+    let mut newest = [0u32; HISTORY_SAMPLES];
+    for sample in newest.iter_mut().skip(HISTORY_SAMPLES * 3 / 4) {
+        *sample = 50;
+    }
+
+    for glyphs in [Glyphs::Block, Glyphs::Braille] {
+        let rows = band_at(WIDE, newest, glyphs);
+        let baseline = rows.last().expect("a band row");
+        let inset = drawn_inset(baseline);
+        let span = usize::from(WIDE) - BAR_COLUMNS - inset;
+        // The axis fills every cell, so ink is not the measure: height is. The
+        // upper row is drawn only where a column climbs past the baseline row.
+        let upper: Vec<char> = rows[0].chars().collect();
+        let tall: Vec<usize> = (0..span)
+            .filter(|cell| !upper[inset + cell].is_whitespace())
+            .collect();
+
         assert!(
-            drawn.contains(glyph),
-            "the dense band never drew {glyph:?}, so a cell's two halves are \
-             not carrying two samples:\n{drawn}"
+            !tall.is_empty(),
+            "{glyphs:?}: nothing climbed, so this compared nothing"
+        );
+        let leftmost = tall[0];
+        assert!(
+            leftmost * 2 > span,
+            "{glyphs:?}: the newest quarter of the window drew its first tall \
+             column at {leftmost} of {span}, left of centre, so the band is \
+             mirrored in time:\n{}",
+            rows.join("\n")
         );
     }
 }
