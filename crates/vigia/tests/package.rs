@@ -628,7 +628,14 @@ fn workspace_members() -> Vec<(String, String)> {
     toml_array(&repo_file("Cargo.toml"), "members")
         .into_iter()
         .map(|dir| {
-            let manifest = repo_file(&format!("{dir}/Cargo.toml"));
+            // **Comments stripped first**, which is the rule every other parser
+            // in this file follows and the one a line-prefix scan needs most: a
+            // `# name = "the-old-name"` sitting between `[package]` and the real
+            // field is exactly what someone leaves behind while renaming a
+            // crate, and `find_map` would take it. `toml_array` strips for the
+            // same reason, and there is no `#`-inside-a-value case here because
+            // a crates.io name cannot contain one.
+            let manifest = without_comments(&repo_file(&format!("{dir}/Cargo.toml")));
             let package = manifest
                 .split_once("[package]")
                 .unwrap_or_else(|| panic!("{dir}/Cargo.toml has no [package] section"))
@@ -642,6 +649,17 @@ fn workspace_members() -> Vec<(String, String)> {
         .collect()
 }
 
+/// Whether a `cargo package --list` names `file` at the package root.
+///
+/// **Trimmed equality rather than `contains`**, which is this file's standing
+/// rule and the one it has been caught by four times: a substring test for
+/// `LICENSE` would also be satisfied by a path ending in it, so the mention
+/// would stand in for the thing. The list prints package-relative paths one per
+/// line, so an exact line is the mechanism and nothing else is.
+fn listed_has(listed: &str, file: &str) -> bool {
+    listed.lines().any(|line| line.trim() == file)
+}
+
 /// `cargo package --list` for one member, or `None` if the registry is away.
 ///
 /// **The skip is a documented outcome rather than a failure**, and the
@@ -649,6 +667,15 @@ fn workspace_members() -> Vec<(String, String)> {
 /// means this gate proved nothing on this run, while anything else cargo
 /// refuses is the gate firing. `gate` names the caller in the annotation, so a
 /// CI log says which claim went unchecked rather than that one did.
+///
+/// **`gate` is a literal that has to track the caller's own name, and nothing
+/// enforces that**, so a renamed test leaves a CI annotation pointing at a test
+/// that no longer exists. Recorded rather than fixed: Rust has no stable way to
+/// read the enclosing function's name, and the alternatives are a
+/// `stringify!`-based macro or a `type_name` trick that are both more machinery
+/// than two call sites are worth. The failure is a misleading log line on a run
+/// that already proved nothing, which is the cheapest place in this file for a
+/// drift to land.
 fn package_list(package: &str, gate: &str) -> Option<String> {
     let output = Command::new(env!("CARGO"))
         .args(["package", "--list", "--allow-dirty", "-p", package])
@@ -1720,7 +1747,7 @@ fn the_packaged_artifact_carries_no_tests() {
          gate thinks it is reading:\n{listed}"
     );
     assert!(
-        listed.lines().any(|line| line.trim() == "README.md"),
+        listed_has(&listed, "README.md"),
         "README.md is not in the package; `readme` inheritance from the \
          workspace has stopped resolving:\n{listed}"
     );
@@ -1750,6 +1777,32 @@ fn the_packaged_artifact_carries_no_tests() {
 /// `notify` among them and both workspaces with this same layout, ship the file
 /// from inside the crate directory.
 ///
+/// **A symlink is the third idea and the worst of the three, which is worth
+/// writing down because it is the one a Unix reader reaches for first.** It
+/// fails twice over, independently. Git on Windows needs
+/// `SeCreateSymbolicLinkPrivilege` to materialise one at all, and without it a
+/// checkout writes an ordinary file whose *contents* are the string
+/// `../../LICENSE`; `.gitattributes` does not save that, since `eol=lf` governs
+/// line endings rather than symlink materialisation. And even where the link is
+/// real, cargo does not dereference one pointing outside the package directory:
+/// [cargo#5664](https://github.com/rust-lang/cargo/issues/5664) is open on
+/// exactly this case, filed against `serde`, whose packaged `LICENSE-APACHE`
+/// carried the literal target path instead of the licence text. Both failures
+/// are silent, and both land on the tier-1 platform this project is developed
+/// on. A `build.rs` cannot help either, since `cargo package` fixes the
+/// tarball's file list before any build script runs.
+///
+/// **And this gate lives in `vigia`'s tests rather than each crate's own**,
+/// which is not tidiness. `crates/vigia/Cargo.toml` excludes `tests/**`, so a
+/// test here that reads outside the package ships to nobody;
+/// `crates/vigia-core`'s manifest says its tests are *"deliberately not
+/// excluded"* because none of them escape. A licence-drift check placed there
+/// would read `../../LICENSE` and become the first escape in the one package
+/// that publishes its own test suite, which is the exact defect `SPEC.md` §9
+/// and this file exist to prevent. Reaching `vigia-core` from here costs
+/// nothing: this gate shells `cargo package -p vigia-core` and reads its files
+/// by path, and touches nothing under its `tests/`.
+///
 /// This gate asks cargo. [`the_licence_each_crate_ships_is_the_repository_licence`]
 /// asks whether what it ships is the right text, and neither subsumes the
 /// other: a copy that drifts passes here, and a mechanism that stops working
@@ -1762,7 +1815,7 @@ fn every_published_crate_ships_the_licence() {
         };
 
         assert!(
-            listed.lines().any(|line| line.trim() == "LICENSE"),
+            listed_has(&listed, "LICENSE"),
             "the .crate for {package} carries no LICENSE, so `cargo install` and \
              a vendored copy get the SPDX name with none of the text behind it. \
              `{dir}/LICENSE` is what puts it there, because cargo takes a licence \
@@ -1772,7 +1825,7 @@ fn every_published_crate_ships_the_licence() {
         // The other direction, so the assertion above cannot pass because the
         // list came back empty or came from a package this gate did not mean.
         assert!(
-            listed.lines().any(|line| line.trim() == "README.md"),
+            listed_has(&listed, "README.md"),
             "the package list for {package} has no README.md in it, so it is not \
              the list this gate thinks it is reading:\n{listed}"
         );
@@ -1795,9 +1848,15 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
 
     // Non-vacuity, on the same rule as the package lists above: an empty or
     // truncated root file would make every comparison below pass by matching
-    // nothing against nothing.
+    // nothing against nothing, and three empty files are byte-identical.
+    //
+    // **Fifteen lines because the licence is twenty-one**, which is the number
+    // the docblock above quotes, so the floor is set just under the real value
+    // rather than at a round one. A loose floor is the point: MIT's text is
+    // fixed, but a year or a name change moves the byte count and must not turn
+    // this into a failure about nothing.
     assert!(
-        root.contains("MIT License") && root.len() > 500,
+        root.contains("MIT License") && root.lines().count() > 15,
         "the repository LICENSE is not the text this gate thinks it is \
          comparing against, so the comparisons below prove nothing"
     );
