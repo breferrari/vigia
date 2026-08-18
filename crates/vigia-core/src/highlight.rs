@@ -338,11 +338,12 @@ impl Sides {
         syntaxes: &SyntaxSet,
         table: &[(Scope, Class)],
     ) -> Vec<Span> {
-        // `load_defaults_newlines` is the dump syntect supports; its
-        // no-newline twin is documented as unreliable because grammars anchor
-        // on end of line. The core strips line endings, so one is put back
-        // here, into a buffer the hunk reuses rather than an allocation per
-        // line.
+        // The embedded dump is built from the newlines variant (`xtask` merges
+        // onto `two_face::syntax::extra_newlines` and loads extras with
+        // lines-include-newline); the no-newline form is documented as
+        // unreliable because grammars anchor on end of line. The core strips
+        // line endings, so one is put back here, into a buffer the hunk reuses
+        // rather than an allocation per line.
         buf.clear();
         buf.push_str(&line.text);
         buf.push('\n');
@@ -573,9 +574,19 @@ pub struct Highlighter {
 impl Highlighter {
     /// Load the bundled grammars and start with an empty cache.
     ///
-    /// Costs 318µs measured in release, which is why it is done up front rather
-    /// than behind a lazy initialiser: I7 gives startup 50ms, and hiding this
-    /// behind first use would only move it onto the first frame that draws.
+    /// The grammars are the dump `xtask` builds and commits at
+    /// `assets/syntaxes.bin` — `two-face`'s `fancy`-vetted packaging of `bat`'s
+    /// curated set plus the locally vendored extras, which is the covered set
+    /// `SPEC.md` §6 rules and [#235](https://github.com/breferrari/vigia/issues/235)
+    /// decided. `from_binary` panics on a malformed dump, and deliberately so:
+    /// the bytes are compiled into the binary, so a dump that cannot load is a
+    /// build defect every test run catches, not a runtime condition to recover
+    /// from.
+    ///
+    /// Loading is done up front rather than behind a lazy initialiser: I7
+    /// gives startup 50ms, the old 75-syntax dump cost 318µs in release, and
+    /// hiding this behind first use would only move it onto the first frame
+    /// that draws.
     ///
     /// **Loading a grammar and compiling one are different costs, and only the
     /// small one happens here.** `syntect` defers every pattern to
@@ -588,7 +599,9 @@ impl Highlighter {
     /// off the path a reader is waiting on.
     pub fn new() -> Self {
         Self {
-            syntaxes: Arc::new(SyntaxSet::load_defaults_newlines()),
+            syntaxes: Arc::new(syntect::dumps::from_binary(include_bytes!(
+                "../assets/syntaxes.bin"
+            ))),
             table: CLASSES
                 .iter()
                 .filter_map(|(prefix, class)| Some((Scope::new(prefix).ok()?, *class)))
@@ -988,9 +1001,9 @@ impl Default for Highlighter {
 }
 
 impl std::fmt::Debug for Highlighter {
-    /// Hand written because the bundled grammars are seventy-five syntaxes of
-    /// compiled regex, and a derived `Debug` would put all of them in whatever
-    /// this is nested inside.
+    /// Hand written because the bundled grammars are a couple of hundred
+    /// syntaxes of compiled regex, and a derived `Debug` would put all of them
+    /// in whatever this is nested inside.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Highlighter")
             .field("tracked", &self.entries.len())
@@ -1396,11 +1409,11 @@ mod tests {
     /// A file with no extension at all, which is why the lookup has two steps.
     #[test]
     fn a_file_named_rather_than_extended_still_finds_its_grammar() {
-        let syntaxes = SyntaxSet::load_defaults_newlines();
-        assert!(syntax_for(&syntaxes, "src/lib.rs").is_some());
-        assert!(syntax_for(&syntaxes, "Makefile").is_some());
-        assert!(syntax_for(&syntaxes, "deep/nested/Makefile").is_some());
-        assert!(syntax_for(&syntaxes, "src/no-such-thing.zzzznope").is_none());
+        let syntaxes = &Highlighter::new().syntaxes;
+        assert!(syntax_for(syntaxes, "src/lib.rs").is_some());
+        assert!(syntax_for(syntaxes, "Makefile").is_some());
+        assert!(syntax_for(syntaxes, "deep/nested/Makefile").is_some());
+        assert!(syntax_for(syntaxes, "src/no-such-thing.zzzznope").is_none());
     }
 
     /// Why the two sides are parsed apart.
