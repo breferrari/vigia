@@ -3300,6 +3300,19 @@ pub fn render(
         // The reserve is untouched. It is about **glyph adjacency**, so that a
         // full-block thumb never reads as part of a `-6`, and a blank cell whose
         // background matches the band is still a blank cell.
+        //
+        // **This equals `area.width`, the `pane` argument below, and the two are
+        // deliberately not merged.** `region` is built `..area`, so today the wash's
+        // width and the pane's width are the same number arriving twice, which is
+        // fair to read as derivable state. They mean different things: this is *the
+        // region's* extent, which is what furniture spans, and `pane` is the
+        // screen's, which is what glyph placement is planned against. The
+        // coincidence is that the diff region currently spans the whole pane.
+        // [#162](https://github.com/breferrari/vigia/issues/162) ends that on
+        // purpose, giving the diff *"the remaining width as its own region"* beside
+        // a left rail, and on that layout the wash must follow the region and not
+        // the screen. Collapsing them now would be correct and would plant a defect
+        // for that row to land on, so the seam stays and this paragraph is why.
         let washed = full.width;
         painter.body(region, washed, view, area.width);
     }

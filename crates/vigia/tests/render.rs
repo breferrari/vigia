@@ -5712,14 +5712,37 @@ fn a_wash_runs_under_the_scrollbar_column() {
         width - 1
     );
 
-    // **And the track is still drawn there**, which is the half that stops this
-    // becoming a band with the bar deleted out of it. The glyph is what a reader
-    // locates the thumb inside; the wash is only what it sits on.
+    // **And the track's own colour survived the wash**, which is the half the
+    // whole fix rests on and the half a symbol check cannot reach.
+    //
+    // `Cell::set_style` merges: `ratatui-core-0.1.2/src/buffer/cell.rs:192` assigns
+    // `fg` and `bg` only where the incoming style carries `Some`, so a wash holding
+    // a background and no foreground repaints this cell's background and leaves the
+    // track's colour alone. That is a **dependency's** behaviour, pinned at
+    // `ratatui 0.30` by the root manifest and load-bearing here, so it is asserted
+    // rather than described: an upgrade that stopped short-circuiting a `None`
+    // foreground would grey the whole bar on every changed row.
+    assert_eq!(
+        buffer[(width - 1, washed)].fg,
+        vigia::Theme::dark()
+            .bar_track
+            .fg
+            .expect("dark's track has a colour"),
+        "the wash overwrote the track's foreground, so the band was painted over \
+         the bar rather than behind it"
+    );
+
+    // The glyph too, which is a **different** claim kept for a different reason.
+    // `Buffer::set_style` never touches a symbol whether it merges or replaces, so
+    // this cannot fail from the merge changing under us and is not evidence for the
+    // paragraph above. What it does catch is content reaching this column: widening
+    // the wash means the row's rect now covers the bar, and a future change drawing
+    // text rather than only a background into that rect would erase the track.
     assert_eq!(
         buffer[(width - 1, washed)].symbol(),
         "\u{2502}",
-        "the bar column carries the band but no track glyph, so widening the \
-         wash swallowed the bar instead of drawing over it"
+        "the bar column carries the band but no track glyph, so something drew \
+         content into the column the bar owns"
     );
 
     // **And the gap beside it *is* washed, which this asserted the other way

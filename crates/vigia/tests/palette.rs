@@ -1677,25 +1677,42 @@ fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
-/// The channels of a truecolour style's **background**.
+/// The two truecolour palettes and the pane each is authored against.
 ///
-/// The row washes are the only backgrounds this file reads, and they are the
-/// reason [`a_bar_track_is_visible_on_every_row_it_crosses`] exists: the bar's
-/// column stopped being pane-coloured on 2026-08-18, so the ratios that decide
-/// whether its marks can be seen are no longer all measured against one thing.
-fn bg_of(style: ratatui::style::Style) -> (u8, u8, u8) {
-    match style.bg.expect("a background") {
+/// **Data only, and deliberately not a shared assertion.** Two gates enumerate
+/// this same triple and their bodies make different claims: one is about all three
+/// tracks against the pane, the other about the bar's marks across every row the
+/// bar crosses. Merging the gates would let one claim's failure read as the
+/// other's, so only the enumeration is shared, which carries no rationale of its
+/// own.
+fn palettes() -> [(&'static str, Theme, (u8, u8, u8)); 2] {
+    [
+        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
+        (
+            "light",
+            Theme::light().resolve(Depth::Truecolor),
+            LIGHT_PANE,
+        ),
+    ]
+}
+
+/// The channels of a truecolour value, named so a failure says which one.
+///
+/// **One extractor rather than one per field.** A second copy was written for
+/// backgrounds when [`a_bar_track_is_visible_on_every_row_it_crosses`] landed, and
+/// the two differed only in the field read and the noun in the panic. The washes
+/// this file compares against already arrive as a `Color` from [`wash_of`], so a
+/// background extractor was never needed at all.
+fn channels_of(colour: Color, which: &str) -> (u8, u8, u8) {
+    match colour {
         Color::Rgb(r, g, b) => (r, g, b),
-        other => panic!("expected a truecolour background, found {other:?}"),
+        other => panic!("expected a truecolour {which}, found {other:?}"),
     }
 }
 
 /// The channels of a truecolour style's foreground.
 fn rgb_of(style: ratatui::style::Style) -> (u8, u8, u8) {
-    match style.fg.expect("a foreground") {
-        Color::Rgb(r, g, b) => (r, g, b),
-        other => panic!("expected a truecolour foreground, found {other:?}"),
-    }
+    channels_of(style.fg.expect("a foreground"), "foreground")
 }
 
 /// The floor a mark meant to be *seen but subordinate* has to clear.
@@ -1726,14 +1743,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
     // the sixteen-colour rung. That is the picture-versus-cell-grid distinction
     // `SPEC.md` §5.1 already draws: a 1.24:1 edge across many pixels of SVG is
     // perceptible, and the same ratio inside one terminal cell is not.
-    for (name, theme, pane) in [
-        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
-        (
-            "light",
-            Theme::light().resolve(Depth::Truecolor),
-            LIGHT_PANE,
-        ),
-    ] {
+    for (name, theme, pane) in palettes() {
         for (element, style) in [
             ("bar_track", theme.bar_track),
             ("heat_track", theme.heat_track),
@@ -1794,14 +1804,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
 /// satisfied one rule by destroying the other.
 #[test]
 fn a_bar_track_is_visible_on_every_row_it_crosses() {
-    for (name, theme, pane) in [
-        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
-        (
-            "light",
-            Theme::light().resolve(Depth::Truecolor),
-            LIGHT_PANE,
-        ),
-    ] {
+    for (name, theme, pane) in palettes() {
         let track = rgb_of(theme.bar_track);
         let thumb = rgb_of(theme.bar);
 
@@ -1810,15 +1813,21 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
         // restatement of them here.
         let backgrounds = [
             ("the pane", pane),
-            ("an added row", bg_of(theme.row(true).0)),
-            ("a removed row", bg_of(theme.row(false).0)),
+            (
+                "an added row",
+                channels_of(wash_of(theme, true), "row wash"),
+            ),
+            (
+                "a removed row",
+                channels_of(wash_of(theme, false), "row wash"),
+            ),
         ];
 
-        for (where_, behind) in backgrounds {
+        for (place, behind) in backgrounds {
             let seen = contrast(track, behind);
             assert!(
                 seen >= TRACK_FLOOR,
-                "{name}'s bar_track is {seen:.2}:1 on {where_}, under the \
+                "{name}'s bar_track is {seen:.2}:1 on {place}, under the \
                  {TRACK_FLOOR}:1 a mark needs to be seen at all. The bar crosses \
                  that row, so this is a background it is drawn on"
             );
@@ -1831,9 +1840,55 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
             let lit = contrast(thumb, behind);
             assert!(
                 lit > seen * 1.5,
-                "{name}'s thumb is {lit:.2}:1 on {where_} and its track \
+                "{name}'s thumb is {lit:.2}:1 on {place} and its track \
                  {seen:.2}:1, which is not enough separation for the thumb to \
                  read as the lit one"
+            );
+        }
+    }
+}
+
+/// The bar's marks and the row wash touch **disjoint** style fields.
+///
+/// This is the invariant that makes the draw order not matter, and it was unstated
+/// until [#239](https://github.com/breferrari/vigia/issues/239)'s audit went
+/// looking for it.
+///
+/// The bar is drawn before the wash, and the wash now covers the bar's column, so
+/// the band lands on a cell the bar already wrote. That is only safe because every
+/// bar style is a foreground and every row wash is a background: `Cell::set_style`
+/// merges field by field, so the two writes cannot reach the same field and
+/// therefore commute. Reorder them and nothing changes.
+///
+/// **It breaks the day a bar rung gains a background**, which is a real direction
+/// rather than a hypothetical: the hover and pressed rungs already exist as their
+/// own keys, and giving one a background would make the wash and the bar fight over
+/// the same field, silently, with the render gate still green because a context row
+/// has no wash to fight with. Then the order stops being free and has to be chosen.
+/// This is the gate that says so at that moment rather than afterwards.
+#[test]
+fn the_bar_and_the_wash_touch_disjoint_fields() {
+    for (name, theme, _) in palettes() {
+        for (element, style) in [
+            ("bar", theme.bar),
+            ("bar_track", theme.bar_track),
+            ("bar_hover", theme.bar_hover),
+            ("bar_active", theme.bar_active),
+        ] {
+            assert!(
+                style.bg.is_none(),
+                "{name}'s {element} carries a background, so it now competes with \
+                 the row wash for the bar's own column. The draw order stopped \
+                 being free: pick one deliberately and say so"
+            );
+        }
+
+        for added in [true, false] {
+            let wash = theme.row(added).0;
+            assert!(
+                wash.fg.is_none(),
+                "{name}'s row wash carries a foreground, so painting it over the \
+                 bar's column would erase the track's colour"
             );
         }
     }
