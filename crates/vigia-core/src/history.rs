@@ -300,6 +300,26 @@ const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_n
 /// is a forward pass plus a backward pass, `O(n)`, because an exponential is the
 /// one shape that is its own running sum. The centre sample is in both passes,
 /// so it is subtracted once.
+/// Sum a retained series into the buckets a sparkline draws.
+///
+/// Shared by [`Track::drawn`] and [`Track::levelled`] so the two differ only in
+/// the series handed to them. Reconstructing a whole `Track` to reuse the loop
+/// was the first shape and copied fields the sum never reads.
+///
+/// Sliced rather than zipped against `chunks`, which **truncates**: a division
+/// that stopped being exact would silently drop the last group, and the last
+/// group is the newest, so every fresh write would vanish from the screen with
+/// nothing failing. Slicing panics instead, and the `const` assertion beside
+/// [`SAMPLES_PER_BUCKET`] means it cannot.
+fn bucketed(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_BUCKETS] {
+    std::array::from_fn(|bucket| {
+        samples[bucket * SAMPLES_PER_BUCKET..][..SAMPLES_PER_BUCKET]
+            .iter()
+            .copied()
+            .fold(0, u32::saturating_add)
+    })
+}
+
 fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
     let decay = (-1.0 / LEVEL_SAMPLES).exp();
 
@@ -337,15 +357,25 @@ fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
         let total = smoothed[at] + value - f64::from(samples[at]);
         let share = weight[at] + mass - 1.0;
         let level = if share > 0.0 { total / share } else { 0.0 };
-        // **One is the floor here too, and it has to be said again.**
+        // **One is the floor where a write actually landed, and nowhere else.**
+        //
         // `Track::wrote` gives every write at least one so that a store fed no
         // sizes behaves as it always did. A level divides by the kernel's own
-        // weight, so that one becomes a fraction and rounds to nothing: measured,
-        // a file with a single recorded tick drew no bucket at all. Anything the
-        // window actually holds keeps a floor of one, which is the same rule one
-        // layer up rather than a new one.
+        // weight, so that one becomes a fraction and rounds to nothing: a file
+        // with a single recorded tick drew no bucket at all.
+        //
+        // **Gated on the sample rather than on the level, and the difference is
+        // the whole element.** `exp(-1/6)` needs about four thousand steps to
+        // underflow and the window is a hundred and twenty, so after any write at
+        // all *every* sample is positive by a hair. A floor keyed on that lifts
+        // the entire window to one: measured, a single burst sixty seconds back
+        // drew `[10, 12, 58, 302, 1594, 8015, 5698, 1077, 204, 38, 10, 10]`, a
+        // solid bar across a quiet worktree, which is the exact defect this
+        // feature exists to remove, reintroduced by its own guard. Keyed on the
+        // raw sample, the floor protects the write that was made and leaves the
+        // tail to round away, so a quiet stretch is an axis again.
         let rounded = level.round().clamp(0.0, f64::from(u32::MAX));
-        out[at] = if rounded < 1.0 && level > 0.0 {
+        out[at] = if rounded < 1.0 && samples[at] > 0 {
             1
         } else {
             rounded as u32
@@ -543,27 +573,23 @@ impl Track {
     /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
     /// past its type is already at the top of the ramp, and wrapping would draw the
     /// busiest file in the worktree as the quietest.
-    /// [`Track::drawn`] read as a level. See [`levelled`].
-    fn levelled(&self) -> [u32; HISTORY_BUCKETS] {
-        Track {
-            samples: levelled(&self.samples),
-            ..*self
-        }
-        .drawn()
-    }
-
     fn drawn(&self) -> [u32; HISTORY_BUCKETS] {
         // Sliced rather than zipped against `chunks`, which **truncates**: a
         // division that stopped being exact would silently drop the last group,
         // and the last group is the newest, so every fresh write would vanish
         // from the screen with nothing failing. Slicing panics instead, and the
         // `const` assertion beside `SAMPLES_PER_BUCKET` means it cannot.
-        std::array::from_fn(|bucket| {
-            self.samples[bucket * SAMPLES_PER_BUCKET..][..SAMPLES_PER_BUCKET]
-                .iter()
-                .copied()
-                .fold(0, u32::saturating_add)
-        })
+        bucketed(&self.samples)
+    }
+
+    /// [`Track::drawn`] read as a **level** rather than as the writes that made
+    /// it. See [`levelled`] for the kernel and [`HISTORY_LEVEL`] for its
+    /// constant.
+    ///
+    /// Its own function rather than a flag on `drawn`, because the two answer
+    /// different questions and every gate over `drawn` asserts the one it has.
+    fn levelled(&self) -> [u32; HISTORY_BUCKETS] {
+        bucketed(&levelled(&self.samples))
     }
 
     /// Add this write's weight to the newest sample.
@@ -992,7 +1018,12 @@ impl History {
         // Streamed rather than collected: this used to build a `Vec` of every
         // drawn bucket of every path on the frame path, per tick, and `scale_of`
         // takes an iterator precisely so it need not.
-        self.scale = scale_of(self.tracks.values().flat_map(Track::drawn));
+        // **Levelled, because that is what the sparkline draws**
+        // ([#242](https://github.com/breferrari/vigia/issues/242)). A denominator
+        // taken over the raw buckets while the bars are drawn from the levelled
+        // ones is two different quantities in one division, and every bar on
+        // screen would be wrong by whatever the kernel moved.
+        self.scale = scale_of(self.tracks.values().flat_map(Track::levelled));
         self.worktree = Churn(worktree);
     }
 }
@@ -1151,19 +1182,45 @@ mod tests {
         history.record(["a"], now);
         history.record(["b"], now);
 
-        let busiest = history
-            .churn("a")
-            .expect("a is tracked")
+        let ordinary = history.scale();
+        assert!(ordinary > 0, "an ordinary window produced no scale at all");
+
+        // **The claim, asserted by moving the outlier rather than by comparing
+        // against one bucket.** This used to read `scale < busiest`, which was a
+        // true consequence of a mean-based scale while the buckets were spiky and
+        // stopped being one when [#242](https://github.com/breferrari/vigia/issues/242)
+        // made them a level: a smooth series has few outliers, so a mean is
+        // representative and thirteen tenths of it sits *above* a typical bucket
+        // rather than below the tallest. The property that actually matters never
+        // depended on which side it landed: one enormous write must not drag the
+        // denominator with it, because against a maximum every ordinary edit for
+        // the next two minutes draws one level high.
+        let mut spiked = History::starting_at(now);
+        spiked.record(["a"], now);
+        spiked.record(["a"], now);
+        spiked.record(["b"], now);
+        // Twice, because a first write has no earlier size to differ from and
+        // weighs the floor: the outlier is the *delta*, not the size.
+        spiked.record_sized([("c", Some(1_000))], now);
+        spiked.record_sized([("c", Some(50_000_000))], now);
+
+        let busiest = spiked
+            .level("c")
+            .expect("c is tracked")
             .into_iter()
             .max()
             .expect("a window has buckets");
-        assert_eq!(busiest, 2, "the fixture no longer has a bucket to be above");
-        assert_eq!(history.scale(), 1);
+
         assert!(
-            history.scale() < busiest,
-            "the scale is the largest bucket again, so one outlier flattens              every other row on screen"
+            busiest > spiked.scale() * 4,
+            "the outlier's own bucket is {busiest} against a scale of {}, so the              fixture has no outlier to speak of and this proves nothing",
+            spiked.scale()
         );
-        assert_eq!(history.churn("b").unwrap()[HISTORY_BUCKETS - 1], 1);
+        assert_eq!(
+            spiked.churn("b").unwrap()[HISTORY_BUCKETS - 1],
+            1,
+            "the small path stopped being recorded, so the fixture changed rather              than the scale"
+        );
     }
 
     /// A path written more than `u16::MAX` times in one sample is already at the

@@ -656,7 +656,6 @@ fn a_dense_cell_carries_two_samples() {
     // asserting the opposite would fail for a true reason. So this holds the part
     // that is still true and unarguable, that both rungs draw the transition, and
     // points at the ruling for the rest.
-    let _ = (dense, block);
 }
 
 #[test]

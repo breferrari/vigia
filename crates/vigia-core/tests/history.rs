@@ -729,6 +729,18 @@ fn a_single_burst_draws_a_wave_rather_than_a_spike() {
 
     // Non-vacuity first: a wave needs more than one non-empty bucket, and a
     // spike train is exactly the case where it has one.
+    // **And the far end of the window is empty.** Without this the gate passes
+    // against a floor that lights every sample: a solid bar rises to a peak and
+    // falls back to the bar, which is monotone in both directions and is the
+    // defect this feature removes. Measured, that bug drew
+    // `[10, 12, 58, 302, 1594, 8015, 5698, 1077, 204, 38, 10, 10]` and satisfied
+    // every other assertion here.
+    assert_eq!(
+        (drawn[0], drawn[HISTORY_BUCKETS - 1]),
+        (0, 0),
+        "a burst in the middle of the window lit both far ends, so the level has          a floor under it rather than an axis: {drawn:?}"
+    );
+
     let lit = drawn.iter().filter(|value| **value > 0).count();
     assert!(
         lit >= 4,
@@ -810,10 +822,14 @@ fn two_bursts_thirty_seconds_apart_still_read_as_two() {
 
 /// A burst at the newest sample reads at full height.
 ///
-/// The edge case a symmetric kernel is suspected of and does not have. There are
-/// no samples after the newest one, so half the kernel falls outside the window;
-/// edge normalisation was tried for this and rejected, because it flattens the
-/// mid-window wave and this holds without it.
+/// There are no samples after the newest one, so half the kernel falls outside
+/// the window and the level would droop there. `levelled` divides by the weight
+/// **actually available** at each sample, which is what stops it.
+///
+/// What was tried and rejected is the naive form of that, dividing by the whole
+/// kernel's weight everywhere: it flattens the mid-window wave instead of lifting
+/// the edges. An early reading of this recorded "edge normalisation rejected",
+/// which was the wrong lesson from the right measurement.
 #[test]
 fn a_burst_at_the_newest_sample_reads_full_height() {
     let now = base();

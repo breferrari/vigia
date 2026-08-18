@@ -500,8 +500,13 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
 
     let now = Instant::now();
     let mut history = History::starting_at(now);
-    history.record(["src/lib.rs"], now);
-    history.record(["src/lib.rs"], now);
+    // **Sized writes rather than bare ticks.** A sample weighs a difference, and
+    // the sparkline draws a *level* since #242, so two unsized ticks weigh one
+    // each, spread to a scale of exactly 1: the value a hardcoded denominator
+    // would reach for, which is the one thing this gate exists to tell apart.
+    // A first write is a baseline, so the weight is the second one's growth.
+    history.record_sized([("src/lib.rs", Some(4_000))], now);
+    history.record_sized([("src/lib.rs", Some(28_000))], now);
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -528,8 +533,16 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     // *ramp's* denominator to one would also satisfy: the value a store returns
     // has to differ from every constant a mutation would reach for, or the gate
     // that exists to kill a hardcode is one.
+    //
+    // **Thirteen rather than two since [#242](https://github.com/breferrari/vigia/issues/242).**
+    // The sparkline draws a *level*, so its denominator is measured over the same
+    // levelled buckets rather than over the raw ones: two ticks spread by the
+    // kernel light many buckets at a low value, and the mean-based scale over
+    // those is what the bars are actually divided by. Pinned rather than loosened
+    // because this gate's whole point is that the value differs from every
+    // constant a hardcode would reach for, and it still does.
     assert_eq!(
-        view.scale, 2,
+        view.scale, 4_667,
         "the recorded ticks did not reach the view's shared scale"
     );
 
