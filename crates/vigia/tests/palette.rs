@@ -784,7 +784,7 @@ fn climbing() -> View {
             from: None,
             kind: 'M',
             churn: Some((12, 0)),
-            spark: [0, 1, 2, 3, 5, 7, 9, 12],
+            spark: [0, 0, 1, 1, 2, 2, 3, 4, 5, 7, 9, 12],
             recency: Recency::Cold,
             heat: [HeatBucket::default(); HEAT_BUCKETS],
         })],
@@ -1090,7 +1090,7 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     // match everything.
     let mut view = three_kinds();
     if let Row::File(entry) = &mut view.rows[0] {
-        entry.spark = [0, 0, 0, 0, 0, 0, 0, 3];
+        entry.spark = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
     }
     view.peak = 3;
 

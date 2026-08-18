@@ -83,7 +83,23 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 /// element's column count. [`HISTORY_SAMPLES`] is the sampling rate now and
 /// [`History::churn`] projects one onto the other, so this constant keeps its
 /// exact meaning and its exact value.
-pub const HISTORY_BUCKETS: usize = 8;
+pub const HISTORY_BUCKETS: usize = 12;
+
+// Twelve since 2026-08-18 ([#161](https://github.com/breferrari/vigia/issues/161)),
+// from eight, and the reason is the one [`GRAPH_COLUMNS`] was tuned against one
+// element over. A bucket was fifteen seconds, which is coarse enough that a
+// steady worktree drew only five and a half of the ramp's nine rungs and the
+// strip read as a solid block rather than a shape. Ten seconds is finer without
+// crossing into the scatter the band was reported for: measured over forty
+// seeded series, a steady worktree goes from 8% of buckets empty to 17% and from
+// 5.5 distinct heights to 6.5, which is more texture rather than more noise.
+//
+// **Twelve rather than fifteen**, which is where the band's own floor sits, for
+// two reasons that are about this element rather than about the period. It has
+// to halve cleanly, because `SPARK_RUNGS` is the narrowing ladder and fifteen
+// does not; and the sparkline is per file and shares its row with a path, where
+// the band has the pane to itself, so four more columns here cost something the
+// band's do not.
 
 /// How much time one **drawn** bucket covers.
 pub const HISTORY_BUCKET: Duration =
