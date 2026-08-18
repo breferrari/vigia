@@ -23,8 +23,11 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Chrome, Glyphs, Theme, body_layout, render};
-use vigia_core::{Highlighter, History};
+use vigia::{
+    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Row, Theme, View,
+    body_layout, render,
+};
+use vigia_core::{Churn, HISTORY_SAMPLES, Highlighter, History, Recency};
 
 use support::{Scratch, materialise};
 
@@ -37,6 +40,12 @@ use support::{Scratch, materialise};
 /// assertion rather than in this comment.
 const WIDE: u16 = 80;
 const TALL: u16 = 24;
+
+/// Columns of churn the band draws, restated rather than imported.
+///
+/// A gate reading the renderer's own constant would agree with it by
+/// construction, which is this suite's standing rule for every rung table.
+const GRAPH_COLUMNS: usize = 15;
 
 /// Changed files in every fixture here, which is what `assets/preview.svg` draws.
 const FILES: usize = 3;
@@ -179,4 +188,185 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
         header.contains(BRANCH),
         "a pane with the masthead hidden drew no branch: {header:?}"
     );
+}
+
+/// A view whose band has a known series, drawn on a pane that allocates one.
+///
+/// **The pinned list is what allocates the band**, and that is the fixture trap
+/// worth recording rather than rediscovering: `render` clamps the body to
+/// `view.list.len()`, so a view carrying diff rows and an empty list draws no
+/// masthead however tall the pane or however true the flag. An earlier attempt
+/// at a band gate was withdrawn for exactly this, having read the file list's
+/// sparkline and concluded the band drew nothing.
+fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
+    let heat = [HeatBucket {
+        added: 4,
+        removed: 1,
+    }; HEAT_BUCKETS];
+    let entry = FileEntry {
+        path: "crates/vigia/src/render.rs".to_owned(),
+        from: None,
+        kind: 'M',
+        churn: Some((45, 12)),
+        spark: [1, 2, 4, 6, 8, 9, 11, 12],
+        recency: Recency::Live,
+        heat,
+    };
+    View {
+        list: vec![entry.clone()],
+        rows: vec![Row::File(entry)],
+        files: 1,
+        peak: 12,
+        worktree_churn: Churn(series),
+        ..View::default()
+    }
+}
+
+/// The band's own rows, drawn at `width`, as strings.
+fn band_rows(width: u16, series: [u32; HISTORY_SAMPLES]) -> Vec<String> {
+    let shown = Chrome {
+        masthead: true,
+        ..chrome(&App::new())
+    };
+    let area = Rect::new(0, 0, width, TALL);
+    let body = body_layout(area, &shown, 1);
+    assert!(
+        body.graph > 0,
+        "the fixture drew no band at {width} columns, so the gate would prove \
+         nothing"
+    );
+    let mut buf = Buffer::empty(area);
+    render(
+        &mut buf,
+        area,
+        &banded(series),
+        &Theme::default(),
+        Glyphs::default(),
+        &shown,
+    );
+    let top = 1 + body.lead as u16;
+    (top..top + body.graph as u16)
+        .map(|y| {
+            (0..width)
+                .map(|x| buf[(x, y)].symbol().to_owned())
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// A worktree written in bursts, which is the shape #223 was reported on.
+const BURSTY: [u32; HISTORY_SAMPLES] = {
+    let mut s = [0; HISTORY_SAMPLES];
+    s[8] = 6;
+    s[26] = 9;
+    s[55] = 2;
+    s[70] = 11;
+    s[98] = 5;
+    s[115] = 8;
+    s
+};
+
+#[test]
+fn a_wider_pane_buys_wider_bars_and_not_finer_time() {
+    // **The defect, stated as a property.** `Churn::projected` clamped the drawn
+    // width to the sample count, so past 120 columns one column was one second
+    // and a save drew a hairline between two blanks. Widening must buy bar
+    // width; the time resolution is the element's own and does not move.
+    let mut widths = Vec::new();
+    for width in [60u16, 80, 120, 160, 200] {
+        let rows = band_rows(width, BURSTY);
+        let drawn: usize = rows[0].chars().filter(|c| !c.is_whitespace()).count()
+            + rows[1].chars().filter(|c| !c.is_whitespace()).count();
+        // Runs of one glyph are bars; counting distinct runs counts columns.
+        let bars = rows
+            .iter()
+            .map(|row| {
+                row.chars()
+                    .collect::<Vec<_>>()
+                    .windows(2)
+                    .filter(|w| w[0] != w[1] && !w[1].is_whitespace())
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
+        widths.push((width, drawn, bars));
+    }
+
+    // Ink grows with the pane.
+    for pair in widths.windows(2) {
+        assert!(
+            pair[1].1 >= pair[0].1,
+            "widening from {} to {} drew less ink: {widths:?}",
+            pair[0].0,
+            pair[1].0
+        );
+    }
+    // And the column count never exceeds the element's own resolution, however
+    // wide the pane gets. This is what stops a wide pane sampling per second.
+    for (width, _, bars) in &widths {
+        assert!(
+            *bars <= GRAPH_COLUMNS,
+            "at {width} columns the band drew {bars} bars, past its own resolution"
+        );
+    }
+    // Non-vacuity: the widest pane must actually be wider in ink than the
+    // narrowest, or "never exceeds" is true of a band that never grew.
+    assert!(
+        widths.last().expect("a width").1 > widths[0].1,
+        "the sweep never grew, so this gate compared nothing: {widths:?}"
+    );
+}
+
+#[test]
+fn a_burst_and_its_neighbour_land_in_one_column() {
+    // Two writes six seconds apart are one burst, and at the old one-second
+    // columns they drew as two separate spikes with five blanks between them.
+    let mut near = [0u32; HISTORY_SAMPLES];
+    near[40] = 5;
+    near[46] = 5;
+    let rows = band_rows(WIDE, near);
+    let bars = rows[1]
+        .split(|c: char| c.is_whitespace())
+        .filter(|run| !run.is_empty())
+        .count();
+    assert_eq!(
+        bars,
+        1,
+        "two writes six seconds apart drew {bars} bars rather than one:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn an_empty_column_still_draws_nothing() {
+    // #158, unchanged by the coarser period and worth a gate precisely because
+    // coarser columns could look like an excuse to revisit it.
+    let rows = band_rows(WIDE, BURSTY);
+    assert!(
+        rows.iter().any(|row| row.contains("  ")),
+        "no run of blank columns survived, so the band filled its gaps:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn the_band_reaches_both_edges_of_its_slot() {
+    // §5.3: furniture runs full bleed. The span arithmetic distributes the
+    // remainder rather than leaving a ragged tail, so a width that does not
+    // divide by the column count still reaches the last cell.
+    let full = [7u32; HISTORY_SAMPLES];
+    for width in [60u16, 83, 120, 137] {
+        let rows = band_rows(width, full);
+        let widest = rows
+            .iter()
+            .map(|row| row.trim_end().chars().count())
+            .max()
+            .unwrap_or(0);
+        let inset = rows[1].len() - rows[1].trim_start().len();
+        assert!(
+            widest + 2 >= usize::from(width) - inset,
+            "at {width} columns the band stopped {} short of its slot",
+            usize::from(width) - widest
+        );
+    }
 }
