@@ -1677,6 +1677,19 @@ fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
+/// The channels of a truecolour style's **background**.
+///
+/// The row washes are the only backgrounds this file reads, and they are the
+/// reason [`a_bar_track_is_visible_on_every_row_it_crosses`] exists: the bar's
+/// column stopped being pane-coloured on 2026-08-18, so the ratios that decide
+/// whether its marks can be seen are no longer all measured against one thing.
+fn bg_of(style: ratatui::style::Style) -> (u8, u8, u8) {
+    match style.bg.expect("a background") {
+        Color::Rgb(r, g, b) => (r, g, b),
+        other => panic!("expected a truecolour background, found {other:?}"),
+    }
+}
+
 /// The channels of a truecolour style's foreground.
 fn rgb_of(style: ratatui::style::Style) -> (u8, u8, u8) {
     match style.fg.expect("a foreground") {
@@ -1757,5 +1770,71 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
             "{name}'s thumb is {thumb:.2}:1 and its track {track:.2}:1, which is \
              not enough separation for the thumb to read as the lit one"
         );
+    }
+}
+
+/// The bar's track and thumb are legible on **every** row the bar crosses.
+///
+/// [`a_track_is_visible_against_the_pane_it_is_drawn_on`] checks all three tracks
+/// against the pane, and for two of them that is the whole story: the heat strip
+/// and the sparkline draw on list rows and file headings, which are never washed.
+///
+/// **The bar is the exception, and it became one on 2026-08-18**
+/// ([#239](https://github.com/breferrari/vigia/issues/239)). The row wash now runs
+/// under the bar's own column, so on a changed row the track and the thumb sit on
+/// `added_row` or `removed_row` rather than on the pane. Every ratio in the older
+/// gate is measured against the pane, so it could not see that `#57606a` fell to
+/// **1.88:1** on an added row: a value this palette calls absent at 1.24:1 and
+/// chose 2.96:1 to escape. The bar would have drawn as a dashed line, solid on
+/// context rows and faint on the rows a reader is looking at.
+///
+/// This is the gate that would have caught it, and it is why the fix could not be
+/// the one-line widening it looks like. It asserts both halves on all three
+/// backgrounds, because a track that clears the floor by reaching its own thumb has
+/// satisfied one rule by destroying the other.
+#[test]
+fn a_bar_track_is_visible_on_every_row_it_crosses() {
+    for (name, theme, pane) in [
+        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
+        (
+            "light",
+            Theme::light().resolve(Depth::Truecolor),
+            LIGHT_PANE,
+        ),
+    ] {
+        let track = rgb_of(theme.bar_track);
+        let thumb = rgb_of(theme.bar);
+
+        // The pane and both washes. `Theme::row` is what the shell itself calls,
+        // so these are the backgrounds that actually get painted rather than a
+        // restatement of them here.
+        let backgrounds = [
+            ("the pane", pane),
+            ("an added row", bg_of(theme.row(true).0)),
+            ("a removed row", bg_of(theme.row(false).0)),
+        ];
+
+        for (where_, behind) in backgrounds {
+            let seen = contrast(track, behind);
+            assert!(
+                seen >= TRACK_FLOOR,
+                "{name}'s bar_track is {seen:.2}:1 on {where_}, under the \
+                 {TRACK_FLOOR}:1 a mark needs to be seen at all. The bar crosses \
+                 that row, so this is a background it is drawn on"
+            );
+
+            // **Subordinate on the same background it was measured legible on.**
+            // Clearing the floor on the wash while checking the separation only
+            // against the pane would pass a value that is illegible on one and
+            // indistinguishable on the other, which is the shape SPEC.md section 7
+            // keeps finding: two true assertions with the failure between them.
+            let lit = contrast(thumb, behind);
+            assert!(
+                lit > seen * 1.5,
+                "{name}'s thumb is {lit:.2}:1 on {where_} and its track \
+                 {seen:.2}:1, which is not enough separation for the thumb to \
+                 read as the lit one"
+            );
+        }
     }
 }

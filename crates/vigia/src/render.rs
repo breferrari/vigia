@@ -3274,15 +3274,33 @@ pub fn render(
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
-        // **The wash spans one column more than the content**, which is the blank
-        // `reserved` keeps in front of the bar
-        // ([#214](https://github.com/breferrari/vigia/issues/214)). That reserve is
-        // about glyph adjacency, so a full-block thumb never reads as part of a
-        // `-6`, and a blank cell whose background matches the band is still a blank
-        // cell. Left unwashed it was a column of pane background between the band
-        // and the bar, invisible on a context row and a notch on every changed one.
-        // Zero where no bar was drawn, since there is then no reserve to fill.
-        let washed = region.width + (full.width - region.width).saturating_sub(1);
+        // **The wash spans the region's whole width, the bar's own column
+        // included** ([#239](https://github.com/breferrari/vigia/issues/239)).
+        //
+        // It reached one column further than the content until then, filling the
+        // blank `reserved` keeps in front of the bar
+        // ([#214](https://github.com/breferrari/vigia/issues/214)), and stopped at
+        // the bar. #214's reason is *"one column of pane background between the
+        // band and the bar, so the band reads as clipped and the bar as standing
+        // in a notch"*, and that reason reaches its own remainder: the bar's
+        // column was the last cell of pane on a changed row, so the notch was one
+        // column narrower and still there, running the height of the diff.
+        // Reported from a real pane. `SPEC.md` §5.3's furniture rule says the same
+        // thing from the other side, and `assets/preview.svg` draws every washed
+        // row `x="8" width="884"`, the pane exactly, with the bar painting over
+        // it.
+        //
+        // **Nothing is reordered to achieve it, and that is why this is one
+        // line.** The bar is drawn above, and `Buffer::set_style` *merges*: the
+        // wash carries a background and no foreground, so it repaints the bar
+        // cell's background and leaves the track's colour and its glyph exactly
+        // where they were. The band ends up behind the bar rather than instead of
+        // it, which is what the picture draws.
+        //
+        // The reserve is untouched. It is about **glyph adjacency**, so that a
+        // full-block thumb never reads as part of a `-6`, and a blank cell whose
+        // background matches the band is still a blank cell.
+        let washed = full.width;
         painter.body(region, washed, view, area.width);
     }
 
@@ -5317,8 +5335,11 @@ impl Painter<'_> {
         //
         // The wash is still `area` rather than the pane on a screen with a
         // scrollbar, and that is the existing ruling
-        // `a_wash_stops_before_the_scrollbar_column` rather than something this
-        // changed.
+        // `a_wash_runs_under_the_scrollbar_column` rather than something this
+        // changed. That gate was `a_wash_stops_before_the_scrollbar_column` until
+        // [#239](https://github.com/breferrari/vigia/issues/239) inverted it; the
+        // sentence above is unaffected either way, because `area` is the region
+        // and the question is only how much of it the wash covers.
         let mut x = glyphs.x;
         let mut room = usize::from(glyphs.width);
         if self.gutter > 0 {

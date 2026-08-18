@@ -5614,7 +5614,7 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
     }
 }
 
-/// A removed line's wash stops before the scrollbar's column.
+/// A removed line's band runs **under** the scrollbar's own column.
 ///
 /// [#81](https://github.com/breferrari/vigia/issues/81) was filed **undiagnosed
 /// on purpose**, from a real pane where the wash appeared to reach the far right
@@ -5622,12 +5622,26 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
 /// row may be washing the columns `with_bar` took, or the host terminal may be
 /// drawing its own scrollbar over a correct full-bleed band.
 ///
-/// This is the gate that tells them apart, and it is the thing the issue says
+/// This is the gate that tells them apart, and it is the thing that issue says
 /// does not exist. It reads the **background** of the bar's column on a row that
 /// is definitely washed, which is the property the snapshots structurally cannot
 /// see: `TestBackend`'s `Display` writes symbols and drops styles.
+///
+/// **It asserted the opposite until [#239](https://github.com/breferrari/vigia/issues/239),
+/// and that is worth stating rather than quietly editing.** The assertion was
+/// `assert_ne!(bar, wash)`, which is what kills #81's failure and is also what
+/// stopped the band ever joining the bar. One axis, two ends, and the gate was
+/// pinned to the wrong one: reported from a real pane, the bar column was the
+/// last cell of pane background left on a changed row, so the bar stood in a
+/// one-column notch running the height of the diff. `SPEC.md` line 610 records
+/// the same move for this gate's predecessor, *"it held the old ruling
+/// correctly, which is why this is a change to the ruling rather than a fix to
+/// the gate"*, and this is that sentence a second time on the same column.
+///
+/// The reserve is untouched and still asserted below. It is about **glyph
+/// adjacency**, not about background, so nothing it protects moves.
 #[test]
-fn a_wash_stops_before_the_scrollbar_column() {
+fn a_wash_runs_under_the_scrollbar_column() {
     /// The same draw as [`screen`], on the palette that actually tints a row.
     ///
     /// `Theme::default()` is the sixteen named colours, which draw **no row tint
@@ -5690,11 +5704,22 @@ fn a_wash_stops_before_the_scrollbar_column() {
         ratatui::style::Color::Reset,
         "the removed line was not washed at all, so this gate proves nothing"
     );
-    assert_ne!(
+    assert_eq!(
         bar,
         wash,
-        "the wash reached the scrollbar's own column at x={}",
+        "the band stops before the scrollbar's own column at x={}, so the bar \
+         stands in a notch of pane background on every changed row",
         width - 1
+    );
+
+    // **And the track is still drawn there**, which is the half that stops this
+    // becoming a band with the bar deleted out of it. The glyph is what a reader
+    // locates the thumb inside; the wash is only what it sits on.
+    assert_eq!(
+        buffer[(width - 1, washed)].symbol(),
+        "\u{2502}",
+        "the bar column carries the band but no track glyph, so widening the \
+         wash swallowed the bar instead of drawing over it"
     );
 
     // **And the gap beside it *is* washed, which this asserted the other way
@@ -6146,7 +6171,7 @@ fn the_wash_bleeds_under_the_inset() {
     // inset anything, and blank alone passes against a pane whose band starts
     // where its text does.
     //
-    // Drawn through `Theme::dark` for `a_wash_stops_before_the_scrollbar_column`'s
+    // Drawn through `Theme::dark` for `a_wash_runs_under_the_scrollbar_column`'s
     // reason: the sixteen named colours paint no row tint at any depth, so this
     // gate on `Theme::default` would assert that a wash nobody painted did not
     // reach a column it was never going to.
