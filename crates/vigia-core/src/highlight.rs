@@ -149,7 +149,7 @@ pub struct HighlightStats {
 /// ever a number, and `storage.type.function` has to precede `storage.type`
 /// because Sublime's Rust grammar scopes `fn` as a storage *type* while a reader
 /// and the mockup both see a keyword.
-const CLASSES: [(&str, Class); 16] = [
+const CLASSES: [(&str, Class); 25] = [
     ("comment", Class::Comment),
     ("string", Class::String),
     ("constant.numeric", Class::Number),
@@ -160,12 +160,42 @@ const CLASSES: [(&str, Class); 16] = [
     ("storage.type", Class::Type),
     ("storage", Class::Keyword),
     ("entity.name.function", Class::Function),
+    // A heading's text: Sublime's Markdown grammar scopes it
+    // `entity.name.section` *inside* `markup.heading`, and innermost-first
+    // classification reaches it before the markup row ever gets asked, so
+    // without this row a heading reads as a type while its `#` reads as a
+    // heading. Same class as `markup.heading`, deliberately: the two rows are
+    // one element to the eye.
+    ("entity.name.section", Class::Function),
     ("entity.name", Class::Type),
+    // HTML attributes, CSS selectors, and their JSX/Vue/Svelte descendants.
+    // Absent until #235, which is why an attribute drew plain in a covered
+    // language. No shadowing with the `entity.name` rows above: prefix match
+    // is per whole scope atom, so `entity.name` never claims `entity.other.*`.
+    ("entity.other.attribute-name", Class::Variable),
     ("support.function", Class::Function),
     ("support.type", Class::Type),
     ("support.class", Class::Type),
     ("variable.language", Class::Keyword),
     ("variable", Class::Variable),
+    // The markup family, absent entirely until #235: Markdown drew at 4.5%,
+    // with headings, bold, code spans and links all plain, in the format
+    // READMEs put in diffs constantly. `markup.list` is deliberately not
+    // here: Sublime's Markdown grammar applies it as a meta scope across the
+    // whole list item, so a row for it would paint every bullet's entire text
+    // rather than a delimiter.
+    ("markup.heading", Class::Function),
+    ("markup.bold", Class::Keyword),
+    ("markup.italic", Class::Keyword),
+    ("markup.raw", Class::String),
+    ("markup.underline.link", Class::Constant),
+    ("markup.quote", Class::Comment),
+    // The one deliberate `meta.*` row. A link's visible text carries only
+    // `meta.link.inline.description` (probed against the shipped dump: the
+    // `markup.underline.link` above covers the URL, not the words), so
+    // without this the half of a link a reader actually reads stays plain.
+    // Same class as the URL: one element to the eye.
+    ("meta.link.inline.description", Class::Constant),
 ];
 
 /// Lines between the parse positions a later frame can rewind to.
@@ -1362,6 +1392,43 @@ mod tests {
         assert_eq!(class_at(spans, at("u32")), Class::Type);
         assert_eq!(class_at(spans, at("7")), Class::Number);
         assert_eq!(class_at(spans, at("{")), Class::Plain);
+    }
+
+    /// The markup rows, through a real Markdown parse rather than pushed
+    /// stacks, because Markdown drew at 4.5% while being a covered language
+    /// and nothing could see it (#235). Each assertion is one of the four
+    /// elements the issue names as rendering plain: a heading, bold, a code
+    /// span, a link.
+    #[test]
+    fn markdown_reaches_the_markup_classes() {
+        let texts = [
+            "# A heading",
+            "Some **bold** text and `a code span` here.",
+            "[a link](https://example.com) closes it.",
+        ];
+        let source = hunk(texts.iter().map(|t| line(LineKind::Added, t)).collect());
+        let spans = spans_for("README.md", &source);
+
+        assert_eq!(class_at(&spans[0], texts[0].find('A').unwrap()), Class::Function);
+        assert_eq!(class_at(&spans[1], texts[1].find("bold").unwrap()), Class::Keyword);
+        assert_eq!(class_at(&spans[1], texts[1].find("code").unwrap()), Class::String);
+        assert_eq!(class_at(&spans[2], texts[2].find("a link").unwrap()), Class::Constant);
+        assert_eq!(class_at(&spans[2], texts[2].find("https").unwrap()), Class::Constant);
+        // And a bullet's text must stay plain: `markup.list` is a meta scope
+        // over the whole item, which is why it has no row.
+        let list = hunk(vec![line(LineKind::Added, "- plain list text")]);
+        let list_spans = spans_for("README.md", &list);
+        assert_eq!(class_at(&list_spans[0], "- plain ".len()), Class::Plain);
+    }
+
+    /// The attribute row, through real HTML and CSS parses: both were plain
+    /// before #235, and both reach JSX, Vue and Svelte the moment their
+    /// grammars resolve.
+    #[test]
+    fn an_attribute_name_is_no_longer_plain() {
+        let source = hunk(vec![line(LineKind::Added, "<a href=\"x\">t</a>")]);
+        let spans = spans_for("index.html", &source);
+        assert_eq!(class_at(&spans[0], "<a ".len()), Class::Variable);
     }
 
     /// Merging, which is what keeps a line of ordinary code from becoming a span
