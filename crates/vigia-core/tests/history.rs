@@ -19,10 +19,12 @@
 //! Structural throughout: counts and bounds, hardware-independent, no slack.
 //! There is nothing to time here, because I10 is a claim about size.
 
+use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, Recency,
+    GRAPH_COLUMNS, GRAPH_PERIOD, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW,
+    History, Recency,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -324,4 +326,27 @@ fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
             "the write was duplicated or lost while sliding: {drawn:?}"
         );
     }
+}
+
+#[test]
+fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
+    // **The period the spec names, gated where it is computed.** `SPEC.md`
+    // §11.1 says a drawn bucket is ten seconds and a band column eight, and both
+    // are divisions of one window by one constant. A `const` block already
+    // refuses a division that is not exact; this refuses one that is exact and
+    // wrong, which is the case that would leave the spec's numbers false while
+    // everything still compiled.
+    assert_eq!(HISTORY_BUCKET, Duration::from_secs(10));
+    assert_eq!(GRAPH_PERIOD, Duration::from_secs(8));
+
+    // And the two tile the same window, which is what makes them comparable at
+    // all: the band is finer than the strip beside it, and both are coarser than
+    // the rate the store samples at.
+    assert_eq!(HISTORY_BUCKET * HISTORY_BUCKETS as u32, HISTORY_WINDOW);
+    assert_eq!(GRAPH_PERIOD * GRAPH_COLUMNS as u32, HISTORY_WINDOW);
+    assert!(
+        GRAPH_PERIOD < HISTORY_BUCKET,
+        "the band stopped being finer than the sparkline, which is the whole \
+         reason they are two elements"
+    );
 }

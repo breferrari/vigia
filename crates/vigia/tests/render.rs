@@ -869,7 +869,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
         from: None,
         kind: 'M',
         churn: Some((added, removed)),
-        spark: [0, 0, 1, 3, 8, 5, 9, 12],
+        spark: [0, 0, 0, 0, 1, 2, 3, 5, 8, 5, 9, 12],
         recency: Recency::Cold,
         heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
     }
@@ -3023,7 +3023,7 @@ fn glancing() -> View {
                 from: None,
                 kind: 'M',
                 churn: Some((42, 7)),
-                spark: [0, 0, 1, 3, 8, 5, 9, 12],
+                spark: [0, 0, 0, 0, 1, 2, 3, 5, 8, 5, 9, 12],
                 recency: Recency::Pulse,
                 // Additions at the head, a mixed slice in the middle, removals
                 // at the tail. One row carrying all three kinds plus the track,
@@ -3035,7 +3035,7 @@ fn glancing() -> View {
                 from: None,
                 kind: 'M',
                 churn: Some((11, 3)),
-                spark: [0, 0, 0, 2, 1, 0, 0, 0],
+                spark: [0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0],
                 recency: Recency::Live,
                 heat: heat(&[(3, 2, 1)]),
             }),
@@ -3358,8 +3358,8 @@ fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
     );
     let drawn: String = slot.iter().map(|&(_, class)| class).collect();
     assert_eq!(
-        drawn, "tttssttt",
-        "`[0, 0, 0, 2, 1, 0, 0, 0]` drew {drawn:?}, so a bucket's emptiness is \
+        drawn, "tttttssttttt",
+        "`[0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0]` drew {drawn:?}, so a bucket's emptiness is \
          not where the store says it is"
     );
 }
@@ -3399,7 +3399,7 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
     let theme = Theme::default();
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[0] {
-        entry.spark = [1, 2, 3, 4, 5, 6, 7, 8];
+        entry.spark = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     }
     let backend = screen(80, 5, &view, &chrome());
     let buffer = backend.buffer();
@@ -3448,7 +3448,7 @@ fn a_narrowed_sparkline_keeps_the_newest_buckets_and_drops_the_oldest() {
     // track-then-bar. The two are each other's reverse, so this cannot pass
     // against the wrong end.
     let theme = Theme::default();
-    let backend = screen(44, 5, &glancing(), &chrome());
+    let backend = screen(45, 5, &glancing(), &chrome());
 
     let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
         .into_iter()
@@ -3460,14 +3460,14 @@ fn a_narrowed_sparkline_keeps_the_newest_buckets_and_drops_the_oldest() {
     assert_eq!(
         slot.len(),
         HISTORY_BUCKETS / 2,
-        "44 columns is meant to be the four-bucket rung, so this fixture is no \
+        "45 columns is meant to be the half rung, so this fixture is no \
          longer exercising the narrow slice at all: {slot:?}"
     );
     let drawn: String = slot.iter().map(|&(_, class)| class).collect();
     assert_eq!(
-        drawn, "sttt",
-        "the narrowed strip drew {drawn:?}; \"sttt\" is the newest four buckets \
-         and \"ttts\" is the oldest four, so this is the wrong end of the window"
+        drawn, "sttttt",
+        "the narrowed strip drew {drawn:?}; \"sttttt\" is the newest six buckets \
+         and \"ttttts\" is the oldest six, so this is the wrong end of the window"
     );
 }
 

@@ -3,7 +3,7 @@ source: crates/vigia/tests/render.rs
 expression: backend
 ---
 " vigia · 1 changed                                 watching "
-" M Makefile                           ________    +1    -0  "
+" M Makefile                       ____________    +1    -0  "
 " 1 +     cargo build a   b                                  "
 " 2   bell·esc·[31mnul·                                      "
 " q quit · f follow · ? keys                             1/1 "

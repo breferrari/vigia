@@ -3,10 +3,10 @@ source: crates/vigia/tests/render.rs
 expression: "screen(60, 8, &view, &chrome())"
 ---
 " vigia · 3 changed                                 watching "
-" M assets/banner.jpg                  ________              "
+" M …ets/banner.jpg                ____________              "
 "   binary                                                   "
-" U src/merge.rs                       ________              "
+" U src/merge.rs                   ____________              "
 "   unresolved conflict                                      "
-" R …vigia/src/shell.rs                ________    +0    -0  "
+" R …a/src/shell.rs                ____________    +0    -0  "
 "                                                            "
 " q quit · f follow · ? keys                             1/3 "

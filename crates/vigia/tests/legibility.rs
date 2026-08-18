@@ -907,7 +907,7 @@ fn glancing() -> View {
                 from: None,
                 kind: 'M',
                 churn: Some((42, 7)),
-                spark: [1, 2, 4, 6, 8, 9, 11, 12],
+                spark: [1, 1, 2, 2, 4, 5, 6, 7, 8, 9, 11, 12],
                 recency: Recency::Pulse,
                 heat: ENDS_CHANGED,
             }),
@@ -916,7 +916,7 @@ fn glancing() -> View {
                 from: None,
                 kind: 'M',
                 churn: Some((11, 3)),
-                spark: [1, 1, 2, 2, 1, 3, 2, 1],
+                spark: [1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 1, 1],
                 recency: Recency::Live,
                 heat: ENDS_CHANGED,
             }),
@@ -1541,9 +1541,9 @@ fn the_glance_columns_collapse_in_one_order() {
         (1, (false, 0, 0)),
         (28, (true, 0, 0)),
         (37, (true, 6, 0)),
-        (42, (true, 6, 4)),
-        (49, (true, 12, 4)),
-        (53, (true, 12, 8)),
+        (45, (true, 6, 6)),
+        (51, (true, 12, 6)),
+        (57, (true, 12, 12)),
     ];
     let theme = theme();
     let heats = heat_colours(&theme);
@@ -2697,9 +2697,9 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
                 let buckets = spark_slot(&backend, y, &theme, Glyphs::default());
                 let row = &rows[usize::from(y)];
                 assert!(
-                    buckets <= 8,
-                    "{name}: {buckets} buckets at {width} columns, over the eight \
-                     the window holds: {row:?}"
+                    buckets <= HISTORY_BUCKETS,
+                    "{name}: {buckets} buckets at {width} columns, over the \
+                     {HISTORY_BUCKETS} the window holds: {row:?}"
                 );
                 if buckets > 0 {
                     seen.insert(buckets);
@@ -2712,7 +2712,7 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
     // rather than shortened, which is the shape the rule forbids.
     assert_eq!(
         seen,
-        [4usize, 8].into_iter().collect(),
+        [HISTORY_BUCKETS / 2, HISTORY_BUCKETS].into_iter().collect(),
         "the sparkline was drawn at bucket counts {seen:?}; only whole rungs are \
          legal, and both of them have to be reachable or the ladder has a rung \
          no width can produce"
@@ -4830,7 +4830,7 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     let backend = drawn_at(
         120,
         8,
-        &sparked([0, 0, 4, 6, 8, 9, 11, 12]),
+        &sparked([0, 0, 2, 3, 4, 6, 8, 9, 10, 11, 12, 12]),
         &chrome(),
         Glyphs::Braille,
     );
@@ -4845,7 +4845,10 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     // every pair whose older half is quiet, which is exactly the shape a file
     // that has just started being written has: the strip would draw a track
     // over the activity a reader opened the pane to see.
-    for pattern in [[0, 12, 0, 9, 0, 6, 0, 4], [12, 0, 9, 0, 6, 0, 4, 0]] {
+    for pattern in [
+        [0, 12, 0, 9, 0, 6, 0, 4, 0, 8, 0, 5],
+        [12, 0, 9, 0, 6, 0, 4, 0, 8, 0, 5, 0],
+    ] {
         let backend = drawn_at(120, 8, &sparked(pattern), &chrome(), Glyphs::Braille);
         let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
         assert_eq!(
@@ -4888,7 +4891,7 @@ fn a_pair_takes_the_busier_buckets_band() {
     let backend = drawn_at(
         120,
         8,
-        &sparked([1, 12, 1, 1, 1, 1, 1, 1]),
+        &sparked([1, 12, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
         &chrome(),
         Glyphs::Braille,
     );
@@ -4904,7 +4907,7 @@ fn a_pair_takes_the_busier_buckets_band() {
     let backend = drawn_at(
         120,
         8,
-        &sparked([12, 1, 1, 1, 1, 1, 1, 1]),
+        &sparked([12, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
         &chrome(),
         Glyphs::Braille,
     );
@@ -4954,7 +4957,7 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     let bars = spark_colours(&theme);
     // Buckets all busy, so every cell of the strip is a bar and the leftmost one
     // is the slot's own left edge rather than a track the bar colours miss.
-    let view = sparked([12, 11, 9, 8, 6, 4, 2, 1]);
+    let view = sparked([12, 12, 11, 10, 9, 8, 6, 5, 4, 3, 2, 1]);
 
     // **Swept, and the first draft was not.** At 120 columns the widest rung is
     // drawn, where a slot mis-measured in buckets happens to be clamped back to
@@ -5016,7 +5019,12 @@ fn the_block_rung_spells_an_empty_bucket_with_its_own_track() {
     // onto.
     let theme = theme();
     let track = theme.spark_track.fg.expect("the track has a colour");
-    let backend = drawn(120, 8, &sparked([0, 0, 4, 6, 8, 9, 11, 12]), &chrome());
+    let backend = drawn(
+        120,
+        8,
+        &sparked([0, 0, 2, 3, 4, 6, 8, 9, 10, 11, 12, 12]),
+        &chrome(),
+    );
 
     let tracks = cells_coloured(&backend, 1, &[track], &[TRACK]).len();
     assert_eq!(tracks, 2, "two empty buckets should draw two track cells");
@@ -5048,7 +5056,7 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         let view = View {
             peak: 0,
-            ..sparked([1, 2, 4, 6, 8, 9, 11, 12])
+            ..sparked([1, 1, 2, 2, 4, 5, 6, 7, 8, 9, 11, 12])
         };
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, empty) = alphabet(glyphs);
@@ -5090,7 +5098,7 @@ fn a_dense_strip_draws_its_buckets_at_different_heights() {
         // answer. Quiet buckets of 1 do not separate those two spellings, so a
         // gate built on them passes against a rung that has lost its middle
         // entirely: 4 and 12 do.
-        let view = sparked([4, 4, 12, 12, 4, 4, 4, 4]);
+        let view = sparked([4, 4, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4]);
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, _) = alphabet(glyphs);
         let bars = spark_colours(&theme());
@@ -5141,7 +5149,7 @@ fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
     for glyphs in [Glyphs::Braille, Glyphs::Octant] {
         // Every pair is one empty bucket beside a full one, so every drawn cell
         // must be the glyph for (0, top) and never (1, top).
-        let view = sparked([0, 12, 0, 12, 0, 12, 0, 12]);
+        let view = sparked([0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12]);
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, _) = alphabet(glyphs);
         let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)
