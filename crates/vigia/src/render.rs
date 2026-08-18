@@ -396,7 +396,32 @@ const CURRENT_WEIGHT: Modifier = Modifier::BOLD;
 /// still the whole file.
 ///
 /// Halves, so the sum is exact and every drawn bucket covers the same span.
-const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
+///
+/// **Four rungs since [#161](https://github.com/breferrari/vigia/issues/161), and
+/// what moved is the source rather than this ladder's shape.** [`HEAT_BUCKETS`]
+/// doubled, so the same halving now reaches twenty-four before it reaches
+/// twelve, and every rung that existed keeps its exact width. Which of them a
+/// given pane picks is [`Columns::plan`]'s business, and the rung above the
+/// settled ladder is the one the share clamp there exists for.
+const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+
+// **Asserted rather than documented, because a rung that does not divide the
+// source is silent.** [`heat_at`] groups `HEAT_BUCKETS / width` and chunks by it,
+// so a rung that leaves a remainder draws a short final group carrying fewer
+// source slices than its neighbours: a strip whose last slice is quieter than
+// the file, with nothing failing. `HEAT_RUNGS` is derived from `HEAT_BUCKETS`
+// today and this is what keeps that true if a rung is ever written out by hand.
+const _: () = {
+    let mut rung = 0;
+    while rung < HEAT_RUNGS.len() {
+        assert!(
+            HEAT_RUNGS[rung] == 0 || HEAT_BUCKETS % HEAT_RUNGS[rung] == 0,
+            "a heat rung does not divide the source resolution, so its last \
+             slice would cover fewer lines than the rest"
+        );
+        rung += 1;
+    }
+};
 
 /// Columns a path keeps before any glance element is allowed to exist.
 ///
@@ -1809,15 +1834,69 @@ const COUNT_CELL: usize = 5;
 /// pulse's *label* was the other, and it opened the ladder, so removing it only
 /// removed the widest layout: a layout's width is the sum of its own slots, and
 /// none of the six left changed.
-const ROW_LAYOUTS: [Columns; 7] = [
+/// **The top row is above the settled ladder and the step below it gives up the
+/// *strip's* resolution rather than the sparkline's**, which amends the drop
+/// order stated above at its top end only
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). The sparkline has no
+/// rung above [`HISTORY_BUCKETS`] to give up: its drawn bucket must stay coarser
+/// than the band's own column period or the two elements read one store at
+/// crossed scales, and twelve is the largest division of the window that clears
+/// it. So the strip is the only element with somewhere left to grow, and the
+/// generous rung is the strip's.
+const ROW_LAYOUTS: [Columns; 8] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[1]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[0]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[1]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[2], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[3], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[3], SPARK_RUNGS[2]),
     Columns::NOTHING,
 ];
+
+/// The widest layout that shipped before a rung was added above it.
+///
+/// **What makes "no boundary below the new rung moves" true by construction
+/// rather than by a swept comparison.** [`Columns::plan`]'s share clamp is
+/// floored at this layout's width, so every layout from here down keeps exactly
+/// the budget it had, whatever the share is set to and whatever rungs are added
+/// on top. The gate that sweeps it is evidence; this is the mechanism.
+///
+/// An index rather than a copy of the layout, so it cannot drift from the table
+/// it points into.
+const SETTLED_RUNG: usize = 1;
+
+/// The share of a row the glance elements may take, above the settled ladder.
+///
+/// **Two questions, not one, and the table only ever answered the first.** Below
+/// [`SETTLED_RUNG`] the question is *what survives*: a narrowing pane drops
+/// elements until the path is safe, and [`ROW_FLOOR`] is the floor that decides
+/// it. Above it the question is *what is worth spending*, and "does it fit" is
+/// the wrong test, because a fixed-sum table takes a rung the instant it fits.
+/// Twenty-four slices fit inside a seventy-one column pane, which is narrower
+/// than the 109-column render `assets/preview.svg` is measured from, so without
+/// this the widest strip would arrive at a width where the picture says it does
+/// not exist.
+///
+/// **Two in five, checked against [#161](https://github.com/breferrari/vigia/issues/161)'s
+/// own targets rather than against that constraint.** That issue asked for
+/// twenty-four slices near 140 columns and forty-eight near 200; this rule puts
+/// them at **134** and **194**, having been derived from neither. A rule that
+/// reproduces both numbers it was not fitted to is a rule. Half the row was the
+/// other candidate and it clears the picture by a single column, which is a
+/// coincidence rather than a margin.
+const GLANCE_NUMER: usize = 2;
+/// The denominator of [`GLANCE_NUMER`]'s share.
+const GLANCE_DENOM: usize = 5;
+
+/// Columns the glance elements may spend on a row this wide, above the settled
+/// ladder.
+///
+/// Floored by the division, so the share is never rounded **up** into a column
+/// the path was keeping.
+const fn generous_of(width: u16) -> usize {
+    width as usize * GLANCE_NUMER / GLANCE_DENOM
+}
 
 /// Columns a whole counts cell of `cell`-wide halves occupies, its space included.
 const fn counts_width(cell: usize) -> usize {
@@ -2076,8 +2155,26 @@ impl Columns {
     /// simply reached earlier. Monotonicity is therefore still by construction
     /// rather than by argument, and it holds separately at each rung, which is
     /// what `tests/legibility.rs` sweeps rather than assumes.
+    ///
+    /// **Two floors, because the table answers two questions**
+    /// ([#161](https://github.com/breferrari/vigia/issues/161)). [`ROW_FLOOR`] is
+    /// what survival costs and it decides every rung the tool shipped with.
+    /// [`generous_of`] is what generosity costs and it decides only the rungs
+    /// above [`SETTLED_RUNG`], because "does it fit" stops being the right test
+    /// once a row has room to spare: a fixed-sum table takes a rung the instant
+    /// it fits, and the widest strip fits inside a pane narrower than the one the
+    /// published picture is measured from. Both constants carry the argument.
+    ///
+    /// **Monotone still, and still by construction.** The share grows with the
+    /// width it is taken from, so a rung once affordable stays affordable, and
+    /// the `max` against the settled layout means no width that had a layout can
+    /// lose it. Widening a pane cannot remove an element, which is the one
+    /// promise this whole function exists to keep.
     fn plan(width: u16, glyphs: Glyphs) -> Self {
         let budget = usize::from(width).saturating_sub(ROW_FLOOR);
+        // Floored at the settled ladder rather than applied to it, which is what
+        // makes every boundary that shipped stay exactly where it was.
+        let budget = budget.min(generous_of(width).max(ROW_LAYOUTS[SETTLED_RUNG].width(glyphs)));
         ROW_LAYOUTS
             .iter()
             .copied()

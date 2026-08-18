@@ -52,6 +52,53 @@ const FACT_JOIN: &str = " · ";
 /// Widths every sweep covers. One column to well past the widest snapshot.
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
+/// Panes wide enough to reach every rung of the glance ladder.
+///
+/// **[`WIDTHS`] cannot reach the top one, and that is what this exists for**
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). The widest heat rung
+/// is not taken until the glance elements fit inside their share of the row, and
+/// that share is not reached until 134 columns. A sweep stopping at 120 would
+/// report the ladder sound while its top rung was unreachable at every width it
+/// looked at.
+///
+/// Two hundred, which is the pane class the row was reported from and past the
+/// widest boundary the table produces.
+const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=200;
+
+/// The width `assets/preview.svg` is measured from, stated in its own comment.
+///
+/// `SPEC.md` §5.1 rules that a published artifact answering an open question
+/// **is** the answer, and what the picture answers about the heat strip is how
+/// many slices a pane draws **at this width**. That was a claim only prose made
+/// until #161 gave the strip a rung above the pictured one, at which point the
+/// difference between "twelve always" and "twelve here" stopped being academic.
+const PICTURED_PANE: u16 = 109;
+
+/// Slices `assets/preview.svg` draws, counted off the picture.
+const PICTURED_SLICES: usize = 12;
+
+/// How many slices the heat strip may show, widest rung first.
+///
+/// Restated rather than imported, the way [`CONTINUES`] and `FACT_JOIN` are: a
+/// test that read the renderer's own table would agree with it by construction
+/// instead of checking it. `RAMP` and `HEAT_SLICE` are *not* restated, because
+/// this file already declares them at the top and a second copy would check the
+/// first copy rather than the renderer.
+///
+/// **Four rungs since #161 raised the source, and the halving is unchanged**, so
+/// what a given width under 120 columns draws is the same number it drew before.
+/// That is why `ACCEPTED_WALK` is untouched by that change.
+const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+
+/// How many buckets a sparkline may show, widest rung first.
+///
+/// Restated for [`HEAT_RUNGS`]' reason. **Three rungs, and the top one is a
+/// ceiling rather than a choice**: a drawn bucket has to stay coarser than the
+/// churn band's own column period, or the two elements draw one store at crossed
+/// scales. `vigia-core`'s own gate pins that bound, and it is why #161 reaches
+/// the strip and not this ladder.
+const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+
 /// #119's margin ladder, widest pane first: blank columns the pane keeps between
 /// its own edge and any glyph, **both sides counted together**.
 ///
@@ -1457,13 +1504,6 @@ fn the_glance_columns_collapse_in_one_order() {
     // Read off the drawn row by colour and glyph together, for the reason the
     // renderer's own doc gives: the heat strip and a full sparkline bucket draw
     // the same block, and the pulse shares a foreground with the sparkline.
-    // Restated rather than imported, the way `CONTINUES` and `FACT_JOIN` are: a
-    // test that read the renderer's own table would agree with it by
-    // construction instead of checking it. `RAMP` and `HEAT_SLICE` are *not*
-    // restated here, because this file already declares them at the top and a
-    // second copy would check the first copy rather than the renderer.
-    const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
-    const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
     // The first width each state is drawn at, and `(counts, heat slices,
     // sparkline buckets)`. **The widths are pinned as well as the order**,
     // because a sequence alone is a weak gate: removing the gap the heat strip
@@ -3115,7 +3155,10 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
     let view = glancing();
     let mut widths_seen = std::collections::BTreeSet::new();
 
-    for width in WIDTHS {
+    // **`GENEROUS_WIDTHS` rather than `WIDTHS`**, because the widest rung is not
+    // reachable inside 120 columns and a sweep that never draws a rung cannot
+    // check that it re-projects.
+    for width in GENEROUS_WIDTHS {
         let backend = drawn(width, 6, &view, &following());
 
         // Row 1 is the first file heading; the header is row 0.
@@ -3129,8 +3172,8 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
         // Whole rungs only. Anything between them is a strip that was squeezed
         // rather than re-projected.
         assert!(
-            strip.len() == HEAT_BUCKETS || strip.len() == HEAT_BUCKETS / 2,
-            "at {width} columns the strip is {} slices wide, which is neither \
+            HEAT_RUNGS.contains(&strip.len()),
+            "at {width} columns the strip is {} slices wide, which is not a \
              whole rung",
             strip.len()
         );
@@ -3161,10 +3204,143 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
 
     assert_eq!(
         widths_seen,
-        [HEAT_BUCKETS / 2, HEAT_BUCKETS].into_iter().collect(),
-        "the strip was drawn at slice counts {widths_seen:?}; both rungs have to \
-         be reachable or the ladder has a rung no width can produce"
+        HEAT_RUNGS
+            .iter()
+            .copied()
+            .filter(|rung| *rung > 0)
+            .collect(),
+        "the strip was drawn at slice counts {widths_seen:?}; every rung has to \
+         be reachable or the ladder has one no width can produce"
     );
+}
+
+/// The width the published picture is measured from still draws what it draws.
+///
+/// **`SPEC.md` §5.1's ruling has never had a gate, and #161 is what made it need
+/// one.** That ruling is that a published artifact answering an open question
+/// *is* the answer, and `assets/preview.svg` answers "how many slices does the
+/// heat strip have" with twelve. While twelve was the source resolution the claim
+/// was true at every width and nothing could break it. It is a **rung** now, so
+/// it is true at a width, and the width is the one the picture's own comment
+/// records.
+///
+/// Without the share rule the widest rung would arrive at 69 columns, well under
+/// the pictured pane, and the picture would have become false with the whole
+/// suite green.
+#[test]
+fn the_pictured_width_still_draws_twelve_slices() {
+    let theme = theme();
+    let slices = cells_coloured(
+        &drawn(PICTURED_PANE, 8, &glancing(), &chrome()),
+        1,
+        &heat_colours(&theme),
+        &[HEAT_SLICE],
+    )
+    .len();
+
+    assert_eq!(
+        slices, PICTURED_SLICES,
+        "at the {PICTURED_PANE} columns `assets/preview.svg` is measured from, \
+         the strip drew {slices} slices where the picture draws {PICTURED_SLICES}"
+    );
+}
+
+/// The widest heat rung waits for a pane that can spare it, rather than arriving
+/// the moment it fits.
+///
+/// **Two floors, because the layout table answers two questions**
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). Below the settled
+/// ladder the question is what survives a narrowing pane, and `ROW_FLOOR` decides
+/// it. Above it the question is what a wide pane is worth spending, and "does it
+/// fit" is the wrong test there: a fixed-sum table takes a rung the instant it
+/// fits, and the widest strip fits inside a pane narrower than the one the
+/// published picture is measured from.
+///
+/// **The boundary is derived here rather than copied out of a failure message**,
+/// which is what #161 asked for in those words. Every layout's width is the sum
+/// of its own slots, so which pane first affords one is decidable by reading.
+#[test]
+fn the_widest_strip_waits_until_the_path_keeps_the_row() {
+    // Restated rather than imported, for the reason `HEAT_RUNGS` gives: a test
+    // that read the renderer's own numbers would agree with them by construction.
+    const COUNT_HALF: usize = 5;
+    const PULSE_CELLS: usize = 1;
+    const BAR_COLUMNS: usize = 2;
+    const ROW_FLOOR: usize = 2 + 12;
+    const GLANCE_NUMER: usize = 2;
+    const GLANCE_DENOM: usize = 5;
+
+    /// Columns something on the right of a row costs, its separating gap included.
+    fn reserved(width: usize) -> usize {
+        if width == 0 { 0 } else { width + 1 }
+    }
+
+    /// Columns a layout of these two rungs needs, counters and pulse included.
+    fn layout(heat: usize, spark: usize) -> usize {
+        reserved(COUNT_HALF * 2 + 1) + reserved(PULSE_CELLS) + reserved(heat) + reserved(spark)
+    }
+
+    /// The columns a row is planned against on a pane this wide.
+    ///
+    /// Saturating for the renderer's own reason: the sweep starts at one column,
+    /// where the bar's reserve alone is wider than the whole pane.
+    fn planning(pane: u16) -> usize {
+        usize::from(pane)
+            .saturating_sub(BAR_COLUMNS)
+            .saturating_sub(inset_at(pane))
+            .saturating_sub(CARET_WIDTH.saturating_sub(inset_at(pane)))
+    }
+
+    let widest = layout(HEAT_RUNGS[0], SPARK_RUNGS[0]);
+    let boundary = GENEROUS_WIDTHS
+        .clone()
+        .find(|pane| {
+            let room = planning(*pane);
+            // Both floors, in the order the renderer applies them: survival, then
+            // share. Multiplied out rather than divided, so the comparison is the
+            // rule itself and not a rounding of it.
+            widest + ROW_FLOOR <= room && widest * GLANCE_DENOM <= room * GLANCE_NUMER
+        })
+        .expect("the sweep reaches a pane that affords the widest strip");
+
+    // **Non-vacuity, and it is the whole claim rather than a formality.** If
+    // merely fitting and deserving were the same width, this gate would be
+    // checking `ROW_FLOOR` and nothing #161 added, and the picture would be false.
+    let fitting = GENEROUS_WIDTHS
+        .clone()
+        .find(|pane| widest + ROW_FLOOR <= planning(*pane))
+        .expect("some pane fits the widest strip at all");
+    assert!(
+        fitting < PICTURED_PANE && PICTURED_PANE < boundary,
+        "the pictured pane no longer sits between merely fitting the widest \
+         strip ({fitting}) and deserving it ({boundary}), which is the gap \
+         `the_pictured_width_still_draws_twelve_slices` rests on"
+    );
+
+    let theme = theme();
+    let view = glancing();
+    for pane in GENEROUS_WIDTHS {
+        let slices = cells_coloured(
+            &drawn(pane, 8, &view, &chrome()),
+            1,
+            &heat_colours(&theme),
+            &[HEAT_SLICE],
+        )
+        .len();
+        if pane < boundary {
+            assert!(
+                slices < HEAT_RUNGS[0],
+                "at {pane} columns the strip drew its widest rung, {slices} \
+                 slices, below the {boundary} its share needs"
+            );
+        } else {
+            assert_eq!(
+                slices, HEAT_RUNGS[0],
+                "at {pane} columns the strip drew {slices} slices rather than \
+                 the widest rung it can afford from {boundary} up"
+            );
+        }
+    }
 }
 
 #[test]

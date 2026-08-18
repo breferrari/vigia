@@ -3603,6 +3603,16 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     );
 }
 
+/// A pane wide enough for the heat strip's widest rung.
+///
+/// **The gate below indexes *source* slices**, so it only says what it claims on
+/// a pane where the drawn slices and the source slices are the same thing. At any
+/// narrower rung the renderer sums adjacent slices, and `strip[11]` would then be
+/// a slice nobody put anything in. It was 120 columns while the source resolution
+/// and the widest rung were the same number
+/// ([#161](https://github.com/breferrari/vigia/issues/161) separated them).
+const WHOLE_STRIP_PANE: u16 = 140;
+
 /// A heat map from `(slice, added, removed)` triples, everything else track.
 fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
     let mut map = [HeatBucket::default(); HEAT_BUCKETS];
@@ -3619,7 +3629,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     // picture of one is twelve identical blocks. The colour is the entire
     // signal, which makes this the only place the strip is really tested.
     let theme = Theme::default();
-    let backend = screen(120, 5, &glancing(), &chrome());
+    let backend = screen(WHOLE_STRIP_PANE, 5, &glancing(), &chrome());
     let buffer = backend.buffer();
 
     // By colour as well as by glyph: the sparkline's top rung on the same row is
@@ -3639,7 +3649,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     .iter()
     .filter_map(|style| style.fg)
     .collect();
-    let strip: Vec<_> = (0..120)
+    let strip: Vec<_> = (0..WHOLE_STRIP_PANE)
         .map(|x| &buffer[(x, 1)])
         .filter(|cell| cell.symbol() == HEAT_SLICE)
         .filter_map(|cell| cell.style().fg)

@@ -628,11 +628,22 @@ fn the_wash_changes_no_symbol_and_so_cannot_move_the_layout() {
     }
 }
 
+/// The pane the graded fixture is drawn on.
+///
+/// **Wide enough to take the widest heat rung**, which is what keeps
+/// [`graded_heat`]'s premise true: at any narrower rung the renderer sums
+/// adjacent source slices, and the four graded values would arrive as two summed
+/// ones with shares nobody chose. It was 120 columns while the source resolution
+/// and the widest rung were the same number
+/// ([#161](https://github.com/breferrari/vigia/issues/161) separated them).
+const GRADED_PANE: u16 = 140;
+
 /// A file whose heat profile has a slice in each band.
 ///
-/// Twelve buckets, so no re-projection happens and the drawn slices are the source
-/// slices. The busiest is 12, so 8 is hot (two thirds), 4 is warm (one third) and 1
-/// is low, which puts one slice in every band by construction rather than by luck.
+/// Drawn at [`GRADED_PANE`], so no re-projection happens and the drawn slices are
+/// the source slices. The busiest is 12, so 8 is hot (two thirds), 4 is warm (one
+/// third) and 1 is low, which puts one slice in every band by construction rather
+/// than by luck.
 fn graded_heat() -> View {
     let mut heat = [HeatBucket::default(); HEAT_BUCKETS];
     heat[0] = HeatBucket {
@@ -676,11 +687,11 @@ fn graded_heat() -> View {
 
 /// Distinct foregrounds on the file heading, ignoring the track and the counters.
 fn heat_stops(theme: Theme) -> Vec<Color> {
-    let backend = draw(120, 4, &graded_heat(), theme);
+    let backend = draw(GRADED_PANE, 4, &graded_heat(), theme);
     let buffer = backend.buffer();
     let track = theme.heat_track.fg;
     let mut seen: Vec<Color> = Vec::new();
-    for x in 0..120 {
+    for x in 0..GRADED_PANE {
         let cell = &buffer[(x, HEADING)];
         // **Symbol and style together.** Every heat slice is a full block and so is
         // a sparkline's top rung, and the counters on the same row share the
@@ -701,9 +712,9 @@ fn heat_stops(theme: Theme) -> Vec<Color> {
 /// The strip's slice colours in order, track included, so a band can be asserted
 /// by position rather than by counting.
 fn heat_sequence(theme: Theme) -> Vec<Color> {
-    let backend = draw(120, 4, &graded_heat(), theme);
+    let backend = draw(GRADED_PANE, 4, &graded_heat(), theme);
     let buffer = backend.buffer();
-    (0..120)
+    (0..GRADED_PANE)
         .filter(|x| buffer[(*x, HEADING)].symbol() == HEAT_SLICE)
         .filter_map(|x| buffer[(x, HEADING)].style().fg)
         .collect()
