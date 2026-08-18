@@ -49,20 +49,25 @@ const NARROW: u16 = 60;
 
 /// A dense cell whose newer half is taller than its older one, and its mirror.
 ///
-/// Restated as literals for [`GRAPH_COLUMNS`]' reason: a gate that built these
+/// Restated as literals for [`WINDOW_SAMPLES`]' reason: a gate that built these
 /// through the renderer's own packing would agree with it by construction.
 const RIGHT_HEAVY: char = '⣸';
 /// The mirror of [`RIGHT_HEAVY`].
 const LEFT_HEAVY: char = '⣇';
 const TALL: u16 = 24;
 
-/// Columns of churn the band draws, restated rather than imported.
+/// Samples the store keeps, restated rather than imported.
 ///
 /// A gate reading the renderer's own constant would agree with it by
 /// construction, which is this suite's standing rule for every rung table.
-const GRAPH_COLUMNS: usize = 15;
+///
+/// **This was `GRAPH_COLUMNS`, and that constant is retired**
+/// ([#232](https://github.com/breferrari/vigia/issues/232)): the band drew a
+/// fixed fifteen columns and now draws one value per sub-column, so its period is
+/// a property of the pane. What a fixture still needs is where a sample lands.
+const WINDOW_SAMPLES: usize = 120;
 
-/// Columns the scrollbar reserves, restated for [`GRAPH_COLUMNS`]'s reason.
+/// Columns the scrollbar reserves, restated for [`WINDOW_SAMPLES`]'s reason.
 const BAR_COLUMNS: usize = 2;
 
 /// Cells of any glyph in a drawn row.
@@ -457,14 +462,14 @@ fn the_band_reaches_both_edges_of_its_slot() {
 const QUARTERED: [u32; HISTORY_SAMPLES] = {
     let mut s = [0; HISTORY_SAMPLES];
     s[0] = 16;
-    s[HISTORY_SAMPLES / GRAPH_COLUMNS] = 4;
+    s[WINDOW_SAMPLES / 8] = 4;
     s
 };
 
-/// The eighth-block ramp, restated for [`GRAPH_COLUMNS`]'s reason.
+/// The eighth-block ramp, restated for [`WINDOW_SAMPLES`]'s reason.
 const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
-/// Rows of churn the band draws, restated for [`GRAPH_COLUMNS`]'s reason.
+/// Rows of churn the band draws, restated for [`WINDOW_SAMPLES`]'s reason.
 ///
 /// Load bearing in the gate below rather than incidental: two rows of an
 /// eight-rung ramp is a sixteen-level scale, which is what makes a quarter of the

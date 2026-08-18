@@ -662,7 +662,7 @@ fn every_row_kind() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -692,7 +692,7 @@ fn awkward() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -708,7 +708,7 @@ fn empty() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -749,7 +749,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         files,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -1022,7 +1022,7 @@ fn glancing() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
     }
 }
@@ -2581,7 +2581,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     let long_name = Chrome {
@@ -2713,7 +2713,7 @@ fn a_clipped_content_line_says_it_continues() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
 
@@ -4153,7 +4153,7 @@ fn overlong(rows: usize) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -5265,7 +5265,7 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
 
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         let view = View {
-            peak: 0,
+            scale: 0,
             ..sparked([1, 1, 2, 2, 4, 5, 6, 7, 8, 9, 11, 12])
         };
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
@@ -5455,15 +5455,15 @@ fn both_rules_reach_both_edges_of_the_pane() {
     let text_rows = stacked.len() - 1 - body_rows(&split) - FOOTER_RULE_ROWS;
     assert_eq!(
         text_rows, 2,
-        "forty columns following no longer takes two footer lines, so this case          stopped being the one it was written for"
+        "forty columns following no longer takes two footer lines, so this case \
+         stopped being the one it was written for"
     );
     assert_eq!(
         ruled.last().copied(),
         Some(stacked.len() - 1 - text_rows),
-        "with a two-line footer the rule landed inside it rather than above          it: {ruled:?} in:
-{}",
-        stacked.join("
-")
+        "with a two-line footer the rule landed inside it rather than above \
+         it: {ruled:?} in:\n{}",
+        stacked.join("\n")
     );
 }
 

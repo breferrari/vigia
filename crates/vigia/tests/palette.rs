@@ -114,7 +114,7 @@ fn three_kinds() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -682,7 +682,7 @@ fn graded_heat() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -802,7 +802,7 @@ fn climbing() -> View {
             heat: [HeatBucket::default(); HEAT_BUCKETS],
         })],
         files: 1,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
         ..View::default()
     }
@@ -1105,7 +1105,7 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
     }
-    view.peak = 3;
+    view.scale = 3;
 
     let flat = Theme::dark().resolve(Depth::None);
     assert_eq!(

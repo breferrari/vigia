@@ -366,7 +366,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -471,7 +471,7 @@ fn one_file() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -635,7 +635,7 @@ fn nothing_changed() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -896,7 +896,7 @@ fn ragged_counts() -> View {
         files: 3,
         top: Position::default(),
         read: 1,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
     }
 }
@@ -2080,7 +2080,7 @@ fn a_file_with_no_line_diff_says_why() {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
@@ -2105,7 +2105,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
@@ -2139,7 +2139,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
@@ -2415,7 +2415,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
@@ -2449,7 +2449,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
 
@@ -2500,7 +2500,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
 
@@ -2585,7 +2585,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         files: 2,
         top: Position::default(),
         read: 1,
-        peak: u32::MAX,
+        scale: u32::MAX,
         worktree_churn: Default::default(),
     };
 
@@ -3054,7 +3054,7 @@ fn glancing() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
     }
 }
@@ -3147,7 +3147,7 @@ fn launched() -> View {
             entry.recency = Recency::Cold;
         }
     }
-    view.peak = 0;
+    view.scale = 0;
     view
 }
 
@@ -3230,7 +3230,7 @@ fn the_first_tick_after_launch_moves_no_column() {
         entry.spark[HISTORY_BUCKETS - 1] = 1;
         entry.recency = Recency::Pulse;
     }
-    view.peak = 1;
+    view.scale = 1;
     let after = screen(80, 6, &view, &chrome());
 
     // The written file: seven track cells and one bucket, and the bucket is the
@@ -3295,7 +3295,7 @@ fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
         entry.spark = [3; HISTORY_BUCKETS];
     }
     assert_eq!(
-        view.peak, 0,
+        view.scale, 0,
         "the fixture stopped being the inconsistent one"
     );
 
@@ -3326,7 +3326,7 @@ fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [u32::MAX; HISTORY_BUCKETS];
     }
-    view.peak = 1;
+    view.scale = 1;
 
     let theme = Theme::default();
     let backend = screen(80, 5, &view, &chrome());
@@ -3745,7 +3745,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         files: 3,
         top: Position { file: current, row },
         read: 4,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -4176,7 +4176,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         files,
         top: Position::default(),
         read: 2,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }

@@ -23,8 +23,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    GRAPH_COLUMNS, GRAPH_PERIOD, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES,
-    HISTORY_WINDOW, History, Recency,
+    HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW, History, Recency,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -119,7 +118,7 @@ fn a_window_of_silence_empties_the_store() {
         history.tracked()
     );
     assert!(history.stats().evicted_by_window >= HISTORY_PATHS as u64);
-    assert_eq!(history.peak(), 0, "the shared scale outlived its samples");
+    assert_eq!(history.scale(), 0, "the shared scale outlived its samples");
 }
 
 /// The same claim, reached one bucket at a time.
@@ -337,52 +336,36 @@ fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
     // wrong, which is the case that would leave the spec's numbers false while
     // everything still compiled.
     assert_eq!(HISTORY_BUCKET, Duration::from_secs(10));
-    assert_eq!(GRAPH_PERIOD, Duration::from_secs(8));
 
-    // And the two tile the same window, which is what makes them comparable at
-    // all: the band is finer than the strip beside it, and both are coarser than
-    // the rate the store samples at.
+    // And it tiles the window, which is what makes a drawn bucket mean the same
+    // amount of time wherever it sits.
     assert_eq!(HISTORY_BUCKET * HISTORY_BUCKETS as u32, HISTORY_WINDOW);
-    assert_eq!(GRAPH_PERIOD * GRAPH_COLUMNS as u32, HISTORY_WINDOW);
-    assert!(
-        GRAPH_PERIOD < HISTORY_BUCKET,
-        "the band stopped being finer than the sparkline, which is the whole \
-         reason they are two elements"
-    );
+
+    // **The band half of this gate is gone with the constants it read**
+    // ([#232](https://github.com/breferrari/vigia/issues/232)). It asserted
+    // `GRAPH_PERIOD < HISTORY_BUCKET`, "the band stopped being finer than the
+    // sparkline, which is the whole reason they are two elements", against a band
+    // that drew fifteen fixed columns. The band draws one value per sub-column
+    // now, so its period is a property of the pane rather than a constant, and at
+    // any wide pane it is the store's own one-second resolution. It is therefore
+    // finer than a drawn bucket at every width, and the comparison has nothing
+    // left to compare.
 }
 
-/// The sparkline's bucket count is a ceiling, not a choice, and the ceiling is
-/// computed here rather than written down.
-///
-/// **[#161](https://github.com/breferrari/vigia/issues/161) asked for the drawn
-/// bucket count to become a rung of the width ladder, and for the sparkline that
-/// is refused by arithmetic rather than by preference.** A wider slot cannot buy
-/// more of the window, because the widest rung already draws all of it. It can
-/// only buy a finer division of the same window, and the division cannot go finer
-/// than a band column without the two elements reading one store at crossed
-/// scales, which is what the gate above forbids.
-///
-/// So the largest count available is the largest divisor of [`HISTORY_SAMPLES`]
-/// whose period still exceeds [`GRAPH_PERIOD`], and the sparkline is already
-/// sitting on it. **Searched rather than restated**, because the claim is that no
-/// larger count exists: writing the answer down would assert the number instead
-/// of the argument, and the number would go on passing if either constant moved
-/// underneath it.
-#[test]
-fn the_sparkline_is_already_at_the_ceiling_the_band_sets() {
-    let ceiling = (1..=HISTORY_SAMPLES)
-        .filter(|count| HISTORY_SAMPLES % count == 0)
-        .filter(|count| HISTORY_WINDOW / *count as u32 > GRAPH_PERIOD)
-        .max()
-        .expect("some division of the window is coarser than a band column");
-
-    assert_eq!(
-        HISTORY_BUCKETS, ceiling,
-        "the sparkline draws {HISTORY_BUCKETS} buckets where {ceiling} is the \
-         largest division of the window that stays coarser than a band column, \
-         so it has either room left to grow or has already passed the band"
-    );
-}
+// **The sparkline's ceiling gate is gone, and #161's ruling with it**
+// ([#232](https://github.com/breferrari/vigia/issues/232)).
+//
+// It searched for the largest division of the window whose period still exceeded
+// `GRAPH_PERIOD` and asserted `HISTORY_BUCKETS` was already it, which is how
+// [#161](https://github.com/breferrari/vigia/issues/161) closed its sparkline
+// half by ruling rather than by a rung: a drawn bucket could not go finer than a
+// band column without the two elements drawing one store at crossed scales.
+//
+// **That bound was a property of the band's fixed period and the band no longer
+// has one.** It draws one value per sub-column, so at any wide pane its period
+// is the store's own second, which is finer than any bucket the sparkline could
+// ask for. The constraint is gone rather than merely restated, so the ruling it
+// carried is reopened rather than defended, and the follow-up says so.
 
 /// The newest drawn bucket of a path, which is where a write just landed.
 fn newest(history: &History, path: &str) -> u32 {
@@ -486,11 +469,11 @@ fn the_peak_follows_the_weight_rather_than_the_write_count() {
     let mut history = History::starting_at(now);
 
     history.record_sized([("src/a.rs", Some(100))], now);
-    let flat = history.peak();
+    let flat = history.scale();
     history.record_sized([("src/a.rs", Some(5_000))], now);
 
     assert!(
-        history.peak() > flat,
+        history.scale() > flat,
         "a four-thousand-nine-hundred-byte write left the peak at {flat}, so \
          every column would still draw against a denominator that cannot move"
     );

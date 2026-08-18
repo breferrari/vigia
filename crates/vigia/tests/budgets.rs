@@ -380,7 +380,7 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
         paths.len(),
         HISTORY_PATHS,
         "the burst was not the widest a wake can carry, so this timed a narrower \
-         the product has"
+         tick than the product has"
     );
     assert!(
         history.churn(EDITED_PATH).is_some(),
@@ -397,7 +397,9 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
     // feature to buy back time the frame never spent.
     assert!(
         taken <= budget,
-        "sizing a {HISTORY_PATHS}-path burst spent {taken:?} of thread CPU time at p50          against {budget:?}, a tenth of the {I9_FRAME:?} frame it shares (wall {wall:?},          which contention inflates and this does not)"
+        "sizing a {HISTORY_PATHS}-path burst spent {taken:?} of thread CPU time \
+         at p50 against {budget:?}, a tenth of the {I9_FRAME:?} frame it shares \
+         (wall {wall:?}, which contention inflates and this does not)"
     );
 }
 

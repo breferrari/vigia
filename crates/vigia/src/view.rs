@@ -476,7 +476,7 @@ pub struct View {
     /// bucket draws a track, so a peak of zero means every bucket is empty and
     /// every one of them is still drawn. `vigia_core::History::peak` carries the
     /// same correction, and this is the copy a renderer actually reads.
-    pub peak: u32,
+    pub scale: u32,
     /// The whole worktree's churn over the window, oldest sample first.
     ///
     /// **What the masthead's band draws** ([#158](https://github.com/breferrari/vigia/issues/158)),
@@ -812,7 +812,7 @@ impl View {
                 row: position.row,
             },
             read: 0,
-            peak: history.peak(),
+            scale: history.scale(),
             worktree_churn: history.worktree_churn(),
         };
         if files == 0 {
@@ -1608,7 +1608,8 @@ mod tests {
         assert_eq!(
             touched(&map),
             vec![HEAT_BUCKETS / 12],
-            "the addition is on line 11, which is a twelfth of the way into a              120-line file"
+            "the addition is on line 11, which is a twelfth of the way into a \
+             120-line file"
         );
     }
 }
