@@ -13,7 +13,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | Load the bundled grammars | 318µs, against I7's 50ms |
+//! | Load the bundled grammars (217 syntaxes, uncompressed dump) | 674µs, against I7's 50ms |
 //! | Parse one screenful, 24 lines | 1.53ms, against I9's 16ms |
 //! | Parse a 1006-line hunk **whole** | **60.97ms**, which is 3.8x over I9 |
 //! | Hash that hunk to revalidate it | 7.1µs |
@@ -620,9 +620,14 @@ impl Highlighter {
     /// from.
     ///
     /// Loading is done up front rather than behind a lazy initialiser: I7
-    /// gives startup 50ms, the old 75-syntax dump cost 318µs in release, and
-    /// hiding this behind first use would only move it onto the first frame
-    /// that draws.
+    /// gives startup 50ms, this costs **0.674ms** in release (best of 20; the
+    /// old 75-syntax dump was 318µs), and hiding it behind first use would
+    /// only move it onto the first frame that draws. The dump is
+    /// **uncompressed**, and that is a measured decision rather than a
+    /// default: the compressed form of the same set loads at **9.67ms**, a
+    /// 14x, against 90KB saved in a binary whose size budget has an order of
+    /// magnitude more room than its startup budget. `two-face` ships its own
+    /// dumps uncompressed for the same reason.
     ///
     /// **Loading a grammar and compiling one are different costs, and only the
     /// small one happens here.** `syntect` defers every pattern to
@@ -635,9 +640,10 @@ impl Highlighter {
     /// off the path a reader is waiting on.
     pub fn new() -> Self {
         Self {
-            syntaxes: Arc::new(syntect::dumps::from_binary(include_bytes!(
-                "../assets/syntaxes.bin"
-            ))),
+            syntaxes: Arc::new(
+                syntect::dumps::from_uncompressed_data(include_bytes!("../assets/syntaxes.bin"))
+                    .expect("the embedded dump deserialises"),
+            ),
             table: CLASSES
                 .iter()
                 .filter_map(|(prefix, class)| Some((Scope::new(prefix).ok()?, *class)))
@@ -954,8 +960,7 @@ impl Highlighter {
                     // Rewind to the deepest position the new content still
                     // agrees with, and only start over when there is none.
                     if !entries[slot].rewind(content.clone()) {
-                        entries[slot] =
-                            Entry::new(path, ordinal, content, syntaxes, first_line);
+                        entries[slot] = Entry::new(path, ordinal, content, syntaxes, first_line);
                     }
                     entries[slot].live = true;
                 }
@@ -1045,7 +1050,8 @@ impl Pass<'_> {
         index: usize,
         first_line: Option<&str>,
     ) -> &[Span] {
-        self.highlighter.spans(path, ordinal, hunk, index, first_line)
+        self.highlighter
+            .spans(path, ordinal, hunk, index, first_line)
     }
 
     /// Counters for what the highlighter has done, mid-pass.
@@ -1549,11 +1555,26 @@ mod tests {
         let source = hunk(texts.iter().map(|t| line(LineKind::Added, t)).collect());
         let spans = spans_for("README.md", &source);
 
-        assert_eq!(class_at(&spans[0], texts[0].find('A').unwrap()), Class::Function);
-        assert_eq!(class_at(&spans[1], texts[1].find("bold").unwrap()), Class::Keyword);
-        assert_eq!(class_at(&spans[1], texts[1].find("code").unwrap()), Class::String);
-        assert_eq!(class_at(&spans[2], texts[2].find("a link").unwrap()), Class::Constant);
-        assert_eq!(class_at(&spans[2], texts[2].find("https").unwrap()), Class::Constant);
+        assert_eq!(
+            class_at(&spans[0], texts[0].find('A').unwrap()),
+            Class::Function
+        );
+        assert_eq!(
+            class_at(&spans[1], texts[1].find("bold").unwrap()),
+            Class::Keyword
+        );
+        assert_eq!(
+            class_at(&spans[1], texts[1].find("code").unwrap()),
+            Class::String
+        );
+        assert_eq!(
+            class_at(&spans[2], texts[2].find("a link").unwrap()),
+            Class::Constant
+        );
+        assert_eq!(
+            class_at(&spans[2], texts[2].find("https").unwrap()),
+            Class::Constant
+        );
         // And a bullet's text must stay plain: `markup.list` is a meta scope
         // over the whole item, which is why it has no row.
         let list = hunk(vec![line(LineKind::Added, "- plain list text")]);
@@ -1648,7 +1669,10 @@ mod tests {
         // ...and a Qt translation file is an XML document whose extension
         // lies; the first line is what tells them apart.
         assert_eq!(
-            grammar_of("i18n/app_de.ts", Some("<?xml version=\"1.0\" encoding=\"utf-8\"?>")),
+            grammar_of(
+                "i18n/app_de.ts",
+                Some("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+            ),
             "XML"
         );
     }

@@ -439,7 +439,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The worktree churn graph: the hero element nothing draws | [#158](https://github.com/breferrari/vigia/issues/158) |
 | ✅ | The masthead starts drawn, and the reader who asked for the toggle wants it hidden | [#204](https://github.com/breferrari/vigia/issues/204) |
 | ✅ | Braille resolution as a glyph rung above the block ramp | [#159](https://github.com/breferrari/vigia/issues/159) |
-| ⬜ | Support every modern language: the bundled grammar set is a Sublime Text 3 snapshot | [#235](https://github.com/breferrari/vigia/issues/235) |
+| ✅ | Support every modern language: the bundled grammar set is a Sublime Text 3 snapshot | [#235](https://github.com/breferrari/vigia/issues/235) |
 | ⬜ | The list keeps six rows on a fifty-row pane, so the map is void where it could be | [#160](https://github.com/breferrari/vigia/issues/160) |
 | ✅ | The glance elements are postage stamps at width: bucket counts as a width rung | [#161](https://github.com/breferrari/vigia/issues/161) |
 | ⬜ | The sparkline's bucket ceiling was the band's period, and that period is gone | [#234](https://github.com/breferrari/vigia/issues/234) |

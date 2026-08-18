@@ -25,8 +25,8 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use syntect::parsing::syntax_definition::{Pattern, SyntaxDefinition};
 use syntect::parsing::Regex;
+use syntect::parsing::syntax_definition::{Pattern, SyntaxDefinition};
 
 fn main() {
     // The workspace root, addressed from this crate's own manifest rather than
@@ -49,7 +49,16 @@ fn main() {
     }
     let set = builder.build();
 
-    let dump = syntect::dumps::dump_binary(&set);
+    // Uncompressed, and that is a measured decision rather than a default:
+    // the compressed form of this set costs 9.67ms to load in release (flate2
+    // then bincode) where I7's whole first paint is 13.26ms, and two-face
+    // ships its own dumps uncompressed for exactly this reason. The price is
+    // binary size, which is the cheaper budget here by an order of magnitude.
+    let mut dump = Vec::new();
+    syntect::dumps::dump_to_uncompressed_file(&set, root.join("target/.syntaxes-tmp.bin"))
+        .expect("serialise the dump");
+    dump.extend(std::fs::read(root.join("target/.syntaxes-tmp.bin")).expect("read it back"));
+    let _ = std::fs::remove_file(root.join("target/.syntaxes-tmp.bin"));
     let dump_path = root
         .join("crates")
         .join("vigia-core")
@@ -64,7 +73,7 @@ fn main() {
     let mut names: Vec<&str> = set.syntaxes().iter().map(|s| s.name.as_str()).collect();
     names.sort_unstable();
     println!(
-        "{} syntaxes ({} from two-face {}, {} local), {} bytes compressed -> {}",
+        "{} syntaxes ({} from two-face {}, {} local), {} bytes uncompressed -> {}",
         set.syntaxes().len(),
         base_count,
         two_face_version(),
@@ -87,9 +96,7 @@ fn load_extras(dir: &Path) -> Vec<SyntaxDefinition> {
         Ok(entries) => entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| {
-                p.extension().is_some_and(|e| e == "sublime-syntax")
-            })
+            .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
             .collect(),
         // No extras directory is a legal state: the dump is then exactly
         // two-face's set.
@@ -169,8 +176,7 @@ fn write_notice(dir: &Path, extra_names: &[String]) {
     std::fs::create_dir_all(dir).expect("assets/syntaxes exists");
     // Some upstream licence texts carry CRLF; normalised so a regeneration on
     // any platform produces the same bytes and a clean diff.
-    std::fs::write(dir.join("NOTICE.md"), md.replace("\r\n", "\n"))
-        .expect("write NOTICE.md");
+    std::fs::write(dir.join("NOTICE.md"), md.replace("\r\n", "\n")).expect("write NOTICE.md");
 }
 
 /// The exact two-face release the dump was generated from, for the line the
