@@ -5614,7 +5614,7 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
     }
 }
 
-/// A removed line's wash stops before the scrollbar's column.
+/// A removed line's band runs **under** the scrollbar's own column.
 ///
 /// [#81](https://github.com/breferrari/vigia/issues/81) was filed **undiagnosed
 /// on purpose**, from a real pane where the wash appeared to reach the far right
@@ -5622,37 +5622,54 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
 /// row may be washing the columns `with_bar` took, or the host terminal may be
 /// drawing its own scrollbar over a correct full-bleed band.
 ///
-/// This is the gate that tells them apart, and it is the thing the issue says
+/// This is the gate that tells them apart, and it is the thing that issue says
 /// does not exist. It reads the **background** of the bar's column on a row that
 /// is definitely washed, which is the property the snapshots structurally cannot
 /// see: `TestBackend`'s `Display` writes symbols and drops styles.
-#[test]
-fn a_wash_stops_before_the_scrollbar_column() {
-    /// The same draw as [`screen`], on the palette that actually tints a row.
-    ///
-    /// `Theme::default()` is the sixteen named colours, which draw **no row tint
-    /// at any depth** by the ruling in `theme.rs`. Rendering this gate through it
-    /// would assert that a wash which was never painted did not reach a column,
-    /// which is the shape §7 keeps finding: a gate that cannot fail.
-    fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
-        let theme = vigia::Theme::dark();
-        terminal
-            .draw(|f| {
-                let area = f.area();
-                vigia::render(
-                    f.buffer_mut(),
-                    area,
-                    view,
-                    &theme,
-                    Glyphs::default(),
-                    chrome,
-                );
-            })
-            .expect("draw");
-        terminal.backend().clone()
-    }
+///
+/// **It asserted the opposite until [#239](https://github.com/breferrari/vigia/issues/239),
+/// and that is worth stating rather than quietly editing.** The assertion was
+/// `assert_ne!(bar, wash)`, which is what kills #81's failure and is also what
+/// stopped the band ever joining the bar. One axis, two ends, and the gate was
+/// pinned to the wrong one: reported from a real pane, the bar column was the
+/// last cell of pane background left on a changed row, so the bar stood in a
+/// one-column notch running the height of the diff. `SPEC.md` line 610 records
+/// the same move for this gate's predecessor, *"it held the old ruling
+/// correctly, which is why this is a change to the ruling rather than a fix to
+/// the gate"*, and this is that sentence a second time on the same column.
+///
+/// The reserve is untouched and still asserted below. It is about **glyph
+/// adjacency**, not about background, so nothing it protects moves.
+/// The same draw as [`screen`], on the palette that actually tints a row.
+///
+/// `Theme::default()` is the sixteen named colours, which draw **no row tint at any
+/// depth** by the ruling in `theme.rs`. Rendering a wash gate through it would
+/// assert that a wash which was never painted did not reach a column, which is the
+/// shape §7 keeps finding: a gate that cannot fail.
+///
+/// Module scope rather than nested, because two gates need it: one reads a single
+/// washed row, the other sweeps every row the bar draws on.
+fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    let theme = vigia::Theme::dark();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                chrome,
+            );
+        })
+        .expect("draw");
+    terminal.backend().clone()
+}
 
+#[test]
+fn a_wash_runs_under_the_scrollbar_column() {
     let width = 64u16;
     let view = View {
         total_rows: 400,
@@ -5690,11 +5707,45 @@ fn a_wash_stops_before_the_scrollbar_column() {
         ratatui::style::Color::Reset,
         "the removed line was not washed at all, so this gate proves nothing"
     );
-    assert_ne!(
+    assert_eq!(
         bar,
         wash,
-        "the wash reached the scrollbar's own column at x={}",
+        "the band stops before the scrollbar's own column at x={}, so the bar \
+         stands in a notch of pane background on every changed row",
         width - 1
+    );
+
+    // **And the track's own colour survived the wash**, which is the half the
+    // whole fix rests on and the half a symbol check cannot reach.
+    //
+    // `Cell::set_style` merges: `ratatui-core-0.1.2/src/buffer/cell.rs:194-198` assigns
+    // `fg` and `bg` only where the incoming style carries `Some`, so a wash holding
+    // a background and no foreground repaints this cell's background and leaves the
+    // track's colour alone. That is a **dependency's** behaviour, pinned at
+    // `ratatui 0.30` by the root manifest and load-bearing here, so it is asserted
+    // rather than described: an upgrade that stopped short-circuiting a `None`
+    // foreground would grey the whole bar on every changed row.
+    assert_eq!(
+        buffer[(width - 1, washed)].fg,
+        vigia::Theme::dark()
+            .bar_track
+            .fg
+            .expect("dark's track has a colour"),
+        "the wash overwrote the track's foreground, so the band was painted over \
+         the bar rather than behind it"
+    );
+
+    // The glyph too, which is a **different** claim kept for a different reason.
+    // `Buffer::set_style` never touches a symbol whether it merges or replaces, so
+    // this cannot fail from the merge changing under us and is not evidence for the
+    // paragraph above. What it does catch is content reaching this column: widening
+    // the wash means the row's rect now covers the bar, and a future change drawing
+    // text rather than only a background into that rect would erase the track.
+    assert_eq!(
+        buffer[(width - 1, washed)].symbol().chars().next(),
+        Some(BAR_GLYPHS[0]),
+        "the bar column carries the band but no track glyph, so something drew \
+         content into the column the bar owns"
     );
 
     // **And the gap beside it *is* washed, which this asserted the other way
@@ -5719,6 +5770,361 @@ fn a_wash_stops_before_the_scrollbar_column() {
         buffer[(width - 2, washed)].symbol(),
         " ",
         "the column reserved beside the bar drew a glyph"
+    );
+}
+
+/// Every row the bar draws on carries that row's own background, buttons included.
+///
+/// The gate above reads **one** cell, on a mid-track row of a stepped bar, and that
+/// is three coverage holes wide. Round 1 of #239's audit named two and a probe
+/// found the third while proving the second.
+///
+/// The step buttons sit on the region's **first and last** rows (`Bar::Stepped`),
+/// which the track loop never reaches and a separate arm draws. The gate above ran
+/// at one height, so a bar below `STEP_FLOOR`, which has no buttons at all, was
+/// never drawn against a widened wash. And the obvious fixture puts both buttons on
+/// rows that happen to be *unwashed*, a file heading at the top and blank filler at
+/// the bottom, so a sweep written against it would report covering the buttons while
+/// never once painting a band across one.
+///
+/// **The heights are pinned to the shapes rather than chosen and described**, which
+/// is what stops this docblock going stale the way its first version did. That one
+/// swept 12 and 18 and called the short one the bare case; measured, a pane of 12
+/// still draws a *stepped* bar, so the bare path stayed uncovered while the comment
+/// claimed otherwise. Each height now asserts which shape it drew, so the pairing
+/// fails loudly if the layout moves under it.
+///
+/// One incidental gain worth naming, since it is why some swept rows are unwashed by
+/// construction: both regions put their bar in the same column, so this sweeps the
+/// **list's** bar wherever both are drawn, and a list row never carries a wash.
+///
+/// So this sweeps rather than samples, over fixtures chosen to force the case: for
+/// every row of the bar's column, the cell's background must equal **that row's**
+/// background and its glyph must be one the bar owns. That is the invariant in a
+/// sentence, where the gate above is its worked example, and it holds for the track,
+/// the thumb and both buttons without naming which is which.
+///
+/// The `washed_buttons` counter is the part that must not rot. Without it the two
+/// fixtures below could stop overlapping a button with a changed row through some
+/// unrelated layout change, and this gate would go on passing while covering
+/// exactly what the naive version covered.
+#[test]
+fn every_row_of_the_bar_carries_its_own_rows_background() {
+    let changed = |n: u32| {
+        [
+            line(LineKind::Added, n, "    let fresh = self.pending.take();"),
+            line(LineKind::Removed, n, "    let stale = self.pending.take();"),
+        ]
+    };
+    let many: Vec<Row> = (38..58).flat_map(changed).collect();
+
+    // **Two fixtures, and the second exists only to wash a button.** The first
+    // opens on a file heading, which is what a diff scrolled to a file boundary
+    // looks like and leaves the top button unwashed. The second opens mid-file on a
+    // changed line, which is what a diff scrolled *into* a file looks like, and puts
+    // a band under the top button. Both overflow the region so the bottom button
+    // lands on a changed row rather than on filler.
+    let mut heading = vec![file("src/engine/watch.rs", 42, 7)];
+    heading.extend(many.iter().cloned());
+
+    let fixtures = [
+        ("opening on a heading", heading),
+        ("opening mid-file", many),
+    ];
+
+    let width = 64u16;
+
+    /// The shortest track that can express more than one position, mirroring
+    /// `render.rs`'s `MIN_TRACK`. A bare bar at the short height draws a thumb and a
+    /// track cell and no more, so two is the real floor; the first version of this
+    /// gate wrote a bare `3`, looser than the shape allows.
+    const MIN_BAR_CELLS: usize = 2;
+
+    for (what, rows) in fixtures {
+        let view = View {
+            total_rows: 400,
+            rows_above: 40,
+            rows,
+            ..two_regions(1)
+        };
+
+        // **Two heights, and the short one is the point.** `Bar::Stepped` only
+        // appears above `STEP_FLOOR`; below it the bar is bare, which is a different
+        // draw path and the one the gate above never exercised.
+        for (height, expect_buttons) in [(11u16, false), (18, true)] {
+            let backend = washed_screen(width, height, &view, &chrome());
+            let buffer = backend.buffer();
+
+            let mut bar_rows = 0usize;
+            let mut washed_rows = 0usize;
+            let mut saw_buttons = false;
+            let mut washed_buttons = 0usize;
+
+            for y in 0..height {
+                let cell = &buffer[(width - 1, y)];
+                let Some(glyph) = cell.symbol().chars().next() else {
+                    continue;
+                };
+                if !BAR_GLYPHS.contains(&glyph) {
+                    continue;
+                }
+                bar_rows += 1;
+
+                // That row's own background, read from a cell the row owns rather
+                // than restated from the palette.
+                //
+                // **Column 1, and not because it is margin.** An earlier version of
+                // this comment said it was, which is false at the width this gate
+                // uses: `inset_of(64)` is 1, so column 0 is the whole margin and
+                // column 1 is the line number's first cell. Margin only reaches
+                // column 1 from eighty columns up. What makes it the right cell is
+                // narrower and holds at every width: the wash runs the row's full
+                // span and the gutter carries no background of its own, so column 1
+                // shows the band wherever the row has one and the pane's own colour
+                // where it does not. Column 0 would be the wrong choice, because
+                // §5.1's left bar paints an accent there on a changed row.
+                let behind = buffer[(1, y)].bg;
+                let button = glyph == BAR_GLYPHS[2] || glyph == BAR_GLYPHS[3];
+                saw_buttons |= button;
+                if behind != ratatui::style::Color::Reset {
+                    washed_rows += 1;
+                    if button {
+                        washed_buttons += 1;
+                    }
+                }
+
+                assert_eq!(
+                    cell.bg, behind,
+                    "{what} at {width}x{height}: the bar's cell on row {y} is \
+                     {:?} where the row behind it is {:?}, so the band does not \
+                     reach the bar on every row it crosses",
+                    cell.bg, behind
+                );
+            }
+
+            // Non-vacuity in two directions: the sweep must find a drawn bar at
+            // all, and at least one of its rows must actually carry a wash, or
+            // every comparison above was `Reset` against `Reset`.
+            assert!(
+                bar_rows >= MIN_BAR_CELLS,
+                "{what} at {width}x{height}: the sweep found {bar_rows} bar rows, \
+                 so it is not reading a drawn scrollbar and proves nothing"
+            );
+            assert!(
+                washed_rows > 0,
+                "{what} at {width}x{height}: no row the bar crosses was washed, so \
+                 every comparison above was Reset against Reset"
+            );
+
+            // **The shape this height was chosen for.** Without it the pair of
+            // heights is a claim in a comment, and the comment was wrong once
+            // already: the first version swept 12 and called it the bare case, and
+            // a pane of 12 draws a stepped bar.
+            assert_eq!(
+                saw_buttons, expect_buttons,
+                "{what} at {width}x{height}: step buttons present={saw_buttons} \
+                 where this height was chosen to draw present={expect_buttons}, so \
+                 the two heights no longer cover the two bar shapes"
+            );
+
+            // **Per height, not once at the end.** An aggregate count lets three of
+            // four combinations stop covering a washed button while the fourth
+            // carries the assertion, which is the same free-riding this gate exists
+            // to remove one level down.
+            if expect_buttons {
+                assert!(
+                    washed_buttons > 0,
+                    "{what} at {width}x{height}: a stepped bar drew no button on a \
+                     washed row, so the case round 1 of #239's audit named is not \
+                     covered by this fixture any more"
+                );
+            }
+        }
+    }
+}
+
+/// A row wash's **modifier** never reaches the scrollbar's cell.
+///
+/// The regression this pins was introduced by #239 itself and found by round 2 of
+/// its own audit, which is why it is written out rather than summarised.
+///
+/// Making the band run under the bar means the bar's cell arrives already painted.
+/// The first version let `Cell::set_style` merge over it, on the reading that a wash
+/// carries a background and no foreground so only the background would land. True of
+/// `fg` and `bg`, and **false of modifiers**:
+/// `ratatui-core-0.1.2/src/buffer/cell.rs:204` does
+/// `modifier.insert(style.add_modifier)` gated on nothing at all.
+///
+/// And it is reachable by configuration rather than only in theory. `VIGIA_THEME`
+/// accepts a trailing modifier word on every key `Theme::KEYS` names, row washes
+/// included, so `removed_row = on #45222a reverse` would put `REVERSED` on the thumb
+/// and swap the two colours that every contrast gate in `tests/palette.rs` exists to
+/// prove. A reader would have configured a row tint and silently lost the scrollbar.
+///
+/// So `Painter::bar_cell` assigns the modifier instead of merging it, and this is
+/// the gate over that: a wash carrying `REVERSED` must leave the bar's cell with the
+/// bar's own modifier and nothing borrowed.
+#[test]
+fn a_row_washs_modifier_never_reaches_the_scrollbar() {
+    use ratatui::style::Modifier;
+
+    let view = View {
+        total_rows: 400,
+        rows_above: 40,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            line(
+                LineKind::Removed,
+                38,
+                "    let stale = self.pending.take();",
+            ),
+            line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+        ],
+        ..two_regions(1)
+    };
+
+    // The palette a reader could actually write, built from the shipped one so the
+    // only difference is the thing under test.
+    let mut theme = vigia::Theme::dark();
+    theme.removed_row = theme.removed_row.add_modifier(Modifier::REVERSED);
+
+    let width = 64u16;
+    let height = 18u16;
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome(),
+            );
+        })
+        .expect("draw");
+    let backend = terminal.backend().clone();
+    let buffer = backend.buffer();
+
+    let washed = (0..height)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn at all");
+
+    // Non-vacuity: the modifier must actually have landed on the row, or this gate
+    // is asserting that a thing nobody applied did not spread.
+    assert!(
+        buffer[(1, washed)].modifier.contains(Modifier::REVERSED),
+        "the row itself is not reversed, so the wash never carried the modifier and \
+         this gate proves nothing"
+    );
+
+    assert!(
+        !buffer[(width - 1, washed)]
+            .modifier
+            .contains(Modifier::REVERSED),
+        "the row wash's REVERSED reached the scrollbar's own cell, which swaps the \
+         track against its background and undoes every contrast ratio the palette \
+         gates prove"
+    );
+}
+
+/// A bar style's own background wins over the band, and no background yields to it.
+///
+/// `bar_cell` falls both colours back to the cell it is writing, and until round 4
+/// of [#239](https://github.com/breferrari/vigia/issues/239)'s audit the background
+/// half was **discarded** rather than fallen back: a theme file could write
+/// `bar_track = #57606a on #21262d`, parse without complaint, and never draw it.
+/// That is the failure this repository's own parser notes rail against, one that
+/// reports no error and changes nothing, and this branch created it by making the
+/// band run under the bar.
+///
+/// It was also the one line in `bar_cell` verified only by **absence**: a palette
+/// gate asserted no shipped style carries a background, which says nothing about
+/// what happens when one does. Both directions are drawn here instead.
+#[test]
+fn a_bar_styles_own_background_wins_over_the_band() {
+    fn bar_bg_on_a_washed_row(
+        theme: &vigia::Theme,
+    ) -> (ratatui::style::Color, ratatui::style::Color) {
+        let view = View {
+            total_rows: 400,
+            rows_above: 40,
+            rows: vec![
+                file("src/engine/watch.rs", 42, 7),
+                Row::Hunk {
+                    old_start: 38,
+                    old_lines: 8,
+                    new_start: 38,
+                    new_lines: 9,
+                },
+                line(
+                    LineKind::Removed,
+                    38,
+                    "    let stale = self.pending.take();",
+                ),
+                line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+            ],
+            ..two_regions(1)
+        };
+        let (width, height) = (64u16, 18u16);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    &view,
+                    theme,
+                    Glyphs::default(),
+                    &chrome(),
+                );
+            })
+            .expect("draw");
+        let backend = terminal.backend().clone();
+        let y = (0..height)
+            .find(|y| row_text(&backend, *y).contains("let stale"))
+            .expect("the removed line was not drawn at all");
+        (
+            backend.buffer()[(width - 1, y)].bg,
+            backend.buffer()[(1, y)].bg,
+        )
+    }
+
+    // Shipped: no background on the bar, so the band shows through.
+    let plain = vigia::Theme::dark();
+    let (bar, wash) = bar_bg_on_a_washed_row(&plain);
+    assert_ne!(
+        wash,
+        ratatui::style::Color::Reset,
+        "the removed row was not washed, so neither half of this gate proves anything"
+    );
+    assert_eq!(
+        bar, wash,
+        "a bar style with no background of its own did not take the band's"
+    );
+
+    // A theme that declares one: it wins, and the band stops under that column.
+    let opaque = ratatui::style::Color::Rgb(0x21, 0x26, 0x2d);
+    let mut gutter = vigia::Theme::dark();
+    gutter.bar_track = gutter.bar_track.bg(opaque);
+    let (bar, wash) = bar_bg_on_a_washed_row(&gutter);
+    assert_ne!(
+        wash, opaque,
+        "the fixture's wash is the same colour as the gutter under test, so the \
+         assertion below cannot tell them apart"
+    );
+    assert_eq!(
+        bar, opaque,
+        "a bar style declaring a background did not draw it, so the value would be \
+         authored, readable in a theme file, and silently dropped"
     );
 }
 
@@ -6146,7 +6552,7 @@ fn the_wash_bleeds_under_the_inset() {
     // inset anything, and blank alone passes against a pane whose band starts
     // where its text does.
     //
-    // Drawn through `Theme::dark` for `a_wash_stops_before_the_scrollbar_column`'s
+    // Drawn through `Theme::dark` for `a_wash_runs_under_the_scrollbar_column`'s
     // reason: the sixteen named colours paint no row tint at any depth, so this
     // gate on `Theme::default` would assert that a wash nobody painted did not
     // reach a column it was never going to.

@@ -3206,13 +3206,21 @@ pub fn render(
             ..area
         };
         // Counted in **files**, which is exactly what this region shows.
-        let region = painter.with_bar(
-            region,
-            bars,
-            view.list_top as u64,
-            body.list as u64,
-            view.files as u64,
-        );
+        let full = region;
+        let (region, bar) = painter.with_bar(region, bars, body.list as u64, view.files as u64);
+        // **Before the content here, and it does not matter which**, because a list
+        // row carries no wash: the bar's cell and the row's cells never overlap. The
+        // diff region below is the one where the order is load-bearing, and it draws
+        // the other way round for a reason stated there.
+        if bar.drawn() {
+            painter.scrollbar(
+                full,
+                bar,
+                view.list_top as u64,
+                body.list as u64,
+                view.files as u64,
+            );
+        }
         painter.list(region, view, area.width);
         y += body.list as u16;
     }
@@ -3267,23 +3275,69 @@ pub fn render(
         // short for a bar, and `with_bar` draws nothing when told a whole of
         // zero.
         let full = region;
-        let region = painter.with_bar(
+        let (region, bar) = painter.with_bar(
             region,
             bars,
-            view.rows_above as u64,
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
-        // **The wash spans one column more than the content**, which is the blank
-        // `reserved` keeps in front of the bar
-        // ([#214](https://github.com/breferrari/vigia/issues/214)). That reserve is
-        // about glyph adjacency, so a full-block thumb never reads as part of a
-        // `-6`, and a blank cell whose background matches the band is still a blank
-        // cell. Left unwashed it was a column of pane background between the band
-        // and the bar, invisible on a context row and a notch on every changed one.
-        // Zero where no bar was drawn, since there is then no reserve to fill.
-        let washed = region.width + (full.width - region.width).saturating_sub(1);
+        // **The wash spans the region's whole width, the bar's own column
+        // included** ([#239](https://github.com/breferrari/vigia/issues/239)).
+        //
+        // It reached one column further than the content until then, filling the
+        // blank `reserved` keeps in front of the bar
+        // ([#214](https://github.com/breferrari/vigia/issues/214)), and stopped at
+        // the bar. #214's reason is *"one column of pane background between the
+        // band and the bar, so the band reads as clipped and the bar as standing
+        // in a notch"*, and that reason reaches its own remainder: the bar's
+        // column was the last cell of pane on a changed row, so the notch was one
+        // column narrower and still there, running the height of the diff.
+        // Reported from a real pane. `SPEC.md` §5.3's furniture rule says the same
+        // thing from the other side, and `assets/preview.svg` draws every washed
+        // row `x="8" width="884"`, the pane exactly, with the bar painting over
+        // it.
+        //
+        // **The bar draws after the content here, and that order is the fix rather
+        // than a detail.** It drew first at the start of #239, on the reading that
+        // `Buffer::set_style` merges and so the wash would repaint only the
+        // background and leave the track's glyph and colour alone. That is true of
+        // `fg` and `bg` and **false of modifiers**: `Cell::set_style` inserts
+        // `add_modifier` unconditionally, so a wash carrying one handed it to the
+        // bar, and `VIGIA_THEME` lets a reader put `reverse` on a row wash. Round 2
+        // of #239's audit found it on the change that introduced it.
+        //
+        // Drawing the bar last puts the band underneath and lets
+        // [`Painter::bar_cell`] own the cell outright except for its background,
+        // which is where that guarantee now lives. The band ends up behind the bar
+        // rather than instead of it, which is what the picture draws.
+        //
+        // The reserve is untouched. It is about **glyph adjacency**, so that a
+        // full-block thumb never reads as part of a `-6`, and a blank cell whose
+        // background matches the band is still a blank cell.
+        //
+        // **This equals `area.width`, the `pane` argument below, and the two are
+        // deliberately not merged.** `region` is built `..area`, so today the wash's
+        // width and the pane's width are the same number arriving twice, which is
+        // fair to read as derivable state. They mean different things: this is *the
+        // region's* extent, which is what furniture spans, and `pane` is the
+        // screen's, which is what glyph placement is planned against. The
+        // coincidence is that the diff region currently spans the whole pane.
+        // [#162](https://github.com/breferrari/vigia/issues/162) ends that on
+        // purpose, giving the diff *"the remaining width as its own region"* beside
+        // a left rail, and on that layout the wash must follow the region and not
+        // the screen. Collapsing them now would be correct and would plant a defect
+        // for that row to land on, so the seam stays and this paragraph is why.
+        let washed = full.width;
         painter.body(region, washed, view, area.width);
+        if bar.drawn() {
+            painter.scrollbar(
+                full,
+                bar,
+                view.rows_above as u64,
+                u64::from(body.diff as u16),
+                view.total_rows as u64,
+            );
+        }
     }
 
     // **Last, over everything, and only if a reader asked.** `SPEC.md` §11.1's
@@ -4343,8 +4397,22 @@ impl Painter<'_> {
         }
     }
 
-    /// Draw this region's scrollbar if it has one, and hand back the room left
-    /// for content.
+    /// Decide this region's scrollbar, and hand back the room left for content
+    /// along with the shape decided.
+    ///
+    /// **It stopped drawing on 2026-08-18**
+    /// ([#239](https://github.com/breferrari/vigia/issues/239)), which is why it
+    /// returns the `Bar` rather than keeping it. Deciding and drawing had to come
+    /// apart because the two regions now want them in opposite orders: the diff's
+    /// bar draws *after* its content so the row band lands underneath it, and the
+    /// list's draws before, where the order is free because a list row carries no
+    /// wash. A single call that did both could only serve one of them, and the one
+    /// it served silently was the wrong one.
+    ///
+    /// The consolidation the paragraphs below describe is untouched: the question
+    /// is still asked in exactly one place, and its answer is still the return
+    /// value. What moved out is the drawing, and each caller now says out loud
+    /// when it happens.
     ///
     /// **One place asks and one place answers.** Both regions ran the same three
     /// steps — decide, draw, then narrow the `Rect` — and the deciding half was
@@ -4359,16 +4427,18 @@ impl Painter<'_> {
     /// **The deciding half now lives in [`bar_for`]**, which is the same
     /// consolidation one layer out: `regions` asks it too, so the pointer and the
     /// screen cannot disagree about whether a bar exists or where its track is.
-    fn with_bar(&mut self, region: Rect, wide: bool, at: u64, span: u64, of: u64) -> Rect {
+    fn with_bar(&mut self, region: Rect, wide: bool, span: u64, of: u64) -> (Rect, Bar) {
         let bar = bar_for(wide, region.height, span, of);
         if !bar.drawn() {
-            return region;
+            return (region, bar);
         }
-        self.scrollbar(region, bar, at, span, of);
-        Rect {
-            width: region.width.saturating_sub(BAR_WIDTH as u16),
-            ..region
-        }
+        (
+            Rect {
+                width: region.width.saturating_sub(BAR_WIDTH as u16),
+                ..region
+            },
+            bar,
+        )
     }
 
     /// Draw a one-column scrollbar down the right of `area`.
@@ -4552,8 +4622,49 @@ impl Painter<'_> {
     /// Clipped, for the reason the heat strip gives.
     fn bar_cell(&mut self, x: u16, y: u16, glyph: char, style: Style) {
         if let Some(cell) = self.buf.cell_mut((x, y)) {
-            cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
-                .set_style(style);
+            // **The band's background is kept; the bar owns everything else.**
+            //
+            // Written field by field rather than through `set_style`, and that is
+            // the whole point rather than a style preference. Since
+            // [#239](https://github.com/breferrari/vigia/issues/239) the row wash
+            // runs under this column, so the cell arrives already painted, and
+            // `Cell::set_style` would leave two of the wash's marks on it:
+            // `bg`, which is wanted, and any **modifier**, which is not.
+            // `ratatui-core-0.1.2/src/buffer/cell.rs:204` does
+            // `modifier.insert(add_modifier)` **unconditionally**, gated on nothing,
+            // so a wash carrying one hands it to the bar.
+            //
+            // That is user-reachable rather than theoretical: `VIGIA_THEME` accepts
+            // a trailing modifier word on every key `Theme::KEYS` names, row washes
+            // included, so `removed_row = on #45222a reverse` would put `REVERSED`
+            // on the thumb and swap the two colours every contrast gate in
+            // `tests/palette.rs` was written to prove. Found by round 2 of #239's
+            // own audit, on the change that introduced it.
+            //
+            // So the modifier is **assigned**, not merged, and the foreground is
+            // taken from the style with the background put back underneath. The bar
+            // then reads identically whatever the row behind it says, except for the
+            // one field it deliberately borrows.
+            //
+            // **Both colours fall back to the cell, and the symmetry is the
+            // point.** A bar style that declares neither leaves the band showing
+            // through, which is every shipped palette. One that declares a
+            // background gets it, opting that palette out of the band under its
+            // own bar rather than having the value silently dropped: a theme file
+            // may write `bar_track = #57606a on #21262d`, and a draw site that
+            // discarded it would be the failure this module's own parser notes
+            // rail against, one that reports no error and changes nothing.
+            //
+            // The foreground's fallback is the same shape and matters more,
+            // because the cell it falls back to is the **wash's** foreground under
+            // a band. A bar style without one would draw the diff's colour and
+            // look deliberate. `palette.rs::every_bar_style_says_what_bar_cell_reads`
+            // is what stops a palette shipping that.
+            let behind = cell.bg;
+            cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]));
+            cell.fg = style.fg.unwrap_or(cell.fg);
+            cell.bg = style.bg.unwrap_or(behind);
+            cell.modifier = style.add_modifier;
         }
     }
 
@@ -5317,8 +5428,11 @@ impl Painter<'_> {
         //
         // The wash is still `area` rather than the pane on a screen with a
         // scrollbar, and that is the existing ruling
-        // `a_wash_stops_before_the_scrollbar_column` rather than something this
-        // changed.
+        // `a_wash_runs_under_the_scrollbar_column` rather than something this
+        // changed. That gate was `a_wash_stops_before_the_scrollbar_column` until
+        // [#239](https://github.com/breferrari/vigia/issues/239) inverted it; the
+        // sentence above is unaffected either way, because `area` is the region
+        // and the question is only how much of it the wash covers.
         let mut x = glyphs.x;
         let mut room = usize::from(glyphs.width);
         if self.gutter > 0 {

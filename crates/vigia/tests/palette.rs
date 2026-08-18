@@ -1677,12 +1677,42 @@ fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
+/// The two truecolour palettes and the pane each is authored against.
+///
+/// **Data only, and deliberately not a shared assertion.** Two gates enumerate
+/// this same triple and their bodies make different claims: one is about all three
+/// tracks against the pane, the other about the bar's marks across every row the
+/// bar crosses. Merging the gates would let one claim's failure read as the
+/// other's, so only the enumeration is shared, which carries no rationale of its
+/// own.
+fn palettes() -> [(&'static str, Theme, (u8, u8, u8)); 2] {
+    [
+        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
+        (
+            "light",
+            Theme::light().resolve(Depth::Truecolor),
+            LIGHT_PANE,
+        ),
+    ]
+}
+
+/// The channels of a truecolour value, named so a failure says which one.
+///
+/// **One extractor rather than one per field.** A second copy was written for
+/// backgrounds when [`a_bar_track_is_visible_on_every_row_it_crosses`] landed, and
+/// the two differed only in the field read and the noun in the panic. The washes
+/// this file compares against already arrive as a `Color` from [`wash_of`], so a
+/// background extractor was never needed at all.
+fn channels_of(colour: Color, which: &str) -> (u8, u8, u8) {
+    match colour {
+        Color::Rgb(r, g, b) => (r, g, b),
+        other => panic!("expected a truecolour {which}, found {other:?}"),
+    }
+}
+
 /// The channels of a truecolour style's foreground.
 fn rgb_of(style: ratatui::style::Style) -> (u8, u8, u8) {
-    match style.fg.expect("a foreground") {
-        Color::Rgb(r, g, b) => (r, g, b),
-        other => panic!("expected a truecolour foreground, found {other:?}"),
-    }
+    channels_of(style.fg.expect("a foreground"), "foreground")
 }
 
 /// The floor a mark meant to be *seen but subordinate* has to clear.
@@ -1713,14 +1743,7 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
     // the sixteen-colour rung. That is the picture-versus-cell-grid distinction
     // `SPEC.md` §5.1 already draws: a 1.24:1 edge across many pixels of SVG is
     // perceptible, and the same ratio inside one terminal cell is not.
-    for (name, theme, pane) in [
-        ("dark", Theme::dark().resolve(Depth::Truecolor), DARK_PANE),
-        (
-            "light",
-            Theme::light().resolve(Depth::Truecolor),
-            LIGHT_PANE,
-        ),
-    ] {
+    for (name, theme, pane) in palettes() {
         for (element, style) in [
             ("bar_track", theme.bar_track),
             ("heat_track", theme.heat_track),
@@ -1757,5 +1780,145 @@ fn a_track_is_visible_against_the_pane_it_is_drawn_on() {
             "{name}'s thumb is {thumb:.2}:1 and its track {track:.2}:1, which is \
              not enough separation for the thumb to read as the lit one"
         );
+    }
+}
+
+/// The bar's track and thumb are legible on **every** row the bar crosses.
+///
+/// [`a_track_is_visible_against_the_pane_it_is_drawn_on`] checks all three tracks
+/// against the pane, and for two of them that is the whole story: the heat strip
+/// and the sparkline draw on list rows and file headings, which are never washed.
+///
+/// **The bar is the exception, and it became one on 2026-08-18**
+/// ([#239](https://github.com/breferrari/vigia/issues/239)). The row wash now runs
+/// under the bar's own column, so on a changed row the track and the thumb sit on
+/// `added_row` or `removed_row` rather than on the pane. Every ratio in the older
+/// gate is measured against the pane, so it could not see that `#57606a` fell to
+/// **1.88:1** on an added row: a value this palette calls absent at 1.24:1 and
+/// chose 2.96:1 to escape. The bar would have drawn as a dashed line, solid on
+/// context rows and faint on the rows a reader is looking at.
+///
+/// This is the gate that would have caught it, and it is why the fix could not be
+/// the one-line widening it looks like. It asserts both halves on all three
+/// backgrounds, because a track that clears the floor by reaching its own thumb has
+/// satisfied one rule by destroying the other.
+#[test]
+fn a_bar_track_is_visible_on_every_row_it_crosses() {
+    for (name, theme, pane) in palettes() {
+        let track = rgb_of(theme.bar_track);
+        let thumb = rgb_of(theme.bar);
+
+        // The pane and both washes. `Theme::row` is what the shell itself calls,
+        // so these are the backgrounds that actually get painted rather than a
+        // restatement of them here.
+        let backgrounds = [
+            ("the pane", pane),
+            (
+                "an added row",
+                channels_of(wash_of(theme, true), "row wash"),
+            ),
+            (
+                "a removed row",
+                channels_of(wash_of(theme, false), "row wash"),
+            ),
+        ];
+
+        for (place, behind) in backgrounds {
+            let seen = contrast(track, behind);
+            assert!(
+                seen >= TRACK_FLOOR,
+                "{name}'s bar_track is {seen:.2}:1 on {place}, under the \
+                 {TRACK_FLOOR}:1 a mark needs to be seen at all. The bar crosses \
+                 that row, so this is a background it is drawn on"
+            );
+
+            // **Subordinate on the same background it was measured legible on.**
+            // Clearing the floor on the wash while checking the separation only
+            // against the pane would pass a value that is illegible on one and
+            // indistinguishable on the other, which is the shape SPEC.md section 7
+            // keeps finding: two true assertions with the failure between them.
+            let lit = contrast(thumb, behind);
+            assert!(
+                lit > seen * 1.5,
+                "{name}'s thumb is {lit:.2}:1 on {place} and its track \
+                 {seen:.2}:1, which is not enough separation for the thumb to \
+                 read as the lit one"
+            );
+        }
+    }
+}
+
+/// Every bar style says everything [`Painter::bar_cell`] reads from it.
+///
+/// This began as a claim that the bar and the wash touch **disjoint** style fields,
+/// which was true of `fg` and `bg` and was the stated reason the draw order did not
+/// matter. Round 2 of [#239](https://github.com/breferrari/vigia/issues/239)'s audit
+/// falsified it: a **modifier** is a third field, `Cell::set_style` inserts one
+/// unconditionally, and `VIGIA_THEME` lets a reader put `reverse` on a row wash. The
+/// order was never free, and the reason recorded here was wrong rather than
+/// incomplete.
+///
+/// It is free now because `bar_cell` assigns rather than merges: the band's
+/// background is kept and the bar owns the symbol, the foreground and the modifier
+/// outright. `tests/render.rs::a_row_washs_modifier_never_reaches_the_scrollbar` is
+/// the gate over that, from the drawn side.
+///
+/// What is left for a palette to get wrong is the other half of that bargain, and it
+/// is what this gate now holds. `bar_cell` reads exactly two things from the style it
+/// is handed, so:
+///
+/// - **A foreground is required.** It falls back to the cell's own, which under a
+///   band is the *wash's* foreground, so a bar style without one would draw the
+///   diff's colour and still pass every contrast gate here, which measures the
+///   palette rather than the screen.
+/// - **A background is declined, not forbidden.** `bar_cell` falls back to the
+///   band's only where the style carries none, so a palette declaring one opts its
+///   own bar out of the band #239 ruled should run under it. That is a legitimate
+///   thing for a *reader's* theme to do and the wrong default to ship.
+///   `render.rs::a_bar_styles_own_background_wins_over_the_band` holds the other
+///   side, that a declared background really does draw.
+///
+/// Both are the same failure in opposite directions, a field that looks authored and
+/// is not what draws.
+#[test]
+fn every_bar_style_says_what_bar_cell_reads() {
+    // **Its own enumeration, and `ansi` is why.** [`palettes`] cannot carry it:
+    // every other gate there extracts channels, and `Theme::ansi` is named colours
+    // by construction, so `rgb_of` would panic on it. This gate asks about a
+    // style's *shape* rather than its values, so it can hold the palette the other
+    // two structurally cannot, and `ansi` is the one that matters most: it is the
+    // default when nothing is detected, so leaving it out meant the shipped
+    // default was compliant by luck. Named by round 3 of #239's audit.
+    //
+    // **Unresolved, which is stricter than resolving.** `Depth::resolve` only ever
+    // strips a background and always maps a foreground to `Some`, so a resolved
+    // palette passes both assertions more easily than the authored one. The
+    // authored values are also what a theme file writes and what a reader edits.
+    let palettes = [
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+        ("ansi", Theme::ansi()),
+    ];
+
+    for (name, theme) in palettes {
+        for (element, style) in [
+            ("bar", theme.bar),
+            ("bar_track", theme.bar_track),
+            ("bar_hover", theme.bar_hover),
+            ("bar_active", theme.bar_active),
+        ] {
+            assert!(
+                style.fg.is_some(),
+                "{name}'s {element} carries no foreground, so under a row band the \
+                 bar would draw in the wash's colour instead of its own and nothing \
+                 measuring this palette would notice"
+            );
+            assert!(
+                style.bg.is_none(),
+                "{name}'s {element} carries a background, which opts this \
+                 palette's own bar out of the band #239 ruled should run under \
+                 it. A reader's theme may choose that; a shipped palette may not"
+            );
+        }
     }
 }

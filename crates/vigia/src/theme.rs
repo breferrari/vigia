@@ -793,7 +793,55 @@ impl Theme {
             // `#57606a` is **2.96:1**, against the thumb's 6.15:1. Both visible,
             // and the gap between them is what keeps the ruling one line up true:
             // the track is context and the thumb is the reading.
-            bar_track: rgb(0x57, 0x60, 0x6a),
+            //
+            // **`#656c76` from 2026-08-18, because the column it sits on stopped
+            // being the pane** ([#239](https://github.com/breferrari/vigia/issues/239)).
+            // Every ratio above is measured against `#0d1117`, which was true of
+            // the bar's cell while the row wash stopped one column short of it.
+            // The band runs under the bar now, so on a changed row this glyph sits
+            // on `added_row` or `removed_row` instead, and `#57606a` there is
+            // **1.88:1** and **2.17:1**. That is nearer the `#21262d` this note
+            // rejects as absent than the value it chose, so the track would have
+            // survived on context rows and faded on the rows a reader is looking
+            // at, drawing the bar as a dashed line down the pane.
+            //
+            //             context   added  removed
+            //   #57606a     2.96     1.88     2.17
+            //   #656c76     3.57     2.27     2.61
+            //   thumb       6.15     3.91     4.51
+            //
+            // The gap the paragraph above depends on survives and stops varying:
+            // **1.72x on every row kind**, where it was 2.08x on a context row and
+            // undefined on a washed one, the track having been the pane there.
+            //
+            // **`#656c76` is a value this palette did not previously hold, and the
+            // plan for #239 said no new colour would be needed. That was wrong and
+            // this is where it was found.** The intended value was `spark_track`'s
+            // own `#6e7681`, on §5.3's rule that an element earns a colour by
+            // taking a role rather than by being distinct. It fails `palette.rs`'s
+            // pre-existing separation gate, which requires the thumb to outrank the
+            // track by half again: it lands at **1.49x** where 1.50 is the floor.
+            //
+            // The window is genuinely narrow. Once the track has to clear 2.0:1 on
+            // the *added* row and stay under the thumb by half again on that same
+            // row, it is bounded to roughly 2.0 and 2.61 there, and **no grey this
+            // palette already holds sits inside it**: `#57606a` is below the floor
+            // at 1.88, and `#6e7681` and everything above it breaks the separation.
+            // So the value is chosen by those two constraints rather than by eye,
+            // and it is stated as new rather than dressed up as borrowed.
+            //
+            // (An earlier version of this note called the intended value `#6e7781`
+            // and read it as a second, distinct grey one step from `#6e7681`. There
+            // is no such value here: `spark_track` is `#6e7681`, and the other was
+            // that value with a single digit slipped, `7` for `6` in the fourth
+            // place, which is why it read as a neighbour rather than as a typo. The
+            // 1.49x was measured against the real one, so the conclusion held while
+            // the attribution did not.)
+            bar_track: rgb(0x65, 0x6c, 0x76),
+            // **Left at `#57606a` deliberately, and not an oversight.** The move
+            // above is paid for by the wash, and the heat strip does not sit on
+            // one: it draws on list rows and on file headings, which are never
+            // washed. Only the diff's bar crosses a changed row.
             heat_track: rgb(0x57, 0x60, 0x6a),
             heat_added: rgb(0x3f, 0xb9, 0x50),
             heat_added_warm: rgb(0x56, 0xd3, 0x64),
@@ -922,8 +970,24 @@ impl Theme {
             // invisible for the same reason the dark palette's was. See the note
             // on `Theme::dark`'s `bar_track`; the two were wrong together and are
             // fixed together, and the gap below `bar`'s 6.11:1 matches.
-            bar_track: rgb(0x8c, 0x95, 0x9f),
+            //
+            // **`#7d8590` from 2026-08-18**, and the third time these two move
+            // together ([#239](https://github.com/breferrari/vigia/issues/239)).
+            // The band runs under the bar, so this glyph sits on `added_row` or
+            // `removed_row` on a changed row rather than on white:
+            //
+            //             context   added  removed
+            //   #8c959f     3.04     2.40     2.25
+            //   #7d8590     3.73     2.95     2.77
+            //   thumb       6.11     4.83     4.54
+            //
+            // A uniform **1.64x** below the thumb on every row kind. `#7d8590` is
+            // `spark_track`'s value here, so no colour is invented on this palette
+            // either.
+            bar_track: rgb(0x7d, 0x85, 0x90),
             // Light enough to read as a track on white, dark enough to be visible.
+            // Unmoved for the reason `Theme::dark`'s twin gives: the heat strip
+            // never draws on a washed row.
             heat_track: rgb(0x8c, 0x95, 0x9f),
             heat_added: rgb(0x4a, 0xc2, 0x6b),
             heat_added_warm: rgb(0x2d, 0xa4, 0x4e),
