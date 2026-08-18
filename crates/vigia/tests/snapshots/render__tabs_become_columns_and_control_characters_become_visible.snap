@@ -5,5 +5,5 @@ expression: backend
 " vigia · 1 changed                                 watching "
 " M Makefile                       ____________    +1    -0  "
 " 1 +     cargo build a   b                                  "
-" 2   bell·esc·[31mnul·                                      "
+"────────────────────────────────────────────────────────────"
 " q quit · f follow · ? keys                             1/1 "

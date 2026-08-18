@@ -1845,7 +1845,7 @@ const COUNT_CELL: usize = 5;
 /// generous rung is the strip's.
 const ROW_LAYOUTS: [Columns; 8] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[0]),
+    SETTLED,
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[1]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
@@ -1862,14 +1862,19 @@ const ROW_LAYOUTS: [Columns; 8] = [
 /// the budget it had, whatever the share is set to and whatever rungs are added
 /// on top. The gate that sweeps it is evidence; this is the mechanism.
 ///
-/// An index rather than a copy of the layout, so it cannot drift from the table
-/// it points into.
-const SETTLED_RUNG: usize = 1;
+/// **By value, and used *as* the table's entry, so an index cannot rot.** This
+/// was `const SETTLED_RUNG: usize = 1` and the number is the hazard: inserting a
+/// row above index 1 silently moves the floor onto the generous rung, which then
+/// arrives at the width where it merely fits and the published picture becomes
+/// false, with only a distant gate catching it and blaming the wrong thing.
+/// Written out here and referenced from [`ROW_LAYOUTS`], the two cannot disagree
+/// however the table is edited.
+const SETTLED: Columns = Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[0]);
 
 /// The share of a row the glance elements may take, above the settled ladder.
 ///
 /// **Two questions, not one, and the table only ever answered the first.** Below
-/// [`SETTLED_RUNG`] the question is *what survives*: a narrowing pane drops
+/// [`SETTLED`] the question is *what survives*: a narrowing pane drops
 /// elements until the path is safe, and [`ROW_FLOOR`] is the floor that decides
 /// it. Above it the question is *what is worth spending*, and "does it fit" is
 /// the wrong test, because a fixed-sum table takes a rung the instant it fits.
@@ -2116,7 +2121,7 @@ impl Columns {
         }
     }
 
-    /// The widest layout that fits a region `width` columns wide.
+    /// The widest layout a region `width` columns wide both fits and deserves.
     ///
     /// **Nothing here reads a row**, and that is the ruling rather than an
     /// economy: a slot whose width depended on the rows would move whenever the
@@ -2160,7 +2165,7 @@ impl Columns {
     /// ([#161](https://github.com/breferrari/vigia/issues/161)). [`ROW_FLOOR`] is
     /// what survival costs and it decides every rung the tool shipped with.
     /// [`generous_of`] is what generosity costs and it decides only the rungs
-    /// above [`SETTLED_RUNG`], because "does it fit" stops being the right test
+    /// above [`SETTLED`], because "does it fit" stops being the right test
     /// once a row has room to spare: a fixed-sum table takes a rung the instant
     /// it fits, and the widest strip fits inside a pane narrower than the one the
     /// published picture is measured from. Both constants carry the argument.
@@ -2171,10 +2176,13 @@ impl Columns {
     /// lose it. Widening a pane cannot remove an element, which is the one
     /// promise this whole function exists to keep.
     fn plan(width: u16, glyphs: Glyphs) -> Self {
-        let budget = usize::from(width).saturating_sub(ROW_FLOOR);
+        // Named rather than shadowed, because the docblock above calls them two
+        // different questions and the code said `budget` twice.
+        let survival = usize::from(width).saturating_sub(ROW_FLOOR);
         // Floored at the settled ladder rather than applied to it, which is what
         // makes every boundary that shipped stay exactly where it was.
-        let budget = budget.min(generous_of(width).max(ROW_LAYOUTS[SETTLED_RUNG].width(glyphs)));
+        let generous = generous_of(width).max(SETTLED.width(glyphs));
+        let budget = survival.min(generous);
         ROW_LAYOUTS
             .iter()
             .copied()
@@ -2625,6 +2633,18 @@ struct Footer<'a> {
     left: &'a str,
     /// Whether `left` is a notice, which is what decides its colour.
     alert: bool,
+    /// Whether a rule is drawn above the footer's text.
+    ///
+    /// **The same mark the list already puts over the diff**, asked for from a
+    /// live pane: the bottom bar is chrome sitting under content with nothing
+    /// saying so, where every other boundary on this screen is drawn. Counted
+    /// into [`Footer::height`] rather than into [`Footer::rows`], because `rows`
+    /// is what decides the one-line-or-two ladder and a rule is neither line.
+    ///
+    /// It yields on a short pane like every other piece of furniture here: a rule
+    /// that cost the diff its last row would be chrome announcing a region rather
+    /// than separating one.
+    rule: bool,
     /// The frame-time and memory cells, already narrowed to what is left after
     /// the hints and the state have taken theirs.
     ///
@@ -2635,6 +2655,15 @@ struct Footer<'a> {
 }
 
 impl<'a> Footer<'a> {
+    /// Rows the footer takes off the pane, its rule included.
+    ///
+    /// **What every layout caller wants, where [`Footer::rows`] is what the
+    /// drawer wants.** The two differ by the rule, and reaching for the wrong one
+    /// puts the diff's last row under the mark.
+    fn height(&self) -> u16 {
+        self.rows + u16::from(self.rule)
+    }
+
     /// Decide the footer's shape from the width, the state, and the file count.
     ///
     /// **From the file count, never the scroll position.** `{files}/{files}` is
@@ -2668,6 +2697,7 @@ impl<'a> Footer<'a> {
                 reserved: 0,
                 left: "",
                 alert: false,
+                rule: false,
                 diagnostics: String::new(),
             };
         }
@@ -2718,6 +2748,11 @@ impl<'a> Footer<'a> {
             && reserved > 0
             && area.height >= 3 + MIN_BODY;
         let rows = if grows { 2 } else { 1 };
+        // **Charged the way the second footer line is**, against the same floor:
+        // one header, the footer's own rows, the rule, and a body still worth
+        // showing under it. Below that the mark is the first thing to go, which is
+        // `SPEC.md` §5.3's rule that richness is the reward of space.
+        let rule = area.height >= 1 + rows + 1 + MIN_BODY;
 
         let room = if grows {
             width
@@ -2772,6 +2807,7 @@ impl<'a> Footer<'a> {
             reserved,
             left,
             alert,
+            rule,
             diagnostics,
         }
     }
@@ -3025,7 +3061,7 @@ impl Body {
 pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
     Body::split(
         area,
-        Footer::plan(area, chrome, files).rows,
+        Footer::plan(area, chrome, files).height(),
         files,
         chrome.masthead,
     )
@@ -3105,7 +3141,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     }
     let footer = Footer::plan(area, chrome, view.files);
     let body =
-        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
+        Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
     let wide = affords_bar(area.width);
 
     // The lead blank and the masthead sit between the header and the list, so
@@ -3137,7 +3173,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         // to draw it, since a target nobody can see must not eat a gesture.
         sheet: chrome
             .sheet
-            .then(|| sheet_plan(area, footer.rows, margins_of(area.width)))
+            .then(|| sheet_plan(area, footer.height(), margins_of(area.width)))
             .flatten()
             .map(|plan| plan.target()),
     }
@@ -3172,7 +3208,7 @@ pub fn render(
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
     let body =
-        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
+        Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
     let margins = margins_of(area.width);
 
     let mut painter = Painter {
@@ -3327,7 +3363,7 @@ pub fn render(
     // any region, so it is composited after all of them and the plan above is
     // untouched by whether it is up.
     if chrome.sheet {
-        if let Some(plan) = sheet_plan(area, footer.rows, margins) {
+        if let Some(plan) = sheet_plan(area, footer.height(), margins) {
             painter.sheet(&plan);
         }
     }
@@ -3965,6 +4001,19 @@ impl Painter<'_> {
             height: 1,
             ..area
         };
+
+        // **Above the footer's own rows, and full bleed like the one over the
+        // diff.** `Painter::rule` takes the pane's rect rather than an inset one,
+        // so both marks run edge to edge: a rule that stopped at the margin would
+        // read as a box someone forgot to close, which is that method's own
+        // reason and applies to this boundary identically.
+        if footer.rule {
+            self.rule(Rect {
+                y: bottom.y - footer.rows,
+                height: 1,
+                ..area
+            });
+        }
 
         // Where `put_right` will place that string, and how much of its head the
         // readouts occupy. Computed from the same two strings it is drawn from,

@@ -93,7 +93,6 @@ const REWRITE_EVERY: usize = 50;
 const WARMUP_FRAMES: usize = 50;
 const SAMPLED_FRAMES: usize = 250;
 
-/// An ordinary terminal.
 /// Sample the history the way `vigia::run` does, `stat` included.
 ///
 /// **The `stat` is part of what a tick costs and therefore part of what these
@@ -104,7 +103,7 @@ const SAMPLED_FRAMES: usize = 250;
 /// comment beside every call site here already names, arriving through a new
 /// door: what gets left out gets *cheaper*, so the omission would never fail.
 fn sample(history: &mut History, root: &Path, path: &str) {
-    sample_all(history, root, std::slice::from_ref(&path));
+    sample_all(history, root, &[path]);
 }
 
 /// [`sample`] over a whole burst, which is what a bulk rewrite delivers.
@@ -116,13 +115,13 @@ fn sample(history: &mut History, root: &Path, path: &str) {
 /// file. Sampling `EDITED_PATH` alone there would have left the widest tick this
 /// tool has unmeasured while reporting a number that looked like it covered it.
 fn sample_all(history: &mut History, root: &Path, paths: &[&str]) {
+    // **`vigia::weigh`, which is the one `run` calls.** These three lines used to
+    // be copied here, and the copy is the drift surface: what a gate leaves out
+    // gets cheaper, so it would go on passing while pricing a tick the product no
+    // longer has, which is the failure the comment beside every call site in this
+    // file already names.
     history.record_sized(
-        paths.iter().map(|path| {
-            let bytes = std::fs::symlink_metadata(root.join(path))
-                .ok()
-                .map(|meta| meta.len());
-            (*path, bytes)
-        }),
+        paths.iter().map(|path| (*path, vigia::weigh(root, path))),
         Instant::now(),
     );
 }
@@ -149,6 +148,7 @@ fn bulk_burst() -> Vec<String> {
         .collect()
 }
 
+/// An ordinary terminal.
 fn area() -> Rect {
     Rect::new(0, 0, 80, 24)
 }

@@ -189,7 +189,9 @@ fn the_fixture_lands_where_these_say() {
     // Every gate below indexes rows by the constants above, so if the layout ever
     // moves this is the one that says so, by name, instead of five gates failing
     // with assertions about colour.
-    let backend = draw(60, 8, &three_kinds(), Theme::ansi());
+    // One row taller since the footer gained a rule, which takes a body row and
+    // would otherwise land on the last line this gate reads by name.
+    let backend = draw(60, 9, &three_kinds(), Theme::ansi());
     let buffer = backend.buffer();
     let row = |y: u16| -> String { (0..60).map(|x| buffer[(x, y)].symbol()).collect::<String>() };
 

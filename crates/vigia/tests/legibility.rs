@@ -50,6 +50,17 @@ const FOLLOW_MARK: char = '▶';
 const FACT_JOIN: &str = " · ";
 
 /// Widths every sweep covers. One column to well past the widest snapshot.
+/// Rows the rule above the footer takes.
+///
+/// Named rather than folded into each expectation, so a gate about the footer's
+/// *height ladder* still reads as one: the mark is a fixed row that ladder sits
+/// under, and burying a `+ 1` in six assertions would make the next change to it
+/// six edits and one missed.
+const FOOTER_RULE_ROWS: usize = 1;
+
+/// A pane tall enough that the two rows the wide-glyph gate samples stay body.
+const WIDE_GLYPH_ROWS: u16 = 8;
+
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
 
 /// Panes wide enough to reach every rung of the glance ladder.
@@ -148,6 +159,37 @@ fn margin_at(width: u16) -> usize {
 /// two widths nothing else singles out.
 fn inset_at(width: u16) -> usize {
     margin_at(width).div_ceil(2)
+}
+
+/// Columns the scrollbar reserves on the right of every row.
+///
+/// Restated for [`MARGIN_RUNGS`]' reason, and hoisted because three gates now
+/// derive a width from it: a second copy checks the first copy rather than the
+/// renderer.
+const BAR_COLUMNS: usize = 2;
+
+/// The narrowest a file row can be and still name its own file.
+///
+/// The kind letter's two columns plus the twelve `SPEC.md` §11.1 keeps for the
+/// path. Restated and hoisted for [`BAR_COLUMNS`]' reason.
+const ROW_FLOOR: usize = 2 + 12;
+
+/// The columns a row is planned against on a pane this wide.
+///
+/// The pane less the bar's reserve, the left inset, and whatever the caret cannot
+/// borrow from that inset. **Hoisted because it was written out three times**,
+/// and [#173](https://github.com/breferrari/vigia/issues/173) has already moved
+/// what the caret costs once: the next move would fix one copy and leave the
+/// others deriving boundaries from a stale floor.
+///
+/// Saturating for the renderer's own reason: a sweep starts at one column, where
+/// the bar's reserve alone is wider than the whole pane.
+fn planning(pane: u16) -> usize {
+    let inset = inset_at(pane);
+    usize::from(pane)
+        .saturating_sub(BAR_COLUMNS)
+        .saturating_sub(inset)
+        .saturating_sub(CARET_WIDTH.saturating_sub(inset))
 }
 
 /// A row with its caret taken off, and the columns the caret took.
@@ -1034,7 +1076,11 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
     let view = awkward();
     let mut saw_swallowable = false;
     for width in WIDTHS {
-        let rows = rows_at(width, 6, &view, &chrome());
+        // **Eight rows rather than six**, because the footer gained a rule over it
+        // and the two rows sampled below are addressed by index. At six, a narrow
+        // pane takes a second footer line and the mark lands on row three, where
+        // this gate would read chrome as a clipped line of content.
+        let rows = rows_at(width, WIDE_GLYPH_ROWS, &view, &chrome());
         for (y, full) in [(2usize, "見出し a 見出し b 見出し c"), (3, "🙂🙂🙂 tail")]
         {
             let row = &rows[y];
@@ -2141,24 +2187,24 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
 
     assert_eq!(
         body(80, &following()),
-        usize::from(tall) - 2,
+        usize::from(tall) - 2 - FOOTER_RULE_ROWS,
         "eighty columns hold the hints and the state on one line"
     );
     assert_eq!(
         body(120, &following()),
-        usize::from(tall) - 2,
+        usize::from(tall) - 2 - FOOTER_RULE_ROWS,
         "so do a hundred and twenty"
     );
 
     assert_eq!(
         body(40, &chrome()),
-        usize::from(tall) - 2,
+        usize::from(tall) - 2 - FOOTER_RULE_ROWS,
         "forty columns hold them too once the follow marker is gone"
     );
 
     assert_eq!(
         body(40, &following()),
-        usize::from(tall) - 3,
+        usize::from(tall) - 3 - FOOTER_RULE_ROWS,
         "forty columns following cannot, so the footer takes a second line"
     );
 
@@ -2752,7 +2798,7 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
     // rather than shortened, which is the shape the rule forbids.
     assert_eq!(
         seen,
-        [HISTORY_BUCKETS / 2, HISTORY_BUCKETS].into_iter().collect(),
+        [SPARK_RUNGS[1], SPARK_RUNGS[0]].into_iter().collect(),
         "the sparkline was drawn at bucket counts {seen:?}; only whole rungs are \
          legal, and both of them have to be reachable or the ladder has a rung \
          no width can produce"
@@ -3265,8 +3311,6 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
     // that read the renderer's own numbers would agree with them by construction.
     const COUNT_HALF: usize = 5;
     const PULSE_CELLS: usize = 1;
-    const BAR_COLUMNS: usize = 2;
-    const ROW_FLOOR: usize = 2 + 12;
     const GLANCE_NUMER: usize = 2;
     const GLANCE_DENOM: usize = 5;
 
@@ -3275,23 +3319,12 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
         if width == 0 { 0 } else { width + 1 }
     }
 
-    /// Columns a layout of these two rungs needs, counters and pulse included.
-    fn layout(heat: usize, spark: usize) -> usize {
-        reserved(COUNT_HALF * 2 + 1) + reserved(PULSE_CELLS) + reserved(heat) + reserved(spark)
-    }
-
-    /// The columns a row is planned against on a pane this wide.
-    ///
-    /// Saturating for the renderer's own reason: the sweep starts at one column,
-    /// where the bar's reserve alone is wider than the whole pane.
-    fn planning(pane: u16) -> usize {
-        usize::from(pane)
-            .saturating_sub(BAR_COLUMNS)
-            .saturating_sub(inset_at(pane))
-            .saturating_sub(CARET_WIDTH.saturating_sub(inset_at(pane)))
-    }
-
-    let widest = layout(HEAT_RUNGS[0], SPARK_RUNGS[0]);
+    // Inlined rather than named: one call site, and `reserved` is what carries
+    // the idea.
+    let widest = reserved(COUNT_HALF * 2 + 1)
+        + reserved(PULSE_CELLS)
+        + reserved(HEAT_RUNGS[0])
+        + reserved(SPARK_RUNGS[0]);
     let boundary = GENEROUS_WIDTHS
         .clone()
         .find(|pane| {
@@ -3364,8 +3397,11 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     // The case that broke. Idle at forty columns, where the state is a bare
     // position and the baseline bar fits beside it.
     assert_eq!(
+        // **Plus the rule the footer now carries**, which is a deliberate row asked
+        // for from a live pane rather than a rung sneaking one: this gate still bites,
+        // at a baseline one higher, because a bonus hint buying a line makes it three.
         rows(40, &chrome()),
-        1,
+        1 + FOOTER_RULE_ROWS,
         "forty columns idle took a second footer line, so a bonus hint bought a \
          body row at the width I6 is named for"
     );
@@ -3874,7 +3910,6 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
     // is the margin the row does **not** pay for, because the reserve is standing
     // in for it. The two happen to be equal at every rung today, so the wrong one
     // passed, which is why this is stated rather than checked by eye.
-    const BAR_COLUMNS: usize = 2;
     for width in WIDTHS {
         let trailing = margin_at(width) - inset_at(width);
         assert!(
@@ -4518,7 +4553,6 @@ fn the_path_starts_in_one_column_in_both_regions() {
 #[test]
 fn the_caret_threshold_is_the_row_floor_it_claims() {
     /// The kind letter and its gap, plus `MIN_PATH_WIDTH`. Restated.
-    const ROW_FLOOR: usize = 2 + 12;
     /// The bar's column and the blank in front of it, paid whether or not a bar
     /// is drawn. Restated.
     const BAR: usize = 2;
@@ -5349,5 +5383,116 @@ fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
                 "{glyphs:?}: an empty bucket climbed off the floor beside a busy                  one, so no writes and one write draw the same height"
             );
         }
+    }
+}
+
+/// Both rules run edge to edge, and the footer has one.
+///
+/// **Asked for from a live pane.** The bottom bar is chrome sitting under content
+/// with nothing saying so, where every other boundary on this screen is drawn:
+/// the list gets a rule over the diff and the masthead gets blank rows either
+/// side. The footer got neither.
+///
+/// **Full bleed is the half worth gating.** `SPEC.md` §5.3 rules that furniture
+/// runs to both edges, and `Painter::rule`'s own docblock gives the reason: a rule
+/// that stopped short would read as a box someone forgot to close. Both marks are
+/// drawn from the pane's rect rather than an inset one, so neither takes the
+/// margin the text rows take, and that is exactly the property a reader notices
+/// and no other gate here states.
+#[test]
+fn both_rules_reach_both_edges_of_the_pane() {
+    let width = 80u16;
+    // **A view with a pinned list, which is what puts a rule under one.**
+    // `glancing` carries file *headings* and an empty list, and `render` clamps
+    // the body to `view.list.len()`, so a fixture without one draws no rule under
+    // the list and this gate would have found a single mark and blamed the
+    // renderer for it.
+    let view = numbered(12, 3, 3);
+    let rows = rows_at(width, 24, &view, &chrome());
+    let bar: String = std::iter::repeat_n('─', usize::from(width)).collect();
+
+    // Every fully ruled row on the screen. Two: the one under the list and the
+    // one over the footer.
+    let ruled: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.as_str() == bar)
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(
+        ruled.len(),
+        2,
+        "expected a rule under the list and one over the footer, both edge to \
+         edge; found {ruled:?} in:\n{}",
+        rows.join("\n")
+    );
+
+    // The lower one sits directly above the footer's text, and the footer's text
+    // is the last thing on the pane.
+    let footer = rows.len() - 1;
+    assert_eq!(
+        ruled[1],
+        footer - 1,
+        "the footer's rule is not immediately above it: {ruled:?}"
+    );
+
+    // **And again where the footer takes two lines**, which is the case a rule
+    // placed a fixed one row up would get wrong: it would land *inside* the
+    // footer, over the state line. Forty columns following is the width
+    // `the_readouts_ride_the_second_footer_line_at_forty_columns` already pins
+    // that ladder at, so this rides a boundary the suite states elsewhere rather
+    // than inventing one.
+    let narrow = 40u16;
+    let stacked = rows_at(narrow, 24, &view, &following());
+    let bar: String = std::iter::repeat_n('─', usize::from(narrow)).collect();
+    let ruled: Vec<usize> = stacked
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.as_str() == bar)
+        .map(|(at, _)| at)
+        .collect();
+    let split = body_layout(Rect::new(0, 0, narrow, 24), &following(), view.files);
+    let text_rows = stacked.len() - 1 - body_rows(&split) - FOOTER_RULE_ROWS;
+    assert_eq!(
+        text_rows, 2,
+        "forty columns following no longer takes two footer lines, so this case          stopped being the one it was written for"
+    );
+    assert_eq!(
+        ruled.last().copied(),
+        Some(stacked.len() - 1 - text_rows),
+        "with a two-line footer the rule landed inside it rather than above          it: {ruled:?} in:
+{}",
+        stacked.join("
+")
+    );
+}
+
+#[test]
+fn a_pane_too_short_for_a_body_keeps_no_rule_over_its_footer() {
+    // **The mark yields like every other piece of furniture here**, which is
+    // §5.3's rule that richness is the reward of space. A rule that cost the diff
+    // its last row would be chrome announcing a region rather than separating
+    // one, which is the same argument `Body::split` already makes for the rule
+    // *under* the list on a pane with no list.
+    let width = 80u16;
+    let view = numbered(12, 3, 3);
+    let bar: String = std::iter::repeat_n('─', usize::from(width)).collect();
+
+    // Swept rather than sampled at one height, because the floor is what is being
+    // gated and a single short pane could miss it either way.
+    for height in 2..=6u16 {
+        let rows = rows_at(width, height, &view, &chrome());
+        let ruled = rows.iter().filter(|row| row.as_str() == bar).count();
+        let body = body_rows(&body_layout(
+            Rect::new(0, 0, width, height),
+            &chrome(),
+            view.files,
+        ));
+        assert!(
+            body >= 2 || ruled == 0,
+            "at {height} rows the pane kept {ruled} rule(s) over a body of \
+             {body}:\n{}",
+            rows.join("\n")
+        );
     }
 }

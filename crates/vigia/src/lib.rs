@@ -671,12 +671,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // thing that was written.
                     let workdir = worktree.workdir();
                     shell.history.record_sized(
-                        paths.iter().map(|path| {
-                            let bytes = std::fs::symlink_metadata(workdir.join(path))
-                                .ok()
-                                .map(|meta| meta.len());
-                            (path.as_str(), bytes)
-                        }),
+                        paths
+                            .iter()
+                            .map(|path| (path.as_str(), weigh(workdir, path))),
                         Instant::now(),
                     );
                     // The core leaves the frame exactly as it was on failure, so the
@@ -732,6 +729,29 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     }
 
     Ok(())
+}
+
+/// What a written path now holds on disk, for [`vigia_core::History::record_sized`].
+///
+/// **Exported so the budget gates can call the one the product calls**
+/// ([#232](https://github.com/breferrari/vigia/issues/232)). `crates/vigia/tests/budgets.rs`
+/// prices this syscall inside the timed region, and it had its own copy of these
+/// three lines: the gate's own docblock claimed to sample "the way `vigia::run`
+/// does" and nothing held it to that. Drift here is invisible in the direction
+/// that matters, because what the gate leaves out gets *cheaper*, so the gate
+/// would go on passing while pricing a tick the product no longer has.
+///
+/// **Does not follow links**, for `Frame`'s fingerprint rule one crate over: the
+/// thing weighed has to be the thing that was written, and a link's own bytes are
+/// what a write to it changes.
+///
+/// `None` for a path that cannot be read, which is a file that vanished between
+/// the watch naming it and this call. The store weighs that at its floor rather
+/// than at nothing, because it was still written.
+pub fn weigh(workdir: &Path, path: &str) -> Option<u64> {
+    std::fs::symlink_metadata(workdir.join(path))
+        .ok()
+        .map(|meta| meta.len())
 }
 
 /// How long the direction arrows stay lit after the last scroll.

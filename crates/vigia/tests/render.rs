@@ -726,7 +726,7 @@ fn the_header_carries_no_changed_line_total() {
     // carry the pulse, the heat strips and the sparklines, so the header is
     // asserted silent against the busiest row set the shell can draw rather than
     // against the emptiest. Its counters are the mockup's own.
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
     let header = row_text(&backend, 0);
 
     // What a header total would have to draw, in **either** form: the counters'
@@ -2938,7 +2938,9 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
         )
     };
 
-    let wide = screen(30, 6, &view(), &chrome());
+    // One row taller since the footer gained a rule, which takes a body row and
+    // would otherwise land on `CONTENT_ROW`.
+    let wide = screen(30, 7, &view(), &chrome());
     let mark = column_of(&wide, CONTENT_ROW, CONTINUES);
     assert_eq!(
         wide.buffer()[(mark, CONTENT_ROW)].style().fg,
@@ -2946,7 +2948,7 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
         "the mark is not drawn in the colour of the comment it cut"
     );
 
-    let narrow = screen(1, 6, &view(), &chrome());
+    let narrow = screen(1, 7, &view(), &chrome());
     assert_eq!(
         narrow.buffer()[(0, CONTENT_ROW)].symbol(),
         CONTINUES,
@@ -3159,7 +3161,7 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
     // mattered most.
     let theme = Theme::default();
     let spark = spark_colours(&theme);
-    let backend = screen(80, 5, &launched(), &chrome());
+    let backend = screen(80, 6, &launched(), &chrome());
 
     // **Row one, not [`LIST_TOP`], and the difference is the point.** A five-row
     // pane cannot afford a list at all — `Body::split` returns `diff_only` — so
@@ -3221,7 +3223,7 @@ fn the_first_tick_after_launch_moves_no_column() {
     // is the only value at which the ramp's numerator and denominator are equal,
     // so a single write draws the *top* of the ramp rather than its floor.
     let theme = Theme::default();
-    let launch = screen(80, 5, &launched(), &chrome());
+    let launch = screen(80, 6, &launched(), &chrome());
 
     let mut view = launched();
     if let Row::File(entry) = &mut view.rows[0] {
@@ -3229,7 +3231,7 @@ fn the_first_tick_after_launch_moves_no_column() {
         entry.recency = Recency::Pulse;
     }
     view.peak = 1;
-    let after = screen(80, 5, &view, &chrome());
+    let after = screen(80, 6, &view, &chrome());
 
     // The written file: seven track cells and one bucket, and the bucket is the
     // top of the ramp because it is the busiest thing on screen.
@@ -3342,7 +3344,7 @@ fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
     // fixture holds `[0, 0, 0, 2, 1, 0, 0, 0]`, so it draws both kinds and the
     // order has to survive.
     let theme = Theme::default();
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
 
     let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
         .into_iter()
@@ -3502,7 +3504,7 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     // sparkline is drawn from the eighth-blocks, so a `●` anywhere on the row
     // is the pulse and nothing else.
     let theme = Theme::default();
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
 
     // **Row one, and the reason is the fixture rather than the height.**
     // `glancing()` carries an empty `list`, so `clamped_to` collapses the body to
@@ -3565,7 +3567,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     // sparkline bucket; this test passed on symbols alone until that strip
     // landed. See [`blocks_of`].
     let spark = spark_colours(&Theme::default());
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
     let busiest = blocks_of(&backend, 1, &spark);
     let quieter = blocks_of(&backend, 2, &spark);
 
@@ -6484,11 +6486,12 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
     // was asserted while the code observed it and threw it away, which review
     // caught: a floor moving would then change where the band appears and
     // nothing would say so.
-    // Twenty: one header, one footer, three list rows and the rule leave the
-    // masthead's four and ten of diff, which is GRAPH_KEEP.
+    // Twenty-one: one header, one footer **and the rule above it**, three list
+    // rows and the rule under them leave the masthead's four and ten of diff,
+    // which is GRAPH_KEEP. One taller than before the footer gained its mark.
     assert_eq!(
         arrived,
-        Some(20),
+        Some(21),
         "the band arrived at {arrived:?} rather than where the floors add up to"
     );
 }
