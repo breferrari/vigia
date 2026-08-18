@@ -179,8 +179,10 @@ impl Worktree {
                 // A conflict and a type change are states rather than diffs, and
                 // this method deliberately reads nothing for them. Reporting a
                 // length would mean opening the file to find one, which is the
-                // read the early return exists to avoid.
+                // read the early return exists to avoid — and the same read a
+                // first line would need.
                 lines: 0,
+                first_line: None,
                 bytes: 0,
             });
         }

@@ -424,7 +424,13 @@ struct Entry {
 }
 
 impl Entry {
-    fn new(path: &str, ordinal: usize, content: Content, syntaxes: &SyntaxSet) -> Self {
+    fn new(
+        path: &str,
+        ordinal: usize,
+        content: Content,
+        syntaxes: &SyntaxSet,
+        first_line: Option<&str>,
+    ) -> Self {
         Self {
             path: path.to_owned(),
             ordinal,
@@ -432,7 +438,7 @@ impl Entry {
             marks: content.marks,
             checkpoints: Vec::new(),
             live: true,
-            sides: syntax_for(syntaxes, path).map(Sides::new),
+            sides: syntax_for(syntaxes, path, first_line).map(Sides::new),
             lines: Vec::new(),
             buf: String::new(),
         }
@@ -549,7 +555,7 @@ impl Entry {
 ///
 /// let mut pass = highlighter.pass();
 /// for i in 0..hunk.lines.len() {
-///     println!("{:?}", pass.spans(&path, 0, &hunk, i));
+///     println!("{:?}", pass.spans(&path, 0, &hunk, i, None));
 /// }
 /// # Ok(())
 /// # }
@@ -745,7 +751,7 @@ impl Highlighter {
                 // treats as a syntax's identity and is a `Copy` bit-packed atom.
                 // The `name` is a display string, so keying on it would allocate
                 // per path including the ones the cap is about to skip.
-                let Some(grammar) = syntax_for(&syntaxes, &path).map(|s| s.scope) else {
+                let Some(grammar) = syntax_for(&syntaxes, &path, None).map(|s| s.scope) else {
                     continue;
                 };
                 let seen = per_grammar.entry(grammar).or_insert(0);
@@ -889,7 +895,14 @@ impl Highlighter {
         self.retired.remove(at)
     }
 
-    fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
+    fn spans(
+        &mut self,
+        path: &str,
+        ordinal: usize,
+        hunk: &Hunk,
+        index: usize,
+        first_line: Option<&str>,
+    ) -> &[Span] {
         // One scan, and the miss is where the retired queue is consulted, so a
         // hunk the reader has scrolled back to lands in `entries` and everything
         // below sees one cache rather than two. Whether its content is still
@@ -941,7 +954,8 @@ impl Highlighter {
                     // Rewind to the deepest position the new content still
                     // agrees with, and only start over when there is none.
                     if !entries[slot].rewind(content.clone()) {
-                        entries[slot] = Entry::new(path, ordinal, content, syntaxes);
+                        entries[slot] =
+                            Entry::new(path, ordinal, content, syntaxes, first_line);
                     }
                     entries[slot].live = true;
                 }
@@ -949,7 +963,13 @@ impl Highlighter {
             }
             None => {
                 stats.parsed += 1;
-                entries.push(Entry::new(path, ordinal, content_of(hunk), syntaxes));
+                entries.push(Entry::new(
+                    path,
+                    ordinal,
+                    content_of(hunk),
+                    syntaxes,
+                    first_line,
+                ));
                 entries.len() - 1
             }
         };
@@ -1002,14 +1022,30 @@ impl Pass<'_> {
     /// hand the same key to different content every time the view scrolled, and
     /// the reader would see the colours of a hunk they are not looking at.
     ///
+    /// `first_line` is the file's own line one — [`FileDiff::first_line`]
+    /// (crate::FileDiff::first_line) — and feeds the two resolution steps that
+    /// need content (`SPEC.md` §6): the shebang fallback and the `.ts` XML
+    /// sniff. It is consulted only when an entry is created, so a first line
+    /// that changes while a hunk's own content does not keeps the cached
+    /// grammar until that hunk changes too — self-healing rather than tracked,
+    /// because tracking it would re-key the cache on a fact almost no frame
+    /// moves.
+    ///
     /// # Panics
     ///
     /// If `index` is past the end of `hunk.lines`, the same way indexing a slice
     /// does, and for the same reason [`Frame::diff`](crate::Frame::diff) panics
     /// on a stale index: a caller has to be walking a hunk it holds, and a
     /// lenient accessor would turn that bug into a silently uncoloured row.
-    pub fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
-        self.highlighter.spans(path, ordinal, hunk, index)
+    pub fn spans(
+        &mut self,
+        path: &str,
+        ordinal: usize,
+        hunk: &Hunk,
+        index: usize,
+        first_line: Option<&str>,
+    ) -> &[Span] {
+        self.highlighter.spans(path, ordinal, hunk, index, first_line)
     }
 
     /// Counters for what the highlighter has done, mid-pass.
@@ -1149,7 +1185,9 @@ pub const WARM_BYTES: usize = 64 * 1024;
 /// API would make the shell name a type it has no dependency on.
 /// [`Highlighter::warm_ahead`] is the way in.
 fn warm(syntaxes: &SyntaxSet, path: &str, text: &str) {
-    let Some(syntax) = syntax_for(syntaxes, path) else {
+    // The text is in hand, so resolution here sees the same first line the
+    // frame path will, and a shebang script warms the grammar it will draw.
+    let Some(syntax) = syntax_for(syntaxes, path, text.lines().next()) else {
         return;
     };
     let mut state = ParseState::new(syntax);
@@ -1165,22 +1203,91 @@ fn warm(syntaxes: &SyntaxSet, path: &str, text: &str) {
     }
 }
 
-/// The grammar for `path`, by extension and then by whole file name.
+/// Extensions whose grammar is chosen by a written rule rather than by
+/// registration accident, because more than one grammar in the dump claims
+/// them. `SPEC.md` §6 carries the reasons row by row; the short form:
 ///
-/// Whole name second because `Makefile`, `Dockerfile` and `.gitignore` have no
-/// extension to look up. `None` is ordinary rather than an error: an unrecognised
-/// file draws exactly as it did before there was highlighting at all, which
+/// - `.h` and `.m` go to Objective-C over C/C++ and MATLAB because ObjC's
+///   grammar is a C superset (C headers colour fully) and it is the dialect of
+///   the reader who filed [#235](https://github.com/breferrari/vigia/issues/235).
+///   `bat` rules `.h` the other way (C++, their #877), recorded in §6 so
+///   flipping a row is one edit and an informed one.
+/// - `.v` goes to V over Verilog because the ruling's whole subject is the
+///   modern-language set.
+/// - `.sass` goes to Sass by name because Ruby Haml also registers the
+///   extension, which is how `.sass` drew as Haml for two phases.
+/// - `.jsx` goes to the TSX grammar: TSX is a superset of JSX, and the Babel
+///   grammar is excluded from the `fancy`-vetted set.
+///
+/// A named grammar missing from the dump falls through to ordinary
+/// resolution rather than to nothing, so the table can name grammars the dump
+/// has not vendored yet without turning those files plain in the meantime.
+const AMBIGUOUS: [(&str, &str); 5] = [
+    ("h", "Objective-C"),
+    ("m", "Objective-C"),
+    ("v", "V"),
+    ("sass", "Sass"),
+    ("jsx", "TypeScriptReact"),
+];
+
+/// The grammar for `path`, by `SPEC.md` §6's four steps: the ambiguity rules,
+/// the whole file name (with a leading-dot retry), the extension, and the
+/// file's first line.
+///
+/// Whole name **before** extension because it is the more specific claim:
+/// `CMakeLists.txt` is registered whole by the CMake grammar, and looking up
+/// `txt` first handed it to Plain Text — which is exactly what the old
+/// two-step did, so `CMakeLists.txt` drew plain for as long as highlighting
+/// has existed. The dot retry is for `.gitignore`-shaped names whose grammar
+/// registers the bare word. The first line is last and optional: it is how an
+/// extensionless shebang script gets a language at all, and how a `.ts` that
+/// is really a Qt translation file (an XML document) escapes the TypeScript
+/// grammar. `None` is ordinary rather than an error: an unrecognised file
+/// draws exactly as it did before there was highlighting at all, which
 /// `SPEC.md` §11.1 rules.
-fn syntax_for<'s>(syntaxes: &'s SyntaxSet, path: &str) -> Option<&'s SyntaxReference> {
+fn syntax_for<'s>(
+    syntaxes: &'s SyntaxSet,
+    path: &str,
+    first_line: Option<&str>,
+) -> Option<&'s SyntaxReference> {
     let path = Path::new(path);
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .and_then(|ext| syntaxes.find_syntax_by_extension(ext))
-        .or_else(|| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| syntaxes.find_syntax_by_extension(name))
-        })
+    let ext = path.extension().and_then(|ext| ext.to_str());
+
+    if let Some(ext) = ext {
+        // The one content-aware ambiguity: a `.ts` whose first line is an XML
+        // declaration is a Qt translation file, and TypeScript-colouring an
+        // XML document is wrong on every token.
+        if ext == "ts"
+            && first_line.is_some_and(|line| line.trim_start().starts_with("<?xml"))
+            && let Some(syntax) = syntaxes.find_syntax_by_extension("xml")
+        {
+            return Some(syntax);
+        }
+        for (candidate, grammar) in &AMBIGUOUS {
+            if ext == *candidate
+                && let Some(syntax) = syntaxes.find_syntax_by_name(grammar)
+            {
+                return Some(syntax);
+            }
+        }
+    }
+
+    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+        if let Some(syntax) = syntaxes.find_syntax_by_extension(name) {
+            return Some(syntax);
+        }
+        if let Some(bare) = name.strip_prefix('.')
+            && let Some(syntax) = syntaxes.find_syntax_by_extension(bare)
+        {
+            return Some(syntax);
+        }
+    }
+
+    if let Some(syntax) = ext.and_then(|ext| syntaxes.find_syntax_by_extension(ext)) {
+        return Some(syntax);
+    }
+
+    first_line.and_then(|line| syntaxes.find_syntax_by_first_line(line))
 }
 
 /// A hunk's content, hashed whole and at every stride boundary.
@@ -1287,7 +1394,7 @@ mod tests {
         let mut highlighter = Highlighter::new();
         let mut pass = highlighter.pass();
         (0..hunk.lines.len())
-            .map(|i| pass.spans(path, 0, hunk, i).to_vec())
+            .map(|i| pass.spans(path, 0, hunk, i, None).to_vec())
             .collect()
     }
 
@@ -1455,7 +1562,7 @@ mod tests {
         let mut highlighter = Highlighter::new();
         let spans = highlighter
             .pass()
-            .spans("a/b.zzzznope", 0, &source, 0)
+            .spans("a/b.zzzznope", 0, &source, 0, None)
             .to_vec();
 
         assert_eq!(
@@ -1477,10 +1584,58 @@ mod tests {
     #[test]
     fn a_file_named_rather_than_extended_still_finds_its_grammar() {
         let syntaxes = &Highlighter::new().syntaxes;
-        assert!(syntax_for(syntaxes, "src/lib.rs").is_some());
-        assert!(syntax_for(syntaxes, "Makefile").is_some());
-        assert!(syntax_for(syntaxes, "deep/nested/Makefile").is_some());
-        assert!(syntax_for(syntaxes, "src/no-such-thing.zzzznope").is_none());
+        assert!(syntax_for(syntaxes, "src/lib.rs", None).is_some());
+        assert!(syntax_for(syntaxes, "Makefile", None).is_some());
+        assert!(syntax_for(syntaxes, "deep/nested/Makefile", None).is_some());
+        assert!(syntax_for(syntaxes, "src/no-such-thing.zzzznope", None).is_none());
+    }
+
+    /// The grammar `path` resolves to, by name, or what it failed on.
+    fn grammar_of(path: &str, first_line: Option<&str>) -> String {
+        let highlighter = Highlighter::new();
+        syntax_for(&highlighter.syntaxes, path, first_line)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "<none>".to_owned())
+    }
+
+    /// §6's ambiguity table, row by row. Each of these had two grammars (or a
+    /// wrong one) claiming the extension, and each answer here is the written
+    /// rule rather than whichever grammar happened to register first.
+    #[test]
+    fn an_ambiguous_extension_resolves_by_rule_not_registration_order() {
+        assert_eq!(grammar_of("include/thing.h", None), "Objective-C");
+        assert_eq!(grammar_of("Sources/AppDelegate.m", None), "Objective-C");
+        // `.sass` resolved to Ruby Haml for two phases; unresolved would beat
+        // that, and Sass is in the dump, so the rule finds the real grammar.
+        assert_eq!(grammar_of("styles/site.sass", None), "Sass");
+        // TSX is a superset of JSX, and the Babel grammar is fancy-excluded.
+        assert_eq!(grammar_of("src/App.jsx", None), "TypeScriptReact");
+        // An ordinary TypeScript file is TypeScript...
+        assert_eq!(grammar_of("src/main.ts", None), "TypeScript");
+        // ...and a Qt translation file is an XML document whose extension
+        // lies; the first line is what tells them apart.
+        assert_eq!(
+            grammar_of("i18n/app_de.ts", Some("<?xml version=\"1.0\" encoding=\"utf-8\"?>")),
+            "XML"
+        );
+    }
+
+    /// Step three's leading-dot retry and step four's first-line fallback,
+    /// which are what give dotfiles and extensionless scripts a language.
+    #[test]
+    fn dotfiles_and_shebang_scripts_resolve() {
+        assert_eq!(grammar_of(".gitignore", None), "Git Ignore");
+        assert_eq!(grammar_of("Dockerfile", None), "Dockerfile");
+        assert_eq!(grammar_of("cmake/CMakeLists.txt", None), "CMake");
+        assert_eq!(grammar_of("go.mod", None), "Gomod");
+        // No extension, no known name: the shebang is all there is.
+        assert_eq!(
+            grammar_of("scripts/deploy", Some("#!/usr/bin/env bash")),
+            "Bourne Again Shell (bash)"
+        );
+        // And without a first line the same path stays plain, which §11.1
+        // rules is ordinary rather than an error.
+        assert_eq!(grammar_of("scripts/deploy", None), "<none>");
     }
 
     /// Why the two sides are parsed apart.

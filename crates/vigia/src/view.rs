@@ -1370,7 +1370,14 @@ impl View {
                             // `Viewport::highlight`.
                             spans: match highlighter.as_deref_mut() {
                                 Some(pass) => {
-                                    pass.spans(&diff.path, ordinal, hunk, within).to_vec()
+                                    pass.spans(
+                                        &diff.path,
+                                        ordinal,
+                                        hunk,
+                                        within,
+                                        diff.first_line.as_deref(),
+                                    )
+                                    .to_vec()
                                 }
                                 None => Vec::new(),
                             },
@@ -1423,6 +1430,7 @@ mod tests {
             added: 0,
             removed: 0,
             lines,
+            first_line: None,
             bytes: 0,
         }
     }

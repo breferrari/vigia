@@ -286,12 +286,12 @@ The split is a dependency decision, not a hedge: the TUI renders whatever the co
 |---|---|---|
 | `.h` | Objective-C | ObjC's grammar is a C superset, so C headers colour fully and only C++-only constructs draw plain; and it is the dialect of the reader who filed #235. `bat` rules the other way (`*.h` → C++, their #877), recorded here so flipping this row is one edit and an informed one |
 | `.m` | Objective-C | Same population argument over MATLAB, and the same one-row flip if it proves wrong |
-| `.v` | V | Verilog has no grammar in the dump, so the collision is nominal today |
+| `.v` | V | Verilog is in the dump too, so the collision is real; the ruling's whole subject is the modern-language set, and V is the one it covers |
 | `.sass` | Sass, else nothing | It resolved to **Ruby Haml**, which is simply wrong; unresolved-and-plain beats wrongly coloured |
 | `.jsx` | the TSX grammar | TSX is a superset of JSX, and the Babel grammar is `fancy`-excluded |
 | `.ts` | TypeScript, unless the first line opens `<?xml` — then XML | A `.ts` whose first line is an XML declaration is a Qt translation file |
 
-**And resolution now has four steps rather than two**: the table above, then extension, then whole file name with a leading-dot retry (so `.gitignore` can match a grammar registering `gitignore`), then `find_syntax_by_first_line` when the file's first line is known — which is what gives an extensionless shebang script a language at all. The first line travels on `FileDiff`, captured from bytes the diff already holds, so no read is added anywhere (I4). The warmer does not use it, deliberately: its per-grammar cap is checked before the read, and reordering that to sniff content would spend the I/O the cap exists to save.
+**And resolution now has four steps rather than two**: the table above, then whole file name with a leading-dot retry (so `.gitignore` can match a grammar registering `gitignore`), then extension, then `find_syntax_by_first_line` when the file's first line is known — which is what gives an extensionless shebang script a language at all. Whole name **before** extension because it is the more specific claim: `CMakeLists.txt` is registered whole by the CMake grammar, and the old extension-first order handed it to Plain Text, so it drew plain for as long as highlighting has existed. The first line travels on `FileDiff`, captured from bytes the diff already holds, so no read is added anywhere (I4). The warmer does not use it, deliberately: its per-grammar cap is checked before the read, and reordering that to sniff content would spend the I/O the cap exists to save.
 
 **Coalescing stays ours.** `notify` has a companion debouncer crate, and taking it would move coalesce policy out of `vigia-core`, which is the one place I1 is testable. `notify` supplies raw events and nothing else.
 

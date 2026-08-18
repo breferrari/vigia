@@ -82,6 +82,19 @@ pub struct FileDiff {
     /// against. Zero when there is no working-tree side to measure: a removal, a
     /// binary file, a conflict, a type change.
     pub lines: u32,
+    /// The file's own first line, worktree side, falling back to the index
+    /// side for a deletion. `None` for a binary file and for the states this
+    /// crate deliberately reads nothing for.
+    ///
+    /// Exists for syntax resolution and nothing else: a shebang or an XML
+    /// declaration is how an extensionless script or an ambiguous `.ts` gets a
+    /// language at all (`SPEC.md` §6), and the hunks of a mid-file edit never
+    /// contain line one. **It costs no read**: [`compute`] holds both sides
+    /// whole to diff them, so this is a by-product exactly like
+    /// [`FileDiff::lines`]. Capped at 256 bytes because every first-line
+    /// pattern in the dump matches inside that, and a minified bundle's "first
+    /// line" is the whole file.
+    pub first_line: Option<String>,
     /// Bytes compared: index-side content plus worktree-side content.
     ///
     /// Recorded because I2a is a claim about work being proportional to what
@@ -259,9 +272,17 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
             // then locate changes inside a file that has no lines to locate
             // them in.
             lines: 0,
+            // The same reasoning one field over: bytes that happen to precede
+            // an 0x0A are not a line, and nothing should resolve a grammar
+            // from them.
+            first_line: None,
             bytes,
         };
     }
+
+    // Worktree side first because it is the file the reader is looking at;
+    // the index side only for a deletion, where it is the only side there is.
+    let first_line = first_line_of(after).or_else(|| first_line_of(before));
 
     let input = InternedInput::new(before, after);
     // Histogram plus slider heuristics is what git itself produces, so hunks
@@ -339,8 +360,27 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
         // the by-product `FileDiff::lines` documents rather than a second pass
         // over the file.
         lines: after_len,
+        first_line,
         bytes,
     }
+}
+
+/// The first line of `bytes`, capped at 256 bytes, or `None` for an empty
+/// side.
+///
+/// The cap is what keeps a minified bundle's single line from travelling on
+/// every [`FileDiff`] of it; every first-line pattern in the dump matches
+/// inside 256 bytes. `from_utf8_lossy` because the cap can land mid-codepoint
+/// and a replacement character at the tail of a shebang match is harmless
+/// where refusing the line would lose it.
+fn first_line_of(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let end = bytes.iter().take(256).position(|&b| b == b'\n').unwrap_or(bytes.len().min(256));
+    let line = &bytes[..end];
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    Some(String::from_utf8_lossy(line).into_owned())
 }
 
 #[cfg(test)]
