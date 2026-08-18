@@ -459,6 +459,16 @@ Whichever runs, pass the docs carve-out into the invocation, because `/simplify`
 > notes. If a simplification would delete context about why something works, skip
 > the simplification.
 
+**And pass the read-only carve-out, because an agent that builds competes with you for the machine.** On 2026-08-18 four review agents were told to measure and each ran an optimised build (`lto = "thin"`, `codegen-units = 1`) concurrently with the session's own, one against a probe worktree carrying a 3.4G `CARGO_TARGET_DIR`. The machine was audibly saturated before anything in the loop noticed, because a session's picture of the machine is its own actions only. It costs nothing in review quality to prevent: round 2 of #245's audit ran read-only with the numbers pasted into the brief and was just as sharp as the round that built.
+
+> Read the code. Do not run builds, benchmarks, test suites, or anything else
+> that consumes the machine: `cargo build`, `cargo test`, `cargo bench`,
+> `cargo clippy` and the soak are all mine to run, not yours. Every measurement
+> you need is in this brief. If one you need is missing, name it and say what
+> it would change about your finding, and I will run it and hand it back.
+
+Running is the orchestrator's job in both directions: the numbers an agent reasons from come from **one** run, so the audit reads a single consistent picture rather than four builds' worth of contention. This is the same rule as the concurrency clause the soak workflow already carries, applied to review instead of to instruments.
+
 **"Foundational" is not a self-assessment you get to lower.** If the change touches the frame path, the watch engine, the diff oracle, or the budget gates, it is foundational — that is the whole system. Do not accept your own "not worth fixing" on a first pass either: that dismissal has a one-pushback half-life here, and three out of four have historically been wrong.
 
 ## 7. Mark it ready, and wait for both reviewers
@@ -582,6 +592,8 @@ Say what the record gave you, too: which recorded decisions the work stood on, o
 - Halting on a question this file already answers, above all at the audit
 - Offering "ship it as is" as an option
 - Asking permission for the review agents, which the invocation already gave
+- Letting a review agent build, measure or soak, instead of handing it the numbers you already ran
+- Reissuing a search that has not returned, rather than checking whether it is still running
 - Leaving a pass unfinished with a pending prompt instead of finished with a flagged decision
 - Opening the PR ready, or marking it ready to see what CI says
 - Reading a draft's empty check list as a passing one

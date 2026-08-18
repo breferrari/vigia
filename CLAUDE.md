@@ -28,6 +28,15 @@ That distinction is not stylistic. It generates every budget in `SPEC.md`, and t
 
 Everything above is pure Rust on purpose: `--target x86_64-unknown-linux-musl` gives a static binary with no cross-toolchain, and macOS/Windows are tier-1. **Choosing tree-sitter over `syntect` reintroduces a C toolchain** — that is a spec change, not an implementation detail.
 
+**Reading a dependency's source: address it, never search for it.** `ratatui` 0.30 splits into `ratatui-core`, `ratatui-crossterm` and `ratatui-widgets`, so the types this project draws against most often (`Buffer`, `Cell`, the layout solver) live in a **transitive** crate that is not in this workspace. Its source sits in the Cargo registry cache behind a hash-suffixed index directory and a version-suffixed crate directory, which is not a path anyone can guess, which is exactly why a session starts searching for it instead. Both of these are instant:
+
+```bash
+ls ~/.cargo/registry/src/*/ratatui-core-*/src/buffer/          # the sources, addressed directly
+cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="ratatui-core") | .manifest_path'
+```
+
+**Never run `find /` on Windows.** Under Git Bash `/` is the MSYS root (`C:\Program Files\Git\`), so `~/.cargo` is not under it and no match is possible; and MSYS mounts the Windows registry as directories at `/proc/registry`, `/proc/registry32` and `/proc/registry64`, so the walk enumerates the hives twice through live Win32 calls and never terminates. Six of these, left orphaned by sessions that moved on, burned 26.8 CPU-hours over five hours on 2026-08-18. Bound any exploratory scan with `timeout`, and prefer Glob or Grep pointed at an explicit path.
+
 `gix` was the least-precedented dependency here (`delta` uses `git2`/libgit2 instead, likely for age reasons), so Phase 1 proved it before anything was built on top. **Proven 2026-07-30:** hunk boundaries match `git diff -U3` exactly and every Phase 1 budget holds with room. Evidence and the one constraint it came with are in `SPEC.md` §10.
 
 ## Method: spec-driven, drift-enforced
