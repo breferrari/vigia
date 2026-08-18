@@ -1535,3 +1535,60 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
         "the position did not move on every row: {seen:?}"
     );
 }
+
+/// A path's weight comes from the filesystem, and the cases that are not a size.
+///
+/// **`vigia::weigh` had no test at all, which is how the bug it was written to
+/// fix could be reintroduced silently** ([#232](https://github.com/breferrari/vigia/issues/232)).
+/// `crates/vigia-core/tests/history.rs::deleting_a_file_weighs_what_it_removed`
+/// drives `record_sized` with a literal size and never reaches this function, so
+/// reverting the `NotFound` arm below left the whole suite green: verified by
+/// mutation, 717 passing either way.
+///
+/// The three cases are three different answers, and conflating any two of them is
+/// a defect somebody has already shipped here:
+///
+/// - **A file that is gone weighs zero bytes.** Reading it as "no size" keeps the
+///   store's baseline at whatever the file last held, so the deletion weighs the
+///   floor and the file that replaces it weighs the dead one's whole size.
+/// - **A directory weighs nothing**, because it is not a write with a size:
+///   `symlink_metadata` reports 0 for one on Windows and 4096 and rising on Linux
+///   and macOS, so weighing it charges `mkdir` churn as kilobytes against a path
+///   that is in no diff.
+/// - **A file that is there weighs its bytes.**
+#[test]
+fn a_path_weighs_its_bytes_and_a_missing_one_weighs_zero() {
+    let scratch = Scratch::new("weigh-cases");
+    scratch.write("src/present.rs", "0123456789");
+    scratch.write("src/gone.rs", "gone");
+    std::fs::create_dir_all(scratch.path_of("src/adir")).expect("a directory");
+    std::fs::remove_file(scratch.path_of("src/gone.rs")).expect("remove");
+
+    assert_eq!(
+        vigia::sized(scratch.root(), &["src/present.rs".to_owned()])
+            .next()
+            .expect("a path")
+            .1,
+        Some(10),
+        "a file that is there did not weigh its bytes"
+    );
+    assert_eq!(
+        vigia::sized(scratch.root(), &["src/gone.rs".to_owned()])
+            .next()
+            .expect("a path")
+            .1,
+        Some(0),
+        "a deleted file weighed 'no size' rather than zero bytes, so the store \
+         keeps a baseline the file no longer has and the next write at that path \
+         weighs the dead one"
+    );
+    assert_eq!(
+        vigia::sized(scratch.root(), &["src/adir".to_owned()])
+            .next()
+            .expect("a path")
+            .1,
+        None,
+        "a directory weighed a size, so a `mkdir` is charged as churn against a \
+         path in no diff"
+    );
+}

@@ -481,7 +481,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     // **The producer, not the decider.** `spark_of` and the painter are mutation
     // tested from every side in `render.rs`, and every one of those fixtures
     // hands `View` a `peak` by hand. Nothing drove a *recorded* one through
-    // `App::view`, so `View::peak = history.peak()` was untested: hardcoding it
+    // `App::view`, so `View::peak = history.scale()` was untested: hardcoding it
     // to zero passed the entire workspace suite, all 426 tests, while making
     // every sparkline on every screen draw pure track forever.
     //
@@ -491,7 +491,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     // right and say nothing, which is the defect that issue exists to remove
     // rather than a new one it introduced.
     //
-    // Asserted through the drawn cells rather than off `view.peak`, so it covers
+    // Asserted through the drawn cells rather than off `view.scale`, so it covers
     // the whole path a bucket takes from the store to the screen.
     let scratch = Scratch::new("shell-rows-recorded-tick");
     scratch.write("src/lib.rs", numbered(12));
@@ -529,7 +529,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     // has to differ from every constant a mutation would reach for, or the gate
     // that exists to kill a hardcode is one.
     assert_eq!(
-        view.peak, 2,
+        view.scale, 2,
         "the recorded ticks did not reach the view's shared scale"
     );
 

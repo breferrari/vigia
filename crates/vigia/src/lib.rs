@@ -654,9 +654,24 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // thing that moves it is a wake the loop was already having.
                     // An empty burst still rolls the window and still leaves the
                     // pulse where it was, which is the staging case.
+                    // **Sized, and the `stat` is here on purpose**
+                    // ([#232](https://github.com/breferrari/vigia/issues/232)).
+                    // A sample used to count files written, so a worktree where
+                    // one file is saved over and over put a one in every sample,
+                    // became its own peak, and drew every active column of the
+                    // band at full height: the element said *when* and never
+                    // *how much*. Weighing a write by the bytes it moved is what
+                    // gives both glance elements the shape `SPEC.md` §5.1 names
+                    // them for.
+                    //
+                    // One `symlink_metadata` per changed path per tick, taken
+                    // where the budget gates can see it rather than inside the
+                    // store. It does not follow links, for `fingerprint`'s
+                    // reason one crate over: the thing weighed has to be the
+                    // thing that was written.
                     shell
                         .history
-                        .record(paths.iter().map(String::as_str), Instant::now());
+                        .record_sized(sized(worktree.workdir(), &paths), Instant::now());
                     // The core leaves the frame exactly as it was on failure, so the
                     // previous diff is still valid to draw. Saying so on the footer
                     // beats blanking a pane for a reason the reader cannot see.
@@ -710,6 +725,79 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     }
 
     Ok(())
+}
+
+/// What each path in one wake's burst now holds, for [`vigia_core::History::record_sized`].
+///
+/// **Every path, and the cap that was here twice is the finding.** A burst
+/// reports up to `HISTORY_PATHS` paths on one coalesced wake, and sizing all of
+/// them measures **2.60ms of thread CPU** in isolation against I9's 16ms. That
+/// number is real and it is not the cost, which is the whole lesson: measured in
+/// the frame it actually sits in, interleaved over thirty rounds of a hundred-file
+/// bulk rewrite, the frame costs **18.43ms sizing nothing, 17.39ms sizing
+/// sixty-four paths and 17.93ms sizing all 256**. The unsized run is the slowest
+/// of the three. `Frame::advance` walks status on the same wake and stats every
+/// one of these paths to decide they changed at all, so by the time this runs the
+/// metadata is warm and the marginal syscall costs nothing measurable.
+///
+/// **A component measured alone is not a budget.** `CLAUDE.md` asks for the
+/// headroom to be quoted beside any cost used to refuse something, and this was
+/// refused twice on a number taken outside the frame: once on a wall figure
+/// inflated by a loaded machine, and once on a CPU figure that was real and
+/// answered a question nobody was asking. Both times the thing the cap protected
+/// went unmeasured.
+///
+/// The duplicated work is still real and still worth removing: the walk already
+/// has the size and `gix` does not surface it, which is
+/// [#233](https://github.com/breferrari/vigia/issues/233). That is an efficiency
+/// row, not a reason to draw a worse graph.
+pub fn sized<'p>(
+    workdir: &'p Path,
+    paths: &'p [String],
+) -> impl Iterator<Item = (&'p str, Option<u64>)> + 'p {
+    paths
+        .iter()
+        .map(move |path| (path.as_str(), weigh(workdir, path)))
+}
+
+/// What a written path now holds on disk, for [`vigia_core::History::record_sized`].
+///
+/// **Private, because [`sized`] is what a caller wants.** The budget gates price
+/// this syscall inside the frame they measure, and they reach it through `sized`
+/// so a gate cannot end up sampling a shape the product does not have: what a
+/// gate leaves out gets *cheaper*, so that drift would never fail.
+///
+/// **Does not follow links**, for `Frame`'s fingerprint rule one crate over: the
+/// thing weighed has to be the thing that was written, and a link's own bytes are
+/// what a write to it changes.
+///
+/// `None` for a path that cannot be read, which is a file that vanished between
+/// the watch naming it and this call. The store weighs that at its floor rather
+/// than at nothing, because it was still written.
+fn weigh(workdir: &Path, path: &str) -> Option<u64> {
+    match std::fs::symlink_metadata(workdir.join(path)) {
+        // **A directory is not a write with a size**, and on the platforms where
+        // it has one it is a lie: `relative` admits directory events, and
+        // `symlink_metadata` reports 0 for a directory on Windows but 4096 and
+        // rising on Linux and macOS. Weighing those would charge `mkdir` churn as
+        // kilobytes against a path that is in no diff at all.
+        Ok(meta) if meta.is_dir() => None,
+        Ok(meta) => Some(meta.len()),
+        // **A file that is gone weighs zero bytes, not "no size"**, and the
+        // difference is the largest edit a reader can make. Mapping both to
+        // `None` kept the store's baseline at whatever the file last held, so a
+        // deletion weighed the floor of one and the *recreation* after it weighed
+        // the dead file's whole size: the biggest change drawn as the smallest
+        // and a trivial one drawn as a spike. Measured at two million bytes: the
+        // delete scored 1 and the fifty-byte file that replaced it scored
+        // 1,999,950.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(0),
+        // Anything else is a size that could not be read rather than a file that
+        // is not there: a permission change, a path that stopped being valid
+        // Unicode under us. The store weighs those at its floor, because the
+        // write happened and its magnitude is genuinely unknown.
+        Err(_) => None,
+    }
 }
 
 /// How long the direction arrows stay lit after the last scroll.

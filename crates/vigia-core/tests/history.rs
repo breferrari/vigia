@@ -23,8 +23,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    GRAPH_COLUMNS, GRAPH_PERIOD, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW,
-    History, Recency,
+    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
+    History, Recency, scale_of,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -119,7 +119,7 @@ fn a_window_of_silence_empties_the_store() {
         history.tracked()
     );
     assert!(history.stats().evicted_by_window >= HISTORY_PATHS as u64);
-    assert_eq!(history.peak(), 0, "the shared scale outlived its samples");
+    assert_eq!(history.scale(), 0, "the shared scale outlived its samples");
 }
 
 /// The same claim, reached one bucket at a time.
@@ -249,8 +249,8 @@ fn the_window_is_exactly_the_buckets_it_is_divided_into() {
 /// Named for the reason [`base`] and [`bulk_paths`] are: the gates below both ask
 /// "did anything leak or vanish", and a spelled-out fold in each is the third
 /// copy this file would carry.
-fn total(drawn: &[u16; HISTORY_BUCKETS]) -> u32 {
-    drawn.iter().map(|&count| u32::from(count)).sum()
+fn total(drawn: &[u32; HISTORY_BUCKETS]) -> u32 {
+    drawn.iter().copied().sum()
 }
 
 /// A drawn column is the **sum** of the samples under it, not one of them.
@@ -281,7 +281,7 @@ fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
     }
 
     let drawn = history.churn("src/a.rs").expect("the path is tracked");
-    let newest = u32::from(drawn[HISTORY_BUCKETS - 1]);
+    let newest = drawn[HISTORY_BUCKETS - 1];
     assert_eq!(
         newest, writes,
         "the newest column holds {newest} of {writes} writes made inside it, so \
@@ -337,16 +337,327 @@ fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
     // wrong, which is the case that would leave the spec's numbers false while
     // everything still compiled.
     assert_eq!(HISTORY_BUCKET, Duration::from_secs(10));
-    assert_eq!(GRAPH_PERIOD, Duration::from_secs(8));
 
-    // And the two tile the same window, which is what makes them comparable at
-    // all: the band is finer than the strip beside it, and both are coarser than
-    // the rate the store samples at.
+    // And it tiles the window, which is what makes a drawn bucket mean the same
+    // amount of time wherever it sits.
     assert_eq!(HISTORY_BUCKET * HISTORY_BUCKETS as u32, HISTORY_WINDOW);
-    assert_eq!(GRAPH_PERIOD * GRAPH_COLUMNS as u32, HISTORY_WINDOW);
+
+    // **The band half of this gate is gone with the constants it read**
+    // ([#232](https://github.com/breferrari/vigia/issues/232)). It asserted
+    // `GRAPH_PERIOD < HISTORY_BUCKET`, "the band stopped being finer than the
+    // sparkline, which is the whole reason they are two elements", against a band
+    // that drew fifteen fixed columns. The band draws one value per sub-column
+    // now, so its period is a property of the pane rather than a constant, and at
+    // any wide pane it is the store's own one-second resolution. It is therefore
+    // finer than a drawn bucket at every width, and the comparison has nothing
+    // left to compare.
+}
+
+// **The sparkline's ceiling gate is gone, and #161's ruling with it**
+// ([#232](https://github.com/breferrari/vigia/issues/232)).
+//
+// It searched for the largest division of the window whose period still exceeded
+// `GRAPH_PERIOD` and asserted `HISTORY_BUCKETS` was already it, which is how
+// [#161](https://github.com/breferrari/vigia/issues/161) closed its sparkline
+// half by ruling rather than by a rung: a drawn bucket could not go finer than a
+// band column without the two elements drawing one store at crossed scales.
+//
+// **That bound was a property of the band's fixed period and the band no longer
+// has one.** It draws one value per sub-column, so at any wide pane its period
+// is the store's own second, which is finer than any bucket the sparkline could
+// ask for. The constraint is gone rather than merely restated, so the ruling it
+// carried is reopened rather than defended, and the follow-up says so.
+
+/// The newest drawn bucket of a path, which is where a write just landed.
+fn newest(history: &History, path: &str) -> u32 {
+    *history
+        .churn(path)
+        .expect("the path is tracked")
+        .last()
+        .expect("a window has buckets")
+}
+
+/// A write weighs the bytes it moved, not the fact that it happened.
+///
+/// **[#232](https://github.com/breferrari/vigia/issues/232), reported from a live
+/// pane.** A sample used to be a count of files written, so a worktree where one
+/// file is saved repeatedly put exactly one in every sample and made itself the
+/// peak, and both the band and the sparkline drew every active column at full
+/// height. The element could say *when* and never *how much*, which is the
+/// opposite of the "change density over time" `SPEC.md` §5.1 names it for.
+///
+/// The first write of a path is a baseline rather than a change, so the gate
+/// takes three: one to establish the size, then a small edit and a large one.
+#[test]
+fn a_larger_write_weighs_more_than_a_smaller_one() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(1_000)), ("src/b.rs", Some(1_000))], now);
+    let baseline = (newest(&history, "src/a.rs"), newest(&history, "src/b.rs"));
+    assert_eq!(
+        baseline,
+        (1, 1),
+        "a first write has no earlier size to differ from, so it weighs the \
+         floor; charging a file's whole size on first sight would spike the peak \
+         on the first save of a session"
+    );
+
+    // `a` gains ten bytes and `b` gains a thousand, in one tick, so nothing but
+    // the weight can separate them.
+    history.record_sized([("src/a.rs", Some(1_010)), ("src/b.rs", Some(2_000))], now);
+    let (small, large) = (newest(&history, "src/a.rs"), newest(&history, "src/b.rs"));
+
     assert!(
-        GRAPH_PERIOD < HISTORY_BUCKET,
-        "the band stopped being finer than the sparkline, which is the whole \
-         reason they are two elements"
+        large > small,
+        "a thousand-byte write drew {large} against a ten-byte write's {small}, \
+         so the store is still counting writes rather than weighing them"
+    );
+    // And the magnitudes are the deltas rather than some rank of them, which is
+    // what makes the drawn heights proportional instead of merely ordered.
+    assert_eq!((small, large), (1 + 10, 1 + 1_000));
+}
+
+/// A file that shrinks moved as much as one that grew.
+///
+/// Deleting five thousand bytes is the larger of the two edits a reader can make
+/// and signing the difference would draw it as the quieter one.
+#[test]
+fn a_write_that_shrinks_a_file_weighs_what_it_removed() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(5_000))], now);
+    history.record_sized([("src/a.rs", Some(1_000))], now);
+
+    assert_eq!(newest(&history, "src/a.rs"), 1 + 4_000);
+}
+
+/// A size that could not be read still counts the write.
+///
+/// A file can vanish between the watch naming it and the `stat`, and it was
+/// still written. It weighs the floor rather than nothing, which is exactly what
+/// [`History::record`] does for every caller that supplies no size at all, so the
+/// unsized entry point keeps the behaviour every gate written before #232 holds.
+#[test]
+fn a_write_whose_size_cannot_be_read_still_counts_one() {
+    let now = base();
+    let mut sized = History::starting_at(now);
+    let mut plain = History::starting_at(now);
+
+    sized.record_sized([("src/a.rs", None)], now);
+    sized.record_sized([("src/a.rs", None)], now);
+    plain.record(["src/a.rs"], now);
+    plain.record(["src/a.rs"], now);
+
+    assert_eq!(newest(&sized, "src/a.rs"), 2);
+    assert_eq!(
+        sized.churn("src/a.rs"),
+        plain.churn("src/a.rs"),
+        "an unreadable size stopped behaving like the unsized entry point, so \
+         every gate written against `record` is measuring something else now"
+    );
+}
+
+/// The peak follows the weight, which is what makes the drawn heights differ.
+///
+/// The store's own half of #232: heights are scaled against the busiest drawn
+/// bucket, so a peak that stayed at the file count would leave every active
+/// column at the ceiling however the samples were weighed.
+#[test]
+fn the_peak_follows_the_weight_rather_than_the_write_count() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(100))], now);
+    let flat = history.scale();
+    history.record_sized([("src/a.rs", Some(5_000))], now);
+
+    assert!(
+        history.scale() > flat,
+        "a four-thousand-nine-hundred-byte write left the peak at {flat}, so \
+         every column would still draw against a denominator that cannot move"
+    );
+}
+
+/// Two large writes of different sizes stay different sizes.
+///
+/// **The ceiling is part of the unit, and changing the unit moved it.** Sixteen
+/// bits was ample while a sample counted writes: sixty-five thousand saves inside
+/// one second is not a thing anyone can do. It is one ordinary save of a lockfile
+/// once the unit is bytes, and two saves either side of that ceiling would both
+/// peg, become indistinguishable, and hold the peak at its maximum for the whole
+/// two-minute window, scaling every other row on screen to nothing. That is
+/// exactly the flattening [#232](https://github.com/breferrari/vigia/issues/232)
+/// exists to remove, re-entered through the type rather than through the count.
+///
+/// Both deltas here are past `u16::MAX`, so this is the gate that separates a
+/// `u32` sample from a `u16` one; nothing else in this file does.
+#[test]
+fn two_large_writes_of_different_sizes_do_not_both_peg() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/small.rs", Some(0)), ("src/large.rs", Some(0))], now);
+    history.record_sized(
+        [
+            ("src/small.rs", Some(100_000)),
+            ("src/large.rs", Some(300_000)),
+        ],
+        now,
+    );
+
+    let (small, large) = (
+        newest(&history, "src/small.rs"),
+        newest(&history, "src/large.rs"),
+    );
+    assert!(
+        large > small,
+        "a 300,000-byte write drew {large} against a 100,000-byte write's \
+         {small}, so both saturated and the graph cannot tell them apart"
+    );
+    assert_eq!((small, large), (1 + 100_000, 1 + 300_000));
+}
+
+/// The worktree sum saturates rather than wrapping.
+///
+/// **The widening put this back in play** ([#232](https://github.com/breferrari/vigia/issues/232)).
+/// While a sample was a `u16` and the sum a `u32`, 256 paths at their ceiling
+/// could not reach it and a plain `+=` was safe by arithmetic. A sample is a
+/// `u32` of bytes now, so two paths at [`Track::bump`]'s own ceiling in one
+/// second overflow the sum: a panic in debug, and in release the busiest worktree
+/// there has ever been drawn as the quietest.
+#[test]
+fn the_worktree_sum_saturates_rather_than_wrapping() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    // Two paths, each written far past what a `u32` sample can hold, in one
+    // second. `wrote` floors a first sighting at one, so each takes two writes:
+    // one to set the baseline and one to move it by the whole range.
+    for path in ["src/a.rs", "src/b.rs"] {
+        history.record_sized([(path, Some(0))], now);
+        history.record_sized([(path, Some(u64::from(u32::MAX)))], now);
+    }
+
+    let newest = history.worktree_churn().0[HISTORY_SAMPLES - 1];
+    assert_eq!(
+        newest,
+        u32::MAX,
+        "the worktree sum wrapped instead of topping out, so the busiest second \
+         this store has ever held draws as one of its quietest"
+    );
+}
+
+/// `scale_of` at its edges, driven directly rather than through a rendered frame.
+///
+/// It is public API and every other gate reaches it through a screen, which is
+/// how the empty case and the floor stayed unexercised.
+#[test]
+fn the_scale_rule_holds_at_its_edges() {
+    assert_eq!(
+        scale_of(std::iter::empty()),
+        0,
+        "nothing tracked is no scale"
+    );
+    assert_eq!(scale_of([0, 0, 0].into_iter()), 0, "all idle is no scale");
+
+    // The floor: any non-empty input divides to at least one, or a single small
+    // write would be measured against zero.
+    assert_eq!(scale_of([1].into_iter()), 1);
+    assert_eq!(
+        scale_of([0, 0, 1].into_iter()),
+        1,
+        "the zeroes do not dilute it"
+    );
+
+    // 1.3 of the mean, floored, over the non-empty values only.
+    assert_eq!(scale_of([10, 10, 10].into_iter()), 13);
+    assert_eq!(scale_of([0, 10, 0, 10].into_iter()), 13);
+
+    // **Above every input by design**, which is what stops a uniformly busy
+    // worktree drawing as a solid block, and is `btop`'s own behaviour.
+    assert!(scale_of([10, 10].into_iter()) > 10);
+
+    // And it saturates rather than wrapping on a window full of ceilings.
+    assert_eq!(scale_of([u32::MAX; 8].into_iter()), u32::MAX);
+}
+
+/// A projection returns exactly the width it was asked for.
+///
+/// **The contract this gained in #232**, and the reason: the band asks for one
+/// value per sub-column, which past a wide pane is more than the window holds
+/// samples. It used to clamp and hand back a short `Vec`, and the band drew a
+/// graph that stopped partway across the pane with bare axis after it.
+#[test]
+fn a_projection_returns_the_width_it_was_asked_for() {
+    let mut samples = [0u32; HISTORY_SAMPLES];
+    samples[0] = 5;
+    samples[HISTORY_SAMPLES - 1] = 7;
+    let churn = Churn(samples);
+
+    for width in [
+        1usize,
+        7,
+        HISTORY_SAMPLES - 1,
+        HISTORY_SAMPLES,
+        HISTORY_SAMPLES * 2 + 3,
+    ] {
+        let drawn = churn.projected(width);
+        assert_eq!(
+            drawn.len(),
+            width,
+            "a projection onto {width} was not {width} wide"
+        );
+    }
+
+    // Below the sample count every sample lands in exactly one column, so the
+    // total is conserved. Above it, values repeat instead, which is the honest
+    // answer: the window holds what it holds.
+    let exact: u32 = churn.projected(HISTORY_SAMPLES).iter().sum();
+    assert_eq!(
+        exact, 12,
+        "a projection at the sample count lost or invented churn"
+    );
+    let narrow: u32 = churn.projected(10).iter().sum();
+    assert_eq!(narrow, 12, "a narrower projection lost or invented churn");
+
+    // The oldest value stays oldest however wide the ask, which is what stops a
+    // wide pane drawing the window mirrored.
+    let wide = churn.projected(HISTORY_SAMPLES * 2);
+    assert_eq!(wide.first().copied(), Some(5));
+    assert_eq!(wide.last().copied(), Some(7));
+}
+
+/// A deletion weighs what it removed, and the file after it weighs itself.
+///
+/// **`Track::wrote`'s docblock claimed this and only the shrink half was gated**
+/// ([#232](https://github.com/breferrari/vigia/issues/232)). A path that vanishes
+/// has a size of zero rather than an unknown one, and treating the two the same
+/// left the baseline at whatever the file last held: the delete weighed the floor
+/// and the *next* file at that path weighed the dead one's whole size. The
+/// largest edit a reader can make drawn as the smallest, and a trivial one drawn
+/// as a spike.
+#[test]
+fn deleting_a_file_weighs_what_it_removed() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(2_000))], now);
+    let baseline = newest(&history, "src/a.rs");
+    history.record_sized([("src/a.rs", Some(0))], now);
+    let after_delete = newest(&history, "src/a.rs") - baseline;
+    history.record_sized([("src/a.rs", Some(50))], now);
+    let after_recreate = newest(&history, "src/a.rs") - baseline - after_delete;
+
+    assert_eq!(
+        after_delete, 2_000,
+        "the deletion weighed {after_delete} rather than the two thousand bytes \
+         it removed"
+    );
+    assert_eq!(
+        after_recreate, 50,
+        "the file that replaced it weighed {after_recreate} rather than its own \
+         fifty bytes, so the baseline was still the dead file's"
     );
 }

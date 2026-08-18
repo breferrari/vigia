@@ -86,7 +86,7 @@ pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 pub const HISTORY_BUCKETS: usize = 12;
 
 // Twelve since 2026-08-18 ([#161](https://github.com/breferrari/vigia/issues/161)),
-// from eight, and the reason is the one [`GRAPH_COLUMNS`] was tuned against one
+// from eight, and the reason is the one the band's own period was tuned against one
 // element over. A bucket was fifteen seconds, which is coarse enough that a
 // steady worktree drew only five and a half of the ramp's nine rungs and the
 // strip read as a solid block rather than a shape. Ten seconds is finer without
@@ -94,50 +94,31 @@ pub const HISTORY_BUCKETS: usize = 12;
 // seeded series, a steady worktree goes from 8% of buckets empty to 17% and from
 // 5.5 distinct heights to 6.5, which is more texture rather than more noise.
 //
-// **Twelve rather than fifteen**, which is where the band's own floor sits, for
-// two reasons that are about this element rather than about the period. It has
-// to halve cleanly, because `SPARK_RUNGS` is the narrowing ladder and fifteen
-// does not; and the sparkline is per file and shares its row with a path, where
-// the band has the pane to itself, so four more columns here cost something the
+// **Twelve rather than fifteen**, and the band's floor was the reason until
+// #232 retired it. What survives is about this element: it has to halve cleanly,
+// because `SPARK_RUNGS` is the narrowing ladder and fifteen does not; and the
+// sparkline is per file and shares its row with a path, where the band has the
+// pane to itself, so four more columns here cost something the
 // band's do not.
 
 /// How much time one **drawn** bucket covers.
 pub const HISTORY_BUCKET: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_BUCKETS as u64);
 
-/// Columns of churn the band draws, however wide the pane is.
-///
-/// **A floor on the aggregation, which is what the band was missing.**
-/// [`Churn::projected`] sums the samples under
-/// each column, so a narrow band already shows the same total churn at a lower
-/// resolution. What it did not do is *stop*: it clamped to the sample count, so
-/// once the pane reached 120 columns one column was one second. A save is
-/// instantaneous, so it filled a single column and left both neighbours empty,
-/// and a wide pane bought time resolution nobody asked for instead of bigger
-/// bars.
-///
-/// **Fifteen columns of eight seconds, and eight was tuned rather than chosen.**
-/// Forty seeded series across three work patterns, measuring two things at once:
-/// how much of the band is empty, and how many *distinct* heights survive.
-/// Emptiness falls monotonically as columns coarsen, but the distinct heights
-/// peak near four seconds and collapse by fifteen, so both ends lose the shape
-/// for opposite reasons. A steady worktree draws 72% empty at one second, 25% at
-/// eight, and 8% at fifteen with only five and a half of nine rungs left, which
-/// is a solid block rather than a graph. Eight is the knee.
-///
-/// The window slides and its newest sample is always mid-accumulation, so the
-/// newest column is systematically the shortest. That is a second reason to
-/// coarsen: at one second a column it was up to **100%** incomplete and always
-/// short until the second closed, and at eight it is at most 13%.
-pub const GRAPH_COLUMNS: usize = 15;
-
-/// How much time one **drawn** band column covers.
-///
-/// Named beside [`HISTORY_BUCKET`] rather than left in prose, which is where it
-/// was: "eight seconds" appeared five times across the shell and the spec and
-/// was computed nowhere.
-pub const GRAPH_PERIOD: Duration =
-    Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / GRAPH_COLUMNS as u64);
+// **`GRAPH_COLUMNS` and `GRAPH_PERIOD` were here and are retired**
+// ([#232](https://github.com/breferrari/vigia/issues/232)). They fixed the
+// band's period at fifteen columns of eight seconds, which
+// [#223](https://github.com/breferrari/vigia/issues/223) tuned over forty seeded
+// series. That row diagnosed the right defect, a save drawing a one-column
+// hairline between two blanks, and reached for the wrong fix: `btop` answers the
+// same defect on the same shape of signal by drawing the **axis**, and with a
+// floor under it a narrow column is a spike rather than a mark in a void. The
+// band draws one value per sub-column now, so its period is a property of the
+// pane and there is no constant to name.
+//
+// The measurement is not lost, only re-aimed: what it found is that the shape
+// lives in the *distinct heights*, and those collapse when columns coarsen.
+// Coarsening was the thing being tuned, and it is gone.
 
 /// Samples the store keeps per path, oldest first.
 ///
@@ -153,13 +134,13 @@ pub const GRAPH_PERIOD: Duration =
 /// paths are kept.
 ///
 /// **One hundred and twenty, so a sample is exactly one second** and exactly
-/// fifteen of them make one drawn bucket. Both divisions are exact, which is what
-/// keeps [`HISTORY_BUCKET`] an honest fifteen seconds rather than a rounding of
+/// ten of them make one drawn bucket. Both divisions are exact, which is what
+/// keeps [`HISTORY_BUCKET`] an honest ten seconds rather than a rounding of
 /// one: a projection that did not divide evenly would make some drawn columns
 /// cover more time than others, and a sparkline compared down a list would be
 /// comparing unequal windows.
 ///
-/// The cost is `paths * samples` `u16`s, which at the cap is sixty kibibytes, and
+/// The cost is `paths * samples` `u16`s, which at the cap is a hundred and twenty kibibytes, and
 /// a [`History::record`] walk fifteen times longer than it was. Both are measured
 /// in the issue rather than asserted to be small.
 ///
@@ -193,10 +174,6 @@ const HISTORY_SAMPLE: Duration =
 const SAMPLES_PER_BUCKET: usize = HISTORY_SAMPLES / HISTORY_BUCKETS;
 
 const _: () = {
-    assert!(
-        HISTORY_SAMPLES % GRAPH_COLUMNS == 0,
-        "the samples do not divide into the band's columns, so a drawn column \n         would cover more time than its neighbours"
-    );
     assert!(
         HISTORY_SAMPLES % HISTORY_BUCKETS == 0,
         "the samples do not divide into the drawn buckets, so a drawn column \
@@ -292,8 +269,23 @@ impl Churn {
     /// The remainder is spread rather than dropped: with a width that does not
     /// divide [`HISTORY_SAMPLES`], the earlier columns take one extra sample
     /// each. Every sample lands in exactly one column, which is the property that
-    /// matters, and no column is empty because the width is bounded by the caller
-    /// to at most [`HISTORY_SAMPLES`].
+    /// matters at or below [`HISTORY_SAMPLES`], which is the range every caller
+    /// but the churn band asks for.
+    ///
+    /// **Exactly `width` values, whatever `width` is.** This used to clamp to
+    /// [`HISTORY_SAMPLES`] and hand back a short `Vec`, which was fine while
+    /// every caller drew one column per cell and became a trap when the churn
+    /// band started asking for one per braille sub-column: a pane wide enough
+    /// wanted more columns than the window holds samples, got fewer, and drew a
+    /// graph that stopped partway across and left bare axis after it. The caller
+    /// then re-derived the mapping to work around it, so this formula existed
+    /// twice, once forwards and once inverted.
+    ///
+    /// Past that point a value covers **less** than one sample and neighbouring
+    /// columns repeat, which is the honest answer: the window holds what it holds
+    /// and a wider pane cannot invent resolution. `.max(from + 1)` is what makes
+    /// the span non-empty there, and it changes nothing at or below
+    /// [`HISTORY_SAMPLES`], where the spans are already at least one wide.
     ///
     /// Saturating for [`Track::drawn`]'s reason: a column already at the top of
     /// the ramp must not wrap to the bottom of it.
@@ -301,11 +293,10 @@ impl Churn {
         if width == 0 {
             return Vec::new();
         }
-        let width = width.min(HISTORY_SAMPLES);
         (0..width)
             .map(|column| {
                 let from = column * HISTORY_SAMPLES / width;
-                let to = (column + 1) * HISTORY_SAMPLES / width;
+                let to = ((column + 1) * HISTORY_SAMPLES / width).max(from + 1);
                 self.0[from..to]
                     .iter()
                     .copied()
@@ -313,6 +304,51 @@ impl Churn {
             })
             .collect()
     }
+}
+
+/// What a churn height is measured against: above the ordinary write, not at the
+/// largest one.
+///
+/// **`btop`'s rule, and the reason it is not a maximum.** Its network graph faces
+/// this signal exactly, bursty and zero most of the time with occasional values
+/// orders of magnitude above the rest, and `graph_max` is set to 1.3 times the
+/// mean of recent samples rather than to the largest of them; anything above it
+/// clamps to full height. Read from `src/linux/btop_collect.cpp` rather than
+/// recalled ([#232](https://github.com/breferrari/vigia/issues/232)).
+///
+/// The reason is what a maximum does to everything else. One `cargo build`
+/// rewriting a lock file is two orders of magnitude above an ordinary save, and
+/// against that denominator every edit a reader makes for the next two minutes
+/// draws one level high: a graph that goes blank because something interesting
+/// happened. Scaling against the ordinary case and letting the outlier saturate
+/// keeps the shape a reader is watching for.
+///
+/// **The mean is over the non-empty values only.** A worktree is idle most of the
+/// time, so counting the zeroes would make the denominator a measure of how long
+/// the reader has been away rather than of how large a write is.
+///
+/// **Shared by both glance elements, which is why it lives here.** The churn band
+/// and the per-file sparkline divide by different quantities, worktree-wide and
+/// per-file, and that asymmetry is `SPEC.md` §11.1's ruling. What they must not
+/// disagree about is the *rule*, and it existed in the renderer for one of them
+/// before this: the band was fixed where the symptom was reported and the
+/// sparkline kept dividing by a maximum over the same byte samples.
+///
+/// Zero when nothing is in the window at all, which every caller reads as "no
+/// scale yet".
+pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
+    let (sum, busy) = values
+        .filter(|value| *value > 0)
+        .fold((0u64, 0u64), |(sum, busy), value| {
+            (sum + u64::from(value), busy + 1)
+        });
+    if busy == 0 {
+        return 0;
+    }
+    // Thirteen tenths, which is `btop`'s own factor: above the mean, so an
+    // ordinary write does not sit at the ceiling, and close enough to it that an
+    // ordinary write is still legible as a shape rather than as a stub.
+    u32::try_from(sum * 13 / (busy * 10)).unwrap_or(u32::MAX)
 }
 
 /// One path's churn, and when it last moved.
@@ -325,13 +361,28 @@ impl Churn {
 #[derive(Debug, Clone)]
 struct Track {
     /// Oldest sample first, so the array projects left to right as written.
-    samples: [u16; HISTORY_SAMPLES],
+    samples: [u32; HISTORY_SAMPLES],
     /// Ordinal of the last tick that named this path.
     ///
     /// A counter rather than an [`Instant`], because the only question asked of
     /// it is "was this the newest tick", and comparing ordinals cannot drift
     /// the way two clocks can.
     tick: u64,
+    /// Bytes this path held when it was last weighed, if it ever has been.
+    ///
+    /// **What turns a count of writes into a measure of change**
+    /// ([#232](https://github.com/breferrari/vigia/issues/232)). A sample used to
+    /// be how many files moved, so a worktree where one file is saved repeatedly
+    /// put exactly one in every sample, made itself the peak, and drew every
+    /// active column at full height. The element said *when* and could not say
+    /// *how much*, which is the opposite of the "change density over time"
+    /// `SPEC.md` §5.1 names it for.
+    ///
+    /// `None` until the first weighed write, which is why that write still counts
+    /// one: a delta needs two observations and the first one is not a change, it
+    /// is a baseline. Charging a file's whole size on first sight would spike the
+    /// peak on the first save of a session and flatten the two minutes after it.
+    bytes: Option<u64>,
 }
 
 impl Track {
@@ -339,6 +390,7 @@ impl Track {
         Self {
             samples: [0; HISTORY_SAMPLES],
             tick,
+            bytes: None,
         }
     }
 
@@ -372,9 +424,9 @@ impl Track {
     /// covered, so the same writes land in the same column.
     ///
     /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
-    /// past `u16` is already at the top of the ramp, and wrapping would draw the
+    /// past its type is already at the top of the ramp, and wrapping would draw the
     /// busiest file in the worktree as the quietest.
-    fn drawn(&self) -> [u16; HISTORY_BUCKETS] {
+    fn drawn(&self) -> [u32; HISTORY_BUCKETS] {
         // Sliced rather than zipped against `chunks`, which **truncates**: a
         // division that stopped being exact would silently drop the last group,
         // and the last group is the newest, so every fresh write would vanish
@@ -384,18 +436,70 @@ impl Track {
             self.samples[bucket * SAMPLES_PER_BUCKET..][..SAMPLES_PER_BUCKET]
                 .iter()
                 .copied()
-                .fold(0, u16::saturating_add)
+                .fold(0, u32::saturating_add)
         })
     }
 
-    fn bump(&mut self) {
+    /// Add this write's weight to the newest sample.
+    ///
+    /// **One is the floor and not the unit**, which is the whole of
+    /// [#232](https://github.com/breferrari/vigia/issues/232). A write always
+    /// counts at least one, so a store fed no sizes behaves exactly as it did
+    /// before and every gate written against that still holds. A write whose
+    /// size can be measured counts what it moved instead, so a paste draws taller
+    /// than a typo and the graph acquires the shape it was named for.
+    ///
+    /// **A `u32` sample rather than a `u16` one, and the width is load bearing
+    /// now that the unit is bytes.** Sixteen bits was ample while a sample
+    /// counted writes: sixty-five thousand saves inside one second is not a
+    /// thing. It is one ordinary save of a lockfile once the unit is bytes, and
+    /// a sample that pegged there would put the peak at its ceiling for the
+    /// whole two-minute window and scale every other row to nothing, which is
+    /// the exact flattening [#232](https://github.com/breferrari/vigia/issues/232)
+    /// exists to remove, re-entered from the top. Four gigabytes in one second is
+    /// a bound a disk cannot reach.
+    ///
+    /// Saturating rather than wrapping even so, because the ceiling still exists
+    /// and wrapping past it would draw the busiest file in the worktree as the
+    /// quietest. [`Track::drawn`] saturates again when it sums a column, for the
+    /// same reason one level up.
+    fn bump(&mut self, weight: u32) {
         let newest = &mut self.samples[HISTORY_SAMPLES - 1];
-        // Saturating rather than wrapping: a path written 65,536 times inside
-        // one sample is already at the top of the ramp, and wrapping would draw
-        // the busiest file in the worktree as the quietest. `Track::drawn`
-        // saturates again when it sums a column, for the same reason one level
-        // up.
-        *newest = newest.saturating_add(1);
+        *newest = newest.saturating_add(weight.max(1));
+    }
+
+    /// What this write weighs, and remember the size it was weighed against.
+    ///
+    /// **The absolute difference, so a deletion weighs what it removed.** A file
+    /// that shrinks by five thousand bytes moved as much as one that grew by
+    /// five thousand, and signing it would draw the larger of the two edits a
+    /// reader can make as the quieter one.
+    ///
+    /// `None` for a size that could not be read, and for the first write of a
+    /// path: both mean there is no delta to take, and both fall back to
+    /// [`Track::bump`]'s floor rather than inventing a magnitude.
+    ///
+    /// **One call rather than a weigh-then-bump pair, because the two were never
+    /// valid apart.** Weighing without bumping advances the baseline and eats the
+    /// write, which is a silent loss; bumping without weighing leaves the
+    /// baseline at its first sighting forever, so every later write measures
+    /// against a size the file has not had for minutes. Both call sites did the
+    /// same two lines in the same order, which is a protocol rather than an API.
+    fn wrote(&mut self, bytes: Option<u64>) {
+        let weight = match (bytes, self.bytes) {
+            (Some(now), Some(before)) => {
+                self.bytes = Some(now);
+                u32::try_from(now.abs_diff(before)).unwrap_or(u32::MAX)
+            }
+            // A first sighting records the baseline and weighs nothing, so
+            // `bump`'s floor is the only place the minimum is stated.
+            (Some(now), None) => {
+                self.bytes = Some(now);
+                0
+            }
+            (None, _) => 0,
+        };
+        self.bump(weight);
     }
 }
 
@@ -434,7 +538,8 @@ pub struct History {
     tick: u64,
     /// When the newest **sample** opened, which is the grid the window rolls on.
     opened: Instant,
-    peak: u16,
+    /// What a drawn bucket's height is divided by. See [`scale_of`].
+    scale: u32,
     /// Every tracked path added together, kept current by the walk that finds
     /// the peak. See [`History::worktree_churn`].
     worktree: Churn,
@@ -457,7 +562,7 @@ impl History {
             tracks: HashMap::new(),
             tick: 0,
             opened: now,
-            peak: 0,
+            scale: 0,
             worktree: Churn::default(),
             stats: HistoryStats::default(),
         }
@@ -495,10 +600,44 @@ impl History {
     /// [`HISTORY_PATHS`] and therefore constant rather than proportional to the
     /// session.
     pub fn record<'p>(&mut self, paths: impl IntoIterator<Item = &'p str>, now: Instant) {
+        self.record_sized(paths.into_iter().map(|path| (path, None)), now);
+    }
+
+    /// [`History::record`], with what each written path now holds on disk.
+    ///
+    /// **This is the one the shell calls, and the difference is what the graph
+    /// can say** ([#232](https://github.com/breferrari/vigia/issues/232)). A
+    /// sample fed through [`History::record`] counts *files written*, so a
+    /// worktree where one file is saved repeatedly puts exactly one in every
+    /// sample, makes itself the peak, and draws every active column at full
+    /// height: the band and the sparkline both say *when* and neither can say
+    /// *how much*. Fed a size, a sample counts the bytes that moved, and both
+    /// elements acquire the shape §5.1 names them for.
+    ///
+    /// `None` for a path whose size could not be read, which is a file that
+    /// vanished between the watch naming it and this call. It weighs the floor
+    /// rather than nothing, because it was still written.
+    ///
+    /// **The size is the caller's to take, deliberately.** This crate has no
+    /// working directory and the shell does, and putting the `stat` at the call
+    /// site is what keeps its cost inside the frame the budget gates measure
+    /// rather than hidden behind a store that looks pure.
+    ///
+    /// # Cost
+    ///
+    /// A path already tracked is a hash lookup. A new one at the cap costs a
+    /// scan for the least recently changed, which is bounded by
+    /// [`HISTORY_PATHS`] and therefore constant rather than proportional to the
+    /// session.
+    pub fn record_sized<'p>(
+        &mut self,
+        paths: impl IntoIterator<Item = (&'p str, Option<u64>)>,
+        now: Instant,
+    ) {
         self.roll(now);
 
         let mut named = false;
-        for path in paths {
+        for (path, bytes) in paths {
             if !named {
                 // Bumped once for the whole tick, before the first sample, so
                 // every path in one burst shares an ordinal and therefore
@@ -510,7 +649,7 @@ impl History {
 
             if let Some(track) = self.tracks.get_mut(path) {
                 track.tick = self.tick;
-                track.bump();
+                track.wrote(bytes);
                 continue;
             }
 
@@ -518,7 +657,9 @@ impl History {
                 self.evict_one();
             }
             let mut track = Track::new(self.tick);
-            track.bump();
+            // The first write of a path has no earlier size to differ from, so it
+            // weighs the floor and leaves the baseline behind for the next one.
+            track.wrote(bytes);
             self.tracks.insert(path.to_owned(), track);
         }
 
@@ -527,8 +668,8 @@ impl History {
 
     /// This path's buckets, oldest first, or `None` when nothing is tracked.
     ///
-    /// Copied rather than borrowed. It is [`HISTORY_BUCKETS`] `u16`s, which is
-    /// smaller than the reference on every target, and returning it by value is
+    /// Copied rather than borrowed. It is [`HISTORY_BUCKETS`] `u32`s, which is
+    /// comparable to the reference on every target, and returning it by value is
     /// what lets a caller hold one while asking about the next path.
     ///
     /// **Projected rather than stored since
@@ -538,7 +679,7 @@ impl History {
     /// would have made the array larger than a reference on every target and
     /// pushed the projection out to every caller, where each would have had to
     /// agree about it.
-    pub fn churn(&self, path: &str) -> Option<[u16; HISTORY_BUCKETS]> {
+    pub fn churn(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
         self.tracks.get(path).map(Track::drawn)
     }
 
@@ -554,22 +695,30 @@ impl History {
         }
     }
 
-    /// The largest bucket any tracked path holds.
+    /// What a drawn bucket's height is divided by, across every tracked path.
     ///
-    /// Rows share one scale rather than each being drawn against its own
+    /// Rows share one denominator rather than each being drawn against its own
     /// maximum, because the question a reader asks across a file list is which
     /// file is busiest, and per-file scaling draws every file at full height the
     /// moment it is the busiest thing it has ever been.
+    ///
+    /// **It is [`scale_of`]'s figure rather than the largest bucket, since
+    /// [#232](https://github.com/breferrari/vigia/issues/232).** A sample weighs
+    /// the bytes a write moved now, so the largest bucket in a two-minute window
+    /// is whatever build last rewrote a lock file, and dividing by that draws
+    /// every edit a reader makes for the next two minutes one level high. The
+    /// band was given this rule when the symptom was reported from a live pane;
+    /// the sparkline divides by the same store and needed it too.
     ///
     /// **Zero when nothing is tracked, which is a scale a caller must not divide
     /// by.** It used to say the caller must treat it as "draw nothing", and that
     /// is no longer what the shell does: since
     /// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
-    /// a track, so a peak of zero means every bucket is empty and every one of
-    /// them is still drawn. The constraint this states is arithmetic and belongs
-    /// here; what to draw is the shell's and belongs in `SPEC.md` §5.1.
-    pub fn peak(&self) -> u16 {
-        self.peak
+    /// a track, so zero means every bucket is empty and every one of them is
+    /// still drawn. The constraint this states is arithmetic and belongs here;
+    /// what to draw is the shell's and belongs in `SPEC.md` §5.1.
+    pub fn scale(&self) -> u32 {
+        self.scale
     }
 
     /// Paths currently tracked. Never more than [`HISTORY_PATHS`].
@@ -604,7 +753,7 @@ impl History {
             self.stats.evicted_by_window += self.tracks.len() as u64;
             self.tracks.clear();
             self.opened = now;
-            self.peak = 0;
+            self.scale = 0;
             return;
         }
 
@@ -663,8 +812,12 @@ impl History {
     /// and the frame path pays nothing at all: a caller asking for this is a
     /// field read.
     ///
-    /// `u32` because the sum is over paths as well as time. At the cap that is
-    /// 256 paths of `u16`, which overflows `u16` and cannot overflow `u32`.
+    /// `u32` because the sum is over paths as well as time, and **saturating**
+    /// rather than merely wide since [#232](https://github.com/breferrari/vigia/issues/232):
+    /// this said 256 paths of `u16` could not reach a `u32`'s ceiling, which was
+    /// true until a sample became a `u32` of bytes that saturates at that ceiling
+    /// on its own. [`History::repeak`] adds them with `saturating_add` for exactly
+    /// that reason.
     pub fn worktree_churn(&self) -> Churn {
         self.worktree
     }
@@ -684,15 +837,25 @@ impl History {
     /// smaller than the columns it divides and every bar on screen would top
     /// out.
     fn repeak(&mut self) {
-        let mut peak = 0u16;
         let mut worktree = [0u32; HISTORY_SAMPLES];
         for track in self.tracks.values() {
             for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
-                *total += u32::from(count);
+                // **Saturating, like every other add on this path.** It was a
+                // plain `+=` while a sample was a `u16` and the sum a `u32`, where
+                // 256 paths of `u16::MAX` could not reach the ceiling. A sample is
+                // a `u32` of bytes now and [`Track::bump`] saturates at its own
+                // ceiling, so two large writes in one second would panic in debug
+                // and wrap in release, drawing the busiest worktree there has ever
+                // been as the quietest. That is the exact failure `bump` and
+                // `drawn` already saturate against, reached through the widening
+                // rather than through a count.
+                *total = total.saturating_add(count);
             }
-            peak = peak.max(track.drawn().into_iter().max().unwrap_or(0));
         }
-        self.peak = peak;
+        // Streamed rather than collected: this used to build a `Vec` of every
+        // drawn bucket of every path on the frame path, per tick, and `scale_of`
+        // takes an iterator precisely so it need not.
+        self.scale = scale_of(self.tracks.values().flat_map(Track::drawn));
         self.worktree = Churn(worktree);
     }
 }
@@ -725,7 +888,7 @@ mod tests {
         let history = History::starting_at(base());
         assert_eq!(history.recency("src/lib.rs"), Recency::Cold);
         assert_eq!(history.churn("src/lib.rs"), None);
-        assert_eq!(history.peak(), 0);
+        assert_eq!(history.scale(), 0);
     }
 
     #[test]
@@ -831,15 +994,38 @@ mod tests {
         assert_eq!(history.recency("f1"), Recency::Cold, "it was the oldest");
     }
 
+    /// One denominator across every path, and it is not the largest bucket.
+    ///
+    /// **The shared half is unchanged and the rule under it moved**
+    /// ([#232](https://github.com/breferrari/vigia/issues/232)). Rows still divide
+    /// by one figure, because the question a reader asks across a file list is
+    /// which file is busiest. What that figure is stopped being a maximum once a
+    /// sample weighed bytes: see [`scale_of`].
+    ///
+    /// Two buckets of 2 and 1 give a non-zero mean of 1.5, and 1.3 of that is 1
+    /// after the integer division. The maximum would be 2, which is what this
+    /// asserted before and what would have left every ordinary write drawing
+    /// against whatever build last rewrote a lock file.
     #[test]
-    fn peak_is_the_largest_bucket_across_paths_so_rows_share_a_scale() {
+    fn one_scale_serves_every_path_and_it_is_not_the_largest_bucket() {
         let now = base();
         let mut history = History::starting_at(now);
         history.record(["a"], now);
         history.record(["a"], now);
         history.record(["b"], now);
 
-        assert_eq!(history.peak(), 2);
+        let busiest = history
+            .churn("a")
+            .expect("a is tracked")
+            .into_iter()
+            .max()
+            .expect("a window has buckets");
+        assert_eq!(busiest, 2, "the fixture no longer has a bucket to be above");
+        assert_eq!(history.scale(), 1);
+        assert!(
+            history.scale() < busiest,
+            "the scale is the largest bucket again, so one outlier flattens              every other row on screen"
+        );
         assert_eq!(history.churn("b").unwrap()[HISTORY_BUCKETS - 1], 1);
     }
 
@@ -854,18 +1040,23 @@ mod tests {
         let now = base();
         let mut history = History::starting_at(now);
         let mut track = Track::new(1);
-        track.samples[HISTORY_SAMPLES - 1] = u16::MAX;
-        track.bump();
-        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
+        track.samples[HISTORY_SAMPLES - 1] = u32::MAX;
+        // Both ends of the weight, because #232 gave a sample one: the floor a
+        // sizeless write takes, and a full-range one from a large edit. Neither
+        // may wrap.
+        track.bump(1);
+        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u32::MAX);
+        track.bump(u32::MAX);
+        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u32::MAX);
         track.samples[HISTORY_SAMPLES - 2] = 9;
         assert_eq!(
             track.drawn()[HISTORY_BUCKETS - 1],
-            u16::MAX,
-            "a drawn column summing past u16 wrapped instead of topping out"
+            u32::MAX,
+            "a drawn column summing past its type wrapped instead of topping out"
         );
 
         history.record(["a"], now);
-        assert!(history.peak() > 0);
+        assert!(history.scale() > 0);
     }
 
     /// A monitor left open overnight wakes up with nothing in the window, and
@@ -880,7 +1071,7 @@ mod tests {
         history.record(std::iter::empty(), now + HISTORY_WINDOW * 100);
 
         assert_eq!(history.tracked(), 0);
-        assert_eq!(history.peak(), 0);
+        assert_eq!(history.scale(), 0);
         assert_eq!(history.stats().evicted_by_window, 2);
     }
 

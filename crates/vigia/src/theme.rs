@@ -193,7 +193,10 @@ palette! {
     spark_warm,
     /// A sparkline bucket at two thirds or more of it.
     ///
-    /// **Measured against the busiest bucket anywhere on screen**, not against
+    /// **Measured against `vigia_core::scale_of`'s figure over every bucket on
+    /// screen**, which was the busiest of them until
+    /// [#232](https://github.com/breferrari/vigia/issues/232) made a sample weigh
+    /// bytes. Not against
     /// this file's own, which is the asymmetry `heat_at`'s docblock already
     /// draws: a sparkline is compared *down* a file list so it shares one scale,
     /// and a heat strip is read *across* one row so it scales to its own file.

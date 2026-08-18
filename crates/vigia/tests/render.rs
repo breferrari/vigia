@@ -366,7 +366,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -471,7 +471,7 @@ fn one_file() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -635,7 +635,7 @@ fn nothing_changed() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -726,7 +726,7 @@ fn the_header_carries_no_changed_line_total() {
     // carry the pulse, the heat strips and the sparklines, so the header is
     // asserted silent against the busiest row set the shell can draw rather than
     // against the emptiest. Its counters are the mockup's own.
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
     let header = row_text(&backend, 0);
 
     // What a header total would have to draw, in **either** form: the counters'
@@ -896,7 +896,7 @@ fn ragged_counts() -> View {
         files: 3,
         top: Position::default(),
         read: 1,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
     }
 }
@@ -2080,7 +2080,7 @@ fn a_file_with_no_line_diff_says_why() {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
@@ -2105,7 +2105,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
@@ -2139,7 +2139,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
@@ -2415,7 +2415,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
@@ -2449,7 +2449,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
 
@@ -2500,7 +2500,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
 
@@ -2568,7 +2568,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         from: None,
         kind: 'M',
         churn: Some((u32::MAX, u32::MAX)),
-        spark: [u16::MAX; HISTORY_BUCKETS],
+        spark: [u32::MAX; HISTORY_BUCKETS],
         recency: Recency::Pulse,
         heat: [HeatBucket {
             added: u16::MAX,
@@ -2585,7 +2585,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         files: 2,
         top: Position::default(),
         read: 1,
-        peak: u16::MAX,
+        scale: u32::MAX,
         worktree_churn: Default::default(),
     };
 
@@ -2938,7 +2938,9 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
         )
     };
 
-    let wide = screen(30, 6, &view(), &chrome());
+    // One row taller since the footer gained a rule, which takes a body row and
+    // would otherwise land on `CONTENT_ROW`.
+    let wide = screen(30, 7, &view(), &chrome());
     let mark = column_of(&wide, CONTENT_ROW, CONTINUES);
     assert_eq!(
         wide.buffer()[(mark, CONTENT_ROW)].style().fg,
@@ -2946,7 +2948,7 @@ fn the_continuation_mark_takes_the_colour_of_the_run_that_reached_the_edge() {
         "the mark is not drawn in the colour of the comment it cut"
     );
 
-    let narrow = screen(1, 6, &view(), &chrome());
+    let narrow = screen(1, 7, &view(), &chrome());
     assert_eq!(
         narrow.buffer()[(0, CONTENT_ROW)].symbol(),
         CONTINUES,
@@ -3052,7 +3054,7 @@ fn glancing() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
     }
 }
@@ -3145,7 +3147,7 @@ fn launched() -> View {
             entry.recency = Recency::Cold;
         }
     }
-    view.peak = 0;
+    view.scale = 0;
     view
 }
 
@@ -3159,7 +3161,7 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
     // mattered most.
     let theme = Theme::default();
     let spark = spark_colours(&theme);
-    let backend = screen(80, 5, &launched(), &chrome());
+    let backend = screen(80, 6, &launched(), &chrome());
 
     // **Row one, not [`LIST_TOP`], and the difference is the point.** A five-row
     // pane cannot afford a list at all — `Body::split` returns `diff_only` — so
@@ -3221,15 +3223,15 @@ fn the_first_tick_after_launch_moves_no_column() {
     // is the only value at which the ramp's numerator and denominator are equal,
     // so a single write draws the *top* of the ramp rather than its floor.
     let theme = Theme::default();
-    let launch = screen(80, 5, &launched(), &chrome());
+    let launch = screen(80, 6, &launched(), &chrome());
 
     let mut view = launched();
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark[HISTORY_BUCKETS - 1] = 1;
         entry.recency = Recency::Pulse;
     }
-    view.peak = 1;
-    let after = screen(80, 5, &view, &chrome());
+    view.scale = 1;
+    let after = screen(80, 6, &view, &chrome());
 
     // The written file: seven track cells and one bucket, and the bucket is the
     // top of the ramp because it is the busiest thing on screen.
@@ -3293,7 +3295,7 @@ fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
         entry.spark = [3; HISTORY_BUCKETS];
     }
     assert_eq!(
-        view.peak, 0,
+        view.scale, 0,
         "the fixture stopped being the inconsistent one"
     );
 
@@ -3322,9 +3324,9 @@ fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
     // numerator at or above the ramp's length) and the upper one is live.
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[0] {
-        entry.spark = [u16::MAX; HISTORY_BUCKETS];
+        entry.spark = [u32::MAX; HISTORY_BUCKETS];
     }
-    view.peak = 1;
+    view.scale = 1;
 
     let theme = Theme::default();
     let backend = screen(80, 5, &view, &chrome());
@@ -3342,7 +3344,7 @@ fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
     // fixture holds `[0, 0, 0, 2, 1, 0, 0, 0]`, so it draws both kinds and the
     // order has to survive.
     let theme = Theme::default();
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
 
     let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
         .into_iter()
@@ -3502,7 +3504,7 @@ fn a_file_that_just_changed_is_marked_and_the_rest_dim() {
     // sparkline is drawn from the eighth-blocks, so a `●` anywhere on the row
     // is the pulse and nothing else.
     let theme = Theme::default();
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
 
     // **Row one, and the reason is the fixture rather than the height.**
     // `glancing()` carries an empty `list`, so `clamped_to` collapses the body to
@@ -3565,7 +3567,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     // sparkline bucket; this test passed on symbols alone until that strip
     // landed. See [`blocks_of`].
     let spark = spark_colours(&Theme::default());
-    let backend = screen(80, 5, &glancing(), &chrome());
+    let backend = screen(80, 6, &glancing(), &chrome());
     let busiest = blocks_of(&backend, 1, &spark);
     let quieter = blocks_of(&backend, 2, &spark);
 
@@ -3603,6 +3605,16 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     );
 }
 
+/// A pane wide enough for the heat strip's widest rung.
+///
+/// **The gate below indexes *source* slices**, so it only says what it claims on
+/// a pane where the drawn slices and the source slices are the same thing. At any
+/// narrower rung the renderer sums adjacent slices, and `strip[11]` would then be
+/// a slice nobody put anything in. It was 120 columns while the source resolution
+/// and the widest rung were the same number
+/// ([#161](https://github.com/breferrari/vigia/issues/161) separated them).
+const WHOLE_STRIP_PANE: u16 = 140;
+
 /// A heat map from `(slice, added, removed)` triples, everything else track.
 fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
     let mut map = [HeatBucket::default(); HEAT_BUCKETS];
@@ -3619,7 +3631,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     // picture of one is twelve identical blocks. The colour is the entire
     // signal, which makes this the only place the strip is really tested.
     let theme = Theme::default();
-    let backend = screen(120, 5, &glancing(), &chrome());
+    let backend = screen(WHOLE_STRIP_PANE, 5, &glancing(), &chrome());
     let buffer = backend.buffer();
 
     // By colour as well as by glyph: the sparkline's top rung on the same row is
@@ -3639,7 +3651,7 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
     .iter()
     .filter_map(|style| style.fg)
     .collect();
-    let strip: Vec<_> = (0..120)
+    let strip: Vec<_> = (0..WHOLE_STRIP_PANE)
         .map(|x| &buffer[(x, 1)])
         .filter(|cell| cell.symbol() == HEAT_SLICE)
         .filter_map(|cell| cell.style().fg)
@@ -3733,7 +3745,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         files: 3,
         top: Position { file: current, row },
         read: 4,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -4164,7 +4176,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         files,
         top: Position::default(),
         read: 2,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -6474,11 +6486,12 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
     // was asserted while the code observed it and threw it away, which review
     // caught: a floor moving would then change where the band appears and
     // nothing would say so.
-    // Twenty: one header, one footer, three list rows and the rule leave the
-    // masthead's four and ten of diff, which is GRAPH_KEEP.
+    // Twenty-one: one header, one footer **and the rule above it**, three list
+    // rows and the rule under them leave the masthead's four and ten of diff,
+    // which is GRAPH_KEEP. One taller than before the footer gained its mark.
     assert_eq!(
         arrived,
-        Some(20),
+        Some(21),
         "the band arrived at {arrived:?} rather than where the floors add up to"
     );
 }

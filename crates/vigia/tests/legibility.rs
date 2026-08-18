@@ -50,7 +50,65 @@ const FOLLOW_MARK: char = '▶';
 const FACT_JOIN: &str = " · ";
 
 /// Widths every sweep covers. One column to well past the widest snapshot.
+/// Rows the rule above the footer takes.
+///
+/// Named rather than folded into each expectation, so a gate about the footer's
+/// *height ladder* still reads as one: the mark is a fixed row that ladder sits
+/// under, and burying a `+ 1` in six assertions would make the next change to it
+/// six edits and one missed.
+const FOOTER_RULE_ROWS: usize = 1;
+
+/// A pane tall enough that the two rows the wide-glyph gate samples stay body.
+const WIDE_GLYPH_ROWS: u16 = 8;
+
 const WIDTHS: std::ops::RangeInclusive<u16> = 1..=120;
+
+/// Panes wide enough to reach every rung of the glance ladder.
+///
+/// **[`WIDTHS`] cannot reach the top one, and that is what this exists for**
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). The widest heat rung
+/// is not taken until the glance elements fit inside their share of the row, and
+/// that share is not reached until 134 columns. A sweep stopping at 120 would
+/// report the ladder sound while its top rung was unreachable at every width it
+/// looked at.
+///
+/// Two hundred, which is the pane class the row was reported from and past the
+/// widest boundary the table produces.
+const GENEROUS_WIDTHS: std::ops::RangeInclusive<u16> = 1..=200;
+
+/// The width `assets/preview.svg` is measured from, stated in its own comment.
+///
+/// `SPEC.md` §5.1 rules that a published artifact answering an open question
+/// **is** the answer, and what the picture answers about the heat strip is how
+/// many slices a pane draws **at this width**. That was a claim only prose made
+/// until #161 gave the strip a rung above the pictured one, at which point the
+/// difference between "twelve always" and "twelve here" stopped being academic.
+const PICTURED_PANE: u16 = 109;
+
+/// Slices `assets/preview.svg` draws, counted off the picture.
+const PICTURED_SLICES: usize = 12;
+
+/// How many slices the heat strip may show, widest rung first.
+///
+/// Restated rather than imported, the way [`CONTINUES`] and `FACT_JOIN` are: a
+/// test that read the renderer's own table would agree with it by construction
+/// instead of checking it. `RAMP` and `HEAT_SLICE` are *not* restated, because
+/// this file already declares them at the top and a second copy would check the
+/// first copy rather than the renderer.
+///
+/// **Four rungs since #161 raised the source, and the halving is unchanged**, so
+/// what a given width under 120 columns draws is the same number it drew before.
+/// That is why `ACCEPTED_WALK` is untouched by that change.
+const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+
+/// How many buckets a sparkline may show, widest rung first.
+///
+/// Restated for [`HEAT_RUNGS`]' reason. **Three rungs, and the top one is a
+/// ceiling rather than a choice**: a drawn bucket has to stay coarser than the
+/// churn band's own column period, or the two elements draw one store at crossed
+/// scales. `vigia-core`'s own gate pins that bound, and it is why #161 reaches
+/// the strip and not this ladder.
+const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
 
 /// #119's margin ladder, widest pane first: blank columns the pane keeps between
 /// its own edge and any glyph, **both sides counted together**.
@@ -101,6 +159,37 @@ fn margin_at(width: u16) -> usize {
 /// two widths nothing else singles out.
 fn inset_at(width: u16) -> usize {
     margin_at(width).div_ceil(2)
+}
+
+/// Columns the scrollbar reserves on the right of every row.
+///
+/// Restated for [`MARGIN_RUNGS`]' reason, and hoisted because three gates now
+/// derive a width from it: a second copy checks the first copy rather than the
+/// renderer.
+const BAR_COLUMNS: usize = 2;
+
+/// The narrowest a file row can be and still name its own file.
+///
+/// The kind letter's two columns plus the twelve `SPEC.md` §11.1 keeps for the
+/// path. Restated and hoisted for [`BAR_COLUMNS`]' reason.
+const ROW_FLOOR: usize = 2 + 12;
+
+/// The columns a row is planned against on a pane this wide.
+///
+/// The pane less the bar's reserve, the left inset, and whatever the caret cannot
+/// borrow from that inset. **Hoisted because it was written out three times**,
+/// and [#173](https://github.com/breferrari/vigia/issues/173) has already moved
+/// what the caret costs once: the next move would fix one copy and leave the
+/// others deriving boundaries from a stale floor.
+///
+/// Saturating for the renderer's own reason: a sweep starts at one column, where
+/// the bar's reserve alone is wider than the whole pane.
+fn planning(pane: u16) -> usize {
+    let inset = inset_at(pane);
+    usize::from(pane)
+        .saturating_sub(BAR_COLUMNS)
+        .saturating_sub(inset)
+        .saturating_sub(CARET_WIDTH.saturating_sub(inset))
 }
 
 /// A row with its caret taken off, and the columns the caret took.
@@ -573,7 +662,7 @@ fn every_row_kind() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -603,7 +692,7 @@ fn awkward() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -619,7 +708,7 @@ fn empty() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -660,7 +749,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         files,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -933,7 +1022,7 @@ fn glancing() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        peak: 12,
+        scale: 12,
         worktree_churn: Default::default(),
     }
 }
@@ -987,7 +1076,11 @@ fn a_wide_glyph_at_the_edge_does_not_swallow_the_mark() {
     let view = awkward();
     let mut saw_swallowable = false;
     for width in WIDTHS {
-        let rows = rows_at(width, 6, &view, &chrome());
+        // **Eight rows rather than six**, because the footer gained a rule over it
+        // and the two rows sampled below are addressed by index. At six, a narrow
+        // pane takes a second footer line and the mark lands on row three, where
+        // this gate would read chrome as a clipped line of content.
+        let rows = rows_at(width, WIDE_GLYPH_ROWS, &view, &chrome());
         for (y, full) in [(2usize, "見出し a 見出し b 見出し c"), (3, "🙂🙂🙂 tail")]
         {
             let row = &rows[y];
@@ -1457,13 +1550,6 @@ fn the_glance_columns_collapse_in_one_order() {
     // Read off the drawn row by colour and glyph together, for the reason the
     // renderer's own doc gives: the heat strip and a full sparkline bucket draw
     // the same block, and the pulse shares a foreground with the sparkline.
-    // Restated rather than imported, the way `CONTINUES` and `FACT_JOIN` are: a
-    // test that read the renderer's own table would agree with it by
-    // construction instead of checking it. `RAMP` and `HEAT_SLICE` are *not*
-    // restated here, because this file already declares them at the top and a
-    // second copy would check the first copy rather than the renderer.
-    const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
-    const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
     // The first width each state is drawn at, and `(counts, heat slices,
     // sparkline buckets)`. **The widths are pinned as well as the order**,
     // because a sequence alone is a weak gate: removing the gap the heat strip
@@ -2101,24 +2187,24 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
 
     assert_eq!(
         body(80, &following()),
-        usize::from(tall) - 2,
+        usize::from(tall) - 2 - FOOTER_RULE_ROWS,
         "eighty columns hold the hints and the state on one line"
     );
     assert_eq!(
         body(120, &following()),
-        usize::from(tall) - 2,
+        usize::from(tall) - 2 - FOOTER_RULE_ROWS,
         "so do a hundred and twenty"
     );
 
     assert_eq!(
         body(40, &chrome()),
-        usize::from(tall) - 2,
+        usize::from(tall) - 2 - FOOTER_RULE_ROWS,
         "forty columns hold them too once the follow marker is gone"
     );
 
     assert_eq!(
         body(40, &following()),
-        usize::from(tall) - 3,
+        usize::from(tall) - 3 - FOOTER_RULE_ROWS,
         "forty columns following cannot, so the footer takes a second line"
     );
 
@@ -2495,7 +2581,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
     let long_name = Chrome {
@@ -2627,7 +2713,7 @@ fn a_clipped_content_line_says_it_continues() {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     };
 
@@ -2712,7 +2798,7 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
     // rather than shortened, which is the shape the rule forbids.
     assert_eq!(
         seen,
-        [HISTORY_BUCKETS / 2, HISTORY_BUCKETS].into_iter().collect(),
+        [SPARK_RUNGS[1], SPARK_RUNGS[0]].into_iter().collect(),
         "the sparkline was drawn at bucket counts {seen:?}; only whole rungs are \
          legal, and both of them have to be reachable or the ladder has a rung \
          no width can produce"
@@ -3115,7 +3201,10 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
     let view = glancing();
     let mut widths_seen = std::collections::BTreeSet::new();
 
-    for width in WIDTHS {
+    // **`GENEROUS_WIDTHS` rather than `WIDTHS`**, because the widest rung is not
+    // reachable inside 120 columns and a sweep that never draws a rung cannot
+    // check that it re-projects.
+    for width in GENEROUS_WIDTHS {
         let backend = drawn(width, 6, &view, &following());
 
         // Row 1 is the first file heading; the header is row 0.
@@ -3129,8 +3218,8 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
         // Whole rungs only. Anything between them is a strip that was squeezed
         // rather than re-projected.
         assert!(
-            strip.len() == HEAT_BUCKETS || strip.len() == HEAT_BUCKETS / 2,
-            "at {width} columns the strip is {} slices wide, which is neither \
+            HEAT_RUNGS.contains(&strip.len()),
+            "at {width} columns the strip is {} slices wide, which is not a \
              whole rung",
             strip.len()
         );
@@ -3161,10 +3250,130 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
 
     assert_eq!(
         widths_seen,
-        [HEAT_BUCKETS / 2, HEAT_BUCKETS].into_iter().collect(),
-        "the strip was drawn at slice counts {widths_seen:?}; both rungs have to \
-         be reachable or the ladder has a rung no width can produce"
+        HEAT_RUNGS
+            .iter()
+            .copied()
+            .filter(|rung| *rung > 0)
+            .collect(),
+        "the strip was drawn at slice counts {widths_seen:?}; every rung has to \
+         be reachable or the ladder has one no width can produce"
     );
+}
+
+/// The width the published picture is measured from still draws what it draws.
+///
+/// **`SPEC.md` §5.1's ruling has never had a gate, and #161 is what made it need
+/// one.** That ruling is that a published artifact answering an open question
+/// *is* the answer, and `assets/preview.svg` answers "how many slices does the
+/// heat strip have" with twelve. While twelve was the source resolution the claim
+/// was true at every width and nothing could break it. It is a **rung** now, so
+/// it is true at a width, and the width is the one the picture's own comment
+/// records.
+///
+/// Without the share rule the widest rung would arrive at 69 columns, well under
+/// the pictured pane, and the picture would have become false with the whole
+/// suite green.
+#[test]
+fn the_pictured_width_still_draws_twelve_slices() {
+    let theme = theme();
+    let slices = cells_coloured(
+        &drawn(PICTURED_PANE, 8, &glancing(), &chrome()),
+        1,
+        &heat_colours(&theme),
+        &[HEAT_SLICE],
+    )
+    .len();
+
+    assert_eq!(
+        slices, PICTURED_SLICES,
+        "at the {PICTURED_PANE} columns `assets/preview.svg` is measured from, \
+         the strip drew {slices} slices where the picture draws {PICTURED_SLICES}"
+    );
+}
+
+/// The widest heat rung waits for a pane that can spare it, rather than arriving
+/// the moment it fits.
+///
+/// **Two floors, because the layout table answers two questions**
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). Below the settled
+/// ladder the question is what survives a narrowing pane, and `ROW_FLOOR` decides
+/// it. Above it the question is what a wide pane is worth spending, and "does it
+/// fit" is the wrong test there: a fixed-sum table takes a rung the instant it
+/// fits, and the widest strip fits inside a pane narrower than the one the
+/// published picture is measured from.
+///
+/// **The boundary is derived here rather than copied out of a failure message**,
+/// which is what #161 asked for in those words. Every layout's width is the sum
+/// of its own slots, so which pane first affords one is decidable by reading.
+#[test]
+fn the_widest_strip_waits_until_the_path_keeps_the_row() {
+    // Restated rather than imported, for the reason `HEAT_RUNGS` gives: a test
+    // that read the renderer's own numbers would agree with them by construction.
+    const COUNT_HALF: usize = 5;
+    const PULSE_CELLS: usize = 1;
+    const GLANCE_NUMER: usize = 2;
+    const GLANCE_DENOM: usize = 5;
+
+    /// Columns something on the right of a row costs, its separating gap included.
+    fn reserved(width: usize) -> usize {
+        if width == 0 { 0 } else { width + 1 }
+    }
+
+    // Inlined rather than named: one call site, and `reserved` is what carries
+    // the idea.
+    let widest = reserved(COUNT_HALF * 2 + 1)
+        + reserved(PULSE_CELLS)
+        + reserved(HEAT_RUNGS[0])
+        + reserved(SPARK_RUNGS[0]);
+    let boundary = GENEROUS_WIDTHS
+        .clone()
+        .find(|pane| {
+            let room = planning(*pane);
+            // Both floors, in the order the renderer applies them: survival, then
+            // share. Multiplied out rather than divided, so the comparison is the
+            // rule itself and not a rounding of it.
+            widest + ROW_FLOOR <= room && widest * GLANCE_DENOM <= room * GLANCE_NUMER
+        })
+        .expect("the sweep reaches a pane that affords the widest strip");
+
+    // **Non-vacuity, and it is the whole claim rather than a formality.** If
+    // merely fitting and deserving were the same width, this gate would be
+    // checking `ROW_FLOOR` and nothing #161 added, and the picture would be false.
+    let fitting = GENEROUS_WIDTHS
+        .clone()
+        .find(|pane| widest + ROW_FLOOR <= planning(*pane))
+        .expect("some pane fits the widest strip at all");
+    assert!(
+        fitting < PICTURED_PANE && PICTURED_PANE < boundary,
+        "the pictured pane no longer sits between merely fitting the widest \
+         strip ({fitting}) and deserving it ({boundary}), which is the gap \
+         `the_pictured_width_still_draws_twelve_slices` rests on"
+    );
+
+    let theme = theme();
+    let view = glancing();
+    for pane in GENEROUS_WIDTHS {
+        let slices = cells_coloured(
+            &drawn(pane, 8, &view, &chrome()),
+            1,
+            &heat_colours(&theme),
+            &[HEAT_SLICE],
+        )
+        .len();
+        if pane < boundary {
+            assert!(
+                slices < HEAT_RUNGS[0],
+                "at {pane} columns the strip drew its widest rung, {slices} \
+                 slices, below the {boundary} its share needs"
+            );
+        } else {
+            assert_eq!(
+                slices, HEAT_RUNGS[0],
+                "at {pane} columns the strip drew {slices} slices rather than \
+                 the widest rung it can afford from {boundary} up"
+            );
+        }
+    }
 }
 
 #[test]
@@ -3188,8 +3397,11 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     // The case that broke. Idle at forty columns, where the state is a bare
     // position and the baseline bar fits beside it.
     assert_eq!(
+        // **Plus the rule the footer now carries**, which is a deliberate row asked
+        // for from a live pane rather than a rung sneaking one: this gate still bites,
+        // at a baseline one higher, because a bonus hint buying a line makes it three.
         rows(40, &chrome()),
-        1,
+        1 + FOOTER_RULE_ROWS,
         "forty columns idle took a second footer line, so a bonus hint bought a \
          body row at the width I6 is named for"
     );
@@ -3698,7 +3910,6 @@ fn the_inset_never_outgrows_the_scrollbars_reserve() {
     // is the margin the row does **not** pay for, because the reserve is standing
     // in for it. The two happen to be equal at every rung today, so the wrong one
     // passed, which is why this is stated rather than checked by eye.
-    const BAR_COLUMNS: usize = 2;
     for width in WIDTHS {
         let trailing = margin_at(width) - inset_at(width);
         assert!(
@@ -3942,7 +4153,7 @@ fn overlong(rows: usize) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        peak: 0,
+        scale: 0,
         worktree_churn: Default::default(),
     }
 }
@@ -4342,7 +4553,6 @@ fn the_path_starts_in_one_column_in_both_regions() {
 #[test]
 fn the_caret_threshold_is_the_row_floor_it_claims() {
     /// The kind letter and its gap, plus `MIN_PATH_WIDTH`. Restated.
-    const ROW_FLOOR: usize = 2 + 12;
     /// The bar's column and the blank in front of it, paid whether or not a bar
     /// is drawn. Restated.
     const BAR: usize = 2;
@@ -4801,7 +5011,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
 ///
 /// A builder rather than a constant, because the gates below each need a
 /// *different* bucket pattern and the pattern is the whole input under test.
-fn sparked(spark: [u16; HISTORY_BUCKETS]) -> View {
+fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
     View {
         rows: vec![Row::File(FileEntry {
             path: "a.rs".to_owned(),
@@ -5055,7 +5265,7 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
 
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         let view = View {
-            peak: 0,
+            scale: 0,
             ..sparked([1, 1, 2, 2, 4, 5, 6, 7, 8, 9, 11, 12])
         };
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
@@ -5173,5 +5383,116 @@ fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
                 "{glyphs:?}: an empty bucket climbed off the floor beside a busy                  one, so no writes and one write draw the same height"
             );
         }
+    }
+}
+
+/// Both rules run edge to edge, and the footer has one.
+///
+/// **Asked for from a live pane.** The bottom bar is chrome sitting under content
+/// with nothing saying so, where every other boundary on this screen is drawn:
+/// the list gets a rule over the diff and the masthead gets blank rows either
+/// side. The footer got neither.
+///
+/// **Full bleed is the half worth gating.** `SPEC.md` §5.3 rules that furniture
+/// runs to both edges, and `Painter::rule`'s own docblock gives the reason: a rule
+/// that stopped short would read as a box someone forgot to close. Both marks are
+/// drawn from the pane's rect rather than an inset one, so neither takes the
+/// margin the text rows take, and that is exactly the property a reader notices
+/// and no other gate here states.
+#[test]
+fn both_rules_reach_both_edges_of_the_pane() {
+    let width = 80u16;
+    // **A view with a pinned list, which is what puts a rule under one.**
+    // `glancing` carries file *headings* and an empty list, and `render` clamps
+    // the body to `view.list.len()`, so a fixture without one draws no rule under
+    // the list and this gate would have found a single mark and blamed the
+    // renderer for it.
+    let view = numbered(12, 3, 3);
+    let rows = rows_at(width, 24, &view, &chrome());
+    let bar: String = std::iter::repeat_n('─', usize::from(width)).collect();
+
+    // Every fully ruled row on the screen. Two: the one under the list and the
+    // one over the footer.
+    let ruled: Vec<usize> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.as_str() == bar)
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(
+        ruled.len(),
+        2,
+        "expected a rule under the list and one over the footer, both edge to \
+         edge; found {ruled:?} in:\n{}",
+        rows.join("\n")
+    );
+
+    // The lower one sits directly above the footer's text, and the footer's text
+    // is the last thing on the pane.
+    let footer = rows.len() - 1;
+    assert_eq!(
+        ruled[1],
+        footer - 1,
+        "the footer's rule is not immediately above it: {ruled:?}"
+    );
+
+    // **And again where the footer takes two lines**, which is the case a rule
+    // placed a fixed one row up would get wrong: it would land *inside* the
+    // footer, over the state line. Forty columns following is the width
+    // `the_readouts_ride_the_second_footer_line_at_forty_columns` already pins
+    // that ladder at, so this rides a boundary the suite states elsewhere rather
+    // than inventing one.
+    let narrow = 40u16;
+    let stacked = rows_at(narrow, 24, &view, &following());
+    let bar: String = std::iter::repeat_n('─', usize::from(narrow)).collect();
+    let ruled: Vec<usize> = stacked
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.as_str() == bar)
+        .map(|(at, _)| at)
+        .collect();
+    let split = body_layout(Rect::new(0, 0, narrow, 24), &following(), view.files);
+    let text_rows = stacked.len() - 1 - body_rows(&split) - FOOTER_RULE_ROWS;
+    assert_eq!(
+        text_rows, 2,
+        "forty columns following no longer takes two footer lines, so this case \
+         stopped being the one it was written for"
+    );
+    assert_eq!(
+        ruled.last().copied(),
+        Some(stacked.len() - 1 - text_rows),
+        "with a two-line footer the rule landed inside it rather than above \
+         it: {ruled:?} in:\n{}",
+        stacked.join("\n")
+    );
+}
+
+#[test]
+fn a_pane_too_short_for_a_body_keeps_no_rule_over_its_footer() {
+    // **The mark yields like every other piece of furniture here**, which is
+    // §5.3's rule that richness is the reward of space. A rule that cost the diff
+    // its last row would be chrome announcing a region rather than separating
+    // one, which is the same argument `Body::split` already makes for the rule
+    // *under* the list on a pane with no list.
+    let width = 80u16;
+    let view = numbered(12, 3, 3);
+    let bar: String = std::iter::repeat_n('─', usize::from(width)).collect();
+
+    // Swept rather than sampled at one height, because the floor is what is being
+    // gated and a single short pane could miss it either way.
+    for height in 2..=6u16 {
+        let rows = rows_at(width, height, &view, &chrome());
+        let ruled = rows.iter().filter(|row| row.as_str() == bar).count();
+        let body = body_rows(&body_layout(
+            Rect::new(0, 0, width, height),
+            &chrome(),
+            view.files,
+        ));
+        assert!(
+            body >= 2 || ruled == 0,
+            "at {height} rows the pane kept {ruled} rule(s) over a body of \
+             {body}:\n{}",
+            rows.join("\n")
+        );
     }
 }

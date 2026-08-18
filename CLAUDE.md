@@ -92,6 +92,26 @@ Before finishing work that changed or clarified a decision here, write it down. 
 
 **The budgets have room and this section exists because that stopped being obvious.** The frame budget is 16ms and the tool runs at **2.4ms p50, 3.1ms p99**, which is five times the headroom. Refusing a feature on cost, in a tool with that much slack, needs the slack quoted alongside the cost or it is not an argument.
 
+### A cost measured in isolation is not a budget
+
+**Measure the whole, not the part, and measure it before the cost is allowed to restrict anything.** A component timed on its own answers a question nobody asked. What decides whether something is affordable is the thing it sits inside, measured with and without it, interleaved, with both numbers quoted.
+
+This rule exists because it was broken twice in one session, on the same 256-path burst, in opposite directions:
+
+- **Once on a wall clock.** 2.38ms p50 on a machine running four agents and a build. The feature was one edit from being capped at a quarter of its range on a number that was mostly contention.
+- **Once on a CPU clock that could not see it.** `GetThreadTimes` reports in 15.625ms steps on Windows, so the burst read **0ns** and that was taken as evidence the cost was off-CPU and therefore the host's. Timed across enough rounds to clear the quantum it is 2.60ms of genuine CPU, so the cap went back.
+
+Both readings were about the syscall alone. **Neither measured the frame the syscall sits in**, and that is the only number that decides anything. Measured properly, interleaved over thirty rounds of a hundred-file bulk rewrite, a frame costs **18.43ms sizing nothing, 17.39ms sizing sixty-four paths and 17.93ms sizing all 256**: the *unsized* run is the slowest of the three, because the status walk on the same wake has already stat'd every one of those files and the metadata is warm. The cost is unmeasurable in situ and the cap was deleted.
+
+So, before a number restricts a feature:
+
+- **A zero from a clock is a quantum until proven otherwise.** Time it across enough repetitions to clear the resolution, or you are reading the instrument rather than the code.
+- **Two fixtures, not one.** Same workload, with and without the thing being priced, interleaved so a loaded machine moves both. A single number has nothing to be compared against and will be compared against a budget instead.
+- **Quote the headroom and the whole**, not the component. "2.6ms against 16ms" is an argument about a syscall; "17.93ms against 18.43ms unsized" is an argument about the product.
+- **A cap is a feature restriction and needs the same bar as a refusal.** It draws a worse graph for the reader, permanently, on the strength of a number. Duplicated work that costs nothing measurable is an efficiency row to file, never a reason to ship less.
+
+**The tell is the shape of the work:** if the measurement's only possible use is to justify spending less, and the thing it protects has not been measured, the bias has already won.
+
 Four rows of Phase 8 spent a full session each and delivered a **decline**. One has since been reopened because *both* reasons it rested on were false: the first was an invariant whose budget could never have measured the case, and the second was an absence (*"the takeover does not enable focus reporting"*) that was one unwritten line rather than a fact about the world. Two other refusals in the same phase cited the same invariant and it did not reach either.
 
 So, when a reader asks for something:

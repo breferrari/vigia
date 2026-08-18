@@ -36,9 +36,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, HISTORY_SAMPLES, LineKind, Recency, Span};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span, scale_of};
 
-use crate::glyphs::{Glyphs, SPARK_RAMP};
+use crate::glyphs::Glyphs;
 use crate::input::{Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
@@ -396,7 +396,32 @@ const CURRENT_WEIGHT: Modifier = Modifier::BOLD;
 /// still the whole file.
 ///
 /// Halves, so the sum is exact and every drawn bucket covers the same span.
-const HEAT_RUNGS: [usize; 3] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, 0];
+///
+/// **Four rungs since [#161](https://github.com/breferrari/vigia/issues/161), and
+/// what moved is the source rather than this ladder's shape.** [`HEAT_BUCKETS`]
+/// doubled, so the same halving now reaches twenty-four before it reaches
+/// twelve, and every rung that existed keeps its exact width. Which of them a
+/// given pane picks is [`Columns::plan`]'s business, and the rung above the
+/// settled ladder is the one the share clamp there exists for.
+const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4, 0];
+
+// **Asserted rather than documented, because a rung that does not divide the
+// source is silent.** [`heat_at`] groups `HEAT_BUCKETS / width` and chunks by it,
+// so a rung that leaves a remainder draws a short final group carrying fewer
+// source slices than its neighbours: a strip whose last slice is quieter than
+// the file, with nothing failing. `HEAT_RUNGS` is derived from `HEAT_BUCKETS`
+// today and this is what keeps that true if a rung is ever written out by hand.
+const _: () = {
+    let mut rung = 0;
+    while rung < HEAT_RUNGS.len() {
+        assert!(
+            HEAT_RUNGS[rung] == 0 || HEAT_BUCKETS % HEAT_RUNGS[rung] == 0,
+            "a heat rung does not divide the source resolution, so its last \
+             slice would cover fewer lines than the rest"
+        );
+        rung += 1;
+    }
+};
 
 /// Columns a path keeps before any glance element is allowed to exist.
 ///
@@ -492,7 +517,7 @@ const fn line_origin(gutter: usize) -> usize {
 
 /// Rows the worktree churn band takes when it is drawn at all.
 ///
-/// **Two, which is sixteen levels over the [`SPARK_RAMP`]'s eight per row.** One
+/// **Two, which is sixteen levels over the [`crate::glyphs::SPARK_RAMP`]'s eight per row.** One
 /// row would be a sparkline, and the pane already has one of those per file; the
 /// band earns its place by being the thing no file row can be, which is the
 /// worktree at a resolution a single row cannot carry. Three was weighed and
@@ -557,43 +582,6 @@ const LEAD_ROWS: usize = 1;
 /// order [`Body::split`] already applies to the list: the map gives way to the
 /// content, and the band gives way before the map does.
 const GRAPH_KEEP: usize = 10;
-
-/// Columns of churn the band draws, however wide the pane is.
-///
-/// **A floor on the aggregation, which is what the band was missing.**
-/// [`Churn::projected`](vigia_core::Churn::projected) sums the samples under
-/// each column, so a narrow band already shows the same total churn at a lower
-/// resolution. What it did not do is *stop*: it clamped to the sample count, so
-/// once the pane reached 120 columns one column was one second. A save is
-/// instantaneous, so it filled a single column and left both neighbours empty,
-/// and a wide pane bought time resolution nobody asked for instead of bigger
-/// bars.
-///
-/// **Fifteen columns of eight seconds, and eight was tuned rather than chosen.**
-/// Forty seeded series across three work patterns, measuring two things at once:
-/// how much of the band is empty, and how many *distinct* heights survive.
-/// Emptiness falls monotonically as columns coarsen, but the distinct heights
-/// peak near four seconds and collapse by fifteen, so both ends lose the shape
-/// for opposite reasons. A steady worktree draws 72% empty at one second, 25% at
-/// eight, and 8% at fifteen with only five and a half of nine rungs left, which
-/// is a solid block rather than a graph. Eight is the knee.
-///
-/// The window slides and its newest sample is always mid-accumulation, so the
-/// newest column is systematically the shortest. That is a second reason to
-/// coarsen: at one second a column it was up to **100%** incomplete and always
-/// short until the second closed, and at eight it is at most 13%.
-const GRAPH_COLUMNS: usize = 15;
-
-// The samples must tile the columns exactly, or one drawn bar would cover more
-// time than its neighbours and the graph would lie about which span was busy.
-// `history.rs` holds the same rule for the sparkline's own division, and this is
-// that rule reaching the second element that divides the same window.
-const _: () = {
-    assert!(
-        HISTORY_SAMPLES % GRAPH_COLUMNS == 0,
-        "the samples do not divide into the band's columns, so a drawn column          would cover more time than its neighbours"
-    );
-};
 
 /// The narrowest band that can draw every sample it holds.
 ///
@@ -1558,7 +1546,7 @@ struct Heading<'r> {
     path: &'r str,
     from: Option<&'r str>,
     churn: Option<(u32, u32)>,
-    spark: &'r [u16; HISTORY_BUCKETS],
+    spark: &'r [u32; HISTORY_BUCKETS],
     recency: Recency,
     heat: &'r [HeatBucket; HEAT_BUCKETS],
 }
@@ -1808,16 +1796,85 @@ const COUNT_CELL: usize = 5;
 /// has a narrow rung to give up: every row here carries the same cell. The
 /// pulse's *label* was the other, and it opened the ladder, so removing it only
 /// removed the widest layout: a layout's width is the sum of its own slots, and
-/// none of the six left changed.
-const ROW_LAYOUTS: [Columns; 7] = [
+/// none of the six left changed. The table is eight entries since #161, and that
+/// sentence is about the six the pulse's label left behind rather than about the
+/// table's length today.
+///
+/// **The top row is above the settled ladder and the step below it gives up the
+/// *strip's* resolution rather than the sparkline's**, which amends the drop
+/// order stated above at its top end only
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). The strip is the
+/// element that gained a rung, so the strip's resolution is what the step below
+/// the top gives up.
+///
+/// **The reason recorded here was that the sparkline had nowhere to grow, and it
+/// is retired** ([#232](https://github.com/breferrari/vigia/issues/232)). It rested
+/// on the band drawing a fixed period, which made a drawn bucket coarser than a
+/// band column by construction and twelve the largest division that cleared it.
+/// The band draws one value per sub-column now, so its period follows the pane
+/// and is finer than a drawn bucket at every width. The bound is gone rather than
+/// replaced, and the question it closed is reopened as
+/// [#234](https://github.com/breferrari/vigia/issues/234) rather than given a
+/// second reason for the same answer.
+const ROW_LAYOUTS: [Columns; 8] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[1]),
+    SETTLED,
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[1]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[2], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[3], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[3], SPARK_RUNGS[2]),
     Columns::NOTHING,
 ];
+
+/// The widest layout that shipped before a rung was added above it.
+///
+/// **What makes "no boundary below the new rung moves" true by construction
+/// rather than by a swept comparison.** [`Columns::plan`]'s share clamp is
+/// floored at this layout's width, so every layout from here down keeps exactly
+/// the budget it had, whatever the share is set to and whatever rungs are added
+/// on top. The gate that sweeps it is evidence; this is the mechanism.
+///
+/// **By value, and used *as* the table's entry, so an index cannot rot.** This
+/// was `const SETTLED_RUNG: usize = 1` and the number is the hazard: inserting a
+/// row above index 1 silently moves the floor onto the generous rung, which then
+/// arrives at the width where it merely fits and the published picture becomes
+/// false, with only a distant gate catching it and blaming the wrong thing.
+/// Written out here and referenced from [`ROW_LAYOUTS`], the two cannot disagree
+/// however the table is edited.
+const SETTLED: Columns = Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[0]);
+
+/// The share of a row the glance elements may take, above the settled ladder.
+///
+/// **Two questions, not one, and the table only ever answered the first.** Below
+/// [`SETTLED`] the question is *what survives*: a narrowing pane drops
+/// elements until the path is safe, and [`ROW_FLOOR`] is the floor that decides
+/// it. Above it the question is *what is worth spending*, and "does it fit" is
+/// the wrong test, because a fixed-sum table takes a rung the instant it fits.
+/// Twenty-four slices fit inside a seventy-one column pane, which is narrower
+/// than the 109-column render `assets/preview.svg` is measured from, so without
+/// this the widest strip would arrive at a width where the picture says it does
+/// not exist.
+///
+/// **Two in five, checked against [#161](https://github.com/breferrari/vigia/issues/161)'s
+/// own targets rather than against that constraint.** That issue asked for
+/// twenty-four slices near 140 columns and forty-eight near 200; this rule puts
+/// them at **134** and **194**, having been derived from neither. A rule that
+/// reproduces both numbers it was not fitted to is a rule. Half the row was the
+/// other candidate and it clears the picture by a single column, which is a
+/// coincidence rather than a margin.
+const GLANCE_NUMER: usize = 2;
+/// The denominator of [`GLANCE_NUMER`]'s share.
+const GLANCE_DENOM: usize = 5;
+
+/// Columns the glance elements may spend on a row this wide, above the settled
+/// ladder.
+///
+/// Floored by the division, so the share is never rounded **up** into a column
+/// the path was keeping.
+const fn generous_of(width: u16) -> usize {
+    width as usize * GLANCE_NUMER / GLANCE_DENOM
+}
 
 /// Columns a whole counts cell of `cell`-wide halves occupies, its space included.
 const fn counts_width(cell: usize) -> usize {
@@ -2037,7 +2094,7 @@ impl Columns {
         }
     }
 
-    /// The widest layout that fits a region `width` columns wide.
+    /// The widest layout a region `width` columns wide both fits and deserves.
     ///
     /// **Nothing here reads a row**, and that is the ruling rather than an
     /// economy: a slot whose width depended on the rows would move whenever the
@@ -2076,8 +2133,29 @@ impl Columns {
     /// simply reached earlier. Monotonicity is therefore still by construction
     /// rather than by argument, and it holds separately at each rung, which is
     /// what `tests/legibility.rs` sweeps rather than assumes.
+    ///
+    /// **Two floors, because the table answers two questions**
+    /// ([#161](https://github.com/breferrari/vigia/issues/161)). [`ROW_FLOOR`] is
+    /// what survival costs and it decides every rung the tool shipped with.
+    /// [`generous_of`] is what generosity costs and it decides only the rungs
+    /// above [`SETTLED`], because "does it fit" stops being the right test
+    /// once a row has room to spare: a fixed-sum table takes a rung the instant
+    /// it fits, and the widest strip fits inside a pane narrower than the one the
+    /// published picture is measured from. Both constants carry the argument.
+    ///
+    /// **Monotone still, and still by construction.** The share grows with the
+    /// width it is taken from, so a rung once affordable stays affordable, and
+    /// the `max` against the settled layout means no width that had a layout can
+    /// lose it. Widening a pane cannot remove an element, which is the one
+    /// promise this whole function exists to keep.
     fn plan(width: u16, glyphs: Glyphs) -> Self {
-        let budget = usize::from(width).saturating_sub(ROW_FLOOR);
+        // Named rather than shadowed, because the docblock above calls them two
+        // different questions and the code said `budget` twice.
+        let survival = usize::from(width).saturating_sub(ROW_FLOOR);
+        // Floored at the settled ladder rather than applied to it, which is what
+        // makes every boundary that shipped stay exactly where it was.
+        let generous = generous_of(width).max(SETTLED.width(glyphs));
+        let budget = survival.min(generous);
         ROW_LAYOUTS
             .iter()
             .copied()
@@ -2245,9 +2323,9 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
 /// **the style is chosen from the variant rather than read back off the
 /// glyph.** [`spark_of`] briefly returned bare `char`s and the painter decided
 /// the style by testing against `SPARK_TRACK`, which worked only while that
-/// glyph stayed outside [`SPARK_RAMP`] — a convention a test defends rather than
+/// glyph stayed outside [`crate::glyphs::SPARK_RAMP`] — a convention a test defends rather than
 /// one the compiler does. It also had a live failure case in the other
-/// direction: on the `peak == 0` path every bucket draws the track *whatever its
+/// direction: on the `scale == 0` path every bucket draws the track *whatever its
 /// count says*, so a painter branching on the count instead would have drawn a
 /// track glyph in the bar's colour. Neither spelling of "derive one from the
 /// other" is safe, and deriving both from a third thing is.
@@ -2310,69 +2388,23 @@ impl Bucket {
     }
 }
 
-/// How many eighths of the band one column fills, out of `rows * 8`.
+/// Which level of `levels` a count reaches, against the busiest count on screen.
 ///
-/// **Scaled against the band's own busiest column**, which is the right
-/// denominator for a single time series: the question `SPEC.md` §5.3 asks of this
-/// element is *was it hotter a minute ago*, and that is a comparison inside the
-/// series. A fixed scale would answer *how hot against what* with a number nobody
-/// chose, and the sparkline's screen-wide peak is a different question asked of a
-/// different element.
+/// **One implementation, and since #232 it is the only one.** The band used to
+/// reach this through a rows-shaped adapter and then build its own glyph, so the
+/// rule that keeps one write from drawing as empty existed twice and could move
+/// in one element and not the other. Both elements now scale here and spell the
+/// result through [`Glyphs::glyph`], which is what lets the band carry a baseline
+/// and two sub-columns per cell without a second drawer.
 ///
-/// A zero peak is the empty store, which is every launch: nothing is written, so
-/// nothing is drawn but the baseline track. Guarded here rather than inside the
-/// loop for [`spark_of`]'s reason, because the two say different things.
-///
-/// Rounded **up**, so a column with anything in it is never drawn as empty. That
-/// is [`spark_of`]'s ruling and the same sentence applies: "one write" and "no
-/// writes" is the distinction the element exists to make.
-fn level_of(total: u32, peak: u32, rows: usize) -> usize {
-    level_to(total, peak, rows * SPARK_RAMP.len())
-}
-
-/// [`level_of`] against a level count named directly rather than in rows.
-///
-/// **One implementation, which is the whole reason this exists as its own
-/// function.** [`level_of`]'s own docblock already worried that writing the
-/// round-up twice would let the rule that keeps one write from drawing as empty
-/// move in one element and not the other. The glyph ladder makes that concrete:
-/// a dense rung's ramp is three levels rather than a multiple of
-/// [`SPARK_RAMP`]'s eight, so it cannot be expressed in rows at all, and the
-/// arithmetic underneath is identical.
-fn level_to(total: u32, peak: u32, levels: usize) -> usize {
-    if peak == 0 || total == 0 || levels == 0 {
+/// Rounded **up**, so any non-zero count reaches at least the first level: a
+/// write that drew as empty would be a write the element failed to report.
+fn level_to(total: u32, scale: u32, levels: usize) -> usize {
+    if scale == 0 || total == 0 || levels == 0 {
         return 0;
     }
-    let scaled = (total as u64 * levels as u64).div_ceil(peak as u64) as usize;
+    let scaled = (total as u64 * levels as u64).div_ceil(scale as u64) as usize;
     scaled.clamp(1, levels)
-}
-
-/// What one cell of the band draws, `row` counted up from the baseline.
-///
-/// `None` is a cell **above** the bar, which is left as the pane's own
-/// background rather than painted: a graph's empty upper rows are not a track,
-/// they are sky, and filling them would draw a solid block the height of the
-/// band on every column.
-///
-/// **An empty column draws nothing at all, and that is [#78](https://github.com/breferrari/vigia/issues/78)
-/// not reaching here rather than being overruled.** That ruling gives the
-/// sparkline's empty bucket a track because *"a gap would make the strip's own
-/// length ambiguous"*: eight columns sitting between a heat strip and a counts
-/// cell have no edges of their own, so a blank one is indistinguishable from the
-/// element being absent.
-///
-/// The band has edges. It spans the pane, and the masthead's blank rows delimit
-/// it above and below, so its extent is never in question and a baseline buys
-/// nothing to pay for how it looks. Reported from use on the first real run: a
-/// hundred columns of `_` reads as a dashed rule across the pane, which is
-/// furniture the pane did not ask for and which the band is not.
-///
-/// The floor rung of [`SPARK_RAMP`] is what an empty column would otherwise
-/// take, and that is exactly the collision `SPARK_TRACK`'s own docblock refuses:
-/// one write and no writes must not be the same shape.
-fn band_cell(level: usize, row: usize) -> Option<char> {
-    let filled = level.saturating_sub(row * SPARK_RAMP.len());
-    (filled > 0).then(|| SPARK_RAMP[filled.min(SPARK_RAMP.len()) - 1])
 }
 
 /// A path's buckets, packed into the cells this rung draws them in.
@@ -2384,7 +2416,7 @@ fn band_cell(level: usize, row: usize) -> Option<char> {
 /// because returning it made every caller destructure a pair to learn something
 /// it already knew.
 ///
-/// `peak` is the busiest bucket **anywhere on the screen**, so two rows drawn
+/// `scale` is the busiest bucket **anywhere on the screen**, so two rows drawn
 /// side by side can be compared by height. A bucket with anything in it is never
 /// blank: it takes the lowest block, because "one write" and "no writes" are the
 /// distinction the strip exists to make and rounding the first down to nothing
@@ -2395,12 +2427,12 @@ fn band_cell(level: usize, row: usize) -> Option<char> {
 /// [#78](https://github.com/breferrari/vigia/issues/78).** There is no longer a
 /// row that draws no strip, so there is no absence for a caller to handle, and
 /// the `has_spark` predicate that answered "is there anything here at all" went
-/// with it. What is left of that guard is the `peak == 0` line below, which is
+/// with it. What is left of that guard is the `scale == 0` line below, which is
 /// the one state where the ramp has no denominator: an empty store, which is
 /// every launch.
 fn spark_of(
-    buckets: &[u16; HISTORY_BUCKETS],
-    peak: u16,
+    buckets: &[u32; HISTORY_BUCKETS],
+    scale: u32,
     glyphs: Glyphs,
 ) -> [Bucket; HISTORY_BUCKETS] {
     let mut drawn = [Bucket::Empty; HISTORY_BUCKETS];
@@ -2409,7 +2441,7 @@ fn spark_of(
     // inside the loop, because the two say different things: this is "there is
     // no scale yet", and the loop's `busiest == 0` is "this cell is empty on a
     // screen that has one".
-    if peak == 0 {
+    if scale == 0 {
         return drawn;
     }
     // **One loop at every rung, and the density is the only thing that moves.**
@@ -2433,12 +2465,13 @@ fn spark_of(
         // **Through [`level_to`], which is where the rounding rule lives.**
         // Written twice, the rule that keeps one write from drawing as empty
         // could move at one rung and not the other.
-        let level = |count: u16| level_to(u32::from(count), u32::from(peak), glyphs.levels());
-        // **Against the same `peak` the heights are scaled from**, which is the
-        // busiest bucket anywhere on screen rather than in this file. Height and
+        let level = |count: u32| level_to(count, scale, glyphs.levels());
+        // **Against the same `scale` the heights are scaled from**, which is
+        // `scale_of`'s figure over every bucket on screen rather than over this
+        // file. Height and
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
-        let band = Band::of(u32::from(busiest), u32::from(peak));
+        let band = Band::of(busiest, scale);
         *cell = Bucket::Written(glyphs.glyph(level(left), level(right)), band);
     }
     drawn
@@ -2528,6 +2561,18 @@ struct Footer<'a> {
     left: &'a str,
     /// Whether `left` is a notice, which is what decides its colour.
     alert: bool,
+    /// Whether a rule is drawn above the footer's text.
+    ///
+    /// **The same mark the list already puts over the diff**, asked for from a
+    /// live pane: the bottom bar is chrome sitting under content with nothing
+    /// saying so, where every other boundary on this screen is drawn. Counted
+    /// into [`Footer::height`] rather than into [`Footer::rows`], because `rows`
+    /// is what decides the one-line-or-two ladder and a rule is neither line.
+    ///
+    /// It yields on a short pane like every other piece of furniture here: a rule
+    /// that cost the diff its last row would be chrome announcing a region rather
+    /// than separating one.
+    rule: bool,
     /// The frame-time and memory cells, already narrowed to what is left after
     /// the hints and the state have taken theirs.
     ///
@@ -2538,6 +2583,15 @@ struct Footer<'a> {
 }
 
 impl<'a> Footer<'a> {
+    /// Rows the footer takes off the pane, its rule included.
+    ///
+    /// **What every layout caller wants, where [`Footer::rows`] is what the
+    /// drawer wants.** The two differ by the rule, and reaching for the wrong one
+    /// puts the diff's last row under the mark.
+    fn height(&self) -> u16 {
+        self.rows + u16::from(self.rule)
+    }
+
     /// Decide the footer's shape from the width, the state, and the file count.
     ///
     /// **From the file count, never the scroll position.** `{files}/{files}` is
@@ -2571,6 +2625,7 @@ impl<'a> Footer<'a> {
                 reserved: 0,
                 left: "",
                 alert: false,
+                rule: false,
                 diagnostics: String::new(),
             };
         }
@@ -2621,6 +2676,11 @@ impl<'a> Footer<'a> {
             && reserved > 0
             && area.height >= 3 + MIN_BODY;
         let rows = if grows { 2 } else { 1 };
+        // **Charged the way the second footer line is**, against the same floor:
+        // one header, the footer's own rows, the rule, and a body still worth
+        // showing under it. Below that the mark is the first thing to go, which is
+        // `SPEC.md` §5.3's rule that richness is the reward of space.
+        let rule = area.height >= 1 + rows + 1 + MIN_BODY;
 
         let room = if grows {
             width
@@ -2675,6 +2735,7 @@ impl<'a> Footer<'a> {
             reserved,
             left,
             alert,
+            rule,
             diagnostics,
         }
     }
@@ -2928,7 +2989,7 @@ impl Body {
 pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
     Body::split(
         area,
-        Footer::plan(area, chrome, files).rows,
+        Footer::plan(area, chrome, files).height(),
         files,
         chrome.masthead,
     )
@@ -3008,7 +3069,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     }
     let footer = Footer::plan(area, chrome, view.files);
     let body =
-        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
+        Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
     let wide = affords_bar(area.width);
 
     // The lead blank and the masthead sit between the header and the list, so
@@ -3040,7 +3101,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         // to draw it, since a target nobody can see must not eat a gesture.
         sheet: chrome
             .sheet
-            .then(|| sheet_plan(area, footer.rows, margins_of(area.width)))
+            .then(|| sheet_plan(area, footer.height(), margins_of(area.width)))
             .flatten()
             .map(|plan| plan.target()),
     }
@@ -3075,7 +3136,7 @@ pub fn render(
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
     let body =
-        Body::split(area, footer.rows, view.files, chrome.masthead).clamped_to(view.list.len());
+        Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
     let margins = margins_of(area.width);
 
     let mut painter = Painter {
@@ -3230,7 +3291,7 @@ pub fn render(
     // any region, so it is composited after all of them and the plan above is
     // untouched by whether it is up.
     if chrome.sheet {
-        if let Some(plan) = sheet_plan(area, footer.rows, margins) {
+        if let Some(plan) = sheet_plan(area, footer.height(), margins) {
             painter.sheet(&plan);
         }
     }
@@ -3869,6 +3930,19 @@ impl Painter<'_> {
             ..area
         };
 
+        // **Above the footer's own rows, and full bleed like the one over the
+        // diff.** `Painter::rule` takes the pane's rect rather than an inset one,
+        // so both marks run edge to edge: a rule that stopped at the margin would
+        // read as a box someone forgot to close, which is that method's own
+        // reason and applies to this boundary identically.
+        if footer.rule {
+            self.rule(Rect {
+                y: bottom.y - footer.rows,
+                height: 1,
+                ..area
+            });
+        }
+
         // Where `put_right` will place that string, and how much of its head the
         // readouts occupy. Computed from the same two strings it is drawn from,
         // so the tint below cannot address a column the text does not.
@@ -4026,48 +4100,109 @@ impl Painter<'_> {
         if !band_fits(area.width) || area.height == 0 {
             return;
         }
-        let left = area.x.saturating_add(self.inset);
+        let left_edge = area.x.saturating_add(self.inset);
         let width = usize::from(planning_width(area.width, 0));
 
-        // **Columns, not cells**, and that distinction is the whole of
-        // [#223](https://github.com/breferrari/vigia/issues/223). Asking for one
-        // column per cell is what made a wide pane sample once a second; asking
-        // for [`GRAPH_COLUMNS`] and stretching them is what makes width buy
-        // wider bars instead. Floored at the pane where the pane is narrower,
-        // which is the rung the band already had.
-        let columns = width.min(GRAPH_COLUMNS);
-        let series = view.worktree_churn.projected(columns);
-        // Off the series rather than through a second projection of it. `Churn`
-        // had a `peak_at` that re-walked the whole window to return a number its
-        // only caller was already holding, which is the shape `History::repeak`
-        // rules against one crate over.
-        let peak = series.iter().copied().max().unwrap_or(0);
+        // **One value per sub-column, and a zero draws the baseline**, which is
+        // `btop`'s own answer to this exact signal
+        // ([#232](https://github.com/breferrari/vigia/issues/232)). Its network
+        // graph is the closest analogue in that tool: bursty, zero most of the
+        // time, and it is built with `no_zero = true`, which forces one dot on
+        // the bottom row so an idle interface draws an axis rather than nothing.
+        // Read from `src/btop_draw.cpp`, `Graph::_create`, rather than recalled.
+        //
+        // **That supersedes [#223](https://github.com/breferrari/vigia/issues/223)'s
+        // coarsening, and the correction is worth stating rather than
+        // absorbing.** That row diagnosed the right defect, a save drawing a
+        // one-column hairline between blanks, and reached for a wider column to
+        // fix it. `btop` fixes the same defect by drawing the floor, and once the
+        // floor is drawn a narrow column is a spike on an axis instead of a mark
+        // in a void. Coarsening then costs resolution and buys nothing, and it
+        // was what made the band read as separated blocks
+        // ([#232](https://github.com/breferrari/vigia/issues/232), reported from
+        // a live pane).
+        //
+        // `btop` sizes its buffer to the pane for the same reason, keeping
+        // `width * 2` samples so no value is ever stretched across cells. Here
+        // the window is fixed by I10, so the projection does the same job from
+        // the other side: it aggregates when the pane holds fewer sub-columns
+        // than the window holds samples, and repeats when it holds more.
+        let density = self.glyphs.density();
+        // **The pane can ask for more sub-columns than the window holds samples,
+        // and then values repeat rather than run out.** `btop` never meets this
+        // because its buffer is sized to the pane, keeping `width * 2` samples;
+        // I10 fixes this window at two minutes instead, so past 120 sub-columns
+        // the projection has nothing further to divide and each value covers more
+        // than one. Asking `projected` for the wider number silently returned a
+        // short series, which drew a graph that stopped partway across the pane
+        // and left bare axis after it.
+        let slots = width * density;
+        let series = view.worktree_churn.projected(slots);
+        // **`vigia_core::scale_of`, the same rule the sparkline divides by.** It
+        // lived here while the band was the only element that had it, which is
+        // exactly how the sparkline was left dividing by a maximum over the same
+        // byte samples. The two denominators stay different quantities, one
+        // worktree-wide and one per file, which is `SPEC.md` §11.1's ruling; what
+        // they may not disagree about is the rule.
+        let scale = scale_of(series.iter().copied());
+        // **No data, no axis**, which is what keeps
+        // [#158](https://github.com/breferrari/vigia/issues/158)'s reported
+        // defect fixed while the axis exists at all. That ruling came from a
+        // first real run: a window holding nothing drew a hundred columns of `_`,
+        // "a dashed rule the pane did not ask for", and every session opens in
+        // exactly that state because a worktree already dirty when `vigia`
+        // started has no tick behind it yet. `btop` draws its floor for an idle
+        // interface and would draw one here too; the distinction it does not have
+        // to make is between *quiet* and *not started*, and this is that line. An
+        // empty column inside a live window is quiet and stands on the floor; an
+        // empty window has no graph to put a floor under. The rows stay reserved
+        // either way, so the first write does not jog the list.
+        //
+        // **It does not distinguish "not started" from "quiet for two minutes",
+        // and that is deliberate rather than an oversight.** Both are an empty
+        // window, and #158's ruling is about what an empty window draws, not about
+        // how it got that way. A reader back from lunch sees the band go bare and
+        // the axis return with the first write, which is the same thing the row
+        // count already does at launch.
+        if scale == 0 {
+            return;
+        }
         let rows = usize::from(area.height);
+        // Levels one row carries. The block ramp gives eight, a 2x4 cell gives
+        // its dot rows less the baseline, and [`Glyphs::glyph`] already spells
+        // both, floor included: level zero is the axis rather than nothing.
+        let levels = self.glyphs.levels();
 
-        for (column, total) in series.iter().enumerate() {
-            // **The span is `projected`'s own arithmetic inverted.** That
-            // function maps columns onto samples with `column * len / width`,
-            // and this maps columns onto cells the same way, so the remainder
-            // distributes across the bars rather than leaving a ragged tail and
-            // the band still reaches both edges, which §5.3 asks of furniture.
-            let from = column * width / columns;
-            let to = (column + 1) * width / columns;
-            let level = level_of(*total, peak, rows);
-            // Ramped by height like the sparkline, and against the same
-            // denominator the height is scaled from, so colour and shape say one
-            // thing at one scale.
-            let band = Band::of(*total, peak);
+        for cell in 0..width {
+            // A dense cell carries two sub-columns, left older than right, which
+            // is `Glyphs::glyph`'s own order and the sparkline's. At the block
+            // rung the density is one and the right half is never read.
+            // `projected` returns exactly what it was asked for, repeating where
+            // the window holds fewer samples than the pane holds sub-columns, so
+            // this is a plain index rather than a second copy of that mapping.
+            let at = |sub: usize| series[cell * density + sub];
+            let (older, newer) = (at(0), at(density - 1));
+            let full = |total: u32| level_to(total, scale, rows * levels);
+            let (left, right) = (full(older), full(newer));
+            // Against the same denominator the heights are scaled from, so
+            // colour and shape say one thing at one scale.
+            let band = Band::of(older.max(newer), scale);
             for row in 0..rows {
                 // Drawn bottom up, so `row` counts from the baseline and the
                 // buffer's `y` counts down from the top.
                 let y = area.y + (rows - 1 - row) as u16;
-                let Some(glyph) = band_cell(level, row) else {
+                let fill = |level: usize| level.saturating_sub(row * levels).min(levels);
+                let (low, high) = (fill(left), fill(right));
+                // **Sky above the bar is left alone; the baseline row is not.**
+                // A graph's empty upper rows are background, and painting them
+                // would draw a solid block the height of the band on every
+                // column. The bottom row is the axis and is always drawn.
+                if row > 0 && low == 0 && high == 0 {
                     continue;
-                };
-                for cell in from..to {
-                    let x = left.saturating_add(cell as u16);
-                    self.bar_cell(x, y, glyph, self.theme.spark_at(band));
                 }
+                let glyph = self.glyphs.glyph(low, high);
+                let x = left_edge.saturating_add(cell as u16);
+                self.bar_cell(x, y, glyph, self.theme.spark_at(band));
             }
         }
     }
@@ -4201,7 +4336,7 @@ impl Painter<'_> {
                     width: inner,
                 },
                 &Heading::of(entry),
-                view.peak,
+                view.scale,
                 &columns,
                 current,
             );
@@ -4646,7 +4781,7 @@ impl Painter<'_> {
                         ..area
                     },
                     &Heading::of(entry),
-                    view.peak,
+                    view.scale,
                     &columns,
                     // **A literal, which is the whole reason this is a
                     // parameter.** No heading in the stream is *the* file the
@@ -4767,7 +4902,7 @@ impl Painter<'_> {
         &mut self,
         area: Rect,
         heading: &Heading<'_>,
-        peak: u16,
+        scale: u32,
         columns: &Columns,
         current: bool,
     ) {
@@ -4886,7 +5021,7 @@ impl Painter<'_> {
             // business: at a dense rung eight buckets arrive in four cells, so a
             // strip measured in buckets would advance the cursor twice as far as
             // it drew and slide every element left of it.
-            let strip = spark_of(heading.spark, peak, self.glyphs);
+            let strip = spark_of(heading.spark, scale, self.glyphs);
             // The whole window in cells, which is what `strip` actually holds,
             // against the slot this width was planned for. They differ at every
             // rung below the widest, and the smaller is what may be drawn.

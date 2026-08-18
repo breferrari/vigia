@@ -54,11 +54,11 @@ pub struct FileEntry {
     /// Raw counts rather than heights. Which glyph a count becomes is the
     /// renderer's, the same way a [`Row::Line`] carries its spans as classes
     /// and lets the renderer pick the colour: the scale is shared across the
-    /// screen and lives on [`View::peak`].
+    /// screen and lives on [`View::scale`].
     ///
     /// All zeroes for a file `vigia` has not seen change, which is the
     /// ordinary case for a worktree that was already dirty at startup.
-    pub spark: [u16; HISTORY_BUCKETS],
+    pub spark: [u32; HISTORY_BUCKETS],
     /// How recently this file changed, which is what dims a settled row and
     /// what puts the pulse on one that just moved.
     pub recency: Recency,
@@ -155,12 +155,26 @@ pub enum Row {
 
 /// Slices a file's length is divided into for the heat strip.
 ///
-/// Twelve, which is not a taste call: `assets/preview.svg` draws exactly twelve
-/// and `SPEC.md` §5.1 rules that a published artifact answering an open question
-/// **is** the answer. The picture also draws an empty slice as a dark track
-/// rather than as a gap, which is why [`FileEntry::heat`] is always this long and
-/// why the renderer draws a block for every bucket.
-pub const HEAT_BUCKETS: usize = 12;
+/// **The source resolution, which is a different number from what any pane
+/// draws** ([#161](https://github.com/breferrari/vigia/issues/161)). The renderer
+/// sums adjacent slices down to the rung its width affords, so this is the
+/// ceiling on that ladder rather than a column count: `heat_at` groups
+/// `HEAT_BUCKETS / width`, and a rung wider than this divides to zero.
+///
+/// **Twelve was this constant until 2026-08-18 and is a rung now**, which keeps
+/// `SPEC.md` §5.1's ruling rather than overturning it. That ruling is that a
+/// published artifact answering an open question **is** the answer, and
+/// `assets/preview.svg` draws exactly twelve slices. What the picture answers is
+/// how many slices a pane **at its own width** draws, and its own comment records
+/// that width: a 109-column render. So twelve stays the rung a 109-column pane
+/// picks, gated at that width in `tests/legibility.rs` rather than left to a
+/// constant nobody could check. Doubling the source is what lets a pane wide
+/// enough to deserve it draw a finer strip without moving what the picture shows.
+///
+/// The picture also draws an empty slice as a dark track rather than as a gap,
+/// which is why [`FileEntry::heat`] is always this long and why the renderer
+/// draws a block for every bucket.
+pub const HEAT_BUCKETS: usize = 24;
 
 /// Changed lines falling in one slice of a file's length.
 ///
@@ -459,10 +473,10 @@ pub struct View {
     /// divide by.** It used to say a renderer must read zero as "draw no
     /// sparkline", and that is the ruling
     /// [#78](https://github.com/breferrari/vigia/issues/78) reversed: an empty
-    /// bucket draws a track, so a peak of zero means every bucket is empty and
-    /// every one of them is still drawn. `vigia_core::History::peak` carries the
+    /// bucket draws a track, so a scale of zero means every bucket is empty and
+    /// every one of them is still drawn. `vigia_core::History::scale` carries the
     /// same correction, and this is the copy a renderer actually reads.
-    pub peak: u16,
+    pub scale: u32,
     /// The whole worktree's churn over the window, oldest sample first.
     ///
     /// **What the masthead's band draws** ([#158](https://github.com/breferrari/vigia/issues/158)),
@@ -471,7 +485,7 @@ pub struct View {
     /// answers *how hot is this tree right now, and was it hotter a minute ago*.
     ///
     /// Carried on the view rather than fetched by the painter, for the reason
-    /// [`View::peak`] is: the renderer is handed what to draw and does not reach
+    /// [`View::scale`] is: the renderer is handed what to draw and does not reach
     /// back into a store for it. It is a copy of a field the history keeps
     /// current on a walk it was already making, so collecting it costs a move.
     pub worktree_churn: vigia_core::Churn,
@@ -798,7 +812,7 @@ impl View {
                 row: position.row,
             },
             read: 0,
-            peak: history.peak(),
+            scale: history.scale(),
             worktree_churn: history.worktree_churn(),
         };
         if files == 0 {
@@ -1433,8 +1447,10 @@ mod tests {
             .collect()
     }
 
-    /// A hundred and twenty lines over twelve buckets is ten lines each, so a
-    /// change at line 1 is bucket 0 and a change at line 61 is bucket 6.
+    /// A hundred and twenty lines over [`HEAT_BUCKETS`] slices puts line 1 in the
+    /// first and line 61 exactly halfway, whatever the source resolution is.
+    /// Written against the constant rather than against the twelve it was, so
+    /// raising the source moves the fixture with it.
     #[test]
     fn a_hunk_lands_in_the_buckets_its_lines_fall_in() {
         let map = heat_of(&diff(
@@ -1445,9 +1461,10 @@ mod tests {
             ],
         ));
 
-        assert_eq!(touched(&map), vec![0, 6]);
+        let middle = HEAT_BUCKETS / 2;
+        assert_eq!(touched(&map), vec![0, middle]);
         assert_eq!(map[0].added, 1);
-        assert_eq!(map[6].added, 2);
+        assert_eq!(map[middle].added, 2);
     }
 
     /// The last line of the file is the last bucket and never one past it.
@@ -1522,6 +1539,16 @@ mod tests {
 
     /// Fewer lines than buckets. Every bucket still has to be reachable, or a
     /// short file would draw all its change at the left edge.
+    ///
+    /// **What it does not claim is that the result is a *solid* strip**, and
+    /// [#230](https://github.com/breferrari/vigia/issues/230) is that gap. Three
+    /// changed lines of a three-line file light three slices out of the source's
+    /// resolution and leave the rest cool, so a file changed throughout draws as
+    /// dashes rather than as a block. Spreading was chosen over bunching when
+    /// this was written and both alternatives were wrong; the third, giving a
+    /// line the whole span of slices it covers, is what that issue is for. The
+    /// expected slices are written against [`HEAT_BUCKETS`] so this fixture keeps
+    /// stating what the projection actually does as the source moves.
     #[test]
     fn a_file_shorter_than_the_bucket_count_still_projects() {
         let map = heat_of(&diff(
@@ -1533,7 +1560,10 @@ mod tests {
             ],
         ));
 
-        assert_eq!(touched(&map), vec![0, 4, 8]);
+        assert_eq!(
+            touched(&map),
+            vec![0, HEAT_BUCKETS / 3, 2 * HEAT_BUCKETS / 3]
+        );
     }
 
     /// A file with no working-tree side has nowhere to place anything. That is a
@@ -1577,8 +1607,9 @@ mod tests {
 
         assert_eq!(
             touched(&map),
-            vec![1],
-            "the addition is on line 11, which is the second bucket of 120/12"
+            vec![HEAT_BUCKETS / 12],
+            "the addition is on line 11, which is a twelfth of the way into a \
+             120-line file"
         );
     }
 }

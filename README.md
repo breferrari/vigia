@@ -97,6 +97,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
            │    38    fn coalesce(&mut self, ev: Event) -> Option<Frame> {
            │    39 +      if self.pending.is_empty() {
            │    40 +          self.deadline = Instant::now() + DEBOUNCE;
+     rule  │  ──────────────────────────────────────────────────────────────
    status  │  q quit · f follow · ? keys   0.8ms frame   19MiB  follow ▶  1/3
 ```
 
@@ -119,7 +120,7 @@ They exist separately because a glance can only ask one question. You read the o
 
 <br>
 
-Cut the file into twelve equal slices, top to bottom, and colour each one by what happened inside it: **green** for lines added, **red** for removed, and a third colour where both. It is a map of the file you are *not* looking at, so a strip lit only at its right end says the change is at the bottom and you have not scrolled there yet. Brighter means more lines in that slice.
+Cut the file into equal slices, top to bottom, twelve of them on an ordinary pane and twenty-four on one wide enough to spare the columns, and colour each one by what happened inside it: **green** for lines added, **red** for removed, and a third colour where both. It is a map of the file you are *not* looking at, so a strip lit only at its right end says the change is at the bottom and you have not scrolled there yet. Brighter means more lines in that slice.
 
 A slice nothing touched is still drawn, in a dark track colour, because a strip with holes in it would be a different shape per file and you could not compare two at a glance. On a narrow pane adjacent slices are summed and reclassified rather than dropped, so it stays a whole file at every width.
 
@@ -130,9 +131,9 @@ A slice nothing touched is still drawn, in a dark track colour, because a strip 
 
 <br>
 
-Eight columns across the last two minutes, so each column is fifteen seconds, oldest on the left. A taller column is more writes landing in that fifteen seconds.
+Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving in that ten seconds.
 
-It is scaled against the busiest column **across every tracked file**, not against the row's own maximum, and that is the whole point: a row scaled to itself would draw full height the moment it was the busiest thing *it* had ever been, and you could not tell the file an agent is hammering from the file it touched once. A column with no writes draws a flat track `_` rather than nothing, for the same reason the heat strip draws its empty slices.
+It is scaled **across every tracked file**, not against the row's own maximum, and that is the whole point: a row scaled to itself would draw full height the moment it was the busiest thing *it* had ever been, and you could not tell the file an agent is hammering from the file it touched once. A column with no writes draws a flat track `_` rather than nothing, for the same reason the heat strip draws its empty slices.
 
 </details>
 
@@ -162,7 +163,7 @@ Two names for one thing, and both are used: **masthead** is the block at the top
    two minutes ago                 now
 ```
 
-Two rows of the same eight-step block ramp, stacked, so it has **sixteen** levels where a row's sparkline has eight, and it grows upward from the bottom row. That resolution is the point: it answers a question no file row can, which is *is anything happening at all right now, and was it busier a minute ago.* A tall block that has been collapsing for thirty seconds is an agent that has finished.
+Two rows of the same block ramp, stacked, growing upward from a drawn baseline. A quiet stretch is a floor rather than a gap, which is what makes a burst read as a spike on a graph instead of a block floating in the dark. That resolution is the point: it answers a question no file row can, which is *is anything happening at all right now, and was it busier a minute ago.* A tall block that has been collapsing for thirty seconds is an agent that has finished.
 
 It starts **hidden**, because it costs three rows of diff and is not wanted on every pane. Press `m` again and the rows go straight back to the diff.
 
