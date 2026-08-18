@@ -67,7 +67,7 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, PaintStats, Theme, body_layout, render};
+use vigia::{Action, App, Glyphs, PaintStats, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
 use support::{Scratch, made_link};
@@ -526,7 +526,14 @@ impl Rig<'_> {
             .app
             .view(&mut self.frame, &mut self.highlighter, &self.history, body)
             .expect("collect a view");
-        let painted = render(&mut self.buf, area(), &view, &self.theme, &chrome);
+        let painted = render(
+            &mut self.buf,
+            area(),
+            &view,
+            &self.theme,
+            Glyphs::default(),
+            &chrome,
+        );
         self.frames += 1;
         self.body_rows = self.body_rows.max(view.rows.len());
         self.painted += painted;

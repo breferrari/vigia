@@ -266,12 +266,13 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 
 ## 🎨 Make it yours
 
-Two independent settings, and most confusion here is the two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. Both have to allow a thing before it appears.
+Three independent settings, and most confusion here is any two being read as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three have to allow a thing before it appears.
 
 | | First answer wins |
 |---|---|
 | 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
+| ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
 
 ```sh
 VIGIA_THEME=ansi     # default: the sixteen names, inherited from your scheme
@@ -280,7 +281,7 @@ VIGIA_THEME=light    # the same design for a light terminal
 VIGIA_THEME=~/themes/mine
 ```
 
-Nothing else is read. There is no flag for either, and no setting in one can change the other.
+Nothing else is read. There is no flag for any of them, and no setting in one can change another.
 
 A theme file is usually about three lines. `base` picks a palette to start from and every line after it overrides one thing, so this keeps your terminal's own sixteen colours and adds the two backgrounds `ansi` declines to guess:
 
@@ -324,6 +325,28 @@ Every key the shell draws with:
 The `_warm` and `_hot` twins are the intensity rungs: a sparkline column and a heat slice both ramp through three levels, so the two glance elements on one row read through one mechanism. `bar_active` is a bar being dragged, `bar_hover` and `path_hover` are the marks under the pointer.
 
 **`ansi` is the default and draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. The cost is the wash, which is why the three-line file above exists: keep `ansi` for the sixteen names your scheme already defines, and add the two backgrounds it declines to guess. Pick your own if your pane is lighter or darker. The only rule is that they stay far enough from your background to read as bands, and far enough from each other that an addition never looks like a removal.
+
+</details>
+
+<details>
+<summary><b>✏️ Sparkline glyphs, and what to do if you see boxes</b></summary>
+
+<br>
+
+The per-file sparkline draws from the eighth-blocks `▁▂▃▄▅▆▇█` by default on terminals whose font may not carry anything denser, and from **braille** where it can. Braille packs two of the eight buckets into one cell, so the whole window fits four columns instead of eight, and the strip survives on a narrower pane instead of halving and then disappearing.
+
+**Nothing can ask a terminal which glyphs its font has.** There is no escape sequence for it, so this is decided the same way the colour depth is: from what the terminal calls itself. If the guess is wrong in either direction, say so:
+
+```sh
+VIGIA_GLYPHS=braille         # denser: 8 buckets in 4 columns
+VIGIA_GLYPHS=block           # the safe floor, if you see boxes
+VIGIA_GLYPHS=octant          # Unicode 16 solid 2x4, very few fonts have these yet
+VIGIA_GLYPHS=auto            # decide for me, which is the default
+```
+
+**If the sparkline is a row of boxes, you want `block`.** That is a font without the braille patterns U+2800 to U+28FF, and it is the one direction detection cannot see. Windows is where this is most likely: the old console draws with Consolas, which carries none of them, so a bare `conhost` gets blocks and Windows Terminal gets braille.
+
+`octant` is deliberately never chosen for you. The Unicode 16 octants are newer than most fonts, including the current Cascadia, and terminals that draw them do so themselves rather than from your font, which nothing in the environment advertises.
 
 </details>
 

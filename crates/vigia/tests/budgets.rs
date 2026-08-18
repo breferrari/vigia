@@ -33,7 +33,9 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render};
+use vigia::{
+    Action, App, Body, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
+};
 use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
 
 use support::{
@@ -136,7 +138,7 @@ fn shell_frame(
     app.sample_memory();
     let chrome = app.chrome("fixture", None, None, None, None, None);
     let view = app.view(frame, highlighter, history, screen).expect("view");
-    render(buf, area(), &view, theme, &chrome);
+    render(buf, area(), &view, theme, Glyphs::default(), &chrome);
     // Recorded from an inner clock rather than handed the caller's, because
     // every caller times this differently: some wrap it in `time`, some in
     // `timed`, and the scroll gates wrap a whole motion. What the ring needs is
@@ -1465,8 +1467,16 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
                 .expect("view")
         });
         let chrome = app.chrome("fixture", None, None, None, None, None);
-        let (painted, paint, paint_cpu) =
-            timed_cpu(|| render(&mut buf, area(), &screen, &theme, &chrome));
+        let (painted, paint, paint_cpu) = timed_cpu(|| {
+            render(
+                &mut buf,
+                area(),
+                &screen,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            )
+        });
         let parsed = highlight_delta(before, highlighter.stats());
 
         if screen.top.file != at_file {

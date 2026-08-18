@@ -28,7 +28,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, FileEntry, Position, Row, Theme, body_layout, render};
+use vigia::{Action, App, Body, FileEntry, Glyphs, Position, Row, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, delta};
@@ -189,7 +189,14 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, &view, &theme, &chrome);
+            render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
         })
         .expect("draw");
     insta::assert_snapshot!(terminal.backend());

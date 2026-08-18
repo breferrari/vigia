@@ -17,7 +17,8 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Style};
 use vigia::{
-    Chrome, Depth, FileEntry, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View, render,
+    Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View,
+    render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -135,7 +136,14 @@ fn draw(width: u16, height: u16, view: &View, theme: Theme) -> TestBackend {
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, &chrome());
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                &chrome(),
+            );
         })
         .expect("draw");
     terminal.backend().clone()

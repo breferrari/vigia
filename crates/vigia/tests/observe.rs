@@ -72,7 +72,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Theme, View, body_layout, regions, render};
+use vigia::{App, Body, Glyphs, Theme, View, body_layout, regions, render};
 use vigia_core::{
     ChangeKind, FrameStats, HISTORY_PATHS, HighlightStats, Highlighter, History, HistoryStats,
     WARM_FILES, WatchOptions, WatchStats, Worktree,
@@ -928,6 +928,7 @@ impl Pane<'_> {
             self.area,
             &self.view,
             &self.theme,
+            Glyphs::default(),
             &chrome,
         );
     }

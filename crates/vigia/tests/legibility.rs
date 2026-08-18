@@ -26,8 +26,8 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Body, Chrome, FileEntry, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row, Theme,
-    View, body_layout, diff_height, render,
+    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row,
+    Theme, View, body_layout, diff_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -170,12 +170,23 @@ fn theme() -> Theme {
 /// Draw one screen and hand back the backend, which is both a picture and a
 /// grid of cells.
 fn drawn(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+    drawn_at(width, height, view, chrome, Glyphs::default())
+}
+
+/// [`drawn`], at a named rung of the glyph ladder.
+///
+/// **The default is the floor**, so every gate that does not ask for a rung goes
+/// on measuring the picture this shell drew before the ladder existed, and the
+/// handful that sweep the second axis say which rung they mean. A `Chrome` field
+/// would have been the other way round: every caller carrying a value only three
+/// of them have an opinion about.
+fn drawn_at(width: u16, height: u16, view: &View, chrome: &Chrome, glyphs: Glyphs) -> TestBackend {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
     let theme = theme();
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, chrome);
+            render(f.buffer_mut(), area, view, &theme, glyphs, chrome);
         })
         .expect("draw");
     terminal.backend().clone()
@@ -287,14 +298,14 @@ fn cells_coloured(
     symbols: &[char],
 ) -> Vec<ratatui::style::Style> {
     let buffer = backend.buffer();
-    (0..buffer.area.width)
-        .map(|x| &buffer[(x, y)])
-        .filter(|cell| {
-            let symbol = cell.symbol();
-            symbols.iter().any(|glyph| symbol == glyph.to_string())
-                && cell.style().fg.is_some_and(|fg| colours.contains(&fg))
-        })
-        .map(|cell| cell.style())
+    // **Through [`columns_of`], so the selector this docblock argues for exists
+    // once.** The two differ only in what they hand back, and a second copy of
+    // the predicate would be a second place for the symbol-and-colour rule to be
+    // corrected, with the correction landing in whichever one the next reader
+    // happened to open.
+    columns_of(backend, y, colours, symbols)
+        .into_iter()
+        .map(|x| buffer[(x, y)].style())
         .collect()
 }
 
@@ -311,17 +322,62 @@ fn cells_coloured(
 /// [`cells_coloured`] would then accept the cross products: a `_` in the bucket
 /// colour, or a block in the track's. Neither is ever drawn, and a helper that
 /// would count them is the loose selector this file's own doc warns about.
-fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme) -> usize {
-    // **Every stop of the ramp**, which is three since #196 and was one. A
-    // helper reading only the quietest would count a busy row as mostly empty
-    // and the slot would look narrower than it is.
-    let bars: Vec<_> = [theme.spark, theme.spark_warm, theme.spark_hot]
+fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> usize {
+    let bars = spark_colours(theme);
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    // **The rung decides which alphabet to count**, and the two halves stay
+    // separate calls for the reason above: one set with both colours would
+    // accept the cross products, a track glyph in a bar's colour or the reverse,
+    // neither of which is ever drawn.
+    let (ramp, empty) = alphabet(glyphs);
+    cells_coloured(backend, y, &bars, &ramp).len()
+        + cells_coloured(backend, y, &[track], &[empty]).len()
+}
+
+/// Every stop of the sparkline's ramp, for a caller matching cells by colour.
+///
+/// **Three since [#196](https://github.com/breferrari/vigia/issues/196), and it
+/// was one.** A helper reading only the quietest stop counts a busy row as
+/// mostly empty and reads the slot as narrower than it is, which is a gate
+/// under-counting rather than failing. Named for [`heat_colours`]'s reason, one
+/// element over: two callers now want this list and a fourth stop must not have
+/// to be remembered in two places.
+fn spark_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
+    [theme.spark, theme.spark_warm, theme.spark_hot]
         .into_iter()
         .filter_map(|style| style.fg)
-        .collect();
-    let track = theme.spark_track.fg.expect("the track has a colour");
-    cells_coloured(backend, y, &bars, &RAMP).len()
-        + cells_coloured(backend, y, &[track], &[TRACK]).len()
+        .collect()
+}
+
+/// Every glyph a sparkline can draw at `glyphs`, and the one that means empty.
+///
+/// **Derived from the ladder rather than restated**, which is the opposite of
+/// [`RAMP`]'s rule a hundred lines up, and the difference is worth stating
+/// because it looks like an inconsistency. A restated `RAMP` gates the renderer:
+/// there are eight eighth-blocks and a test naming them checks that the renderer
+/// still uses those eight. A dense rung's alphabet is sixteen packed cells
+/// chosen by a bit layout that belongs to `ratatui`'s table, so restating it
+/// would gate this file's arithmetic against `ratatui`'s and prove nothing about
+/// the renderer. What gates the packing is `tests/glyphs.rs`, which pins the
+/// corners and the climb against literal characters.
+fn alphabet(glyphs: Glyphs) -> (Vec<char>, char) {
+    // **The block rung keeps the restated constants rather than deriving them**,
+    // so the gates above still check the renderer against eight literal
+    // characters this file names itself. Only the dense alphabet is derived, for
+    // the reason the docblock gives.
+    if glyphs.density() == 1 {
+        return (RAMP.to_vec(), TRACK);
+    }
+    let levels = glyphs.levels();
+    let mut ramp = Vec::new();
+    for left in 0..=levels {
+        for right in 0..=levels {
+            if (left, right) != (0, 0) {
+                ramp.push(glyphs.glyph(left, right));
+            }
+        }
+    }
+    (ramp, glyphs.glyph(0, 0))
 }
 
 /// Every row the body holds, across every region it has.
@@ -1510,7 +1566,7 @@ fn the_glance_columns_collapse_in_one_order() {
         // column rather than leaving it. Counting bars alone happens to agree
         // here, because `glancing`'s first row has no empty bucket, and that
         // agreement is a property of the fixture rather than of the renderer.
-        let spark = spark_slot(&backend, y, &theme);
+        let spark = spark_slot(&backend, y, &theme, Glyphs::default());
         let counts = rows_at(width, 8, &view, &chrome())[usize::from(y)].contains('+');
 
         // **Whole rungs.** A count of slices or buckets that is not on the
@@ -2638,7 +2694,7 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
             let backend = drawn(width, 6, &view, &chrome);
             let rows = rows_at(width, 6, &view, &chrome);
             for y in 0..6u16 {
-                let buckets = spark_slot(&backend, y, &theme);
+                let buckets = spark_slot(&backend, y, &theme, Glyphs::default());
                 let row = &rows[usize::from(y)];
                 assert!(
                     buckets <= 8,
@@ -4541,7 +4597,14 @@ fn the_band_gets_a_left_bar_wherever_the_pane_lends_a_column() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                render(f.buffer_mut(), area, &view, &theme, &chrome);
+                render(
+                    f.buffer_mut(),
+                    area,
+                    &view,
+                    &theme,
+                    Glyphs::default(),
+                    &chrome,
+                );
             })
             .expect("draw");
         let buffer = terminal.backend().buffer().clone();
@@ -4635,4 +4698,472 @@ fn the_band_gets_a_left_bar_wherever_the_pane_lends_a_column() {
         "the sweep saw {lent} widths where the pane lends the bar a column and \
          {bare} where it does not, so it never crossed the rung it is about"
     );
+}
+
+#[test]
+fn the_glyph_rung_buys_columns_and_never_costs_them() {
+    // **The second axis of the row ladder**, swept rather than sampled, because
+    // a ladder is only wrong at the widths where it changes rung and a denser
+    // glyph moves every one of those. The 2026-08-16 header-seam gate is why
+    // this is a sweep and not a screen: it drew one 80-column pane, where the
+    // widest rung fits and the broken narrow one is never reached, and passed
+    // against the code it was written for.
+    //
+    // Read as *buckets of the window*, which is the thing the ladder rations.
+    // Columns are what a glyph changes and buckets are what a reader loses, so a
+    // gate counting columns would call the whole feature a no-op.
+    let theme = theme();
+    let view = glancing();
+    let y = 1u16;
+
+    let slot = |width: u16, glyphs: Glyphs| -> (usize, usize) {
+        let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
+        let cells = spark_slot(&backend, y, &theme, glyphs);
+        (cells, cells * glyphs.density())
+    };
+
+    let mut gain = false;
+    for width in WIDTHS {
+        let (block_cells, block_buckets) = slot(width, Glyphs::Block);
+        for dense in [Glyphs::Braille, Glyphs::Octant] {
+            let (dense_cells, dense_buckets) = slot(width, dense);
+
+            // **Never worse on either axis**, which is the whole claim. A rung
+            // that showed less of the window, or spent more of the row to show
+            // the same, would be a downgrade wearing an upgrade's name.
+            assert!(
+                dense_buckets >= block_buckets,
+                "at {width} columns {dense:?} shows {dense_buckets} buckets \
+                 where blocks show {block_buckets}"
+            );
+            // **Conditioned on the window, and the first draft was not.** A
+            // bare `dense_cells <= block_cells` is too strong and this sweep
+            // said so at 40 columns, where blocks draw no sparkline at all and
+            // braille draws four buckets in two: spending columns to show
+            // something where there was nothing is the feature, not a
+            // regression. What may never happen is spending *more* row on the
+            // *same* window.
+            if dense_buckets == block_buckets {
+                assert!(
+                    dense_cells <= block_cells,
+                    "at {width} columns {dense:?} spends {dense_cells} columns \
+                     on the same {dense_buckets} buckets that blocks draw in \
+                     {block_cells}"
+                );
+            }
+            gain |= dense_buckets > block_buckets;
+        }
+    }
+
+    // **Non-vacuity, and it is the assertion that would have caught a rung wired
+    // up but never reached.** Both bounds above are satisfied by a dense rung
+    // that draws exactly what blocks draw, so without this the gate passes
+    // against a feature that does nothing.
+    assert!(
+        gain,
+        "no width in the sweep shows more of the window on a dense rung, so the \
+         ladder is wired up and never reached"
+    );
+}
+
+#[test]
+fn widening_never_takes_the_window_away_at_any_rung() {
+    // Monotonicity, which every ladder here owes and which the glyph axis makes
+    // a fresh claim rather than an inherited one: the layout table is shared,
+    // but each rung reaches its rungs at different widths, so a table that was
+    // monotone in columns could still step backwards in buckets at one rung and
+    // not another.
+    let theme = theme();
+    let view = glancing();
+
+    for glyphs in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
+        let mut widest = 0usize;
+        for width in WIDTHS {
+            let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
+            let buckets = spark_slot(&backend, 1, &theme, glyphs) * glyphs.density();
+            assert!(
+                buckets >= widest,
+                "{glyphs:?}: widening to {width} columns dropped the sparkline \
+                 from {widest} buckets to {buckets}"
+            );
+            widest = widest.max(buckets);
+        }
+        // The sweep has to end somewhere useful, or "never decreased" is true of
+        // a ladder that never rose either.
+        assert_eq!(
+            widest, HISTORY_BUCKETS,
+            "{glyphs:?}: the sweep never reached a full window"
+        );
+    }
+}
+
+/// One file whose sparkline is exactly `spark`, drawn wide enough for the lot.
+///
+/// A builder rather than a constant, because the gates below each need a
+/// *different* bucket pattern and the pattern is the whole input under test.
+fn sparked(spark: [u16; HISTORY_BUCKETS]) -> View {
+    View {
+        rows: vec![Row::File(FileEntry {
+            path: "a.rs".to_owned(),
+            from: None,
+            kind: 'M',
+            churn: Some((1, 0)),
+            spark,
+            recency: Recency::Live,
+            heat: ENDS_CHANGED,
+        })],
+        ..glancing()
+    }
+}
+
+#[test]
+fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
+    // **#78 at the dense rung, read off the screen rather than off the packer.**
+    // `tests/glyphs.rs` proves the glyph; this proves the renderer reaches for
+    // it, which is the half a packing test cannot see.
+    let theme = theme();
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    let empty = Glyphs::Braille.glyph(0, 0);
+
+    // Two buckets of every pair empty, the rest busy: the first cell is the
+    // track and no other cell is.
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([0, 0, 4, 6, 8, 9, 11, 12]),
+        &chrome(),
+        Glyphs::Braille,
+    );
+    let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
+    assert_eq!(
+        tracks, 1,
+        "one pair is empty, so exactly one cell should draw the track"
+    );
+
+    // **A pair is empty only when *both* halves are**, and testing the older
+    // half alone survived the suite. That mutation loses the newer bucket of
+    // every pair whose older half is quiet, which is exactly the shape a file
+    // that has just started being written has: the strip would draw a track
+    // over the activity a reader opened the pane to see.
+    for pattern in [[0, 12, 0, 9, 0, 6, 0, 4], [12, 0, 9, 0, 6, 0, 4, 0]] {
+        let backend = drawn_at(120, 8, &sparked(pattern), &chrome(), Glyphs::Braille);
+        let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
+        assert_eq!(
+            tracks, 0,
+            "every pair has a busy half, so none should draw the track: {pattern:?}"
+        );
+    }
+
+    // And with nothing anywhere, every cell is the track. This is the ordinary
+    // first frame: history is fed from the watch, so a worktree already dirty at
+    // launch has no ticks behind it yet.
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([0; HISTORY_BUCKETS]),
+        &chrome(),
+        Glyphs::Braille,
+    );
+    let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
+    assert_eq!(
+        tracks,
+        HISTORY_BUCKETS / Glyphs::Braille.density(),
+        "an empty history draws a full track"
+    );
+}
+
+#[test]
+fn a_pair_takes_the_busier_buckets_band() {
+    // **The cost this rung is bought at, gated so it cannot drift into the
+    // quieter direction.** A `Cell` holds one style, so the pair shares a band;
+    // taking the busier one is what keeps a hot bucket beside a flat one reading
+    // hot. Taking the flatter one would hide exactly what the element is for,
+    // and nothing else in the suite would notice.
+    let theme = theme();
+    let hot = theme.spark_hot.fg.expect("the hot stop has a colour");
+    let (ramp, _) = alphabet(Glyphs::Braille);
+
+    // The screen's peak is 12, so a bucket of 12 is hot. Pair it with a bucket
+    // of 1, which alone would be the flattest stop there is.
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([1, 12, 1, 1, 1, 1, 1, 1]),
+        &chrome(),
+        Glyphs::Braille,
+    );
+    let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
+    assert_eq!(
+        hots, 1,
+        "the pair holding the busiest bucket should draw hot, whichever half of \
+         the cell it sits in"
+    );
+
+    // And the same pair the other way round, so the rule is about the maximum
+    // rather than about which side of the cell the count happens to land on.
+    let backend = drawn_at(
+        120,
+        8,
+        &sparked([12, 1, 1, 1, 1, 1, 1, 1]),
+        &chrome(),
+        Glyphs::Braille,
+    );
+    let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
+    assert_eq!(
+        hots, 1,
+        "the busier bucket decides the band from either side"
+    );
+}
+
+/// Columns on row `y` holding one of `symbols` in one of `colours`.
+///
+/// [`cells_coloured`]'s sibling, returning **where** rather than **what**. The
+/// gate below is about the distance between two elements, which a list of styles
+/// cannot answer.
+fn columns_of(
+    backend: &TestBackend,
+    y: u16,
+    colours: &[ratatui::style::Color],
+    symbols: &[char],
+) -> Vec<u16> {
+    let buffer = backend.buffer();
+    (0..buffer.area.width)
+        .filter(|x| {
+            let cell = &buffer[(*x, y)];
+            let symbol = cell.symbol();
+            symbols.iter().any(|glyph| symbol == glyph.to_string())
+                && cell.style().fg.is_some_and(|fg| colours.contains(&fg))
+        })
+        .collect()
+}
+
+#[test]
+fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
+    // **The gap, which is the only thing that can see a miscounted advance.**
+    // Every gate above this one counts the sparkline's own cells, and a cursor
+    // moved by buckets where it should move by cells draws the sparkline
+    // correctly and puts everything *left* of it in the wrong column. Mutating
+    // the advance survived the whole suite until this existed, which is
+    // `SPEC.md` §7's own lesson about a gate that looks settled.
+    //
+    // The distance is compared **across rungs** rather than pinned to a number,
+    // because the number is `reserved`'s one column of gap and restating it here
+    // would gate this file against itself.
+    let theme = theme();
+    let heats = heat_colours(&theme);
+    let bars = spark_colours(&theme);
+    // Buckets all busy, so every cell of the strip is a bar and the leftmost one
+    // is the slot's own left edge rather than a track the bar colours miss.
+    let view = sparked([12, 11, 9, 8, 6, 4, 2, 1]);
+
+    // **Swept, and the first draft was not.** At 120 columns the widest rung is
+    // drawn, where a slot mis-measured in buckets happens to be clamped back to
+    // the right answer by the number of cells that exist. Mutating the clamp
+    // survived a single-width version of this gate and dies here, because it is
+    // only at the *narrow* sparkline rung that the two units disagree in a
+    // direction nothing else bounds: the strip then draws four cells into a slot
+    // reserved for two and walks into the heat strip.
+    let gap = |width: u16, glyphs: Glyphs| -> Option<u16> {
+        let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
+        let (ramp, _) = alphabet(glyphs);
+        let spark = columns_of(&backend, 1, &bars, &ramp);
+        let heat = columns_of(&backend, 1, &heats, &[HEAT_SLICE]);
+        // Widths where either element has been dropped have no gap to check, and
+        // that is the ladder working rather than a failure.
+        let first = *spark.first()?;
+        let last = *heat.last()?;
+        assert!(
+            first > last,
+            "{glyphs:?} at {width}: the sparkline starts at {first}, left of \
+             the heat strip's last slice at {last}, so the slot overflowed"
+        );
+        Some(first - last)
+    };
+
+    let mut compared = 0usize;
+    for width in WIDTHS {
+        let Some(block) = gap(width, Glyphs::Block) else {
+            continue;
+        };
+        for dense in [Glyphs::Braille, Glyphs::Octant] {
+            let Some(dense_gap) = gap(width, dense) else {
+                continue;
+            };
+            assert_eq!(
+                dense_gap, block,
+                "{dense:?} at {width} columns does not leave the heat strip the \
+                 gap blocks leave, so the cursor moved by a different unit than \
+                 the slot was drawn in"
+            );
+            compared += 1;
+        }
+    }
+    assert!(
+        compared > 0,
+        "no width drew both elements at both rungs, so this gate compared nothing"
+    );
+}
+
+#[test]
+fn the_block_rung_spells_an_empty_bucket_with_its_own_track() {
+    // **The default rung's track, which nothing else in this file covers.**
+    // Every ladder gate here reads `glancing`'s first row, and that row has no
+    // empty bucket, so a renderer drawing the ramp's floor for "nothing
+    // happened" was invisible to the whole suite. Mutating the track glyph
+    // survived every gate until this existed, and it is the rung most readers
+    // are on: `#78` and `SPARK_TRACK` both turn on one write and no writes being
+    // different *shapes*, and the ramp's floor is what that must not collapse
+    // onto.
+    let theme = theme();
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    let backend = drawn(120, 8, &sparked([0, 0, 4, 6, 8, 9, 11, 12]), &chrome());
+
+    let tracks = cells_coloured(&backend, 1, &[track], &[TRACK]).len();
+    assert_eq!(tracks, 2, "two empty buckets should draw two track cells");
+
+    // And the floor of the ramp is not what they drew, which is the half a
+    // count alone cannot say.
+    let floors = cells_coloured(&backend, 1, &[track], &[RAMP[0]]).len();
+    assert_eq!(
+        floors, 0,
+        "an empty bucket drew the ramp's lowest rung, which is the collision \
+         SPARK_TRACK exists to refuse"
+    );
+}
+
+#[test]
+fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
+    // **The state `spark_of`'s `peak == 0` return exists for**, and deleting that
+    // return is a mutation the rest of the suite survives. `View::peak` is a
+    // public field, so a screen-wide peak of zero beside a nonzero bucket is
+    // constructible rather than hypothetical: the level then scales to nothing
+    // while `Band::of` divides by no denominator and answers `Hot`, which would
+    // paint a track glyph in the busiest colour on the row.
+    //
+    // Both rungs, because the two reach that return by different routes.
+    let theme = theme();
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    let hot = theme.spark_hot.fg.expect("the hot stop has a colour");
+
+    for glyphs in [Glyphs::Block, Glyphs::Braille] {
+        let view = View {
+            peak: 0,
+            ..sparked([1, 2, 4, 6, 8, 9, 11, 12])
+        };
+        let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
+        let (ramp, empty) = alphabet(glyphs);
+
+        let cells = spark_cells_for(glyphs);
+        let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
+        assert_eq!(
+            tracks, cells,
+            "{glyphs:?}: with no scale yet every cell should be the track"
+        );
+        let hots = cells_coloured(&backend, 1, &[hot], &ramp).len();
+        assert_eq!(
+            hots, 0,
+            "{glyphs:?}: a bucket with no denominator drew a bar, and the hottest one"
+        );
+    }
+}
+
+/// Cells a full window occupies at `glyphs`, restated for [`RAMP`]'s reason.
+fn spark_cells_for(glyphs: Glyphs) -> usize {
+    HISTORY_BUCKETS.div_ceil(glyphs.density())
+}
+
+#[test]
+fn a_dense_strip_draws_its_buckets_at_different_heights() {
+    // **The feature's own claim, and nothing gated it.** Every other dense gate
+    // counts cells or reads colours, and `tests/glyphs.rs` gates the packer
+    // rather than the renderer, so forcing every non-empty column to full height
+    // survived the entire suite: the strip flat-topped and no gate cared. A
+    // sparkline whose heights do not scale is not a sparkline, it is a
+    // presence indicator.
+    //
+    // Read off the screen rather than off the packer, because the scaling
+    // happens in `spark_of` and only a drawn row can see it.
+    for glyphs in [Glyphs::Braille, Glyphs::Octant] {
+        // **Mid-range on purpose.** Against a screen peak of 12 a bucket of 4 is
+        // level 1 of 3, and scaling to the block ramp's eight levels and then
+        // clamping to three would make it level 3, which is the busiest pair's
+        // answer. Quiet buckets of 1 do not separate those two spellings, so a
+        // gate built on them passes against a rung that has lost its middle
+        // entirely: 4 and 12 do.
+        let view = sparked([4, 4, 12, 12, 4, 4, 4, 4]);
+        let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
+        let (ramp, _) = alphabet(glyphs);
+        let bars = spark_colours(&theme());
+        let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)
+            .into_iter()
+            .map(|x| backend.buffer()[(x, 1)].symbol().to_owned())
+            .collect();
+
+        let distinct: std::collections::BTreeSet<&String> = drawn_cells.iter().collect();
+        assert!(
+            distinct.len() > 1,
+            "{glyphs:?}: every drawn cell is {drawn_cells:?}, so the heights do \
+             not scale with the buckets"
+        );
+
+        // And specifically: the busy pair is taller than the quiet one. Ordering
+        // the two by their level is what a reader actually does with the strip.
+        let quiet = glyphs.glyph(1, 1);
+        let busy = glyphs.glyph(glyphs.levels(), glyphs.levels());
+        assert!(
+            drawn_cells.contains(&busy.to_string()),
+            "{glyphs:?}: the busiest pair did not draw a full cell: {drawn_cells:?}"
+        );
+        // **And the quiet pair is on screen too**, which is the half a
+        // `assert_ne!(quiet, busy)` could never reach: two pure calls disagreeing
+        // says nothing about what was drawn, and injectivity already covers it.
+        assert!(
+            drawn_cells.contains(&quiet.to_string()),
+            "{glyphs:?}: the quiet pairs did not draw their own height: {drawn_cells:?}"
+        );
+    }
+}
+
+#[test]
+fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
+    // **The rule the dense rung exists to keep, and only the packer gated it.**
+    // `level_to`'s `total == 0` guard is what holds it: without it an empty
+    // bucket scales to level 1, so inside a cell whose other half is busy the
+    // empty column climbs a dot and "one write" and "no writes" become the same
+    // height. `tests/glyphs.rs` proves `glyph(0, n)` differs from `glyph(1, n)`;
+    // nothing proved the renderer asks for the first of those.
+    //
+    // Removing that guard survived the whole suite, as did clamping the level to
+    // a minimum of one.
+    let theme = theme();
+    let bars = spark_colours(&theme);
+
+    for glyphs in [Glyphs::Braille, Glyphs::Octant] {
+        // Every pair is one empty bucket beside a full one, so every drawn cell
+        // must be the glyph for (0, top) and never (1, top).
+        let view = sparked([0, 12, 0, 12, 0, 12, 0, 12]);
+        let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
+        let (ramp, _) = alphabet(glyphs);
+        let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)
+            .into_iter()
+            .map(|x| backend.buffer()[(x, 1)].symbol().to_owned())
+            .collect();
+
+        let floor = glyphs.glyph(0, glyphs.levels()).to_string();
+        let climbed = glyphs.glyph(1, glyphs.levels()).to_string();
+        assert_ne!(
+            floor, climbed,
+            "{glyphs:?}: the fixture cannot tell these apart"
+        );
+        assert!(
+            !drawn_cells.is_empty(),
+            "{glyphs:?}: no cell was drawn, so this gate proved nothing"
+        );
+        for cell in &drawn_cells {
+            assert_eq!(
+                *cell, floor,
+                "{glyphs:?}: an empty bucket climbed off the floor beside a busy                  one, so no writes and one write draw the same height"
+            );
+        }
+    }
 }

@@ -156,21 +156,9 @@ impl Depth {
         windows: bool,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, DepthError> {
-        // **Set-but-empty is the same as unset**, which `VIGIA_THEME` has always
-        // said and this did not. Without the filter, `VIGIA_COLOR=""` reaches the
-        // refusal arm below and stops the shell from starting, over a variable
-        // nobody gave a value to.
-        //
-        // Reachable without trying. `$env:X = ''` in PowerShell leaves the variable
-        // **set and empty**, and a child process sees it: verified on 7.6.3, where
-        // `GetEnvironmentVariable` returns an empty string rather than null. (The
-        // sibling spelling `$env:X = $null` does remove it there, which is worth
-        // knowing because the two look interchangeable and are not.) Every shell
-        // has some way to leave an empty value behind, and a reader who cleared a
-        // variable has said "decide for me", not "here is a value you will not
-        // recognise".
-        if let Some(raw) = lookup(DEPTH_VAR).filter(|value| !value.trim().is_empty()) {
-            let value = raw.trim().to_ascii_lowercase();
+        // Through [`override_of`], which owns the set-but-empty rule for both
+        // ladders and carries the PowerShell gotcha behind it.
+        if let Some((raw, value)) = override_of(&lookup, DEPTH_VAR) {
             match value.as_str() {
                 "never" | "none" | "0" => return Ok(Self::None),
                 "16" | "ansi" => return Ok(Self::Ansi16),
@@ -191,7 +179,12 @@ impl Depth {
             return Ok(Self::None);
         }
 
-        let term = lookup("TERM").unwrap_or_default();
+        // **Folded once, here.** `term_depth` folds again below and this arm did
+        // not fold at all, so `TERM=DUMB` was a terminal saying it cannot draw
+        // that this ladder heard and the glyph ladder did not. `TERM` is
+        // conventionally lower case and the forgiving reading is the right one
+        // when the cost of mishearing is colour a reader switched off.
+        let term = lookup("TERM").unwrap_or_default().to_ascii_lowercase();
         if term == "dumb" {
             return Ok(Self::None);
         }
@@ -364,6 +357,11 @@ fn program_depth(program: &str) -> Option<Depth> {
 /// **Promotes only**, which is `SPEC.md` §11.1's standing rule for `TERM`: an entry
 /// that names none of these yields nothing and leaves the floor where it is.
 fn term_depth(term: &str) -> Option<Depth> {
+    // **Folded again, and deliberately.** The one caller folds before calling,
+    // so this is idempotent and redundant on that path; it stays because the
+    // alternative is a precondition living in a caller rather than in a
+    // signature, on a private function whose next caller has no way to know.
+    // It runs once at startup, so the cost is not a consideration.
     let term = term.to_ascii_lowercase();
     // `contains` rather than `ends_with`, for `xterm-direct2` and friends: the
     // database numbers the direct entries by how many bits they hand each channel,
@@ -397,12 +395,47 @@ const TRUECOLOR_TERMS: [&str; 7] = [
     "xterm-kitty",
 ];
 
+/// What a rung-override variable was set to, raw and normalised, or nothing.
+///
+/// **Set-but-empty is the same as unset**, and that rule is here rather than in
+/// each ladder because it is a discovered gotcha rather than a choice: `$env:X =
+/// ''` in PowerShell leaves the variable **set and empty** and a child process
+/// sees it, verified on 7.6.3 where `GetEnvironmentVariable` returns an empty
+/// string rather than null. (The sibling spelling `$env:X = $null` does remove
+/// it, which is worth knowing because the two look interchangeable.) Without
+/// this filter a reader who *cleared* a variable stops the shell from starting,
+/// over a value nobody gave. Written twice, a later correction to it (a BOM, a
+/// different whitespace class) would land in one ladder and not the other.
+///
+/// Both spellings come back because both are needed and neither derives from the
+/// other: the **normalised** one is matched against, and the **raw** one is what
+/// a refusal quotes, since a reader who typed `Braille ` needs to see what they
+/// typed rather than what it was folded to.
+///
+/// `NO_COLOR` deliberately does not come through here and the asymmetry is the
+/// point: it has no valid values at all, so presence is the whole signal and an
+/// empty one still means what it says.
+pub(crate) fn override_of(
+    lookup: &impl Fn(&str) -> Option<String>,
+    var: &str,
+) -> Option<(String, String)> {
+    let raw = lookup(var).filter(|value| !value.trim().is_empty())?;
+    let normalised = raw.trim().to_ascii_lowercase();
+    Some((raw, normalised))
+}
+
 /// Whether `term` is `name` or one of its variants.
 ///
 /// Entries are suffixed rather than substringed: `foot-extra` and `alacritty-direct`
 /// are the same terminal, and a bare `contains` would also match a `TERM` that
 /// merely has the word in it. The boundary is the `-` the database itself uses.
-fn names(term: &str, name: &str) -> bool {
+///
+/// **Shared with [`glyphs`](crate::glyphs), which is the one thing the two
+/// ladders do share.** The *tables* are deliberately separate, because a colour
+/// depth and a font's coverage are different questions about the same name; how
+/// a `TERM` entry is matched against a table is the same question in both, and
+/// two copies of this would be two chances to disagree about `foot-extra`.
+pub(crate) fn names(term: &str, name: &str) -> bool {
     term.strip_prefix(name)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
 }

@@ -23,7 +23,9 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{App, Body, FileEntry, Position, Row, Theme, View, Viewport, body_layout, render};
+use vigia::{
+    App, Body, FileEntry, Glyphs, Position, Row, Theme, View, Viewport, body_layout, render,
+};
 use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
@@ -461,7 +463,14 @@ fn a_real_repository_draws() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, &view, &theme, &chrome);
+            render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
         })
         .expect("draw");
     insta::assert_snapshot!(terminal.backend());
@@ -529,7 +538,14 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     terminal
         .draw(|f| {
             let drawn = f.area();
-            render(f.buffer_mut(), drawn, &view, &theme, &chrome);
+            render(
+                f.buffer_mut(),
+                drawn,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome,
+            );
         })
         .expect("draw");
 

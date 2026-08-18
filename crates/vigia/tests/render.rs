@@ -33,8 +33,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
-    Chrome, FileEntry, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row, Theme, View,
-    body_layout, diff_height, regions, render,
+    Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row,
+    Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -231,7 +231,14 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
     terminal
         .draw(|f| {
             let area = f.area();
-            render(f.buffer_mut(), area, view, &theme, chrome);
+            render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                chrome,
+            );
         })
         .expect("draw");
     terminal.backend().clone()
@@ -5576,7 +5583,14 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
                     let area = Rect::new(origin.0, origin.1, width, height);
                     let mut buf = ratatui::buffer::Buffer::empty(area);
                     // Panics inside ratatui if anything writes out of range.
-                    render(&mut buf, area, view, &Theme::default(), &chrome());
+                    render(
+                        &mut buf,
+                        area,
+                        view,
+                        &Theme::default(),
+                        Glyphs::default(),
+                        &chrome(),
+                    );
                     assert_eq!(
                         *buf.area(),
                         area,
@@ -5614,7 +5628,14 @@ fn a_wash_stops_before_the_scrollbar_column() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    view,
+                    &theme,
+                    Glyphs::default(),
+                    chrome,
+                );
             })
             .expect("draw");
         terminal.backend().clone()
@@ -6091,6 +6112,7 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                 Rect::new(0, 0, area.0, area.1),
                 &view,
                 &theme,
+                Glyphs::default(),
                 &chrome(),
             );
         }
@@ -6122,7 +6144,14 @@ fn the_wash_bleeds_under_the_inset() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                vigia::render(f.buffer_mut(), area, view, &theme, chrome);
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    view,
+                    &theme,
+                    Glyphs::default(),
+                    chrome,
+                );
             })
             .expect("draw");
         terminal.backend().clone()

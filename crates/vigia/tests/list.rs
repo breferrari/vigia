@@ -28,7 +28,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, LIST_ROWS, Position, View, Viewport, body_layout};
+use vigia::{Action, App, Body, Glyphs, LIST_ROWS, Position, View, Viewport, body_layout};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -432,7 +432,14 @@ fn the_region_at_fifty_files() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                render(f.buffer_mut(), area, &view, &theme, &chrome);
+                render(
+                    f.buffer_mut(),
+                    area,
+                    &view,
+                    &theme,
+                    Glyphs::default(),
+                    &chrome,
+                );
             })
             .expect("draw");
         println!("\n=== {FILES} files, {label} ===\n{}", terminal.backend());

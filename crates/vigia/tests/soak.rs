@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Row, Theme, View, body_layout, diff_height, render};
+use vigia::{Action, App, Body, Glyphs, Row, Theme, View, body_layout, diff_height, render};
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
     RETAINED_HUNKS, WatchOptions, Worktree,
@@ -1278,7 +1278,7 @@ fn drive(
         // Drawn rather than collected, because the renderer is the half of the
         // shell that holds a buffer, and a soak that stopped short of it would
         // leave the one allocation per frame nobody measured.
-        render(&mut buffer, area, &view, &theme, &chrome);
+        render(&mut buffer, area, &view, &theme, Glyphs::default(), &chrome);
         app.record_frame(frame_began.elapsed());
         if view.rows.len() == body.diff {
             full_frames += 1;

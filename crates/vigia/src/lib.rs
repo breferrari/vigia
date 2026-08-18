@@ -62,6 +62,7 @@
 
 mod app;
 mod colour;
+mod glyphs;
 mod input;
 /// Public where its seven siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
@@ -82,6 +83,7 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
+pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
     WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
@@ -291,6 +293,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // quantises. I9 therefore sees none of it.
     let theme = theme::from_env(Depth::detect()?, |key| std::env::var(key).ok())?;
 
+    // Beside the depth and for the same reason: a property of the terminal,
+    // resolved once before the screen is taken, so the frame path never asks the
+    // environment anything. Refused rather than defaulted when the variable is
+    // set to something this does not recognise, which is `VIGIA_COLOR`'s rule and
+    // reaches the reader on a terminal they can still see, exactly as the line
+    // above does. **Not** when the variable is unreadable: `env::var` drops a
+    // non-UTF-8 value, so that case falls through to detection rather than
+    // refusing, which is the same behaviour the depth ladder has and is stated
+    // here because the two are easy to conflate.
+    let glyphs = Glyphs::detect()?;
+
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
     // sees it. Built here because the handler on it is armed on the next line,
     // before the terminal is taken, and the other two senders are armed after the
@@ -347,6 +360,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // inventing a recency for it would light up rows nothing has touched.
         history: History::new(),
         theme,
+        glyphs,
         name: short_name(worktree.workdir()),
         branch: None,
         screen: View::default(),
@@ -771,6 +785,15 @@ struct Shell {
     /// the session.
     history: History,
     theme: Theme,
+    /// Which glyphs the sparkline may draw from, resolved once at startup.
+    ///
+    /// Held beside [`Shell::theme`] because it is the same kind of value: a
+    /// property of the terminal, decided before the screen was taken and
+    /// unchanged for the session. It reaches the renderer the way `theme` does,
+    /// as its own [`render`] parameter, rather than riding [`Chrome`]: nothing
+    /// in the layout reads it, so a per-frame field meant two of its three
+    /// callers stamping something the function they fed never looked at.
+    glyphs: Glyphs,
     /// What the header calls the working tree.
     name: String,
     /// What the header calls the branch, or `None` when there is none to call.
@@ -1092,7 +1115,7 @@ impl Shell {
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
-        let (theme, screen) = (&self.theme, &self.screen);
+        let (theme, screen, glyphs) = (&self.theme, &self.screen, self.glyphs);
         let mut painted = Regions::default();
         let was = self.regions;
         self.session.screen().draw(|f| {
@@ -1116,7 +1139,7 @@ impl Shell {
             // before the mark is judged against it, and the paint below sees the
             // judged one.
             chrome.hovered = hover_repainted(chrome.hovered, was, painted);
-            render(f.buffer_mut(), area, screen, theme, &chrome);
+            render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
         })?;
         self.hovered = chrome.hovered;
         self.regions = painted;
