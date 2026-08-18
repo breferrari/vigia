@@ -239,17 +239,6 @@ fn drew_a_full_screen(
 /// Shared for the reason the marker itself is not: each gate writes its own
 /// format (`fn edited_{n}` here, `fn bulk_edited_{n}` in the bulk gate), so the
 /// producer already varies and only the check is common. Two copies of the check
-/// The edits have to still be landing.
-///
-/// Checked against the frame's diff rather than against the screen, and the
-/// difference is the fixture: these rewrite every line, so a file's hunk is five
-/// hundred removals followed by five hundred additions and the newest line sits
-/// far below any viewport. A screen assertion here would fail while the code was
-/// perfect.
-///
-/// Shared for the reason the marker itself is not: each gate writes its own
-/// format (`fn edited_{n}` here, `fn bulk_edited_{n}` in the bulk gate), so the
-/// producer already varies and only the check is common. Two copies of the check
 /// would be two places to notice that a producer's format had moved.
 fn the_edits_still_land(frame: &mut Frame, path: &str, marker: &str) {
     let at = frame
@@ -265,6 +254,71 @@ fn the_edits_still_land(frame: &mut Frame, path: &str, marker: &str) {
             .any(|line| line.kind == LineKind::Added && line.text == marker)),
         "the diff for {path} does not contain {marker:?}, so the edits stopped \
          reaching it"
+    );
+}
+
+#[test]
+fn a_real_frame_with_highlighting_holds_the_frame_budget() {
+    frame_budget_at_depth("shell-i9", 0);
+}
+
+#[test]
+fn the_timed_frame_draws_the_readouts_it_is_timing() {
+    // **A gate over the gates, and this repo has paid twice for not having
+    // one.** `SPEC.md` §7 records both: `render` sat outside every budget on
+    // both crates for two phases, so a row costing 7.2x its pane passed a 16ms
+    // assertion; and a gate that settled before measuring left the one window
+    // it was written about unmeasured. Both were invisible from inside the gate,
+    // which is exactly the property that makes a comment a bad instrument here.
+    //
+    // The status readouts are the same shape one more time. `sample_memory` is a
+    // syscall and `chrome` sorts a hundred and twenty-eight durations, and if
+    // `shell_frame` ever stops calling them, every wall-clock assertion in this
+    // file keeps passing while measuring a screen the product does not draw.
+    // Nothing else here can catch that, because what is left out gets *cheaper*.
+    //
+    // Two frames rather than one: the first has no completed frame behind it, so
+    // its chrome legitimately carries no frame time. The readout appearing on
+    // the second is the shipped behaviour, and asserting it at the first would
+    // be asserting the bug.
+    let scratch = Scratch::large_diff("readouts-in-the-gate", 4, 20);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+    let screen = layout(&app, 4);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+
+    for _ in 0..2 {
+        shell_frame(
+            &mut frame,
+            &mut app,
+            &mut highlighter,
+            &history,
+            &mut buf,
+            &theme,
+            screen,
+        );
+    }
+
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    assert!(
+        chrome.frame.is_some(),
+        "the timed frame never recorded what it cost, so every wall-clock gate \
+         in this file is measuring a screen without the frame readout on it"
+    );
+    // Every tier-1 target has a cheap read, so this asserts unconditionally
+    // rather than behind a `cfg`. A platform outside those three would fail here
+    // and should: it means the readout silently stopped being covered, which is
+    // the thing this gate exists to notice. `SPEC.md` §5.1 names the three.
+    assert!(
+        chrome.memory.is_some(),
+        "the timed frame read no memory, so the syscall the status bar performs \
+         every frame is outside every budget in this file"
     );
 }
 
@@ -360,11 +414,21 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
         plain > Duration::ZERO,
         "the unsized arm took no time, so this compared nothing"
     );
+    // **The delta against a fraction of the frame, not a ratio against the whole
+    // one.** A ratio hides the term it is supposed to expose: with `weigh` swapped
+    // for a whole-file read this gate measured 28.98ms against 35.27ms and passed,
+    // because both arms grew together and the quotient stayed under two. What this
+    // prices is the difference, and the difference is what a `stat` becoming a
+    // read would move.
+    //
+    // Saturating, because the sizing arm is routinely the *faster* of the two: the
+    // status walk on the same wake has already warmed this metadata, so the
+    // marginal syscall is free and run-to-run noise decides the order.
+    let delta = weighed.saturating_sub(plain);
+    let allowed = I9_FRAME / 8;
     assert!(
-        weighed <= plain * 2,
-        "sizing a {HISTORY_PATHS}-path burst took the frame from {plain:?} to \
-         {weighed:?}, which is a `stat` that has become a read or a walk rather \
-         than a syscall on metadata the status walk has already warmed"
+        delta <= allowed,
+        "sizing a {HISTORY_PATHS}-path burst added {delta:?} to the frame          ({plain:?} to {weighed:?}) against {allowed:?}, which is a `stat` that          has become a read or a walk rather than a syscall on metadata the status          walk has already warmed"
     );
 }
 

@@ -1796,16 +1796,26 @@ const COUNT_CELL: usize = 5;
 /// has a narrow rung to give up: every row here carries the same cell. The
 /// pulse's *label* was the other, and it opened the ladder, so removing it only
 /// removed the widest layout: a layout's width is the sum of its own slots, and
-/// none of the six left changed.
+/// none of the six left changed. The table is eight entries since #161, and that
+/// sentence is about the six the pulse's label left behind rather than about the
+/// table's length today.
+///
 /// **The top row is above the settled ladder and the step below it gives up the
 /// *strip's* resolution rather than the sparkline's**, which amends the drop
 /// order stated above at its top end only
-/// ([#161](https://github.com/breferrari/vigia/issues/161)). The sparkline has no
-/// rung above [`HISTORY_BUCKETS`] to give up: its drawn bucket must stay coarser
-/// than the band's own column period or the two elements read one store at
-/// crossed scales, and twelve is the largest division of the window that clears
-/// it. So the strip is the only element with somewhere left to grow, and the
-/// generous rung is the strip's.
+/// ([#161](https://github.com/breferrari/vigia/issues/161)). The strip is the
+/// element that gained a rung, so the strip's resolution is what the step below
+/// the top gives up.
+///
+/// **The reason recorded here was that the sparkline had nowhere to grow, and it
+/// is retired** ([#232](https://github.com/breferrari/vigia/issues/232)). It rested
+/// on the band drawing a fixed period, which made a drawn bucket coarser than a
+/// band column by construction and twelve the largest division that cleared it.
+/// The band draws one value per sub-column now, so its period follows the pane
+/// and is finer than a drawn bucket at every width. The bound is gone rather than
+/// replaced, and the question it closed is reopened as
+/// [#234](https://github.com/breferrari/vigia/issues/234) rather than given a
+/// second reason for the same answer.
 const ROW_LAYOUTS: [Columns; 8] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
     SETTLED,
