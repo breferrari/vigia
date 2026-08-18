@@ -5787,6 +5787,17 @@ fn a_wash_runs_under_the_scrollbar_column() {
 /// the bottom, so a sweep written against it would report covering the buttons while
 /// never once painting a band across one.
 ///
+/// **The heights are pinned to the shapes rather than chosen and described**, which
+/// is what stops this docblock going stale the way its first version did. That one
+/// swept 12 and 18 and called the short one the bare case; measured, a pane of 12
+/// still draws a *stepped* bar, so the bare path stayed uncovered while the comment
+/// claimed otherwise. Each height now asserts which shape it drew, so the pairing
+/// fails loudly if the layout moves under it.
+///
+/// One incidental gain worth naming, since it is why some swept rows are unwashed by
+/// construction: both regions put their bar in the same column, so this sweeps the
+/// **list's** bar wherever both are drawn, and a list row never carries a wash.
+///
 /// So this sweeps rather than samples, over fixtures chosen to force the case: for
 /// every row of the bar's column, the cell's background must equal **that row's**
 /// background and its glyph must be one the bar owns. That is the invariant in a
@@ -5822,7 +5833,12 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
     ];
 
     let width = 64u16;
-    let mut washed_buttons = 0usize;
+
+    /// The shortest track that can express more than one position, mirroring
+    /// `render.rs`'s `MIN_TRACK`. A bare bar at the short height draws a thumb and a
+    /// track cell and no more, so two is the real floor; the first version of this
+    /// gate wrote a bare `3`, looser than the shape allows.
+    const MIN_BAR_CELLS: usize = 2;
 
     for (what, rows) in fixtures {
         let view = View {
@@ -5835,12 +5851,14 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
         // **Two heights, and the short one is the point.** `Bar::Stepped` only
         // appears above `STEP_FLOOR`; below it the bar is bare, which is a different
         // draw path and the one the gate above never exercised.
-        for height in [12u16, 18] {
+        for (height, expect_buttons) in [(11u16, false), (18, true)] {
             let backend = washed_screen(width, height, &view, &chrome());
             let buffer = backend.buffer();
 
             let mut bar_rows = 0usize;
             let mut washed_rows = 0usize;
+            let mut saw_buttons = false;
+            let mut washed_buttons = 0usize;
 
             for y in 0..height {
                 let cell = &buffer[(width - 1, y)];
@@ -5852,13 +5870,25 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
                 }
                 bar_rows += 1;
 
-                // That row's own background, read from a content column rather than
-                // restated. Column 1 sits in the pane's margin, which the wash
-                // bleeds under wherever the row has one.
+                // That row's own background, read from a cell the row owns rather
+                // than restated from the palette.
+                //
+                // **Column 1, and not because it is margin.** An earlier version of
+                // this comment said it was, which is false at the width this gate
+                // uses: `inset_of(64)` is 1, so column 0 is the whole margin and
+                // column 1 is the line number's first cell. Margin only reaches
+                // column 1 from eighty columns up. What makes it the right cell is
+                // narrower and holds at every width: the wash runs the row's full
+                // span and the gutter carries no background of its own, so column 1
+                // shows the band wherever the row has one and the pane's own colour
+                // where it does not. Column 0 would be the wrong choice, because
+                // §5.1's left bar paints an accent there on a changed row.
                 let behind = buffer[(1, y)].bg;
+                let button = glyph == BAR_GLYPHS[2] || glyph == BAR_GLYPHS[3];
+                saw_buttons |= button;
                 if behind != ratatui::style::Color::Reset {
                     washed_rows += 1;
-                    if glyph == BAR_GLYPHS[2] || glyph == BAR_GLYPHS[3] {
+                    if button {
                         washed_buttons += 1;
                     }
                 }
@@ -5876,7 +5906,7 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
             // all, and at least one of its rows must actually carry a wash, or
             // every comparison above was `Reset` against `Reset`.
             assert!(
-                bar_rows >= 3,
+                bar_rows >= MIN_BAR_CELLS,
                 "{what} at {width}x{height}: the sweep found {bar_rows} bar rows, \
                  so it is not reading a drawn scrollbar and proves nothing"
             );
@@ -5885,13 +5915,123 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
                 "{what} at {width}x{height}: no row the bar crosses was washed, so \
                  every comparison above was Reset against Reset"
             );
+
+            // **The shape this height was chosen for.** Without it the pair of
+            // heights is a claim in a comment, and the comment was wrong once
+            // already: the first version swept 12 and called it the bare case, and
+            // a pane of 12 draws a stepped bar.
+            assert_eq!(
+                saw_buttons, expect_buttons,
+                "{what} at {width}x{height}: step buttons present={saw_buttons} \
+                 where this height was chosen to draw present={expect_buttons}, so \
+                 the two heights no longer cover the two bar shapes"
+            );
+
+            // **Per height, not once at the end.** An aggregate count lets three of
+            // four combinations stop covering a washed button while the fourth
+            // carries the assertion, which is the same free-riding this gate exists
+            // to remove one level down.
+            if expect_buttons {
+                assert!(
+                    washed_buttons > 0,
+                    "{what} at {width}x{height}: a stepped bar drew no button on a \
+                     washed row, so the case round 1 of #239's audit named is not \
+                     covered by this fixture any more"
+                );
+            }
         }
     }
+}
+
+/// A row wash's **modifier** never reaches the scrollbar's cell.
+///
+/// The regression this pins was introduced by #239 itself and found by round 2 of
+/// its own audit, which is why it is written out rather than summarised.
+///
+/// Making the band run under the bar means the bar's cell arrives already painted.
+/// The first version let `Cell::set_style` merge over it, on the reading that a wash
+/// carries a background and no foreground so only the background would land. True of
+/// `fg` and `bg`, and **false of modifiers**:
+/// `ratatui-core-0.1.2/src/buffer/cell.rs:204` does
+/// `modifier.insert(style.add_modifier)` gated on nothing at all.
+///
+/// And it is reachable by configuration rather than only in theory. `VIGIA_THEME`
+/// accepts a trailing modifier word on every key `Theme::KEYS` names, row washes
+/// included, so `removed_row = on #45222a reverse` would put `REVERSED` on the thumb
+/// and swap the two colours that every contrast gate in `tests/palette.rs` exists to
+/// prove. A reader would have configured a row tint and silently lost the scrollbar.
+///
+/// So `Painter::bar_cell` assigns the modifier instead of merging it, and this is
+/// the gate over that: a wash carrying `REVERSED` must leave the bar's cell with the
+/// bar's own modifier and nothing borrowed.
+#[test]
+fn a_row_washs_modifier_never_reaches_the_scrollbar() {
+    use ratatui::style::Modifier;
+
+    let view = View {
+        total_rows: 400,
+        rows_above: 40,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            line(
+                LineKind::Removed,
+                38,
+                "    let stale = self.pending.take();",
+            ),
+            line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+        ],
+        ..two_regions(1)
+    };
+
+    // The palette a reader could actually write, built from the shipped one so the
+    // only difference is the thing under test.
+    let mut theme = vigia::Theme::dark();
+    theme.removed_row = theme.removed_row.add_modifier(Modifier::REVERSED);
+
+    let width = 64u16;
+    let height = 18u16;
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome(),
+            );
+        })
+        .expect("draw");
+    let backend = terminal.backend().clone();
+    let buffer = backend.buffer();
+
+    let washed = (0..height)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn at all");
+
+    // Non-vacuity: the modifier must actually have landed on the row, or this gate
+    // is asserting that a thing nobody applied did not spread.
+    assert!(
+        buffer[(1, washed)].modifier.contains(Modifier::REVERSED),
+        "the row itself is not reversed, so the wash never carried the modifier and \
+         this gate proves nothing"
+    );
 
     assert!(
-        washed_buttons > 0,
-        "no step button was ever drawn on a washed row, so the case round 1 of \
-         #239's audit named is not covered by these fixtures any more"
+        !buffer[(width - 1, washed)]
+            .modifier
+            .contains(Modifier::REVERSED),
+        "the row wash's REVERSED reached the scrollbar's own cell, which swaps the \
+         track against its background and undoes every contrast ratio the palette \
+         gates prove"
     );
 }
 

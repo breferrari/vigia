@@ -1848,26 +1848,37 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
     }
 }
 
-/// The bar's marks and the row wash touch **disjoint** style fields.
+/// Every bar style says everything [`Painter::bar_cell`] reads from it.
 ///
-/// This is the invariant that makes the draw order not matter, and it was unstated
-/// until [#239](https://github.com/breferrari/vigia/issues/239)'s audit went
-/// looking for it.
+/// This began as a claim that the bar and the wash touch **disjoint** style fields,
+/// which was true of `fg` and `bg` and was the stated reason the draw order did not
+/// matter. Round 2 of [#239](https://github.com/breferrari/vigia/issues/239)'s audit
+/// falsified it: a **modifier** is a third field, `Cell::set_style` inserts one
+/// unconditionally, and `VIGIA_THEME` lets a reader put `reverse` on a row wash. The
+/// order was never free, and the reason recorded here was wrong rather than
+/// incomplete.
 ///
-/// The bar is drawn before the wash, and the wash now covers the bar's column, so
-/// the band lands on a cell the bar already wrote. That is only safe because every
-/// bar style is a foreground and every row wash is a background: `Cell::set_style`
-/// merges field by field, so the two writes cannot reach the same field and
-/// therefore commute. Reorder them and nothing changes.
+/// It is free now because `bar_cell` assigns rather than merges: the band's
+/// background is kept and the bar owns the symbol, the foreground and the modifier
+/// outright. `tests/render.rs::a_row_washs_modifier_never_reaches_the_scrollbar` is
+/// the gate over that, from the drawn side.
 ///
-/// **It breaks the day a bar rung gains a background**, which is a real direction
-/// rather than a hypothetical: the hover and pressed rungs already exist as their
-/// own keys, and giving one a background would make the wash and the bar fight over
-/// the same field, silently, with the render gate still green because a context row
-/// has no wash to fight with. Then the order stops being free and has to be chosen.
-/// This is the gate that says so at that moment rather than afterwards.
+/// What is left for a palette to get wrong is the other half of that bargain, and it
+/// is what this gate now holds. `bar_cell` reads exactly two things from the style it
+/// is handed, so:
+///
+/// - **A foreground is required.** It falls back to the cell's own, which under a
+///   band is the *wash's* foreground, so a bar style without one would draw the
+///   diff's colour and still pass every contrast gate here, which measures the
+///   palette rather than the screen.
+/// - **A background is forbidden.** It is discarded in favour of the band's, so a
+///   bar style carrying one would be silently ignored: the value would sit in the
+///   palette, be readable in a theme file, and never appear.
+///
+/// Both are the same failure in opposite directions, a field that looks authored and
+/// is not what draws.
 #[test]
-fn the_bar_and_the_wash_touch_disjoint_fields() {
+fn every_bar_style_says_what_bar_cell_reads() {
     for (name, theme, _) in palettes() {
         for (element, style) in [
             ("bar", theme.bar),
@@ -1876,19 +1887,16 @@ fn the_bar_and_the_wash_touch_disjoint_fields() {
             ("bar_active", theme.bar_active),
         ] {
             assert!(
-                style.bg.is_none(),
-                "{name}'s {element} carries a background, so it now competes with \
-                 the row wash for the bar's own column. The draw order stopped \
-                 being free: pick one deliberately and say so"
+                style.fg.is_some(),
+                "{name}'s {element} carries no foreground, so under a row band the \
+                 bar would draw in the wash's colour instead of its own and nothing \
+                 measuring this palette would notice"
             );
-        }
-
-        for added in [true, false] {
-            let wash = theme.row(added).0;
             assert!(
-                wash.fg.is_none(),
-                "{name}'s row wash carries a foreground, so painting it over the \
-                 bar's column would erase the track's colour"
+                style.bg.is_none(),
+                "{name}'s {element} carries a background, which `bar_cell` discards \
+                 in favour of the band's: the value would be authored, readable in a \
+                 theme file, and never drawn"
             );
         }
     }

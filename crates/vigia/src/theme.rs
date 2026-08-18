@@ -832,9 +832,11 @@ impl Theme {
             //
             // (An earlier version of this note called the intended value `#6e7781`
             // and read it as a second, distinct grey one step from `#6e7681`. There
-            // is no such value here: `spark_track` is `#6e7681` and that was a
-            // transposition. The 1.49x was measured against the real one, so the
-            // conclusion held while the attribution did not.)
+            // is no such value here: `spark_track` is `#6e7681`, and the other was
+            // that value with a single digit slipped, `7` for `6` in the fourth
+            // place, which is why it read as a neighbour rather than as a typo. The
+            // 1.49x was measured against the real one, so the conclusion held while
+            // the attribution did not.)
             bar_track: rgb(0x65, 0x6c, 0x76),
             // **Left at `#57606a` deliberately, and not an oversight.** The move
             // above is paid for by the wash, and the heat strip does not sit on

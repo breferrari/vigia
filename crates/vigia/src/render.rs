@@ -3206,13 +3206,21 @@ pub fn render(
             ..area
         };
         // Counted in **files**, which is exactly what this region shows.
-        let region = painter.with_bar(
-            region,
-            bars,
-            view.list_top as u64,
-            body.list as u64,
-            view.files as u64,
-        );
+        let full = region;
+        let (region, bar) = painter.with_bar(region, bars, body.list as u64, view.files as u64);
+        // **Before the content here, and it does not matter which**, because a list
+        // row carries no wash: the bar's cell and the row's cells never overlap. The
+        // diff region below is the one where the order is load-bearing, and it draws
+        // the other way round for a reason stated there.
+        if bar.drawn() {
+            painter.scrollbar(
+                full,
+                bar,
+                view.list_top as u64,
+                body.list as u64,
+                view.files as u64,
+            );
+        }
         painter.list(region, view, area.width);
         y += body.list as u16;
     }
@@ -3267,10 +3275,9 @@ pub fn render(
         // short for a bar, and `with_bar` draws nothing when told a whole of
         // zero.
         let full = region;
-        let region = painter.with_bar(
+        let (region, bar) = painter.with_bar(
             region,
             bars,
-            view.rows_above as u64,
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
@@ -3290,12 +3297,19 @@ pub fn render(
         // row `x="8" width="884"`, the pane exactly, with the bar painting over
         // it.
         //
-        // **Nothing is reordered to achieve it, and that is why this is one
-        // line.** The bar is drawn above, and `Buffer::set_style` *merges*: the
-        // wash carries a background and no foreground, so it repaints the bar
-        // cell's background and leaves the track's colour and its glyph exactly
-        // where they were. The band ends up behind the bar rather than instead of
-        // it, which is what the picture draws.
+        // **The bar draws after the content here, and that order is the fix rather
+        // than a detail.** It drew first at the start of #239, on the reading that
+        // `Buffer::set_style` merges and so the wash would repaint only the
+        // background and leave the track's glyph and colour alone. That is true of
+        // `fg` and `bg` and **false of modifiers**: `Cell::set_style` inserts
+        // `add_modifier` unconditionally, so a wash carrying one handed it to the
+        // bar, and `VIGIA_THEME` lets a reader put `reverse` on a row wash. Round 2
+        // of #239's audit found it on the change that introduced it.
+        //
+        // Drawing the bar last puts the band underneath and lets
+        // [`Painter::bar_cell`] own the cell outright except for its background,
+        // which is where that guarantee now lives. The band ends up behind the bar
+        // rather than instead of it, which is what the picture draws.
         //
         // The reserve is untouched. It is about **glyph adjacency**, so that a
         // full-block thumb never reads as part of a `-6`, and a blank cell whose
@@ -3315,6 +3329,15 @@ pub fn render(
         // for that row to land on, so the seam stays and this paragraph is why.
         let washed = full.width;
         painter.body(region, washed, view, area.width);
+        if bar.drawn() {
+            painter.scrollbar(
+                full,
+                bar,
+                view.rows_above as u64,
+                u64::from(body.diff as u16),
+                view.total_rows as u64,
+            );
+        }
     }
 
     // **Last, over everything, and only if a reader asked.** `SPEC.md` §11.1's
@@ -4390,16 +4413,18 @@ impl Painter<'_> {
     /// **The deciding half now lives in [`bar_for`]**, which is the same
     /// consolidation one layer out: `regions` asks it too, so the pointer and the
     /// screen cannot disagree about whether a bar exists or where its track is.
-    fn with_bar(&mut self, region: Rect, wide: bool, at: u64, span: u64, of: u64) -> Rect {
+    fn with_bar(&mut self, region: Rect, wide: bool, span: u64, of: u64) -> (Rect, Bar) {
         let bar = bar_for(wide, region.height, span, of);
         if !bar.drawn() {
-            return region;
+            return (region, bar);
         }
-        self.scrollbar(region, bar, at, span, of);
-        Rect {
-            width: region.width.saturating_sub(BAR_WIDTH as u16),
-            ..region
-        }
+        (
+            Rect {
+                width: region.width.saturating_sub(BAR_WIDTH as u16),
+                ..region
+            },
+            bar,
+        )
     }
 
     /// Draw a one-column scrollbar down the right of `area`.
@@ -4583,8 +4608,34 @@ impl Painter<'_> {
     /// Clipped, for the reason the heat strip gives.
     fn bar_cell(&mut self, x: u16, y: u16, glyph: char, style: Style) {
         if let Some(cell) = self.buf.cell_mut((x, y)) {
-            cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]))
-                .set_style(style);
+            // **The band's background is kept; the bar owns everything else.**
+            //
+            // Written field by field rather than through `set_style`, and that is
+            // the whole point rather than a style preference. Since
+            // [#239](https://github.com/breferrari/vigia/issues/239) the row wash
+            // runs under this column, so the cell arrives already painted, and
+            // `Cell::set_style` would leave two of the wash's marks on it:
+            // `bg`, which is wanted, and any **modifier**, which is not.
+            // `ratatui-core-0.1.2/src/buffer/cell.rs:204` does
+            // `modifier.insert(add_modifier)` **unconditionally**, gated on nothing,
+            // so a wash carrying one hands it to the bar.
+            //
+            // That is user-reachable rather than theoretical: `VIGIA_THEME` accepts
+            // a trailing modifier word on every key `Theme::KEYS` names, row washes
+            // included, so `removed_row = on #45222a reverse` would put `REVERSED`
+            // on the thumb and swap the two colours every contrast gate in
+            // `tests/palette.rs` was written to prove. Found by round 2 of #239's
+            // own audit, on the change that introduced it.
+            //
+            // So the modifier is **assigned**, not merged, and the foreground is
+            // taken from the style with the background put back underneath. The bar
+            // then reads identically whatever the row behind it says, except for the
+            // one field it deliberately borrows.
+            let behind = cell.bg;
+            cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]));
+            cell.fg = style.fg.unwrap_or(cell.fg);
+            cell.bg = behind;
+            cell.modifier = style.add_modifier;
         }
     }
 
