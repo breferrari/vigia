@@ -1,0 +1,63 @@
+%YAML 1.2
+---
+# Vendored for vigia by #235. Provenance (SPEC.md section 6):
+#   upstream: https://github.com/onerbs/sublime-v
+#   pinned:   e4b694043225b10d008cc041247acc3c5e059d30
+#   path:     Syntaxes/V Module.sublime-syntax
+#   licence:  MIT
+name: V Module
+scope: source.vmod
+file_extensions: [v.mod]
+
+contexts:
+  main:
+    - match: \b(Module)\b
+      scope: keyword.language.vmod
+    - match: \{
+      scope: punctuation.definition.block.begin.vmod
+      push:
+        - meta_scope: meta.module.vmod
+        - match: \b(author|dependencies|description|license|name|repo_url|version)\b
+          scope: entity.name.tag.vmod
+        - include: Value
+        - match: \[
+          scope: punctuation.definition.list.begin.vmod
+          push:
+            - meta_scope: meta.dependencies.vmod
+            - include: Value
+            - match: \]
+              scope: punctuation.definition.list.end.vmod
+              pop: true
+        - match: \}
+          scope: punctuation.definition.block.end.vmod
+          pop: true
+
+  Value:
+    - match: '[:,]'
+      scope: punctuation.separator.vmod
+    - match: \b(\w+)\b
+      scope: variable.other.vmod
+    - include: StringSingle
+    - include: StringDouble
+
+  StringSingle:
+    - match: \'
+      scope: punctuation.definition.string.begin.vmod
+      push:
+      - meta_scope: meta.string.vmod string.quoted.single.vmod
+      - match: \\\'
+        scope: constant.character.escape.vmod
+      - match: \'
+        scope: punctuation.definition.string.end.vmod
+        pop: true
+
+  StringDouble:
+    - match: \"
+      scope: punctuation.definition.string.begin.vmod
+      push:
+      - meta_scope: meta.string.vmod string.quoted.double.vmod
+      - match: \\\"
+        scope: constant.character.escape.vmod
+      - match: \"
+        scope: punctuation.definition.string.end.vmod
+        pop: true

@@ -74,6 +74,11 @@ const RULED: &[(&str, &str)] = &[
     ("env", "DotENV"),
     ("gitignore", "Git Ignore"),
     ("go.mod", "Gomod"),
+    // The locally vendored tail (assets/syntaxes/), each pinned upstream.
+    ("V", "V"),
+    ("v.mod", "V Module"),
+    ("Gleam", "Gleam"),
+    ("PowerShell", "PowerShell"),
     // Covered before #235, and covered still: the set may only grow.
     ("Rust", "Rust"),
     ("Python", "Python"),
@@ -105,7 +110,7 @@ const RULED: &[(&str, &str)] = &[
 /// that changes the set moves this number, and moving it is a deliberate edit
 /// in the same commit as the upgrade, with the diff of names read rather than
 /// assumed. The "may not silently drop" half is [`RULED`].
-const PINNED_COUNT: usize = 213;
+const PINNED_COUNT: usize = 217;
 
 #[test]
 fn every_ruled_format_is_in_the_dump_and_the_count_is_pinned() {
@@ -159,7 +164,8 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
             continue;
         }
         let text = std::fs::read_to_string(&path).expect("read a vendored grammar");
-        let def = SyntaxDefinition::load_from_str(&text, true, None)
+        let stem = path.file_stem().and_then(|s| s.to_str());
+        let def = SyntaxDefinition::load_from_str(&text, true, stem)
             .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
 
         for (context_name, context) in &def.contexts {
@@ -190,4 +196,335 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
         })
         .unwrap_or(0);
     assert_eq!(checked, listed, "a vendored grammar was skipped");
+}
+
+/// One ruled format's snippet: a path, optionally a first line, a few lines
+/// of representative source, and the least number of distinct non-Plain
+/// classes those lines must reach.
+struct Snippet {
+    format: &'static str,
+    path: &'static str,
+    first_line: Option<&'static str>,
+    lines: &'static [&'static str],
+    min_classes: usize,
+}
+
+const fn snip(
+    format: &'static str,
+    path: &'static str,
+    lines: &'static [&'static str],
+    min_classes: usize,
+) -> Snippet {
+    Snippet {
+        format,
+        path,
+        first_line: None,
+        lines,
+        min_classes,
+    }
+}
+
+/// A representative snippet per ruled format. Three distinct classes is the
+/// default bar — comment, string and one structural class is what "this
+/// language highlights" means at minimum — and the rows below it carry the
+/// measured reason.
+const SNIPPETS: &[Snippet] = &[
+    snip("TypeScript", "src/app.ts", &[
+        "// greet",
+        "const n: number = 42;",
+        "export function greet(name: string): string {",
+        "  return name;",
+        "}",
+    ], 3),
+    snip("TSX", "src/App.tsx", &[
+        "// view",
+        "const n = 42;",
+        "export const App = () => <div className=\"a\">{n}</div>;",
+    ], 3),
+    snip("JSX", "src/App.jsx", &[
+        "// view",
+        "const n = 42;",
+        "export const App = () => <div className=\"a\">{n}</div>;",
+    ], 3),
+    snip("Kotlin", "Main.kt", &[
+        "// entry",
+        "fun main() {",
+        "    val n = 42",
+        "    println(\"hello\")",
+        "}",
+    ], 3),
+    snip("Swift", "Sources/App.swift", &[
+        "// app",
+        "func greet(name: String) -> Int {",
+        "    let n = 42",
+        "    return n",
+        "}",
+    ], 3),
+    snip("Dart", "lib/main.dart", &[
+        "// entry",
+        "int main() {",
+        "  var n = 42;",
+        "  print('hi');",
+        "}",
+    ], 3),
+    snip("PowerShell", "deploy.ps1", &[
+        "# deploy",
+        "function Get-Thing {",
+        "    $count = 42",
+        "    Write-Output \"hi\"",
+        "}",
+    ], 3),
+    snip("Elixir", "lib/app.ex", &[
+        "# mod",
+        "defmodule App do",
+        "  def go, do: IO.puts(\"hi\")",
+        "end",
+    ], 3),
+    snip("Julia", "calc.jl", &[
+        "# calc",
+        "function f(x)",
+        "    return x * 42",
+        "end",
+        "s = \"hi\"",
+    ], 3),
+    snip("Zig", "src/main.zig", &[
+        "// entry",
+        "const std = @import(\"std\");",
+        "pub fn main() void {",
+        "    const n: u32 = 42;",
+        "    _ = n;",
+        "}",
+    ], 3),
+    snip("Nim", "app.nim", &[
+        "# app",
+        "proc greet(name: string): int =",
+        "  result = 42",
+        "echo \"hi\"",
+    ], 3),
+    snip("Crystal", "app.cr", &[
+        "# app",
+        "def greet(name : String)",
+        "  42",
+        "end",
+        "puts \"hi\"",
+    ], 3),
+    snip("F#", "App.fs", &[
+        "// app",
+        "let greet name =",
+        "    let n = 42",
+        "    sprintf \"hi %s\" name",
+    ], 3),
+    snip("Solidity", "Token.sol", &[
+        "// SPDX-License-Identifier: MIT",
+        "pragma solidity ^0.8.0;",
+        "contract Token {",
+        "    uint256 total = 42;",
+        "}",
+    ], 3),
+    snip("V", "cli/main.v", &[
+        "// entry",
+        "fn main() {",
+        "    n := 42",
+        "    println('hi')",
+        "}",
+    ], 3),
+    snip("Odin", "main.odin", &[
+        "package main",
+        "// entry",
+        "main :: proc() {",
+        "    n := 42",
+        "    s := \"hi\"",
+        "}",
+    ], 3),
+    snip("Elm", "src/Main.elm", &[
+        "-- main",
+        "module Main exposing (main)",
+        "answer : Int",
+        "answer = 42",
+        "greet = \"hi\"",
+    ], 3),
+    snip("Gleam", "src/app.gleam", &[
+        "// app",
+        "pub fn main() {",
+        "  let n = 42",
+        "  io.println(\"hi\")",
+        "}",
+    ], 3),
+    snip("SCSS", "styles/site.scss", &[
+        "// vars",
+        "$primary: #333;",
+        ".card {",
+        "  color: $primary;",
+        "  margin: 4px;",
+        "}",
+    ], 3),
+    snip("Sass", "styles/site.sass", &[
+        "// vars",
+        "$primary: #333",
+        ".card",
+        "  color: $primary",
+    ], 3),
+    snip("Less", "styles/site.less", &[
+        "// vars",
+        "@primary: #333;",
+        ".card { color: @primary; }",
+    ], 3),
+    snip("Vue", "src/App.vue", &[
+        "<template>",
+        "  <div class=\"app\">hi</div>",
+        "</template>",
+        "<script>",
+        "export default { n: 42 }",
+        "</script>",
+    ], 3),
+    snip("Svelte", "src/App.svelte", &[
+        "<script>",
+        "  let n = 42;",
+        "</script>",
+        "<div class=\"app\">{n}</div>",
+    ], 3),
+    snip("TOML", "Cargo.toml", &[
+        "# manifest",
+        "[package]",
+        "name = \"vigia\"",
+        "version = \"0.19.0\"",
+    ], 3),
+    snip("INI", "config.ini", &[
+        "; config",
+        "[server]",
+        "host = \"localhost\"",
+        "port = 8080",
+    ], 2),
+    snip("Protobuf", "api.proto", &[
+        "// api",
+        "syntax = \"proto3\";",
+        "message Ping {",
+        "  int32 id = 1;",
+        "}",
+    ], 3),
+    snip("GraphQL", "schema.graphql", &[
+        "# schema",
+        "type Query {",
+        "  user(id: ID!): String",
+        "}",
+    ], 3),
+    snip("Terraform", "infra/main.tf", &[
+        "# infra",
+        "resource \"aws_s3_bucket\" \"b\" {",
+        "  bucket = \"name\"",
+        "  size   = 42",
+        "}",
+    ], 3),
+    snip("Dockerfile", "Dockerfile", &[
+        "# build",
+        "FROM rust:1.85",
+        "RUN cargo build --release",
+        "ENV PORT=8080",
+    ], 2),
+    snip("CMake", "CMakeLists.txt", &[
+        "# build",
+        "cmake_minimum_required(VERSION 3.20)",
+        "project(vigia)",
+        "set(SRC \"main.c\")",
+    ], 3),
+    snip("Nix", "default.nix", &[
+        "# drv",
+        "{ pkgs }:",
+        "pkgs.stdenv.mkDerivation {",
+        "  name = \"vigia-0.1\";",
+        "}",
+    ], 3),
+    snip("env", ".env", &[
+        "# secrets",
+        "PORT=8080",
+        "NAME=\"vigia\"",
+    ], 2),
+    snip("gitignore", ".gitignore", &[
+        "# artifacts",
+        "target/",
+        "*.log",
+    ], 2),
+    snip("go.mod", "go.mod", &[
+        "// module",
+        "module example.com/app",
+        "go 1.22",
+        "require example.com/dep v1.2.3",
+    ], 3),
+    // The nearest-grammar approximations (SPEC §6 records each gap): the bar
+    // is the base grammar's, because that is the whole of what they buy.
+    snip("Astro (as HTML)", "src/pages/index.astro", &[
+        "<!-- page -->",
+        "<div class=\"app\">hi</div>",
+    ], 2),
+    snip("Bicep (as JavaScript)", "infra/main.bicep", &[
+        "// infra",
+        "var total = 42",
+        "param name string = 'x'",
+    ], 3),
+    snip("MDX (as Markdown)", "docs/post.mdx", &[
+        "# A heading",
+        "Some **bold** and `code` here.",
+    ], 2),
+    snip("Mojo (as Python)", "kernels/matmul.mojo", &[
+        "# kernel",
+        "def matmul(n):",
+        "    return n * 42",
+    ], 3),
+];
+
+/// Parse every snippet through the crate's own public path — the same
+/// resolution, the same scope table, the same parser a frame uses — and
+/// assert the spread. A resolution-only test would pass while a language
+/// draws plain, which is #235's second half.
+#[test]
+fn every_ruled_format_reaches_a_spread_of_classes() {
+    use vigia_core::{Class, Highlighter, Hunk, Line, LineKind};
+
+    let mut failures = Vec::new();
+    for snippet in SNIPPETS {
+        let hunk = Hunk {
+            old_start: 0,
+            old_lines: 0,
+            new_start: 1,
+            new_lines: snippet.lines.len() as u32,
+            lines: snippet
+                .lines
+                .iter()
+                .map(|text| Line {
+                    kind: LineKind::Added,
+                    text: (*text).to_owned(),
+                })
+                .collect(),
+        };
+
+        let mut highlighter = Highlighter::new();
+        let mut classes = HashSet::new();
+        {
+            let mut pass = highlighter.pass();
+            for index in 0..hunk.lines.len() {
+                for span in pass.spans(snippet.path, 0, &hunk, index, snippet.first_line) {
+                    if span.class != Class::Plain {
+                        classes.insert(format!("{:?}", span.class));
+                    }
+                }
+            }
+        }
+
+        if classes.len() < snippet.min_classes {
+            failures.push(format!(
+                "{} ({}): {} distinct classes {:?}, needs {}",
+                snippet.format,
+                snippet.path,
+                classes.len(),
+                classes,
+                snippet.min_classes,
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "formats the ruling covers that do not actually colour:\n{}",
+        failures.join("\n"),
+    );
 }

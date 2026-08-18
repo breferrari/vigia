@@ -101,9 +101,13 @@ fn load_extras(dir: &Path) -> Vec<SyntaxDefinition> {
         .iter()
         .map(|path| {
             let text = std::fs::read_to_string(path).expect("read a vendored grammar");
+            // The file stem as the fallback name: `name:` is optional in the
+            // format (Sublime derives it from the filename), and a grammar
+            // that loads as "Unnamed" is unfindable by every by-name rule.
+            let stem = path.file_stem().and_then(|s| s.to_str());
             // `true` for lines-include-newline, matching the newlines variant
             // of the base set and the `\n` the highlighter appends per line.
-            let def = SyntaxDefinition::load_from_str(&text, true, None)
+            let def = SyntaxDefinition::load_from_str(&text, true, stem)
                 .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
             let bad = incompatible_patterns(&def);
             assert!(

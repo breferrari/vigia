@@ -1230,9 +1230,32 @@ const AMBIGUOUS: [(&str, &str); 5] = [
     ("jsx", "TypeScriptReact"),
 ];
 
-/// The grammar for `path`, by `SPEC.md` §6's four steps: the ambiguity rules,
-/// the whole file name (with a leading-dot retry), the extension, and the
-/// file's first line.
+/// Formats whose own grammar this stack cannot carry, resolved to the nearest
+/// grammar in the dump rather than to nothing. `SPEC.md` §6 records each gap
+/// with its reason; the short form:
+///
+/// - Astro's and Bicep's upstream grammars are ST4 `version: 2` files built on
+///   `extends:` inheritance, which `syntect` does not implement — and each
+///   extends exactly the grammar its row names, so the approximation is the
+///   grammar's own base.
+/// - Mojo has no `.sublime-syntax` anywhere, and MDX's only real one carries
+///   no licence to vendor under; both languages are supersets of the grammar
+///   named.
+///
+/// Consulted **after** ordinary resolution fails, so the day a real grammar
+/// for one of these lands in the dump it wins without this table changing —
+/// an approximation must never outrank the real thing.
+const NEAREST: [(&str, &str); 5] = [
+    ("astro", "HTML"),
+    ("bicep", "JavaScript"),
+    ("mdx", "Markdown"),
+    ("mojo", "Python"),
+    ("🔥", "Python"),
+];
+
+/// The grammar for `path`, by `SPEC.md` §6's five steps: the ambiguity rules,
+/// the whole file name (with a leading-dot retry), the extension, the
+/// nearest-grammar approximations of [`NEAREST`], and the file's first line.
 ///
 /// Whole name **before** extension because it is the more specific claim:
 /// `CMakeLists.txt` is registered whole by the CMake grammar, and looking up
@@ -1285,6 +1308,16 @@ fn syntax_for<'s>(
 
     if let Some(syntax) = ext.and_then(|ext| syntaxes.find_syntax_by_extension(ext)) {
         return Some(syntax);
+    }
+
+    if let Some(ext) = ext {
+        for (candidate, grammar) in &NEAREST {
+            if ext == *candidate
+                && let Some(syntax) = syntaxes.find_syntax_by_name(grammar)
+            {
+                return Some(syntax);
+            }
+        }
     }
 
     first_line.and_then(|line| syntaxes.find_syntax_by_first_line(line))
@@ -1636,6 +1669,24 @@ mod tests {
         // And without a first line the same path stays plain, which §11.1
         // rules is ordinary rather than an error.
         assert_eq!(grammar_of("scripts/deploy", None), "<none>");
+    }
+
+    /// The nearest-grammar approximations: formats whose own grammar this
+    /// stack cannot carry, each resolved to the grammar its upstream builds on
+    /// (or the language it is a superset of) rather than to nothing. §6
+    /// records the gaps.
+    #[test]
+    fn a_gap_format_resolves_to_its_nearest_grammar() {
+        assert_eq!(grammar_of("src/pages/index.astro", None), "HTML");
+        assert_eq!(grammar_of("infra/main.bicep", None), "JavaScript");
+        assert_eq!(grammar_of("docs/post.mdx", None), "Markdown");
+        assert_eq!(grammar_of("kernels/matmul.mojo", None), "Python");
+        assert_eq!(grammar_of("kernels/matmul.🔥", None), "Python");
+        // And the ruled formats that DO have their own grammar now: the
+        // survey's headline plus the whole vendored tail.
+        assert_eq!(grammar_of("cli/main.v", None), "V");
+        assert_eq!(grammar_of("src/app.gleam", None), "Gleam");
+        assert_eq!(grammar_of("deploy.ps1", None), "PowerShell");
     }
 
     /// Why the two sides are parsed apart.
