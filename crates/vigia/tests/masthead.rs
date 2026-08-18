@@ -74,6 +74,19 @@ fn drawn_ink(row: &str) -> usize {
     row.chars().filter(|glyph| !glyph.is_whitespace()).count()
 }
 
+/// Blank columns before a drawn row's first glyph, which is the pane's inset.
+///
+/// **Named because two gates recover it and one of them had hand-ported the
+/// other.** What counts as blank is one definition, and a copy adapted from
+/// `&str` to `&[char]` is the surface it drifts across: change it in the gate
+/// that reads the band's left edge and the gate that locates a column by index
+/// keeps the old answer, reading the wrong cell without failing.
+fn drawn_inset(row: &str) -> usize {
+    row.chars()
+        .take_while(|glyph| glyph.is_whitespace())
+        .count()
+}
+
 /// Changed files in every fixture here, which is what `assets/preview.svg` draws.
 const FILES: usize = 3;
 
@@ -397,15 +410,92 @@ fn the_band_reaches_both_edges_of_its_slot() {
         // precisely where the scrollbar's reserve begins. Counted in `char`s on
         // both sides, since a byte length would disagree the moment a glyph is
         // not ASCII.
-        let last = rows.last().expect("a band row");
-        let inset = last
-            .chars()
-            .take_while(|glyph| glyph.is_whitespace())
-            .count();
+        let inset = drawn_inset(rows.last().expect("a band row"));
         assert_eq!(
             widest,
             usize::from(width) - BAR_COLUMNS,
             "at {width} columns the band did not end at the bar's reserve,              inset {inset}"
         );
     }
+}
+
+/// Two columns of known height against one peak, which is what #225 needed.
+///
+/// **Mixed rather than uniform, and that is the whole point of the fixture.**
+/// The gate withdrawn during [#159](https://github.com/breferrari/vigia/issues/159)
+/// used a series that was full everywhere, where every row sits at its ceiling
+/// and flattening the stack changes nothing, so it passed against the very
+/// mutation it was written for.
+///
+/// `Churn::projected` maps a column onto its own share of the samples, so one
+/// sample per column is enough to set that column's total: the first is the peak
+/// and the second is a **quarter** of it. The index is that share rather than the
+/// eight it happens to be, since a change to either constant would otherwise
+/// slide the quarter into a neighbouring column and leave the fixture reading a
+/// bar it was not written for.
+const QUARTERED: [u32; HISTORY_SAMPLES] = {
+    let mut s = [0; HISTORY_SAMPLES];
+    s[0] = 16;
+    s[HISTORY_SAMPLES / GRAPH_COLUMNS] = 4;
+    s
+};
+
+/// The eighth-block ramp, restated for [`GRAPH_COLUMNS`]'s reason.
+const RAMP: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+/// Rows of churn the band draws, restated for [`GRAPH_COLUMNS`]'s reason.
+///
+/// Load bearing in the gate below rather than incidental: two rows of an
+/// eight-rung ramp is a sixteen-level scale, which is what makes a quarter of the
+/// peak land on the ramp's fourth rung exactly.
+const GRAPH_ROWS: usize = 2;
+
+#[test]
+fn the_band_stacks_its_rows_from_the_bottom() {
+    // **[#225](https://github.com/breferrari/vigia/issues/225).** Every other
+    // band gate reads presence, row count, run count or blankness, and none of
+    // them reads what a drawn column's glyph *is*, so the hero element of the
+    // pane could stack arbitrarily and only an eye would catch it. Three
+    // mutations survived the whole suite on that.
+    let rows = band_strip(WIDE, QUARTERED);
+    // The precondition the rungs below are derived from, asserted rather than
+    // assumed: a third row would make a quarter of the peak level six of
+    // twenty-four and every expected glyph here wrong.
+    assert_eq!(rows.len(), GRAPH_ROWS, "the band drew the wrong row count");
+    let strip = rows.join("\n");
+    // `band` draws bottom up, so `row` counts from the baseline while the buffer
+    // counts down from the top: the last string is the baseline.
+    let upper: Vec<char> = rows[0].chars().collect();
+    let base: Vec<char> = rows[1].chars().collect();
+
+    // Derived from the drawn row rather than restated, the way
+    // `the_band_reaches_both_edges_of_its_slot` already derives it: the band
+    // runs from the pane's inset to where the scrollbar's reserve begins.
+    let span = usize::from(WIDE) - BAR_COLUMNS - drawn_inset(&rows[1]);
+    let at = |column: usize| drawn_inset(&rows[1]) + column * span / GRAPH_COLUMNS;
+
+    // The peak column fills both rows, which is what makes the assertions below
+    // about the quarter column mean something: a band that drew nothing at all
+    // would satisfy "the row above is blank" on its own. Compared as a pair so a
+    // failure prints both halves rather than stopping at the first.
+    assert_eq!(
+        (base[at(0)], upper[at(0)]),
+        (RAMP[7], RAMP[7]),
+        "the tallest column did not fill both rows:\n{strip}"
+    );
+
+    // A quarter of the peak over two rows of an eight-rung ramp is level four of
+    // sixteen, so it draws the ramp's fourth rung on the baseline and **nothing
+    // at all** above it. Both halves are load bearing: the glyph catches a ramp
+    // shifted by one, and the blank catches a stack that climbs by a level
+    // instead of by a whole ramp.
+    assert_eq!(
+        base[at(1)],
+        RAMP[3],
+        "a column at a quarter of the peak drew the wrong rung:\n{strip}"
+    );
+    assert!(
+        upper[at(1)].is_whitespace(),
+        "a column at a quarter of the peak spilled into the row above it:\n{strip}"
+    );
 }
