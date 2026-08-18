@@ -794,7 +794,7 @@ impl Theme {
             // and the gap between them is what keeps the ruling one line up true:
             // the track is context and the thumb is the reading.
             //
-            // **`#6e7781` from 2026-08-18, because the column it sits on stopped
+            // **`#656c76` from 2026-08-18, because the column it sits on stopped
             // being the pane** ([#239](https://github.com/breferrari/vigia/issues/239)).
             // Every ratio above is measured against `#0d1117`, which was true of
             // the bar's cell while the row wash stopped one column short of it.
@@ -817,17 +817,24 @@ impl Theme {
             // **`#656c76` is a value this palette did not previously hold, and the
             // plan for #239 said no new colour would be needed. That was wrong and
             // this is where it was found.** The intended value was `spark_track`'s
-            // `#6e7781`, on §5.3's rule that an element earns a colour by taking a
-            // role. It fails `palette.rs`'s pre-existing separation gate, which
-            // requires the thumb to outrank the track by half again, and so does
-            // Primer's `#6e7681` one step below it: both land at **1.49x** where
-            // 1.50 is the floor. The window is genuinely narrow once the track has
-            // to clear 2.0:1 on the *added* row and stay under the thumb by half
-            // again on the same row, which bounds it to roughly 2.0 and 2.61 there,
-            // and no grey already in this palette sits inside it. So the value is
-            // chosen by the constraints rather than by eye, and it is Primer's own
-            // `#656c76` rather than an invention, borrowed from the light scale the
-            // way this palette already borrows `#7d8590` the other way.
+            // own `#6e7681`, on §5.3's rule that an element earns a colour by
+            // taking a role rather than by being distinct. It fails `palette.rs`'s
+            // pre-existing separation gate, which requires the thumb to outrank the
+            // track by half again: it lands at **1.49x** where 1.50 is the floor.
+            //
+            // The window is genuinely narrow. Once the track has to clear 2.0:1 on
+            // the *added* row and stay under the thumb by half again on that same
+            // row, it is bounded to roughly 2.0 and 2.61 there, and **no grey this
+            // palette already holds sits inside it**: `#57606a` is below the floor
+            // at 1.88, and `#6e7681` and everything above it breaks the separation.
+            // So the value is chosen by those two constraints rather than by eye,
+            // and it is stated as new rather than dressed up as borrowed.
+            //
+            // (An earlier version of this note called the intended value `#6e7781`
+            // and read it as a second, distinct grey one step from `#6e7681`. There
+            // is no such value here: `spark_track` is `#6e7681` and that was a
+            // transposition. The 1.49x was measured against the real one, so the
+            // conclusion held while the attribution did not.)
             bar_track: rgb(0x65, 0x6c, 0x76),
             // **Left at `#57606a` deliberately, and not an oversight.** The move
             // above is paid for by the wash, and the heat strip does not sit on

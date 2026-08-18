@@ -5640,33 +5640,36 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
 ///
 /// The reserve is untouched and still asserted below. It is about **glyph
 /// adjacency**, not about background, so nothing it protects moves.
+/// The same draw as [`screen`], on the palette that actually tints a row.
+///
+/// `Theme::default()` is the sixteen named colours, which draw **no row tint at any
+/// depth** by the ruling in `theme.rs`. Rendering a wash gate through it would
+/// assert that a wash which was never painted did not reach a column, which is the
+/// shape §7 keeps finding: a gate that cannot fail.
+///
+/// Module scope rather than nested, because two gates need it: one reads a single
+/// washed row, the other sweeps every row the bar draws on.
+fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    let theme = vigia::Theme::dark();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                view,
+                &theme,
+                Glyphs::default(),
+                chrome,
+            );
+        })
+        .expect("draw");
+    terminal.backend().clone()
+}
+
 #[test]
 fn a_wash_runs_under_the_scrollbar_column() {
-    /// The same draw as [`screen`], on the palette that actually tints a row.
-    ///
-    /// `Theme::default()` is the sixteen named colours, which draw **no row tint
-    /// at any depth** by the ruling in `theme.rs`. Rendering this gate through it
-    /// would assert that a wash which was never painted did not reach a column,
-    /// which is the shape §7 keeps finding: a gate that cannot fail.
-    fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend {
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
-        let theme = vigia::Theme::dark();
-        terminal
-            .draw(|f| {
-                let area = f.area();
-                vigia::render(
-                    f.buffer_mut(),
-                    area,
-                    view,
-                    &theme,
-                    Glyphs::default(),
-                    chrome,
-                );
-            })
-            .expect("draw");
-        terminal.backend().clone()
-    }
-
     let width = 64u16;
     let view = View {
         total_rows: 400,
@@ -5739,8 +5742,8 @@ fn a_wash_runs_under_the_scrollbar_column() {
     // the wash means the row's rect now covers the bar, and a future change drawing
     // text rather than only a background into that rect would erase the track.
     assert_eq!(
-        buffer[(width - 1, washed)].symbol(),
-        "\u{2502}",
+        buffer[(width - 1, washed)].symbol().chars().next(),
+        Some(BAR_GLYPHS[0]),
         "the bar column carries the band but no track glyph, so something drew \
          content into the column the bar owns"
     );
@@ -5767,6 +5770,128 @@ fn a_wash_runs_under_the_scrollbar_column() {
         buffer[(width - 2, washed)].symbol(),
         " ",
         "the column reserved beside the bar drew a glyph"
+    );
+}
+
+/// Every row the bar draws on carries that row's own background, buttons included.
+///
+/// The gate above reads **one** cell, on a mid-track row of a stepped bar, and that
+/// is three coverage holes wide. Round 1 of #239's audit named two and a probe
+/// found the third while proving the second.
+///
+/// The step buttons sit on the region's **first and last** rows (`Bar::Stepped`),
+/// which the track loop never reaches and a separate arm draws. The gate above ran
+/// at one height, so a bar below `STEP_FLOOR`, which has no buttons at all, was
+/// never drawn against a widened wash. And the obvious fixture puts both buttons on
+/// rows that happen to be *unwashed*, a file heading at the top and blank filler at
+/// the bottom, so a sweep written against it would report covering the buttons while
+/// never once painting a band across one.
+///
+/// So this sweeps rather than samples, over fixtures chosen to force the case: for
+/// every row of the bar's column, the cell's background must equal **that row's**
+/// background and its glyph must be one the bar owns. That is the invariant in a
+/// sentence, where the gate above is its worked example, and it holds for the track,
+/// the thumb and both buttons without naming which is which.
+///
+/// The `washed_buttons` counter is the part that must not rot. Without it the two
+/// fixtures below could stop overlapping a button with a changed row through some
+/// unrelated layout change, and this gate would go on passing while covering
+/// exactly what the naive version covered.
+#[test]
+fn every_row_of_the_bar_carries_its_own_rows_background() {
+    let changed = |n: u32| {
+        [
+            line(LineKind::Added, n, "    let fresh = self.pending.take();"),
+            line(LineKind::Removed, n, "    let stale = self.pending.take();"),
+        ]
+    };
+    let many: Vec<Row> = (38..58).flat_map(changed).collect();
+
+    // **Two fixtures, and the second exists only to wash a button.** The first
+    // opens on a file heading, which is what a diff scrolled to a file boundary
+    // looks like and leaves the top button unwashed. The second opens mid-file on a
+    // changed line, which is what a diff scrolled *into* a file looks like, and puts
+    // a band under the top button. Both overflow the region so the bottom button
+    // lands on a changed row rather than on filler.
+    let mut heading = vec![file("src/engine/watch.rs", 42, 7)];
+    heading.extend(many.iter().cloned());
+
+    let fixtures = [
+        ("opening on a heading", heading),
+        ("opening mid-file", many),
+    ];
+
+    let width = 64u16;
+    let mut washed_buttons = 0usize;
+
+    for (what, rows) in fixtures {
+        let view = View {
+            total_rows: 400,
+            rows_above: 40,
+            rows,
+            ..two_regions(1)
+        };
+
+        // **Two heights, and the short one is the point.** `Bar::Stepped` only
+        // appears above `STEP_FLOOR`; below it the bar is bare, which is a different
+        // draw path and the one the gate above never exercised.
+        for height in [12u16, 18] {
+            let backend = washed_screen(width, height, &view, &chrome());
+            let buffer = backend.buffer();
+
+            let mut bar_rows = 0usize;
+            let mut washed_rows = 0usize;
+
+            for y in 0..height {
+                let cell = &buffer[(width - 1, y)];
+                let Some(glyph) = cell.symbol().chars().next() else {
+                    continue;
+                };
+                if !BAR_GLYPHS.contains(&glyph) {
+                    continue;
+                }
+                bar_rows += 1;
+
+                // That row's own background, read from a content column rather than
+                // restated. Column 1 sits in the pane's margin, which the wash
+                // bleeds under wherever the row has one.
+                let behind = buffer[(1, y)].bg;
+                if behind != ratatui::style::Color::Reset {
+                    washed_rows += 1;
+                    if glyph == BAR_GLYPHS[2] || glyph == BAR_GLYPHS[3] {
+                        washed_buttons += 1;
+                    }
+                }
+
+                assert_eq!(
+                    cell.bg, behind,
+                    "{what} at {width}x{height}: the bar's cell on row {y} is \
+                     {:?} where the row behind it is {:?}, so the band does not \
+                     reach the bar on every row it crosses",
+                    cell.bg, behind
+                );
+            }
+
+            // Non-vacuity in two directions: the sweep must find a drawn bar at
+            // all, and at least one of its rows must actually carry a wash, or
+            // every comparison above was `Reset` against `Reset`.
+            assert!(
+                bar_rows >= 3,
+                "{what} at {width}x{height}: the sweep found {bar_rows} bar rows, \
+                 so it is not reading a drawn scrollbar and proves nothing"
+            );
+            assert!(
+                washed_rows > 0,
+                "{what} at {width}x{height}: no row the bar crosses was washed, so \
+                 every comparison above was Reset against Reset"
+            );
+        }
+    }
+
+    assert!(
+        washed_buttons > 0,
+        "no step button was ever drawn on a washed row, so the case round 1 of \
+         #239's audit named is not covered by these fixtures any more"
     );
 }
 

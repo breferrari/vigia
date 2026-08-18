@@ -594,7 +594,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | `App::chrome` takes four pointer marks positionally, and every new mark churns thirty call sites | [#191](https://github.com/breferrari/vigia/issues/191) |
 | ✅ | The churn band's heights are ungated, so three mutations to its stacking survive | [#225](https://github.com/breferrari/vigia/issues/225) |
 | ⬜ | WSL inside Windows Terminal gets no row wash, because `WT_SESSION` is read only on Windows | [#226](https://github.com/breferrari/vigia/issues/226) |
-| ⬜ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
+| ✅ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
 | ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ⬜ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
 | ⬜ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
