@@ -425,7 +425,29 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
     // status walk on the same wake has already warmed this metadata, so the
     // marginal syscall is free and run-to-run noise decides the order.
     let delta = weighed.saturating_sub(plain);
-    let allowed = I9_FRAME / 8;
+    // **An eighth was calibrated on one machine and the cost is host-dependent.**
+    // On the reference machine sizing is free: 18.43ms unsized against 17.93ms
+    // sized, the unsized arm slower. On `windows-latest` the same comparison is
+    // 6.36ms against 9.41ms, so sizing costs **3.04ms** there. The frame is much
+    // cheaper on that host, so the same syscalls are a far larger share of it, and
+    // "unmeasurable in situ" turned out to be a fact about one filesystem rather
+    // than about the change. CI is what found that, which is the whole reason a
+    // gate calibrated locally gets run on three platforms before it is believed.
+    //
+    // Half the frame, which tolerates the honest 3ms with room for a slower host
+    // and still catches what this gate is for: a `stat` that has become a read
+    // would be reading five hundred lines from each of two hundred and fifty six
+    // files, which is orders of magnitude rather than milliseconds.
+    let allowed = budget(I9_FRAME / 2);
+    // **No absolute claim here, and the attempt to add one is worth recording.**
+    // Asserting this frame holds I9 looked like the product-level statement the
+    // ratio never made, and it is measuring the wrong thing: this fixture is a
+    // hundred-file bulk rewrite inside the settle margin, which costs 18.43ms
+    // unsized on the reference machine, and I9 is the *steady state* budget.
+    // `what_a_bulk_rewrite_of_undrawn_files_costs` reports that shape and
+    // `the_frame_budget_holds_through_a_bulk_rewrite` gates it, both against the
+    // in-margin case rather than against I9. A bound that fails on correct code
+    // is worse than no bound, and this gate's job is the comparison.
     assert!(
         delta <= allowed,
         "sizing a {HISTORY_PATHS}-path burst added {delta:?} to the frame          ({plain:?} to {weighed:?}) against {allowed:?}, which is a `stat` that          has become a read or a walk rather than a syscall on metadata the status          walk has already warmed"

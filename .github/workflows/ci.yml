@@ -292,3 +292,61 @@ jobs:
           --test first_paint -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
+
+  # **The one check branch protection should require, and the reason it exists is
+  # an instrument that reported green while nothing had run**
+  # ([#236](https://github.com/breferrari/vigia/issues/236)).
+  #
+  # `gh pr checks --watch --fail-fast` exited 0 on a PR whose matrix had not
+  # started. It treats "every check currently attached to the head SHA is terminal
+  # and none failed" as done, and it cannot know more are about to attach. Three
+  # deliberate properties lined up to make that reachable: the jobs above skip on
+  # drafts, so a `skipped` check is normal here and indistinguishable from a
+  # passing one to anything counting failures; a second workflow also triggers on
+  # `pull_request`, so the PR is never checkless, which is the one state a human
+  # would notice; and pushing and marking ready in quick succession fires two runs,
+  # the second cancelling the first, which opens the window.
+  #
+  # This collapses the class rather than narrowing it. A cancelled run fails it, a
+  # skipped matrix fails it, a matrix job that never ran fails it, and a check list
+  # that does not *contain* it is visibly incomplete rather than quietly green.
+  # `SPEC.md` §7's rule reaching the review surface: a gate that cannot fail is
+  # indistinguishable from one that cannot be reached.
+  #
+  # **`if: always()` is what makes it a gate rather than a summary.** Without it
+  # the job inherits `needs`'s own skipping, so the one check that is supposed to
+  # notice an absent matrix would go absent with it, which is the failure it
+  # exists to catch wearing the fix's clothes.
+  #
+  # It carries no draft guard, deliberately. On a draft every `needs` job is
+  # skipped and this reports failure, which is correct: a draft has not been
+  # checked, and the check list should say so rather than showing seven skips that
+  # read as a clean run.
+  ci-complete:
+    name: ci complete
+    if: always()
+    needs: [lint, test, benches, pure-rust, musl]
+    runs-on: ubuntu-latest
+    steps:
+      # Every result, not just failures: `skipped` and `cancelled` are the two
+      # this exists for and neither is a failure. Printed before it is judged, so
+      # a red build says which leg was missing rather than only that one was.
+      - name: every leg ran and passed
+        run: |
+          echo 'lint=${{ needs.lint.result }}'
+          echo 'test=${{ needs.test.result }}'
+          echo 'benches=${{ needs.benches.result }}'
+          echo 'pure-rust=${{ needs.pure-rust.result }}'
+          echo 'musl=${{ needs.musl.result }}'
+          for result in \
+            '${{ needs.lint.result }}' \
+            '${{ needs.test.result }}' \
+            '${{ needs.benches.result }}' \
+            '${{ needs.pure-rust.result }}' \
+            '${{ needs.musl.result }}'
+          do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required leg reported '$result' rather than success"
+              exit 1
+            fi
+          done
