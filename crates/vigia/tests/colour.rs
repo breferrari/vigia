@@ -763,3 +763,134 @@ fn the_rungs_are_ordered_so_a_comparison_reads_as_a_capability() {
     // colours a terminal cannot show, an under-claim only looks flatter.
     assert_eq!(Depth::default(), Depth::Ansi16);
 }
+
+#[test]
+fn every_self_naming_term_answers() {
+    // **The sibling trap, one file over.** `tests/glyphs.rs` sweeps both of its
+    // name tables entry by entry, precisely because an entry that no case drives
+    // can rot without a gate noticing; this ladder swept neither. Five of the
+    // seven were gated incidentally by other rows and two, `contour` and `rio`,
+    // by nothing at all: deleting either survived the whole suite.
+    //
+    // Driven with nothing else in the environment, so the `TERM` entry is the
+    // only thing that can supply the answer and the floor under it is sixteen.
+    // Restated rather than imported, which is this file's standing rule: a gate
+    // reading the renderer's own table would agree with it by construction.
+    const SELF_NAMING: [&str; 7] = [
+        "alacritty",
+        "contour",
+        "foot",
+        "rio",
+        "wezterm",
+        "xterm-ghostty",
+        "xterm-kitty",
+    ];
+    for term in SELF_NAMING {
+        assert_eq!(
+            Depth::from_env(false, env(&[("TERM", term)])).expect("a rung"),
+            Depth::Truecolor,
+            "TERM={term} ships its own entry and has only ever drawn 24-bit"
+        );
+        // A suffixed variant is the same terminal, which is `names`' whole rule.
+        let variant = format!("{term}-direct");
+        assert_eq!(
+            Depth::from_env(false, env(&[("TERM", variant.as_str())])).expect("a rung"),
+            Depth::Truecolor,
+            "TERM={variant} is a variant of {term}"
+        );
+    }
+}
+
+#[test]
+fn every_named_program_answers() {
+    // The other half of the same gap: `program_depth`'s arms were reachable only
+    // through rows that used them as a *higher* signal something else had to
+    // lose to, so deleting `tabby` and five others survived.
+    //
+    // `Apple_Terminal` is the one entry that is not truecolour and it is the
+    // reason this table returns a rung rather than a bool, so it is named
+    // separately rather than swept with the rest.
+    for program in [
+        "ghostty",
+        "Hyper",
+        "iTerm.app",
+        "rio",
+        "Tabby",
+        "vscode",
+        "WarpTerminal",
+        "WezTerm",
+    ] {
+        assert_eq!(
+            Depth::from_env(false, env(&[("TERM_PROGRAM", program), ("TERM", "screen")]))
+                .expect("a rung"),
+            Depth::Truecolor,
+            "TERM_PROGRAM={program} names a terminal that draws 24-bit"
+        );
+    }
+    assert_eq!(
+        Depth::from_env(
+            false,
+            env(&[("TERM_PROGRAM", "Apple_Terminal"), ("TERM", "screen")])
+        )
+        .expect("a rung"),
+        Depth::Ansi256,
+        "Terminal.app rounds 24-bit to its own palette, which is why this table \
+         returns a rung"
+    );
+}
+
+#[test]
+fn a_256color_entry_is_matched_anywhere_in_the_name() {
+    // `contains` rather than `ends_with`, and swapping them survived. Real
+    // entries in this machine's own terminfo carry suffixes after the rung:
+    // `screen-256color-bce`, `screen-256color-bce-s`, `screen-256color-s`. The
+    // `-direct` twin one line above is gated by the `xterm-direct2` row; this
+    // one was gated by nothing.
+    for term in [
+        "screen-256color",
+        "screen-256color-bce",
+        "screen-256color-bce-s",
+        "xterm-256color-italic",
+    ] {
+        assert_eq!(
+            Depth::from_env(false, env(&[("TERM", term)])).expect("a rung"),
+            Depth::Ansi256,
+            "TERM={term} names the 256-colour rung"
+        );
+    }
+}
+
+#[test]
+fn wt_session_is_read_only_on_windows() {
+    // **Pinning what happens today rather than asserting it is right.** Windows
+    // Terminal exports `WT_SESSION` into WSL, where this binary is a Linux one
+    // and `cfg!(windows)` is false, so the promotion above does not fire and the
+    // rung comes from `TERM` instead. Dropping the `windows &&` flips that case,
+    // which is why it is a behaviour question rather than a dead guard, and it
+    // is filed rather than changed here: this row is a glyph ladder, not a
+    // colour ruling.
+    //
+    // Its glyph twin genuinely is equivalent, because every non-Windows path
+    // below it already answers braille.
+    assert_eq!(
+        Depth::from_env(false, env(&[("WT_SESSION", "abc")])).expect("a rung"),
+        Depth::Ansi16,
+        "off Windows the session variable is not read, so the floor applies"
+    );
+    assert_eq!(
+        Depth::from_env(true, env(&[("WT_SESSION", "abc")])).expect("a rung"),
+        Depth::Truecolor,
+        "on Windows it is the terminal naming itself"
+    );
+    // And the case a reader actually hits: WSL in Windows Terminal, whose TERM
+    // is what decides today.
+    assert_eq!(
+        Depth::from_env(
+            false,
+            env(&[("WT_SESSION", "abc"), ("TERM", "xterm-256color")])
+        )
+        .expect("a rung"),
+        Depth::Ansi256,
+        "WSL in Windows Terminal takes its rung from TERM"
+    );
+}
