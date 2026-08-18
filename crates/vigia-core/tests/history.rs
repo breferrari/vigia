@@ -249,8 +249,8 @@ fn the_window_is_exactly_the_buckets_it_is_divided_into() {
 /// Named for the reason [`base`] and [`bulk_paths`] are: the gates below both ask
 /// "did anything leak or vanish", and a spelled-out fold in each is the third
 /// copy this file would carry.
-fn total(drawn: &[u16; HISTORY_BUCKETS]) -> u32 {
-    drawn.iter().map(|&count| u32::from(count)).sum()
+fn total(drawn: &[u32; HISTORY_BUCKETS]) -> u32 {
+    drawn.iter().copied().sum()
 }
 
 /// A drawn column is the **sum** of the samples under it, not one of them.
@@ -281,7 +281,7 @@ fn a_drawn_bucket_is_the_sum_of_everything_written_inside_it() {
     }
 
     let drawn = history.churn("src/a.rs").expect("the path is tracked");
-    let newest = u32::from(drawn[HISTORY_BUCKETS - 1]);
+    let newest = drawn[HISTORY_BUCKETS - 1];
     assert_eq!(
         newest, writes,
         "the newest column holds {newest} of {writes} writes made inside it, so \
@@ -385,7 +385,7 @@ fn the_sparkline_is_already_at_the_ceiling_the_band_sets() {
 }
 
 /// The newest drawn bucket of a path, which is where a write just landed.
-fn newest(history: &History, path: &str) -> u16 {
+fn newest(history: &History, path: &str) -> u32 {
     *history
         .churn(path)
         .expect("the path is tracked")
@@ -494,4 +494,43 @@ fn the_peak_follows_the_weight_rather_than_the_write_count() {
         "a four-thousand-nine-hundred-byte write left the peak at {flat}, so \
          every column would still draw against a denominator that cannot move"
     );
+}
+
+/// Two large writes of different sizes stay different sizes.
+///
+/// **The ceiling is part of the unit, and changing the unit moved it.** Sixteen
+/// bits was ample while a sample counted writes: sixty-five thousand saves inside
+/// one second is not a thing anyone can do. It is one ordinary save of a lockfile
+/// once the unit is bytes, and two saves either side of that ceiling would both
+/// peg, become indistinguishable, and hold the peak at its maximum for the whole
+/// two-minute window, scaling every other row on screen to nothing. That is
+/// exactly the flattening [#232](https://github.com/breferrari/vigia/issues/232)
+/// exists to remove, re-entered through the type rather than through the count.
+///
+/// Both deltas here are past `u16::MAX`, so this is the gate that separates a
+/// `u32` sample from a `u16` one; nothing else in this file does.
+#[test]
+fn two_large_writes_of_different_sizes_do_not_both_peg() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/small.rs", Some(0)), ("src/large.rs", Some(0))], now);
+    history.record_sized(
+        [
+            ("src/small.rs", Some(100_000)),
+            ("src/large.rs", Some(300_000)),
+        ],
+        now,
+    );
+
+    let (small, large) = (
+        newest(&history, "src/small.rs"),
+        newest(&history, "src/large.rs"),
+    );
+    assert!(
+        large > small,
+        "a 300,000-byte write drew {large} against a 100,000-byte write's \
+         {small}, so both saturated and the graph cannot tell them apart"
+    );
+    assert_eq!((small, large), (1 + 100_000, 1 + 300_000));
 }

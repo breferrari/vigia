@@ -4977,7 +4977,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
 ///
 /// A builder rather than a constant, because the gates below each need a
 /// *different* bucket pattern and the pattern is the whole input under test.
-fn sparked(spark: [u16; HISTORY_BUCKETS]) -> View {
+fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
     View {
         rows: vec![Row::File(FileEntry {
             path: "a.rs".to_owned(),

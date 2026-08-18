@@ -2568,7 +2568,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         from: None,
         kind: 'M',
         churn: Some((u32::MAX, u32::MAX)),
-        spark: [u16::MAX; HISTORY_BUCKETS],
+        spark: [u32::MAX; HISTORY_BUCKETS],
         recency: Recency::Pulse,
         heat: [HeatBucket {
             added: u16::MAX,
@@ -2585,7 +2585,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         files: 2,
         top: Position::default(),
         read: 1,
-        peak: u16::MAX,
+        peak: u32::MAX,
         worktree_churn: Default::default(),
     };
 
@@ -3322,7 +3322,7 @@ fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
     // numerator at or above the ramp's length) and the upper one is live.
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[0] {
-        entry.spark = [u16::MAX; HISTORY_BUCKETS];
+        entry.spark = [u32::MAX; HISTORY_BUCKETS];
     }
     view.peak = 1;
 

@@ -325,7 +325,7 @@ impl Churn {
 #[derive(Debug, Clone)]
 struct Track {
     /// Oldest sample first, so the array projects left to right as written.
-    samples: [u16; HISTORY_SAMPLES],
+    samples: [u32; HISTORY_SAMPLES],
     /// Ordinal of the last tick that named this path.
     ///
     /// A counter rather than an [`Instant`], because the only question asked of
@@ -390,7 +390,7 @@ impl Track {
     /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
     /// past `u16` is already at the top of the ramp, and wrapping would draw the
     /// busiest file in the worktree as the quietest.
-    fn drawn(&self) -> [u16; HISTORY_BUCKETS] {
+    fn drawn(&self) -> [u32; HISTORY_BUCKETS] {
         // Sliced rather than zipped against `chunks`, which **truncates**: a
         // division that stopped being exact would silently drop the last group,
         // and the last group is the newest, so every fresh write would vanish
@@ -400,7 +400,7 @@ impl Track {
             self.samples[bucket * SAMPLES_PER_BUCKET..][..SAMPLES_PER_BUCKET]
                 .iter()
                 .copied()
-                .fold(0, u16::saturating_add)
+                .fold(0, u32::saturating_add)
         })
     }
 
@@ -413,12 +413,21 @@ impl Track {
     /// size can be measured counts what it moved instead, so a paste draws taller
     /// than a typo and the graph acquires the shape it was named for.
     ///
-    /// Saturating rather than wrapping: a path written 65,536 times inside one
-    /// sample, or moving that many bytes, is already at the top of the ramp, and
-    /// wrapping would draw the busiest file in the worktree as the quietest.
-    /// [`Track::drawn`] saturates again when it sums a column, for the same
-    /// reason one level up.
-    fn bump(&mut self, weight: u16) {
+    /// **A `u32` sample rather than a `u16` one, and the width is load bearing
+    /// now that the unit is bytes.** Sixteen bits was ample while a sample
+    /// counted writes: sixty-five thousand saves inside one second is not a
+    /// thing. It is one ordinary save of a lockfile once the unit is bytes, and
+    /// a sample that pegged there would put the peak at its ceiling for the
+    /// whole two-minute window and scale every other row to nothing, which is
+    /// the exact flattening [#232](https://github.com/breferrari/vigia/issues/232)
+    /// exists to remove, re-entered from the top. Four gigabytes in one second is
+    /// a bound a disk cannot reach.
+    ///
+    /// Saturating rather than wrapping even so, because the ceiling still exists
+    /// and wrapping past it would draw the busiest file in the worktree as the
+    /// quietest. [`Track::drawn`] saturates again when it sums a column, for the
+    /// same reason one level up.
+    fn bump(&mut self, weight: u32) {
         let newest = &mut self.samples[HISTORY_SAMPLES - 1];
         *newest = newest.saturating_add(weight.max(1));
     }
@@ -431,16 +440,30 @@ impl Track {
     /// reader can make as the quieter one.
     ///
     /// `None` for a size that could not be read, and for the first write of a
-    /// path: both mean there is no delta to take, and both fall back to the floor
-    /// rather than inventing a magnitude.
-    fn weigh(&mut self, bytes: Option<u64>) -> u16 {
-        let Some(now) = bytes else { return 1 };
-        let weight = match self.bytes {
-            Some(before) => u16::try_from(now.abs_diff(before)).unwrap_or(u16::MAX),
-            None => 1,
+    /// path: both mean there is no delta to take, and both fall back to
+    /// [`Track::bump`]'s floor rather than inventing a magnitude.
+    ///
+    /// **One call rather than a weigh-then-bump pair, because the two were never
+    /// valid apart.** Weighing without bumping advances the baseline and eats the
+    /// write, which is a silent loss; bumping without weighing leaves the
+    /// baseline at its first sighting forever, so every later write measures
+    /// against a size the file has not had for minutes. Both call sites did the
+    /// same two lines in the same order, which is a protocol rather than an API.
+    fn wrote(&mut self, bytes: Option<u64>) {
+        let weight = match (bytes, self.bytes) {
+            (Some(now), Some(before)) => {
+                self.bytes = Some(now);
+                u32::try_from(now.abs_diff(before)).unwrap_or(u32::MAX)
+            }
+            // A first sighting records the baseline and weighs nothing, so
+            // `bump`'s floor is the only place the minimum is stated.
+            (Some(now), None) => {
+                self.bytes = Some(now);
+                0
+            }
+            (None, _) => 0,
         };
-        self.bytes = Some(now);
-        weight
+        self.bump(weight);
     }
 }
 
@@ -479,7 +502,7 @@ pub struct History {
     tick: u64,
     /// When the newest **sample** opened, which is the grid the window rolls on.
     opened: Instant,
-    peak: u16,
+    peak: u32,
     /// Every tracked path added together, kept current by the walk that finds
     /// the peak. See [`History::worktree_churn`].
     worktree: Churn,
@@ -589,8 +612,7 @@ impl History {
 
             if let Some(track) = self.tracks.get_mut(path) {
                 track.tick = self.tick;
-                let weight = track.weigh(bytes);
-                track.bump(weight);
+                track.wrote(bytes);
                 continue;
             }
 
@@ -600,8 +622,7 @@ impl History {
             let mut track = Track::new(self.tick);
             // The first write of a path has no earlier size to differ from, so it
             // weighs the floor and leaves the baseline behind for the next one.
-            let weight = track.weigh(bytes);
-            track.bump(weight);
+            track.wrote(bytes);
             self.tracks.insert(path.to_owned(), track);
         }
 
@@ -621,7 +642,7 @@ impl History {
     /// would have made the array larger than a reference on every target and
     /// pushed the projection out to every caller, where each would have had to
     /// agree about it.
-    pub fn churn(&self, path: &str) -> Option<[u16; HISTORY_BUCKETS]> {
+    pub fn churn(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
         self.tracks.get(path).map(Track::drawn)
     }
 
@@ -651,7 +672,7 @@ impl History {
     /// a track, so a peak of zero means every bucket is empty and every one of
     /// them is still drawn. The constraint this states is arithmetic and belongs
     /// here; what to draw is the shell's and belongs in `SPEC.md` §5.1.
-    pub fn peak(&self) -> u16 {
+    pub fn peak(&self) -> u32 {
         self.peak
     }
 
@@ -767,11 +788,11 @@ impl History {
     /// smaller than the columns it divides and every bar on screen would top
     /// out.
     fn repeak(&mut self) {
-        let mut peak = 0u16;
+        let mut peak = 0u32;
         let mut worktree = [0u32; HISTORY_SAMPLES];
         for track in self.tracks.values() {
             for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
-                *total += u32::from(count);
+                *total += count;
             }
             peak = peak.max(track.drawn().into_iter().max().unwrap_or(0));
         }
@@ -937,19 +958,19 @@ mod tests {
         let now = base();
         let mut history = History::starting_at(now);
         let mut track = Track::new(1);
-        track.samples[HISTORY_SAMPLES - 1] = u16::MAX;
+        track.samples[HISTORY_SAMPLES - 1] = u32::MAX;
         // Both ends of the weight, because #232 gave a sample one: the floor a
         // sizeless write takes, and a full-range one from a large edit. Neither
         // may wrap.
         track.bump(1);
-        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
-        track.bump(u16::MAX);
-        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
+        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u32::MAX);
+        track.bump(u32::MAX);
+        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u32::MAX);
         track.samples[HISTORY_SAMPLES - 2] = 9;
         assert_eq!(
             track.drawn()[HISTORY_BUCKETS - 1],
-            u16::MAX,
-            "a drawn column summing past u16 wrapped instead of topping out"
+            u32::MAX,
+            "a drawn column summing past its type wrapped instead of topping out"
         );
 
         history.record(["a"], now);

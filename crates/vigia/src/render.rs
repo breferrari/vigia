@@ -38,7 +38,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, HISTORY_SAMPLES, LineKind, Recency, Span};
 
-use crate::glyphs::{Glyphs, SPARK_RAMP};
+use crate::glyphs::Glyphs;
 use crate::input::{Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
@@ -1583,7 +1583,7 @@ struct Heading<'r> {
     path: &'r str,
     from: Option<&'r str>,
     churn: Option<(u32, u32)>,
-    spark: &'r [u16; HISTORY_BUCKETS],
+    spark: &'r [u32; HISTORY_BUCKETS],
     recency: Recency,
     heat: &'r [HeatBucket; HEAT_BUCKETS],
 }
@@ -2407,69 +2407,69 @@ impl Bucket {
     }
 }
 
-/// How many eighths of the band one column fills, out of `rows * 8`.
+/// What the churn band's heights are measured against.
 ///
-/// **Scaled against the band's own busiest column**, which is the right
-/// denominator for a single time series: the question `SPEC.md` §5.3 asks of this
-/// element is *was it hotter a minute ago*, and that is a comparison inside the
-/// series. A fixed scale would answer *how hot against what* with a number nobody
-/// chose, and the sparkline's screen-wide peak is a different question asked of a
-/// different element.
+/// **Not the window's maximum, and `btop` is why**
+/// ([#232](https://github.com/breferrari/vigia/issues/232)). Its network graph
+/// faces this signal exactly: bursty, zero most of the time, with occasional
+/// values orders of magnitude above the rest. It does not normalise to the
+/// largest thing in the window. `graph_max` is set to **1.3 times the mean of the
+/// most recent samples**, floored, and moved only once five consecutive samples
+/// breach it; anything above it clamps to full height. Read from
+/// `src/linux/btop_collect.cpp` rather than recalled.
 ///
-/// A zero peak is the empty store, which is every launch: nothing is written, so
-/// nothing is drawn but the baseline track. Guarded here rather than inside the
-/// loop for [`spark_of`]'s reason, because the two say different things.
+/// The reason is what a maximum does to everything else. One `cargo build`
+/// rewriting a lock file puts a value two orders of magnitude above an ordinary
+/// save into the window, and against that denominator every edit a reader makes
+/// for the next two minutes draws one level high: a graph that goes blank
+/// because something interesting happened. Scaling against the ordinary case and
+/// letting the outlier saturate keeps the shape a reader is watching for.
 ///
-/// Rounded **up**, so a column with anything in it is never drawn as empty. That
-/// is [`spark_of`]'s ruling and the same sentence applies: "one write" and "no
-/// writes" is the distinction the element exists to make.
-fn level_of(total: u32, peak: u32, rows: usize) -> usize {
-    level_to(total, peak, rows * SPARK_RAMP.len())
+/// **The mean is over the non-empty samples only.** A worktree is idle most of
+/// the time, so counting the zeroes would make the denominator a measure of how
+/// long the reader has been away rather than of how large a write is.
+///
+/// No hysteresis, where `btop` needs it: its buffer advances one sample per
+/// redraw, so a scale recomputed every frame would jitter. This window rolls on
+/// a one-second grid and holds two minutes, so the mean of what is inside it is
+/// already stable across the frames between two ticks.
+///
+/// Zero when nothing is in the window at all, which [`level_to`] reads as "no
+/// scale yet" and draws as the baseline.
+fn band_scale(series: &[u32]) -> u32 {
+    let mut sum = 0u64;
+    let mut busy = 0u64;
+    for total in series.iter().copied().filter(|total| *total > 0) {
+        sum += u64::from(total);
+        busy += 1;
+    }
+    if busy == 0 {
+        return 0;
+    }
+    // Thirteen tenths, which is `btop`'s own factor: above the mean, so an
+    // ordinary write does not sit at the ceiling, and close enough to it that an
+    // ordinary write is still legible as a shape rather than as a stub.
+    let scale = sum * 13 / (busy * 10);
+    u32::try_from(scale).unwrap_or(u32::MAX).max(1)
 }
 
-/// [`level_of`] against a level count named directly rather than in rows.
+/// Which level of `levels` a count reaches, against the busiest count on screen.
 ///
-/// **One implementation, which is the whole reason this exists as its own
-/// function.** [`level_of`]'s own docblock already worried that writing the
-/// round-up twice would let the rule that keeps one write from drawing as empty
-/// move in one element and not the other. The glyph ladder makes that concrete:
-/// a dense rung's ramp is three levels rather than a multiple of
-/// [`SPARK_RAMP`]'s eight, so it cannot be expressed in rows at all, and the
-/// arithmetic underneath is identical.
+/// **One implementation, and since #232 it is the only one.** The band used to
+/// reach this through a rows-shaped adapter and then build its own glyph, so the
+/// rule that keeps one write from drawing as empty existed twice and could move
+/// in one element and not the other. Both elements now scale here and spell the
+/// result through [`Glyphs::glyph`], which is what lets the band carry a baseline
+/// and two sub-columns per cell without a second drawer.
+///
+/// Rounded **up**, so any non-zero count reaches at least the first level: a
+/// write that drew as empty would be a write the element failed to report.
 fn level_to(total: u32, peak: u32, levels: usize) -> usize {
     if peak == 0 || total == 0 || levels == 0 {
         return 0;
     }
     let scaled = (total as u64 * levels as u64).div_ceil(peak as u64) as usize;
     scaled.clamp(1, levels)
-}
-
-/// What one cell of the band draws, `row` counted up from the baseline.
-///
-/// `None` is a cell **above** the bar, which is left as the pane's own
-/// background rather than painted: a graph's empty upper rows are not a track,
-/// they are sky, and filling them would draw a solid block the height of the
-/// band on every column.
-///
-/// **An empty column draws nothing at all, and that is [#78](https://github.com/breferrari/vigia/issues/78)
-/// not reaching here rather than being overruled.** That ruling gives the
-/// sparkline's empty bucket a track because *"a gap would make the strip's own
-/// length ambiguous"*: eight columns sitting between a heat strip and a counts
-/// cell have no edges of their own, so a blank one is indistinguishable from the
-/// element being absent.
-///
-/// The band has edges. It spans the pane, and the masthead's blank rows delimit
-/// it above and below, so its extent is never in question and a baseline buys
-/// nothing to pay for how it looks. Reported from use on the first real run: a
-/// hundred columns of `_` reads as a dashed rule across the pane, which is
-/// furniture the pane did not ask for and which the band is not.
-///
-/// The floor rung of [`SPARK_RAMP`] is what an empty column would otherwise
-/// take, and that is exactly the collision `SPARK_TRACK`'s own docblock refuses:
-/// one write and no writes must not be the same shape.
-fn band_cell(level: usize, row: usize) -> Option<char> {
-    let filled = level.saturating_sub(row * SPARK_RAMP.len());
-    (filled > 0).then(|| SPARK_RAMP[filled.min(SPARK_RAMP.len()) - 1])
 }
 
 /// A path's buckets, packed into the cells this rung draws them in.
@@ -2496,8 +2496,8 @@ fn band_cell(level: usize, row: usize) -> Option<char> {
 /// the one state where the ramp has no denominator: an empty store, which is
 /// every launch.
 fn spark_of(
-    buckets: &[u16; HISTORY_BUCKETS],
-    peak: u16,
+    buckets: &[u32; HISTORY_BUCKETS],
+    peak: u32,
     glyphs: Glyphs,
 ) -> [Bucket; HISTORY_BUCKETS] {
     let mut drawn = [Bucket::Empty; HISTORY_BUCKETS];
@@ -2530,12 +2530,12 @@ fn spark_of(
         // **Through [`level_to`], which is where the rounding rule lives.**
         // Written twice, the rule that keeps one write from drawing as empty
         // could move at one rung and not the other.
-        let level = |count: u16| level_to(u32::from(count), u32::from(peak), glyphs.levels());
+        let level = |count: u32| level_to(count, peak, glyphs.levels());
         // **Against the same `peak` the heights are scaled from**, which is the
         // busiest bucket anywhere on screen rather than in this file. Height and
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
-        let band = Band::of(u32::from(busiest), u32::from(peak));
+        let band = Band::of(busiest, peak);
         *cell = Bucket::Written(glyphs.glyph(level(left), level(right)), band);
     }
     drawn
@@ -4123,48 +4123,103 @@ impl Painter<'_> {
         if !band_fits(area.width) || area.height == 0 {
             return;
         }
-        let left = area.x.saturating_add(self.inset);
+        let left_edge = area.x.saturating_add(self.inset);
         let width = usize::from(planning_width(area.width, 0));
 
-        // **Columns, not cells**, and that distinction is the whole of
-        // [#223](https://github.com/breferrari/vigia/issues/223). Asking for one
-        // column per cell is what made a wide pane sample once a second; asking
-        // for [`GRAPH_COLUMNS`] and stretching them is what makes width buy
-        // wider bars instead. Floored at the pane where the pane is narrower,
-        // which is the rung the band already had.
-        let columns = width.min(GRAPH_COLUMNS);
-        let series = view.worktree_churn.projected(columns);
-        // Off the series rather than through a second projection of it. `Churn`
-        // had a `peak_at` that re-walked the whole window to return a number its
-        // only caller was already holding, which is the shape `History::repeak`
-        // rules against one crate over.
-        let peak = series.iter().copied().max().unwrap_or(0);
+        // **One value per sub-column, and a zero draws the baseline**, which is
+        // `btop`'s own answer to this exact signal
+        // ([#232](https://github.com/breferrari/vigia/issues/232)). Its network
+        // graph is the closest analogue in that tool: bursty, zero most of the
+        // time, and it is built with `no_zero = true`, which forces one dot on
+        // the bottom row so an idle interface draws an axis rather than nothing.
+        // Read from `src/btop_draw.cpp`, `Graph::_create`, rather than recalled.
+        //
+        // **That supersedes [#223](https://github.com/breferrari/vigia/issues/223)'s
+        // coarsening, and the correction is worth stating rather than
+        // absorbing.** That row diagnosed the right defect, a save drawing a
+        // one-column hairline between blanks, and reached for a wider column to
+        // fix it. `btop` fixes the same defect by drawing the floor, and once the
+        // floor is drawn a narrow column is a spike on an axis instead of a mark
+        // in a void. Coarsening then costs resolution and buys nothing, and it
+        // was what made the band read as separated blocks
+        // ([#232](https://github.com/breferrari/vigia/issues/232), reported from
+        // a live pane).
+        //
+        // `btop` sizes its buffer to the pane for the same reason, keeping
+        // `width * 2` samples so no value is ever stretched across cells. Here
+        // the window is fixed by I10, so the projection does the same job from
+        // the other side: it aggregates when the pane holds fewer sub-columns
+        // than the window holds samples, and repeats when it holds more.
+        let density = self.glyphs.density();
+        // **The pane can ask for more sub-columns than the window holds samples,
+        // and then values repeat rather than run out.** `btop` never meets this
+        // because its buffer is sized to the pane, keeping `width * 2` samples;
+        // I10 fixes this window at two minutes instead, so past 120 sub-columns
+        // the projection has nothing further to divide and each value covers more
+        // than one. Asking `projected` for the wider number silently returned a
+        // short series, which drew a graph that stopped partway across the pane
+        // and left bare axis after it.
+        let slots = width * density;
+        let series = view.worktree_churn.projected(slots);
+        let peak = band_scale(&series);
+        // **No data, no axis**, which is what keeps
+        // [#158](https://github.com/breferrari/vigia/issues/158)'s reported
+        // defect fixed while the axis exists at all. That ruling came from a
+        // first real run: a window holding nothing drew a hundred columns of `_`,
+        // "a dashed rule the pane did not ask for", and every session opens in
+        // exactly that state because a worktree already dirty when `vigia`
+        // started has no tick behind it yet. `btop` draws its floor for an idle
+        // interface and would draw one here too; the distinction it does not have
+        // to make is between *quiet* and *not started*, and this is that line. An
+        // empty column inside a live window is quiet and stands on the floor; an
+        // empty window has no graph to put a floor under. The rows stay reserved
+        // either way, so the first write does not jog the list.
+        if peak == 0 {
+            return;
+        }
         let rows = usize::from(area.height);
+        // Levels one row carries. The block ramp gives eight, a 2x4 cell gives
+        // its dot rows less the baseline, and [`Glyphs::glyph`] already spells
+        // both, floor included: level zero is the axis rather than nothing.
+        let levels = self.glyphs.levels();
 
-        for (column, total) in series.iter().enumerate() {
-            // **The span is `projected`'s own arithmetic inverted.** That
-            // function maps columns onto samples with `column * len / width`,
-            // and this maps columns onto cells the same way, so the remainder
-            // distributes across the bars rather than leaving a ragged tail and
-            // the band still reaches both edges, which §5.3 asks of furniture.
-            let from = column * width / columns;
-            let to = (column + 1) * width / columns;
-            let level = level_of(*total, peak, rows);
-            // Ramped by height like the sparkline, and against the same
-            // denominator the height is scaled from, so colour and shape say one
-            // thing at one scale.
-            let band = Band::of(*total, peak);
+        for cell in 0..width {
+            // A dense cell carries two sub-columns, left older than right, which
+            // is `Glyphs::glyph`'s own order and the sparkline's. At the block
+            // rung the density is one and the right half is never read.
+            let at = |sub: usize| {
+                // Sub-column onto value, which is `projected`'s own arithmetic
+                // inverted: it maps values onto samples the same way, so a
+                // remainder distributes across the graph rather than leaving a
+                // ragged tail.
+                let sub = cell * density + sub;
+                series
+                    .get(sub * series.len() / slots.max(1))
+                    .copied()
+                    .unwrap_or(0)
+            };
+            let (older, newer) = (at(0), at(density - 1));
+            let full = |total: u32| level_to(total, peak, rows * levels);
+            let (left, right) = (full(older), full(newer));
+            // Against the same denominator the heights are scaled from, so
+            // colour and shape say one thing at one scale.
+            let band = Band::of(older.max(newer), peak);
             for row in 0..rows {
                 // Drawn bottom up, so `row` counts from the baseline and the
                 // buffer's `y` counts down from the top.
                 let y = area.y + (rows - 1 - row) as u16;
-                let Some(glyph) = band_cell(level, row) else {
+                let fill = |level: usize| level.saturating_sub(row * levels).min(levels);
+                let (low, high) = (fill(left), fill(right));
+                // **Sky above the bar is left alone; the baseline row is not.**
+                // A graph's empty upper rows are background, and painting them
+                // would draw a solid block the height of the band on every
+                // column. The bottom row is the axis and is always drawn.
+                if row > 0 && low == 0 && high == 0 {
                     continue;
-                };
-                for cell in from..to {
-                    let x = left.saturating_add(cell as u16);
-                    self.bar_cell(x, y, glyph, self.theme.spark_at(band));
                 }
+                let glyph = self.glyphs.glyph(low, high);
+                let x = left_edge.saturating_add(cell as u16);
+                self.bar_cell(x, y, glyph, self.theme.spark_at(band));
             }
         }
     }
@@ -4864,7 +4919,7 @@ impl Painter<'_> {
         &mut self,
         area: Rect,
         heading: &Heading<'_>,
-        peak: u16,
+        peak: u32,
         columns: &Columns,
         current: bool,
     ) {

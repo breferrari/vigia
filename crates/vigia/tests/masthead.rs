@@ -39,6 +39,21 @@ use support::{Scratch, materialise};
 /// affordable, and `the_shipped_shell_starts_with_the_band_hidden` says so in an
 /// assertion rather than in this comment.
 const WIDE: u16 = 80;
+
+/// A pane narrow enough that a dense cell's two halves are two stored samples.
+///
+/// The window holds [`HISTORY_SAMPLES`], so a pane asking for more sub-columns
+/// than that feeds neighbouring halves from one sample. Sixty columns asks for
+/// 114 of them.
+const NARROW: u16 = 60;
+
+/// A dense cell whose newer half is taller than its older one, and its mirror.
+///
+/// Restated as literals for [`GRAPH_COLUMNS`]' reason: a gate that built these
+/// through the renderer's own packing would agree with it by construction.
+const RIGHT_HEAVY: char = '⣸';
+/// The mirror of [`RIGHT_HEAVY`].
+const LEFT_HEAVY: char = '⣇';
 const TALL: u16 = 24;
 
 /// Columns of churn the band draws, restated rather than imported.
@@ -49,25 +64,6 @@ const GRAPH_COLUMNS: usize = 15;
 
 /// Columns the scrollbar reserves, restated for [`GRAPH_COLUMNS`]'s reason.
 const BAR_COLUMNS: usize = 2;
-
-/// Runs of one glyph in a drawn row, which is how many bars it carries.
-///
-/// **Walked rather than windowed.** The first version used `windows(2)`, which
-/// has no window before the first character and therefore under-counted a bar
-/// starting at column zero; it passed only because the pane's inset happens to
-/// blank that column, which is a property of the fixture rather than of the
-/// band. It also collected into a `Vec` to get the windows at all.
-fn drawn_runs(row: &str) -> usize {
-    let mut runs = 0;
-    let mut previous = ' ';
-    for glyph in row.chars() {
-        if glyph != previous && !glyph.is_whitespace() {
-            runs += 1;
-        }
-        previous = glyph;
-    }
-    runs
-}
 
 /// Cells of any glyph in a drawn row.
 fn drawn_ink(row: &str) -> usize {
@@ -309,31 +305,51 @@ const BURSTY: [u32; HISTORY_SAMPLES] = {
     s
 };
 
+/// A wider pane buys finer time, which is the opposite of what #223 ruled.
+///
+/// **[#223](https://github.com/breferrari/vigia/issues/223) is superseded here
+/// and the correction is stated rather than absorbed.** That row saw a real
+/// defect: at one column a second, a save drew a hairline between two blanks and
+/// the whole band read as scatter. It reached for a wider column. `btop` fixes
+/// the same defect on the same shape of signal, its network graph, by drawing
+/// the **axis**: `no_zero` puts one dot on the bottom row of an empty column, so
+/// a narrow spike stands on a floor rather than floating in a void. With the
+/// floor drawn, coarsening costs resolution and buys nothing, and it was what
+/// made the band read as separated blocks
+/// ([#232](https://github.com/breferrari/vigia/issues/232), reported from a live
+/// pane).
+///
+/// So a wider pane draws more distinct values, up to what the window holds.
 #[test]
-fn a_wider_pane_buys_wider_bars_and_not_finer_time() {
+fn a_wider_pane_buys_finer_time() {
     /// One pane width and what the band drew at it.
     #[derive(Debug)]
     struct Drawn {
         width: u16,
         ink: usize,
-        bars: usize,
+        heights: usize,
     }
 
-    // **The defect, stated as a property.** `Churn::projected` clamped the drawn
-    // width to the sample count, so past 120 columns one column was one second
-    // and a save drew a hairline between two blanks. Widening must buy bar
-    // width; the time resolution is the element's own and does not move.
     let mut widths = Vec::new();
     for width in [60u16, 80, 120, 160, 200] {
         let rows = band_strip(width, BURSTY);
-        // Summed over every row the band was given rather than two named ones,
-        // which restated `GRAPH_ROWS` silently.
         let ink: usize = rows.iter().map(|row| drawn_ink(row)).sum();
-        let bars = rows.iter().map(|row| drawn_runs(row)).max().unwrap_or(0);
-        widths.push(Drawn { width, ink, bars });
+        // Distinct glyphs across the whole band, which is how much of the ramp
+        // the shape actually uses. A wider pane divides the same window into
+        // more values, so it can only ever show at least as much of it.
+        let mut seen: Vec<char> = Vec::new();
+        for glyph in rows.iter().flat_map(|row| row.chars()) {
+            if !glyph.is_whitespace() && !seen.contains(&glyph) {
+                seen.push(glyph);
+            }
+        }
+        widths.push(Drawn {
+            width,
+            ink,
+            heights: seen.len(),
+        });
     }
 
-    // Ink grows with the pane.
     for pair in widths.windows(2) {
         assert!(
             pair[1].ink >= pair[0].ink,
@@ -342,52 +358,57 @@ fn a_wider_pane_buys_wider_bars_and_not_finer_time() {
             pair[1].width
         );
     }
-    // And the column count never exceeds the element's own resolution, however
-    // wide the pane gets. This is what stops a wide pane sampling per second.
-    for drawn in &widths {
-        assert!(
-            drawn.bars <= GRAPH_COLUMNS,
-            "at {} columns the band drew {} bars, past its own resolution",
-            drawn.width,
-            drawn.bars
-        );
-    }
-    // Non-vacuity: the widest pane must actually be wider in ink than the
-    // narrowest, or "never exceeds" is true of a band that never grew.
+    // Non-vacuity in the direction that matters: the sweep has to actually gain
+    // something, or "never fewer" is true of a band that never changed.
+    let (narrow, wide) = (&widths[0], widths.last().expect("a width"));
     assert!(
-        widths.last().expect("a width").ink > widths[0].ink,
+        wide.ink > narrow.ink,
         "the sweep never grew, so this gate compared nothing: {widths:?}"
     );
-}
-
-#[test]
-fn a_burst_and_its_neighbour_land_in_one_column() {
-    // Two writes six seconds apart are one burst, and at the old one-second
-    // columns they drew as two separate spikes with five blanks between them.
-    let mut near = [0u32; HISTORY_SAMPLES];
-    near[40] = 5;
-    near[46] = 5;
-    let rows = band_strip(WIDE, near);
-    let bars = rows[1]
-        .split(|c: char| c.is_whitespace())
-        .filter(|run| !run.is_empty())
-        .count();
-    assert_eq!(
-        bars,
-        1,
-        "two writes six seconds apart drew {bars} bars rather than one:\n{}",
-        rows.join("\n")
+    assert!(
+        wide.heights >= narrow.heights,
+        "the widest pane drew fewer distinct heights than the narrowest, so \
+         widening cost resolution: {widths:?}"
     );
 }
 
 #[test]
-fn an_empty_column_still_draws_nothing() {
-    // #158, unchanged by the coarser period and worth a gate precisely because
-    // coarser columns could look like an excuse to revisit it.
+fn an_empty_column_draws_the_axis() {
+    // **The reversal of [#158](https://github.com/breferrari/vigia/issues/158),
+    // and it is the whole of why the band reads as a graph.** That ruling gave an
+    // empty column nothing, because a full track of `_` "reads as a dashed rule
+    // across the pane". It does, and that is what a graph's axis is: `btop` draws
+    // exactly this for its network graph and calls the flag `no_zero`. Without
+    // it, the filled columns float with nothing to stand on and the element reads
+    // as separated blocks, which is what was reported from a live pane.
+    //
+    // The band has edges the sparkline does not, which is #158's own reason for
+    // treating the two differently, and it cuts the other way once the element is
+    // a graph rather than a strip.
     let rows = band_strip(WIDE, BURSTY);
+    let baseline = rows.last().expect("a band row");
+    // Between the pane's own inset and the scrollbar's reserve, which is the
+    // span the band is given; the margins either side are not gaps in the axis.
+    let blanks = baseline
+        .trim_end()
+        .chars()
+        .skip(drawn_inset(baseline))
+        .filter(|glyph| glyph.is_whitespace())
+        .count();
+
+    assert_eq!(
+        blanks,
+        0,
+        "the baseline row has {blanks} gaps in it, so a quiet stretch of the \
+         window leaves the graph with no floor:\n{}",
+        rows.join("\n")
+    );
+    // And the row above it still has sky, or the band is a solid block rather
+    // than a graph with a floor.
     assert!(
-        rows.iter().any(|row| row.contains("  ")),
-        "no run of blank columns survived, so the band filled its gaps:\n{}",
+        rows[0].contains("  "),
+        "no run of blank columns survived above the axis, so the band filled \
+         its whole height:\n{}",
         rows.join("\n")
     );
 }
@@ -452,50 +473,148 @@ const GRAPH_ROWS: usize = 2;
 
 #[test]
 fn the_band_stacks_its_rows_from_the_bottom() {
-    // **[#225](https://github.com/breferrari/vigia/issues/225).** Every other
-    // band gate reads presence, row count, run count or blankness, and none of
-    // them reads what a drawn column's glyph *is*, so the hero element of the
-    // pane could stack arbitrarily and only an eye would catch it. Three
-    // mutations survived the whole suite on that.
+    // **[#225](https://github.com/breferrari/vigia/issues/225), re-aimed at the
+    // drawer that replaced `band_cell`.** The rule is unchanged and its code
+    // moved: a column's height climbs a whole ramp per row, so a column that does
+    // not fill the baseline row may not put anything in the row above it. Every
+    // other band gate reads presence, ink, axis or span and none reads a drawn
+    // column's glyph, so without this the hero element of the pane can stack
+    // arbitrarily and only an eye would catch it.
+    //
+    // **Structural rather than a pinned rung**, because the denominator is no
+    // longer the window's maximum: heights are scaled against
+    // [`band_scale`]'s mean-based figure, so "a quarter of the peak" is not a
+    // thing a fixture can state any more. What it can state, and what the rule
+    // actually is, is that a short column stays in one row and a tall one does
+    // not.
     let rows = band_strip(WIDE, QUARTERED);
-    // The precondition the rungs below are derived from, asserted rather than
-    // assumed: a third row would make a quarter of the peak level six of
-    // twenty-four and every expected glyph here wrong.
     assert_eq!(rows.len(), GRAPH_ROWS, "the band drew the wrong row count");
     let strip = rows.join("\n");
-    // `band` draws bottom up, so `row` counts from the baseline while the buffer
-    // counts down from the top: the last string is the baseline.
     let upper: Vec<char> = rows[0].chars().collect();
     let base: Vec<char> = rows[1].chars().collect();
 
-    // Derived from the drawn row rather than restated, the way
-    // `the_band_reaches_both_edges_of_its_slot` already derives it: the band
-    // runs from the pane's inset to where the scrollbar's reserve begins.
-    let span = usize::from(WIDE) - BAR_COLUMNS - drawn_inset(&rows[1]);
-    let at = |column: usize| drawn_inset(&rows[1]) + column * span / GRAPH_COLUMNS;
+    // Every cell the band was given, as (baseline glyph, whether it reaches the
+    // row above). The axis means every cell inside the span is drawn.
+    let inset = drawn_inset(&rows[1]);
+    let span = usize::from(WIDE) - BAR_COLUMNS - inset;
+    let cells: Vec<(char, bool)> = (0..span)
+        .map(|cell| (base[inset + cell], !upper[inset + cell].is_whitespace()))
+        .collect();
 
-    // The peak column fills both rows, which is what makes the assertions below
-    // about the quarter column mean something: a band that drew nothing at all
-    // would satisfy "the row above is blank" on its own. Compared as a pair so a
-    // failure prints both halves rather than stopping at the first.
-    assert_eq!(
-        (base[at(0)], upper[at(0)]),
-        (RAMP[7], RAMP[7]),
-        "the tallest column did not fill both rows:\n{strip}"
-    );
-
-    // A quarter of the peak over two rows of an eight-rung ramp is level four of
-    // sixteen, so it draws the ramp's fourth rung on the baseline and **nothing
-    // at all** above it. Both halves are load bearing: the glyph catches a ramp
-    // shifted by one, and the blank catches a stack that climbs by a level
-    // instead of by a whole ramp.
-    assert_eq!(
-        base[at(1)],
-        RAMP[3],
-        "a column at a quarter of the peak drew the wrong rung:\n{strip}"
-    );
+    // The tallest column fills its baseline row and climbs into the next, which
+    // is what makes the assertion below about short columns mean something: a
+    // band that never left the baseline would satisfy it on its own.
     assert!(
-        upper[at(1)].is_whitespace(),
-        "a column at a quarter of the peak spilled into the row above it:\n{strip}"
+        cells
+            .iter()
+            .any(|(glyph, above)| *glyph == RAMP[7] && *above),
+        "no column filled the baseline row and continued above it, so nothing \
+         here exercises stacking at all:\n{strip}"
     );
+
+    // And no column that failed to fill its baseline row put anything above it.
+    // This is the mutation that matters: a stack climbing by one level rather
+    // than by a whole ramp spills a quarter-height column into the row above.
+    for (at, (glyph, above)) in cells.iter().enumerate() {
+        assert!(
+            !(*above && *glyph != RAMP[7]),
+            "cell {at} drew {glyph:?} on the baseline, short of the ramp's top, \
+             and still put ink in the row above it:\n{strip}"
+        );
+    }
+
+    // Non-vacuity in the third direction: there has to be a genuinely mid-ramp
+    // column, or the loop above only ever saw full ones and empty ones.
+    assert!(
+        cells
+            .iter()
+            .any(|(glyph, _)| RAMP[..7].contains(glyph) && *glyph != RAMP[0]),
+        "no column landed mid-ramp, so the fixture cannot tell a correct stack \
+         from a flattened one:\n{strip}"
+    );
+}
+
+/// A pane whose planning width divides the window exactly.
+///
+/// 124 columns leaves 120 after the bar's reserve and the inset, so at the block
+/// rung one drawn cell is one stored sample and the arithmetic below can be done
+/// on paper. Every other width has cells covering one or two samples, which makes
+/// an exact expectation a fixture property rather than a rule.
+const EXACT_PANE: u16 = 124;
+
+#[test]
+fn the_band_scales_against_the_ordinary_write_rather_than_the_largest() {
+    // **`btop`'s rule, pinned by the two glyphs it produces.** Its network graph
+    // faces this signal and scales against 1.3 times a recent mean rather than
+    // against the window's maximum, so one outlier saturates instead of crushing
+    // every ordinary write beneath it. Read from `src/linux/btop_collect.cpp`.
+    //
+    // A window where every sample is equal is the case that states the factor:
+    // the mean **is** that value, so the scale is 1.3 of it and a column reaches
+    // 16 / 1.3 of the two rows' sixteen levels, which is thirteen. Thirteen fills
+    // the baseline row's eight and puts five in the row above.
+    //
+    // Both halves are load bearing. Drop the 1.3 and every column tops out at
+    // sixteen, so the row above reads `RAMP[7]` and a uniformly busy worktree
+    // draws as a solid block. Change the level count and the row above moves off
+    // `RAMP[4]`, which is the only place either number is observable.
+    let rows = band_strip(EXACT_PANE, [7; HISTORY_SAMPLES]);
+    let at = drawn_inset(&rows[1]);
+
+    assert_eq!(
+        (rows[1].chars().nth(at), rows[0].chars().nth(at)),
+        (Some(RAMP[7]), Some(RAMP[4])),
+        "a uniformly busy window drew the wrong height, so either the scale is \
+         no longer above the mean or a row no longer carries a whole ramp:\n{}",
+        rows.join("\n")
+    );
+}
+
+#[test]
+fn a_dense_cell_carries_two_samples() {
+    // **The braille rung's whole purpose, and nothing else here drives it**
+    // ([#232](https://github.com/breferrari/vigia/issues/232)). A 2x4 cell holds
+    // two sub-columns, older on the left, which is how `btop` fits two values
+    // into one character and the reason its graphs read as a line rather than as
+    // bars. Drawing one sample into both halves would look almost right and
+    // halve the resolution silently.
+    //
+    // **A narrow pane on purpose.** The window holds 120 samples, so a pane
+    // asking for more sub-columns than that gets neighbouring halves fed from one
+    // sample, and the two are then equal by arithmetic rather than by defect.
+    let mut alternating = [0u32; HISTORY_SAMPLES];
+    for (at, sample) in alternating.iter_mut().enumerate() {
+        *sample = if at % 2 == 0 { 0 } else { 100 };
+    }
+
+    let shown = Chrome {
+        masthead: true,
+        ..chrome(&App::new())
+    };
+    let area = Rect::new(0, 0, NARROW, TALL);
+    let body = body_layout(area, &shown, 1);
+    let mut buf = Buffer::empty(area);
+    render(
+        &mut buf,
+        area,
+        &banded(alternating),
+        &Theme::default(),
+        Glyphs::Braille,
+        &shown,
+    );
+    let top = 1 + body.lead as u16;
+    let drawn: String = (0..NARROW)
+        .map(|x| buf[(x, top + body.graph as u16 - 1)].symbol().to_owned())
+        .collect();
+
+    // A cell whose newer half is taller than its older one, and one the other way
+    // round. Both have to appear, or a single asymmetric glyph could be an edge
+    // of the series rather than the rule.
+    for glyph in [LEFT_HEAVY, RIGHT_HEAVY] {
+        assert!(
+            drawn.contains(glyph),
+            "the dense band never drew {glyph:?}, so a cell's two halves are \
+             not carrying two samples:\n{drawn}"
+        );
+    }
 }

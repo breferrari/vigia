@@ -58,7 +58,7 @@ pub struct FileEntry {
     ///
     /// All zeroes for a file `vigia` has not seen change, which is the
     /// ordinary case for a worktree that was already dirty at startup.
-    pub spark: [u16; HISTORY_BUCKETS],
+    pub spark: [u32; HISTORY_BUCKETS],
     /// How recently this file changed, which is what dims a settled row and
     /// what puts the pulse on one that just moved.
     pub recency: Recency,
@@ -476,7 +476,7 @@ pub struct View {
     /// bucket draws a track, so a peak of zero means every bucket is empty and
     /// every one of them is still drawn. `vigia_core::History::peak` carries the
     /// same correction, and this is the copy a renderer actually reads.
-    pub peak: u16,
+    pub peak: u32,
     /// The whole worktree's churn over the window, oldest sample first.
     ///
     /// **What the masthead's band draws** ([#158](https://github.com/breferrari/vigia/issues/158)),

@@ -37,7 +37,9 @@ use ratatui::layout::Rect;
 use vigia::{
     Action, App, Body, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
 };
-use vigia_core::{CHECKPOINT_STRIDE, Frame, Highlighter, History, LineKind, Samples};
+use vigia_core::{
+    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, Highlighter, History, LineKind, Samples,
+};
 
 use support::{
     Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta, exclusively_timed,
@@ -125,9 +127,26 @@ fn sample_all(history: &mut History, root: &Path, paths: &[&str]) {
     );
 }
 
-/// Every path a bulk rewrite touches, which is the burst the watcher coalesces.
+/// Rounds the burst gate times before taking a median.
+///
+/// Enough that one scheduler hiccup cannot be the answer, which nearest-rank
+/// percentiles make a real hazard on a shared runner.
+const SAMPLED_BURSTS: usize = 30;
+
+/// The widest burst a wake can carry, as paths.
+///
+/// **[`HISTORY_PATHS`] rather than [`FILES`]**: `Burst` caps the set it reports
+/// at the store's own cap, so this is the widest tick the product has, and a
+/// gate built on the hundred-file fixture measured two fifths of the case it was
+/// written for. The first `FILES` of these exist on disk and the rest do not,
+/// which is the honest shape of a cap being hit rather than a defect in the
+/// fixture: `symlink_metadata` fails fast on a missing path, so this is the
+/// cheaper half of the range and the gate is measuring a floor on the real cost
+/// rather than a ceiling. Stated here rather than discovered from the number.
 fn bulk_burst() -> Vec<String> {
-    (0..FILES).map(|f| format!("src/mod_{f}.rs")).collect()
+    (0..HISTORY_PATHS)
+        .map(|f| format!("src/mod_{f}.rs"))
+        .collect()
 }
 
 fn area() -> Rect {
@@ -342,14 +361,25 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
         sample_all(&mut history, scratch.root(), &paths);
     }
 
-    let taken = time(|| sample_all(&mut history, scratch.root(), &paths));
+    // **Sampled rather than timed once**, which is the instrument rule the
+    // gates below already follow. A single `time` call against a sub-millisecond
+    // quantity is one scheduler hiccup away from a red build.
+    let mut runs = Samples::new(SAMPLED_BURSTS);
+    let mut cpu = Samples::new(SAMPLED_BURSTS);
+    for _ in 0..SAMPLED_BURSTS {
+        let (wall, spent) = time_cpu(|| sample_all(&mut history, scratch.root(), &paths));
+        runs.push(wall);
+        cpu.push(spent);
+    }
+    let wall = runs.percentile(0.5).expect("a sampled round");
+    let taken = cpu.percentile(0.5).expect("a sampled round");
 
     // Non-vacuity, and it is the assertion that matters most: a burst that sized
     // nothing would post a very fast time and pass a budget it never spent.
     assert_eq!(
         paths.len(),
-        FILES,
-        "the burst was not the whole rewrite, so this timed a narrower tick than \
+        HISTORY_PATHS,
+        "the burst was not the widest a wake can carry, so this timed a narrower \
          the product has"
     );
     assert!(
@@ -357,10 +387,17 @@ fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
         "the burst recorded nothing, so this gate timed a walk over paths the \
          store ignored"
     );
+    // **Asserted on thread CPU time and reported on both**, which is `SPEC.md`
+    // section 7's own rule for this tier ([#212](https://github.com/breferrari/vigia/issues/212)):
+    // a wall-clock overshoot spent off-CPU is the host, one spent on-CPU is ours,
+    // and contention cannot inflate a CPU clock. It matters here more than
+    // anywhere else in this file, because a `stat` is almost entirely waiting. On
+    // the reference machine this burst measures about 2.3ms of wall against
+    // **0ns** of CPU, and a bound read off the wall number would have capped the
+    // feature to buy back time the frame never spent.
     assert!(
         taken <= budget,
-        "sizing a {FILES}-path burst took {taken:?} against {budget:?}, a tenth \
-         of the {I9_FRAME:?} frame it shares"
+        "sizing a {HISTORY_PATHS}-path burst spent {taken:?} of thread CPU time at p50          against {budget:?}, a tenth of the {I9_FRAME:?} frame it shares (wall {wall:?},          which contention inflates and this does not)"
     );
 }
 
