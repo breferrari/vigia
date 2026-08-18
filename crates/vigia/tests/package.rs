@@ -19,10 +19,12 @@
 //! test, which is what the first gate below asserts.
 //!
 //! What none of this proves: nothing here builds a tarball or runs a workflow.
-//! [`the_packaged_artifact_carries_no_tests`] is the one gate that asks cargo
-//! rather than asking a file, and a syntactically broken workflow still reaches
-//! CI. `RELEASE-SMOKE.md` is where the artifact itself gets checked, by a human,
-//! before the tag that makes any of it permanent.
+//! [`the_packaged_artifact_carries_no_tests`] and
+//! [`every_published_crate_ships_the_licence`] are the gates that ask cargo
+//! rather than asking a file, and both go through [`package_list`], so both
+//! skip together when the registry is away. A syntactically broken workflow
+//! still reaches CI. `RELEASE-SMOKE.md` is where the artifact itself gets
+//! checked, by a human, before the tag that makes any of it permanent.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -606,6 +608,108 @@ fn covers(pattern: &str, name: &str) -> bool {
 /// Read a workspace-level file by repository-relative path.
 fn repo_file(relative: &str) -> String {
     read(&repo_root().join(relative))
+}
+
+/// Every workspace member, as (repository-relative directory, package name).
+///
+/// **Derived rather than written out, on the same rule as everything else in
+/// this file.** A list restated here is a second place to edit, and forgetting
+/// is silent in the direction that matters: `cargo publish --workspace` ships a
+/// third crate whether or not any gate below has heard of it.
+/// [`the_internal_dependency_tracks_the_workspace_version`] is what makes
+/// adding one a decision rather than a discovery; this is what makes the gates
+/// follow it.
+///
+/// The name is read from the member's own `[package]` block rather than taken
+/// from the last path segment. They agree today, and a directory name is not a
+/// crates.io name: `cargo package -p <name>` takes the latter, so reading the
+/// manifest is the mechanism and the path is a guess that happens to be right.
+fn workspace_members() -> Vec<(String, String)> {
+    toml_array(&repo_file("Cargo.toml"), "members")
+        .into_iter()
+        .map(|dir| {
+            // **Comments stripped first**, which is the rule every other parser
+            // in this file follows and the one a line-prefix scan needs most: a
+            // `# name = "the-old-name"` sitting between `[package]` and the real
+            // field is exactly what someone leaves behind while renaming a
+            // crate, and `find_map` would take it. `toml_array` strips for the
+            // same reason, and there is no `#`-inside-a-value case here because
+            // a crates.io name cannot contain one.
+            let manifest = without_comments(&repo_file(&format!("{dir}/Cargo.toml")));
+            let package = manifest
+                .split_once("[package]")
+                .unwrap_or_else(|| panic!("{dir}/Cargo.toml has no [package] section"))
+                .1
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("name = "))
+                .map(|name| name.trim().trim_matches('"').to_owned())
+                .unwrap_or_else(|| panic!("{dir}/Cargo.toml declares no package name"));
+            (dir, package)
+        })
+        .collect()
+}
+
+/// Whether a `cargo package --list` names `file` at the package root.
+///
+/// **Trimmed equality rather than `contains`**, which is this file's standing
+/// rule and the one it has been caught by four times: a substring test for
+/// `LICENSE` would also be satisfied by a path ending in it, so the mention
+/// would stand in for the thing. The list prints package-relative paths one per
+/// line, so an exact line is the mechanism and nothing else is.
+fn listed_has(listed: &str, file: &str) -> bool {
+    listed.lines().any(|line| line.trim() == file)
+}
+
+/// `cargo package --list` for one member, or `None` if the registry is away.
+///
+/// **The skip is a documented outcome rather than a failure**, and the
+/// distinction is [`registry_unreachable`]'s: an index that cannot be reached
+/// means this gate proved nothing on this run, while anything else cargo
+/// refuses is the gate firing. `gate` names the caller in the annotation, so a
+/// CI log says which claim went unchecked rather than that one did.
+///
+/// **`gate` is a literal that has to track the caller's own name, and nothing
+/// enforces that**, so a renamed test leaves a CI annotation pointing at a test
+/// that no longer exists. Recorded rather than fixed: Rust has no stable way to
+/// read the enclosing function's name, and the alternatives are a
+/// `stringify!`-based macro or a `type_name` trick that are both more machinery
+/// than two call sites are worth. The failure is a misleading log line on a run
+/// that already proved nothing, which is the cheapest place in this file for a
+/// drift to land.
+fn package_list(package: &str, gate: &str) -> Option<String> {
+    let output = Command::new(env!("CARGO"))
+        .args(["package", "--list", "--allow-dirty", "-p", package])
+        .current_dir(repo_root())
+        // **Colour off, or the classifier below cannot see a `warning:`.**
+        // `ci.yml` sets `CARGO_TERM_COLOR: always` for the whole workflow, so in
+        // CI cargo writes `\e[1m\e[93mwarning\e[0m:` and a prefix test for
+        // `warning:` is false on every line. That would put the one filter that
+        // stops a recovered network blip excusing a broken manifest out of
+        // action precisely where it matters, and nowhere else.
+        .env("CARGO_TERM_COLOR", "never")
+        .output();
+
+    let output = match output {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                registry_unreachable(&stderr),
+                "`cargo package --list -p {package}` failed for a reason that is \
+                 not the registry being unreachable, so this is the gate firing \
+                 rather than the gate being unavailable:\n{stderr}"
+            );
+            eprintln!(
+                "::warning::SKIPPED {gate}: the registry index is unreachable, so \
+                 this gate proved nothing about {package} on this run. \
+                 RELEASE-SMOKE.md §1 covers it by hand.\n{stderr}"
+            );
+            return None;
+        }
+        Err(e) => panic!("could not run cargo at all: {e}"),
+    };
+
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Every test that reads outside this package is excluded from the package.
@@ -1617,39 +1721,10 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
 /// `soak.rs`'s own rule exists to prevent.
 #[test]
 fn the_packaged_artifact_carries_no_tests() {
-    let output = Command::new(env!("CARGO"))
-        .args(["package", "--list", "--allow-dirty", "-p", "vigia"])
-        .current_dir(repo_root())
-        // **Colour off, or the classifier below cannot see a `warning:`.**
-        // `ci.yml` sets `CARGO_TERM_COLOR: always` for the whole workflow, so in
-        // CI cargo writes `\e[1m\e[93mwarning\e[0m:` and a prefix test for
-        // `warning:` is false on every line. That would put the one filter that
-        // stops a recovered network blip excusing a broken manifest out of
-        // action precisely where it matters, and nowhere else.
-        .env("CARGO_TERM_COLOR", "never")
-        .output();
-
-    let output = match output {
-        Ok(output) if output.status.success() => output,
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                registry_unreachable(&stderr),
-                "`cargo package --list` failed for a reason that is not the \
-                 registry being unreachable, so this is the gate firing rather \
-                 than the gate being unavailable:\n{stderr}"
-            );
-            eprintln!(
-                "::warning::SKIPPED the_packaged_artifact_carries_no_tests: the \
-                 registry index is unreachable, so this gate proved nothing on \
-                 this run. RELEASE-SMOKE.md §1 covers it by hand.\n{stderr}"
-            );
-            return;
-        }
-        Err(e) => panic!("could not run cargo at all: {e}"),
+    let Some(listed) = package_list("vigia", "the_packaged_artifact_carries_no_tests") else {
+        return;
     };
 
-    let listed = String::from_utf8_lossy(&output.stdout);
     let tests: Vec<&str> = listed
         .lines()
         .map(str::trim)
@@ -1672,8 +1747,128 @@ fn the_packaged_artifact_carries_no_tests() {
          gate thinks it is reading:\n{listed}"
     );
     assert!(
-        listed.lines().any(|line| line.trim() == "README.md"),
+        listed_has(&listed, "README.md"),
         "README.md is not in the package; `readme` inheritance from the \
          workspace has stopped resolving:\n{listed}"
     );
+}
+
+/// Every published crate carries the licence text, not only its SPDX name.
+///
+/// `license = "MIT"` is metadata: crates.io renders a badge from it and a
+/// scanner reads it, and neither puts the twenty-one lines of the licence in
+/// front of a reader who has the tarball. Cargo picks a licence up from the
+/// **package** directory only, and this repository's is one level above both
+/// packages, so for the whole of 0.1.0 through 0.17.0 the `.crate` shipped
+/// none. `dist` puts `LICENSE` in all four binary archives, so the tarball was
+/// the one channel that did not carry it.
+///
+/// **What closes it is a copy in each package directory, and the alternative is
+/// worth recording because it is the one everybody reaches for first.** An
+/// inherited `license-file = "LICENSE"` resolves against the workspace root and
+/// works exactly like `readme`: measured 2026-08-18, it puts `LICENSE` in both
+/// tarballs and rewrites the path package-relative. It also makes `cargo
+/// publish` print `warning: only one of license or license-file is necessary`,
+/// from the verify step rather than from `--list`, which is why it looks clean
+/// until the one workflow nobody can rehearse runs it. The root manifest
+/// already ruled that trade in the other direction for `homepage`, and
+/// dropping `license` to silence it would give up the SPDX expression that is
+/// the field's whole point. Eight of eight dependencies here, `gix` and
+/// `notify` among them and both workspaces with this same layout, ship the file
+/// from inside the crate directory.
+///
+/// **A symlink is the third idea and the worst of the three, which is worth
+/// writing down because it is the one a Unix reader reaches for first.** It
+/// fails twice over, independently. Git on Windows needs
+/// `SeCreateSymbolicLinkPrivilege` to materialise one at all, and without it a
+/// checkout writes an ordinary file whose *contents* are the string
+/// `../../LICENSE`; `.gitattributes` does not save that, since `eol=lf` governs
+/// line endings rather than symlink materialisation. And even where the link is
+/// real, cargo does not dereference one pointing outside the package directory:
+/// [cargo#5664](https://github.com/rust-lang/cargo/issues/5664) is open on
+/// exactly this case, filed against `serde`, whose packaged `LICENSE-APACHE`
+/// carried the literal target path instead of the licence text. Both failures
+/// are silent, and both land on the tier-1 platform this project is developed
+/// on. A `build.rs` cannot help either, since `cargo package` fixes the
+/// tarball's file list before any build script runs.
+///
+/// **And this gate lives in `vigia`'s tests rather than each crate's own**,
+/// which is not tidiness. `crates/vigia/Cargo.toml` excludes `tests/**`, so a
+/// test here that reads outside the package ships to nobody;
+/// `crates/vigia-core`'s manifest says its tests are *"deliberately not
+/// excluded"* because none of them escape. A licence-drift check placed there
+/// would read `../../LICENSE` and become the first escape in the one package
+/// that publishes its own test suite, which is the exact defect `SPEC.md` §9
+/// and this file exist to prevent. Reaching `vigia-core` from here costs
+/// nothing: this gate shells `cargo package -p vigia-core` and reads its files
+/// by path, and touches nothing under its `tests/`.
+///
+/// This gate asks cargo. [`the_licence_each_crate_ships_is_the_repository_licence`]
+/// asks whether what it ships is the right text, and neither subsumes the
+/// other: a copy that drifts passes here, and a mechanism that stops working
+/// passes there.
+#[test]
+fn every_published_crate_ships_the_licence() {
+    for (dir, package) in workspace_members() {
+        let Some(listed) = package_list(&package, "every_published_crate_ships_the_licence") else {
+            return;
+        };
+
+        assert!(
+            listed_has(&listed, "LICENSE"),
+            "the .crate for {package} carries no LICENSE, so `cargo install` and \
+             a vendored copy get the SPDX name with none of the text behind it. \
+             `{dir}/LICENSE` is what puts it there, because cargo takes a licence \
+             from the package directory and nowhere else:\n{listed}"
+        );
+
+        // The other direction, so the assertion above cannot pass because the
+        // list came back empty or came from a package this gate did not mean.
+        assert!(
+            listed_has(&listed, "README.md"),
+            "the package list for {package} has no README.md in it, so it is not \
+             the list this gate thinks it is reading:\n{listed}"
+        );
+    }
+}
+
+/// The licence each crate ships is this repository's, byte for byte.
+///
+/// The cost of the copy that [`every_published_crate_ships_the_licence`]
+/// records: two files that can drift from the one at the root, and from each
+/// other. Drift here is worse than the absence it replaced, because a crate
+/// that ships *a* licence looks settled while carrying terms nobody chose.
+///
+/// Offline and unconditional, unlike its pair, which is deliberate: the gate
+/// that can be skipped is the one about a mechanism cargo owns, and the gate
+/// about what this repository is licensed under always runs.
+#[test]
+fn the_licence_each_crate_ships_is_the_repository_licence() {
+    let root = repo_file("LICENSE");
+
+    // Non-vacuity, on the same rule as the package lists above: an empty or
+    // truncated root file would make every comparison below pass by matching
+    // nothing against nothing, and three empty files are byte-identical.
+    //
+    // **Fifteen lines because the licence is twenty-one**, which is the number
+    // the docblock above quotes, so the floor is set just under the real value
+    // rather than at a round one. A loose floor is the point: MIT's text is
+    // fixed, but a year or a name change moves the byte count and must not turn
+    // this into a failure about nothing.
+    assert!(
+        root.contains("MIT License") && root.lines().count() > 15,
+        "the repository LICENSE is not the text this gate thinks it is \
+         comparing against, so the comparisons below prove nothing"
+    );
+
+    for (dir, package) in workspace_members() {
+        let shipped = repo_file(&format!("{dir}/LICENSE"));
+        assert_eq!(
+            shipped, root,
+            "{dir}/LICENSE has drifted from the repository LICENSE, so {package} \
+             would publish terms that are not this project's. It is a copy \
+             because cargo takes a licence from the package directory only, and \
+             this is the gate that stops a copy becoming a second licence"
+        );
+    }
 }
