@@ -36,7 +36,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
+use vigia_core::{Class, HISTORY_BUCKETS, HISTORY_SAMPLES, LineKind, Recency, Span};
 
 use crate::glyphs::{Glyphs, SPARK_RAMP};
 use crate::input::{Hovered, Region, Regions, Sheet};
@@ -557,6 +557,43 @@ const LEAD_ROWS: usize = 1;
 /// order [`Body::split`] already applies to the list: the map gives way to the
 /// content, and the band gives way before the map does.
 const GRAPH_KEEP: usize = 10;
+
+/// Columns of churn the band draws, however wide the pane is.
+///
+/// **A floor on the aggregation, which is what the band was missing.**
+/// [`Churn::projected`](vigia_core::Churn::projected) sums the samples under
+/// each column, so a narrow band already shows the same total churn at a lower
+/// resolution. What it did not do is *stop*: it clamped to the sample count, so
+/// once the pane reached 120 columns one column was one second. A save is
+/// instantaneous, so it filled a single column and left both neighbours empty,
+/// and a wide pane bought time resolution nobody asked for instead of bigger
+/// bars.
+///
+/// **Fifteen columns of eight seconds, and eight was tuned rather than chosen.**
+/// Forty seeded series across three work patterns, measuring two things at once:
+/// how much of the band is empty, and how many *distinct* heights survive.
+/// Emptiness falls monotonically as columns coarsen, but the distinct heights
+/// peak near four seconds and collapse by fifteen, so both ends lose the shape
+/// for opposite reasons. A steady worktree draws 72% empty at one second, 25% at
+/// eight, and 8% at fifteen with only five and a half of nine rungs left, which
+/// is a solid block rather than a graph. Eight is the knee.
+///
+/// The window slides and its newest sample is always mid-accumulation, so the
+/// newest column is systematically the shortest. That is a second reason to
+/// coarsen: at one second a column it was up to **100%** incomplete and always
+/// short until the second closed, and at eight it is at most 13%.
+const GRAPH_COLUMNS: usize = 15;
+
+// The samples must tile the columns exactly, or one drawn bar would cover more
+// time than its neighbours and the graph would lie about which span was busy.
+// `history.rs` holds the same rule for the sparkline's own division, and this is
+// that rule reaching the second element that divides the same window.
+const _: () = {
+    assert!(
+        HISTORY_SAMPLES % GRAPH_COLUMNS == 0,
+        "the samples do not divide into the band's columns, so a drawn column          would cover more time than its neighbours"
+    );
+};
 
 /// The narrowest band that can draw every sample it holds.
 ///
@@ -3992,7 +4029,14 @@ impl Painter<'_> {
         let left = area.x.saturating_add(self.inset);
         let width = usize::from(planning_width(area.width, 0));
 
-        let series = view.worktree_churn.projected(width);
+        // **Columns, not cells**, and that distinction is the whole of
+        // [#223](https://github.com/breferrari/vigia/issues/223). Asking for one
+        // column per cell is what made a wide pane sample once a second; asking
+        // for [`GRAPH_COLUMNS`] and stretching them is what makes width buy
+        // wider bars instead. Floored at the pane where the pane is narrower,
+        // which is the rung the band already had.
+        let columns = width.min(GRAPH_COLUMNS);
+        let series = view.worktree_churn.projected(columns);
         // Off the series rather than through a second projection of it. `Churn`
         // had a `peak_at` that re-walked the whole window to return a number its
         // only caller was already holding, which is the shape `History::repeak`
@@ -4000,8 +4044,14 @@ impl Painter<'_> {
         let peak = series.iter().copied().max().unwrap_or(0);
         let rows = usize::from(area.height);
 
-        for (offset, total) in series.iter().enumerate() {
-            let x = left.saturating_add(offset as u16);
+        for (column, total) in series.iter().enumerate() {
+            // **The span is `projected`'s own arithmetic inverted.** That
+            // function maps columns onto samples with `column * len / width`,
+            // and this maps columns onto cells the same way, so the remainder
+            // distributes across the bars rather than leaving a ragged tail and
+            // the band still reaches both edges, which §5.3 asks of furniture.
+            let from = column * width / columns;
+            let to = (column + 1) * width / columns;
             let level = level_of(*total, peak, rows);
             // Ramped by height like the sparkline, and against the same
             // denominator the height is scaled from, so colour and shape say one
@@ -4014,7 +4064,10 @@ impl Painter<'_> {
                 let Some(glyph) = band_cell(level, row) else {
                     continue;
                 };
-                self.bar_cell(x, y, glyph, self.theme.spark_at(band));
+                for cell in from..to {
+                    let x = left.saturating_add(cell as u16);
+                    self.bar_cell(x, y, glyph, self.theme.spark_at(band));
+                }
             }
         }
     }
