@@ -4645,10 +4645,25 @@ impl Painter<'_> {
             // taken from the style with the background put back underneath. The bar
             // then reads identically whatever the row behind it says, except for the
             // one field it deliberately borrows.
+            //
+            // **Both colours fall back to the cell, and the symmetry is the
+            // point.** A bar style that declares neither leaves the band showing
+            // through, which is every shipped palette. One that declares a
+            // background gets it, opting that palette out of the band under its
+            // own bar rather than having the value silently dropped: a theme file
+            // may write `bar_track = #57606a on #21262d`, and a draw site that
+            // discarded it would be the failure this module's own parser notes
+            // rail against, one that reports no error and changes nothing.
+            //
+            // The foreground's fallback is the same shape and matters more,
+            // because the cell it falls back to is the **wash's** foreground under
+            // a band. A bar style without one would draw the diff's colour and
+            // look deliberate. `palette.rs::every_bar_style_says_what_bar_cell_reads`
+            // is what stops a palette shipping that.
             let behind = cell.bg;
             cell.set_symbol(glyph.encode_utf8(&mut [0u8; 4]));
             cell.fg = style.fg.unwrap_or(cell.fg);
-            cell.bg = behind;
+            cell.bg = style.bg.unwrap_or(behind);
             cell.modifier = style.add_modifier;
         }
     }

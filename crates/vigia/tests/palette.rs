@@ -1871,9 +1871,12 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
 ///   band is the *wash's* foreground, so a bar style without one would draw the
 ///   diff's colour and still pass every contrast gate here, which measures the
 ///   palette rather than the screen.
-/// - **A background is forbidden.** It is discarded in favour of the band's, so a
-///   bar style carrying one would be silently ignored: the value would sit in the
-///   palette, be readable in a theme file, and never appear.
+/// - **A background is declined, not forbidden.** `bar_cell` falls back to the
+///   band's only where the style carries none, so a palette declaring one opts its
+///   own bar out of the band #239 ruled should run under it. That is a legitimate
+///   thing for a *reader's* theme to do and the wrong default to ship.
+///   `render.rs::a_bar_styles_own_background_wins_over_the_band` holds the other
+///   side, that a declared background really does draw.
 ///
 /// Both are the same failure in opposite directions, a field that looks authored and
 /// is not what draws.
@@ -1912,9 +1915,9 @@ fn every_bar_style_says_what_bar_cell_reads() {
             );
             assert!(
                 style.bg.is_none(),
-                "{name}'s {element} carries a background, which `bar_cell` discards \
-                 in favour of the band's: the value would be authored, readable in a \
-                 theme file, and never drawn"
+                "{name}'s {element} carries a background, which opts this \
+                 palette's own bar out of the band #239 ruled should run under \
+                 it. A reader's theme may choose that; a shipped palette may not"
             );
         }
     }

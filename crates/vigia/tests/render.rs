@@ -5718,7 +5718,7 @@ fn a_wash_runs_under_the_scrollbar_column() {
     // **And the track's own colour survived the wash**, which is the half the
     // whole fix rests on and the half a symbol check cannot reach.
     //
-    // `Cell::set_style` merges: `ratatui-core-0.1.2/src/buffer/cell.rs:192` assigns
+    // `Cell::set_style` merges: `ratatui-core-0.1.2/src/buffer/cell.rs:194-198` assigns
     // `fg` and `bg` only where the incoming style carries `Some`, so a wash holding
     // a background and no foreground repaints this cell's background and leaves the
     // track's colour alone. That is a **dependency's** behaviour, pinned at
@@ -6032,6 +6032,99 @@ fn a_row_washs_modifier_never_reaches_the_scrollbar() {
         "the row wash's REVERSED reached the scrollbar's own cell, which swaps the \
          track against its background and undoes every contrast ratio the palette \
          gates prove"
+    );
+}
+
+/// A bar style's own background wins over the band, and no background yields to it.
+///
+/// `bar_cell` falls both colours back to the cell it is writing, and until round 4
+/// of [#239](https://github.com/breferrari/vigia/issues/239)'s audit the background
+/// half was **discarded** rather than fallen back: a theme file could write
+/// `bar_track = #57606a on #21262d`, parse without complaint, and never draw it.
+/// That is the failure this repository's own parser notes rail against, one that
+/// reports no error and changes nothing, and this branch created it by making the
+/// band run under the bar.
+///
+/// It was also the one line in `bar_cell` verified only by **absence**: a palette
+/// gate asserted no shipped style carries a background, which says nothing about
+/// what happens when one does. Both directions are drawn here instead.
+#[test]
+fn a_bar_styles_own_background_wins_over_the_band() {
+    fn bar_bg_on_a_washed_row(
+        theme: &vigia::Theme,
+    ) -> (ratatui::style::Color, ratatui::style::Color) {
+        let view = View {
+            total_rows: 400,
+            rows_above: 40,
+            rows: vec![
+                file("src/engine/watch.rs", 42, 7),
+                Row::Hunk {
+                    old_start: 38,
+                    old_lines: 8,
+                    new_start: 38,
+                    new_lines: 9,
+                },
+                line(
+                    LineKind::Removed,
+                    38,
+                    "    let stale = self.pending.take();",
+                ),
+                line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+            ],
+            ..two_regions(1)
+        };
+        let (width, height) = (64u16, 18u16);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    &view,
+                    theme,
+                    Glyphs::default(),
+                    &chrome(),
+                );
+            })
+            .expect("draw");
+        let backend = terminal.backend().clone();
+        let y = (0..height)
+            .find(|y| row_text(&backend, *y).contains("let stale"))
+            .expect("the removed line was not drawn at all");
+        (
+            backend.buffer()[(width - 1, y)].bg,
+            backend.buffer()[(1, y)].bg,
+        )
+    }
+
+    // Shipped: no background on the bar, so the band shows through.
+    let plain = vigia::Theme::dark();
+    let (bar, wash) = bar_bg_on_a_washed_row(&plain);
+    assert_ne!(
+        wash,
+        ratatui::style::Color::Reset,
+        "the removed row was not washed, so neither half of this gate proves anything"
+    );
+    assert_eq!(
+        bar, wash,
+        "a bar style with no background of its own did not take the band's"
+    );
+
+    // A theme that declares one: it wins, and the band stops under that column.
+    let opaque = ratatui::style::Color::Rgb(0x21, 0x26, 0x2d);
+    let mut gutter = vigia::Theme::dark();
+    gutter.bar_track = gutter.bar_track.bg(opaque);
+    let (bar, wash) = bar_bg_on_a_washed_row(&gutter);
+    assert_ne!(
+        wash, opaque,
+        "the fixture's wash is the same colour as the gutter under test, so the \
+         assertion below cannot tell them apart"
+    );
+    assert_eq!(
+        bar, opaque,
+        "a bar style declaring a background did not draw it, so the value would be \
+         authored, readable in a theme file, and silently dropped"
     );
 }
 
