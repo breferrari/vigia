@@ -23,8 +23,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    GRAPH_COLUMNS, GRAPH_PERIOD, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_WINDOW,
-    History, Recency,
+    GRAPH_COLUMNS, GRAPH_PERIOD, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES,
+    HISTORY_WINDOW, History, Recency,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -348,5 +348,38 @@ fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
         GRAPH_PERIOD < HISTORY_BUCKET,
         "the band stopped being finer than the sparkline, which is the whole \
          reason they are two elements"
+    );
+}
+
+/// The sparkline's bucket count is a ceiling, not a choice, and the ceiling is
+/// computed here rather than written down.
+///
+/// **[#161](https://github.com/breferrari/vigia/issues/161) asked for the drawn
+/// bucket count to become a rung of the width ladder, and for the sparkline that
+/// is refused by arithmetic rather than by preference.** A wider slot cannot buy
+/// more of the window, because the widest rung already draws all of it. It can
+/// only buy a finer division of the same window, and the division cannot go finer
+/// than a band column without the two elements reading one store at crossed
+/// scales, which is what the gate above forbids.
+///
+/// So the largest count available is the largest divisor of [`HISTORY_SAMPLES`]
+/// whose period still exceeds [`GRAPH_PERIOD`], and the sparkline is already
+/// sitting on it. **Searched rather than restated**, because the claim is that no
+/// larger count exists: writing the answer down would assert the number instead
+/// of the argument, and the number would go on passing if either constant moved
+/// underneath it.
+#[test]
+fn the_sparkline_is_already_at_the_ceiling_the_band_sets() {
+    let ceiling = (1..=HISTORY_SAMPLES)
+        .filter(|count| HISTORY_SAMPLES % count == 0)
+        .filter(|count| HISTORY_WINDOW / *count as u32 > GRAPH_PERIOD)
+        .max()
+        .expect("some division of the window is coarser than a band column");
+
+    assert_eq!(
+        HISTORY_BUCKETS, ceiling,
+        "the sparkline draws {HISTORY_BUCKETS} buckets where {ceiling} is the \
+         largest division of the window that stays coarser than a band column, \
+         so it has either room left to grow or has already passed the band"
     );
 }
