@@ -94,11 +94,11 @@ pub const HISTORY_BUCKETS: usize = 12;
 // seeded series, a steady worktree goes from 8% of buckets empty to 17% and from
 // 5.5 distinct heights to 6.5, which is more texture rather than more noise.
 //
-// **Twelve rather than fifteen**, which is where the band's own floor sits, for
-// two reasons that are about this element rather than about the period. It has
-// to halve cleanly, because `SPARK_RUNGS` is the narrowing ladder and fifteen
-// does not; and the sparkline is per file and shares its row with a path, where
-// the band has the pane to itself, so four more columns here cost something the
+// **Twelve rather than fifteen**, and the band's floor was the reason until
+// #232 retired it. What survives is about this element: it has to halve cleanly,
+// because `SPARK_RUNGS` is the narrowing ladder and fifteen does not; and the
+// sparkline is per file and shares its row with a path, where the band has the
+// pane to itself, so four more columns here cost something the
 // band's do not.
 
 /// How much time one **drawn** bucket covers.
@@ -134,8 +134,8 @@ pub const HISTORY_BUCKET: Duration =
 /// paths are kept.
 ///
 /// **One hundred and twenty, so a sample is exactly one second** and exactly
-/// fifteen of them make one drawn bucket. Both divisions are exact, which is what
-/// keeps [`HISTORY_BUCKET`] an honest fifteen seconds rather than a rounding of
+/// ten of them make one drawn bucket. Both divisions are exact, which is what
+/// keeps [`HISTORY_BUCKET`] an honest ten seconds rather than a rounding of
 /// one: a projection that did not divide evenly would make some drawn columns
 /// cover more time than others, and a sparkline compared down a list would be
 /// comparing unequal windows.
@@ -668,8 +668,8 @@ impl History {
 
     /// This path's buckets, oldest first, or `None` when nothing is tracked.
     ///
-    /// Copied rather than borrowed. It is [`HISTORY_BUCKETS`] `u16`s, which is
-    /// smaller than the reference on every target, and returning it by value is
+    /// Copied rather than borrowed. It is [`HISTORY_BUCKETS`] `u32`s, which is
+    /// comparable to the reference on every target, and returning it by value is
     /// what lets a caller hold one while asking about the next path.
     ///
     /// **Projected rather than stored since
@@ -812,8 +812,12 @@ impl History {
     /// and the frame path pays nothing at all: a caller asking for this is a
     /// field read.
     ///
-    /// `u32` because the sum is over paths as well as time. At the cap that is
-    /// 256 paths of `u16`, which overflows `u16` and cannot overflow `u32`.
+    /// `u32` because the sum is over paths as well as time, and **saturating**
+    /// rather than merely wide since [#232](https://github.com/breferrari/vigia/issues/232):
+    /// this said 256 paths of `u16` could not reach a `u32`'s ceiling, which was
+    /// true until a sample became a `u32` of bytes that saturates at that ceiling
+    /// on its own. [`History::repeak`] adds them with `saturating_add` for exactly
+    /// that reason.
     pub fn worktree_churn(&self) -> Churn {
         self.worktree
     }
@@ -834,10 +838,6 @@ impl History {
     /// out.
     fn repeak(&mut self) {
         let mut worktree = [0u32; HISTORY_SAMPLES];
-        // Every drawn bucket of every path, which is what the sparkline's heights
-        // are measured across. Collected rather than folded, because
-        // [`scale_of`] needs two passes' worth of information and a bounded
-        // `Vec` here is `HISTORY_PATHS` times [`HISTORY_BUCKETS`] of `u32`.
         for track in self.tracks.values() {
             for (total, &count) in worktree.iter_mut().zip(track.samples.iter()) {
                 // **Saturating, like every other add on this path.** It was a

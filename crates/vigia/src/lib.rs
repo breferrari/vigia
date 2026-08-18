@@ -727,63 +727,45 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     Ok(())
 }
 
-/// Paths one wake weighs by size before the rest fall back to the count.
-///
-/// **A bound, and the measurement that justifies it was taken twice.** A burst
-/// reports up to `HISTORY_PATHS` paths on one coalesced wake, and sizing all of
-/// them measures **2.33ms of wall and 2.60ms of thread CPU** per burst on the
-/// reference machine, against I9's 16ms, on a wake already spending most of that
-/// budget walking status for a bulk rewrite.
-///
-/// **The first measurement said `0ns` of CPU and it was the instrument, not the
-/// cost.** `GetThreadTimes` reports in 15.625ms steps on Windows, so a burst
-/// timed on its own reads zero and therefore reads as time spent waiting rather
-/// than working. That is `SPEC.md` §7's own rule turned against itself: an
-/// off-CPU overshoot is the host's, and a clock too coarse to see the work says
-/// off-CPU for everything. Timed across enough rounds to clear the quantum, the
-/// cost is CPU. The cap was removed on the blind reading and is back on the
-/// sighted one.
-///
-/// Sixty-four, which measures about 0.65ms, a twenty-fifth of the frame. **What
-/// the remainder gives up is precision where precision matters least**: the
-/// defect reported from a live pane is a worktree where *one* file is saved
-/// repeatedly, drawing every column at full height because a sample counted files
-/// rather than bytes. A wake naming more than sixty-four paths is an agent or a
-/// build rewriting the tree, and there the count is already a magnitude. The
-/// overflow weighs the store's floor of one, which is what every path weighed
-/// before this existed.
-///
-/// The honest improvement is to stop paying for the size at all: `Frame::advance`
-/// walks status on the same wake and has already stat'd every one of these paths.
-/// `gix` does not surface it, which is [#233](https://github.com/breferrari/vigia/issues/233).
-pub const SIZED_PATHS: usize = 64;
-
 /// What each path in one wake's burst now holds, for [`vigia_core::History::record_sized`].
 ///
-/// **The cap lives here rather than at the call site, so the budget gate prices
-/// what ships.** `crates/vigia/tests/budgets.rs` times this inside the frame it
-/// measures, and a gate applying no cap would report a cost the product does not
-/// pay, while one reimplementing the cap could drift from it. What a gate leaves
-/// out gets cheaper, so that drift would never fail.
+/// **Every path, and the cap that was here twice is the finding.** A burst
+/// reports up to `HISTORY_PATHS` paths on one coalesced wake, and sizing all of
+/// them measures **2.60ms of thread CPU** in isolation against I9's 16ms. That
+/// number is real and it is not the cost, which is the whole lesson: measured in
+/// the frame it actually sits in, interleaved over thirty rounds of a hundred-file
+/// bulk rewrite, the frame costs **18.43ms sizing nothing, 17.39ms sizing
+/// sixty-four paths and 17.93ms sizing all 256**. The unsized run is the slowest
+/// of the three. `Frame::advance` walks status on the same wake and stats every
+/// one of these paths to decide they changed at all, so by the time this runs the
+/// metadata is warm and the marginal syscall costs nothing measurable.
+///
+/// **A component measured alone is not a budget.** `CLAUDE.md` asks for the
+/// headroom to be quoted beside any cost used to refuse something, and this was
+/// refused twice on a number taken outside the frame: once on a wall figure
+/// inflated by a loaded machine, and once on a CPU figure that was real and
+/// answered a question nobody was asking. Both times the thing the cap protected
+/// went unmeasured.
+///
+/// The duplicated work is still real and still worth removing: the walk already
+/// has the size and `gix` does not surface it, which is
+/// [#233](https://github.com/breferrari/vigia/issues/233). That is an efficiency
+/// row, not a reason to draw a worse graph.
 pub fn sized<'p>(
     workdir: &'p Path,
     paths: &'p [String],
 ) -> impl Iterator<Item = (&'p str, Option<u64>)> + 'p {
-    paths.iter().enumerate().map(move |(at, path)| {
-        let bytes = (at < SIZED_PATHS).then(|| weigh(workdir, path)).flatten();
-        (path.as_str(), bytes)
-    })
+    paths
+        .iter()
+        .map(move |path| (path.as_str(), weigh(workdir, path)))
 }
 
 /// What a written path now holds on disk, for [`vigia_core::History::record_sized`].
 ///
-/// **Exported so the budget gates can call the one the product calls**
-/// ([#232](https://github.com/breferrari/vigia/issues/232)). `crates/vigia/tests/budgets.rs`
-/// prices this syscall inside the timed region, and it had its own copy of these
-/// three lines: the gate's own docblock claimed to sample "the way `vigia::run`
-/// does" and nothing held it to that. Drift here is invisible in the direction
-/// that matters, because what the gate leaves out gets *cheaper*, so the gate
-/// would go on passing while pricing a tick the product no longer has.
+/// **Private, because [`sized`] is what a caller wants.** The budget gates price
+/// this syscall inside the frame they measure, and they reach it through `sized`
+/// so a gate cannot end up sampling a shape the product does not have: what a
+/// gate leaves out gets *cheaper*, so that drift would never fail.
 ///
 /// **Does not follow links**, for `Frame`'s fingerprint rule one crate over: the
 /// thing weighed has to be the thing that was written, and a link's own bytes are
@@ -792,8 +774,14 @@ pub fn sized<'p>(
 /// `None` for a path that cannot be read, which is a file that vanished between
 /// the watch naming it and this call. The store weighs that at its floor rather
 /// than at nothing, because it was still written.
-pub fn weigh(workdir: &Path, path: &str) -> Option<u64> {
+fn weigh(workdir: &Path, path: &str) -> Option<u64> {
     match std::fs::symlink_metadata(workdir.join(path)) {
+        // **A directory is not a write with a size**, and on the platforms where
+        // it has one it is a lie: `relative` admits directory events, and
+        // `symlink_metadata` reports 0 for a directory on Windows but 4096 and
+        // rising on Linux and macOS. Weighing those would charge `mkdir` churn as
+        // kilobytes against a path that is in no diff at all.
+        Ok(meta) if meta.is_dir() => None,
         Ok(meta) => Some(meta.len()),
         // **A file that is gone weighs zero bytes, not "no size"**, and the
         // difference is the largest edit a reader can make. Mapping both to

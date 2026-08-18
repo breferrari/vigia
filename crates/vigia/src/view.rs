@@ -474,7 +474,7 @@ pub struct View {
     /// sparkline", and that is the ruling
     /// [#78](https://github.com/breferrari/vigia/issues/78) reversed: an empty
     /// bucket draws a track, so a scale of zero means every bucket is empty and
-    /// every one of them is still drawn. `vigia_core::History::peak` carries the
+    /// every one of them is still drawn. `vigia_core::History::scale` carries the
     /// same correction, and this is the copy a renderer actually reads.
     pub scale: u32,
     /// The whole worktree's churn over the window, oldest sample first.

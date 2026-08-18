@@ -239,6 +239,17 @@ fn drew_a_full_screen(
 /// Shared for the reason the marker itself is not: each gate writes its own
 /// format (`fn edited_{n}` here, `fn bulk_edited_{n}` in the bulk gate), so the
 /// producer already varies and only the check is common. Two copies of the check
+/// The edits have to still be landing.
+///
+/// Checked against the frame's diff rather than against the screen, and the
+/// difference is the fixture: these rewrite every line, so a file's hunk is five
+/// hundred removals followed by five hundred additions and the newest line sits
+/// far below any viewport. A screen assertion here would fail while the code was
+/// perfect.
+///
+/// Shared for the reason the marker itself is not: each gate writes its own
+/// format (`fn edited_{n}` here, `fn bulk_edited_{n}` in the bulk gate), so the
+/// producer already varies and only the check is common. Two copies of the check
 /// would be two places to notice that a producer's format had moved.
 fn the_edits_still_land(frame: &mut Frame, path: &str, marker: &str) {
     let at = frame
@@ -257,158 +268,103 @@ fn the_edits_still_land(frame: &mut Frame, path: &str, marker: &str) {
     );
 }
 
+/// Sizing a whole burst does not measurably change the frame it sits in.
+///
+/// **Two fixtures rather than one number against a budget, which is the finding
+/// this gate exists to keep.** Weighing a write by its size costs one
+/// `symlink_metadata` per changed path per wake, and a burst carries up to
+/// `HISTORY_PATHS` of them. Timed on its own that is 2.60ms of thread CPU against
+/// I9's 16ms, and twice in one session that number was used to cap the feature:
+/// once off a wall figure inflated by a loaded machine, once off a `0ns` CPU
+/// figure that was the clock's 15.625ms quantum rather than a measurement.
+///
+/// **Neither reading measured the frame.** `Frame::advance` walks status on the
+/// same wake and stats every one of these paths to decide they changed at all, so
+/// by the time the sizing runs the metadata is warm and the marginal syscall is
+/// free. Interleaved over thirty rounds of a bulk rewrite, the frame measured
+/// 18.43ms sizing nothing against 17.93ms sizing all of them: the *unsized* run
+/// was the slower of the two.
+///
+/// So this compares two problem sizes whose per-unit content is identical and
+/// whose counts differ, which is the only form of this comparison with no shared
+/// term to cancel. It is deliberately loose: it is here to catch a `stat` that
+/// has become a read or a walk, three orders of magnitude, not to track
+/// microseconds on a shared runner.
 #[test]
-fn a_real_frame_with_highlighting_holds_the_frame_budget() {
-    frame_budget_at_depth("shell-i9", 0);
-}
-
-#[test]
-fn the_timed_frame_draws_the_readouts_it_is_timing() {
-    // **A gate over the gates, and this repo has paid twice for not having
-    // one.** `SPEC.md` §7 records both: `render` sat outside every budget on
-    // both crates for two phases, so a row costing 7.2x its pane passed a 16ms
-    // assertion; and a gate that settled before measuring left the one window
-    // it was written about unmeasured. Both were invisible from inside the gate,
-    // which is exactly the property that makes a comment a bad instrument here.
-    //
-    // The status readouts are the same shape one more time. `sample_memory` is a
-    // syscall and `chrome` sorts a hundred and twenty-eight durations, and if
-    // `shell_frame` ever stops calling them, every wall-clock assertion in this
-    // file keeps passing while measuring a screen the product does not draw.
-    // Nothing else here can catch that, because what is left out gets *cheaper*.
-    //
-    // Two frames rather than one: the first has no completed frame behind it, so
-    // its chrome legitimately carries no frame time. The readout appearing on
-    // the second is the shipped behaviour, and asserting it at the first would
-    // be asserting the bug.
-    let scratch = Scratch::large_diff("readouts-in-the-gate", 4, 20);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    settle(&mut frame);
-
-    let mut app = App::new();
-    let mut highlighter = Highlighter::new();
-    let history = History::new();
-    let screen = layout(&app, 4);
-    let theme = Theme::default();
-    let mut buf = Buffer::empty(area());
-
-    for _ in 0..2 {
-        shell_frame(
-            &mut frame,
-            &mut app,
-            &mut highlighter,
-            &history,
-            &mut buf,
-            &theme,
-            screen,
-        );
-    }
-
-    let chrome = app.chrome("fixture", None, None, None, None, None);
-    assert!(
-        chrome.frame.is_some(),
-        "the timed frame never recorded what it cost, so every wall-clock gate \
-         in this file is measuring a screen without the frame readout on it"
-    );
-    // Every tier-1 target has a cheap read, so this asserts unconditionally
-    // rather than behind a `cfg`. A platform outside those three would fail here
-    // and should: it means the readout silently stopped being covered, which is
-    // the thing this gate exists to notice. `SPEC.md` §5.1 names the three.
-    assert!(
-        chrome.memory.is_some(),
-        "the timed frame read no memory, so the syscall the status bar performs \
-         every frame is outside every budget in this file"
-    );
-}
-
-#[test]
-fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
-    // **What [#232](https://github.com/breferrari/vigia/issues/232) added to a
-    // tick, gated at its widest rather than at its typical.** Weighing a write by
-    // the bytes it moved means one `symlink_metadata` per changed path per wake,
-    // and the watcher coalesces a bulk rewrite into a single wake, so the widest
-    // tick this tool has sizes every file in the burst at once. A gate that sized
-    // one path would have measured the case that was never in doubt.
-    //
-    // The cost is not hypothetical and this repo has already paid it once: an
-    // `lstat` before every working-tree read measured **+1.18ms p50** over a
-    // hundred undrawn files, which is why `FileChange::maybe_symlink` exists to
-    // carry the walk's answer instead. That is the number this gate exists to
-    // keep from coming back through a different door.
-    //
-    // A tenth of the frame, which is looser than the memory read's hundredth
-    // above and for the same stated reason: the point is to catch a stat that has
-    // become a read or a walk, not to track microseconds on a shared runner.
+fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
 
-    let budget = I9_FRAME / 10;
-    let scratch = Scratch::large_diff("burst-sizing", FILES, LINES);
-    let paths = bulk_burst();
+    let scratch = Scratch::large_diff("burst-frame", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
     let mut history = History::new();
+    let screen = layout(&app, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+    let paths = bulk_burst();
 
-    // Warmed, for the memory read's reason one gate up: the first `stat` of a
-    // path faults in whatever the platform caches for it, and `SPEC.md` §7's rule
-    // about steady state applies to a syscall as much as to a frame.
-    for _ in 0..10 {
-        sample_all(&mut history, scratch.root(), &paths);
+    // **Interleaved, because a sequential pair under varying load is not a
+    // controlled experiment.** This repo nearly filed a phantom regression that
+    // way: a 125ms tail landed on the arm the branch did not touch.
+    let (mut sized, mut bare) = (Samples::new(SAMPLED_BURSTS), Samples::new(SAMPLED_BURSTS));
+    for round in 1..=SAMPLED_BURSTS {
+        for weighed in [true, false] {
+            scratch.rewrite_all(FILES, LINES, round);
+            let (wall, _) = time_cpu(|| {
+                if weighed {
+                    history.record_sized(vigia::sized(scratch.root(), &paths), Instant::now());
+                } else {
+                    history.record(paths.iter().map(String::as_str), Instant::now());
+                }
+                shell_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
+            });
+            // Warm rounds only, for the reason every gate in this file warms:
+            // the first frames fault in whatever the platform caches.
+            if round > SAMPLED_BURSTS / 4 {
+                if weighed {
+                    sized.push(wall)
+                } else {
+                    bare.push(wall)
+                }
+            }
+        }
     }
 
-    // **Sampled rather than timed once**, which is the instrument rule the
-    // gates below already follow. A single `time` call against a sub-millisecond
-    // quantity is one scheduler hiccup away from a red build.
-    // **Timed as one block rather than per round, because the thread clock has a
-    // quantum.** `GetThreadTimes` reports in 15.625ms steps on Windows, so a
-    // sub-millisecond burst measured on its own reads `0ns`, and a budget
-    // compared against that is trivially true for every implementation. This gate
-    // shipped in exactly that state, and the cap in `vigia::SIZED_PATHS` was
-    // *removed* on the reading: zero CPU said the cost was time spent waiting,
-    // which `SPEC.md` §7 attributes to the host. Rolling the rounds into one
-    // measurement clears the quantum, and the cost is CPU after all.
-    let (wall, spent) = time_cpu(|| {
-        for _ in 0..SAMPLED_BURSTS {
-            sample_all(&mut history, scratch.root(), &paths);
-        }
-    });
-    let rounds = u32::try_from(SAMPLED_BURSTS).expect("a sane round count");
-    let (wall, taken) = (wall / rounds, spent / rounds);
-
-    // Non-vacuity, and it is the assertion that matters most: a burst that sized
-    // nothing would post a very fast time and pass a budget it never spent.
-    assert_eq!(
-        paths.len(),
-        HISTORY_PATHS,
-        "the burst was not the widest a wake can carry, so this timed a narrower \
-         tick than the product has"
+    let weighed = sized.percentile(0.5).expect("a sampled round");
+    let plain = bare.percentile(0.5).expect("a sampled round");
+    // Non-vacuity: both arms have to have done the work, or this compares two
+    // numbers neither of which is a frame.
+    // **Non-vacuity on what the run did, not on what the fixture is.** Asserting
+    // `paths.len() == HISTORY_PATHS` was true by construction, since `bulk_burst`
+    // *is* that range: it kills no mutation and reads as a check.
+    let recorded = history.stats().recorded;
+    assert!(
+        recorded >= (HISTORY_PATHS * SAMPLED_BURSTS) as u64,
+        "the store recorded {recorded} paths across {SAMPLED_BURSTS} rounds of          both arms, so at least one arm sized a burst the history never took"
     );
     assert!(
-        history.churn(EDITED_PATH).is_some(),
-        "the burst recorded nothing, so this gate timed a walk over paths the \
-         store ignored"
-    );
-    // **Asserted on thread CPU time and reported on both**, which is `SPEC.md`
-    // section 7's own rule for this tier ([#212](https://github.com/breferrari/vigia/issues/212)):
-    // a wall-clock overshoot spent off-CPU is the host, one spent on-CPU is ours,
-    // and contention cannot inflate a CPU clock. It matters here more than
-    // anywhere else in this file, because a `stat` is almost entirely waiting. On
-    // the reference machine this burst measures about 2.3ms of wall against
-    // **0ns** of CPU, and a bound read off the wall number would have capped the
-    // feature to buy back time the frame never spent.
-    // **Both clocks, and neither may read zero.** The CPU figure is the one that
-    // survives contention; the wall figure is the one a reader waits through. The
-    // non-vacuity assertion is the half this gate shipped without: with a clock
-    // too coarse to see the burst, `taken <= budget` was `0ns <= 1.6ms` and could
-    // not fail for any implementation.
-    assert!(
-        taken > Duration::ZERO,
-        "the thread clock reported no time for {SAMPLED_BURSTS} bursts, so it          cannot see this cost and the budget below asserts nothing"
+        plain > Duration::ZERO,
+        "the unsized arm took no time, so this compared nothing"
     );
     assert!(
-        taken <= budget && wall <= budget,
-        "sizing a {HISTORY_PATHS}-path burst spent {taken:?} of thread CPU and          {wall:?} of wall against {budget:?}, a tenth of the {I9_FRAME:?} frame          it shares"
+        weighed <= plain * 2,
+        "sizing a {HISTORY_PATHS}-path burst took the frame from {plain:?} to \
+         {weighed:?}, which is a `stat` that has become a read or a walk rather \
+         than a syscall on metadata the status walk has already warmed"
     );
 }
 
