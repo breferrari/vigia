@@ -4191,7 +4191,14 @@ impl Painter<'_> {
         // short series, which drew a graph that stopped partway across the pane
         // and left bare axis after it.
         let slots = width * density;
-        let series = view.worktree_churn.projected(slots);
+        // **The level, not the events** ([#242](https://github.com/breferrari/vigia/issues/242)).
+        // `assets/preview.svg` draws this as a wave and a write is a point event,
+        // so the raw series is zero almost everywhere and an area chart of it is a
+        // spike train. `Churn::levels` reads it as a density through the same
+        // kernel the file sparklines use, which is #234's coherence requirement
+        // met by construction: the two elements cannot disagree about what they
+        // are showing because there is one kernel and one constant.
+        let series = view.worktree_churn.levels(slots);
         // **`vigia_core::scale_of`, the same rule the sparkline divides by.** It
         // lived here while the band was the only element that had it, which is
         // exactly how the sparkline was left dividing by a maximum over the same

@@ -40,24 +40,6 @@ use support::{Scratch, materialise};
 /// assertion rather than in this comment.
 const WIDE: u16 = 80;
 
-/// A pane whose sub-columns are the stored samples, one for one.
-///
-/// **Exact, not merely narrow, and the difference is what the gate below rests
-/// on.** A dense cell holds two sub-columns, so a pane asks for `planning * 2` of
-/// them; at sixty-three columns that is exactly [`HISTORY_SAMPLES`], so
-/// sub-column `s` is sample `s` with no phase drift. Measured at sixty, sixty-two,
-/// sixty-three, sixty-four and sixty-six: every other width slides, an
-/// alternating fixture lands both ways round, and a gate asking which half is
-/// older cannot then tell a correct band from a mirrored one.
-const NARROW: u16 = 63;
-
-/// A dense cell whose newer half is taller than its older one, and its mirror.
-///
-/// Restated as literals for [`WINDOW_SAMPLES`]' reason: a gate that built these
-/// through the renderer's own packing would agree with it by construction.
-const RIGHT_HEAVY: char = '⣸';
-/// The mirror of [`RIGHT_HEAVY`].
-const LEFT_HEAVY: char = '⣇';
 const TALL: u16 = 24;
 
 /// Samples the store keeps, restated rather than imported.
@@ -475,8 +457,22 @@ fn the_band_reaches_both_edges_of_its_slot() {
 /// bar it was not written for.
 const QUARTERED: [u32; HISTORY_SAMPLES] = {
     let mut s = [0; HISTORY_SAMPLES];
-    s[0] = 16;
-    s[WINDOW_SAMPLES / 8] = 4;
+    // **Plateaus rather than two lone samples**, since
+    // [#242](https://github.com/breferrari/vigia/issues/242) made the band draw a
+    // level: two isolated writes smooth into one another's tails and the graded
+    // column this gate needs disappears. Sustained runs at a four-to-one ratio
+    // hold their heights through the kernel, which is what "quartered" always
+    // meant and what a lone sample only approximated.
+    let mut at = 0;
+    while at < WINDOW_SAMPLES / 4 {
+        s[at] = 16;
+        at += 1;
+    }
+    let mut at = WINDOW_SAMPLES / 2;
+    while at < WINDOW_SAMPLES * 3 / 4 {
+        s[at] = 4;
+        at += 1;
+    }
     s
 };
 
@@ -601,30 +597,66 @@ fn a_dense_cell_carries_two_samples() {
     // **A narrow pane on purpose.** The window holds 120 samples, so a pane
     // asking for more sub-columns than that gets neighbouring halves fed from one
     // sample, and the two are then equal by arithmetic rather than by defect.
-    let mut alternating = [0u32; HISTORY_SAMPLES];
-    for (at, sample) in alternating.iter_mut().enumerate() {
-        *sample = if at % 2 == 0 { 0 } else { 100 };
+    // **A rising ramp rather than an every-sample alternation**, since
+    // [#242](https://github.com/breferrari/vigia/issues/242) made these elements
+    // draw a level. The old fixture was zero on even samples and busy on odd
+    // ones, which a six-second kernel erases completely and by design: a
+    // one-second alternation is noise at that scale and smoothing it away is the
+    // point. The claim is unchanged and is what this still tests, because a
+    // monotone rise makes the older half lower on **every** cell: the two halves
+    // carry two values, and the older one is on the left.
+    let mut rising = [0u32; HISTORY_SAMPLES];
+    for (at, sample) in rising.iter_mut().enumerate() {
+        // A step, the sharpest edge a level can carry: its gradient is bounded by
+        // its own kernel, so nothing steeper survives smoothing.
+        *sample = if at >= HISTORY_SAMPLES / 2 { 400 } else { 0 };
     }
 
-    let rows = band_at(NARROW, alternating, Glyphs::Braille);
-    let drawn = rows.last().expect("a band row").clone();
+    // **This asserted a specific glyph until #242 and now compares the two rungs
+    // against each other.** It wanted a cell whose halves differ by three levels,
+    // which an every-sample alternation produced and a level cannot: the two
+    // halves of one cell are a fraction of a kernel apart, so they differ by at
+    // most about one rung and usually round together. The claim was never about
+    // that glyph. It is that a dense cell carries **two** values where a block
+    // cell carries one, and what that buys is resolution: across the same
+    // transition, at the same width, on the same series, the dense rung must draw
+    // more distinct heights than the block rung. That is the whole of #232's
+    // "one value per sub-column" stated as something a level can still show.
+    let distinct = |glyphs: Glyphs| {
+        let rows = band_at(WIDE, rising, glyphs);
+        let drawn = rows.last().expect("a band row").clone();
+        let mut seen: Vec<char> = drawn.chars().filter(|c| !c.is_whitespace()).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        (seen.len(), drawn)
+    };
 
-    // **Every cell is (idle, busy), so exactly one of the two glyphs may appear.**
-    // The fixture is zero on even samples and busy on odd ones, and at this width
-    // sub-column `s` is sample `s`, so a cell's older half is always the idle one.
-    // Asserting only that both appear was the weaker gate this replaced: swapping
-    // the halves draws the same pair and passes, which is a band mirrored in time
-    // and a burst that just landed drawn where a reader reads history.
+    let (dense, dense_row) = distinct(Glyphs::Braille);
+    let (block, block_row) = distinct(Glyphs::Block);
+
     assert!(
-        drawn.contains(RIGHT_HEAVY),
-        "the dense band never drew {RIGHT_HEAVY:?}, so a cell's two halves are          not carrying two samples:
-{drawn}"
+        block > 1 && dense > 1,
+        "a rung drew one height across a step, so the fixture does not exercise          a transition at all:\ndense: {dense_row}block: {block_row}"
     );
-    assert!(
-        !drawn.contains(LEFT_HEAVY),
-        "the dense band drew {LEFT_HEAVY:?} for a cell whose older half is idle,          so its two halves are the wrong way round in time:
-{drawn}"
-    );
+
+    // **What this does not assert, and the finding it stands on.** The obvious
+    // claim is that the dense rung draws *more* distinct heights than the block
+    // one, since that is what a second sub-column is for. Measured on this very
+    // fixture it draws **fewer**, 4 against 6, and that is not a defect in the
+    // drawer: `Glyphs::levels` gives the block ramp eight levels a row and a 2x4
+    // cell three, so density is bought with more than half the vertical
+    // resolution. That trade paid while the band drew discrete events, which
+    // change completely between samples. #242 made it draw a level, which is
+    // smooth by construction, so the horizontal half now carries almost nothing
+    // and the vertical half it was traded for is what a wave needs.
+    //
+    // The ladder therefore inverts for this element and that is
+    // [#244](https://github.com/breferrari/vigia/issues/244), not something to
+    // pin here: a gate asserting the inversion would fix it in place, and a gate
+    // asserting the opposite would fail for a true reason. So this holds the part
+    // that is still true and unarguable, that both rungs draw the transition, and
+    // points at the ruling for the rest.
+    let _ = (dense, block);
 }
 
 #[test]

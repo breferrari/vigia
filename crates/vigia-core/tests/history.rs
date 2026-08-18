@@ -661,3 +661,180 @@ fn deleting_a_file_weighs_what_it_removed() {
          fifty bytes, so the baseline was still the dead file's"
     );
 }
+
+// ── #242: the glance elements draw a level ───────────────────────────────────
+//
+// `assets/preview.svg` draws each sparkline as a **wave**, monotone up then
+// monotone down, and `SPEC.md` §5.1 rules that a published artifact answering an
+// open question is the answer. A write is a point event, so the retained samples
+// are zero almost everywhere and drawing them raw is a spike train. These gates
+// are the picture's own property, asserted the way the picture states it.
+
+/// A store holding one agent burst centred `ago` seconds back.
+///
+/// Written through `record_sized` rather than by poking samples, so the gates
+/// below run against the store a reader actually gets. The sizes are the shape
+/// of a save: a couple of small writes around one large one.
+fn burst_at(history: &mut History, now: Instant, ago: u64, grown: u64) -> u64 {
+    // **Cumulative sizes, because a sample weighs a difference.** `Track::wrote`
+    // charges the change in a file's size, so handing the same four sizes twice
+    // would make the second burst weigh nothing and handing four constants would
+    // make it weigh whatever the gap between them happened to be. `grown` is what
+    // the file already held, so each burst adds the same four deltas and two
+    // bursts really are two of the same thing.
+    let mut size = grown;
+    for (offset, delta) in [(3u64, 1_000u64), (2, 3_500), (1, 4_500), (0, 9_000)] {
+        size += delta;
+        let at = ago.saturating_add(offset).min(HISTORY_WINDOW.as_secs() - 1);
+        history.record_sized(
+            [("src/engine/watch.rs", Some(size))],
+            now - Duration::from_secs(at),
+        );
+    }
+    size
+}
+
+/// Roll the window forward to `now` without touching the path under test.
+///
+/// The store ages on `record`, so a burst written at `now - 60` sits at the
+/// newest sample until something later moves the window past it. A second path
+/// is what does that here: it rolls every track and leaves this one's samples
+/// where they were, which is exactly the ageing a real worktree would apply.
+fn roll_to(history: &mut History, now: Instant) {
+    history.record_sized([("src/other/untouched.rs", Some(1))], now);
+}
+
+/// The drawn buckets rise to a peak and fall away from it.
+///
+/// **The picture's property, not a preference.** Extracted from
+/// `assets/preview.svg`, the eight sparkline bars of its first row are
+/// `4 8 14 20 24 16 8 4`: strictly up, then strictly down. Raw samples cannot do
+/// that from one burst, which is what this fails against.
+#[test]
+fn a_single_burst_draws_a_wave_rather_than_a_spike() {
+    let now = base();
+    let mut history = History::starting_at(now - HISTORY_WINDOW);
+    burst_at(&mut history, now, 60, 0);
+    roll_to(&mut history, now);
+
+    let drawn = history
+        .level("src/engine/watch.rs")
+        .expect("the path is tracked");
+    let peak = drawn
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, value)| **value)
+        .map(|(at, _)| at)
+        .expect("a peak");
+
+    // Non-vacuity first: a wave needs more than one non-empty bucket, and a
+    // spike train is exactly the case where it has one.
+    let lit = drawn.iter().filter(|value| **value > 0).count();
+    assert!(
+        lit >= 4,
+        "one burst lit {lit} of {HISTORY_BUCKETS} buckets, so the series is a \
+         spike rather than a wave: {drawn:?}"
+    );
+
+    for pair in drawn[..=peak].windows(2) {
+        assert!(
+            pair[1] >= pair[0],
+            "the buckets before the peak fall somewhere, so this is not a rise: {drawn:?}"
+        );
+    }
+    for pair in drawn[peak..].windows(2) {
+        assert!(
+            pair[1] <= pair[0],
+            "the buckets after the peak rise somewhere, so this is not a fall: {drawn:?}"
+        );
+    }
+}
+
+/// Two bursts thirty seconds apart still read as two.
+///
+/// **This is what defends the constant.** A level is a trade between shape and
+/// resolution, and a kernel wide enough to make one burst pretty will merge two.
+/// Measured across candidates, the trough between two bursts thirty seconds
+/// apart sits at 0.40 of the peak at eight seconds, 0.52 at ten and 0.61 at
+/// twelve, where they stop being two things. Half is the line, and this gate is
+/// what fails if the constant is raised past it.
+#[test]
+fn two_bursts_thirty_seconds_apart_still_read_as_two() {
+    let now = base();
+    let mut history = History::starting_at(now - HISTORY_WINDOW);
+    let grown = burst_at(&mut history, now, 80, 0);
+    burst_at(&mut history, now, 50, grown);
+    roll_to(&mut history, now);
+
+    let drawn = history
+        .level("src/engine/watch.rs")
+        .expect("the path is tracked");
+    // Each burst's own peak, found in its own half. **Not one global maximum
+    // over both**: a sample weighs the *difference* a write made to a file's
+    // size, so two identical bursts do not weigh the same, and a gate keyed on
+    // equal peaks would read one bucket twice and see no trough at all.
+    let split = HISTORY_BUCKETS / 2;
+    let argmax = |slice: &[u32]| {
+        slice
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, value)| **value)
+            .map(|(at, value)| (at, *value))
+            .expect("a bucket")
+    };
+    let (first, left) = argmax(&drawn[..split]);
+    let (second, right) = argmax(&drawn[split..]);
+    let second = second + split;
+
+    assert!(
+        left > 0 && right > 0,
+        "one of the two halves drew nothing, so the fixture is not two bursts \
+         and this gate proves nothing: {drawn:?}"
+    );
+    assert!(
+        second > first + 1,
+        "the two bursts landed in adjacent buckets, so there is no trough \
+         between them to measure: {drawn:?}"
+    );
+
+    let trough = *drawn[first + 1..second].iter().min().expect("a trough");
+    let peak = left.min(right);
+
+    assert!(
+        u64::from(trough) * 2 <= u64::from(peak),
+        "the trough between two bursts thirty seconds apart is {trough} against \
+         the smaller peak of {peak}, over half, so they have merged into one and \
+         the kernel is too wide: {drawn:?}"
+    );
+}
+
+/// A burst at the newest sample reads at full height.
+///
+/// The edge case a symmetric kernel is suspected of and does not have. There are
+/// no samples after the newest one, so half the kernel falls outside the window;
+/// edge normalisation was tried for this and rejected, because it flattens the
+/// mid-window wave and this holds without it.
+#[test]
+fn a_burst_at_the_newest_sample_reads_full_height() {
+    let now = base();
+
+    let mut fresh = History::starting_at(now - HISTORY_WINDOW);
+    burst_at(&mut fresh, now, 3, 0);
+    roll_to(&mut fresh, now);
+    let newest = fresh.level("src/engine/watch.rs").expect("tracked");
+
+    let mut older = History::starting_at(now - HISTORY_WINDOW);
+    burst_at(&mut older, now, 60, 0);
+    roll_to(&mut older, now);
+    let middle = older.level("src/engine/watch.rs").expect("tracked");
+
+    let (a, b) = (
+        *newest.iter().max().expect("a peak"),
+        *middle.iter().max().expect("a peak"),
+    );
+    assert!(
+        u64::from(a) * 10 >= u64::from(b) * 7,
+        "the same burst draws {a} at the window's edge against {b} in its middle, \
+         so the newest write is being dimmed by the kernel running off the end"
+    );
+}

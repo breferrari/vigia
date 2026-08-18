@@ -252,6 +252,108 @@ pub struct HistoryStats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Churn(pub [u32; HISTORY_SAMPLES]);
 
+/// How far a write's weight is spread when the series is read as a **level**.
+///
+/// **The picture is the ruling and this is only its constant.**
+/// `assets/preview.svg` draws every sparkline as a wave: its first row is
+/// `4 8 14 20 24 16 8 4`, monotone up then monotone down, and `SPEC.md` §5.1
+/// rules that a published artifact answering an open question is the answer. A
+/// write is a **point event**, so the retained samples are zero almost
+/// everywhere and drawing them raw is a spike train rather than a wave. Reported
+/// from a live pane as *"spikes on a flat line"*
+/// ([#242](https://github.com/breferrari/vigia/issues/242)).
+///
+/// **A causal decay is the obvious first idea and it is the wrong shape.** An
+/// impulse rises instantly and falls slowly, which is a sawtooth: measured, it
+/// draws `█▇▃▁` where the picture wants `▁▂▃▅▆█▅▂`. The picture rises *and*
+/// falls, so the kernel has to look both ways, which is what reading a point
+/// process as a density means.
+///
+/// **Six seconds, and the number is a trade rather than a taste.** A wider
+/// kernel draws a prettier single burst and merges two nearby ones. Measured
+/// against the aggregation these values are actually read through, a sum of ten
+/// smoothed samples per drawn bucket, two bursts thirty seconds apart leave a
+/// trough at 0.36 of the peak here and 0.54 at eight seconds, where they stop
+/// being two things. Half is the line, and
+/// `tests/history.rs::two_bursts_thirty_seconds_apart_still_read_as_two` is what
+/// fails if this is raised past it.
+///
+/// **Derived twice, and the first derivation was wrong in a way worth keeping.**
+/// Modelled against a *maximum* per bucket it read as eight seconds; the drawn
+/// bucket is a **sum**, which smears further, so the same criterion lands two
+/// seconds lower. A constant tuned against the wrong aggregation is a constant
+/// tuned against nothing.
+pub const HISTORY_LEVEL: Duration = Duration::from_secs(6);
+
+/// [`HISTORY_LEVEL`] in samples, which is what the filter actually steps in.
+const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_nanos() as f64;
+
+/// Read a retained series as a level rather than as the events that made it.
+///
+/// A two-sided exponential kernel, `x[j] * a^|i-j|`, normalised so the total it
+/// carries is the total it was given: the shape changes and the quantity does
+/// not.
+///
+/// **Two passes rather than a convolution, and that is what makes it
+/// affordable.** Written out, the kernel is `O(n·k)` and this runs on the frame
+/// path for the band and once per drawn row for the sparklines. The same kernel
+/// is a forward pass plus a backward pass, `O(n)`, because an exponential is the
+/// one shape that is its own running sum. The centre sample is in both passes,
+/// so it is subtracted once.
+fn levelled(samples: &[u32; HISTORY_SAMPLES]) -> [u32; HISTORY_SAMPLES] {
+    let decay = (-1.0 / LEVEL_SAMPLES).exp();
+
+    // Two passes over the samples, and two more over a flat series of ones. The
+    // second pair is the **weight actually available** at each position, and
+    // dividing by it is what makes this a weighted average rather than a sum.
+    //
+    // **Without it a uniform window is not drawn uniform.** The kernel runs off
+    // both ends of a fixed window, so the first and last samples see half of it
+    // and droop: measured, a busy two minutes drew `▂▂▂▄▄▄…▄▄▄▂▂▂` where every
+    // second of it was equally busy. The oldest end drooping is a curiosity; the
+    // **newest** end drooping means the present under-reports itself, on the one
+    // element a reader looks at to see whether anything is happening now.
+    //
+    // An earlier attempt divided by the whole kernel's weight everywhere, which
+    // is the same thing done wrong: it flattened the interior instead of lifting
+    // the edges, and that is why the first reading of this rejected the idea.
+    let mut smoothed = [0.0f64; HISTORY_SAMPLES];
+    let mut weight = [0.0f64; HISTORY_SAMPLES];
+
+    let (mut value, mut mass) = (0.0, 0.0);
+    for at in 0..HISTORY_SAMPLES {
+        value = f64::from(samples[at]) + value * decay;
+        mass = 1.0 + mass * decay;
+        smoothed[at] = value;
+        weight[at] = mass;
+    }
+
+    let mut out = [0u32; HISTORY_SAMPLES];
+    let (mut value, mut mass) = (0.0, 0.0);
+    for at in (0..HISTORY_SAMPLES).rev() {
+        value = f64::from(samples[at]) + value * decay;
+        mass = 1.0 + mass * decay;
+        // The centre sample is in both passes, so it is counted once.
+        let total = smoothed[at] + value - f64::from(samples[at]);
+        let share = weight[at] + mass - 1.0;
+        let level = if share > 0.0 { total / share } else { 0.0 };
+        // **One is the floor here too, and it has to be said again.**
+        // `Track::wrote` gives every write at least one so that a store fed no
+        // sizes behaves as it always did. A level divides by the kernel's own
+        // weight, so that one becomes a fraction and rounds to nothing: measured,
+        // a file with a single recorded tick drew no bucket at all. Anything the
+        // window actually holds keeps a floor of one, which is the same rule one
+        // layer up rather than a new one.
+        let rounded = level.round().clamp(0.0, f64::from(u32::MAX));
+        out[at] = if rounded < 1.0 && level > 0.0 {
+            1
+        } else {
+            rounded as u32
+        };
+    }
+    out
+}
+
 impl Default for Churn {
     fn default() -> Self {
         Self([0; HISTORY_SAMPLES])
@@ -303,6 +405,21 @@ impl Churn {
                     .fold(0u32, u32::saturating_add)
             })
             .collect()
+    }
+
+    /// The series read as a **level**, re-projected onto `width` columns.
+    ///
+    /// [`Churn::projected`] answers *what was written when*, which is what the
+    /// store retains and what every gate over it asserts. This answers *how busy
+    /// the worktree was around then*, which is what the picture draws, and it is
+    /// a separate method for exactly that reason: a level is a presentation of
+    /// the events rather than a correction to them, and folding it into the
+    /// projection would change what a drawn column means underneath ten gates
+    /// that are right.
+    ///
+    /// See [`levelled`] for the kernel and [`HISTORY_LEVEL`] for its constant.
+    pub fn levels(&self, width: usize) -> Vec<u32> {
+        Churn(levelled(&self.0)).projected(width)
     }
 }
 
@@ -426,6 +543,15 @@ impl Track {
     /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
     /// past its type is already at the top of the ramp, and wrapping would draw the
     /// busiest file in the worktree as the quietest.
+    /// [`Track::drawn`] read as a level. See [`levelled`].
+    fn levelled(&self) -> [u32; HISTORY_BUCKETS] {
+        Track {
+            samples: levelled(&self.samples),
+            ..*self
+        }
+        .drawn()
+    }
+
     fn drawn(&self) -> [u32; HISTORY_BUCKETS] {
         // Sliced rather than zipped against `chunks`, which **truncates**: a
         // division that stopped being exact would silently drop the last group,
@@ -681,6 +807,17 @@ impl History {
     /// agree about it.
     pub fn churn(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
         self.tracks.get(path).map(Track::drawn)
+    }
+
+    /// This path's churn read as a **level** rather than as the writes that made
+    /// it, in the same drawn buckets [`History::churn`] returns.
+    ///
+    /// The sparkline's half of [#242](https://github.com/breferrari/vigia/issues/242),
+    /// and it shares one kernel with the worktree band so the two cannot
+    /// disagree, which is [#234](https://github.com/breferrari/vigia/issues/234)'s
+    /// constraint met by construction rather than by discipline.
+    pub fn level(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
+        self.tracks.get(path).map(Track::levelled)
     }
 
     /// Which rung of the recency ladder this path is on.

@@ -648,7 +648,7 @@ fn entry_of(kind: &ChangeKind, diff: &FileDiff, history: &History) -> FileEntry 
         from: source_of(kind).map(str::to_owned),
         kind: letter(kind),
         churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
-        spark: history.churn(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
+        spark: history.level(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
         recency: history.recency(&diff.path),
         heat: heat_of(diff),
     }
