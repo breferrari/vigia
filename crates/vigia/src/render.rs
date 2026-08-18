@@ -4397,8 +4397,22 @@ impl Painter<'_> {
         }
     }
 
-    /// Draw this region's scrollbar if it has one, and hand back the room left
-    /// for content.
+    /// Decide this region's scrollbar, and hand back the room left for content
+    /// along with the shape decided.
+    ///
+    /// **It stopped drawing on 2026-08-18**
+    /// ([#239](https://github.com/breferrari/vigia/issues/239)), which is why it
+    /// returns the `Bar` rather than keeping it. Deciding and drawing had to come
+    /// apart because the two regions now want them in opposite orders: the diff's
+    /// bar draws *after* its content so the row band lands underneath it, and the
+    /// list's draws before, where the order is free because a list row carries no
+    /// wash. A single call that did both could only serve one of them, and the one
+    /// it served silently was the wrong one.
+    ///
+    /// The consolidation the paragraphs below describe is untouched: the question
+    /// is still asked in exactly one place, and its answer is still the return
+    /// value. What moved out is the drawing, and each caller now says out loud
+    /// when it happens.
     ///
     /// **One place asks and one place answers.** Both regions ran the same three
     /// steps — decide, draw, then narrow the `Rect` — and the deciding half was

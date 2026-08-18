@@ -1879,7 +1879,25 @@ fn a_bar_track_is_visible_on_every_row_it_crosses() {
 /// is not what draws.
 #[test]
 fn every_bar_style_says_what_bar_cell_reads() {
-    for (name, theme, _) in palettes() {
+    // **Its own enumeration, and `ansi` is why.** [`palettes`] cannot carry it:
+    // every other gate there extracts channels, and `Theme::ansi` is named colours
+    // by construction, so `rgb_of` would panic on it. This gate asks about a
+    // style's *shape* rather than its values, so it can hold the palette the other
+    // two structurally cannot, and `ansi` is the one that matters most: it is the
+    // default when nothing is detected, so leaving it out meant the shipped
+    // default was compliant by luck. Named by round 3 of #239's audit.
+    //
+    // **Unresolved, which is stricter than resolving.** `Depth::resolve` only ever
+    // strips a background and always maps a foreground to `Some`, so a resolved
+    // palette passes both assertions more easily than the authored one. The
+    // authored values are also what a theme file writes and what a reader edits.
+    let palettes = [
+        ("dark", Theme::dark()),
+        ("light", Theme::light()),
+        ("ansi", Theme::ansi()),
+    ];
+
+    for (name, theme) in palettes {
         for (element, style) in [
             ("bar", theme.bar),
             ("bar_track", theme.bar_track),
