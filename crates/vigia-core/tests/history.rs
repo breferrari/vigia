@@ -383,3 +383,115 @@ fn the_sparkline_is_already_at_the_ceiling_the_band_sets() {
          so it has either room left to grow or has already passed the band"
     );
 }
+
+/// The newest drawn bucket of a path, which is where a write just landed.
+fn newest(history: &History, path: &str) -> u16 {
+    *history
+        .churn(path)
+        .expect("the path is tracked")
+        .last()
+        .expect("a window has buckets")
+}
+
+/// A write weighs the bytes it moved, not the fact that it happened.
+///
+/// **[#232](https://github.com/breferrari/vigia/issues/232), reported from a live
+/// pane.** A sample used to be a count of files written, so a worktree where one
+/// file is saved repeatedly put exactly one in every sample and made itself the
+/// peak, and both the band and the sparkline drew every active column at full
+/// height. The element could say *when* and never *how much*, which is the
+/// opposite of the "change density over time" `SPEC.md` §5.1 names it for.
+///
+/// The first write of a path is a baseline rather than a change, so the gate
+/// takes three: one to establish the size, then a small edit and a large one.
+#[test]
+fn a_larger_write_weighs_more_than_a_smaller_one() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(1_000)), ("src/b.rs", Some(1_000))], now);
+    let baseline = (newest(&history, "src/a.rs"), newest(&history, "src/b.rs"));
+    assert_eq!(
+        baseline,
+        (1, 1),
+        "a first write has no earlier size to differ from, so it weighs the \
+         floor; charging a file's whole size on first sight would spike the peak \
+         on the first save of a session"
+    );
+
+    // `a` gains ten bytes and `b` gains a thousand, in one tick, so nothing but
+    // the weight can separate them.
+    history.record_sized([("src/a.rs", Some(1_010)), ("src/b.rs", Some(2_000))], now);
+    let (small, large) = (newest(&history, "src/a.rs"), newest(&history, "src/b.rs"));
+
+    assert!(
+        large > small,
+        "a thousand-byte write drew {large} against a ten-byte write's {small}, \
+         so the store is still counting writes rather than weighing them"
+    );
+    // And the magnitudes are the deltas rather than some rank of them, which is
+    // what makes the drawn heights proportional instead of merely ordered.
+    assert_eq!((small, large), (1 + 10, 1 + 1_000));
+}
+
+/// A file that shrinks moved as much as one that grew.
+///
+/// Deleting five thousand bytes is the larger of the two edits a reader can make
+/// and signing the difference would draw it as the quieter one.
+#[test]
+fn a_write_that_shrinks_a_file_weighs_what_it_removed() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(5_000))], now);
+    history.record_sized([("src/a.rs", Some(1_000))], now);
+
+    assert_eq!(newest(&history, "src/a.rs"), 1 + 4_000);
+}
+
+/// A size that could not be read still counts the write.
+///
+/// A file can vanish between the watch naming it and the `stat`, and it was
+/// still written. It weighs the floor rather than nothing, which is exactly what
+/// [`History::record`] does for every caller that supplies no size at all, so the
+/// unsized entry point keeps the behaviour every gate written before #232 holds.
+#[test]
+fn a_write_whose_size_cannot_be_read_still_counts_one() {
+    let now = base();
+    let mut sized = History::starting_at(now);
+    let mut plain = History::starting_at(now);
+
+    sized.record_sized([("src/a.rs", None)], now);
+    sized.record_sized([("src/a.rs", None)], now);
+    plain.record(["src/a.rs"], now);
+    plain.record(["src/a.rs"], now);
+
+    assert_eq!(newest(&sized, "src/a.rs"), 2);
+    assert_eq!(
+        sized.churn("src/a.rs"),
+        plain.churn("src/a.rs"),
+        "an unreadable size stopped behaving like the unsized entry point, so \
+         every gate written against `record` is measuring something else now"
+    );
+}
+
+/// The peak follows the weight, which is what makes the drawn heights differ.
+///
+/// The store's own half of #232: heights are scaled against the busiest drawn
+/// bucket, so a peak that stayed at the file count would leave every active
+/// column at the ceiling however the samples were weighed.
+#[test]
+fn the_peak_follows_the_weight_rather_than_the_write_count() {
+    let now = base();
+    let mut history = History::starting_at(now);
+
+    history.record_sized([("src/a.rs", Some(100))], now);
+    let flat = history.peak();
+    history.record_sized([("src/a.rs", Some(5_000))], now);
+
+    assert!(
+        history.peak() > flat,
+        "a four-thousand-nine-hundred-byte write left the peak at {flat}, so \
+         every column would still draw against a denominator that cannot move"
+    );
+}

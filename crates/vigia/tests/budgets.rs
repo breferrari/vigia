@@ -29,6 +29,7 @@
 mod support;
 
 use std::cell::RefCell;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
@@ -91,6 +92,44 @@ const WARMUP_FRAMES: usize = 50;
 const SAMPLED_FRAMES: usize = 250;
 
 /// An ordinary terminal.
+/// Sample the history the way `vigia::run` does, `stat` included.
+///
+/// **The `stat` is part of what a tick costs and therefore part of what these
+/// gates measure** ([#232](https://github.com/breferrari/vigia/issues/232)).
+/// Weighing a write by the bytes it moved means the run loop reads each changed
+/// path's size on the wake that records it, and a gate calling `record` instead
+/// would time a frame path the product does not have. That is the failure the
+/// comment beside every call site here already names, arriving through a new
+/// door: what gets left out gets *cheaper*, so the omission would never fail.
+fn sample(history: &mut History, root: &Path, path: &str) {
+    sample_all(history, root, std::slice::from_ref(&path));
+}
+
+/// [`sample`] over a whole burst, which is what a bulk rewrite delivers.
+///
+/// **A hundred paths cost a hundred `stat`s, and the gate has to spend them or
+/// it is measuring a tick the product never has.** The watcher coalesces one
+/// wake per burst, so the run loop sizes every path in it, and the bulk-rewrite
+/// gates below are the only place in this file where a burst is more than one
+/// file. Sampling `EDITED_PATH` alone there would have left the widest tick this
+/// tool has unmeasured while reporting a number that looked like it covered it.
+fn sample_all(history: &mut History, root: &Path, paths: &[&str]) {
+    history.record_sized(
+        paths.iter().map(|path| {
+            let bytes = std::fs::symlink_metadata(root.join(path))
+                .ok()
+                .map(|meta| meta.len());
+            (*path, bytes)
+        }),
+        Instant::now(),
+    );
+}
+
+/// Every path a bulk rewrite touches, which is the burst the watcher coalesces.
+fn bulk_burst() -> Vec<String> {
+    (0..FILES).map(|f| format!("src/mod_{f}.rs")).collect()
+}
+
 fn area() -> Rect {
     Rect::new(0, 0, 80, 24)
 }
@@ -268,6 +307,64 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
 }
 
 #[test]
+fn sizing_a_whole_burst_costs_a_fraction_of_the_frame_it_sits_in() {
+    // **What [#232](https://github.com/breferrari/vigia/issues/232) added to a
+    // tick, gated at its widest rather than at its typical.** Weighing a write by
+    // the bytes it moved means one `symlink_metadata` per changed path per wake,
+    // and the watcher coalesces a bulk rewrite into a single wake, so the widest
+    // tick this tool has sizes every file in the burst at once. A gate that sized
+    // one path would have measured the case that was never in doubt.
+    //
+    // The cost is not hypothetical and this repo has already paid it once: an
+    // `lstat` before every working-tree read measured **+1.18ms p50** over a
+    // hundred undrawn files, which is why `FileChange::maybe_symlink` exists to
+    // carry the walk's answer instead. That is the number this gate exists to
+    // keep from coming back through a different door.
+    //
+    // A tenth of the frame, which is looser than the memory read's hundredth
+    // above and for the same stated reason: the point is to catch a stat that has
+    // become a read or a walk, not to track microseconds on a shared runner.
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let budget = I9_FRAME / 10;
+    let scratch = Scratch::large_diff("burst-sizing", FILES, LINES);
+    let burst = bulk_burst();
+    let paths: Vec<&str> = burst.iter().map(String::as_str).collect();
+    let mut history = History::new();
+
+    // Warmed, for the memory read's reason one gate up: the first `stat` of a
+    // path faults in whatever the platform caches for it, and `SPEC.md` §7's rule
+    // about steady state applies to a syscall as much as to a frame.
+    for _ in 0..10 {
+        sample_all(&mut history, scratch.root(), &paths);
+    }
+
+    let taken = time(|| sample_all(&mut history, scratch.root(), &paths));
+
+    // Non-vacuity, and it is the assertion that matters most: a burst that sized
+    // nothing would post a very fast time and pass a budget it never spent.
+    assert_eq!(
+        paths.len(),
+        FILES,
+        "the burst was not the whole rewrite, so this timed a narrower tick than \
+         the product has"
+    );
+    assert!(
+        history.churn(EDITED_PATH).is_some(),
+        "the burst recorded nothing, so this gate timed a walk over paths the \
+         store ignored"
+    );
+    assert!(
+        taken <= budget,
+        "sizing a {FILES}-path burst took {taken:?} against {budget:?}, a tenth \
+         of the {I9_FRAME:?} frame it shares"
+    );
+}
+
+#[test]
 fn the_memory_read_costs_a_fraction_of_the_frame_it_sits_in() {
     // The one *variable* cost the readouts add, and the reason the whole design
     // turns on it: `SPEC.md` §5.1 ships this cell precisely because the read is
@@ -411,7 +508,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
                 // recorded outside `time` would be timing a frame path the product
                 // does not have. It is what I10 costs per tick, measured where I9
                 // can see it.
-                history.record([EDITED_PATH], Instant::now());
+                sample(history, scratch.root(), EDITED_PATH);
                 shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
         };
@@ -556,7 +653,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
             scratch.edit_line(EDITED_PATH, 0, &marker.borrow());
             edits += 1;
             time_cpu(|| {
-                history.record([EDITED_PATH], Instant::now());
+                sample(history, scratch.root(), EDITED_PATH);
                 shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
         };
@@ -729,7 +826,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     for round in 1..=CYCLES {
         scratch.rewrite_all(FILES, LINES, round);
         for _ in 0..ABSORB {
-            history.record([EDITED_PATH], Instant::now());
+            sample(&mut history, scratch.root(), EDITED_PATH);
             shell_frame(
                 &mut frame,
                 &mut app,
@@ -743,7 +840,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
         for _ in 0..PER_CYCLE {
             let was = frame.stats().measured;
             let cost = time(|| {
-                history.record([EDITED_PATH], Instant::now());
+                sample(&mut history, scratch.root(), EDITED_PATH);
                 shell_frame(
                     &mut frame,
                     &mut app,
@@ -889,7 +986,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let mut draw =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
             time_cpu(|| {
-                history.record([EDITED_PATH], Instant::now());
+                sample(history, scratch.root(), EDITED_PATH);
                 shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
             })
         };

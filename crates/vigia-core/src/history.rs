@@ -332,6 +332,21 @@ struct Track {
     /// it is "was this the newest tick", and comparing ordinals cannot drift
     /// the way two clocks can.
     tick: u64,
+    /// Bytes this path held when it was last weighed, if it ever has been.
+    ///
+    /// **What turns a count of writes into a measure of change**
+    /// ([#232](https://github.com/breferrari/vigia/issues/232)). A sample used to
+    /// be how many files moved, so a worktree where one file is saved repeatedly
+    /// put exactly one in every sample, made itself the peak, and drew every
+    /// active column at full height. The element said *when* and could not say
+    /// *how much*, which is the opposite of the "change density over time"
+    /// `SPEC.md` §5.1 names it for.
+    ///
+    /// `None` until the first weighed write, which is why that write still counts
+    /// one: a delta needs two observations and the first one is not a change, it
+    /// is a baseline. Charging a file's whole size on first sight would spike the
+    /// peak on the first save of a session and flatten the two minutes after it.
+    bytes: Option<u64>,
 }
 
 impl Track {
@@ -339,6 +354,7 @@ impl Track {
         Self {
             samples: [0; HISTORY_SAMPLES],
             tick,
+            bytes: None,
         }
     }
 
@@ -388,14 +404,43 @@ impl Track {
         })
     }
 
-    fn bump(&mut self) {
+    /// Add this write's weight to the newest sample.
+    ///
+    /// **One is the floor and not the unit**, which is the whole of
+    /// [#232](https://github.com/breferrari/vigia/issues/232). A write always
+    /// counts at least one, so a store fed no sizes behaves exactly as it did
+    /// before and every gate written against that still holds. A write whose
+    /// size can be measured counts what it moved instead, so a paste draws taller
+    /// than a typo and the graph acquires the shape it was named for.
+    ///
+    /// Saturating rather than wrapping: a path written 65,536 times inside one
+    /// sample, or moving that many bytes, is already at the top of the ramp, and
+    /// wrapping would draw the busiest file in the worktree as the quietest.
+    /// [`Track::drawn`] saturates again when it sums a column, for the same
+    /// reason one level up.
+    fn bump(&mut self, weight: u16) {
         let newest = &mut self.samples[HISTORY_SAMPLES - 1];
-        // Saturating rather than wrapping: a path written 65,536 times inside
-        // one sample is already at the top of the ramp, and wrapping would draw
-        // the busiest file in the worktree as the quietest. `Track::drawn`
-        // saturates again when it sums a column, for the same reason one level
-        // up.
-        *newest = newest.saturating_add(1);
+        *newest = newest.saturating_add(weight.max(1));
+    }
+
+    /// What this write weighs, and remember the size it was weighed against.
+    ///
+    /// **The absolute difference, so a deletion weighs what it removed.** A file
+    /// that shrinks by five thousand bytes moved as much as one that grew by
+    /// five thousand, and signing it would draw the larger of the two edits a
+    /// reader can make as the quieter one.
+    ///
+    /// `None` for a size that could not be read, and for the first write of a
+    /// path: both mean there is no delta to take, and both fall back to the floor
+    /// rather than inventing a magnitude.
+    fn weigh(&mut self, bytes: Option<u64>) -> u16 {
+        let Some(now) = bytes else { return 1 };
+        let weight = match self.bytes {
+            Some(before) => u16::try_from(now.abs_diff(before)).unwrap_or(u16::MAX),
+            None => 1,
+        };
+        self.bytes = Some(now);
+        weight
     }
 }
 
@@ -495,10 +540,44 @@ impl History {
     /// [`HISTORY_PATHS`] and therefore constant rather than proportional to the
     /// session.
     pub fn record<'p>(&mut self, paths: impl IntoIterator<Item = &'p str>, now: Instant) {
+        self.record_sized(paths.into_iter().map(|path| (path, None)), now);
+    }
+
+    /// [`History::record`], with what each written path now holds on disk.
+    ///
+    /// **This is the one the shell calls, and the difference is what the graph
+    /// can say** ([#232](https://github.com/breferrari/vigia/issues/232)). A
+    /// sample fed through [`History::record`] counts *files written*, so a
+    /// worktree where one file is saved repeatedly puts exactly one in every
+    /// sample, makes itself the peak, and draws every active column at full
+    /// height: the band and the sparkline both say *when* and neither can say
+    /// *how much*. Fed a size, a sample counts the bytes that moved, and both
+    /// elements acquire the shape §5.1 names them for.
+    ///
+    /// `None` for a path whose size could not be read, which is a file that
+    /// vanished between the watch naming it and this call. It weighs the floor
+    /// rather than nothing, because it was still written.
+    ///
+    /// **The size is the caller's to take, deliberately.** This crate has no
+    /// working directory and the shell does, and putting the `stat` at the call
+    /// site is what keeps its cost inside the frame the budget gates measure
+    /// rather than hidden behind a store that looks pure.
+    ///
+    /// # Cost
+    ///
+    /// A path already tracked is a hash lookup. A new one at the cap costs a
+    /// scan for the least recently changed, which is bounded by
+    /// [`HISTORY_PATHS`] and therefore constant rather than proportional to the
+    /// session.
+    pub fn record_sized<'p>(
+        &mut self,
+        paths: impl IntoIterator<Item = (&'p str, Option<u64>)>,
+        now: Instant,
+    ) {
         self.roll(now);
 
         let mut named = false;
-        for path in paths {
+        for (path, bytes) in paths {
             if !named {
                 // Bumped once for the whole tick, before the first sample, so
                 // every path in one burst shares an ordinal and therefore
@@ -510,7 +589,8 @@ impl History {
 
             if let Some(track) = self.tracks.get_mut(path) {
                 track.tick = self.tick;
-                track.bump();
+                let weight = track.weigh(bytes);
+                track.bump(weight);
                 continue;
             }
 
@@ -518,7 +598,10 @@ impl History {
                 self.evict_one();
             }
             let mut track = Track::new(self.tick);
-            track.bump();
+            // The first write of a path has no earlier size to differ from, so it
+            // weighs the floor and leaves the baseline behind for the next one.
+            let weight = track.weigh(bytes);
+            track.bump(weight);
             self.tracks.insert(path.to_owned(), track);
         }
 
@@ -855,7 +938,12 @@ mod tests {
         let mut history = History::starting_at(now);
         let mut track = Track::new(1);
         track.samples[HISTORY_SAMPLES - 1] = u16::MAX;
-        track.bump();
+        // Both ends of the weight, because #232 gave a sample one: the floor a
+        // sizeless write takes, and a full-range one from a large edit. Neither
+        // may wrap.
+        track.bump(1);
+        assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
+        track.bump(u16::MAX);
         assert_eq!(track.samples[HISTORY_SAMPLES - 1], u16::MAX);
         track.samples[HISTORY_SAMPLES - 2] = 9;
         assert_eq!(

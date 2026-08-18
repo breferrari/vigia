@@ -654,9 +654,31 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // thing that moves it is a wake the loop was already having.
                     // An empty burst still rolls the window and still leaves the
                     // pulse where it was, which is the staging case.
-                    shell
-                        .history
-                        .record(paths.iter().map(String::as_str), Instant::now());
+                    // **Sized, and the `stat` is here on purpose**
+                    // ([#232](https://github.com/breferrari/vigia/issues/232)).
+                    // A sample used to count files written, so a worktree where
+                    // one file is saved over and over put a one in every sample,
+                    // became its own peak, and drew every active column of the
+                    // band at full height: the element said *when* and never
+                    // *how much*. Weighing a write by the bytes it moved is what
+                    // gives both glance elements the shape `SPEC.md` §5.1 names
+                    // them for.
+                    //
+                    // One `symlink_metadata` per changed path per tick, taken
+                    // where the budget gates can see it rather than inside the
+                    // store. It does not follow links, for `fingerprint`'s
+                    // reason one crate over: the thing weighed has to be the
+                    // thing that was written.
+                    let workdir = worktree.workdir();
+                    shell.history.record_sized(
+                        paths.iter().map(|path| {
+                            let bytes = std::fs::symlink_metadata(workdir.join(path))
+                                .ok()
+                                .map(|meta| meta.len());
+                            (path.as_str(), bytes)
+                        }),
+                        Instant::now(),
+                    );
                     // The core leaves the frame exactly as it was on failure, so the
                     // previous diff is still valid to draw. Saying so on the footer
                     // beats blanking a pane for a reason the reader cannot see.
