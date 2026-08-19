@@ -696,21 +696,25 @@ impl Highlighter {
     /// change to the panic strategy or nothing.
     ///
     /// The per-grammar cap is checked **before** the read, so a run over a
-    /// single-language changed set does three reads rather than sixty-four.
+    /// single-language changed set does three reads rather than sixty-four. It
+    /// is checked again after it, because one resolution step reads the first
+    /// line ([`CONTENT_SENSITIVE`]) and the grammar actually compiled is the
+    /// one that must be charged: charging the pre-read answer spent
+    /// TypeScript's budget on a Qt translation file's XML.
     pub fn warm_ahead(
         &self,
         root: std::path::PathBuf,
         paths: Vec<String>,
-    ) -> std::thread::JoinHandle<usize> {
+    ) -> std::thread::JoinHandle<WarmReport> {
         let syntaxes = Arc::clone(&self.syntaxes);
         std::thread::spawn(move || {
             // Resolved once: every path below is checked against it, and a root
             // that cannot be resolved is a worktree that has gone away, which is
             // nothing to warm rather than something to guess at.
             let Ok(canonical_root) = std::fs::canonicalize(&root) else {
-                return 0;
+                return WarmReport::default();
             };
-            let mut warmed = 0usize;
+            let mut report = WarmReport::default();
             let mut per_grammar: HashMap<Scope, usize> = HashMap::new();
             for path in paths.into_iter().take(WARM_FILES) {
                 // **The total, which the per-grammar cap does not bound.** A
@@ -720,7 +724,7 @@ impl Highlighter {
                 // 1.053s worst case the per-grammar cap was reasoned about with.
                 // No single-language fixture can see that, which is `SPEC.md`
                 // §7's ASCII-fixture rule one axis over.
-                if warmed >= WARM_TOTAL {
+                if report.warmed >= WARM_TOTAL {
                     break;
                 }
 
@@ -763,7 +767,22 @@ impl Highlighter {
                 // by extension, so charging here spent TypeScript's budget on
                 // XML's work and could starve the real TypeScript file later in
                 // the same run.
-                if syntax_for(&syntaxes, &path, None).is_none() {
+                let Some(by_path) = syntax_for(&syntaxes, &path, None) else {
+                    continue;
+                };
+                // **And the cap, cheaply, on the answer the path alone gives.**
+                // This is what keeps a single-language changed set to three
+                // reads: without it every file past the cap was read and
+                // canonicalized before being discarded, which is the I/O
+                // amplification the cap exists to prevent. It is sound for any
+                // path whose grammar the first line cannot change; the ones it
+                // can are named by [`CONTENT_SENSITIVE`] and pay the read to
+                // find out.
+                if !content_sensitive(&path)
+                    && per_grammar
+                        .get(&by_path.scope)
+                        .is_some_and(|seen| *seen >= WARM_PER_GRAMMAR)
+                {
                     continue;
                 }
 
@@ -802,6 +821,10 @@ impl Highlighter {
                 if file.take(WARM_BYTES as u64).read_to_end(&mut buf).is_err() {
                     continue;
                 }
+                // Counted here, at the read itself, so the number means what
+                // [`WarmReport::read`] says it means: files this thread opened
+                // and pulled bytes from, whatever happened afterwards.
+                report.read += 1;
                 // A bounded read lands mid-codepoint on any file that is not
                 // ASCII, so the tail is trimmed to the last complete character
                 // rather than the read being widened to avoid it. `valid_up_to`
@@ -836,9 +859,9 @@ impl Highlighter {
 
                 warm(&syntaxes, &path, text);
                 *seen += 1;
-                warmed += 1;
+                report.warmed += 1;
             }
-            warmed
+            report
         })
     }
 
@@ -1166,6 +1189,24 @@ pub const WARM_TOTAL: usize = 12;
 /// is an RSS spike I3 has no reason to absorb.
 pub const WARM_BYTES: usize = 64 * 1024;
 
+/// What one [`Highlighter::warm_ahead`] run did.
+///
+/// Two numbers rather than one, because the thread has two costs and the cap
+/// exists to bound both. `warmed` is what it parsed, which the per-grammar cap
+/// has always been asserted on. `read` is what it opened, and it went ungated
+/// until a change moved the cap's check after the read: the parse count was
+/// identical either way, so a run that read sixty-four files to warm three
+/// looked exactly like one that read three. A number nothing asserts is a
+/// property nothing protects.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WarmReport {
+    /// Files parsed, and so grammars actually compiled against.
+    pub warmed: usize,
+    /// Files opened and read, which the per-grammar cap is meant to keep near
+    /// `warmed` rather than near the changed set.
+    pub read: usize,
+}
+
 /// Compile the patterns `text` reaches under `path`'s grammar, so a later frame
 /// drawing that content does not.
 ///
@@ -1270,6 +1311,28 @@ const AMBIGUOUS: [(&str, &str); 5] = [
 /// Consulted **after** ordinary resolution fails, so the day a real grammar
 /// for one of these lands in the dump it wins without this table changing —
 /// an approximation must never outrank the real thing.
+/// Extensions whose grammar cannot be known from the path alone, because a
+/// resolution step reads the file's first line.
+///
+/// One entry today: `SPEC.md` §6's Qt rule, where a `.ts` opening with an XML
+/// declaration is a translation file rather than TypeScript. It is a named
+/// constant because two places need the same answer — the sniff in
+/// [`syntax_for`] and the warmer's pre-read cap check, which may only trust an
+/// extension-only resolution for a path that is *not* in here.
+const CONTENT_SENSITIVE: [&str; 1] = ["ts"];
+
+/// Whether `path`'s grammar depends on its content. See [`CONTENT_SENSITIVE`].
+fn content_sensitive(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            CONTENT_SENSITIVE
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+        })
+}
+
 const NEAREST: [(&str, &str); 5] = [
     ("astro", "HTML"),
     ("bicep", "JavaScript"),
@@ -1305,7 +1368,9 @@ fn syntax_for<'s>(
         // The one content-aware ambiguity: a `.ts` whose first line is an XML
         // declaration is a Qt translation file, and TypeScript-colouring an
         // XML document is wrong on every token.
-        if ext.eq_ignore_ascii_case("ts")
+        if CONTENT_SENSITIVE
+            .iter()
+            .any(|candidate| ext.eq_ignore_ascii_case(candidate))
             && first_line.is_some_and(|line| {
                 // A BOM survives `trim_start` (U+FEFF is not whitespace), and
                 // a BOM'd Qt file is still a Qt file.

@@ -34,7 +34,8 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
             vec!["data.unknownext".to_owned()],
         )
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, 0,
@@ -47,7 +48,7 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
 fn an_empty_changed_set_warms_nothing() {
     let highlighter = Highlighter::new();
     let handle = highlighter.warm_ahead(std::path::PathBuf::from("."), Vec::new());
-    assert_eq!(handle.join().expect("the warmer thread"), 0);
+    assert_eq!(handle.join().expect("the warmer thread").warmed, 0);
 }
 
 #[test]
@@ -66,12 +67,52 @@ fn many_files_of_one_language_warm_only_a_few() {
     let warmed = highlighter
         .warm_ahead(scratch.root().to_path_buf(), paths)
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, WARM_PER_GRAMMAR,
         "the warmer parsed {warmed} of {files} files that all share one \
          grammar, over the {WARM_PER_GRAMMAR} it is allowed"
+    );
+}
+
+/// And the reads, which is the half of the cap nothing asserted.
+///
+/// The parse count above is identical whether the cap is consulted before the
+/// read or after it, so a run that opened eighty-four files to warm three
+/// looked exactly like one that opened three. It happened: the cap moved after
+/// the read while the grammar being charged was corrected, every test stayed
+/// green, and the I/O amplification the cap exists to prevent was back.
+///
+/// The bound is `WARM_PER_GRAMMAR` exactly for a single-language set, because
+/// nothing here is content-sensitive: `SPEC.md` §6's `.ts` rule is the one case
+/// that has to pay a read to learn its grammar, and a `.rs` file never does.
+#[test]
+fn many_files_of_one_language_are_not_even_read() {
+    let files = WARM_FILES + 20;
+    let scratch = Scratch::large_diff("warm-one-language-reads", files, 4);
+    let highlighter = Highlighter::new();
+    let paths: Vec<String> = (0..files).map(|n| format!("src/mod_{n}.rs")).collect();
+
+    let report = highlighter
+        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .join()
+        .expect("the warmer thread");
+
+    assert_eq!(
+        report.read, WARM_PER_GRAMMAR,
+        "the warmer opened {} of {files} files that all share one grammar, so \
+         the per-grammar cap is being checked after the read rather than \
+         before it and saves the parse without saving the I/O",
+        report.read
+    );
+    assert_eq!(
+        report.warmed, report.read,
+        "every file this run opened should also have been parsed ({} read, {} \
+         warmed); a gap means bytes were pulled for a file the cap then threw \
+         away",
+        report.read, report.warmed
     );
 }
 
@@ -92,7 +133,8 @@ fn the_path_cap_stops_the_walk_before_a_language_it_has_not_reached() {
     let warmed = highlighter
         .warm_ahead(scratch.root().to_path_buf(), paths)
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, WARM_PER_GRAMMAR,
@@ -123,7 +165,8 @@ fn a_path_that_is_not_there_is_skipped_rather_than_fatal() {
             ],
         )
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, 2,
@@ -161,7 +204,8 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
 
     let cold = Highlighter::new();
     let cold_parse = time(|| {
-        cold.warm_ahead(root.clone(), paths.clone())
+        let _ = cold
+            .warm_ahead(root.clone(), paths.clone())
             .join()
             .expect("the warmer thread");
     });
@@ -206,7 +250,8 @@ fn the_per_grammar_cap_is_per_grammar_and_not_one_shared_counter() {
     let warmed = Highlighter::new()
         .warm_ahead(scratch.root().to_path_buf(), paths)
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed,
@@ -244,7 +289,8 @@ fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
     let warmed = Highlighter::new()
         .warm_ahead(scratch.root().to_path_buf(), paths)
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     // `assert_eq!` rather than `<=`, because a bound is only evidence when
     // something reached it: `warmed <= WARM_TOTAL` is satisfied by a `warm_ahead`
@@ -273,7 +319,8 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
             vec!["src/utf16.rs".to_owned()],
         )
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
     assert_eq!(
         alone, 0,
         "a file that is not text counted as a warm, so the result counts files \
@@ -286,7 +333,8 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
     let warmed = Highlighter::new()
         .warm_ahead(scratch.root().to_path_buf(), paths)
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
     assert_eq!(
         warmed, WARM_PER_GRAMMAR,
         "with an unreadable file first the warmer parsed {warmed} real files \
@@ -377,7 +425,8 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     let warmed = Highlighter::new()
         .warm_ahead(scratch.root().to_path_buf(), spellings)
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, 0,
@@ -414,7 +463,8 @@ fn a_file_cut_mid_character_still_parses() {
             vec!["src/straddle.rs".to_owned()],
         )
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, 1,
@@ -561,7 +611,8 @@ fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
             vec!["link/mod_0.rs".to_owned()],
         )
         .join()
-        .expect("the warmer thread");
+        .expect("the warmer thread")
+        .warmed;
 
     assert_eq!(
         warmed, 0,

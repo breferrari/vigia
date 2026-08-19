@@ -57,7 +57,7 @@ pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
 pub use highlight::{
     CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_BYTES,
-    WARM_FILES, WARM_PER_GRAMMAR, WARM_TOTAL,
+    WARM_FILES, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport,
 };
 pub use history::{
     Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
