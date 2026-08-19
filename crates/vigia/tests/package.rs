@@ -649,6 +649,31 @@ fn workspace_members() -> Vec<(String, String)> {
         .collect()
 }
 
+/// The members `cargo publish --workspace` actually ships: every workspace
+/// member whose manifest does not declare `publish = false`.
+///
+/// The licence gates walk this list rather than [`workspace_members`], because
+/// what they guarantee is a property of the **published** artifact: `xtask`
+/// (`publish = false`, the grammar-dump builder `SPEC.md` §6 names) never
+/// becomes a `.crate`, so there is no tarball for a LICENSE to be missing
+/// from. The member-list pin in
+/// [`the_release_pipeline_publishes_to_the_registry`] is what stops an
+/// unpublished member from being added silently.
+fn published_members() -> Vec<(String, String)> {
+    workspace_members()
+        .into_iter()
+        .filter(|(dir, _)| {
+            !without_comments(&repo_file(&format!("{dir}/Cargo.toml")))
+                .split_once("[package]")
+                .map(|(_, rest)| rest)
+                .unwrap_or_default()
+                .lines()
+                .take_while(|line| !line.trim_start().starts_with('['))
+                .any(|line| line.trim().starts_with("publish = false"))
+        })
+        .collect()
+}
+
 /// Whether a `cargo package --list` names `file` at the package root.
 ///
 /// **Trimmed equality rather than `contains`**, which is this file's standing
@@ -1245,20 +1270,29 @@ fn the_release_pipeline_publishes_to_the_registry() {
          except the publish and report success"
     );
 
-    // `--workspace` publishes every member, so what the workspace *holds* is
-    // part of what the release ships. A third crate added for any reason, a
-    // fixture generator, a proc macro, an experiment, would be published to
-    // crates.io permanently on the next tag, and nothing else here would
-    // mention it. Two is a deliberate number (`SPEC.md` §6's engine/shell split)
-    // rather than an accident, so a third is a decision that should be made
-    // rather than discovered.
+    // `--workspace` publishes every member that does not opt out, so what the
+    // workspace *holds* is part of what the release ships. A crate added for
+    // any reason, a fixture generator, a proc macro, an experiment, would be
+    // published to crates.io permanently on the next tag, and nothing else
+    // here would mention it. The member list is therefore pinned whole: two
+    // published crates is a deliberate number (`SPEC.md` §6's engine/shell
+    // split), `xtask` is deliberately unpublished (`publish = false`, §6's
+    // grammar-dump builder), and any new name is a decision that should be
+    // made here rather than discovered at the tag.
     let members = toml_array(&repo_file("Cargo.toml"), "members");
     assert_eq!(
-        members.len(),
+        members,
+        vec!["crates/vigia-core", "crates/vigia", "xtask"],
+        "the workspace member list moved. `cargo publish --workspace` ships \
+         every member that does not carry `publish = false`, and a published \
+         name is claimed forever, so decide the new list here rather than at \
+         the tag"
+    );
+    assert_eq!(
+        published_members().len(),
         2,
-        "`cargo publish --workspace` ships every member and the workspace now \
-         holds {members:?}. Adding one is fine, but it claims a crates.io name \
-         forever, so decide it here rather than at the tag"
+        "the set of *published* members moved; the engine/shell split is two \
+         crates, and a third publish is a decision, not a side effect"
     );
 
     // dist generates release.yml from the config above, so this asserts the
@@ -1809,7 +1843,7 @@ fn the_packaged_artifact_carries_no_tests() {
 /// passes there.
 #[test]
 fn every_published_crate_ships_the_licence() {
-    for (dir, package) in workspace_members() {
+    for (dir, package) in published_members() {
         let Some(listed) = package_list(&package, "every_published_crate_ships_the_licence") else {
             return;
         };
@@ -1829,6 +1863,33 @@ fn every_published_crate_ships_the_licence() {
             "the package list for {package} has no README.md in it, so it is not \
              the list this gate thinks it is reading:\n{listed}"
         );
+
+        // **And the grammar dump, for the engine.** `vigia-core` reaches it
+        // with `include_bytes!`, so a `.crate` without it does not merely lack
+        // an asset: it does not compile, and the failure lands inside `cargo
+        // publish` at release time rather than in any test here. It is one
+        // `exclude` line away from happening, which is the same distance the
+        // licence was.
+        if package == "vigia-core" {
+            assert!(
+                listed_has(&listed, "assets/syntaxes.bin"),
+                "the .crate for {package} carries no assets/syntaxes.bin, and \
+                 `Highlighter::new` embeds it with `include_bytes!`, so the \
+                 published crate would not build at all:\n{listed}"
+            );
+            // **And the roster, for the same reason one level over.** This
+            // crate publishes its own test suite, so `tests/coverage.rs` ships
+            // too, and it reaches the roster with `include_str!`. A `.crate`
+            // without it compiles the library and fails the tests a consumer
+            // runs, which is the failure this file exists to keep out of a
+            // release. Verified once by hand as well: the extracted 0.19.0
+            // tarball builds and passes `cargo test --test coverage`.
+            assert!(
+                listed_has(&listed, "assets/GRAMMARS.txt"),
+                "the .crate for {package} carries no assets/GRAMMARS.txt, and \
+                 its published test suite embeds it with `include_str!`:\n{listed}"
+            );
+        }
     }
 }
 
@@ -1861,7 +1922,7 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
          comparing against, so the comparisons below prove nothing"
     );
 
-    for (dir, package) in workspace_members() {
+    for (dir, package) in published_members() {
         let shipped = repo_file(&format!("{dir}/LICENSE"));
         assert_eq!(
             shipped, root,

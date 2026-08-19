@@ -352,7 +352,7 @@ fn drive(root: &Path) -> Driven {
         } else {
             rig.leanest_frame
         },
-        warmed: warmer.join().expect("the warmer finished"),
+        warmed: warmer.join().expect("the warmer finished").warmed,
         events: watcher.delivered(),
     }
 }

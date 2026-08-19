@@ -499,7 +499,7 @@ fn highlight_window(
     let mut drawn = 0;
     for (offset, hunk) in diff.hunks[first..first + hunks].iter().enumerate() {
         for line in 0..hunk.lines.len() {
-            pass.spans(path, first + offset, hunk, line);
+            pass.spans(path, first + offset, hunk, line, None);
             drawn += 1;
         }
     }

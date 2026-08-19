@@ -82,6 +82,21 @@ pub struct FileDiff {
     /// against. Zero when there is no working-tree side to measure: a removal, a
     /// binary file, a conflict, a type change.
     pub lines: u32,
+    /// The file's own first line, worktree side, falling back to the index
+    /// side for a deletion. `None` for a binary file and for the states this
+    /// crate deliberately reads nothing for.
+    ///
+    /// Exists for syntax resolution and nothing else: a shebang or an XML
+    /// declaration is how an extensionless script or an ambiguous `.ts` gets a
+    /// language at all (`SPEC.md` §6), and the hunks of a mid-file edit never
+    /// contain line one. **It costs no read**: [`compute`] holds both sides
+    /// whole to diff them, so this is a by-product exactly like
+    /// [`FileDiff::lines`]. Capped at 256 bytes **read** because every
+    /// first-line pattern in the dump matches inside that, and a minified
+    /// bundle's "first line" is the whole file. The returned string can run to
+    /// 258: a cut through a four-byte character becomes a three-byte
+    /// replacement, which [`first_line_of`] documents and a test pins.
+    pub first_line: Option<String>,
     /// Bytes compared: index-side content plus worktree-side content.
     ///
     /// Recorded because I2a is a claim about work being proportional to what
@@ -259,9 +274,17 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
             // then locate changes inside a file that has no lines to locate
             // them in.
             lines: 0,
+            // The same reasoning one field over: bytes that happen to precede
+            // an 0x0A are not a line, and nothing should resolve a grammar
+            // from them.
+            first_line: None,
             bytes,
         };
     }
+
+    // Worktree side first because it is the file the reader is looking at;
+    // the index side only for a deletion, where it is the only side there is.
+    let first_line = first_line_of(after).or_else(|| first_line_of(before));
 
     let input = InternedInput::new(before, after);
     // Histogram plus slider heuristics is what git itself produces, so hunks
@@ -339,8 +362,30 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
         // the by-product `FileDiff::lines` documents rather than a second pass
         // over the file.
         lines: after_len,
+        first_line,
         bytes,
     }
+}
+
+/// The first line of `bytes`, capped at 256 bytes read, or `None` for an
+/// empty side.
+///
+/// The cap is what keeps a minified bundle's single line from travelling on
+/// every [`FileDiff`] of it; every first-line pattern in the dump matches
+/// inside 256 bytes. `from_utf8_lossy` because the cap can land mid-codepoint
+/// and a replacement character at the tail of a shebang match is harmless
+/// where refusing the line would lose it. **The cap counts bytes read, not
+/// bytes returned**: a split codepoint becomes a three-byte `U+FFFD`, so a
+/// cut through a four-byte character returns 258. Bounded either way, which
+/// is the whole point of the cap.
+fn first_line_of(bytes: &[u8]) -> Option<String> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let head = &bytes[..bytes.len().min(256)];
+    let end = head.iter().position(|&b| b == b'\n').unwrap_or(head.len());
+    let line = head[..end].strip_suffix(b"\r").unwrap_or(&head[..end]);
+    Some(String::from_utf8_lossy(line).into_owned())
 }
 
 #[cfg(test)]
@@ -410,6 +455,44 @@ mod tests {
 
         assert!(diff.binary, "the fixture did not sniff as binary");
         assert_eq!(diff.lines, 0);
+    }
+
+    /// What [`FileDiff::first_line`] captures, case by case: the worktree side
+    /// when there is one, the index side for a deletion, nothing for binary,
+    /// with the cap and the CRLF strip both exercised.
+    #[test]
+    fn the_first_line_prefers_the_worktree_and_falls_back_for_a_deletion() {
+        let both = compute("a.rs".to_owned(), b"old first\nx\n", b"new first\nx\n");
+        assert_eq!(both.first_line.as_deref(), Some("new first"));
+
+        let gone = compute("a.rs".to_owned(), b"#!/bin/sh\nx\n", b"");
+        assert_eq!(gone.first_line.as_deref(), Some("#!/bin/sh"));
+
+        let binary = compute("a.bin".to_owned(), b"", b"\x00\x01\n\x02");
+        assert_eq!(binary.first_line, None);
+
+        let empty = compute("a.rs".to_owned(), b"", b"");
+        assert_eq!(empty.first_line, None);
+
+        let crlf = compute("a.rs".to_owned(), b"", b"first\r\nsecond\r\n");
+        assert_eq!(crlf.first_line.as_deref(), Some("first"));
+    }
+
+    /// The 256-byte cap, which is what keeps a minified bundle's single line
+    /// off every [`FileDiff`] of it.
+    #[test]
+    fn the_first_line_is_capped_and_never_longer() {
+        let long = vec![b'x'; 10_000];
+        let diff = compute("bundle.js".to_owned(), b"", &long);
+        assert_eq!(diff.first_line.as_ref().map(String::len), Some(256));
+
+        // A cut through a four-byte character: 255 ASCII bytes then one lead
+        // byte, which `from_utf8_lossy` replaces with a three-byte U+FFFD. The
+        // cap is on bytes **read**, so the answer is 258 and still bounded.
+        let mut split = vec![b'x'; 255];
+        split.extend_from_slice("🔥".as_bytes());
+        let diff = compute("bundle.js".to_owned(), b"", &split);
+        assert_eq!(diff.first_line.as_ref().map(String::len), Some(258));
     }
 
     /// A file with no trailing newline still counts its last line.

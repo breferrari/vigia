@@ -32,8 +32,15 @@ syntect.workspace = true
 # than through a fixture crate. That keeps the dependency list exactly what
 # SPEC.md names, and has the side benefit of proving gix against repositories
 # real git wrote rather than ones we wrote ourselves.
+#
+# `syntect` reappears here with `yaml-load` so `tests/coverage.rs` can read the
+# locally vendored grammar *sources* and force-compile their patterns under the
+# shipped engine — the abort-on-first-use gate SPEC.md section 6 demands. A
+# dev-dependency's features do not reach the published graph, so the shipped
+# binary still carries no YAML loader.
 [dev-dependencies]
 criterion.workspace = true
+syntect = { workspace = true, features = ["yaml-load"] }
 
 [[bench]]
 name = "engine"

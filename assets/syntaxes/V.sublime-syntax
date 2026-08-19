@@ -1,0 +1,537 @@
+%YAML 1.2
+---
+# Vendored for vigia by #235. Provenance (SPEC.md section 6):
+#   upstream: https://github.com/onerbs/sublime-v
+#   pinned:   e4b694043225b10d008cc041247acc3c5e059d30
+#   path:     Syntaxes/V.sublime-syntax
+#   licence:  MIT
+name: V
+scope: source.v
+file_extensions: [v, vh, vv, vsh]
+foldingStartMarker: '[\{\(]$'
+foldingStopMarker: '^\s*[\)\}]$'
+
+variables:
+  re_attrib: (assert_continues|callconv|console|deprecated|direct_array_access|flag|heap|inline|keep_args_alive|live|manualfree|markused|noinit|noinline|noreturn|params|ref_only|trusted|typedef|unsafe|windows_stdcall)
+  re_builtin: (dump|exit|error|flush_std(?:err|out)|free|isnil|panic|e?print(?:ln)?|print_backtrace|sizeof|typeof|(?:malloc|memdup|vcalloc)(?:_noscan)?|realloc_data|v_realloc|vstrlen(?:_char)?|vmem(?:cpy|move|cmp|set))
+  re_type_numeric: (byte|u8|u16|u32|u64|u128|i8|i16|i32|int|i64|i128|f32|f64)
+  re_type_primitive: (any|bool|cha[rn]|rune|thread|u?string|[iu]size|voidptr)
+  re_name_class: '[A-Z][A-Za-z\d_]*'
+  re_name_regular: '[a-z][a-z\d_]*'
+
+  re_ct_os: (android|bsd|darwin|dragonfly|freebsd|gnu|haiku|hpux|ios|linux|linux_or_macos|mach|macos|netbsd|openbsd|qnx|solaris|windows)
+  # re_ct_compiler: (clang|cplusplus|gcc|mingw|msvc|tinyc)
+  # re_ct_platform: (aarch64|amd64|(big|little)_endian|x32|x64)
+  # re_ct_other: (debug|glibc|js|no_bounds_checking|prealloc|prod|test)
+  re_ct_token: (COLUMN|FILE|FILE_LINE|FN|LINE|LOCATION|METHOD|MOD|STRUCT|VEXE|VEXEROOT|VCURRENTHASH|VHASH|VMOD_FILE|VMODROOT)
+
+contexts:
+  main:
+    - include: Module
+    - include: Directive
+    - include: Import
+
+    - include: Enum
+    - include: Struct
+    - include: Function
+    - match: \[
+      scope: punctuation.definition.attribute.begin.v
+      push:
+        - include: String
+        - match: \b(if)\b
+          scope: keyword.language.attribute.conditional.v
+        - match: (!)
+          scope: keyword.operator.logical.v
+        - match: (\w+)\s*(\?)
+          captures:
+            1: keyword.language.d_flag.v
+            2: punctuation.v
+        - match: \b{{re_attrib}}\b
+          scope: keyword.language.attribute.v
+        - match: '[:;]'
+          scope: punctuation.v
+        - match: \]
+          scope: punctuation.definition.attribute.end.v
+          pop: true
+
+    - include: Value
+
+    - match: (^#!)
+      scope: punctuation.definition.comment.begin.v
+      push:
+        - meta_scope: comment.line.v
+        - include: EOL
+
+  Value:
+    - include: Block
+    - include: Comment
+    - include: Number
+    - include: String
+    - include: FnCall
+    - include: Keyword
+    - include: Punctuation
+    - include: Operator
+    - include: Type
+    - include: ParameterListBegin
+    # - match: \b({{re_name_regular}})(\.)({{re_name_regular}})\b
+    #   captures:
+    #     1: variable.other.v
+    #     2: punctuation.accessor.v
+    #     3: variable.other.property.v
+    - match: \s\.({{re_name_regular}})\b
+      scope: constant.enum.v
+    - match: \b({{re_name_regular}})\b
+      scope: variable.other.v
+    - match: \@{{re_ct_token}}\b
+      scope: variable.language.v
+
+  Directive:
+    - match: \#(flag)\b
+      scope: keyword.control.import.include.v
+      push:
+        - match: \b{{re_ct_os}}\b
+          scope: support.target.v
+        - match: \@{{re_ct_token}}
+          scope: variable.language.v
+        - match: (-[IlLD])
+          scope: constant.flag.v
+        - match: (\w+|/)
+          scope: constant.included.path.v
+        - include: EOL
+    - match: \#(include)\b
+      scope: keyword.control.import.include.v
+      push:
+        - include: Comment
+        - match: '<|\"'
+          scope: punctuation.definition.string.begin.v
+          push:
+            - meta_scope: string.quoted.other.v
+            - match: '>|\"'
+              scope: punctuation.definition.string.end.v
+              pop: true
+        - include: EOL
+    - include: EOL
+
+  Module:
+    - match: \b(module)\b
+      scope: keyword.declaration.namespace.v
+      push:
+        - match: \b({{re_name_regular}})\b
+          scope: entity.name.namespace.v
+        - include: EOL
+
+  Import:
+    - match: \b(import)\b
+      scope: keyword.control.import.v
+      push:
+        - include: Punctuation
+        - match: \b(as)\b
+          scope: keyword.other.alias.v
+        - match: \b({{re_name_regular}})\b
+          scope: entity.name.module.v
+        - match: \{
+          scope: punctuation.definition.import-list.begin.v
+          push:
+            - include: Punctuation
+            - match: \b({{re_name_class}})\b
+              scope: constant.v
+            - match: \b({{re_name_regular}})\b
+              scope: constant.v
+            - match: \}
+              scope: punctuation.definition.import-list.end.v
+              pop: true
+        - include: EOL
+
+  # Entity
+
+  Enum:
+    - match: \b(enum)\b
+      scope: keyword.declaration.enum.v
+      push:
+        - match: \b({{re_name_class}})\b
+          scope: entity.name.class.v
+        - match: \b(\S+)\b
+          scope: invalid.illegal.v
+        - match: \{
+          scope: punctuation.definition.block.begin.v
+          push:
+            - match: \=
+              scope: keyword.operator.assignment.v
+            - match: \b{{re_name_regular}}\b
+              scope: constant.enum.root.v
+            - include: Comment
+            - include: Number
+            - match: \b(\S+)\b
+              scope: invalid.illegal.v
+            - match: \}
+              scope: punctuation.definition.block.end.v
+              pop: true
+        - include: EOL
+
+  Struct:
+    - match: \b(struct)\b
+      scope: keyword.declaration.struct.v
+      push:
+        - match: \b(C)\b
+          scope: constant.c-interop.v
+        - match: \.
+          scope: punctuation.accessor.v
+        - include: Type
+        - match: \{
+          scope: punctuation.definition.block.begin.v
+          push:
+            - match: (\[)(json|required|skip)(\])
+              captures:
+                1: punctuation.definition.attribute.begin.v
+                2: keyword.language.attribute.v
+                3: punctuation.definition.attribute.end.v
+            - include: Value
+            - match: \}
+              scope: punctuation.definition.block.end.v
+              pop: true
+        - include: EOL
+
+  Function:
+    - match: \b(fn)\b
+      scope: keyword.declaration.function.v
+      push:
+        - include: Type
+        - match: \.
+          scope: punctuation.accessor.v
+        - include: ParameterListBegin
+        - match: \b({{re_name_regular}})\b
+          scope: entity.name.function.v
+        - include: Block
+        - include: EOL
+
+  FnCall:
+    - match: '\b(?:{{re_type_numeric}}|{{re_type_primitive}})(\()'
+      captures:
+        1: storage.type.numeric.v
+        2: storage.type.primitive.v
+        3: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+    - match: '\b{{re_builtin}}(\()'
+      captures:
+        1: support.function.builtin.v
+        2: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+    - match: '(_(?:un)?likely_)(\()'
+      captures:
+        1: support.function.hint.v
+        2: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+    - match: '\s(\.)({{re_name_regular}})(\()'
+      captures:
+        1: punctuation.accessor.v
+        2: variable.function.v
+        3: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+    - match: '\b({{re_name_regular}})(\()'
+      captures:
+        1: variable.function.v
+        2: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+  # Generic
+
+  Block:
+    - match: \{
+      scope: punctuation.definition.block.begin.v
+      push:
+        - include: Value
+        - match: \}
+          scope: punctuation.definition.block.end.v
+          pop: true
+
+  Type:
+    - include: TypeModifier
+    - match: \b{{re_type_numeric}}\b
+      scope: storage.type.numeric.v
+    - match: \b{{re_type_primitive}}\b
+      scope: storage.type.primitive.v
+    - match: \b(map)\b
+      scope: storage.type.map.v
+    - match: \b(C)\b
+      scope: constant.c-interop.v
+    - match: \b([A-Z])\b
+      scope: storage.type.generic.v
+    - match: (<)([A-Z])(>)
+      captures:
+        1: punctuation.definition.generic.begin.v
+        2: storage.type.generic.v
+        3: punctuation.definition.generic.end.v
+    - match: \b({{re_name_class}})\b
+      scope: storage.type.class.v
+
+  ParameterListBegin:
+    - match: \(
+      scope: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+  ParameterListEnd:
+    - match: \b(fn)\b
+      scope: storage.type.function.v
+    - match: \.\.\.
+      scope: keyword.operator.varargs.v
+    - include: Value
+    - match: \)
+      scope: punctuation.definition.params.end.v
+      pop: true
+
+  # Language
+
+  Keyword:
+    - match: \b(in)\b
+      scope: keyword.operator.access.v
+    - match: \b(is)\b
+      scope: keyword.operator.comparison.v
+
+    - match: \b(const)\b
+      scope: keyword.declaration.constant.v
+    - match: \b(interface)\b
+      scope: keyword.declaration.interface.v
+    - match: \b(type)\b
+      scope: keyword.declaration.type_alias.v
+
+    - match: \b(if|else|for|match|select|return|break|continue|defer)\b
+      scope: keyword.control.flow.v
+
+    - match: \b(asm|assert|atomic|embed|go(to)?|or|r?lock|shared|sizeof|spawn|static|typeof|union|unsafe)\b
+      scope: keyword.language.v
+
+      # Constants
+    - match: \b(err|it|none)\b
+      scope: constant.language.v
+    - match: \b(true|false)\b
+      scope: constant.language.boolean.v
+
+      # Modifiers
+    - match: \b(mut)\b
+      scope: storage.modifier.mutable.v
+    - match: \b(pub)\b
+      scope: storage.modifier.public.v
+
+      # Built in
+    - match: '\b{{re_builtin}}\b'
+      scope: support.function.builtin.v
+    - match: \b(__[a-z_]+)\b
+      scope: support.v
+
+      # Compile-time
+    - match: \$(if|else|for)\b
+      scope: keyword.control.flow.comptime.v
+    - match: \$(embed_file|env|html|tmpl|vweb\.html)\b
+      scope: variable.function.comptime.v
+    - match: \$(\S+)\b
+      scope: invalid.illegal.v
+
+  # KeywordComptime:
+  #   - match: \b{{re_ct_os}}\b
+  #     scope: support.os.v
+  #   - match: \b{{re_ct_compiler}}\b
+  #     scope: support.compiler.v
+  #   - match: \b{{re_ct_platform}}\b
+  #     scope: support.platform.v
+  #   - match: \b{{re_ct_other}}\b
+  #     scope: support.other.v
+
+  Operator:
+    - match: (\+\+)
+      scope: keyword.operator.increment.v
+    - match: (--)
+      scope: keyword.operator.decrement.v
+    - match: ([=!<>]=)|<|>
+      scope: keyword.operator.comparison.v
+    - match: ([+*/%:&\|^-]|<<|>>)?=|(:)
+      scope: keyword.operator.assignment.v
+    - match: ([+*/%-])
+      scope: keyword.operator.arithmetic.v
+    - match: (!=?|\|\||&&)
+      scope: keyword.operator.logical.v
+    - match: ([&\|^~])
+      scope: keyword.operator.bitwise.v
+    - match: (<<|>>)
+      scope: keyword.operator.shift.v
+    - match: (\.\.\.?)
+      scope: keyword.operator.range.v
+    - match: (<-)
+      scope: keyword.operator.arrow.v
+
+  Punctuation:
+    - match: \.
+      scope: punctuation.accessor.v
+    - match: (,|;)
+      scope: punctuation.separator.v
+    - match: (\[|\])
+      scope: punctuation.brackets.v
+
+  TypeModifier:
+    - match: (\[\])+
+      scope: storage.modifier.array.v
+    - match: \&\&
+      scope: keyword.operator.logical.v
+    - match: \&
+      scope: storage.modifier.reference.v
+    - match: \!
+      scope: storage.modifier.returnType.v
+    - match: \?
+      scope: storage.modifier.optionType.v
+    - match: (\*)({{re_name_regular}})
+      captures:
+        1: storage.modifier.dereference.v
+        2: variable.other.v
+    - match: (\*)(\()
+      captures:
+        1: storage.modifier.dereference.v
+        2: punctuation.definition.params.begin.v
+      push: ParameterListEnd
+
+  # Common
+
+  Comment:
+    - include: CommentBlock
+    - include: CommentLine
+
+  CommentBlock:
+    - match: /\*
+      scope: punctuation.definition.comment.begin.v
+      push:
+        - meta_scope: comment.block.v
+        - include: CommentTag
+        - include: CommentBlock
+        - include: CommentLine
+        - match: \*/
+          scope: punctuation.definition.comment.end.v
+          pop: true
+
+  CommentLine:
+    - match: //
+      scope: punctuation.definition.comment.begin.v
+      push:
+        - meta_scope: comment.line.v
+        - include: CommentTag
+        - include: EOL
+
+  CommentTag:
+    - match: \b(Q)\b.*\?
+      scope: comment.tag.question.v
+    - match: \b(TODO|todo)\b.*$
+      scope: comment.tag.todo.v
+    - match: \b(FIXME|fixme)\b.*$
+      scope: comment.tag.fixme.v
+    - match: \b([a-z]+)://\S+\b
+      scope: comment.tag.url.v
+
+  String:
+    - include: StringDouble
+    - include: StringSingle
+    - include: RawStringDouble
+    - include: RawStringSingle
+    - include: Rune
+
+  StringDouble:
+    - match: \"
+      scope: punctuation.definition.string.begin.v
+      push:
+      - meta_scope: string.quoted.double.v
+      - include: StringCommon
+      - match: \"
+        scope: punctuation.definition.string.end.v
+        pop: true
+
+  StringSingle:
+    - match: \'
+      scope: punctuation.definition.string.begin.v
+      push:
+      - meta_scope: string.quoted.single.v
+      - include: StringCommon
+      - match: \'
+        scope: punctuation.definition.string.end.v
+        pop: true
+
+  RawStringDouble:
+    - match: (r)(\")
+      captures:
+        1: storage.type.raw_string.v
+        2: punctuation.definition.string.begin.v
+      push:
+      - meta_scope: string.quoted.double.v
+      - match: \"
+        scope: punctuation.definition.string.end.v
+        pop: true
+
+  RawStringSingle:
+    - match: (r)(\')
+      captures:
+        1: storage.type.raw_string.v
+        2: punctuation.definition.string.begin.v
+      push:
+      - meta_scope: string.quoted.single.v
+      - match: \'
+        scope: punctuation.definition.string.end.v
+        pop: true
+
+  StringCommon:
+    - match: \\([\\\$"abtnvfre'']|x\h{,2}|[0-7]{,3})
+      scope: constant.character.escape.v
+
+      # String interpolation
+    - match: \$\{
+      scope: punctuation.definition.template.begin.v
+      push:
+        - include: Value
+        - match: \}
+          scope: punctuation.definition.template.end.v
+          pop: true
+    - match: (\$)(err|it)\b
+      captures:
+        1: punctuation.definition.template.v
+        2: constant.language.v
+    - match: (\$)(?:({{re_name_regular}})(\.))?({{re_name_regular}})(\()
+      captures:
+        1: punctuation.definition.template.v
+        2: variable.other.v
+        3: punctuation.accessor.v
+        4: variable.function.v
+        5: punctuation.definition.params.v
+      push: ParameterListEnd
+    - match: (\$)(?:({{re_name_regular}})(\.))?({{re_name_regular}})
+      captures:
+        1: punctuation.definition.template.v
+        2: variable.other.v
+        3: punctuation.accessor.v
+        4: variable.other.v
+
+  Rune:
+    - match: (`)
+      scope: punctuation.definition.rune.begin.v
+      push:
+        - meta_scope: constant.rune.v
+        - match: (\\[\\`])
+          scope: ''
+        - match: (`)
+          scope: punctuation.definition.rune.end.v
+          pop: true
+
+  Number:
+    - match: \b([\d_]+(\.[\d_]+)?e[\+\-]?\d+)\b
+      scope: constant.numeric.scientific.v
+    - match: \b(0b[01_]+)\b
+      scope: constant.numeric.binary.v
+    - match: \b(0o[0-7_]+)\b
+      scope: constant.numeric.octal.v
+    - match: \b(0x[\h_]+)\b
+      scope: constant.numeric.hexadecimal.v
+    - match: \b([\d_]+\.[\d_]+)(\.+\d+)+\b
+      scope: invalid.illegal.v
+    - match: \b([\d_]+)\b
+      scope: constant.numeric.v
+
+  EOL:
+    - match: ($)
+      pop: true

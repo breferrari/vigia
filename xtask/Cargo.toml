@@ -1,0 +1,29 @@
+# The grammar-dump builder. A workspace member so `cargo run -p xtask` works
+# from a checkout, and `publish = false` because it is a tool of this repo, not
+# a product of it: nothing in the shipped graph depends on it, which is what
+# keeps `two-face` and the `yaml-load`/`dump-create` halves of `syntect` out of
+# the published crates entirely (SPEC.md section 6).
+[package]
+name = "xtask"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# bat's curated grammar set, packaged for syntect, in the fancy-regex-vetted
+# variant. The feature choice is the whole point: every definition it ships
+# compiles under the engine vigia actually runs, where the onig variant would
+# hand us grammars that abort the monitor on first use (SPEC.md section 6).
+two-face = { version = "0.5.2", default-features = false, features = [
+    "syntect-fancy",
+] }
+# The build-time half of syntect: yaml-load reads the locally vendored
+# .sublime-syntax files, dump-create serialises the merged set. **The
+# workspace dependency, not a second declaration**: the whole point of the
+# force-compile in `main.rs` is that it exercises the exact engine vigia
+# ships, and an independent version requirement here is the one way the two
+# could quietly diverge. The workspace features (parsing, dump-load,
+# regex-fancy) ride along.
+syntect = { workspace = true, features = ["yaml-load", "dump-create"] }

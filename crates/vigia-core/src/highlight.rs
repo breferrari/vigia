@@ -13,7 +13,7 @@
 //!
 //! | | |
 //! |---|---|
-//! | Load the bundled grammars | 318µs, against I7's 50ms |
+//! | Load the bundled grammars (217 syntaxes, uncompressed dump) | 674µs, against I7's 50ms |
 //! | Parse one screenful, 24 lines | 1.53ms, against I9's 16ms |
 //! | Parse a 1006-line hunk **whole** | **60.97ms**, which is 3.8x over I9 |
 //! | Hash that hunk to revalidate it | 7.1µs |
@@ -149,7 +149,7 @@ pub struct HighlightStats {
 /// ever a number, and `storage.type.function` has to precede `storage.type`
 /// because Sublime's Rust grammar scopes `fn` as a storage *type* while a reader
 /// and the mockup both see a keyword.
-const CLASSES: [(&str, Class); 16] = [
+const CLASSES: [(&str, Class); 25] = [
     ("comment", Class::Comment),
     ("string", Class::String),
     ("constant.numeric", Class::Number),
@@ -160,12 +160,42 @@ const CLASSES: [(&str, Class); 16] = [
     ("storage.type", Class::Type),
     ("storage", Class::Keyword),
     ("entity.name.function", Class::Function),
+    // A heading's text: Sublime's Markdown grammar scopes it
+    // `entity.name.section` *inside* `markup.heading`, and innermost-first
+    // classification reaches it before the markup row ever gets asked, so
+    // without this row a heading reads as a type while its `#` reads as a
+    // heading. Same class as `markup.heading`, deliberately: the two rows are
+    // one element to the eye.
+    ("entity.name.section", Class::Function),
     ("entity.name", Class::Type),
+    // HTML attributes, CSS selectors, and their JSX/Vue/Svelte descendants.
+    // Absent until #235, which is why an attribute drew plain in a covered
+    // language. No shadowing with the `entity.name` rows above: prefix match
+    // is per whole scope atom, so `entity.name` never claims `entity.other.*`.
+    ("entity.other.attribute-name", Class::Variable),
     ("support.function", Class::Function),
     ("support.type", Class::Type),
     ("support.class", Class::Type),
     ("variable.language", Class::Keyword),
     ("variable", Class::Variable),
+    // The markup family, absent entirely until #235: Markdown drew at 4.5%,
+    // with headings, bold, code spans and links all plain, in the format
+    // READMEs put in diffs constantly. `markup.list` is deliberately not
+    // here: Sublime's Markdown grammar applies it as a meta scope across the
+    // whole list item, so a row for it would paint every bullet's entire text
+    // rather than a delimiter.
+    ("markup.heading", Class::Function),
+    ("markup.bold", Class::Keyword),
+    ("markup.italic", Class::Keyword),
+    ("markup.raw", Class::String),
+    ("markup.underline.link", Class::Constant),
+    ("markup.quote", Class::Comment),
+    // The one deliberate `meta.*` row. A link's visible text carries only
+    // `meta.link.inline.description` (probed against the shipped dump: the
+    // `markup.underline.link` above covers the URL, not the words), so
+    // without this the half of a link a reader actually reads stays plain.
+    // Same class as the URL: one element to the eye.
+    ("meta.link.inline.description", Class::Constant),
 ];
 
 /// Lines between the parse positions a later frame can rewind to.
@@ -338,11 +368,12 @@ impl Sides {
         syntaxes: &SyntaxSet,
         table: &[(Scope, Class)],
     ) -> Vec<Span> {
-        // `load_defaults_newlines` is the dump syntect supports; its
-        // no-newline twin is documented as unreliable because grammars anchor
-        // on end of line. The core strips line endings, so one is put back
-        // here, into a buffer the hunk reuses rather than an allocation per
-        // line.
+        // The embedded dump is built from the newlines variant (`xtask` merges
+        // onto `two_face::syntax::extra_newlines` and loads extras with
+        // lines-include-newline); the no-newline form is documented as
+        // unreliable because grammars anchor on end of line. The core strips
+        // line endings, so one is put back here, into a buffer the hunk reuses
+        // rather than an allocation per line.
         buf.clear();
         buf.push_str(&line.text);
         buf.push('\n');
@@ -393,7 +424,13 @@ struct Entry {
 }
 
 impl Entry {
-    fn new(path: &str, ordinal: usize, content: Content, syntaxes: &SyntaxSet) -> Self {
+    fn new(
+        path: &str,
+        ordinal: usize,
+        content: Content,
+        syntaxes: &SyntaxSet,
+        first_line: Option<&str>,
+    ) -> Self {
         Self {
             path: path.to_owned(),
             ordinal,
@@ -401,7 +438,7 @@ impl Entry {
             marks: content.marks,
             checkpoints: Vec::new(),
             live: true,
-            sides: syntax_for(syntaxes, path).map(Sides::new),
+            sides: syntax_for(syntaxes, path, first_line).map(Sides::new),
             lines: Vec::new(),
             buf: String::new(),
         }
@@ -518,7 +555,7 @@ impl Entry {
 ///
 /// let mut pass = highlighter.pass();
 /// for i in 0..hunk.lines.len() {
-///     println!("{:?}", pass.spans(&path, 0, &hunk, i));
+///     println!("{:?}", pass.spans(&path, 0, &hunk, i, None));
 /// }
 /// # Ok(())
 /// # }
@@ -573,9 +610,24 @@ pub struct Highlighter {
 impl Highlighter {
     /// Load the bundled grammars and start with an empty cache.
     ///
-    /// Costs 318µs measured in release, which is why it is done up front rather
-    /// than behind a lazy initialiser: I7 gives startup 50ms, and hiding this
-    /// behind first use would only move it onto the first frame that draws.
+    /// The grammars are the dump `xtask` builds and commits at
+    /// `assets/syntaxes.bin` — `two-face`'s `fancy`-vetted packaging of `bat`'s
+    /// curated set plus the locally vendored extras, which is the covered set
+    /// `SPEC.md` §6 rules and [#235](https://github.com/breferrari/vigia/issues/235)
+    /// decided. `from_binary` panics on a malformed dump, and deliberately so:
+    /// the bytes are compiled into the binary, so a dump that cannot load is a
+    /// build defect every test run catches, not a runtime condition to recover
+    /// from.
+    ///
+    /// Loading is done up front rather than behind a lazy initialiser: I7
+    /// gives startup 50ms, this costs **0.674ms** in release (best of 20; the
+    /// old 75-syntax dump was 318µs), and hiding it behind first use would
+    /// only move it onto the first frame that draws. The dump is
+    /// **uncompressed**, and that is a measured decision rather than a
+    /// default: the compressed form of the same set loads at **9.67ms**, a
+    /// 14x, against 90KB saved in a binary whose size budget has an order of
+    /// magnitude more room than its startup budget. `two-face` ships its own
+    /// dumps uncompressed for the same reason.
     ///
     /// **Loading a grammar and compiling one are different costs, and only the
     /// small one happens here.** `syntect` defers every pattern to
@@ -588,7 +640,10 @@ impl Highlighter {
     /// off the path a reader is waiting on.
     pub fn new() -> Self {
         Self {
-            syntaxes: Arc::new(SyntaxSet::load_defaults_newlines()),
+            syntaxes: Arc::new(
+                syntect::dumps::from_uncompressed_data(include_bytes!("../assets/syntaxes.bin"))
+                    .expect("the embedded dump deserialises"),
+            ),
             table: CLASSES
                 .iter()
                 .filter_map(|(prefix, class)| Some((Scope::new(prefix).ok()?, *class)))
@@ -641,21 +696,25 @@ impl Highlighter {
     /// change to the panic strategy or nothing.
     ///
     /// The per-grammar cap is checked **before** the read, so a run over a
-    /// single-language changed set does three reads rather than sixty-four.
+    /// single-language changed set does three reads rather than sixty-four. It
+    /// is checked again after it, because one resolution step reads the first
+    /// line ([`CONTENT_SENSITIVE`]) and the grammar actually compiled is the
+    /// one that must be charged: charging the pre-read answer spent
+    /// TypeScript's budget on a Qt translation file's XML.
     pub fn warm_ahead(
         &self,
         root: std::path::PathBuf,
         paths: Vec<String>,
-    ) -> std::thread::JoinHandle<usize> {
+    ) -> std::thread::JoinHandle<WarmReport> {
         let syntaxes = Arc::clone(&self.syntaxes);
         std::thread::spawn(move || {
             // Resolved once: every path below is checked against it, and a root
             // that cannot be resolved is a worktree that has gone away, which is
             // nothing to warm rather than something to guess at.
             let Ok(canonical_root) = std::fs::canonicalize(&root) else {
-                return 0;
+                return WarmReport::default();
             };
-            let mut warmed = 0usize;
+            let mut report = WarmReport::default();
             let mut per_grammar: HashMap<Scope, usize> = HashMap::new();
             for path in paths.into_iter().take(WARM_FILES) {
                 // **The total, which the per-grammar cap does not bound.** A
@@ -665,7 +724,7 @@ impl Highlighter {
                 // 1.053s worst case the per-grammar cap was reasoned about with.
                 // No single-language fixture can see that, which is `SPEC.md`
                 // §7's ASCII-fixture rule one axis over.
-                if warmed >= WARM_TOTAL {
+                if report.warmed >= WARM_TOTAL {
                     break;
                 }
 
@@ -695,18 +754,35 @@ impl Highlighter {
 
                 // Looked up before anything is read, which is what makes the
                 // per-grammar cap save the I/O and not merely the parse. A path
-                // with no grammar is skipped here rather than read and thrown
-                // away, and it is the same answer `syntax_for` gives the frame
-                // path for a file type nothing recognises.
-                // Keyed on the grammar's `Scope`, which is what `syntect` itself
-                // treats as a syntax's identity and is a `Copy` bit-packed atom.
-                // The `name` is a display string, so keying on it would allocate
-                // per path including the ones the cap is about to skip.
-                let Some(grammar) = syntax_for(&syntaxes, &path).map(|s| s.scope) else {
+                // with no grammar at all is skipped here rather than read and
+                // thrown away, and it is the same answer `syntax_for` gives the
+                // frame path for a file type nothing recognises.
+                //
+                // **The cap is charged after the read, not here**, and the two
+                // are different questions. This one is *is there anything to
+                // compile*, which the path answers on its own. Charging needs
+                // the grammar that will actually be compiled, and one of the
+                // resolution steps reads the file's first line: a Qt `.ts`
+                // translation file compiles XML while resolving to TypeScript
+                // by extension, so charging here spent TypeScript's budget on
+                // XML's work and could starve the real TypeScript file later in
+                // the same run.
+                let Some(by_path) = syntax_for(&syntaxes, &path, None) else {
                     continue;
                 };
-                let seen = per_grammar.entry(grammar).or_insert(0);
-                if *seen >= WARM_PER_GRAMMAR {
+                // **And the cap, cheaply, on the answer the path alone gives.**
+                // This is what keeps a single-language changed set to three
+                // reads: without it every file past the cap was read and
+                // canonicalized before being discarded, which is the I/O
+                // amplification the cap exists to prevent. It is sound for any
+                // path whose grammar the first line cannot change; the ones it
+                // can are named by [`CONTENT_SENSITIVE`] and pay the read to
+                // find out.
+                if !content_sensitive(&path)
+                    && per_grammar
+                        .get(&by_path.scope)
+                        .is_some_and(|seen| *seen >= WARM_PER_GRAMMAR)
+                {
                     continue;
                 }
 
@@ -745,6 +821,10 @@ impl Highlighter {
                 if file.take(WARM_BYTES as u64).read_to_end(&mut buf).is_err() {
                     continue;
                 }
+                // Counted here, at the read itself, so the number means what
+                // [`WarmReport::read`] says it means: files this thread opened
+                // and pulled bytes from, whatever happened afterwards.
+                report.read += 1;
                 // A bounded read lands mid-codepoint on any file that is not
                 // ASCII, so the tail is trimmed to the last complete character
                 // rather than the read being widened to avoid it. `valid_up_to`
@@ -763,11 +843,25 @@ impl Highlighter {
                     continue;
                 }
 
+                // Now the text is in hand, so this is the grammar the frame
+                // path would resolve and the one `warm` is about to compile.
+                // Keyed on the grammar's `Scope`, which is what `syntect`
+                // itself treats as a syntax's identity and is a `Copy`
+                // bit-packed atom; the `name` is a display string, so keying
+                // on it would allocate per path.
+                let Some(grammar) = syntax_for(&syntaxes, &path, text.lines().next()) else {
+                    continue;
+                };
+                let seen = per_grammar.entry(grammar.scope).or_insert(0);
+                if *seen >= WARM_PER_GRAMMAR {
+                    continue;
+                }
+
                 warm(&syntaxes, &path, text);
                 *seen += 1;
-                warmed += 1;
+                report.warmed += 1;
             }
-            warmed
+            report
         })
     }
 
@@ -846,7 +940,14 @@ impl Highlighter {
         self.retired.remove(at)
     }
 
-    fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
+    fn spans(
+        &mut self,
+        path: &str,
+        ordinal: usize,
+        hunk: &Hunk,
+        index: usize,
+        first_line: Option<&str>,
+    ) -> &[Span] {
         // One scan, and the miss is where the retired queue is consulted, so a
         // hunk the reader has scrolled back to lands in `entries` and everything
         // below sees one cache rather than two. Whether its content is still
@@ -898,7 +999,7 @@ impl Highlighter {
                     // Rewind to the deepest position the new content still
                     // agrees with, and only start over when there is none.
                     if !entries[slot].rewind(content.clone()) {
-                        entries[slot] = Entry::new(path, ordinal, content, syntaxes);
+                        entries[slot] = Entry::new(path, ordinal, content, syntaxes, first_line);
                     }
                     entries[slot].live = true;
                 }
@@ -906,7 +1007,13 @@ impl Highlighter {
             }
             None => {
                 stats.parsed += 1;
-                entries.push(Entry::new(path, ordinal, content_of(hunk), syntaxes));
+                entries.push(Entry::new(
+                    path,
+                    ordinal,
+                    content_of(hunk),
+                    syntaxes,
+                    first_line,
+                ));
                 entries.len() - 1
             }
         };
@@ -959,14 +1066,31 @@ impl Pass<'_> {
     /// hand the same key to different content every time the view scrolled, and
     /// the reader would see the colours of a hunk they are not looking at.
     ///
+    /// `first_line` is the file's own line one — [`FileDiff::first_line`]
+    /// (crate::FileDiff::first_line) — and feeds the two resolution steps that
+    /// need content (`SPEC.md` §6): the shebang fallback and the `.ts` XML
+    /// sniff. It is consulted only when an entry is created, so a first line
+    /// that changes on its own keeps the cached grammar until the hunk's
+    /// content forces a fresh entry (a rewind keeps the old grammar too, and
+    /// stays grammar-uniform) — self-healing rather than tracked, because
+    /// tracking it would re-key the cache on a fact almost no frame moves.
+    ///
     /// # Panics
     ///
     /// If `index` is past the end of `hunk.lines`, the same way indexing a slice
     /// does, and for the same reason [`Frame::diff`](crate::Frame::diff) panics
     /// on a stale index: a caller has to be walking a hunk it holds, and a
     /// lenient accessor would turn that bug into a silently uncoloured row.
-    pub fn spans(&mut self, path: &str, ordinal: usize, hunk: &Hunk, index: usize) -> &[Span] {
-        self.highlighter.spans(path, ordinal, hunk, index)
+    pub fn spans(
+        &mut self,
+        path: &str,
+        ordinal: usize,
+        hunk: &Hunk,
+        index: usize,
+        first_line: Option<&str>,
+    ) -> &[Span] {
+        self.highlighter
+            .spans(path, ordinal, hunk, index, first_line)
     }
 
     /// Counters for what the highlighter has done, mid-pass.
@@ -988,9 +1112,9 @@ impl Default for Highlighter {
 }
 
 impl std::fmt::Debug for Highlighter {
-    /// Hand written because the bundled grammars are seventy-five syntaxes of
-    /// compiled regex, and a derived `Debug` would put all of them in whatever
-    /// this is nested inside.
+    /// Hand written because the bundled grammars are a couple of hundred
+    /// syntaxes of compiled regex, and a derived `Debug` would put all of them
+    /// in whatever this is nested inside.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Highlighter")
             .field("tracked", &self.entries.len())
@@ -1065,6 +1189,24 @@ pub const WARM_TOTAL: usize = 12;
 /// is an RSS spike I3 has no reason to absorb.
 pub const WARM_BYTES: usize = 64 * 1024;
 
+/// What one [`Highlighter::warm_ahead`] run did.
+///
+/// Two numbers rather than one, because the thread has two costs and the cap
+/// exists to bound both. `warmed` is what it parsed, which the per-grammar cap
+/// has always been asserted on. `read` is what it opened, and it went ungated
+/// until a change moved the cap's check after the read: the parse count was
+/// identical either way, so a run that read sixty-four files to warm three
+/// looked exactly like one that read three. A number nothing asserts is a
+/// property nothing protects.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WarmReport {
+    /// Files parsed, and so grammars actually compiled against.
+    pub warmed: usize,
+    /// Files opened and read, which the per-grammar cap is meant to keep near
+    /// `warmed` rather than near the changed set.
+    pub read: usize,
+}
+
 /// Compile the patterns `text` reaches under `path`'s grammar, so a later frame
 /// drawing that content does not.
 ///
@@ -1106,12 +1248,17 @@ pub const WARM_BYTES: usize = 64 * 1024;
 /// API would make the shell name a type it has no dependency on.
 /// [`Highlighter::warm_ahead`] is the way in.
 fn warm(syntaxes: &SyntaxSet, path: &str, text: &str) {
-    let Some(syntax) = syntax_for(syntaxes, path) else {
+    // The text is in hand, so resolution here sees the same first line the
+    // frame path will. Note the shebang fallback is unreachable through
+    // `warm_ahead`, whose per-grammar cap check runs before the read and so
+    // skips an extensionless path; what this buys today is the `.ts` sniff
+    // agreeing with the frame path on which grammar a Qt file compiles.
+    let Some(syntax) = syntax_for(syntaxes, path, text.lines().next()) else {
         return;
     };
     let mut state = ParseState::new(syntax);
     // `split_inclusive` keeps the trailing newline each line was stored with,
-    // which is what `load_defaults_newlines` grammars expect; splitting it off
+    // which is what the newlines-variant grammars expect; splitting it off
     // would parse every line as though the file ended there.
     for line in text.split_inclusive('\n') {
         // A grammar that fails on a line stops the warm rather than the process.
@@ -1122,22 +1269,166 @@ fn warm(syntaxes: &SyntaxSet, path: &str, text: &str) {
     }
 }
 
-/// The grammar for `path`, by extension and then by whole file name.
+/// Extensions whose grammar is chosen by a written rule rather than by
+/// registration accident, because more than one grammar in the dump claims
+/// them. `SPEC.md` §6 carries the reasons row by row; the short form:
 ///
-/// Whole name second because `Makefile`, `Dockerfile` and `.gitignore` have no
-/// extension to look up. `None` is ordinary rather than an error: an unrecognised
-/// file draws exactly as it did before there was highlighting at all, which
-/// `SPEC.md` §11.1 rules.
-fn syntax_for<'s>(syntaxes: &'s SyntaxSet, path: &str) -> Option<&'s SyntaxReference> {
-    let path = Path::new(path);
-    path.extension()
+/// - `.h` and `.m` go to Objective-C over C/C++ and MATLAB because ObjC's
+///   grammar is a C superset (C headers colour fully) and it is the dialect of
+///   the reader who filed [#235](https://github.com/breferrari/vigia/issues/235).
+///   `bat` rules `.h` the other way (C++, their #877), recorded in §6 so
+///   flipping a row is one edit and an informed one.
+/// - `.v` goes to V over Verilog because the ruling's whole subject is the
+///   modern-language set.
+/// - `.sass` goes to Sass by name because Ruby Haml also registers the
+///   extension, which is how `.sass` drew as Haml for two phases.
+/// - `.jsx` goes to the TSX grammar: TSX is a superset of JSX, and the Babel
+///   grammar is excluded from the `fancy`-vetted set.
+///
+/// A named grammar missing from the dump falls through to ordinary
+/// resolution rather than to nothing, so the table can name grammars the dump
+/// has not vendored yet without turning those files plain in the meantime.
+const AMBIGUOUS: [(&str, &str); 5] = [
+    ("h", "Objective-C"),
+    ("m", "Objective-C"),
+    ("v", "V"),
+    ("sass", "Sass"),
+    ("jsx", "TypeScriptReact"),
+];
+
+/// Formats whose own grammar this stack cannot carry, resolved to the nearest
+/// grammar in the dump rather than to nothing. `SPEC.md` §6 records each gap
+/// with its reason; the short form:
+///
+/// - Astro's and Bicep's upstream grammars are ST4 `version: 2` files built on
+///   `extends:` inheritance, which `syntect` does not implement — and each
+///   extends exactly the grammar its row names, so the approximation is the
+///   grammar's own base.
+/// - Mojo has no `.sublime-syntax` anywhere, and MDX's only real one carries
+///   no licence to vendor under; both languages are supersets of the grammar
+///   named.
+///
+/// Consulted **after** ordinary resolution fails, so the day a real grammar
+/// for one of these lands in the dump it wins without this table changing —
+/// an approximation must never outrank the real thing.
+/// Extensions whose grammar cannot be known from the path alone, because a
+/// resolution step reads the file's first line.
+///
+/// One entry today: `SPEC.md` §6's Qt rule, where a `.ts` opening with an XML
+/// declaration is a translation file rather than TypeScript. It is a named
+/// constant because two places need the same answer — the sniff in
+/// [`syntax_for`] and the warmer's pre-read cap check, which may only trust an
+/// extension-only resolution for a path that is *not* in here.
+const CONTENT_SENSITIVE: [&str; 1] = ["ts"];
+
+/// Whether `path`'s grammar depends on its content. See [`CONTENT_SENSITIVE`].
+fn content_sensitive(path: &str) -> bool {
+    Path::new(path)
+        .extension()
         .and_then(|ext| ext.to_str())
-        .and_then(|ext| syntaxes.find_syntax_by_extension(ext))
-        .or_else(|| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| syntaxes.find_syntax_by_extension(name))
+        .is_some_and(|ext| {
+            CONTENT_SENSITIVE
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
         })
+}
+
+const NEAREST: [(&str, &str); 5] = [
+    ("astro", "HTML"),
+    ("bicep", "JavaScript"),
+    ("mdx", "Markdown"),
+    ("mojo", "Python"),
+    ("🔥", "Python"),
+];
+
+/// The grammar for `path`, by `SPEC.md` §6's five steps: the ambiguity rules,
+/// the whole file name (with a leading-dot retry), the extension, the
+/// nearest-grammar approximations of [`NEAREST`], and the file's first line.
+///
+/// Whole name **before** extension because it is the more specific claim:
+/// `CMakeLists.txt` is registered whole by the CMake grammar, and looking up
+/// `txt` first handed it to Plain Text — which is exactly what the old
+/// two-step did, so `CMakeLists.txt` drew plain for as long as highlighting
+/// has existed. The dot retry is for `.gitignore`-shaped names whose grammar
+/// registers the bare word. The first line is last and optional: it is how an
+/// extensionless shebang script gets a language at all, and how a `.ts` that
+/// is really a Qt translation file (an XML document) escapes the TypeScript
+/// grammar. `None` is ordinary rather than an error: an unrecognised file
+/// draws exactly as it did before there was highlighting at all, which
+/// `SPEC.md` §11.1 rules.
+fn syntax_for<'s>(
+    syntaxes: &'s SyntaxSet,
+    path: &str,
+    first_line: Option<&str>,
+) -> Option<&'s SyntaxReference> {
+    let path = Path::new(path);
+    let ext = path.extension().and_then(|ext| ext.to_str());
+
+    if let Some(ext) = ext {
+        // The one content-aware ambiguity: a `.ts` whose first line is an XML
+        // declaration is a Qt translation file, and TypeScript-colouring an
+        // XML document is wrong on every token.
+        if CONTENT_SENSITIVE
+            .iter()
+            .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+            && first_line.is_some_and(|line| {
+                // A BOM survives `trim_start` (U+FEFF is not whitespace), and
+                // a BOM'd Qt file is still a Qt file.
+                line.trim_start_matches('\u{feff}')
+                    .trim_start()
+                    .starts_with("<?xml")
+            })
+            && let Some(syntax) = syntaxes.find_syntax_by_extension("xml")
+        {
+            return Some(syntax);
+        }
+        if let Some(syntax) = ruled(syntaxes, ext, &AMBIGUOUS) {
+            return Some(syntax);
+        }
+    }
+
+    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+        if let Some(syntax) = syntaxes.find_syntax_by_extension(name) {
+            return Some(syntax);
+        }
+        if let Some(bare) = name.strip_prefix('.')
+            && let Some(syntax) = syntaxes.find_syntax_by_extension(bare)
+        {
+            return Some(syntax);
+        }
+    }
+
+    if let Some(syntax) = ext.and_then(|ext| syntaxes.find_syntax_by_extension(ext)) {
+        return Some(syntax);
+    }
+
+    if let Some(ext) = ext
+        && let Some(syntax) = ruled(syntaxes, ext, &NEAREST)
+    {
+        return Some(syntax);
+    }
+
+    first_line.and_then(|line| syntaxes.find_syntax_by_first_line(line))
+}
+
+/// The grammar a rule table names for `ext`, when the dump holds it.
+///
+/// Shared by the [`AMBIGUOUS`] and [`NEAREST`] steps, which run at different
+/// priorities but resolve identically: first matching row wins, and a named
+/// grammar missing from the dump falls through to the caller's next step
+/// rather than to nothing.
+fn ruled<'s>(
+    syntaxes: &'s SyntaxSet,
+    ext: &str,
+    table: &[(&str, &str)],
+) -> Option<&'s SyntaxReference> {
+    // Case-insensitive, because syntect's own extension lookup is: a rule
+    // that `FOO.H` slips past case-sensitively would hand exactly the files
+    // the table exists for back to registration accident.
+    table
+        .iter()
+        .find(|(candidate, _)| ext.eq_ignore_ascii_case(candidate))
+        .and_then(|(_, grammar)| syntaxes.find_syntax_by_name(grammar))
 }
 
 /// A hunk's content, hashed whole and at every stride boundary.
@@ -1244,7 +1535,7 @@ mod tests {
         let mut highlighter = Highlighter::new();
         let mut pass = highlighter.pass();
         (0..hunk.lines.len())
-            .map(|i| pass.spans(path, 0, hunk, i).to_vec())
+            .map(|i| pass.spans(path, 0, hunk, i, None).to_vec())
             .collect()
     }
 
@@ -1351,6 +1642,58 @@ mod tests {
         assert_eq!(class_at(spans, at("{")), Class::Plain);
     }
 
+    /// The markup rows, through a real Markdown parse rather than pushed
+    /// stacks, because Markdown drew at 4.5% while being a covered language
+    /// and nothing could see it (#235). Each assertion is one of the four
+    /// elements the issue names as rendering plain: a heading, bold, a code
+    /// span, a link.
+    #[test]
+    fn markdown_reaches_the_markup_classes() {
+        let texts = [
+            "# A heading",
+            "Some **bold** text and `a code span` here.",
+            "[a link](https://example.com) closes it.",
+        ];
+        let source = hunk(texts.iter().map(|t| line(LineKind::Added, t)).collect());
+        let spans = spans_for("README.md", &source);
+
+        assert_eq!(
+            class_at(&spans[0], texts[0].find('A').unwrap()),
+            Class::Function
+        );
+        assert_eq!(
+            class_at(&spans[1], texts[1].find("bold").unwrap()),
+            Class::Keyword
+        );
+        assert_eq!(
+            class_at(&spans[1], texts[1].find("code").unwrap()),
+            Class::String
+        );
+        assert_eq!(
+            class_at(&spans[2], texts[2].find("a link").unwrap()),
+            Class::Constant
+        );
+        assert_eq!(
+            class_at(&spans[2], texts[2].find("https").unwrap()),
+            Class::Constant
+        );
+        // And a bullet's text must stay plain: `markup.list` is a meta scope
+        // over the whole item, which is why it has no row.
+        let list = hunk(vec![line(LineKind::Added, "- plain list text")]);
+        let list_spans = spans_for("README.md", &list);
+        assert_eq!(class_at(&list_spans[0], "- plain ".len()), Class::Plain);
+    }
+
+    /// The attribute row, through real HTML and CSS parses: both were plain
+    /// before #235, and both reach JSX, Vue and Svelte the moment their
+    /// grammars resolve.
+    #[test]
+    fn an_attribute_name_is_no_longer_plain() {
+        let source = hunk(vec![line(LineKind::Added, "<a href=\"x\">t</a>")]);
+        let spans = spans_for("index.html", &source);
+        assert_eq!(class_at(&spans[0], "<a ".len()), Class::Variable);
+    }
+
     /// Merging, which is what keeps a line of ordinary code from becoming a span
     /// per token.
     #[test]
@@ -1375,7 +1718,7 @@ mod tests {
         let mut highlighter = Highlighter::new();
         let spans = highlighter
             .pass()
-            .spans("a/b.zzzznope", 0, &source, 0)
+            .spans("a/b.zzzznope", 0, &source, 0, None)
             .to_vec();
 
         assert_eq!(
@@ -1396,11 +1739,100 @@ mod tests {
     /// A file with no extension at all, which is why the lookup has two steps.
     #[test]
     fn a_file_named_rather_than_extended_still_finds_its_grammar() {
-        let syntaxes = SyntaxSet::load_defaults_newlines();
-        assert!(syntax_for(&syntaxes, "src/lib.rs").is_some());
-        assert!(syntax_for(&syntaxes, "Makefile").is_some());
-        assert!(syntax_for(&syntaxes, "deep/nested/Makefile").is_some());
-        assert!(syntax_for(&syntaxes, "src/no-such-thing.zzzznope").is_none());
+        let syntaxes = &Highlighter::new().syntaxes;
+        assert!(syntax_for(syntaxes, "src/lib.rs", None).is_some());
+        assert!(syntax_for(syntaxes, "Makefile", None).is_some());
+        assert!(syntax_for(syntaxes, "deep/nested/Makefile", None).is_some());
+        assert!(syntax_for(syntaxes, "src/no-such-thing.zzzznope", None).is_none());
+    }
+
+    /// The grammar `path` resolves to, by name, or what it failed on.
+    fn grammar_of(path: &str, first_line: Option<&str>) -> String {
+        let highlighter = Highlighter::new();
+        syntax_for(&highlighter.syntaxes, path, first_line)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "<none>".to_owned())
+    }
+
+    /// §6's ambiguity table, row by row. Each of these had two grammars (or a
+    /// wrong one) claiming the extension, and each answer here is the written
+    /// rule rather than whichever grammar happened to register first.
+    #[test]
+    fn an_ambiguous_extension_resolves_by_rule_not_registration_order() {
+        assert_eq!(grammar_of("include/thing.h", None), "Objective-C");
+        assert_eq!(grammar_of("Sources/AppDelegate.m", None), "Objective-C");
+        // `.sass` resolved to Ruby Haml for two phases; unresolved would beat
+        // that, and Sass is in the dump, so the rule finds the real grammar.
+        assert_eq!(grammar_of("styles/site.sass", None), "Sass");
+        // TSX is a superset of JSX, and the Babel grammar is fancy-excluded.
+        assert_eq!(grammar_of("src/App.jsx", None), "TypeScriptReact");
+        // An ordinary TypeScript file is TypeScript...
+        assert_eq!(grammar_of("src/main.ts", None), "TypeScript");
+        // ...and a Qt translation file is an XML document whose extension
+        // lies; the first line is what tells them apart.
+        assert_eq!(
+            grammar_of(
+                "i18n/app_de.ts",
+                Some("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+            ),
+            "XML"
+        );
+        // A BOM survives trim_start (U+FEFF is not whitespace) and must not
+        // defeat the sniff.
+        assert_eq!(
+            grammar_of("i18n/app_de.ts", Some("\u{feff}<?xml version=\"1.0\"?>")),
+            "XML"
+        );
+    }
+
+    /// The rules are case-insensitive, because syntect's own extension lookup
+    /// is: a `FOO.H` that slipped past the table case-sensitively would
+    /// resolve by registration accident, which is the exact failure the table
+    /// exists to end.
+    #[test]
+    fn an_uppercase_extension_resolves_by_the_same_rule() {
+        assert_eq!(grammar_of("INCLUDE/THING.H", None), "Objective-C");
+        assert_eq!(grammar_of("DOCS/POST.MDX", None), "Markdown");
+        assert_eq!(
+            grammar_of("APP_DE.TS", Some("<?xml version=\"1.0\"?>")),
+            "XML"
+        );
+    }
+
+    /// Step three's leading-dot retry and step four's first-line fallback,
+    /// which are what give dotfiles and extensionless scripts a language.
+    #[test]
+    fn dotfiles_and_shebang_scripts_resolve() {
+        assert_eq!(grammar_of(".gitignore", None), "Git Ignore");
+        assert_eq!(grammar_of("Dockerfile", None), "Dockerfile");
+        assert_eq!(grammar_of("cmake/CMakeLists.txt", None), "CMake");
+        assert_eq!(grammar_of("go.mod", None), "Gomod");
+        // No extension, no known name: the shebang is all there is.
+        assert_eq!(
+            grammar_of("scripts/deploy", Some("#!/usr/bin/env bash")),
+            "Bourne Again Shell (bash)"
+        );
+        // And without a first line the same path stays plain, which §11.1
+        // rules is ordinary rather than an error.
+        assert_eq!(grammar_of("scripts/deploy", None), "<none>");
+    }
+
+    /// The nearest-grammar approximations: formats whose own grammar this
+    /// stack cannot carry, each resolved to the grammar its upstream builds on
+    /// (or the language it is a superset of) rather than to nothing. §6
+    /// records the gaps.
+    #[test]
+    fn a_gap_format_resolves_to_its_nearest_grammar() {
+        assert_eq!(grammar_of("src/pages/index.astro", None), "HTML");
+        assert_eq!(grammar_of("infra/main.bicep", None), "JavaScript");
+        assert_eq!(grammar_of("docs/post.mdx", None), "Markdown");
+        assert_eq!(grammar_of("kernels/matmul.mojo", None), "Python");
+        assert_eq!(grammar_of("kernels/matmul.🔥", None), "Python");
+        // And the ruled formats that DO have their own grammar now: the
+        // survey's headline plus the whole vendored tail.
+        assert_eq!(grammar_of("cli/main.v", None), "V");
+        assert_eq!(grammar_of("src/app.gleam", None), "Gleam");
+        assert_eq!(grammar_of("deploy.ps1", None), "PowerShell");
     }
 
     /// Why the two sides are parsed apart.

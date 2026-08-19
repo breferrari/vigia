@@ -104,6 +104,12 @@ fn first_difference(left: &FileDiff, right: &FileDiff) -> String {
     if left.bytes != right.bytes {
         return format!("bytes: frame {}, fresh {}", left.bytes, right.bytes);
     }
+    if left.first_line != right.first_line {
+        return format!(
+            "first_line: frame {:?}, fresh {:?}",
+            left.first_line, right.first_line
+        );
+    }
 
     let lines = |diff: &FileDiff| -> Vec<String> {
         diff.hunks
