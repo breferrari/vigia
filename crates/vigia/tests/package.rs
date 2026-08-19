@@ -1877,6 +1877,18 @@ fn every_published_crate_ships_the_licence() {
                  `Highlighter::new` embeds it with `include_bytes!`, so the \
                  published crate would not build at all:\n{listed}"
             );
+            // **And the roster, for the same reason one level over.** This
+            // crate publishes its own test suite, so `tests/coverage.rs` ships
+            // too, and it reaches the roster with `include_str!`. A `.crate`
+            // without it compiles the library and fails the tests a consumer
+            // runs, which is the failure this file exists to keep out of a
+            // release. Verified once by hand as well: the extracted 0.19.0
+            // tarball builds and passes `cargo test --test coverage`.
+            assert!(
+                listed_has(&listed, "assets/GRAMMARS.txt"),
+                "the .crate for {package} carries no assets/GRAMMARS.txt, and \
+                 its published test suite embeds it with `include_str!`:\n{listed}"
+            );
         }
     }
 }

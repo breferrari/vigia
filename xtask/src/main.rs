@@ -107,7 +107,12 @@ fn main() {
     // and every named row present. This is the whole set, sorted, in a file
     // git diffs, so any addition, removal or rename shows up in review as
     // itself rather than as a number moving.
-    let roster = root.join("assets").join("syntaxes").join("GRAMMARS.txt");
+    // Beside the dump rather than beside the sources, and that is not
+    // filing: `vigia-core` publishes its own test suite, so the gate that
+    // reads this roster ships to consumers, and a file outside the package
+    // directory is one that `include_str!` cannot find there. It describes
+    // the dump, so it belongs where the dump is.
+    let roster = dump_path.with_file_name("GRAMMARS.txt");
     std::fs::write(
         &roster,
         format!(

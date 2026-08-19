@@ -35,6 +35,27 @@ use std::collections::HashSet;
 use syntect::parsing::syntax_definition::{Pattern, SyntaxDefinition};
 use syntect::parsing::{Regex, SyntaxSet};
 
+/// Whether this test is running inside the repository rather than inside a
+/// published `.crate`.
+///
+/// **The two gates below read `assets/syntaxes/`, which is outside the
+/// package**, and `vigia-core` deliberately publishes its own test suite
+/// (see its manifest). So a consumer running `cargo test` on the published
+/// crate has the dump and no sources, which is not the same state as a
+/// contributor deleting the sources, and must not be asserted against as
+/// though it were. The repository is identified by a file only it has;
+/// `SPEC.md` sits two levels up from this crate and never ships in the
+/// package.
+///
+/// This is a skip with a provable condition rather than a shrug, and it is
+/// the narrow form: inside the repository the gates always run, so nothing a
+/// contributor can do makes them quietly stop.
+fn in_repository() -> bool {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../SPEC.md")
+        .exists()
+}
+
 /// The dump the crate embeds, loaded the way `Highlighter::new` loads it.
 fn embedded() -> SyntaxSet {
     syntect::dumps::from_uncompressed_data(include_bytes!("../assets/syntaxes.bin"))
@@ -123,7 +144,7 @@ const RULED: &[(&str, &str)] = &[
 /// arrives in review as the grammar it is rather than as a number moving.
 /// [`RULED`] stays because it makes a different claim: it maps what a reader
 /// calls a format onto the grammar that has to exist for it.
-const ROSTER: &str = include_str!("../../../assets/syntaxes/GRAMMARS.txt");
+const ROSTER: &str = include_str!("../assets/GRAMMARS.txt");
 
 /// The grammars that come from `assets/syntaxes/` rather than from
 /// `two-face`, by the name they carry in the dump.
@@ -174,6 +195,9 @@ fn every_ruled_format_is_in_the_dump_and_the_roster_is_pinned() {
 /// refusal.
 #[test]
 fn every_vendored_pattern_compiles_under_the_shipped_engine() {
+    if !in_repository() {
+        return;
+    }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         // No extras directory means the dump should be exactly two-face's
@@ -273,6 +297,9 @@ fn every_first_line_regex_in_the_dump_compiles() {
 /// recomputes them: table and sources must match exactly, both directions.
 #[test]
 fn the_committed_dump_matches_its_sources() {
+    if !in_repository() {
+        return;
+    }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         assert_no_orphan_vendored_grammars();
