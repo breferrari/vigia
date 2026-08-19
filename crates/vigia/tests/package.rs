@@ -1948,3 +1948,34 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
         );
     }
 }
+
+/// The grammar count the README states is the one the dump holds.
+///
+/// `README.md` names a number, and a number in prose is the thing this
+/// repository has been caught by most often: nothing reads it, so it is true on
+/// the day it is written and silently false after the next `two-face` upgrade.
+/// The roster pin in `crates/vigia-core/tests/coverage.rs` forces the *dump* to
+/// be re-pinned deliberately; this is what points that same edit at the
+/// sentence a reader sees.
+///
+/// **It lives here rather than in a file of its own** because this one already
+/// reads the repository root and is already excluded from the package, so it
+/// adds no escaping test and no count for `SPEC.md` §9 to restate. Phase 4's
+/// rule is that the artifacts agree with each other, and this is one pair of
+/// them.
+#[test]
+fn the_readme_states_the_grammar_count_the_dump_holds() {
+    let roster = repo_file("crates/vigia-core/assets/GRAMMARS.txt");
+    let held = roster
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+
+    let readme = repo_file("README.md");
+    let claim = format!("**{held} grammars**");
+    assert!(
+        readme.contains(&claim),
+        "README.md does not say {claim:?}, and the dump holds {held} grammars. \
+         Whichever moved, they have to move together"
+    );
+}

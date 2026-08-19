@@ -98,7 +98,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
            │    39 +      if self.pending.is_empty() {
            │    40 +          self.deadline = Instant::now() + DEBOUNCE;
      rule  │  ──────────────────────────────────────────────────────────────
-   status  │  q quit · f follow · ? keys   0.8ms frame   19MiB  follow ▶  1/3
+   status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
 The list is **pinned**, so the signals stay on screen while you read the diff under them. Every file gets the same row in both regions:
@@ -131,7 +131,9 @@ A slice nothing touched is still drawn, in a dark track colour, because a strip 
 
 <br>
 
-Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving in that ten seconds.
+Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds.
+
+**Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means. The mockup drew these as waves before the first commit, and drawing the events raw was the defect.
 
 It is scaled **across every tracked file**, not against the row's own maximum, and that is the whole point: a row scaled to itself would draw full height the moment it was the busiest thing *it* had ever been, and you could not tell the file an agent is hammering from the file it touched once. A column with no writes draws a flat track `_` rather than nothing, for the same reason the heat strip draws its empty slices.
 
@@ -150,6 +152,31 @@ The counters lend colour only where it says something: a `-0` stays grey, becaus
 
 </details>
 
+### 🖍️ The diff itself is highlighted, in every language you write
+
+**217 grammars**, so the languages a 2026 tree is actually made of are coloured rather than plain: TypeScript and TSX, Swift, Kotlin, Dart, Elixir, Julia, Zig, Nim, Crystal, F#, Solidity, Gleam, V, Odin, Elm, PowerShell, SCSS and Sass and Less, Vue and Svelte, TOML, Protobuf, GraphQL, Terraform, Dockerfile, CMake, Nix, and `go.mod` and `.gitignore` and `.env`, beside the C-family and scripting languages you would expect.
+
+<details>
+<summary><b>🖍️ How a file finds its language, and the four it cannot</b></summary>
+
+<br>
+
+The grammars are `bat`'s curated collection, which is the same set that tool highlights with, compiled into one dump the binary carries. Every one of their licences is reproduced in `NOTICE.md`, which ships in the release archives and in the published crate rather than only living here.
+
+**Five steps decide the language**, in order, because an extension alone gets a surprising number of files wrong:
+
+1. **A written rule**, where one extension has more than one honest answer. `.h` is Objective-C, whose grammar is a superset of C, so C headers colour fully and only C++-only constructs go plain. `.m` is Objective-C over MATLAB, `.v` is V over Verilog, `.jsx` borrows the TSX grammar, and `.sass` is Sass, which it was not: it used to resolve to Ruby Haml, which is a confidently wrong colour rather than a missing one.
+2. **The whole file name**, so `Dockerfile`, `CMakeLists.txt` and `go.mod` are found by name. This runs *before* the extension, which is what fixes `CMakeLists.txt`: the CMake grammar registers it whole, and looking up `txt` first handed it to plain text.
+3. **The extension**, with a leading-dot retry so `.gitignore` finds a grammar registered as `gitignore`.
+4. **The nearest grammar**, for the four formats below.
+5. **The first line**, which is how an extensionless script with a `#!` gets a language at all, and how a `.ts` file that is really a Qt translation file gets read as the XML it is instead of as TypeScript.
+
+**Four formats have no grammar this stack can carry**, and they draw as their nearest relative rather than as nothing: `.astro` as HTML and `.bicep` as JavaScript, because both upstreams are written in a Sublime Text 4 dialect `syntect` does not implement and both extend exactly those; `.mdx` as Markdown and `.mojo` as Python, which they are supersets of. Carbon has no grammar anywhere in this format, so it draws plain. That step runs *after* the four above, so the day a real grammar lands it wins without anything being deleted.
+
+A file type nothing recognises is not an error. It draws exactly as it did before there was highlighting at all, because a monitor that refused a file it could not colour would have inverted its own job.
+
+</details>
+
 ### 📈 And the masthead, which is the whole tree
 
 Every signal above is about **one file**. Press `m` and the **masthead** opens under the header: the same two-minute window, summed across **every** file at once.
@@ -163,7 +190,9 @@ Two names for one thing, and both are used: **masthead** is the block at the top
    two minutes ago                 now
 ```
 
-Two rows of the same block ramp, stacked, growing upward from a drawn baseline. A quiet stretch is a floor rather than a gap, which is what makes a burst read as a spike on a graph instead of a block floating in the dark. That resolution is the point: it answers a question no file row can, which is *is anything happening at all right now, and was it busier a minute ago.* A tall block that has been collapsing for thirty seconds is an agent that has finished.
+Two rows, stacked, growing upward from a drawn baseline, and the same level the sparklines draw. A quiet stretch is a floor rather than a gap, which is what makes a burst read as a spike on a graph instead of a block floating in the dark. That resolution is the point: it answers a question no file row can, which is *is anything happening at all right now, and was it busier a minute ago.* A tall block that has been collapsing for thirty seconds is an agent that has finished.
+
+It is drawn the way `btop` draws one, read from its source rather than recalled. Three things come from there: one value per sub-column, so where your font carries braille the band resolves twice the detail it does in blocks; the axis, so a lone spike stands on something; and a scale of about 1.3 times a recent mean rather than the window's peak, because one `cargo build` rewriting a lock file is two orders of magnitude above an ordinary save, and against *that* denominator every edit for the next two minutes draws one level high.
 
 It starts **hidden**, because it costs three rows of diff and is not wanted on every pane. Press `m` again and the rows go straight back to the diff.
 
@@ -386,6 +415,7 @@ set -ga terminal-overrides ",*:Tc"
 | [gix](https://github.com/GitoxideLabs/gitoxide) | Pure Rust git. Diffs in process, no subprocess per change |
 | [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what "no polling timer" requires |
 | [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
+| [two-face](https://github.com/CosmicHorrorDev/two-face) | The grammars: [bat](https://github.com/sharkdp/bat)'s curated set, packaged for `syntect`. It builds the dump the binary carries and is itself absent from every shipped graph |
 
 Everything is pure Rust on purpose: a genuinely static Linux binary needs no cross toolchain, and macOS and Windows are plain tier-1 targets.
 
@@ -402,6 +432,8 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them |
 | ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
 | 🔨 | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
+
+There is no Phase 5 in that table: the shelf, where deferred work waits with the dated reason it was deferred for, was numbered as one until August and kept its milestone.
 
 Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked.
 
