@@ -117,11 +117,7 @@ fn main() {
     // directory is one that `include_str!` cannot find there. It describes
     // the dump, so it belongs where the dump is.
     let roster = dump_path.with_file_name("GRAMMARS.txt");
-    let listing = names.join(
-        "
-",
-    ) + "
-";
+    let listing = format!("{}\n", names.join("\n"));
     std::fs::write(&roster, listing).expect("write the roster");
     println!(
         "{} syntaxes ({} from two-face {}, {} local), {} bytes uncompressed -> {}",
@@ -143,19 +139,9 @@ fn main() {
 /// The walk is flat and sorted: extras are single vendored files, not trees,
 /// and a deterministic order keeps the dump reproducible byte for byte.
 fn load_extras(dir: &Path) -> Vec<SyntaxDefinition> {
-    let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
-            .collect(),
-        // No extras directory is a legal state: the dump is then exactly
-        // two-face's set.
-        Err(_) => return Vec::new(),
-    };
-    files.sort();
-
-    files
+    // No extras directory is a legal state: the dump is then exactly
+    // two-face's set, and [`source_files`] returns nothing for it.
+    source_files(dir)
         .iter()
         .map(|path| {
             let text = std::fs::read_to_string(path).expect("read a vendored grammar");
@@ -232,24 +218,99 @@ fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
     );
     if !extra_names.is_empty() {
         md.push_str("## Local extras\n\n");
+        md.push_str(
+            "Grammars vendored into the vigia repository, each at a pinned \
+             upstream commit. The provenance below is read out of the vendored \
+             file's own header, so it cannot disagree with the file it \
+             describes.\n\n",
+        );
         for name in extra_names {
             let _ = writeln!(md, "- {name}");
         }
         md.push('\n');
+
+        for path in &source_files(sources) {
+            let text = std::fs::read_to_string(path).expect("re-read a vendored grammar");
+            let name = path
+                .file_name()
+                .expect("a file has a name")
+                .to_string_lossy();
+            let _ = writeln!(md, "**`{name}`**\n");
+            // The four header fields the vendoring convention writes. Anything
+            // else in the header is the grammar's own comment and is left where
+            // it is.
+            for field in ["upstream", "pinned", "path", "licence"] {
+                if let Some(value) = text.lines().find_map(|line| {
+                    line.trim_start()
+                        .strip_prefix('#')?
+                        .trim_start()
+                        .strip_prefix(&format!("{field}:"))
+                        .map(str::trim)
+                }) {
+                    let _ = writeln!(md, "- {field}: {value}");
+                }
+            }
+            md.push('\n');
+        }
+
+        // **Their licence texts, inlined.** A name is not attribution: MIT asks
+        // for the copyright and permission notice in every copy of a
+        // substantial portion, and Apache-2.0 asks for the notices and a copy
+        // of the licence. The dump is a copy of these grammars, so the text has
+        // to travel with it, and the header comments that carry it in the
+        // vendored `.sublime-syntax` files live outside the package and reach
+        // nobody who installs the crate.
+        //
+        // Only the upstreams `bat` does not carry need one here. `two-face`'s
+        // own listing below reproduces a `LICENSE` per grammar for everything
+        // in `bat`'s curation, PowerShell's included, so duplicating those
+        // would be two copies to drift apart.
+        let mut licences: Vec<_> = std::fs::read_dir(sources.join("licences"))
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "LICENSE"))
+            .collect();
+        licences.sort();
+        if !licences.is_empty() {
+            md.push_str(
+                "Licences for the grammars vendored from upstreams outside \
+                 `bat`'s curation. The rest, PowerShell included, are \
+                 reproduced per grammar in the two-face acknowledgements \
+                 below.\n\n",
+            );
+            for path in licences {
+                let text = std::fs::read_to_string(&path).expect("read a vendored licence");
+                let stem = path
+                    .file_stem()
+                    .expect("a file has a stem")
+                    .to_string_lossy();
+                let _ = writeln!(
+                    md,
+                    "<details>\n<summary>{stem}</summary>\n\n````text\n{}\n````\n\n</details>\n",
+                    text.replace("\r\n", "\n").trim_end()
+                );
+            }
+            md.push('\n');
+        }
+
+        // **What we changed, which both licences ask to be stated.** Only
+        // PowerShell is modified today; the patch is named beside the pattern
+        // it replaced in the vendored file.
+        md.push_str(
+            "### Modifications\n\n- `PowerShell.sublime-syntax`: one match \
+             pattern rewritten, replacing a regex subroutine call the shipped \
+             engine cannot compile with the class it referenced. The change is \
+             marked in place, beside the pattern.\n\n",
+        );
         md.push_str(
             "## Sources\n\nFNV-1a 64 of each vendored source as compiled into \
              the dump. `tests/coverage.rs` recomputes these, which is what \
              catches a source edited without `cargo run -p xtask`: the dump \
              and this table regenerate together or not at all.\n\n",
         );
-        let mut files: Vec<_> = std::fs::read_dir(sources)
-            .expect("the extras directory exists when extras were loaded")
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
-            .collect();
-        files.sort();
-        for file in files {
+        for file in source_files(sources) {
             let bytes = std::fs::read(&file).expect("re-read a vendored grammar");
             let name = file
                 .file_name()
@@ -266,6 +327,20 @@ fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
     // Some upstream licence texts carry CRLF; normalised so a regeneration on
     // any platform produces the same bytes and a clean diff.
     std::fs::write(dir.join("NOTICE.md"), md.replace("\r\n", "\n")).expect("write NOTICE.md");
+}
+
+/// The vendored grammar sources under `dir`, sorted, so the notice's sections
+/// and the dump itself are built from one enumeration rather than three.
+fn source_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
+        .collect();
+    files.sort();
+    files
 }
 
 /// FNV-1a 64, spelled out because the checksum must be identical between

@@ -383,6 +383,124 @@ fn the_committed_dump_matches_its_sources() {
          looking for the wrong set"
     );
 
+    // **And every vendored grammar's attribution reaches the notice.** The
+    // dump is a copy of somebody else's work, so the upstream it came from and
+    // the licence it came under have to travel with it. Both live in the
+    // vendored file's header, which is outside the package and reaches nobody
+    // who installs the crate; the notice is the copy that ships. A name in a
+    // list is not attribution, which is what this file said for one release.
+    for path in &paths {
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let name = path
+            .file_name()
+            .expect("a file has a name")
+            .to_string_lossy();
+        for field in ["upstream", "pinned"] {
+            let value = text
+                .lines()
+                .find_map(|line| {
+                    line.trim_start()
+                        .strip_prefix('#')?
+                        .trim_start()
+                        .strip_prefix(&format!("{field}:"))
+                        .map(str::trim)
+                })
+                .unwrap_or_else(|| {
+                    panic!("{} has no `{field}:` line in its provenance header", name)
+                });
+            assert!(
+                notice.contains(value),
+                "{name} is vendored at {field} {value}, and the shipped notice \
+                 does not mention it; run `cargo run -p xtask` and commit what \
+                 it writes"
+            );
+        }
+    }
+
+    // **And the licence text, per upstream, driven from the grammars rather
+    // than from the licence files.**
+    //
+    // The direction matters and the first spelling of this had it backwards: it
+    // walked `licences/` and checked each file reached the notice, which is a
+    // check that cannot see a *missing* licence. Delete one and regenerate, and
+    // the walk simply had one less thing to look at. Driving it from the
+    // vendored grammars is what makes "somebody added a grammar and not its
+    // licence" the red case.
+    //
+    // A licence file is named after its upstream repository, so two grammars
+    // from one repository share one file, and the association needs no second
+    // list to maintain. `bat` is the exception with a reason: `two-face`
+    // reproduces a `LICENSE` per grammar for everything in its curation, so a
+    // second copy here would be two texts to drift apart.
+    let mut upstreams: Vec<(String, String)> = Vec::new();
+    for path in &paths {
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let upstream = text
+            .lines()
+            .find_map(|line| {
+                line.trim_start()
+                    .strip_prefix('#')?
+                    .trim_start()
+                    .strip_prefix("upstream:")
+                    .map(str::trim)
+            })
+            .expect("a vendored grammar with no upstream in its header");
+        let name = path
+            .file_name()
+            .expect("a file has a name")
+            .to_string_lossy()
+            .into_owned();
+        upstreams.push((upstream.to_owned(), name));
+    }
+
+    for (upstream, grammar) in &upstreams {
+        let repo = upstream
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .expect("an upstream URL has a last segment");
+
+        // The grammars that came through `bat` are covered by the two-face
+        // listing, and the check is that the listing really does carry one for
+        // this grammar rather than that we trust it to.
+        if upstream.contains("sharkdp/bat") {
+            let stem = grammar.trim_end_matches(".sublime-syntax");
+            assert!(
+                notice.contains(&format!("{stem}/LICENSE")),
+                "{grammar} comes through bat, whose per-grammar licences the \
+                 two-face listing reproduces, and the shipped notice has no \
+                 {stem}/LICENSE in it"
+            );
+            continue;
+        }
+
+        let licence = dir.join("licences").join(format!("{repo}.LICENSE"));
+        let text = std::fs::read_to_string(&licence).unwrap_or_else(|e| {
+            panic!(
+                "{grammar} is vendored from {upstream} and {} is not readable \
+                 ({e}), so the dump would ship a copy of somebody's grammar \
+                 without their licence",
+                licence.display()
+            )
+        });
+        // The copyright line for MIT, the title line for Apache: whichever this
+        // licence carries, a substantial line of it has to be in the notice
+        // rather than a summary of it.
+        let anchor = text
+            .lines()
+            .find(|line| line.contains("Copyright") || line.contains("Apache License"))
+            .map(str::trim)
+            .expect("a licence with neither a copyright line nor a title");
+        assert!(
+            notice.contains(anchor),
+            "{grammar}'s licence is committed at {} but its text is not in the \
+             shipped notice; run `cargo run -p xtask` and commit what it writes",
+            licence.display()
+        );
+    }
+
     // And to the **dump**, which is the artefact that actually ships.
     let names: HashSet<String> = embedded()
         .syntaxes()
