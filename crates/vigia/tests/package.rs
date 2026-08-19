@@ -664,7 +664,11 @@ fn published_members() -> Vec<(String, String)> {
         .into_iter()
         .filter(|(dir, _)| {
             !without_comments(&repo_file(&format!("{dir}/Cargo.toml")))
+                .split_once("[package]")
+                .map(|(_, rest)| rest)
+                .unwrap_or_default()
                 .lines()
+                .take_while(|line| !line.trim_start().starts_with('['))
                 .any(|line| line.trim().starts_with("publish = false"))
         })
         .collect()

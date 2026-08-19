@@ -1,0 +1,217 @@
+ASP
+AWK
+ActionScript
+Ada
+Apache Conf
+AppleScript
+AsciiDoc (Asciidoctor)
+Authorized Keys
+Batch File
+BibTeX
+Bourne Again Shell (bash)
+C
+C#
+C++
+CFML
+CFML Script
+CFML Script (Tags)
+CMake
+CMake C Header
+CMake C++ Header
+CMakeCache
+CMakeCommands
+CSS
+Cabal
+Cargo Build Results
+Clojure
+CoffeeScript
+Comma Separated Values
+Command Help
+CpuInfo
+Crontab
+Crystal
+D
+DMD Output
+Dart
+Diff
+Dockerfile
+Dockerfile (with bash)
+DotENV
+Elixir
+Elm
+Elm Compile Messages
+Elm Documentation
+Email
+Erlang
+F#
+Fish
+Fortran (Fixed Form)
+Fortran (Modern)
+Fortran Namelist
+GDScript (Godot Engine)
+GFortran Build Results
+GLSL
+Git Attributes
+Git Commit
+Git Common
+Git Config
+Git Ignore
+Git Link
+Git Log
+Git Mailmap
+Git Rebase Todo
+Gleam
+Go
+Gomod
+Gosum
+GraphQL
+Graphviz (DOT)
+Groff/troff
+Groovy
+HTML
+HTML (ASP)
+HTML (EEx)
+HTML (Erlang)
+HTML (Jinja2)
+HTML (Rails)
+HTML (Tcl)
+HTML (Twig)
+HTTP Request and Response
+Haskell
+Highlight non-printables
+INI
+Idris
+JQ
+JSON
+JSON (Terraform)
+Java
+Java Properties
+Java Server Page (JSP)
+JavaScript
+JavaScript (Rails)
+Javadoc
+Jinja2
+Julia
+Known Hosts
+Kotlin
+LLVM
+LaTeX
+LaTeX Log
+Lean 4
+Less
+Lisp
+Literate Haskell
+LiveScript
+Lua
+MATLAB
+Make Output
+Makefile
+Manpage
+Markdown
+MediaWiki
+MediawikerPanel
+MemInfo
+MultiMarkdown
+NAnt Build File
+NSIS
+Navigational Bar SV
+Navigational Bar VHDL
+Nim
+Ninja
+Nix
+OCaml
+OCamllex
+OCamlyacc
+Objective-C
+Objective-C++
+Odin
+OpenMP (Fortran)
+PHP
+PHP Source
+Pascal
+Perl
+Pipe Separated Values
+Plain Text
+PowerShell
+Private Key
+Protocol Buffer
+Protocol Buffer (TEXT)
+Puppet
+PureScript
+Python
+QML
+R
+R Console
+Racket
+Rd (R Documentation)
+Rego
+Regular Expression
+Regular Expressions (Javascript)
+Regular Expressions (PHP)
+Regular Expressions (Python)
+Requirements.txt
+Robot Framework
+Ruby
+Ruby Haml
+Ruby Slim
+Ruby on Rails
+Rust
+SCSS
+SML
+SQL
+SQL (Rails)
+SSH Common
+SSH Config
+SSH Crypto
+SSHD Config
+Sass
+Scala
+Semi-Colon Separated Values
+Separated Values
+Shell-Unix-Generic
+Solidity
+Strace
+Stylus
+Svelte
+Swift
+SystemVerilog
+TOML
+Tab Separated Values
+Tcl
+TeX
+Terraform
+TestBox
+Textile
+Todo.txt
+TypeScript
+TypeScriptReact
+Typst
+Typst Build Results
+Typst Code
+V
+V Module
+VHDL
+Verilog
+VimL
+Vue Component
+Vyper
+WGSL
+XML
+YAML
+Zig
+camlp4
+commands-builtin-shell-bash
+debsources
+fstab
+gnuplot
+group
+jsonnet
+log
+nginx
+orgmode
+passwd
+reStructuredText
+resolv
+syslog
+varlink
+x86_64 Assembly

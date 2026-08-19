@@ -91,9 +91,11 @@ pub struct FileDiff {
     /// language at all (`SPEC.md` §6), and the hunks of a mid-file edit never
     /// contain line one. **It costs no read**: [`compute`] holds both sides
     /// whole to diff them, so this is a by-product exactly like
-    /// [`FileDiff::lines`]. Capped at 256 bytes because every first-line
-    /// pattern in the dump matches inside that, and a minified bundle's "first
-    /// line" is the whole file.
+    /// [`FileDiff::lines`]. Capped at 256 bytes **read** because every
+    /// first-line pattern in the dump matches inside that, and a minified
+    /// bundle's "first line" is the whole file. The returned string can run to
+    /// 258: a cut through a four-byte character becomes a three-byte
+    /// replacement, which [`first_line_of`] documents and a test pins.
     pub first_line: Option<String>,
     /// Bytes compared: index-side content plus worktree-side content.
     ///

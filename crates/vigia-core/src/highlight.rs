@@ -750,18 +750,20 @@ impl Highlighter {
 
                 // Looked up before anything is read, which is what makes the
                 // per-grammar cap save the I/O and not merely the parse. A path
-                // with no grammar is skipped here rather than read and thrown
-                // away, and it is the same answer `syntax_for` gives the frame
-                // path for a file type nothing recognises.
-                // Keyed on the grammar's `Scope`, which is what `syntect` itself
-                // treats as a syntax's identity and is a `Copy` bit-packed atom.
-                // The `name` is a display string, so keying on it would allocate
-                // per path including the ones the cap is about to skip.
-                let Some(grammar) = syntax_for(&syntaxes, &path, None).map(|s| s.scope) else {
-                    continue;
-                };
-                let seen = per_grammar.entry(grammar).or_insert(0);
-                if *seen >= WARM_PER_GRAMMAR {
+                // with no grammar at all is skipped here rather than read and
+                // thrown away, and it is the same answer `syntax_for` gives the
+                // frame path for a file type nothing recognises.
+                //
+                // **The cap is charged after the read, not here**, and the two
+                // are different questions. This one is *is there anything to
+                // compile*, which the path answers on its own. Charging needs
+                // the grammar that will actually be compiled, and one of the
+                // resolution steps reads the file's first line: a Qt `.ts`
+                // translation file compiles XML while resolving to TypeScript
+                // by extension, so charging here spent TypeScript's budget on
+                // XML's work and could starve the real TypeScript file later in
+                // the same run.
+                if syntax_for(&syntaxes, &path, None).is_none() {
                     continue;
                 }
 
@@ -815,6 +817,20 @@ impl Highlighter {
                 // string, parses zero lines, and would otherwise burn one of
                 // three per-grammar slots and be counted as a warm.
                 if text.is_empty() {
+                    continue;
+                }
+
+                // Now the text is in hand, so this is the grammar the frame
+                // path would resolve and the one `warm` is about to compile.
+                // Keyed on the grammar's `Scope`, which is what `syntect`
+                // itself treats as a syntax's identity and is a `Copy`
+                // bit-packed atom; the `name` is a display string, so keying
+                // on it would allocate per path.
+                let Some(grammar) = syntax_for(&syntaxes, &path, text.lines().next()) else {
+                    continue;
+                };
+                let seen = per_grammar.entry(grammar.scope).or_insert(0);
+                if *seen >= WARM_PER_GRAMMAR {
                     continue;
                 }
 

@@ -3,7 +3,7 @@
 //! `SPEC.md` §6 (via [#235](https://github.com/breferrari/vigia/issues/235))
 //! rules that `vigia` covers every modern language, names the mechanism (the
 //! dump `xtask` builds from `two-face`'s `fancy`-vetted set plus the locally
-//! vendored extras under `assets/syntaxes/`), and demands three things no
+//! vendored extras under `assets/syntaxes/`), and demands four things no
 //! other test asserts:
 //!
 //! 1. **The set is pinned.** An upgrade that silently drops or gains a grammar
@@ -20,6 +20,12 @@
 //!    Markdown drew at 4.5% while being a "covered" language. So every ruled
 //!    format has a snippet gate asserting a spread of classes, not merely
 //!    resolution.
+//! 4. **The committed dump was built from the committed sources.** The checks
+//!    above read the dump and the sources separately, so a grammar edited
+//!    without rerunning `xtask` satisfied both while the shipped bytes still
+//!    held the old one. `xtask` writes two records beside the sources in the
+//!    same run as the dump — `NOTICE.md`'s per-file hashes and
+//!    `GRAMMARS.txt`'s sorted name list — and these gates recompute both.
 //!
 //! The dump is read here exactly as the crate reads it — same bytes, same
 //! loader — so what these gates pass is what a reader gets.
@@ -105,13 +111,19 @@ const RULED: &[(&str, &str)] = &[
     ("Verilog", "Verilog"),
 ];
 
-/// How many syntaxes the committed dump holds, exactly.
+/// The committed roster: every grammar in the dump, sorted, one per line,
+/// written by `xtask` in the same run that writes the dump.
 ///
-/// This is the "may not silently gain" half of the pin: a `two-face` upgrade
-/// that changes the set moves this number, and moving it is a deliberate edit
-/// in the same commit as the upgrade, with the diff of names read rather than
-/// assumed. The "may not silently drop" half is [`RULED`].
-const PINNED_COUNT: usize = 217;
+/// This is the "may not silently change" half of the pin, and it replaced a
+/// count. A count plus [`RULED`]'s named rows protected the 56 grammars
+/// somebody had thought to name: an upgrade swapping one of the other 161 for
+/// a different grammar left the count identical and every named row present,
+/// so the pin's own claim — that a silent drop or gain goes red — was false
+/// for three quarters of the set. A committed list is diffable, so the change
+/// arrives in review as the grammar it is rather than as a number moving.
+/// [`RULED`] stays because it makes a different claim: it maps what a reader
+/// calls a format onto the grammar that has to exist for it.
+const ROSTER: &str = include_str!("../../../assets/syntaxes/GRAMMARS.txt");
 
 /// The grammars that come from `assets/syntaxes/` rather than from
 /// `two-face`, by the name they carry in the dump.
@@ -119,12 +131,12 @@ const PINNED_COUNT: usize = 217;
 /// It exists so the gates below can act on the **absence** of their sources.
 /// Deleting the extras directory without rebuilding used to satisfy every
 /// gate by early return: the walk found nothing to check, `NOTICE.md` went
-/// with the directory, and the committed dump still held 217, so a dump
+/// with the directory, and the committed dump still held them, so a dump
 /// shipping four grammars with no sources and no attribution was invisible.
 const VENDORED: [&str; 4] = ["Gleam", "PowerShell", "V", "V Module"];
 
 #[test]
-fn every_ruled_format_is_in_the_dump_and_the_count_is_pinned() {
+fn every_ruled_format_is_in_the_dump_and_the_roster_is_pinned() {
     let set = embedded();
     let names: HashSet<&str> = set.syntaxes().iter().map(|s| s.name.as_str()).collect();
 
@@ -138,11 +150,14 @@ fn every_ruled_format_is_in_the_dump_and_the_count_is_pinned() {
         "ruled formats missing from the embedded dump: {missing:?}"
     );
 
+    let mut present: Vec<&str> = set.syntaxes().iter().map(|s| s.name.as_str()).collect();
+    present.sort_unstable();
+    let pinned: Vec<&str> = ROSTER.lines().filter(|line| !line.is_empty()).collect();
     assert_eq!(
-        set.syntaxes().len(),
-        PINNED_COUNT,
-        "the dump gained or lost grammars; re-read the xtask name list and \
-         re-pin deliberately"
+        present, pinned,
+        "the dump's grammars and the committed roster disagree; run `cargo run \
+         -p xtask` and read the diff of assets/syntaxes/GRAMMARS.txt before \
+         committing it, because that diff is the change"
     );
 }
 
@@ -178,6 +193,15 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
         .collect();
+
+    // An empty directory is the same state as a missing one, and it was the
+    // hole the `Err` arm alone left open: `read_dir` returns `Ok` for it, so
+    // both gates walked an empty list and passed vacuously while the dump
+    // still shipped the grammars those sources had built.
+    if sources.is_empty() {
+        assert_no_orphan_vendored_grammars();
+        return;
+    }
 
     for path in &sources {
         let text = std::fs::read_to_string(path)
@@ -254,12 +278,22 @@ fn the_committed_dump_matches_its_sources() {
         assert_no_orphan_vendored_grammars();
         return;
     };
-    let mut sources: Vec<(String, u64)> = entries
+    let paths: Vec<std::path::PathBuf> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
+        .collect();
+    // The empty directory, which is the same state as a missing one and which
+    // the `Err` arm alone could not see.
+    if paths.is_empty() {
+        assert_no_orphan_vendored_grammars();
+        return;
+    }
+
+    let mut sources: Vec<(String, u64)> = paths
+        .iter()
         .map(|p| {
-            let bytes = std::fs::read(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
+            let bytes = std::fs::read(p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
             (
                 p.file_name()
                     .expect("a file has a name")
@@ -289,9 +323,32 @@ fn the_committed_dump_matches_its_sources() {
     );
 
     // The hashes above tie the sources to `NOTICE.md`, which `xtask` writes in
-    // the same run as the dump. This ties them to the **dump**, which is the
-    // artefact that actually ships: every grammar the roster names is in it,
-    // and the roster is exactly what the sources parse to.
+    // the same run as the dump. This ties [`VENDORED`] to the sources, which
+    // is the half nothing else could see: the roster is hand-written, so a
+    // fifth vendored grammar nobody added to it would simply never be checked
+    // by the absence direction.
+    let mut parsed: Vec<String> = paths
+        .iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let stem = path.file_stem().and_then(|s| s.to_str());
+            SyntaxDefinition::load_from_str(&text, true, stem)
+                .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()))
+                .name
+        })
+        .collect();
+    parsed.sort();
+    let mut roster: Vec<String> = VENDORED.iter().map(|name| (*name).to_owned()).collect();
+    roster.sort();
+    assert_eq!(
+        parsed, roster,
+        "VENDORED does not name exactly the grammars under assets/syntaxes/, \
+         so the orphan check that runs when those sources are gone would be \
+         looking for the wrong set"
+    );
+
+    // And to the **dump**, which is the artefact that actually ships.
     let names: HashSet<String> = embedded()
         .syntaxes()
         .iter()
@@ -359,10 +416,16 @@ const fn snip(
     }
 }
 
-/// A representative snippet per ruled format. Three distinct classes is the
-/// default bar — comment, string and one structural class is what "this
-/// language highlights" means at minimum — and the rows below it carry the
-/// measured reason.
+/// A representative snippet per ruled format, with the bar set to **what the
+/// snippet actually reaches**, measured rather than chosen.
+///
+/// A floor of "three or so" is the loose bound this repo already has a rule
+/// about: a bound no input can approach is decorative, and a Kotlin snippet
+/// reaching six classes against a bar of three still passes with half its
+/// highlighting gone. Pinned at the measured number, any class a grammar or a
+/// scope-table change stops producing turns this red, and the number moves
+/// the way the count pin moves: deliberately, in the commit that changed the
+/// answer.
 const SNIPPETS: &[Snippet] = &[
     snip(
         "TypeScript",
@@ -374,7 +437,7 @@ const SNIPPETS: &[Snippet] = &[
             "  return name;",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "TSX",
@@ -384,7 +447,7 @@ const SNIPPETS: &[Snippet] = &[
             "const n = 42;",
             "export const App = () => <div className=\"a\">{n}</div>;",
         ],
-        3,
+        7,
     ),
     snip(
         "JSX",
@@ -394,7 +457,7 @@ const SNIPPETS: &[Snippet] = &[
             "const n = 42;",
             "export const App = () => <div className=\"a\">{n}</div>;",
         ],
-        3,
+        7,
     ),
     snip(
         "Kotlin",
@@ -406,7 +469,7 @@ const SNIPPETS: &[Snippet] = &[
             "    println(\"hello\")",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "Swift",
@@ -418,7 +481,7 @@ const SNIPPETS: &[Snippet] = &[
             "    return n",
             "}",
         ],
-        3,
+        4,
     ),
     snip(
         "Dart",
@@ -430,7 +493,7 @@ const SNIPPETS: &[Snippet] = &[
             "  print('hi');",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "PowerShell",
@@ -442,7 +505,7 @@ const SNIPPETS: &[Snippet] = &[
             "    Write-Output \"hi\"",
             "}",
         ],
-        3,
+        7,
     ),
     snip(
         "Elixir",
@@ -453,7 +516,7 @@ const SNIPPETS: &[Snippet] = &[
             "  def go, do: IO.puts(\"hi\")",
             "end",
         ],
-        3,
+        6,
     ),
     snip(
         "Julia",
@@ -465,7 +528,7 @@ const SNIPPETS: &[Snippet] = &[
             "end",
             "s = \"hi\"",
         ],
-        3,
+        5,
     ),
     snip(
         "Zig",
@@ -478,7 +541,7 @@ const SNIPPETS: &[Snippet] = &[
             "    _ = n;",
             "}",
         ],
-        3,
+        7,
     ),
     snip(
         "Nim",
@@ -489,7 +552,7 @@ const SNIPPETS: &[Snippet] = &[
             "  result = 42",
             "echo \"hi\"",
         ],
-        3,
+        6,
     ),
     snip(
         "Crystal",
@@ -501,7 +564,7 @@ const SNIPPETS: &[Snippet] = &[
             "end",
             "puts \"hi\"",
         ],
-        3,
+        7,
     ),
     snip(
         "F#",
@@ -524,7 +587,7 @@ const SNIPPETS: &[Snippet] = &[
             "    uint256 total = 42;",
             "}",
         ],
-        3,
+        5,
     ),
     snip(
         "V",
@@ -536,7 +599,7 @@ const SNIPPETS: &[Snippet] = &[
             "    println('hi')",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "Odin",
@@ -549,7 +612,7 @@ const SNIPPETS: &[Snippet] = &[
             "    s := \"hi\"",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "Elm",
@@ -561,7 +624,7 @@ const SNIPPETS: &[Snippet] = &[
             "answer = 42",
             "greet = \"hi\"",
         ],
-        3,
+        6,
     ),
     snip(
         "Gleam",
@@ -573,7 +636,7 @@ const SNIPPETS: &[Snippet] = &[
             "  io.println(\"hi\")",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "SCSS",
@@ -586,19 +649,19 @@ const SNIPPETS: &[Snippet] = &[
             "  margin: 4px;",
             "}",
         ],
-        3,
+        5,
     ),
     snip(
         "Sass",
         "styles/site.sass",
         &["// vars", "$primary: #333", ".card", "  color: $primary"],
-        3,
+        4,
     ),
     snip(
         "Less",
         "styles/site.less",
         &["// vars", "@primary: #333;", ".card { color: @primary; }"],
-        3,
+        4,
     ),
     snip(
         "Vue",
@@ -611,7 +674,7 @@ const SNIPPETS: &[Snippet] = &[
             "export default { n: 42 }",
             "</script>",
         ],
-        3,
+        5,
     ),
     snip(
         "Svelte",
@@ -622,7 +685,7 @@ const SNIPPETS: &[Snippet] = &[
             "</script>",
             "<div class=\"app\">{n}</div>",
         ],
-        3,
+        5,
     ),
     snip(
         "TOML",
@@ -644,7 +707,7 @@ const SNIPPETS: &[Snippet] = &[
             "host = \"localhost\"",
             "port = 8080",
         ],
-        2,
+        3,
     ),
     snip(
         "Protobuf",
@@ -656,13 +719,13 @@ const SNIPPETS: &[Snippet] = &[
             "  int32 id = 1;",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "GraphQL",
         "schema.graphql",
         &["# schema", "type Query {", "  user(id: ID!): String", "}"],
-        3,
+        4,
     ),
     snip(
         "Terraform",
@@ -674,7 +737,7 @@ const SNIPPETS: &[Snippet] = &[
             "  size   = 42",
             "}",
         ],
-        3,
+        6,
     ),
     snip(
         "Dockerfile",
@@ -685,7 +748,7 @@ const SNIPPETS: &[Snippet] = &[
             "RUN cargo build --release",
             "ENV PORT=8080",
         ],
-        2,
+        3,
     ),
     snip(
         "CMake",
@@ -696,7 +759,7 @@ const SNIPPETS: &[Snippet] = &[
             "project(vigia)",
             "set(SRC \"main.c\")",
         ],
-        3,
+        4,
     ),
     snip(
         "Nix",
@@ -708,19 +771,19 @@ const SNIPPETS: &[Snippet] = &[
             "  name = \"vigia-0.1\";",
             "}",
         ],
-        3,
+        4,
     ),
     snip(
         "env",
         ".env",
         &["# secrets", "PORT=8080", "NAME=\"vigia\""],
-        2,
+        5,
     ),
     snip(
         "gitignore",
         ".gitignore",
         &["# artifacts", "target/", "*.log"],
-        2,
+        3,
     ),
     snip(
         "go.mod",
@@ -731,7 +794,7 @@ const SNIPPETS: &[Snippet] = &[
             "go 1.22",
             "require example.com/dep v1.2.3",
         ],
-        3,
+        4,
     ),
     // The first-line step, through the public path: an extensionless script
     // resolves by its shebang or not at all.
@@ -745,7 +808,7 @@ const SNIPPETS: &[Snippet] = &[
             "NAME=\"vigia\"",
             "echo \"$NAME\"",
         ],
-        min_classes: 2,
+        min_classes: 5,
     },
     // The nearest-grammar approximations (SPEC §6 records each gap): the bar
     // is the base grammar's, because that is the whole of what they buy.
@@ -753,25 +816,25 @@ const SNIPPETS: &[Snippet] = &[
         "Astro (as HTML)",
         "src/pages/index.astro",
         &["<!-- page -->", "<div class=\"app\">hi</div>"],
-        2,
+        4,
     ),
     snip(
         "Bicep (as JavaScript)",
         "infra/main.bicep",
         &["// infra", "var total = 42", "param name string = 'x'"],
-        3,
+        6,
     ),
     snip(
         "MDX (as Markdown)",
         "docs/post.mdx",
         &["# A heading", "Some **bold** and `code` here."],
-        2,
+        3,
     ),
     snip(
         "Mojo (as Python)",
         "kernels/matmul.mojo",
         &["# kernel", "def matmul(n):", "    return n * 42"],
-        3,
+        5,
     ),
 ];
 
