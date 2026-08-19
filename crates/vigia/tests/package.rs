@@ -1859,6 +1859,21 @@ fn every_published_crate_ships_the_licence() {
             "the package list for {package} has no README.md in it, so it is not \
              the list this gate thinks it is reading:\n{listed}"
         );
+
+        // **And the grammar dump, for the engine.** `vigia-core` reaches it
+        // with `include_bytes!`, so a `.crate` without it does not merely lack
+        // an asset: it does not compile, and the failure lands inside `cargo
+        // publish` at release time rather than in any test here. It is one
+        // `exclude` line away from happening, which is the same distance the
+        // licence was.
+        if package == "vigia-core" {
+            assert!(
+                listed_has(&listed, "assets/syntaxes.bin"),
+                "the .crate for {package} carries no assets/syntaxes.bin, and \
+                 `Highlighter::new` embeds it with `include_bytes!`, so the \
+                 published crate would not build at all:\n{listed}"
+            );
+        }
     }
 }
 
