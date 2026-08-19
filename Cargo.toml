@@ -208,6 +208,11 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
+# The grammar attribution rides along in every archive. The binary embeds a few
+# hundred third-party grammars, each under its own licence, and `dist` puts
+# README, LICENSE and CHANGELOG in an archive on its own but knows nothing about
+# this one. `bat` and `two-face` both ship theirs with the artefact.
+include = ["crates/vigia-core/assets/NOTICE.md"]
 installers = ["shell", "powershell", "homebrew"]
 tap = "breferrari/homebrew-tap"
 publish-jobs = ["homebrew", "./publish-crates-io"]

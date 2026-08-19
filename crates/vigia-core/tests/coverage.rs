@@ -25,7 +25,8 @@
 //!    without rerunning `xtask` satisfied both while the shipped bytes still
 //!    held the old one. `xtask` writes two records beside the sources in the
 //!    same run as the dump — `NOTICE.md`'s per-file hashes and
-//!    `GRAMMARS.txt`'s sorted name list — and these gates recompute both.
+//!    `GRAMMARS.txt`'s sorted name list, both beside the dump so they ship
+//!    with it — and these gates recompute both.
 //!
 //! The dump is read here exactly as the crate reads it — same bytes, same
 //! loader — so what these gates pass is what a reader gets.
@@ -151,9 +152,9 @@ const ROSTER: &str = include_str!("../assets/GRAMMARS.txt");
 ///
 /// It exists so the gates below can act on the **absence** of their sources.
 /// Deleting the extras directory without rebuilding used to satisfy every
-/// gate by early return: the walk found nothing to check, `NOTICE.md` went
-/// with the directory, and the committed dump still held them, so a dump
-/// shipping four grammars with no sources and no attribution was invisible.
+/// gate by early return: the walk found nothing to check and the committed
+/// dump still held them, so a dump shipping four grammars with no sources was
+/// invisible.
 const VENDORED: [&str; 4] = ["Gleam", "PowerShell", "V", "V Module"];
 
 #[test]
@@ -332,8 +333,15 @@ fn the_committed_dump_matches_its_sources() {
         .collect();
     sources.sort();
 
-    let notice = std::fs::read_to_string(dir.join("NOTICE.md"))
-        .expect("NOTICE.md is committed beside the sources");
+    // The notice lives beside the dump rather than beside the sources, because
+    // it has to ship: a crates.io consumer and a release archive both get the
+    // grammars, so they both have to get the attribution. `include_str!` would
+    // read it at compile time, and a plain read is used instead so that this
+    // gate fails with the path when the file has moved rather than failing the
+    // build for every consumer.
+    let notice_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/NOTICE.md");
+    let notice = std::fs::read_to_string(&notice_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", notice_path.display()));
     let mut listed: Vec<(String, u64)> = notice
         .lines()
         .filter_map(|line| {

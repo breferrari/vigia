@@ -1889,6 +1889,21 @@ fn every_published_crate_ships_the_licence() {
                 "the .crate for {package} carries no assets/GRAMMARS.txt, and \
                  its published test suite embeds it with `include_str!`:\n{listed}"
             );
+            // **And the attribution, which is the one whose reason lives
+            // outside this repository.** The dump embeds a few hundred
+            // third-party grammars, each under its own licence. For two
+            // releases the notice describing them sat at the repository root,
+            // so `cargo package` left it behind and nobody who installed the
+            // crate ever saw it. It ships beside the dump now;
+            // `workspace.metadata.dist`'s `include` is what puts it in the
+            // binary archives, and this is what keeps it in the source
+            // package.
+            assert!(
+                listed_has(&listed, "assets/NOTICE.md"),
+                "the .crate for {package} carries no assets/NOTICE.md, so it \
+                 ships a few hundred vendored grammars with none of their \
+                 attribution:\n{listed}"
+            );
         }
     }
 }

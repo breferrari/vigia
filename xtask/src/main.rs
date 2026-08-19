@@ -96,7 +96,11 @@ fn main() {
     syntect::dumps::dump_to_uncompressed_file(&set, &dump_path).expect("write the dump");
     let dump_len = std::fs::metadata(&dump_path).expect("stat the dump").len();
 
-    write_notice(&root.join("assets").join("syntaxes"), &extra_names);
+    write_notice(
+        dump_path.parent().expect("the dump has a parent"),
+        &root.join("assets").join("syntaxes"),
+        &extra_names,
+    );
 
     let mut names: Vec<&str> = set.syntaxes().iter().map(|s| s.name.as_str()).collect();
     names.sort_unstable();
@@ -113,18 +117,12 @@ fn main() {
     // directory is one that `include_str!` cannot find there. It describes
     // the dump, so it belongs where the dump is.
     let roster = dump_path.with_file_name("GRAMMARS.txt");
-    std::fs::write(
-        &roster,
-        format!(
-            "{}
+    let listing = names.join(
+        "
 ",
-            names.join(
-                "
-"
-            )
-        ),
-    )
-    .expect("write the roster");
+    ) + "
+";
+    std::fs::write(&roster, listing).expect("write the roster");
     println!(
         "{} syntaxes ({} from two-face {}, {} local), {} bytes uncompressed -> {}",
         set.syntaxes().len(),
@@ -208,10 +206,19 @@ fn incompatible_patterns(def: &SyntaxDefinition) -> Vec<String> {
     bad
 }
 
-/// Regenerate `assets/syntaxes/NOTICE.md`: two-face's own acknowledgements for
+/// Regenerate the grammar attribution: two-face's own acknowledgements for
 /// everything the base set embeds, plus the roster of local extras, whose
 /// provenance (upstream, commit, licence) each file carries in its header.
-fn write_notice(dir: &Path, extra_names: &[String]) {
+///
+/// **Written beside the dump rather than beside the sources, because it has to
+/// ship.** The dump embeds a few hundred third-party grammars, each under its
+/// own licence, and for two releases the notice describing them existed only
+/// in this repository: `cargo package` carries the package directory, so a
+/// crates.io consumer got the grammars and none of the attribution, and so did
+/// every release archive. `bat` and `two-face` both ship theirs with the
+/// artefact. `sources` is where the vendored `.sublime-syntax` files are read
+/// from; `dir` is where the notice lands.
+fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
     let mut md = String::new();
     md.push_str("# Grammar attribution\n\n");
     md.push_str(
@@ -235,7 +242,7 @@ fn write_notice(dir: &Path, extra_names: &[String]) {
              catches a source edited without `cargo run -p xtask`: the dump \
              and this table regenerate together or not at all.\n\n",
         );
-        let mut files: Vec<_> = std::fs::read_dir(dir)
+        let mut files: Vec<_> = std::fs::read_dir(sources)
             .expect("the extras directory exists when extras were loaded")
             .filter_map(|e| e.ok())
             .map(|e| e.path())
@@ -255,7 +262,7 @@ fn write_notice(dir: &Path, extra_names: &[String]) {
     md.push_str("## two-face acknowledgements\n\n");
     md.push_str(&two_face::acknowledgement::listing().to_md());
 
-    std::fs::create_dir_all(dir).expect("assets/syntaxes exists");
+    std::fs::create_dir_all(dir).expect("the notice's directory exists");
     // Some upstream licence texts carry CRLF; normalised so a regeneration on
     // any platform produces the same bytes and a clean diff.
     std::fs::write(dir.join("NOTICE.md"), md.replace("\r\n", "\n")).expect("write NOTICE.md");
