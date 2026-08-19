@@ -48,13 +48,16 @@ fn main() {
     // by-extension lookup iterates newest-first. The pin gate would go red on
     // nothing (the count is unchanged by a shadow), so the refusal lives
     // here, where the collision is created.
+    // Two extras naming themselves the same thing shadow each other exactly
+    // the same way, which is why they go into the one set rather than being
+    // checked only against the base.
     {
-        let base_names: std::collections::HashSet<&str> =
+        let mut names: std::collections::HashSet<&str> =
             base.syntaxes().iter().map(|s| s.name.as_str()).collect();
         for name in &extra_names {
             assert!(
-                !base_names.contains(name.as_str()),
-                "vendored extra {name:?} shadows a grammar two-face already                  ships; rename it or drop it"
+                names.insert(name.as_str()),
+                "vendored extra {name:?} shadows a grammar already in the set,                  whether from two-face or from another vendored file; rename                  it or drop it"
             );
         }
     }

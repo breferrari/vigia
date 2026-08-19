@@ -365,14 +365,17 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
     }
 }
 
-/// The first line of `bytes`, capped at 256 bytes, or `None` for an empty
-/// side.
+/// The first line of `bytes`, capped at 256 bytes read, or `None` for an
+/// empty side.
 ///
 /// The cap is what keeps a minified bundle's single line from travelling on
 /// every [`FileDiff`] of it; every first-line pattern in the dump matches
 /// inside 256 bytes. `from_utf8_lossy` because the cap can land mid-codepoint
 /// and a replacement character at the tail of a shebang match is harmless
-/// where refusing the line would lose it.
+/// where refusing the line would lose it. **The cap counts bytes read, not
+/// bytes returned**: a split codepoint becomes a three-byte `U+FFFD`, so a
+/// cut through a four-byte character returns 258. Bounded either way, which
+/// is the whole point of the cap.
 fn first_line_of(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() {
         return None;
@@ -480,6 +483,14 @@ mod tests {
         let long = vec![b'x'; 10_000];
         let diff = compute("bundle.js".to_owned(), b"", &long);
         assert_eq!(diff.first_line.as_ref().map(String::len), Some(256));
+
+        // A cut through a four-byte character: 255 ASCII bytes then one lead
+        // byte, which `from_utf8_lossy` replaces with a three-byte U+FFFD. The
+        // cap is on bytes **read**, so the answer is 258 and still bounded.
+        let mut split = vec![b'x'; 255];
+        split.extend_from_slice("🔥".as_bytes());
+        let diff = compute("bundle.js".to_owned(), b"", &split);
+        assert_eq!(diff.first_line.as_ref().map(String::len), Some(258));
     }
 
     /// A file with no trailing newline still counts its last line.

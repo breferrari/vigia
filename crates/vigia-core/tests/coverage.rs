@@ -113,6 +113,16 @@ const RULED: &[(&str, &str)] = &[
 /// assumed. The "may not silently drop" half is [`RULED`].
 const PINNED_COUNT: usize = 217;
 
+/// The grammars that come from `assets/syntaxes/` rather than from
+/// `two-face`, by the name they carry in the dump.
+///
+/// It exists so the gates below can act on the **absence** of their sources.
+/// Deleting the extras directory without rebuilding used to satisfy every
+/// gate by early return: the walk found nothing to check, `NOTICE.md` went
+/// with the directory, and the committed dump still held 217, so a dump
+/// shipping four grammars with no sources and no attribution was invisible.
+const VENDORED: [&str; 4] = ["Gleam", "PowerShell", "V", "V Module"];
+
 #[test]
 fn every_ruled_format_is_in_the_dump_and_the_count_is_pinned() {
     let set = embedded();
@@ -151,9 +161,11 @@ fn every_ruled_format_is_in_the_dump_and_the_count_is_pinned() {
 fn every_vendored_pattern_compiles_under_the_shipped_engine() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
     let Ok(entries) = std::fs::read_dir(&dir) else {
-        // No extras directory means the dump is exactly two-face's set, whose
-        // guarantee is upstream's. Nothing to check is a legal state, not a
-        // silent pass over something.
+        // No extras directory means the dump should be exactly two-face's
+        // set, whose guarantee is upstream's. That is a legal state — but
+        // only if the dump agrees, so the absence is asserted rather than
+        // returned on.
+        assert_no_orphan_vendored_grammars();
         return;
     };
 
@@ -239,6 +251,7 @@ fn every_first_line_regex_in_the_dump_compiles() {
 fn the_committed_dump_matches_its_sources() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
     let Ok(entries) = std::fs::read_dir(&dir) else {
+        assert_no_orphan_vendored_grammars();
         return;
     };
     let mut sources: Vec<(String, u64)> = entries
@@ -274,6 +287,38 @@ fn the_committed_dump_matches_its_sources() {
         sources, listed,
         "the vendored sources and NOTICE.md's Sources table disagree, so the          committed dump was not built from these sources; run `cargo run -p          xtask` and commit what it writes"
     );
+
+    // The hashes above tie the sources to `NOTICE.md`, which `xtask` writes in
+    // the same run as the dump. This ties them to the **dump**, which is the
+    // artefact that actually ships: every grammar the roster names is in it,
+    // and the roster is exactly what the sources parse to.
+    let names: HashSet<String> = embedded()
+        .syntaxes()
+        .iter()
+        .map(|syntax| syntax.name.clone())
+        .collect();
+    for vendored in VENDORED {
+        assert!(
+            names.contains(vendored),
+            "{vendored} is vendored under assets/syntaxes/ but is not in the              committed dump; run `cargo run -p xtask` and commit what it writes"
+        );
+    }
+}
+
+/// The dump holds none of [`VENDORED`], which is what "there are no extras"
+/// has to mean for the early returns above to be honest.
+fn assert_no_orphan_vendored_grammars() {
+    let names: HashSet<String> = embedded()
+        .syntaxes()
+        .iter()
+        .map(|syntax| syntax.name.clone())
+        .collect();
+    for vendored in VENDORED {
+        assert!(
+            !names.contains(vendored),
+            "assets/syntaxes/ is gone but the committed dump still ships              {vendored}, so it carries a grammar with no source and no              attribution; run `cargo run -p xtask` and commit what it writes"
+        );
+    }
 }
 
 /// FNV-1a 64, byte-identical to `xtask`'s copy and duplicated for the same
