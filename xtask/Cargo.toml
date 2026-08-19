@@ -20,12 +20,10 @@ two-face = { version = "0.5.2", default-features = false, features = [
     "syntect-fancy",
 ] }
 # The build-time half of syntect: yaml-load reads the locally vendored
-# .sublime-syntax files, dump-create serialises the merged set. regex-fancy so
-# the pattern force-compile in `main.rs` exercises the shipped engine and not a
-# different one.
-syntect = { version = "5.3", default-features = false, features = [
-    "parsing",
-    "regex-fancy",
-    "yaml-load",
-    "dump-create",
-] }
+# .sublime-syntax files, dump-create serialises the merged set. **The
+# workspace dependency, not a second declaration**: the whole point of the
+# force-compile in `main.rs` is that it exercises the exact engine vigia
+# ships, and an independent version requirement here is the one way the two
+# could quietly diverge. The workspace features (parsing, dump-load,
+# regex-fancy) ride along.
+syntect = { workspace = true, features = ["yaml-load", "dump-create"] }

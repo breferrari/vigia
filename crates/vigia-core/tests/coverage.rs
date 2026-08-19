@@ -157,13 +157,18 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
         return;
     };
 
-    let mut checked = 0usize;
-    for entry in entries.filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "sublime-syntax") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).expect("read a vendored grammar");
+    // Collected once, then every collected path is checked or the loop
+    // panics, so nothing can be skipped by construction. The vendored tail is
+    // four grammars today; a count pin here would just restate the roster the
+    // pin gate already holds.
+    let sources: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
+        .collect();
+
+    for path in &sources {
+        let text = std::fs::read_to_string(path).expect("read a vendored grammar");
         let stem = path.file_stem().and_then(|s| s.to_str());
         let def = SyntaxDefinition::load_from_str(&text, true, stem)
             .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
@@ -183,19 +188,7 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
                 }
             }
         }
-        checked += 1;
     }
-
-    // The extras roster lives in the dump; if sources exist they must have
-    // been checkable, or the walk above silently proved nothing.
-    let listed = std::fs::read_dir(&dir)
-        .map(|d| {
-            d.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|x| x == "sublime-syntax"))
-                .count()
-        })
-        .unwrap_or(0);
-    assert_eq!(checked, listed, "a vendored grammar was skipped");
 }
 
 /// One ruled format's snippet: a path, optionally a first line, a few lines
@@ -598,6 +591,20 @@ const SNIPPETS: &[Snippet] = &[
         ],
         3,
     ),
+    // The first-line step, through the public path: an extensionless script
+    // resolves by its shebang or not at all.
+    Snippet {
+        format: "shebang script",
+        path: "scripts/deploy",
+        first_line: Some("#!/usr/bin/env bash"),
+        lines: &[
+            "#!/usr/bin/env bash",
+            "# deploy",
+            "NAME=\"vigia\"",
+            "echo \"$NAME\"",
+        ],
+        min_classes: 2,
+    },
     // The nearest-grammar approximations (SPEC §6 records each gap): the bar
     // is the base grammar's, because that is the whole of what they buy.
     snip(
@@ -634,6 +641,10 @@ const SNIPPETS: &[Snippet] = &[
 fn every_ruled_format_reaches_a_spread_of_classes() {
     use vigia_core::{Class, Highlighter, Hunk, Line, LineKind};
 
+    // One highlighter for the whole table: the cache keys on path and every
+    // snippet's path is distinct, so sharing it also exercises the cache the
+    // way a frame full of files does.
+    let mut highlighter = Highlighter::new();
     let mut failures = Vec::new();
     for snippet in SNIPPETS {
         let hunk = Hunk {
@@ -651,14 +662,13 @@ fn every_ruled_format_reaches_a_spread_of_classes() {
                 .collect(),
         };
 
-        let mut highlighter = Highlighter::new();
-        let mut classes = HashSet::new();
+        let mut classes: Vec<Class> = Vec::new();
         {
             let mut pass = highlighter.pass();
             for index in 0..hunk.lines.len() {
                 for span in pass.spans(snippet.path, 0, &hunk, index, snippet.first_line) {
-                    if span.class != Class::Plain {
-                        classes.insert(format!("{:?}", span.class));
+                    if span.class != Class::Plain && !classes.contains(&span.class) {
+                        classes.push(span.class);
                     }
                 }
             }

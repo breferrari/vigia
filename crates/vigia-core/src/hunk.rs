@@ -377,13 +377,9 @@ fn first_line_of(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() {
         return None;
     }
-    let end = bytes
-        .iter()
-        .take(256)
-        .position(|&b| b == b'\n')
-        .unwrap_or(bytes.len().min(256));
-    let line = &bytes[..end];
-    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let head = &bytes[..bytes.len().min(256)];
+    let end = head.iter().position(|&b| b == b'\n').unwrap_or(head.len());
+    let line = head[..end].strip_suffix(b"\r").unwrap_or(&head[..end]);
     Some(String::from_utf8_lossy(line).into_owned())
 }
 

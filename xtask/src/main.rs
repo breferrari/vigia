@@ -51,14 +51,12 @@ fn main() {
 
     // Uncompressed, and that is a measured decision rather than a default:
     // the compressed form of this set costs 9.67ms to load in release (flate2
-    // then bincode) where I7's whole first paint is 13.26ms, and two-face
+    // then bincode) where the uncompressed one costs 0.674ms, and two-face
     // ships its own dumps uncompressed for exactly this reason. The price is
     // binary size, which is the cheaper budget here by an order of magnitude.
-    let mut dump = Vec::new();
-    syntect::dumps::dump_to_uncompressed_file(&set, root.join("target/.syntaxes-tmp.bin"))
-        .expect("serialise the dump");
-    dump.extend(std::fs::read(root.join("target/.syntaxes-tmp.bin")).expect("read it back"));
-    let _ = std::fs::remove_file(root.join("target/.syntaxes-tmp.bin"));
+    // Written straight to its destination; syntect has no uncompressed-to-Vec
+    // spelling, and a temp-file roundtrip added nothing but a stale file on
+    // panic.
     let dump_path = root
         .join("crates")
         .join("vigia-core")
@@ -66,7 +64,8 @@ fn main() {
         .join("syntaxes.bin");
     std::fs::create_dir_all(dump_path.parent().expect("the dump has a parent"))
         .expect("the dump's directory exists");
-    std::fs::write(&dump_path, &dump).expect("write the dump");
+    syntect::dumps::dump_to_uncompressed_file(&set, &dump_path).expect("write the dump");
+    let dump_len = std::fs::metadata(&dump_path).expect("stat the dump").len();
 
     write_notice(&root.join("assets").join("syntaxes"), &extra_names);
 
@@ -76,9 +75,9 @@ fn main() {
         "{} syntaxes ({} from two-face {}, {} local), {} bytes uncompressed -> {}",
         set.syntaxes().len(),
         base_count,
-        two_face_version(),
+        two_face_version(&root),
         extra_names.len(),
-        dump.len(),
+        dump_len,
         dump_path.display(),
     );
     for name in names {
@@ -179,8 +178,19 @@ fn write_notice(dir: &Path, extra_names: &[String]) {
     std::fs::write(dir.join("NOTICE.md"), md.replace("\r\n", "\n")).expect("write NOTICE.md");
 }
 
-/// The exact two-face release the dump was generated from, for the line the
-/// tool prints; the crate encodes the bat release it tracks in its version.
-fn two_face_version() -> &'static str {
-    "0.5.2+bat-0.26.1"
+/// The exact two-face release the dump was generated from, read from the
+/// workspace `Cargo.lock` rather than restated here, so a dependency bump
+/// cannot leave this provenance line silently stale. The crate encodes the
+/// bat release it tracks in its version.
+fn two_face_version(root: &Path) -> String {
+    let lock = std::fs::read_to_string(root.join("Cargo.lock")).expect("read Cargo.lock");
+    lock.split("[[package]]")
+        .find(|entry| entry.contains("name = \"two-face\""))
+        .and_then(|entry| {
+            entry
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("version = "))
+        })
+        .map(|version| version.trim_matches('"').to_owned())
+        .expect("two-face is in the lock file")
 }

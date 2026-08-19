@@ -1292,12 +1292,8 @@ fn syntax_for<'s>(
         {
             return Some(syntax);
         }
-        for (candidate, grammar) in &AMBIGUOUS {
-            if ext == *candidate
-                && let Some(syntax) = syntaxes.find_syntax_by_name(grammar)
-            {
-                return Some(syntax);
-            }
+        if let Some(syntax) = ruled(syntaxes, ext, &AMBIGUOUS) {
+            return Some(syntax);
         }
     }
 
@@ -1316,17 +1312,30 @@ fn syntax_for<'s>(
         return Some(syntax);
     }
 
-    if let Some(ext) = ext {
-        for (candidate, grammar) in &NEAREST {
-            if ext == *candidate
-                && let Some(syntax) = syntaxes.find_syntax_by_name(grammar)
-            {
-                return Some(syntax);
-            }
-        }
+    if let Some(ext) = ext
+        && let Some(syntax) = ruled(syntaxes, ext, &NEAREST)
+    {
+        return Some(syntax);
     }
 
     first_line.and_then(|line| syntaxes.find_syntax_by_first_line(line))
+}
+
+/// The grammar a rule table names for `ext`, when the dump holds it.
+///
+/// Shared by the [`AMBIGUOUS`] and [`NEAREST`] steps, which run at different
+/// priorities but resolve identically: first matching row wins, and a named
+/// grammar missing from the dump falls through to the caller's next step
+/// rather than to nothing.
+fn ruled<'s>(
+    syntaxes: &'s SyntaxSet,
+    ext: &str,
+    table: &[(&str, &str)],
+) -> Option<&'s SyntaxReference> {
+    table
+        .iter()
+        .find(|(candidate, _)| ext == *candidate)
+        .and_then(|(_, grammar)| syntaxes.find_syntax_by_name(grammar))
 }
 
 /// A hunk's content, hashed whole and at every stride boundary.
