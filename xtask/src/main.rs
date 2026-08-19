@@ -43,6 +43,22 @@ fn main() {
     let extras = load_extras(&root.join("assets").join("syntaxes"));
     let extra_names: Vec<String> = extras.iter().map(|d| d.name.clone()).collect();
 
+    // A vendored extra whose name collides with a base grammar would shadow
+    // it silently: `SyntaxSetBuilder::add` just pushes, and every by-name and
+    // by-extension lookup iterates newest-first. The pin gate would go red on
+    // nothing (the count is unchanged by a shadow), so the refusal lives
+    // here, where the collision is created.
+    {
+        let base_names: std::collections::HashSet<&str> =
+            base.syntaxes().iter().map(|s| s.name.as_str()).collect();
+        for name in &extra_names {
+            assert!(
+                !base_names.contains(name.as_str()),
+                "vendored extra {name:?} shadows a grammar two-face already                  ships; rename it or drop it"
+            );
+        }
+    }
+
     let mut builder = base.into_builder();
     for def in extras {
         builder.add(def);
@@ -129,9 +145,16 @@ fn load_extras(dir: &Path) -> Vec<SyntaxDefinition> {
         .collect()
 }
 
-/// Every regex of every context of `def` that the shipped engine refuses.
+/// Every regex of every context of `def` that the shipped engine refuses,
+/// the `first_line_match` included: `find_syntax_by_first_line` compiles it
+/// behind the same lazy `expect` as any match pattern.
 fn incompatible_patterns(def: &SyntaxDefinition) -> Vec<String> {
     let mut bad = Vec::new();
+    if let Some(flm) = &def.first_line_match
+        && let Some(err) = Regex::try_compile(flm)
+    {
+        bad.push(format!("  first_line_match: /{flm}/ -> {err}"));
+    }
     for (context_name, context) in &def.contexts {
         for pattern in &context.patterns {
             if let Pattern::Match(m) = pattern
@@ -168,6 +191,28 @@ fn write_notice(dir: &Path, extra_names: &[String]) {
             let _ = writeln!(md, "- {name}");
         }
         md.push('\n');
+        md.push_str(
+            "## Sources\n\nFNV-1a 64 of each vendored source as compiled into \
+             the dump. `tests/coverage.rs` recomputes these, which is what \
+             catches a source edited without `cargo run -p xtask`: the dump \
+             and this table regenerate together or not at all.\n\n",
+        );
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .expect("the extras directory exists when extras were loaded")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
+            .collect();
+        files.sort();
+        for file in files {
+            let bytes = std::fs::read(&file).expect("re-read a vendored grammar");
+            let name = file
+                .file_name()
+                .expect("a file has a name")
+                .to_string_lossy();
+            let _ = writeln!(md, "- `{name}`: {:016x}", fnv1a64(&bytes));
+        }
+        md.push('\n');
     }
     md.push_str("## two-face acknowledgements\n\n");
     md.push_str(&two_face::acknowledgement::listing().to_md());
@@ -176,6 +221,20 @@ fn write_notice(dir: &Path, extra_names: &[String]) {
     // Some upstream licence texts carry CRLF; normalised so a regeneration on
     // any platform produces the same bytes and a clean diff.
     std::fs::write(dir.join("NOTICE.md"), md.replace("\r\n", "\n")).expect("write NOTICE.md");
+}
+
+/// FNV-1a 64, spelled out because the checksum must be identical between
+/// this tool and `tests/coverage.rs` forever, which rules out
+/// `DefaultHasher` (stable only within a compiler release). Duplicated there
+/// for the same reason the pattern check is: the two crates cannot share
+/// without a new workspace member.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// The exact two-face release the dump was generated from, read from the

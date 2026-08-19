@@ -798,7 +798,7 @@ impl App {
     /// The highlighter is passed in rather than held here, and that is not an
     /// accident of plumbing. [`App`] is `Clone` and `Default` because it is a
     /// scroll position and a message, which is all `SPEC.md` §6 wants the shell
-    /// to remember; a [`Highlighter`] owns seventy-five compiled grammars, and
+    /// to remember; a [`Highlighter`] owns a couple of hundred compiled grammars, and
     /// putting one behind a derived `Clone` leaves a two-megabyte copy one
     /// keystroke away from being made by accident.
     ///

@@ -168,11 +168,20 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
         .collect();
 
     for path in &sources {
-        let text = std::fs::read_to_string(path).expect("read a vendored grammar");
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let stem = path.file_stem().and_then(|s| s.to_str());
         let def = SyntaxDefinition::load_from_str(&text, true, stem)
             .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
 
+        if let Some(flm) = &def.first_line_match
+            && let Some(err) = Regex::try_compile(flm)
+        {
+            panic!(
+                "{} carries a first_line_match the shipped engine cannot                  compile: /{flm}/ -> {err}",
+                path.display(),
+            );
+        }
         for (context_name, context) in &def.contexts {
             for pattern in &context.patterns {
                 if let Pattern::Match(m) = pattern
@@ -189,6 +198,94 @@ fn every_vendored_pattern_compiles_under_the_shipped_engine() {
             }
         }
     }
+}
+
+/// The other half of the abort-on-first-use guarantee, over the **whole**
+/// dump rather than the extras: `find_syntax_by_first_line` compiles each
+/// grammar's `first_line_match` behind the same lazy `expect` as any match
+/// pattern, `two-face`'s vetting covers match patterns, and a first-line
+/// regex is exactly the kind nothing compiles until an extensionless file
+/// turns up in a diff.
+#[test]
+fn every_first_line_regex_in_the_dump_compiles() {
+    let set = embedded();
+    let mut checked = 0usize;
+    for syntax in set.syntaxes() {
+        if let Some(flm) = &syntax.first_line_match {
+            if let Some(err) = Regex::try_compile(flm) {
+                panic!(
+                    "{}'s first_line_match cannot compile under the shipped                      engine, which aborts the monitor on the first                      extensionless file: /{flm}/ -> {err}",
+                    syntax.name,
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "no grammar in the dump carries a first_line_match,          so this gate checked nothing and the dump is not the one it expects"
+    );
+}
+
+/// The committed dump was built from the committed sources.
+///
+/// The pattern gate checks the *sources* and the pin gate checks the *dump*;
+/// neither ties one to the other, so a source edited without rerunning
+/// `cargo run -p xtask` passed both while the shipped dump still carried the
+/// old grammar. `xtask` writes an FNV-1a 64 of each source into
+/// `NOTICE.md`'s Sources table in the same run that writes the dump, and this
+/// recomputes them: table and sources must match exactly, both directions.
+#[test]
+fn the_committed_dump_matches_its_sources() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/syntaxes");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    let mut sources: Vec<(String, u64)> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "sublime-syntax"))
+        .map(|p| {
+            let bytes = std::fs::read(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
+            (
+                p.file_name()
+                    .expect("a file has a name")
+                    .to_string_lossy()
+                    .into_owned(),
+                fnv1a64(&bytes),
+            )
+        })
+        .collect();
+    sources.sort();
+
+    let notice = std::fs::read_to_string(dir.join("NOTICE.md"))
+        .expect("NOTICE.md is committed beside the sources");
+    let mut listed: Vec<(String, u64)> = notice
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("- `")?;
+            let (name, hash) = rest.split_once("`: ")?;
+            Some((name.to_owned(), u64::from_str_radix(hash.trim(), 16).ok()?))
+        })
+        .collect();
+    listed.sort();
+
+    assert_eq!(
+        sources, listed,
+        "the vendored sources and NOTICE.md's Sources table disagree, so the          committed dump was not built from these sources; run `cargo run -p          xtask` and commit what it writes"
+    );
+}
+
+/// FNV-1a 64, byte-identical to `xtask`'s copy and duplicated for the same
+/// reason the pattern check is: the two crates cannot share it without a new
+/// workspace member.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for &b in bytes {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// One ruled format's snippet: a path, optionally a first line, a few lines

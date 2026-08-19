@@ -1,7 +1,7 @@
 //! Compiling grammars ahead of the reader, and what that is and is not worth.
 //!
 //! `syntect` defers a grammar's patterns to `fancy_regex` on first use, so the
-//! first parse under one costs 74-362ms where loading all seventy-five costs
+//! first parse under one costs 74-362ms where loading the whole dump costs
 //! 318µs. `Highlighter::warm_ahead` pays that where nothing is waiting on it.
 //!
 //! **The claim being tested is deliberately weak, and the weakness is the

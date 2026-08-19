@@ -1031,10 +1031,10 @@ impl Pass<'_> {
     /// (crate::FileDiff::first_line) — and feeds the two resolution steps that
     /// need content (`SPEC.md` §6): the shebang fallback and the `.ts` XML
     /// sniff. It is consulted only when an entry is created, so a first line
-    /// that changes while a hunk's own content does not keeps the cached
-    /// grammar until that hunk changes too — self-healing rather than tracked,
-    /// because tracking it would re-key the cache on a fact almost no frame
-    /// moves.
+    /// that changes on its own keeps the cached grammar until the hunk's
+    /// content forces a fresh entry (a rewind keeps the old grammar too, and
+    /// stays grammar-uniform) — self-healing rather than tracked, because
+    /// tracking it would re-key the cache on a fact almost no frame moves.
     ///
     /// # Panics
     ///
@@ -1192,13 +1192,16 @@ pub const WARM_BYTES: usize = 64 * 1024;
 /// [`Highlighter::warm_ahead`] is the way in.
 fn warm(syntaxes: &SyntaxSet, path: &str, text: &str) {
     // The text is in hand, so resolution here sees the same first line the
-    // frame path will, and a shebang script warms the grammar it will draw.
+    // frame path will. Note the shebang fallback is unreachable through
+    // `warm_ahead`, whose per-grammar cap check runs before the read and so
+    // skips an extensionless path; what this buys today is the `.ts` sniff
+    // agreeing with the frame path on which grammar a Qt file compiles.
     let Some(syntax) = syntax_for(syntaxes, path, text.lines().next()) else {
         return;
     };
     let mut state = ParseState::new(syntax);
     // `split_inclusive` keeps the trailing newline each line was stored with,
-    // which is what `load_defaults_newlines` grammars expect; splitting it off
+    // which is what the newlines-variant grammars expect; splitting it off
     // would parse every line as though the file ended there.
     for line in text.split_inclusive('\n') {
         // A grammar that fails on a line stops the warm rather than the process.
@@ -1286,8 +1289,14 @@ fn syntax_for<'s>(
         // The one content-aware ambiguity: a `.ts` whose first line is an XML
         // declaration is a Qt translation file, and TypeScript-colouring an
         // XML document is wrong on every token.
-        if ext == "ts"
-            && first_line.is_some_and(|line| line.trim_start().starts_with("<?xml"))
+        if ext.eq_ignore_ascii_case("ts")
+            && first_line.is_some_and(|line| {
+                // A BOM survives `trim_start` (U+FEFF is not whitespace), and
+                // a BOM'd Qt file is still a Qt file.
+                line.trim_start_matches('\u{feff}')
+                    .trim_start()
+                    .starts_with("<?xml")
+            })
             && let Some(syntax) = syntaxes.find_syntax_by_extension("xml")
         {
             return Some(syntax);
@@ -1332,9 +1341,12 @@ fn ruled<'s>(
     ext: &str,
     table: &[(&str, &str)],
 ) -> Option<&'s SyntaxReference> {
+    // Case-insensitive, because syntect's own extension lookup is: a rule
+    // that `FOO.H` slips past case-sensitively would hand exactly the files
+    // the table exists for back to registration accident.
     table
         .iter()
-        .find(|(candidate, _)| ext == *candidate)
+        .find(|(candidate, _)| ext.eq_ignore_ascii_case(candidate))
         .and_then(|(_, grammar)| syntaxes.find_syntax_by_name(grammar))
 }
 
@@ -1682,6 +1694,26 @@ mod tests {
                 "i18n/app_de.ts",
                 Some("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
             ),
+            "XML"
+        );
+        // A BOM survives trim_start (U+FEFF is not whitespace) and must not
+        // defeat the sniff.
+        assert_eq!(
+            grammar_of("i18n/app_de.ts", Some("\u{feff}<?xml version=\"1.0\"?>")),
+            "XML"
+        );
+    }
+
+    /// The rules are case-insensitive, because syntect's own extension lookup
+    /// is: a `FOO.H` that slipped past the table case-sensitively would
+    /// resolve by registration accident, which is the exact failure the table
+    /// exists to end.
+    #[test]
+    fn an_uppercase_extension_resolves_by_the_same_rule() {
+        assert_eq!(grammar_of("INCLUDE/THING.H", None), "Objective-C");
+        assert_eq!(grammar_of("DOCS/POST.MDX", None), "Markdown");
+        assert_eq!(
+            grammar_of("APP_DE.TS", Some("<?xml version=\"1.0\"?>")),
             "XML"
         );
     }

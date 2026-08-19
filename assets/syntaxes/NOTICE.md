@@ -11,6 +11,15 @@ The embedded grammar dump has two sources. The base set comes from [two-face](ht
 - V Module
 - V
 
+## Sources
+
+FNV-1a 64 of each vendored source as compiled into the dump. `tests/coverage.rs` recomputes these, which is what catches a source edited without `cargo run -p xtask`: the dump and this table regenerate together or not at all.
+
+- `Gleam.sublime-syntax`: 6e3782dc04514ee1
+- `PowerShell.sublime-syntax`: 92cda2af5c9b8f18
+- `V Module.sublime-syntax`: 191acf6e70755b7d
+- `V.sublime-syntax`: 502c6f9584a831dc
+
 ## two-face acknowledgements
 
 Most of the code for generating both theme and syntax dumps along with the

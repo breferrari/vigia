@@ -452,6 +452,36 @@ mod tests {
         assert_eq!(diff.lines, 0);
     }
 
+    /// What [`FileDiff::first_line`] captures, case by case: the worktree side
+    /// when there is one, the index side for a deletion, nothing for binary,
+    /// with the cap and the CRLF strip both exercised.
+    #[test]
+    fn the_first_line_prefers_the_worktree_and_falls_back_for_a_deletion() {
+        let both = compute("a.rs".to_owned(), b"old first\nx\n", b"new first\nx\n");
+        assert_eq!(both.first_line.as_deref(), Some("new first"));
+
+        let gone = compute("a.rs".to_owned(), b"#!/bin/sh\nx\n", b"");
+        assert_eq!(gone.first_line.as_deref(), Some("#!/bin/sh"));
+
+        let binary = compute("a.bin".to_owned(), b"", b"\x00\x01\n\x02");
+        assert_eq!(binary.first_line, None);
+
+        let empty = compute("a.rs".to_owned(), b"", b"");
+        assert_eq!(empty.first_line, None);
+
+        let crlf = compute("a.rs".to_owned(), b"", b"first\r\nsecond\r\n");
+        assert_eq!(crlf.first_line.as_deref(), Some("first"));
+    }
+
+    /// The 256-byte cap, which is what keeps a minified bundle's single line
+    /// off every [`FileDiff`] of it.
+    #[test]
+    fn the_first_line_is_capped_and_never_longer() {
+        let long = vec![b'x'; 10_000];
+        let diff = compute("bundle.js".to_owned(), b"", &long);
+        assert_eq!(diff.first_line.as_ref().map(String::len), Some(256));
+    }
+
     /// A file with no trailing newline still counts its last line.
     ///
     /// The interner tokenises on line boundaries, so `"a\nb"` is two lines and
