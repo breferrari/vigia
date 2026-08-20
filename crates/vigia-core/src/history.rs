@@ -128,8 +128,10 @@ pub const HISTORY_BUCKETS: usize = 24;
 /// **The halving ladder the shell narrows on, seen from the store's side**
 /// ([#234](https://github.com/breferrari/vigia/issues/234)). A row draws
 /// `HISTORY_BUCKETS / group` buckets, each the sum of `group` source ones, so
-/// this table and `render::SPARK_RUNGS` are one ladder written from two ends and
-/// a `const` block over there asserts they agree.
+/// `render::SPARK_RUNGS` is **computed from this table** rather than written out
+/// beside it, so the two cannot disagree; what a `const` block over there still
+/// asserts is that this one is strictly ascending, because nothing else reads its
+/// order and a reordering would hand the widest pane the narrowest rung.
 ///
 /// **It lives here because what it decides is a *scale*, not a width.** A drawn
 /// bucket summing four source buckets has to be measured against what four

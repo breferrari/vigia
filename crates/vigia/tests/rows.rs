@@ -645,13 +645,19 @@ fn every_rung_draws_from_the_stores_own_figures() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut app = App::new();
     let mut highlighter = Highlighter::new();
     let theme = Theme::default();
     let ramp = "▁▂▃▄▅▆▇█";
     let ink = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
 
     for (pane, rung) in RUNGS {
+        // **A fresh `App` per width, so each iteration is its own observation.**
+        // One shared across the loop carries `App::paint` forward, so the first
+        // pane draws plain and the rest draw coloured, and it carries the scroll
+        // position and the follow state with it. None of that reaches a glance
+        // slot today, which is exactly the kind of accident a later assertion
+        // added to this loop would inherit without noticing.
+        let mut app = App::new();
         let mut terminal = Terminal::new(TestBackend::new(pane, 12)).expect("terminal");
         let area = Rect::new(0, 0, pane, 12);
         let chrome = app.chrome("fixture", None, None, None, None, None);

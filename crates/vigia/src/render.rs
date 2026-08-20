@@ -180,6 +180,16 @@ pub const HINT_SEPARATOR: &str = " · ";
 /// Halving, so the sum is exact and every drawn bucket covers the same span, and
 /// so a narrowed strip is an obvious fraction of the picture rather than a shaved
 /// one.
+const SPARK_RUNGS: [usize; SPARK_GROUPS.len() + 1] = {
+    let mut rungs = [0; SPARK_GROUPS.len() + 1];
+    let mut at = 0;
+    while at < SPARK_GROUPS.len() {
+        rungs[at] = HISTORY_BUCKETS / SPARK_GROUPS[at];
+        at += 1;
+    }
+    rungs
+};
+
 /// Where [`SPARK_RUNGS`] keeps the rung that draws no sparkline at all.
 ///
 /// **Named rather than written as `[3]`, because the ladder is derived now.**
@@ -190,16 +200,6 @@ pub const HINT_SEPARATOR: &str = " · ";
 /// three narrowest layouts, which are supposed to draw no strip, would quietly
 /// start drawing one. This index moves with the ladder instead.
 const SPARK_NONE: usize = SPARK_GROUPS.len();
-
-const SPARK_RUNGS: [usize; SPARK_GROUPS.len() + 1] = {
-    let mut rungs = [0; SPARK_GROUPS.len() + 1];
-    let mut at = 0;
-    while at < SPARK_GROUPS.len() {
-        rungs[at] = HISTORY_BUCKETS / SPARK_GROUPS[at];
-        at += 1;
-    }
-    rungs
-};
 
 // **Derived rather than written out and then asserted equal, which is the shape
 // this replaced.** [`SPARK_GROUPS`] is the same ladder from the store's side,
