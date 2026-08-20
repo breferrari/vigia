@@ -2972,8 +2972,10 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
 
     for width in WIDTHS {
         // Not `clamped_to`, which cannot move a figure `Body::split` has already
-        // capped at `LIST_ROWS`: the fixture is six files and the cap is six, so
-        // clamping would only turn this into "at least six".
+        // capped: the fixture is six files and this pane is 24 rows, where the cap
+        // is the settled `LIST_SETTLED`, so clamping would only turn this into "at
+        // least six". The cap is a share of the pane since #160, and 24 is the
+        // height at which that share is the settled number.
         let listed = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files).list;
         assert_eq!(
             listed, FILES,

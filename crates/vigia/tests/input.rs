@@ -16,7 +16,7 @@ use ratatui::crossterm::event::{
 use std::time::{Duration, Instant};
 
 use vigia::{
-    Action, Grabbed, Held, Hovered, LIST_ROWS, Region, Regions, SCROLL_LINGER, STEP_DELAY,
+    Action, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER, STEP_DELAY,
     STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
     patience, scroll_mark,
 };
@@ -190,14 +190,22 @@ fn n_and_p_are_the_file_step() {
 }
 
 #[test]
-fn every_row_the_list_can_draw_has_a_digit() {
+fn the_digits_cover_the_settled_cap_and_stop_there() {
     // **The gate that makes the restated bound safe.** `input.rs` spells the
-    // digits `'1'..='6'` rather than importing `LIST_ROWS`, because everything
+    // digits `'1'..='6'` rather than importing `LIST_SETTLED`, because everything
     // there is a pure function of a key code and reaching into the renderer for a
     // layout constant would end that. The cost of restating is drift, and this is
-    // what pays it: raise the cap to seven and the loop goes red here instead of
-    // leaving the seventh drawn row with no key that reaches it.
-    for row in 0..LIST_ROWS {
+    // what pays it: move the settled cap and the loop goes red here instead of
+    // leaving a row every pane draws with no key that reaches it.
+    //
+    // **This was `every_row_the_list_can_draw_has_a_digit` and the name stopped
+    // being true** ([#160](https://github.com/breferrari/vigia/issues/160)). The
+    // list is deeper than the settled cap on a pane of 28 rows or more, and those
+    // rows are addressed by `J`/`K`, `n`/`p` and the pointer rather than by a
+    // digit. What the digits cover is the rows **every** pane drawing a list has,
+    // so a digit means the same thing at every height, and that is the claim this
+    // gate holds now.
+    for row in 0..LIST_SETTLED {
         let digit = char::from_digit(row as u32 + 1, 10).expect("a digit for the row");
         assert_eq!(
             action_for(&press(KeyCode::Char(digit)), Regions::default()),
@@ -207,18 +215,20 @@ fn every_row_the_list_can_draw_has_a_digit() {
     }
 
     // And the boundary in the other direction. `0` has no row to name because
-    // rows are counted from one on screen, and the digit past the cap names a row
-    // that can never be drawn. Both stay **unbound** rather than becoming
-    // out-of-range jumps: an unbound key is no action at all, where a bound one
-    // is a jump that lands nowhere and spends the reader's follow mode doing it.
+    // rows are counted from one on screen, and the digit past the settled cap
+    // names a row that some panes draw and most do not. Both stay **unbound**
+    // rather than becoming out-of-range jumps: an unbound key is no action at all,
+    // where a bound one is a jump that lands nowhere and spends the reader's
+    // follow mode doing it, and a key live only above some pane height would be
+    // the intermittent affordance §11.1 refuses one region over.
     //
     // **This is the only place either is asserted, deliberately.** The inert list
     // in `nothing_a_reader_did_not_ask_for_becomes_an_action` holds keys with no
     // home of their own, which is why `D`, `U`, `N` and `P` are not in it either.
-    // Restating `'7'` there would hardcode what this loop derives, so raising the
-    // cap would redden a test named for idle cost and send the next reader to the
-    // wrong file to find out why.
-    let past = char::from_digit(LIST_ROWS as u32 + 1, 10).expect("a digit past the cap");
+    // Restating `'7'` there would hardcode what this loop derives, so moving the
+    // settled cap would redden a test named for idle cost and send the next reader
+    // to the wrong file to find out why.
+    let past = char::from_digit(LIST_SETTLED as u32 + 1, 10).expect("a digit past the cap");
     for digit in ['0', past] {
         assert_eq!(
             action_for(&press(KeyCode::Char(digit)), Regions::default()),

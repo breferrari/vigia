@@ -619,21 +619,103 @@ const fn band_fits(pane: u16) -> bool {
 /// legibility with the content it exists to make legible.
 const MIN_BODY: u16 = 2;
 
-/// Rows the pinned file list may take, before the rule under it.
+/// The deepest pinned file list that shipped before a rung was added above it.
 ///
 /// **A cap rather than a height**, which is the difference between this and a
 /// fixed region: three changed files draw three rows, matching
-/// `assets/preview.svg` exactly, and a formatter touching two hundred draws six
-/// and scrolls. `SPEC.md` §11.1 rules the height a function of pane height and
-/// changed-file count alone, which is the same pair `Footer::plan` already takes
-/// and for the same reason: both change only when the diff does, so neither can
-/// jog a reader's diff.
+/// `assets/preview.svg` exactly, and a formatter touching two hundred draws the
+/// cap and scrolls. `SPEC.md` §11.1 rules the height a function of pane height
+/// and changed-file count alone, which is the same pair `Footer::plan` already
+/// takes and for the same reason: both change only when the diff does, so
+/// neither can jog a reader's diff.
 ///
-/// Six, because it is the largest block that still reads as a glance rather than
-/// as a list to be searched, and because on the 24-row pane this tool is built
-/// for it leaves fourteen rows of diff after the header, the rule and a one-line
-/// footer.
-pub const LIST_ROWS: usize = 6;
+/// **Six, and the reason recorded for it was a proportion wearing an absolute's
+/// clothes** ([#160](https://github.com/breferrari/vigia/issues/160)). §11.1
+/// derived it as *the largest block that still reads as a glance*, and then gave
+/// the working: *on the 24-row pane this tool is built for it leaves fourteen
+/// rows of diff after the header, the rule and a one-line footer*. That is
+/// arithmetic about **one** pane — 24 less a header, [`LEAD_ROWS`], six, the rule
+/// and a footer is fourteen exactly — and six is a quarter of it. So the number
+/// is the instance and [`list_cap`] is the rule, which is why deepening the list
+/// on a taller pane reproduces this one rather than replacing it.
+///
+/// **This was `LIST_ROWS` and the name is the change.** It stopped being the
+/// rows a list takes the moment there was a rung above it, and a layout constant
+/// whose name outlives its meaning is exactly what [`SETTLED`]'s own docblock was
+/// rewritten to prevent. `LIST_FLOOR` was the other candidate and is refused:
+/// [`GRAPH_FLOOR`] and [`ROW_FLOOR`] both mean *the smallest pane that draws the
+/// thing at all*, and this means the opposite end.
+///
+/// **The digit range is this number**, restated in [`crate::action_for`] rather
+/// than imported. `1` to `6` address the rows every pane drawing a list has, so
+/// a digit means the same thing on every pane; the rows a taller pane adds above
+/// it are reached with `J`/`K`, `n`/`p` and the pointer.
+pub const LIST_SETTLED: usize = 6;
+
+/// Rows of pane the list is owed one row of map for, above [`LIST_SETTLED`].
+///
+/// **A quarter, and it is [`LIST_SETTLED`]'s own derivation read as a rule.**
+/// That constant's docblock carries the argument: §11.1 sized the list against a
+/// 24-row pane and six is a quarter of one. A rule that reproduces the shipped
+/// number at the pane it was chosen against is the same evidence
+/// [`GLANCE_NUMER`] was adopted on one region out, which is why this is a share
+/// rather than a rung table: there is one axis here and no per-side split, so a
+/// division cannot oscillate the way [`MARGIN_RUNGS`] could.
+///
+/// **One constant where [`GLANCE_NUMER`] needs two, and the difference is
+/// arithmetic rather than style.** Two fifths is irreducible, so that share can
+/// only be written as a pair; a quarter is `height / 4` exactly, and a numerator
+/// of one beside it would be an inert multiply and a name that does no work.
+/// Bought symmetry is what [`SETTLED`] was rewritten to stop paying for one
+/// element over. Written as a **rate** for the same reason: *one row of list per
+/// four rows of pane* is how §11.1 states it and how the step below reads.
+///
+/// **That step of one is the property the band downstream rests on**, rather
+/// than a rounding: [`Body::split`] pays the band out of what the list leaves, so
+/// a cap that gained two rows for one row of pane would take a band off a pane
+/// that had just grown. A unit numerator holds it at **any** share, since
+/// `(h + 1) / n` exceeds `h / n` by at most one for every `n`; what four decides
+/// is which number the floor reproduces, not whether the step is safe.
+const LIST_SHARE: usize = 4;
+
+/// Rows of list a pane this tall is generous enough to afford.
+///
+/// Floored by the division, so the share is never rounded **up** into a row the
+/// diff was keeping. Same rule as [`generous_of`] one region out.
+const fn deep_of(height: u16) -> usize {
+    height as usize / LIST_SHARE
+}
+
+/// Rows the pinned file list may take on a pane this tall, before the rule.
+///
+/// **Floored at [`LIST_SETTLED`] rather than applied to it**, which is what makes
+/// every pane that shipped draw exactly what it drew: at 24 rows the share *is*
+/// the floor, and below 24 the floor wins, so no pane at or under 27 rows can
+/// move whatever this share is set to. That is [`Columns::plan`]'s clamp one
+/// region out, in the one direction a height ladder has.
+///
+/// **Read from the pane and never from the body**, which is the ruling
+/// [`margin_of`] and [`affords_caret`] already make one axis over. The body is
+/// the pane less its header and a footer whose own height depends on the
+/// changed-file count, so a cap read off it would deepen the list because a
+/// seventh file appeared, which is precisely the jog §11.1 forbids.
+///
+/// Not exported. A test that imported this would compare the ladder against
+/// itself, which is the reason [`HINT_RUNGS`] is deliberately unexported too; the
+/// rungs are observed by splitting a pane.
+///
+/// **A branch rather than `.max`, and it is the const context rather than
+/// taste.** `Ord::max` is a default trait method behind `const_cmp`, so no
+/// `const fn` in this file can call it; [`Columns::plan`] writes the same clamp
+/// as `.max` because it is a plain `fn`. The two say the same thing.
+const fn list_cap(height: u16) -> usize {
+    let deep = deep_of(height);
+    if deep > LIST_SETTLED {
+        deep
+    } else {
+        LIST_SETTLED
+    }
+}
 
 /// Columns the caret glyph itself occupies.
 ///
@@ -2820,11 +2902,17 @@ impl Body {
     /// [`body_layout`] is the wrapper for callers that have no plan in hand.
     ///
     /// **The list is what gives way**, and the order of the three clamps is the
-    /// ruling. It wants one row per changed file; it may not exceed [`LIST_ROWS`];
-    /// and it may not take the diff below [`MIN_BODY`], counting the rule it
-    /// costs. A monitor whose diff has been squeezed out by the map of the diff
-    /// has stopped being one, which is the same argument `Footer::plan` makes one
-    /// region down about its second line.
+    /// ruling. It wants one row per changed file; it may not exceed
+    /// [`list_cap`]; and it may not take the diff below [`MIN_BODY`], counting
+    /// the rule it costs. A monitor whose diff has been squeezed out by the map
+    /// of the diff has stopped being one, which is the same argument
+    /// `Footer::plan` makes one region down about its second line.
+    ///
+    /// **The middle clamp is a function of the pane since
+    /// [#160](https://github.com/breferrari/vigia/issues/160)** and was
+    /// [`LIST_SETTLED`] flat. The order did not move with it, which is the whole
+    /// of why the deepening is safe: the cap is asked *before* `affordable`, so a
+    /// taller pane can only spend rows the diff was never keeping.
     ///
     /// **Nothing here reads the notice**, deliberately. §11.1 forbids a transient
     /// thing from moving content, and a region that appeared and vanished as
@@ -2850,7 +2938,7 @@ impl Body {
         // taken out of what remained would be present on a tall pane and absent on
         // a short one at the same file count.
         let affordable = body.saturating_sub(LEAD_ROWS + usize::from(MIN_BODY) + 1);
-        let list = files.min(LIST_ROWS).min(affordable);
+        let list = files.min(list_cap(area.height)).min(affordable);
         if list == 0 {
             return Self::diff_only(body);
         }
@@ -2860,9 +2948,17 @@ impl Body {
         // list is a map of the diff and gives way to the diff; the band is a
         // fact about the worktree and gives way to both, so it is paid for out
         // of what is left rather than out of either. A pane that could afford a
-        // band by shrinking the list draws six rows of list and no band, on
+        // band by shrinking the list draws its whole cap of list and no band, on
         // purpose: §5.3's "richness is the reward of space" means extra space,
         // not space taken from the map.
+        //
+        // **A taller pane cannot take the band away, and that is a property of
+        // [`list_cap`]'s step rather than of this expression.** `after` is
+        // `body - list - 2`, and one more row of pane adds one to `body` and at
+        // most one to `list`, so it never falls. A cap that gained two rows for
+        // one row of pane would undraw a band on a pane that had just grown,
+        // which is the same "bigger container holds less" failure the margin
+        // ladder is a table to avoid.
         //
         // Tied to the **list's** presence as well, which is one branch rather
         // than two: B3's empty state replaces the whole region with a sentence,

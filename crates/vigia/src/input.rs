@@ -1148,7 +1148,7 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         KeyCode::Char('n') => Some(Action::File(1)),
         KeyCode::Char('p') => Some(Action::File(-1)),
         // **The digits address the drawn window, and there are six of them
-        // because `render::LIST_ROWS` is six.** The numbered-jump grammar a
+        // because `render::LIST_SETTLED` is six.** The numbered-jump grammar a
         // terminal monitor's reader already has, over a region that draws its
         // rows in an order they can count.
         //
@@ -1156,14 +1156,30 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // this module is a pure function of a key code, and reaching into the
         // renderer for a layout constant would end that. What makes the
         // restatement safe is `tests/input.rs`, which presses every digit
-        // `1..=LIST_ROWS` and asserts the one after it is unbound, so raising the
-        // cap goes red here instead of leaving a drawn row unreachable.
+        // `1..=LIST_SETTLED` and asserts the one after it is unbound, so moving
+        // the settled cap goes red here instead of leaving a drawn row
+        // unreachable.
         //
         // `0` and `7`-`9` stay unbound rather than becoming out-of-range jumps,
         // and the difference is real: an unbound key is no action at all, where a
         // bound one naming a row that is not drawn is the empty-list-space case
-        // and disengages follow like any other jump. A row that can never exist
-        // should not spend a reader's follow mode.
+        // and disengages follow like any other jump.
+        //
+        // **The reason that used to close this sentence has expired, and it is
+        // replaced rather than inherited**
+        // ([#160](https://github.com/breferrari/vigia/issues/160)). It read *a
+        // row that can never exist should not spend a reader's follow mode*, and
+        // a seventh row exists on any pane of 28 rows or more now that
+        // `render::list_cap` deepens the list. What survives is the other half,
+        // sharpened: the digits address the rows **every** pane drawing a list
+        // has, so `3` means the same thing on every pane, where a key live only
+        // above some height would be the intermittent affordance `SPEC.md` §11.1
+        // refuses one region over. The rows a taller pane adds are reached with
+        // `J`/`K`, `n`/`p` and the pointer, and nothing on screen ever promised a
+        // number per row, which is
+        // [#149](https://github.com/breferrari/vigia/issues/149)'s own ruling,
+        // re-ruled with this rung because deepening the list is one of the three
+        // conditions §11.1 records for reopening it.
         KeyCode::Char(digit @ '1'..='6') => Some(Action::ListRow(row_of(digit))),
         // Lower case only, and `G` above is why. `g`/`G` already mean two
         // different things here, so a reader has been taught that shift

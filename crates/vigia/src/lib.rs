@@ -89,7 +89,7 @@ pub use input::{
     WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
 };
 pub use render::{
-    Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_ROWS, Mode, PaintStats, body_layout,
+    Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
     diff_height, regions, render,
 };
 pub use terminal::{Screen, Session};

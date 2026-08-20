@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use ratatui::layout::Rect;
 use vigia::{
-    App, Body, FileEntry, HEAT_BUCKETS, HeatBucket, LIST_ROWS, Position, Row, body_layout,
+    App, Body, FileEntry, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout,
 };
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
@@ -33,14 +33,23 @@ use support::{Scratch, delta, materialise, settle, settle_spans};
 const FILES: usize = 100;
 /// The narrow one. Same content per file, so the per-file cost is comparable.
 ///
-/// **At least `LIST_ROWS`, and derived rather than written.** `SPEC.md` §11.1's
+/// **At least `LIST_SETTLED`, and derived rather than written.** `SPEC.md` §11.1's
 /// pinned list is one row per changed file up to a cap, so a fixture below the
 /// cap draws a *shorter* list than the wide one and the two stop being
 /// comparable: the equality gates here would then be reading a difference in
 /// region height and calling it a difference in worktree size. Two above the cap
 /// keeps it unmistakably "few" against a hundred while both screens draw the
 /// same six rows.
-const FEW_FILES: usize = LIST_ROWS + 2;
+///
+/// **The cap is a share of the pane since
+/// [#160](https://github.com/breferrari/vigia/issues/160), and this is still the
+/// right number because of the pane [`layout`] asks for.** Every screen in this
+/// file is 80x24, which is where the share *is* `LIST_SETTLED`, so both fixtures
+/// draw six rows exactly as before and no read count here moves. Deriving it from
+/// the settled cap rather than from `list_cap(24)` is deliberate: the ladder is
+/// not exported, and a test that recomputed a quarter of a height would be
+/// restating the renderer's arithmetic to check the renderer.
+const FEW_FILES: usize = LIST_SETTLED + 2;
 /// Lines per file, chosen so one file is far taller than any screen.
 const LINES: usize = 500;
 
@@ -71,8 +80,34 @@ fn listed() -> usize {
 /// pinned list outside every read bound in the repo, which is §7's rule about a
 /// stage a gate never calls, one region over.
 fn layout() -> Body {
+    layout_at(ORDINARY)
+}
+
+/// An ordinary terminal, and the pane every gate in this file but one measures.
+///
+/// **Named since [#160](https://github.com/breferrari/vigia/issues/160)**, because
+/// it stopped being an arbitrary fixture size the day the pinned list's cap became
+/// a share of the pane: 24 is the height at which that share is the settled six,
+/// so every number below is the one it was before the ladder existed.
+const ORDINARY: u16 = 24;
+
+/// A pane tall enough that the list is deeper than the cap that shipped.
+///
+/// The height [#125](https://github.com/breferrari/vigia/issues/125) named when it
+/// asked for the deepening, taken from the issue rather than derived from the
+/// share, for the reason `tests/list.rs` gives: a gate that recomputed the quarter
+/// would agree with the renderer by construction.
+const DEEP: u16 = 50;
+
+/// [`layout`] at a named pane height.
+///
+/// **The list's height is a function of the pane now**, so a file whose every gate
+/// measured one height was measuring one rung of a ladder. That is the shape §7
+/// keeps finding: an instrument that looks settled and only ever exercises the
+/// case that was already correct.
+fn layout_at(height: u16) -> Body {
     body_layout(
-        Rect::new(0, 0, 80, 24),
+        Rect::new(0, 0, 80, height),
         &App::new().chrome("fixture", None, None, None, None, None),
         FILES,
     )
@@ -107,6 +142,16 @@ struct Screen {
 /// nothing. Priming with an extra view instead would warm the *frame* too and
 /// take the reads with it, which is the comparison the other half is about.
 fn one_screen(name: &str, files: usize) -> Screen {
+    one_screen_at(name, files, ORDINARY)
+}
+
+/// [`one_screen`], drawn against a named pane height.
+///
+/// Split out by [#160](https://github.com/breferrari/vigia/issues/160) so the read
+/// bound can be held at a height where the pinned list is deeper than the cap that
+/// shipped. A second fixture rather than a second draw over the first, because the
+/// measurement wants a **cold** frame and the first draw warms it.
+fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -122,7 +167,7 @@ fn one_screen(name: &str, files: usize) -> Screen {
     let history = History::new();
     let before = frame.stats();
     let view = app
-        .view(&mut frame, &mut highlighter, &history, layout())
+        .view(&mut frame, &mut highlighter, &history, layout_at(height))
         .expect("view");
 
     Screen {
@@ -1147,6 +1192,36 @@ fn the_file_list_reads_only_the_rows_it_draws() {
          rows",
         small.read,
         listed()
+    );
+
+    // **And again on a pane where the region is deeper than the cap that
+    // shipped** ([#160](https://github.com/breferrari/vigia/issues/160)). Every
+    // gate in this file measures `ORDINARY`, which is the one height where the
+    // list's share *is* `LIST_SETTLED`, so before this the claim above was held
+    // at exactly one rung of a ladder and it was the rung that was already
+    // correct. That is the shape §7 keeps finding, and this region is where the
+    // repo has been bitten by it before: the height walk re-read the whole
+    // undrawn changed set on every tick with eleven read-bounding gates green
+    // over it.
+    //
+    // The claim is the same one, not a new one: the read count is the diff's
+    // files plus the region's **own drawn height**, whatever that height is. A
+    // list that started following the changed set would pass at 24 and fail
+    // here, because the fixture is two hundred files and the region is twelve
+    // rows rather than six.
+    let deep = one_screen_at("shell-list-deep", 200, DEEP);
+    let deep_rows = layout_at(DEEP).list;
+    assert!(
+        deep_rows > LIST_SETTLED,
+        "the deep pane drew {deep_rows} list rows, which is not deeper than the \
+         {LIST_SETTLED} the ordinary one draws, so this half proves nothing"
+    );
+    assert_eq!(
+        deep.read,
+        1 + deep_rows,
+        "on a {DEEP}-row pane the screen asked for {} files, which is not one \
+         diff file plus {deep_rows} list rows",
+        deep.read
     );
 }
 
