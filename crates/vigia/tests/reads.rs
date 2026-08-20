@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use ratatui::layout::Rect;
 use vigia::{
-    App, Body, FileEntry, HEAT_BUCKETS, HeatBucket, LIST_ROWS, Position, Row, body_layout,
+    App, Body, FileEntry, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout,
 };
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
@@ -33,14 +33,23 @@ use support::{Scratch, delta, materialise, settle, settle_spans};
 const FILES: usize = 100;
 /// The narrow one. Same content per file, so the per-file cost is comparable.
 ///
-/// **At least `LIST_ROWS`, and derived rather than written.** `SPEC.md` §11.1's
+/// **At least `LIST_SETTLED`, and derived rather than written.** `SPEC.md` §11.1's
 /// pinned list is one row per changed file up to a cap, so a fixture below the
 /// cap draws a *shorter* list than the wide one and the two stop being
 /// comparable: the equality gates here would then be reading a difference in
 /// region height and calling it a difference in worktree size. Two above the cap
 /// keeps it unmistakably "few" against a hundred while both screens draw the
 /// same six rows.
-const FEW_FILES: usize = LIST_ROWS + 2;
+///
+/// **The cap is a share of the pane since
+/// [#160](https://github.com/breferrari/vigia/issues/160), and this is still the
+/// right number because of the pane [`layout`] asks for.** Every screen in this
+/// file is 80x24, which is where the share *is* `LIST_SETTLED`, so both fixtures
+/// draw six rows exactly as before and no read count here moves. Deriving it from
+/// the settled cap rather than from `list_cap(24)` is deliberate: the ladder is
+/// not exported, and a test that recomputed a quarter of a height would be
+/// restating the renderer's arithmetic to check the renderer.
+const FEW_FILES: usize = LIST_SETTLED + 2;
 /// Lines per file, chosen so one file is far taller than any screen.
 const LINES: usize = 500;
 

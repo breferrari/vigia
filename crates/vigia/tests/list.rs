@@ -4,14 +4,20 @@
 //! > The body is three regions since 2026-08-17: a masthead, a pinned file list,
 //! > a rule, and the scrolling diff.
 //!
-//! Four claims live here, and they fail in different ways, which is why they are
-//! four tests rather than one screen inspected from four angles.
+//! Five claims live here, and they fail in different ways, which is why they are
+//! five tests rather than one screen inspected from five angles.
 //!
 //! **Its height is a function of pane height and changed-file count, and of
 //! nothing else.** That is the same pair `Footer::plan` takes, and for the same
 //! reason: both change only when the diff does, so neither can move content
 //! under a reader who did nothing. A notice is the thing most likely to break it
 //! and gets its own gate.
+//!
+//! **It grows with the pane, and no pane that shipped draws differently.** The
+//! cap is a share of the pane rather than a flat six since
+//! [#160](https://github.com/breferrari/vigia/issues/160). The two halves are one
+//! gate because they are one ladder, and because the second is what says every
+//! other fixture in this repo is untouched.
 //!
 //! **It gives way before the diff does.** A monitor whose diff has been squeezed
 //! out by the map of the diff has stopped being one.
@@ -28,7 +34,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Glyphs, LIST_ROWS, Position, View, Viewport, body_layout};
+use vigia::{Action, App, Body, Glyphs, LIST_SETTLED, Position, View, Viewport, body_layout};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -46,6 +52,27 @@ const MIN_BODY: usize = 2;
 /// below is entangled with I6's two-line footer.
 const WIDE: u16 = 80;
 
+/// The top of every height sweep here.
+///
+/// **Well past any pane anyone runs, deliberately.** The cap is a share of the
+/// pane since [#160](https://github.com/breferrari/vigia/issues/160), so a sweep
+/// that stopped at a realistic height would be asserting the ladder's monotonicity
+/// over the rungs that happen to be reachable today rather than over the rule.
+const TALLEST: u16 = 120;
+
+/// The pane `SPEC.md` §11.1 sized the list against, and the anchor of the ladder.
+///
+/// Every claim below about *what did not move* is measured from here, and none of
+/// them restates the share. The ladder's own arithmetic is deliberately not
+/// available to this file: a gate that recomputed the quarter would agree with the
+/// renderer by construction and go on agreeing with it while both were wrong.
+const REFERENCE: u16 = 24;
+
+/// The tall pane [#125](https://github.com/breferrari/vigia/issues/125) named
+/// when it filed this rung: *"a 50-row pane keeping six draws void where the map
+/// could be"*. Taken from the issue rather than derived from the share.
+const DEEP: u16 = 50;
+
 fn chrome(app: &App) -> vigia::Chrome {
     app.chrome("fixture", None, None, None, None, None)
 }
@@ -61,19 +88,19 @@ fn the_list_grows_to_the_file_count_and_stops_at_the_cap() {
     // exactly the picture, and a formatter touching two hundred draws the cap.
     //
     // A gate over only the capped end would pass against a region that was
-    // always `LIST_ROWS` tall and padded with blanks, which is the design this
+    // always `LIST_SETTLED` tall and padded with blanks, which is the design this
     // one was chosen over.
-    for files in 1..=LIST_ROWS {
+    for files in 1..=LIST_SETTLED {
         assert_eq!(
             split(WIDE, 24, files).list,
             files,
             "{files} changed files did not draw {files} rows"
         );
     }
-    for files in [LIST_ROWS + 1, 47, 200, 10_000] {
+    for files in [LIST_SETTLED + 1, 47, 200, 10_000] {
         assert_eq!(
             split(WIDE, 24, files).list,
-            LIST_ROWS,
+            LIST_SETTLED,
             "{files} changed files drew more than the cap"
         );
     }
@@ -85,6 +112,144 @@ fn the_list_grows_to_the_file_count_and_stops_at_the_cap() {
     assert!(!empty.rule, "a rule was drawn over an empty list");
 }
 
+/// The list deepens on a tall pane, and no pane that shipped draws differently.
+///
+/// `SPEC.md` §11.1's cap is a share of the pane since
+/// [#160](https://github.com/breferrari/vigia/issues/160), floored at
+/// `LIST_SETTLED`. Four claims, and they fail in different ways.
+///
+/// **Monotone, and stepping by at most one row per row of pane.** The first is
+/// the obvious half; the second is the one the *band* rests on, one region up.
+/// `Body::split` pays the band out of what the list leaves, so a cap that gained
+/// two rows for one row of pane would take a band off a pane that had just grown,
+/// which is the "a bigger container holds less" failure the margin ladder is
+/// written as a table to avoid. It is asserted here rather than beside the band
+/// because it is a property of the cap.
+///
+/// **Nothing at or below the reference pane moved.** Measured by reading, not by
+/// restating the share: the ladder adds rungs strictly above the settled cap, and
+/// a rung added to the top of a monotone ladder cannot move a boundary beneath
+/// it. So every pane the rest of this suite draws is at the settled cap, and no
+/// snapshot in the repo can move. A share that deepened *early* is exactly what
+/// the `<= LIST_SETTLED` half catches.
+///
+/// **The ladder is walked rather than sampled.** A gate that exercised one height
+/// would exercise one rung, and it would be the healthiest one. The witness at
+/// the end fails if the sweep ever stops reaching several, so a ladder that
+/// silently stopped laddering cannot pass this by going quiet.
+#[test]
+fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
+    // More files than any cap this sweep can reach, so the changed-file clamp is
+    // never the one doing the work and what is measured is the pane's own answer.
+    const MANY: usize = 500;
+
+    let mut depths = std::collections::BTreeSet::new();
+    let mut previous = 0usize;
+
+    for height in 1..=TALLEST {
+        let list = split(WIDE, height, MANY).list;
+
+        assert!(
+            list >= previous,
+            "a pane one row taller than {}x{} drew {list} list rows where the \
+             shorter one drew {previous}",
+            WIDE,
+            height - 1
+        );
+        assert!(
+            list <= previous + 1,
+            "at {WIDE}x{height} the list gained {} rows for one row of pane, so \
+             the diff pays for the reader's taller terminal",
+            list - previous
+        );
+        if height <= REFERENCE {
+            assert!(
+                list <= LIST_SETTLED,
+                "at {WIDE}x{height} the list drew {list} rows, deeper than the \
+                 {LIST_SETTLED} that shipped, on a pane no taller than the one \
+                 §11.1 sized it against"
+            );
+        }
+
+        previous = list;
+        depths.insert(list);
+    }
+
+    assert_eq!(
+        split(WIDE, REFERENCE, MANY).list,
+        LIST_SETTLED,
+        "the reference pane stopped drawing what §11.1 says it draws"
+    );
+    assert!(
+        split(WIDE, DEEP, MANY).list > LIST_SETTLED,
+        "a {DEEP}-row pane still draws {LIST_SETTLED} rows, which is the void \
+         #160 was filed for"
+    );
+    assert!(
+        depths.len() >= 4,
+        "the sweep reached {} distinct depths, so it is one rung checked \
+         repeatedly rather than a ladder walked",
+        depths.len()
+    );
+}
+
+/// A taller pane never costs the masthead its band.
+///
+/// The band is last in `Body::split`'s clamp order and is paid out of what the
+/// list leaves, so the two are coupled in exactly one direction: deepening the
+/// list on a taller pane spends rows the band was going to be offered. The
+/// arithmetic says it cannot bite — `after` is the body less the list less two,
+/// and one more row of pane adds one to the body and at most one to the list — but
+/// that argument rests on a step bound, and an argument is not a gate.
+///
+/// **The failure this refuses is silent and shaped like a feature**: a reader
+/// enlarges their terminal, the map gets deeper, and the graph they were watching
+/// disappears. Nothing errors, no snapshot moves, and the band is a masthead-on
+/// screen so the default pane never sees it.
+///
+/// **Its reach is narrower than it looks, and stating that is cheaper than
+/// re-deriving it.** It sees a band *removed* from a pane that had one, never one
+/// *delayed*. Proved by mutation rather than by reading: a cap made to jump two
+/// rows at height 24 left this green, because 24 is exactly where the band arrives
+/// at this width and the jump pushed the arrival later instead of undoing it. The
+/// same jump one row higher fails it at `80x25`. Delay is the ordinary shape of a
+/// clamp order and needs no gate; removal is the one that reads as a bug to the
+/// person watching.
+#[test]
+fn a_taller_pane_never_costs_the_band_its_rows() {
+    const MANY: usize = 500;
+
+    // The masthead is off by default since #204, and the band only exists with it
+    // on, so this gate has to ask for the screen it is about.
+    let raised = vigia::Chrome {
+        masthead: true,
+        ..chrome(&App::new())
+    };
+
+    let mut had_a_band = false;
+    let mut saw_it_arrive = false;
+
+    for height in 1..=TALLEST {
+        let body = body_layout(Rect::new(0, 0, WIDE, height), &raised, MANY);
+        let band = body.graph > 0;
+
+        if band && !had_a_band {
+            saw_it_arrive = true;
+        }
+        assert!(
+            band || !had_a_band,
+            "at {WIDE}x{height} the band was undrawn on a pane taller than one \
+             that drew it, so the list took a row the band was keeping"
+        );
+        had_a_band |= band;
+    }
+
+    assert!(
+        saw_it_arrive,
+        "no height in the sweep ever drew a band, so the gate proves nothing"
+    );
+}
+
 #[test]
 fn the_list_region_gives_way_before_the_diff_falls_below_min_body() {
     // The ordering rule. The list is what shrinks, and it shrinks to nothing
@@ -94,11 +259,20 @@ fn the_list_region_gives_way_before_the_diff_falls_below_min_body() {
     // Swept over every height a pane can plausibly be rather than checked at the
     // boundary, because the boundary moves with the footer's own height and a
     // gate that hardcoded it would be restating the arithmetic it is checking.
+    //
+    // **The sweep reaches `TALLEST` rather than forty since
+    // [#160](https://github.com/breferrari/vigia/issues/160)**, and the widening
+    // is the point rather than thoroughness: the cap is a share of the pane now,
+    // so every height above forty asks the list for rows the old flat cap never
+    // let it take, and this is the gate that says the diff keeps `MIN_BODY`
+    // through all of them. Widened rather than duplicated, because a second sweep
+    // asserting the same thing over a taller range would be this one with a
+    // different bound.
     let mut saw_a_region = false;
     let mut saw_it_give_way = false;
 
-    for height in 1..=40u16 {
-        for files in [1usize, 3, LIST_ROWS, 100] {
+    for height in 1..=TALLEST {
+        for files in [1usize, 3, LIST_SETTLED, 100] {
             let body = split(WIDE, height, files);
             if body.list > 0 {
                 saw_a_region = true;
@@ -182,7 +356,10 @@ fn the_list_window_slides_to_keep_the_current_file_visible() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
-    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+    assert_eq!(
+        body.list, LIST_SETTLED,
+        "the fixture does not fill the list"
+    );
 
     let mut moved_window = false;
     for step in 0..FILES {
@@ -199,7 +376,7 @@ fn the_list_window_slides_to_keep_the_current_file_visible() {
         );
         assert_eq!(
             view.list.len(),
-            LIST_ROWS,
+            LIST_SETTLED,
             "step {step}: the window shrank instead of sliding"
         );
         if view.list_top > 0 {
@@ -318,7 +495,7 @@ fn scrolling_the_list_leaves_the_diff_where_it_was() {
     );
     assert_eq!(
         after.list.len(),
-        LIST_ROWS,
+        LIST_SETTLED,
         "the window shrank instead of sliding"
     );
 
@@ -511,12 +688,12 @@ fn the_two_regions_tile_the_body_exactly() {
 
     for height in 1..=40u16 {
         for width in [40u16, WIDE, 120] {
-            for files in [0usize, 1, 3, LIST_ROWS, LIST_ROWS + 1, 200] {
+            for files in [0usize, 1, 3, LIST_SETTLED, LIST_SETTLED + 1, 200] {
                 let area = Rect::new(0, 0, width, height);
                 let chrome = chrome(&App::new());
                 let full = body_layout(area, &chrome, files);
 
-                for have in 0..=LIST_ROWS + 2 {
+                for have in 0..=LIST_SETTLED + 2 {
                     let body = full.clamped_to(have);
                     if body.list != full.list {
                         saw_a_clamp = true;
@@ -580,7 +757,7 @@ fn collect_resolves_every_degenerate_viewport() {
     let history = History::new();
 
     for list_top in [0usize, 1, FILES - 1, FILES, FILES + 9, usize::MAX] {
-        for list_rows in [0usize, 1, LIST_ROWS, FILES, FILES + 5, 10_000] {
+        for list_rows in [0usize, 1, LIST_SETTLED, FILES, FILES + 5, 10_000] {
             for diff_rows in [0usize, 1, 22] {
                 for file in [0usize, FILES - 1, FILES, FILES + 3] {
                     for list_follows in [true, false] {
@@ -680,7 +857,7 @@ fn browsing_back_up_returns_the_window_to_the_top() {
     assert_eq!(back.list_top, 0, "browsing back up did not reach the top");
     assert_eq!(
         back.list.len(),
-        LIST_ROWS,
+        LIST_SETTLED,
         "the window lost rows on the way"
     );
 }
@@ -689,7 +866,7 @@ fn browsing_back_up_returns_the_window_to_the_top() {
 ///
 /// The sibling of `scroll.rs`'s diff-drag gate, and the reason both exist: a
 /// track that maps onto the whole changed set instead of onto its travel leaves
-/// its final `LIST_ROWS` worth of track dead, because every fraction past the
+/// its final `LIST_SETTLED` worth of track dead, because every fraction past the
 /// bound clamps to the same window.
 ///
 /// **The middle of the track is the assertion that can tell those apart**, and
@@ -749,7 +926,7 @@ fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
         .expect("view");
     assert_eq!(
         view.list_top,
-        (FILES - LIST_ROWS) / 2,
+        (FILES - LIST_SETTLED) / 2,
         "halfway down the track showed files {}..{}",
         view.list_top,
         view.list_top + view.list.len()
@@ -781,13 +958,16 @@ fn the_caret_travels_the_window_before_the_window_moves() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
-    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+    assert_eq!(
+        body.list, LIST_SETTLED,
+        "the fixture does not fill the list"
+    );
 
     // Walking the diff forward one file at a time from the start, the caret's
     // row is the file's own index until the window has to move, and the window
     // does not move until then.
     let mut seen = Vec::new();
-    for file in 0..LIST_ROWS + 4 {
+    for file in 0..LIST_SETTLED + 4 {
         // `view` is what advances the file, not `apply`: a scroll down adds to
         // the offset and lets `View::collect` carry the overrun into the files
         // after it, so a loop that only applied would spin forever.
@@ -807,7 +987,7 @@ fn the_caret_travels_the_window_before_the_window_moves() {
         let caret = view.top.file - view.list_top;
         seen.push((view.list_top, caret));
 
-        if file < LIST_ROWS {
+        if file < LIST_SETTLED {
             assert_eq!(
                 view.list_top, 0,
                 "the window moved at file {file}, which still fits in it"
@@ -823,18 +1003,18 @@ fn the_caret_travels_the_window_before_the_window_moves() {
             // would leave the current file off it.
             assert_eq!(
                 caret,
-                LIST_ROWS - 1,
+                LIST_SETTLED - 1,
                 "at file {file} the caret left the last row, so the window moved \
                  by more than the overshoot"
             );
-            assert_eq!(view.list_top, file + 1 - LIST_ROWS);
+            assert_eq!(view.list_top, file + 1 - LIST_SETTLED);
         }
     }
 
     assert!(
         seen.iter().any(|(top, _)| *top > 0),
         "the window never moved at all over {} files",
-        LIST_ROWS + 4
+        LIST_SETTLED + 4
     );
 }
 
@@ -846,6 +1026,14 @@ fn the_caret_travels_the_window_before_the_window_moves() {
 /// It is **not** selection, which is what `SPEC.md` §11.2 B4 refuses: nothing is
 /// remembered, no row becomes special, and the event after it means exactly what
 /// it would have meant. The same argument already licensed dragging a scrollbar.
+///
+/// **Run at the reference pane and at a deep one, which is what makes it the
+/// gate for #160's ruling on the digits as well as for the gesture.** The digit
+/// range stays `1`-`LIST_SETTLED`, so on a pane whose list is deeper than that
+/// the rows past it can be named by nothing on the keyboard. What keeps them
+/// reachable is this: the hit-test bounds a click by the *region*, so it reaches
+/// every drawn row at every height. The deepest offset in the loop is
+/// `list_rows - 1`, so the tall pass clicks a row no digit can address.
 #[test]
 fn clicking_a_listed_file_sends_the_diff_to_it() {
     use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -854,56 +1042,68 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
 
     const FILES: usize = 40;
 
-    let scratch = Scratch::large_diff("list-click", FILES, 1);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
+    let mut reached_past_the_digits = false;
 
-    let mut app = App::new();
-    let mut highlighter = Highlighter::new();
-    let history = History::new();
-    let body = split(WIDE, 24, FILES);
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, body)
-        .expect("view");
+    for height in [REFERENCE, DEEP] {
+        let scratch = Scratch::large_diff(&format!("list-click-{height}"), FILES, 1);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        materialise(&mut frame);
 
-    // Through the real hit-test rather than by constructing the action, because
-    // the row-to-offset arithmetic is half of what can be wrong here.
-    let area = Rect::new(0, 0, WIDE, 24);
-    let regions = regions(area, &chrome(&app), &view);
-    let (list_top_row, list_rows) = (regions.list.top, regions.list.rows);
-    assert!(list_rows > 1, "no region was published to click on");
-
-    let click = |row: u16| {
-        Event::Mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            // Not the bar's column: that is a drag, and it is checked first.
-            column: 2,
-            row,
-            modifiers: KeyModifiers::NONE,
-        })
-    };
-
-    for offset in [0u16, 2, list_rows - 1] {
-        let action = action_for(&click(list_top_row + offset), regions);
-        assert_eq!(action, Some(Action::ListRow(offset)));
-        app.apply(action.expect("action"), &mut frame, body.diff)
-            .expect("apply");
+        let mut app = App::new();
+        let mut highlighter = Highlighter::new();
+        let history = History::new();
+        let body = split(WIDE, height, FILES);
         let view = app
             .view(&mut frame, &mut highlighter, &history, body)
             .expect("view");
-        assert_eq!(
-            view.top,
-            Position {
-                file: usize::from(offset),
-                row: 0
-            },
-            "a click on row {offset} did not put the diff at the top of that file"
-        );
+
+        // Through the real hit-test rather than by constructing the action,
+        // because the row-to-offset arithmetic is half of what can be wrong here.
+        let area = Rect::new(0, 0, WIDE, height);
+        let regions = regions(area, &chrome(&app), &view);
+        let (list_top_row, list_rows) = (regions.list.top, regions.list.rows);
+        assert!(list_rows > 1, "no region was published to click on");
+        reached_past_the_digits |= usize::from(list_rows) > LIST_SETTLED;
+
+        let click = |row: u16| {
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                // Not the bar's column: that is a drag, and it is checked first.
+                column: 2,
+                row,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+
+        for offset in [0u16, 2, list_rows - 1] {
+            let action = action_for(&click(list_top_row + offset), regions);
+            assert_eq!(action, Some(Action::ListRow(offset)));
+            app.apply(action.expect("action"), &mut frame, body.diff)
+                .expect("apply");
+            let view = app
+                .view(&mut frame, &mut highlighter, &history, body)
+                .expect("view");
+            assert_eq!(
+                view.top,
+                Position {
+                    file: usize::from(offset),
+                    row: 0
+                },
+                "at {WIDE}x{height}, a click on row {offset} did not put the diff \
+                 at the top of that file"
+            );
+        }
+
+        // And a click on the diff below is still inert, which is B4 standing.
+        assert_eq!(action_for(&click(regions.diff.top + 1), regions), None);
     }
 
-    // And a click on the diff below is still inert, which is B4 standing.
-    assert_eq!(action_for(&click(regions.diff.top + 1), regions), None);
+    assert!(
+        reached_past_the_digits,
+        "no pane in the sweep drew a list deeper than the digit range, so the \
+         half of this gate that is about #160's ruling proves nothing"
+    );
 }
 
 /// A digit key press, through the real key map rather than by construction.
@@ -940,7 +1140,10 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
-    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+    assert_eq!(
+        body.list, LIST_SETTLED,
+        "the fixture does not fill the list"
+    );
 
     let opening = app
         .view(&mut frame, &mut highlighter, &history, body)
@@ -1027,7 +1230,10 @@ fn a_digit_after_the_diff_shrank_names_no_file() {
     let mut highlighter = Highlighter::new();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
-    assert_eq!(body.list, LIST_ROWS, "the fixture does not fill the list");
+    assert_eq!(
+        body.list, LIST_SETTLED,
+        "the fixture does not fill the list"
+    );
 
     let before = app
         .view(&mut frame, &mut highlighter, &history, body)
@@ -1049,7 +1255,7 @@ fn a_digit_after_the_diff_shrank_names_no_file() {
         app.position(),
         before,
         "`6` moved the diff to a file that no longer exists, against a list that \
-         drew {LIST_ROWS} rows before the tree shrank to {LEFT}"
+         drew {LIST_SETTLED} rows before the tree shrank to {LEFT}"
     );
 }
 
@@ -1104,7 +1310,7 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
     // is more files than the region has rows, so the extra thirty-two are two
     // `git` fixtures' worth of setup and a `materialise` over five times the
     // diffs, on every platform in the matrix, proving the same thing. Kept clear
-    // of `LIST_ROWS` so the number does not read as related to the cap.
+    // of `LIST_SETTLED` so the number does not read as related to the cap.
     const MANY: usize = 8;
     const SHORT: u16 = 9;
     let scratch = Scratch::large_diff("list-digit-short-pane", MANY, 1);
@@ -1115,7 +1321,7 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
     let mut app = App::new();
     let body = split(WIDE, SHORT, MANY);
     assert!(
-        body.list > 0 && body.list < LIST_ROWS,
+        body.list > 0 && body.list < LIST_SETTLED,
         "a {SHORT}-row pane drew {} list rows, so this proves nothing",
         body.list
     );
