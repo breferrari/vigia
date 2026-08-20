@@ -23,9 +23,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{
-    App, Body, FileEntry, Glyphs, Position, Row, Theme, View, Viewport, body_layout, render,
-};
+use vigia::{App, Body, Glyphs, Position, Row, Scale, Theme, View, Viewport, body_layout, render};
 use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
@@ -206,7 +204,8 @@ fn a_file_is_its_heading_then_its_hunks() {
     let mut headings = 0usize;
     for (index, row) in view.rows.iter().enumerate() {
         match row {
-            Row::File(FileEntry { churn, .. }) => {
+            Row::File(entry) => {
+                let churn = &entry.churn;
                 headings += 1;
                 assert!(
                     matches!(view.rows.get(index + 1), Some(Row::Hunk { .. })),
@@ -281,9 +280,7 @@ fn each_kind_of_change_gets_its_own_letter() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            Row::File(FileEntry {
-                kind, path, from, ..
-            }) => Some((*kind, path.clone(), from.clone())),
+            Row::File(entry) => Some((entry.kind, entry.path.clone(), entry.from.clone())),
             _ => None,
         })
         .collect();
@@ -478,6 +475,20 @@ fn a_real_repository_draws() {
 
 #[test]
 fn a_recorded_tick_reaches_the_drawn_sparkline() {
+    /// The figure the store answers with at each grouping, finest first.
+    ///
+    /// **Three since [#234](https://github.com/breferrari/vigia/issues/234)**,
+    /// where this pinned one number. The middle entry is that number: `4_667` was
+    /// measured over twelve buckets, and twelve buckets is what a drawn one holds
+    /// at the settled rung, so the value did not move, it acquired an index.
+    ///
+    /// **And the set is what the gate is now for.** `2_333` and `7_779` are not
+    /// `4_667` halved and doubled, which is exactly the point: `scale_of`
+    /// averages the non-empty values and grouping merges empties into their
+    /// neighbours, so the coarsest figure is 17% under what multiplying would
+    /// have given. A store that returned one figure three times, or one figure
+    /// scaled by the grouping, fails here.
+    const PINNED: [u32; 3] = [2_333, 4_667, 7_779];
     // **The producer, not the decider.** `spark_of` and the painter are mutation
     // tested from every side in `render.rs`, and every one of those fixtures
     // hands `View` a `peak` by hand. Nothing drove a *recorded* one through
@@ -542,7 +553,8 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     // because this gate's whole point is that the value differs from every
     // constant a hardcode would reach for, and it still does.
     assert_eq!(
-        view.scale, 4_667,
+        view.scale,
+        Scale(PINNED),
         "the recorded ticks did not reach the view's shared scale"
     );
 
@@ -583,6 +595,122 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     );
 }
 
+/// Every rung draws from the store's own figures, not a fixture's.
+///
+/// **The coverage-shape gap [#234](https://github.com/breferrari/vigia/issues/234)
+/// left, closed here.** Every gate that reaches the twenty-four bucket rung does
+/// it with a hand-set `Scale` on a literal `View`, because the sweeps live in
+/// `tests/legibility.rs` and build their fixtures directly. The only test that
+/// drives a *recorded* store all the way to a drawn row renders at eighty
+/// columns, which is the twelve-bucket rung. So the widest rung had never been
+/// drawn against a denominator the store actually computed, and the denominator
+/// is the half of this feature that is not a width: `History::scales` returns one
+/// figure per grouping precisely because multiplying the finest by the grouping
+/// is wrong on a quiet worktree, and nothing end to end was checking that the
+/// right one of the three arrives.
+///
+/// A hundred and sixty-four columns is the first pane whose share affords the
+/// widest layout at the block rung, which
+/// `tests/legibility.rs::the_glance_columns_collapse_in_one_order` derives and
+/// pins.
+#[test]
+fn every_rung_draws_from_the_stores_own_figures() {
+    /// A pane per rung, widest first, with the buckets that rung must draw.
+    ///
+    /// **Every grouping, not just the widest.** Round 1 closed this gap at the
+    /// twenty-four end and left it open at the other: the six-bucket rung was
+    /// reached only by `tests/legibility.rs` fixtures carrying a hand-set
+    /// `Scale`, and `Scale::spread`'s own docblock says it is exact for the
+    /// fixtures this suite writes rather than for what the store computes. The
+    /// coarsest grouping is the one least like a multiplied figure, so it is the
+    /// one a fixture is least able to stand in for.
+    ///
+    /// The widths are the ones
+    /// `tests/legibility.rs::the_glance_columns_collapse_in_one_order` derives
+    /// and pins.
+    const RUNGS: [(u16, usize); 3] = [(164, 24), (80, 12), (45, 6)];
+
+    let scratch = Scratch::new("shell-rows-every-rung");
+    scratch.write("src/lib.rs", numbered(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
+
+    let now = Instant::now();
+    let mut history = History::starting_at(now);
+    // Two sized writes, as `a_recorded_tick_reaches_the_drawn_sparkline` uses:
+    // a first write is a baseline, so the weight is the second one's growth.
+    history.record_sized([("src/lib.rs", Some(4_000))], now);
+    history.record_sized([("src/lib.rs", Some(28_000))], now);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+    let theme = Theme::default();
+    let ramp = "▁▂▃▄▅▆▇█";
+    let ink = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
+
+    for (pane, rung) in RUNGS {
+        // **A fresh `App` per width, so each iteration is its own observation.**
+        // One shared across the loop carries `App::paint` forward, so the first
+        // pane draws plain and the rest draw coloured, and it carries the scroll
+        // position and the follow state with it. None of that reaches a glance
+        // slot today, which is exactly the kind of accident a later assertion
+        // added to this loop would inherit without noticing.
+        let mut app = App::new();
+        let mut terminal = Terminal::new(TestBackend::new(pane, 12)).expect("terminal");
+        let area = Rect::new(0, 0, pane, 12);
+        let chrome = app.chrome("fixture", None, None, None, None, None);
+        let split = body_layout(area, &chrome, frame.files().len());
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, split)
+            .expect("view");
+
+        terminal
+            .draw(|f| {
+                let drawn = f.area();
+                render(f.buffer_mut(), drawn, &view, &theme, Glyphs::Block, &chrome);
+            })
+            .expect("draw");
+
+        // The whole slot, bars and track together, on the busiest row. At the
+        // block rung a bucket is a cell, so this count is the rung itself.
+        let buffer = terminal.backend().buffer();
+        let bar = |cell: &ratatui::buffer::Cell| {
+            ramp.contains(cell.symbol()) && ink.contains(&cell.style().fg)
+        };
+        let slot = |cell: &ratatui::buffer::Cell| {
+            bar(cell) || (cell.symbol() == "_" && cell.style().fg == theme.spark_track.fg)
+        };
+        let count = |y: u16, want: &dyn Fn(&ratatui::buffer::Cell) -> bool| {
+            (0..buffer.area.width)
+                .filter(|x| want(&buffer[(*x, y)]))
+                .count()
+        };
+
+        let widest = (0..buffer.area.height)
+            .map(|y| count(y, &slot))
+            .max()
+            .expect("a row");
+        assert_eq!(
+            widest, rung,
+            "at {pane} columns a recorded store drew {widest} sparkline buckets \
+             rather than the {rung} its rung asks for"
+        );
+
+        // **And the heights came from the store rather than from nothing.** A
+        // denominator of zero draws pure track, which is what a hardcode or the
+        // wrong entry of `Scale` would most easily produce, and it is
+        // indistinguishable from a correct launch by eye.
+        let bars: usize = (0..buffer.area.height).map(|y| count(y, &bar)).sum();
+        assert!(
+            bars > 0,
+            "at {pane} columns the {rung} bucket rung drew nothing at all, so \
+             the store's figure for this grouping is not reaching the renderer"
+        );
+    }
+}
+
 #[test]
 fn a_binary_file_gets_a_reason_instead_of_hunks() {
     // Otherwise it draws as a heading with nothing under it, which reads as a
@@ -610,7 +738,7 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     assert!(
         matches!(
             view.rows.first(),
-            Some(Row::File(FileEntry { churn: None, .. }))
+            Some(Row::File(entry)) if entry.churn.is_none()
         ),
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()

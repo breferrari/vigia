@@ -131,7 +131,7 @@ A slice nothing touched is still drawn, in a dark track colour, because a strip 
 
 <br>
 
-Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds.
+Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
 
 **Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means. The mockup drew these as waves before the first commit, and drawing the events raw was the defect.
 
@@ -363,7 +363,7 @@ The `_warm` and `_hot` twins are the intensity rungs: a sparkline column and a h
 
 <br>
 
-The per-file sparkline draws from the eighth-blocks `▁▂▃▄▅▆▇█` by default on terminals whose font may not carry anything denser, and from **braille** where it can. Braille packs two of the eight buckets into one cell, so the whole window fits four columns instead of eight, and the strip survives on a narrower pane instead of halving and then disappearing.
+The per-file sparkline draws from the eighth-blocks `▁▂▃▄▅▆▇█` by default on terminals whose font may not carry anything denser, and from **braille** where it can. Braille packs two buckets into one cell, so the usual twelve-column strip fits six columns instead of twelve, and it survives on a narrower pane instead of halving and then disappearing.
 
 **Nothing can ask a terminal which glyphs its font has.** There is no escape sequence for it, so this is decided the same way the colour depth is: from what the terminal calls itself. If the guess is wrong in either direction, say so:
 

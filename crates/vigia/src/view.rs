@@ -28,7 +28,7 @@
 
 use vigia_core::{
     ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, LineKind, Pass, Recency,
-    Result, Span,
+    Result, SPARK_GROUPS, Span,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -81,7 +81,20 @@ pub enum Row {
     ///
     /// The same [`FileEntry`] the pinned list draws, so the two regions cannot
     /// drift apart in what they show or in how they degrade.
-    File(FileEntry),
+    ///
+    /// **Boxed since [#234](https://github.com/breferrari/vigia/issues/234)**,
+    /// which doubled the sparkline's source resolution and took a `FileEntry`
+    /// past 256 bytes. Every variant of an enum is as large as its largest, and
+    /// the largest is drawn a few dozen times a screen while [`Row::Line`] is
+    /// drawn on every row of it, so unboxed the *common* case was paying 264
+    /// bytes to carry 53. One allocation per heading buys that back, and it is
+    /// the direction `clippy::large_enum_variant` names.
+    ///
+    /// It does soften a claim recorded when `spark` first landed here, that a
+    /// drawn row allocates nothing new. That was about the array being fixed
+    /// rather than a `Vec`, which is still true; what is new is one allocation
+    /// per *file heading*, where a heading already carries a `String` path.
+    File(Box<FileEntry>),
     /// A hunk boundary, drawn as git's `@@ -a,b +c,d @@`.
     Hunk {
         /// First line covered on the index side.
@@ -153,6 +166,19 @@ pub enum Row {
     Gap,
 }
 
+impl Row {
+    /// A file heading row.
+    ///
+    /// **A constructor because the variant is boxed**
+    /// ([#234](https://github.com/breferrari/vigia/issues/234)), and it exists so
+    /// the box is written once rather than at every one of the thirty-odd places
+    /// that build one. `Row::File` is still the pattern to match on, which is
+    /// where the box is invisible anyway.
+    pub fn file(entry: FileEntry) -> Self {
+        Self::File(Box::new(entry))
+    }
+}
+
 /// Slices a file's length is divided into for the heat strip.
 ///
 /// **The source resolution, which is a different number from what any pane
@@ -175,6 +201,68 @@ pub enum Row {
 /// which is why [`FileEntry::heat`] is always this long and why the renderer
 /// draws a block for every bucket.
 pub const HEAT_BUCKETS: usize = 24;
+
+/// What a drawn sparkline bucket's height is divided by, one figure per rung.
+///
+/// **A type rather than a number since
+/// [#234](https://github.com/breferrari/vigia/issues/234)**, because a rung is a
+/// resolution now and a drawn bucket is the sum of `group` source ones. The
+/// figure those sums are measured against is not the source figure multiplied:
+/// `scale_of` averages the **non-empty** values and grouping merges empties into
+/// their neighbours, so the estimate is exact on a busy worktree and wrong by up
+/// to the group on a quiet one. `vigia_core::SPARK_GROUPS` carries the
+/// measurement that settled it.
+///
+/// Indexed **by grouping rather than by rung**, so the one number a caller has
+/// (how many source buckets this drawn one holds) is the one it looks up with,
+/// and no call site has to know where its rung sits in a table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Scale(pub [u32; SPARK_GROUPS.len()]);
+
+impl Scale {
+    /// One figure at every grouping.
+    ///
+    /// **For a fixture rather than for the store**, which never produces one:
+    /// the honest set is what `scale_of` says at each grouping, and that is what
+    /// [`View::collect`] fills in. This is for a test that wants a stated
+    /// denominator, including the inconsistent ones two gates deliberately pass.
+    pub const fn flat(figure: u32) -> Self {
+        Self([figure; SPARK_GROUPS.len()])
+    }
+
+    /// `figure` scaled by each grouping, saturating.
+    ///
+    /// **Also for a fixture, and exact for the ones this suite writes.** A test
+    /// that widened its source by repeating each value has, by construction, the
+    /// same non-empty density at every grouping, which is the one case where
+    /// multiplying is the right answer rather than an estimate.
+    pub const fn spread(figure: u32) -> Self {
+        let mut figures = [0; SPARK_GROUPS.len()];
+        let mut at = 0;
+        while at < SPARK_GROUPS.len() {
+            figures[at] = figure.saturating_mul(SPARK_GROUPS[at] as u32);
+            at += 1;
+        }
+        Self(figures)
+    }
+
+    /// The figure a bucket summing `group` source buckets is measured against.
+    ///
+    /// Falls back to the finest figure for a grouping this ladder does not name.
+    /// **No rung the ladder produces can ask for one**, because `SPARK_RUNGS` is
+    /// computed from [`SPARK_GROUPS`] in `render.rs` rather than written out
+    /// beside it, so every grouping a layout divides to is on this table by
+    /// construction. What can still reach the fallback is a hand-written
+    /// `ROW_LAYOUTS` entry, since `Columns::new` takes a bare `usize`; total
+    /// rather than panicking, because `render`'s contract is that any area is
+    /// legal and a frame draws something.
+    pub fn at(self, group: usize) -> u32 {
+        SPARK_GROUPS
+            .iter()
+            .position(|named| *named == group)
+            .map_or(self.0[0], |at| self.0[at])
+    }
+}
 
 /// Changed lines falling in one slice of a file's length.
 ///
@@ -476,7 +564,13 @@ pub struct View {
     /// bucket draws a track, so a scale of zero means every bucket is empty and
     /// every one of them is still drawn. `vigia_core::History::scale` carries the
     /// same correction, and this is the copy a renderer actually reads.
-    pub scale: u32,
+    ///
+    /// **One figure per rung since
+    /// [#234](https://github.com/breferrari/vigia/issues/234)**, because a
+    /// narrower rung draws sums of source buckets and `scale_of` is not linear in
+    /// the grouping. [`Scale`] says why, and `vigia_core::SPARK_GROUPS` carries
+    /// the measurement.
+    pub scale: Scale,
     /// The whole worktree's churn over the window, oldest sample first.
     ///
     /// **What the masthead's band draws** ([#158](https://github.com/breferrari/vigia/issues/158)),
@@ -812,7 +906,7 @@ impl View {
                 row: position.row,
             },
             read: 0,
-            scale: history.scale(),
+            scale: Scale(history.scales()),
             worktree_churn: history.worktree_churn(),
         };
         if files == 0 {
@@ -1288,7 +1382,7 @@ impl View {
             // by the viewport, because this only runs for a heading that fits.
             let entry = entry_of(kind, diff, history);
             drawn.push((index, entry.clone()));
-            self.rows.push(Row::File(entry));
+            self.rows.push(Row::file(entry));
         }
         n += 1;
 

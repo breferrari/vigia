@@ -27,7 +27,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
     Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row,
-    Theme, View, body_layout, diff_height, render,
+    Scale, Theme, View, body_layout, diff_height, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -103,12 +103,27 @@ const HEAT_RUNGS: [usize; 4] = [HEAT_BUCKETS, HEAT_BUCKETS / 2, HEAT_BUCKETS / 4
 
 /// How many buckets a sparkline may show, widest rung first.
 ///
-/// Restated for [`HEAT_RUNGS`]' reason. **Three rungs, and the top one is a
-/// ceiling rather than a choice**: a drawn bucket has to stay coarser than the
-/// churn band's own column period, or the two elements draw one store at crossed
-/// scales. `vigia-core`'s own gate pins that bound, and it is why #161 reaches
-/// the strip and not this ladder.
-const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+/// Restated for [`HEAT_RUNGS`]' reason. **Four rungs since
+/// [#234](https://github.com/breferrari/vigia/issues/234) raised the source, and
+/// the halving is unchanged**, so what a given width under 134 columns draws is
+/// the same number it drew before. The rung that was the top is the second entry
+/// now, and every boundary below it is untouched.
+///
+/// The docblock here used to say the top rung was *"a ceiling rather than a
+/// choice"*, because a drawn bucket had to stay coarser than the churn band's own
+/// column period. That period is retired
+/// ([#232](https://github.com/breferrari/vigia/issues/232)) and the bound with
+/// it; what replaced it is the **window**, which every rung covers, and
+/// `the_sparkline_reprojects_rather_than_dropping_buckets` below is what holds
+/// the shell to it.
+const SPARK_RUNGS: [usize; 4] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, HISTORY_BUCKETS / 4, 0];
+
+/// Buckets a sparkline draws on a pane between the settled rung and the top one.
+///
+/// Restated for [`SPARK_RUNGS`]' reason, and named because the fixtures below are
+/// rendered wide and a bare twelve reads as [`HISTORY_BUCKETS`] to anyone who
+/// remembers when it was.
+const SETTLED_BUCKETS: usize = 12;
 
 /// #119's margin ladder, widest pane first: blank columns the pane keeps between
 /// its own edge and any glyph, **both sides counted together**.
@@ -617,7 +632,7 @@ fn every_row_kind() -> View {
         total_rows: 0,
         rows_above: 0,
         rows: vec![
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "crates/vigia-core/src/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -639,7 +654,7 @@ fn every_row_kind() -> View {
                 "        for change in self.changes() {",
             ),
             line(LineKind::Added, 260, "        for change in self.walk() {"),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -649,7 +664,7 @@ fn every_row_kind() -> View {
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Note("binary"),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -662,7 +677,7 @@ fn every_row_kind() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -677,7 +692,7 @@ fn awkward() -> View {
         total_rows: 0,
         rows_above: 0,
         rows: vec![
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "crates/vigia-core/src/very/deeply/nested/module/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -692,7 +707,7 @@ fn awkward() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -708,7 +723,7 @@ fn empty() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -749,7 +764,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         files,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -991,25 +1006,29 @@ fn glancing() -> View {
         total_rows: 0,
         rows_above: 0,
         rows: vec![
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "crates/vigia-core/src/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
                 churn: Some((42, 7)),
-                spark: [1, 1, 2, 2, 4, 5, 6, 7, 8, 9, 11, 12],
+                spark: [
+                    1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 11, 11, 12, 12,
+                ],
                 recency: Recency::Pulse,
                 heat: ENDS_CHANGED,
             }),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "crates/vigia/src/render.rs".to_owned(),
                 from: None,
                 kind: 'M',
                 churn: Some((11, 3)),
-                spark: [1, 1, 2, 2, 1, 1, 3, 3, 2, 2, 1, 1],
+                spark: [
+                    1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1,
+                ],
                 recency: Recency::Live,
                 heat: ENDS_CHANGED,
             }),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1022,7 +1041,7 @@ fn glancing() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        scale: 12,
+        scale: Scale::spread(12),
         worktree_churn: Default::default(),
     }
 }
@@ -1623,6 +1642,28 @@ fn the_glance_columns_collapse_in_one_order() {
     // - **One more on the top two rungs only** when the pane took #119's inset
     //   (48, 52 became 49, 53). Nothing under 44 columns moved, because the
     //   ladder's own floor is what buys I6's forty-column pane its columns back.
+    //
+    // **Swept over `GENEROUS_WIDTHS` since
+    // [#234](https://github.com/breferrari/vigia/issues/234), and the last two
+    // entries are what that bought.** A hundred and twenty columns cannot reach
+    // either rung above the settled ladder, so the walk pinned six of eight
+    // states and reported the ladder sound while its top was unreachable at every
+    // width it looked at. Both new boundaries are derived from the table rather
+    // than read off a failure, on the rule this gate already states:
+    //
+    // | Layout | counts | pulse | heat | spark | width | from |
+    // |---|---|---|---|---|---|---|
+    // | 1 | 12 | 2 | 25 | 13 | 52 | 134 |
+    // | 0 | 12 | 2 | 25 | 25 | 64 | 164 |
+    //
+    // The `from` column is a different rule for these two, and that is #161's
+    // share clamp rather than an inconsistency: below the settled ladder a layout
+    // arrives when the row can *survive* it, `ROW_FLOOR + width <= planning`, and
+    // above it when the row can *spare* it, `width * 5 <= planning * 2`. The
+    // share is what binds here, so 134 is the first pane with 130 planning
+    // columns and 164 the first with 160. Both were predicted before the change
+    // was run and both came out exactly; 134 is also the boundary
+    // `the_widest_strip_waits_until_the_path_keeps_the_row` derives independently.
     const ACCEPTED_WALK: &[(u16, (bool, usize, usize))] = &[
         (1, (false, 0, 0)),
         (28, (true, 0, 0)),
@@ -1630,6 +1671,8 @@ fn the_glance_columns_collapse_in_one_order() {
         (45, (true, 6, 6)),
         (51, (true, 12, 6)),
         (57, (true, 12, 12)),
+        (134, (true, 24, 12)),
+        (164, (true, 24, 24)),
     ];
     let theme = theme();
     let heats = heat_colours(&theme);
@@ -1637,7 +1680,7 @@ fn the_glance_columns_collapse_in_one_order() {
     let (mut saw_all, mut saw_none) = (false, false);
     let mut seen: Vec<(u16, (bool, usize, usize))> = Vec::new();
 
-    for width in WIDTHS {
+    for width in GENEROUS_WIDTHS {
         let backend = drawn(width, 8, &view, &chrome());
         // Row 1 is the first file heading: `glancing`'s rows start at the top of
         // the body and the header owns row 0.
@@ -2581,7 +2624,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
     let long_name = Chrome {
@@ -2713,7 +2756,7 @@ fn a_clipped_content_line_says_it_continues() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
 
@@ -2750,8 +2793,13 @@ fn a_clipped_content_line_says_it_continues() {
 /// > A thing made of items breaks, a thing made of characters marks its edge,
 /// > and content is neither.
 ///
-/// A sparkline is made of items, so it drops **whole buckets** and never draws a
-/// partial one. This used to say it was observable only because [`glancing`]'s
+/// A sparkline is a **projection** since
+/// [#234](https://github.com/breferrari/vigia/issues/234), so a narrower rung
+/// sums adjacent source buckets rather than dropping the oldest;
+/// `the_sparkline_reprojects_rather_than_dropping_buckets` below is the gate for
+/// that half. What this one still owns is the half the rule shares with the hint
+/// bar and the heat strip: a strip is drawn at a **whole rung** and never at a
+/// count between two. This used to say it was observable only because [`glancing`]'s
 /// buckets are all non-zero, an empty one being a space; since
 /// [#78](https://github.com/breferrari/vigia/issues/78) an empty bucket draws
 /// the track, so the strip's width is readable off any fixture and the gate no
@@ -2761,7 +2809,7 @@ fn a_clipped_content_line_says_it_continues() {
 /// renderer's ladder against the renderer's own constant would agree with itself
 /// at every width, which is the failure the hint-bar gate already documents.
 #[test]
-fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
+fn the_sparkline_draws_whole_rungs_and_never_a_count_between_two() {
     // Counted by **colour** as well as by glyph. Until the heat strip landed a
     // sparkline was the only thing on a heading drawn from blocks, and this gate
     // counted glyphs; a heat slice is the same full block, so the count became
@@ -2771,7 +2819,7 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
     let mut seen = std::collections::BTreeSet::new();
 
     for (name, view, chrome) in cases() {
-        for width in WIDTHS {
+        for width in GENEROUS_WIDTHS {
             // **Both hoisted out of the row loop**, which is where they were:
             // neither depends on `y`, so the screen was being drawn six times per
             // width to read six of its rows. Twelve cases over a hundred and
@@ -2787,6 +2835,12 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
                     "{name}: {buckets} buckets at {width} columns, over the \
                      {HISTORY_BUCKETS} the window holds: {row:?}"
                 );
+                assert!(
+                    buckets == 0 || HISTORY_BUCKETS % buckets == 0,
+                    "{name}: {buckets} buckets at {width} columns does not divide \
+                     the {HISTORY_BUCKETS} the window holds, so one drawn bucket \
+                     covers less time than the rest: {row:?}"
+                );
                 if buckets > 0 {
                     seen.insert(buckets);
                 }
@@ -2798,10 +2852,14 @@ fn the_sparkline_drops_whole_buckets_and_never_half_of_one() {
     // rather than shortened, which is the shape the rule forbids.
     assert_eq!(
         seen,
-        [SPARK_RUNGS[1], SPARK_RUNGS[0]].into_iter().collect(),
+        SPARK_RUNGS
+            .iter()
+            .copied()
+            .filter(|rung| *rung > 0)
+            .collect(),
         "the sparkline was drawn at bucket counts {seen:?}; only whole rungs are \
-         legal, and both of them have to be reachable or the ladder has a rung \
-         no width can produce"
+         legal, and every one of them has to be reachable or the ladder has a \
+         rung no width can produce"
     );
 }
 
@@ -3323,10 +3381,19 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
 
     // Inlined rather than named: one call site, and `reserved` is what carries
     // the idea.
+    //
+    // **`SPARK_RUNGS[1]` rather than `[0]`, since
+    // [#234](https://github.com/breferrari/vigia/issues/234) put a rung above
+    // it.** This gate is about the widest **strip**, so what it has to price is
+    // the *narrowest layout that carries one*, which is the strip's top rung
+    // beside the sparkline's settled one. Pricing the widest layout instead would
+    // move this boundary to where the widest *sparkline* arrives, 164 columns,
+    // and the gate would then be asserting that the strip is absent at 140 where
+    // it is in fact drawn.
     let widest = reserved(COUNT_HALF * 2 + 1)
         + reserved(PULSE_CELLS)
         + reserved(HEAT_RUNGS[0])
-        + reserved(SPARK_RUNGS[0]);
+        + reserved(SPARK_RUNGS[1]);
     let boundary = GENEROUS_WIDTHS
         .clone()
         .find(|pane| {
@@ -4155,7 +4222,7 @@ fn overlong(rows: usize) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -4763,7 +4830,7 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
 fn three_kinds_of_line() -> View {
     View {
         rows: vec![
-            Row::File(entry("src/engine/watch.rs")),
+            Row::file(entry("src/engine/watch.rs")),
             line(LineKind::Context, 38, "    fn coalesce(&mut self) {"),
             line(LineKind::Added, 39, "        self.pending.clear();"),
             line(LineKind::Removed, 40, "        self.flush();"),
@@ -4988,9 +5055,16 @@ fn widening_never_takes_the_window_away_at_any_rung() {
     let theme = theme();
     let view = glancing();
 
+    // **`GENEROUS_WIDTHS` since
+    // [#234](https://github.com/breferrari/vigia/issues/234)**, for the reason
+    // `the_heat_strip_reprojects_rather_than_dropping_buckets` already gives: the
+    // widest rung is not reachable inside 120 columns, so the closing assertion
+    // that the sweep reached a full window would have had to be weakened to a
+    // rung instead, and a monotonicity sweep that never reaches the top is a
+    // sweep that cannot see the step onto it.
     for glyphs in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
         let mut widest = 0usize;
-        for width in WIDTHS {
+        for width in GENEROUS_WIDTHS {
             let backend = drawn_at(width, 8, &view, &chrome(), glyphs);
             let buckets = spark_slot(&backend, 1, &theme, glyphs) * glyphs.density();
             assert!(
@@ -5015,7 +5089,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
 /// *different* bucket pattern and the pattern is the whole input under test.
 fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
     View {
-        rows: vec![Row::File(FileEntry {
+        rows: vec![Row::file(FileEntry {
             path: "a.rs".to_owned(),
             from: None,
             kind: 'M',
@@ -5042,7 +5116,9 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     let backend = drawn_at(
         120,
         8,
-        &sparked([0, 0, 2, 3, 4, 6, 8, 9, 10, 11, 12, 12]),
+        &sparked([
+            0, 0, 0, 0, 2, 2, 3, 3, 4, 4, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 12, 12,
+        ]),
         &chrome(),
         Glyphs::Braille,
     );
@@ -5057,9 +5133,17 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     // every pair whose older half is quiet, which is exactly the shape a file
     // that has just started being written has: the strip would draw a track
     // over the activity a reader opened the pane to see.
+    // Doubled through the source resolution, which is what #234 made these
+    // literals: a pair of equal source buckets sums to one rung bucket of twice
+    // the value, so the *pattern* of quiet and busy halves is exactly the one
+    // this gate was written against and only the magnitudes moved.
     for pattern in [
-        [0, 12, 0, 9, 0, 6, 0, 4, 0, 8, 0, 5],
-        [12, 0, 9, 0, 6, 0, 4, 0, 8, 0, 5, 0],
+        [
+            0, 0, 12, 12, 0, 0, 9, 9, 0, 0, 6, 6, 0, 0, 4, 4, 0, 0, 8, 8, 0, 0, 5, 5,
+        ],
+        [
+            12, 12, 0, 0, 9, 9, 0, 0, 6, 6, 0, 0, 4, 4, 0, 0, 8, 8, 0, 0, 5, 5, 0, 0,
+        ],
     ] {
         let backend = drawn_at(120, 8, &sparked(pattern), &chrome(), Glyphs::Braille);
         let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
@@ -5082,7 +5166,7 @@ fn an_empty_pair_draws_the_track_and_a_written_one_does_not() {
     let tracks = cells_coloured(&backend, 1, &[track], &[empty]).len();
     assert_eq!(
         tracks,
-        HISTORY_BUCKETS / Glyphs::Braille.density(),
+        SETTLED_BUCKETS / Glyphs::Braille.density(),
         "an empty history draws a full track"
     );
 }
@@ -5103,7 +5187,9 @@ fn a_pair_takes_the_busier_buckets_band() {
     let backend = drawn_at(
         120,
         8,
-        &sparked([1, 12, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+        &sparked([
+            1, 1, 12, 12, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        ]),
         &chrome(),
         Glyphs::Braille,
     );
@@ -5119,7 +5205,9 @@ fn a_pair_takes_the_busier_buckets_band() {
     let backend = drawn_at(
         120,
         8,
-        &sparked([12, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+        &sparked([
+            12, 12, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        ]),
         &chrome(),
         Glyphs::Braille,
     );
@@ -5152,6 +5240,126 @@ fn columns_of(
         .collect()
 }
 
+/// A narrower rung shows the whole window at a lower resolution, never its tail.
+///
+/// **`SPEC.md` §11.1's ruling, reversed on 2026-08-20 and gated here**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)). The sparkline was a
+/// list and dropped whole buckets oldest first; it is a projection now, on the
+/// clause the heat strip already had, so a narrow row draws sums of adjacent
+/// source buckets. `the_heat_strip_reprojects_rather_than_dropping_buckets` makes
+/// the identical argument one element over and this is its sibling, down to the
+/// fixture: **written at both ends of the window and quiet between them**, which
+/// is the one shape where truncation and re-projection differ.
+///
+/// The hazard this exists for is that the two produce the same number of cells in
+/// the same columns, so every gate that counts a rung agrees with both. Verified
+/// by mutation before it was trusted, on the ruling's own history: when the
+/// element *did* truncate, swapping the slice for its head killed nothing across
+/// the whole workspace.
+///
+/// **`GENEROUS_WIDTHS`, because a rung it never reaches is a rung it cannot check
+/// re-projects**, and `widths_seen` is what refuses a sweep that only ever drew
+/// one of them.
+#[test]
+fn the_sparkline_reprojects_rather_than_dropping_buckets() {
+    let theme = theme();
+    let track = theme.spark_track.fg.expect("the track has a colour");
+    let bars = spark_colours(&theme);
+    let (ramp, empty) = alphabet(Glyphs::default());
+
+    // Written in the oldest two source buckets and the newest two, quiet across
+    // the middle twenty. Two rather than one at each end so the shape survives
+    // every rung: at the widest a written bucket is one source bucket, and at the
+    // narrowest four of them are summed into a drawn one.
+    let mut spark = [0u32; HISTORY_BUCKETS];
+    for at in [0, 1, HISTORY_BUCKETS - 2, HISTORY_BUCKETS - 1] {
+        spark[at] = 9;
+    }
+    let view = View {
+        scale: Scale::flat(9),
+        ..sparked(spark)
+    };
+
+    let mut widths_seen = std::collections::BTreeSet::new();
+    for width in GENEROUS_WIDTHS {
+        let backend = drawn(width, 8, &view, &chrome());
+        let mut slot: Vec<(u16, char)> = columns_of(&backend, 1, &bars, &ramp)
+            .into_iter()
+            .map(|x| (x, 's'))
+            .chain(
+                columns_of(&backend, 1, &[track], &[empty])
+                    .into_iter()
+                    .map(|x| (x, 't')),
+            )
+            .collect();
+        if slot.is_empty() {
+            continue;
+        }
+        slot.sort_unstable();
+        widths_seen.insert(slot.len());
+        let drawn: String = slot.iter().map(|&(_, class)| class).collect();
+
+        // The claim truncation fails, from both ends at once. A tail leaves the
+        // oldest drawn bucket on the track; a head leaves the newest there.
+        assert!(
+            drawn.starts_with('s'),
+            "at {width} columns the oldest drawn bucket is track, but the \
+             fixture writes the oldest end of the window, so the strip is \
+             showing a suffix rather than the whole of it: {drawn:?}"
+        );
+        assert!(
+            drawn.ends_with('s'),
+            "at {width} columns the newest drawn bucket is track, so the strip \
+             is showing a prefix: {drawn:?}"
+        );
+        // And the middle is still visibly quiet, or the projection smeared the
+        // ends across the window and the strip stopped locating anything in time.
+        assert!(
+            drawn.contains('t'),
+            "at {width} columns every drawn bucket is written, so a window busy \
+             only at its ends is being drawn as one busy throughout: {drawn:?}"
+        );
+    }
+
+    assert_eq!(
+        widths_seen,
+        SPARK_RUNGS
+            .iter()
+            .copied()
+            .filter(|rung| *rung > 0)
+            .collect(),
+        "the strip was drawn at bucket counts {widths_seen:?}; every rung has to \
+         be reachable or the sweep checked re-projection at one of them and \
+         reported it of all"
+    );
+}
+
+/// The width the published picture is measured from still draws what it drew.
+///
+/// **`the_pictured_width_still_draws_twelve_slices`' sibling, and
+/// [#234](https://github.com/breferrari/vigia/issues/234) is what made it
+/// needed.** Twelve buckets was the whole window, so the claim was true at every
+/// width and nothing could break it. It is a **rung** now, so it is true at a
+/// width, and the width worth pinning is the one `assets/preview.svg` is measured
+/// from: what this refuses is a share rule that let the new top rung arrive under
+/// the pictured pane, which would move the published picture without moving a
+/// single boundary the walk gate watches.
+#[test]
+fn the_pictured_width_still_draws_the_settled_sparkline_rung() {
+    let theme = theme();
+    let buckets = spark_slot(
+        &drawn(PICTURED_PANE, 8, &glancing(), &chrome()),
+        1,
+        &theme,
+        Glyphs::default(),
+    );
+
+    assert_eq!(
+        buckets, SETTLED_BUCKETS,
+        "at the {PICTURED_PANE} columns `assets/preview.svg` is measured from,          the sparkline drew {buckets} buckets where it has always drawn          {SETTLED_BUCKETS}"
+    );
+}
+
 #[test]
 fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     // **The gap, which is the only thing that can see a miscounted advance.**
@@ -5169,7 +5377,9 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     let bars = spark_colours(&theme);
     // Buckets all busy, so every cell of the strip is a bar and the leftmost one
     // is the slot's own left edge rather than a track the bar colours miss.
-    let view = sparked([12, 12, 11, 10, 9, 8, 6, 5, 4, 3, 2, 1]);
+    let view = sparked([
+        12, 12, 12, 12, 11, 11, 10, 10, 9, 9, 8, 8, 6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1,
+    ]);
 
     // **Swept, and the first draft was not.** At 120 columns the widest rung is
     // drawn, where a slot mis-measured in buckets happens to be clamped back to
@@ -5234,7 +5444,9 @@ fn the_block_rung_spells_an_empty_bucket_with_its_own_track() {
     let backend = drawn(
         120,
         8,
-        &sparked([0, 0, 2, 3, 4, 6, 8, 9, 10, 11, 12, 12]),
+        &sparked([
+            0, 0, 0, 0, 2, 2, 3, 3, 4, 4, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 12, 12,
+        ]),
         &chrome(),
     );
 
@@ -5267,8 +5479,10 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
 
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         let view = View {
-            scale: 0,
-            ..sparked([1, 1, 2, 2, 4, 5, 6, 7, 8, 9, 11, 12])
+            scale: Scale::flat(0),
+            ..sparked([
+                1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 11, 11, 12, 12,
+            ])
         };
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, empty) = alphabet(glyphs);
@@ -5287,9 +5501,15 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
     }
 }
 
-/// Cells a full window occupies at `glyphs`, restated for [`RAMP`]'s reason.
+/// Cells the settled rung occupies at `glyphs`, restated for [`RAMP`]'s reason.
+///
+/// **The rung rather than the window since
+/// [#234](https://github.com/breferrari/vigia/issues/234)**: every caller here
+/// draws at 120 columns, which is under the 134 the top rung needs at a dense
+/// glyph, so what fills the slot is [`SETTLED_BUCKETS`] and reading
+/// [`HISTORY_BUCKETS`] would be asserting the width of a rung no caller reaches.
 fn spark_cells_for(glyphs: Glyphs) -> usize {
-    HISTORY_BUCKETS.div_ceil(glyphs.density())
+    SETTLED_BUCKETS.div_ceil(glyphs.density())
 }
 
 #[test]
@@ -5310,7 +5530,9 @@ fn a_dense_strip_draws_its_buckets_at_different_heights() {
         // answer. Quiet buckets of 1 do not separate those two spellings, so a
         // gate built on them passes against a rung that has lost its middle
         // entirely: 4 and 12 do.
-        let view = sparked([4, 4, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4]);
+        let view = sparked([
+            4, 4, 4, 4, 12, 12, 12, 12, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        ]);
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, _) = alphabet(glyphs);
         let bars = spark_colours(&theme());
@@ -5361,7 +5583,9 @@ fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
     for glyphs in [Glyphs::Braille, Glyphs::Octant] {
         // Every pair is one empty bucket beside a full one, so every drawn cell
         // must be the glyph for (0, top) and never (1, top).
-        let view = sparked([0, 12, 0, 12, 0, 12, 0, 12, 0, 12, 0, 12]);
+        let view = sparked([
+            0, 0, 12, 12, 0, 0, 12, 12, 0, 0, 12, 12, 0, 0, 12, 12, 0, 0, 12, 12, 0, 0, 12, 12,
+        ]);
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, _) = alphabet(glyphs);
         let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)

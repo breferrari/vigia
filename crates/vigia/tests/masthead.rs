@@ -241,7 +241,7 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
     };
     View {
         list: vec![entry.clone()],
-        rows: vec![Row::File(entry)],
+        rows: vec![Row::file(entry)],
         files: 1,
         worktree_churn: Churn(series),
         ..View::default()
@@ -292,6 +292,108 @@ fn band_at(width: u16, series: [u32; HISTORY_SAMPLES], glyphs: Glyphs) -> Vec<St
                 .collect::<String>()
         })
         .collect()
+}
+
+/// The band's period against a drawn sparkline bucket's, read off one screen.
+///
+/// **The comparison the retired ceiling used to make, reinstated in the form
+/// that survives #232** ([#234](https://github.com/breferrari/vigia/issues/234)).
+/// `vigia-core` once asserted `GRAPH_PERIOD < HISTORY_BUCKET`: two elements read
+/// one store over one window and a reader has both on screen, so a burst that
+/// splits in a file's sparkline and merges in the worktree band at the same
+/// instant is incoherent. That gate went with the constants it read, because the
+/// band's period stopped being a constant and became a property of the pane, and
+/// nothing has compared the two since.
+///
+/// So it is compared where both are now decided, on the screen. The band plots
+/// one value per sub-column and the sparkline one per drawn bucket, both across
+/// the same window, so **finer** means *more of them*: the band may never carry
+/// fewer sub-columns than the sparkline carries buckets.
+///
+/// Read from the drawn cells rather than from either ladder, for this suite's
+/// standing reason. The band's row is solid because #232 gave it an axis, so its
+/// ink is its cells; the fixture's file has no history, so its whole slot is
+/// track and `TRACK` counts it. The path in `banded` carries no underscore, which
+/// is what makes that count the slot rather than the row, and this asserts it
+/// rather than trusting it.
+#[test]
+fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
+    /// The sparkline's empty bucket at the block rung, restated for
+    /// `WINDOW_SAMPLES`' reason.
+    const TRACK: char = '_';
+
+    let shown = Chrome {
+        masthead: true,
+        ..chrome(&App::new())
+    };
+    assert!(
+        !banded(BURSTY).list[0].path.contains(TRACK),
+        "the fixture's path carries an underscore, which this gate counts as a \
+         sparkline bucket"
+    );
+
+    let mut compared = 0usize;
+    for glyphs in [Glyphs::Block, Glyphs::Braille] {
+        for width in 40u16..=200 {
+            let area = Rect::new(0, 0, width, TALL);
+            let body = body_layout(area, &shown, 1);
+            if body.graph == 0 {
+                continue;
+            }
+            let mut buf = Buffer::empty(area);
+            render(
+                &mut buf,
+                area,
+                &banded(BURSTY),
+                &Theme::default(),
+                glyphs,
+                &shown,
+            );
+
+            // **The bottom band row, which is the axis and is solid since
+            // #232.** Every row above it is a height and carries only the columns
+            // tall enough to reach it, so counting one of those would measure the
+            // series rather than the graph.
+            let top = 1 + body.lead as u16;
+            let axis = top + body.graph as u16 - 1;
+            let cells = (0..width)
+                .filter(|x| !buf[(*x, axis)].symbol().trim().is_empty())
+                .count();
+            // The first row under the band that draws a track, which is the
+            // fixture's one file: its history is empty, so its whole slot is
+            // track and nothing else on that row can be.
+            let empty = glyphs.glyph(0, 0).to_string();
+            let Some(buckets) = (axis + 1..area.height)
+                .map(|y| {
+                    (0..width)
+                        .filter(|x| buf[(*x, y)].symbol() == empty)
+                        .count()
+                })
+                .find(|found| *found > 0)
+            else {
+                continue;
+            };
+            compared += 1;
+
+            // **Compared in cells, and the density cancels rather than being
+            // omitted.** The claim is sub-columns against buckets, and a dense
+            // glyph packs two of each into one cell, so the same factor stands on
+            // both sides. Writing it out would be arithmetic that reads as a
+            // conversion and converts nothing.
+            assert!(
+                cells >= buckets,
+                "{glyphs:?} at {width} columns: the band carries {cells} cells \
+                 where the sparkline draws {buckets}, so the worktree graph is \
+                 coarser than a per-file bucket and one burst can split in one \
+                 element while merging in the other"
+            );
+        }
+    }
+
+    assert!(
+        compared > 0,
+        "no width drew both elements, so this gate compared nothing"
+    );
 }
 
 /// A worktree written in bursts, which is the shape #223 was reported on.

@@ -17,10 +17,18 @@ use std::collections::HashSet;
 
 use ratatui::style::{Color, Style};
 use vigia::{
-    Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Theme, View,
-    render,
+    Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Scale, Theme,
+    View, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
+
+/// Buckets a sparkline draws on the panes this file renders at.
+///
+/// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)). That constant is the
+/// resolution the shell projects *from*; what a row draws is the rung its pane
+/// affords, which is twelve at every width here.
+const DRAWN_BUCKETS: usize = 12;
 
 /// The heat strip's slice, restated rather than imported: a test sharing the
 /// renderer's constant agrees with it by construction instead of checking it.
@@ -84,7 +92,7 @@ fn three_kinds() -> View {
         total_rows: 0,
         rows_above: 0,
         rows: vec![
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "src/a.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -114,7 +122,7 @@ fn three_kinds() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -670,7 +678,7 @@ fn graded_heat() -> View {
         current_span: 0,
         total_rows: 0,
         rows_above: 0,
-        rows: vec![Row::File(FileEntry {
+        rows: vec![Row::file(FileEntry {
             path: "src/a.rs".to_owned(),
             from: None,
             kind: 'M',
@@ -682,7 +690,7 @@ fn graded_heat() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -792,17 +800,19 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
 /// zero: a zero peak is the empty-store path and draws nothing but track.
 fn climbing() -> View {
     View {
-        rows: vec![Row::File(FileEntry {
+        rows: vec![Row::file(FileEntry {
             path: "src/a.rs".to_owned(),
             from: None,
             kind: 'M',
             churn: Some((12, 0)),
-            spark: [0, 0, 1, 1, 2, 2, 3, 4, 5, 7, 9, 12],
+            spark: [
+                0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 5, 7, 7, 9, 9, 12, 12,
+            ],
             recency: Recency::Cold,
             heat: [HeatBucket::default(); HEAT_BUCKETS],
         })],
         files: 1,
-        scale: 12,
+        scale: Scale::spread(12),
         worktree_churn: Default::default(),
         ..View::default()
     }
@@ -1103,9 +1113,11 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     // match everything.
     let mut view = three_kinds();
     if let Row::File(entry) = &mut view.rows[0] {
-        entry.spark = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
+        entry.spark = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3,
+        ];
     }
-    view.scale = 3;
+    view.scale = Scale::flat(3);
 
     let flat = Theme::dark().resolve(Depth::None);
     assert_eq!(
@@ -1142,9 +1154,9 @@ fn a_sparkline_track_is_told_from_a_bucket_with_no_colour_at_all() {
     );
     assert_eq!(
         track,
-        HISTORY_BUCKETS - 1,
-        "the seven empty buckets did not draw a track with colour off, so \
-         nothing separates them from the written one on a `NO_COLOR` terminal"
+        DRAWN_BUCKETS - 1,
+        "every drawn bucket but the written one failed to draw a track with \
+         colour off, so nothing separates them from it on a `NO_COLOR` terminal"
     );
 }
 

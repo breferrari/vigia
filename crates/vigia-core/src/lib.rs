@@ -61,7 +61,7 @@ pub use highlight::{
 };
 pub use history::{
     Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
-    History, HistoryStats, Recency, scale_of,
+    History, HistoryStats, Recency, SPARK_GROUPS, scale_of,
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
