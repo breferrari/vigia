@@ -34,9 +34,19 @@ use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
     Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row,
-    Theme, View, body_layout, diff_height, regions, render,
+    Scale, Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
+
+/// Buckets a sparkline draws on the panes this file renders at.
+///
+/// **Restated rather than imported, and no longer [`HISTORY_BUCKETS`]**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)). That constant is the
+/// resolution the shell projects *from*; what a row draws is the rung its pane
+/// affords, which is twelve from fifty-seven columns up and is every screen here.
+/// A gate reading the renderer's own ladder would agree with it by construction,
+/// which is this suite's standing rule for every rung table.
+const DRAWN_BUCKETS: usize = 12;
 
 /// The mark the renderer writes where a row runs past its edge.
 ///
@@ -366,7 +376,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -432,7 +442,7 @@ fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
 /// exactly the way the shared type exists to prevent. Two of the call sites
 /// below build the same file for both regions of one screen.
 fn file(path: &str, added: u32, removed: u32) -> Row {
-    Row::File(entry(path, added, removed))
+    Row::file(entry(path, added, removed))
 }
 
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
@@ -471,7 +481,7 @@ fn one_file() -> View {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -635,7 +645,7 @@ fn nothing_changed() -> View {
         files: 0,
         top: Position::default(),
         read: 0,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -869,7 +879,9 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
         from: None,
         kind: 'M',
         churn: Some((added, removed)),
-        spark: [0, 0, 0, 0, 1, 2, 3, 5, 8, 5, 9, 12],
+        spark: [
+            0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 5, 5, 8, 8, 5, 5, 9, 9, 12, 12,
+        ],
         recency: Recency::Cold,
         heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
     }
@@ -881,7 +893,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
 /// on #77: every list fixture in this file gave every row the same churn, so
 /// right-packing and columns drew identically and the defect was invisible.
 fn ragged_counts() -> View {
-    let row = |path: &str, added: u32, removed: u32| Row::File(listed(path, added, removed));
+    let row = |path: &str, added: u32, removed: u32| Row::file(listed(path, added, removed));
     View {
         list: vec![
             listed("src/engine/watch.rs", 139, 131),
@@ -896,7 +908,7 @@ fn ragged_counts() -> View {
         files: 3,
         top: Position::default(),
         read: 1,
-        scale: 12,
+        scale: Scale::spread(12),
         worktree_churn: Default::default(),
     }
 }
@@ -994,7 +1006,7 @@ fn counting_rows(backend: &TestBackend, rows: std::ops::Range<u16>) -> Vec<u16> 
 /// that is about something else.
 fn streamed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
     view.rows.iter().filter_map(|row| match row {
-        Row::File(entry) => Some(entry),
+        Row::File(entry) => Some(entry.as_ref()),
         _ => None,
     })
 }
@@ -1582,7 +1594,7 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
         rows: entries[..files.min(entries.len())]
             .iter()
             .cloned()
-            .map(Row::File)
+            .map(Row::file)
             .collect(),
         files,
         total_rows: files,
@@ -2047,7 +2059,7 @@ fn a_file_with_no_line_diff_says_why() {
         total_rows: 0,
         rows_above: 0,
         rows: vec![
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -2057,7 +2069,7 @@ fn a_file_with_no_line_diff_says_why() {
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Note("binary"),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "src/merge.rs".to_owned(),
                 from: None,
                 kind: 'U',
@@ -2067,7 +2079,7 @@ fn a_file_with_no_line_diff_says_why() {
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Note("unresolved conflict"),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -2080,7 +2092,7 @@ fn a_file_with_no_line_diff_says_why() {
         files: 3,
         top: Position::default(),
         read: 3,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
@@ -2105,7 +2117,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
@@ -2139,7 +2151,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
@@ -2415,7 +2427,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
@@ -2449,7 +2461,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
 
@@ -2500,7 +2512,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         files: 1,
         top: Position::default(),
         read: 1,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     };
 
@@ -2581,11 +2593,11 @@ fn hostile_content_never_panics_at_any_pane_size() {
         current_span: 400,
         total_rows: 400,
         rows_above: 0,
-        rows: vec![Row::File(saturated)],
+        rows: vec![Row::file(saturated)],
         files: 2,
         top: Position::default(),
         read: 1,
-        scale: u32::MAX,
+        scale: Scale::flat(u32::MAX),
         worktree_churn: Default::default(),
     };
 
@@ -2625,7 +2637,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
     };
     let view = View {
         list: vec![renamed.clone()],
-        rows: vec![Row::File(renamed)],
+        rows: vec![Row::file(renamed)],
         files: 1,
         ..ragged_counts()
     };
@@ -3020,28 +3032,32 @@ fn glancing() -> View {
         total_rows: 0,
         rows_above: 0,
         rows: vec![
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "src/engine/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
                 churn: Some((42, 7)),
-                spark: [0, 0, 0, 0, 1, 2, 3, 5, 8, 5, 9, 12],
+                spark: [
+                    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 5, 5, 8, 8, 5, 5, 9, 9, 12, 12,
+                ],
                 recency: Recency::Pulse,
                 // Additions at the head, a mixed slice in the middle, removals
                 // at the tail. One row carrying all three kinds plus the track,
                 // which is what the colour gate below reads.
                 heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
             }),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "src/render/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
                 churn: Some((11, 3)),
-                spark: [0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0],
+                spark: [
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
                 recency: Recency::Live,
                 heat: heat(&[(3, 2, 1)]),
             }),
-            Row::File(FileEntry {
+            Row::file(FileEntry {
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -3054,7 +3070,7 @@ fn glancing() -> View {
         files: 3,
         top: Position::default(),
         read: 3,
-        scale: 12,
+        scale: Scale::spread(12),
         worktree_churn: Default::default(),
     }
 }
@@ -3147,7 +3163,7 @@ fn launched() -> View {
             entry.recency = Recency::Cold;
         }
     }
-    view.scale = 0;
+    view.scale = Scale::flat(0);
     view
 }
 
@@ -3175,8 +3191,8 @@ fn a_worktree_already_dirty_at_launch_draws_a_track_on_every_row() {
         let track = track_at(&backend, y, &theme);
         assert_eq!(
             track.len(),
-            HISTORY_BUCKETS,
-            "row {y} drew {} track cells where the slot is {HISTORY_BUCKETS} \
+            DRAWN_BUCKETS,
+            "row {y} drew {} track cells where the slot is {DRAWN_BUCKETS} \
              wide, so a file with no history is still leaving part of its \
              column blank: {track:?}",
             track.len()
@@ -3230,14 +3246,14 @@ fn the_first_tick_after_launch_moves_no_column() {
         entry.spark[HISTORY_BUCKETS - 1] = 1;
         entry.recency = Recency::Pulse;
     }
-    view.scale = 1;
+    view.scale = Scale::flat(1);
     let after = screen(80, 6, &view, &chrome());
 
-    // The written file: seven track cells and one bucket, and the bucket is the
-    // top of the ramp because it is the busiest thing on screen.
+    // The written file: every drawn bucket but the newest is track, and that one
+    // is the top of the ramp because it is the busiest thing on screen.
     assert_eq!(
         track_at(&after, 1, &theme).len(),
-        HISTORY_BUCKETS - 1,
+        DRAWN_BUCKETS - 1,
         "the file that was just written did not keep the rest of its window as \
          track"
     );
@@ -3250,7 +3266,7 @@ fn the_first_tick_after_launch_moves_no_column() {
     for y in [2, 3] {
         assert_eq!(
             track_at(&after, y, &theme).len(),
-            HISTORY_BUCKETS,
+            DRAWN_BUCKETS,
             "row {y} stopped drawing its track when a *different* file was \
              written"
         );
@@ -3295,7 +3311,8 @@ fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
         entry.spark = [3; HISTORY_BUCKETS];
     }
     assert_eq!(
-        view.scale, 0,
+        view.scale,
+        Scale::flat(0),
         "the fixture stopped being the inconsistent one"
     );
 
@@ -3303,7 +3320,7 @@ fn a_peak_that_disagrees_with_its_buckets_draws_rather_than_dividing_by_it() {
     let backend = screen(80, 5, &view, &chrome());
     assert_eq!(
         track_at(&backend, 1, &theme).len(),
-        HISTORY_BUCKETS,
+        DRAWN_BUCKETS,
         "a bucket with no scale to measure it against drew something other than \
          the track"
     );
@@ -3326,13 +3343,13 @@ fn a_bucket_busier_than_the_screens_peak_draws_the_top_and_not_a_panic() {
     if let Row::File(entry) = &mut view.rows[0] {
         entry.spark = [u32::MAX; HISTORY_BUCKETS];
     }
-    view.scale = 1;
+    view.scale = Scale::flat(1);
 
     let theme = Theme::default();
     let backend = screen(80, 5, &view, &chrome());
     assert_eq!(
         blocks_of(&backend, 1, &spark_colours(&theme)),
-        vec!['█'; HISTORY_BUCKETS],
+        vec!['█'; DRAWN_BUCKETS],
         "a bucket far busier than the screen's peak did not simply top out"
     );
 }
@@ -3401,7 +3418,9 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
     let theme = Theme::default();
     let mut view = glancing();
     if let Row::File(entry) = &mut view.rows[0] {
-        entry.spark = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        entry.spark = [
+            1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12,
+        ];
     }
     let backend = screen(80, 5, &view, &chrome());
     let buffer = backend.buffer();
@@ -3409,7 +3428,7 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
     let slot = bars_at(&backend, 1, &theme);
     assert_eq!(
         slot.len(),
-        HISTORY_BUCKETS,
+        DRAWN_BUCKETS,
         "row 1 was given a bucket in every slice so its bars would locate the \
          slot, and it drew {} of them: {slot:?}",
         slot.len()
@@ -3432,25 +3451,36 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
 }
 
 #[test]
-fn a_narrowed_sparkline_keeps_the_newest_buckets_and_drops_the_oldest() {
-    // **The one property of the narrow rung nothing could see.** At the widths
-    // where the sparkline halves, `Painter::file_row` draws `strip[8 - n..]`, the
-    // *tail* of the window, because dropping buckets means dropping the oldest
-    // and the oldest are on the left. Drawing `strip[..n]` instead is the same
-    // number of cells in the same columns, so every gate that counts a rung
-    // agrees with both, and every fixture in this file is drawn at a width where
-    // the slot is 8 or 0 and the two slices are identical.
+fn a_narrowed_sparkline_covers_the_whole_window_rather_than_its_tail() {
+    // **The one property of the narrow rung nothing could see**, and it is the
+    // opposite property since [#234](https://github.com/breferrari/vigia/issues/234).
+    // At the widths where the sparkline halves, `Painter::file_row` used to draw
+    // the *tail* of the window, so a narrow pane showed the newest half and said
+    // nothing about the rest; `spark_of` re-projects now, summing adjacent source
+    // buckets so a narrower rung is a lower resolution of the whole window. That
+    // change is invisible to every gate that counts a rung, because it is the
+    // same number of cells in the same columns.
     //
-    // Verified by mutation before it was written: swapping the slice for its
-    // head killed **nothing** across the whole workspace. Widths 42 to 51 are the
-    // band where the rung is four, measured rather than assumed.
+    // The original was verified by mutation before it was written: swapping the
+    // slice for its head killed **nothing** across the whole workspace. The same
+    // hazard applies to this one, which is why the fixture is written at **both
+    // ends** and quiet between them, the one shape where truncation and
+    // re-projection differ. `the_heat_strip_reprojects_rather_than_dropping_buckets`
+    // makes the identical argument one element over.
     //
-    // Row 2 holds `[0, 0, 0, 2, 1, 0, 0, 0]`. Its newest four are `[1, 0, 0, 0]`,
-    // which draws bar-then-track; its oldest four are `[0, 0, 0, 2]`, which draws
-    // track-then-bar. The two are each other's reverse, so this cannot pass
-    // against the wrong end.
+    // Forty-five columns is the six-bucket rung, which groups four source buckets
+    // into each drawn one. Written at source buckets 0, 1, 22 and 23, the drawn
+    // strip is bar, track, track, track, track, bar. A tail would draw four
+    // tracks then two bars; a head, two bars then four tracks. Neither is this.
     let theme = Theme::default();
-    let backend = screen(45, 5, &glancing(), &chrome());
+    let mut view = glancing();
+    if let Row::File(entry) = &mut view.rows[1] {
+        entry.spark = [0; HISTORY_BUCKETS];
+        for at in [0, 1, HISTORY_BUCKETS - 2, HISTORY_BUCKETS - 1] {
+            entry.spark[at] = 9;
+        }
+    }
+    let backend = screen(45, 5, &view, &chrome());
 
     let mut slot: Vec<(u16, char)> = track_at(&backend, 2, &theme)
         .into_iter()
@@ -3461,15 +3491,16 @@ fn a_narrowed_sparkline_keeps_the_newest_buckets_and_drops_the_oldest() {
 
     assert_eq!(
         slot.len(),
-        HISTORY_BUCKETS / 2,
-        "45 columns is meant to be the half rung, so this fixture is no \
-         longer exercising the narrow slice at all: {slot:?}"
+        DRAWN_BUCKETS / 2,
+        "45 columns is meant to be the six-bucket rung, so this fixture is no \
+         longer exercising a narrowed strip at all: {slot:?}"
     );
     let drawn: String = slot.iter().map(|&(_, class)| class).collect();
     assert_eq!(
-        drawn, "sttttt",
-        "the narrowed strip drew {drawn:?}; \"sttttt\" is the newest six buckets \
-         and \"ttttts\" is the oldest six, so this is the wrong end of the window"
+        drawn, "stttts",
+        "the narrowed strip drew {drawn:?}; \"ttttss\" is the newest six source \
+         buckets and \"sstttt\" the oldest six, so the window is being \
+         truncated rather than re-projected"
     );
 }
 
@@ -3600,7 +3631,7 @@ fn a_sparkline_scales_against_the_busiest_file_not_itself() {
     );
     assert_eq!(
         track_at(&backend, 3, &Theme::default()).len(),
-        HISTORY_BUCKETS,
+        DRAWN_BUCKETS,
         "a file with no churn drew no track either, so its column is blank"
     );
 }
@@ -3745,7 +3776,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         files: 3,
         top: Position { file: current, row },
         read: 4,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -4176,7 +4207,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         files,
         top: Position::default(),
         read: 2,
-        scale: 0,
+        scale: Scale::flat(0),
         worktree_churn: Default::default(),
     }
 }
@@ -6449,7 +6480,7 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
     // 30 columns for three-digit numbers.
     let body = |total_rows: usize| View {
         rows: vec![
-            Row::File(listed("src/engine/watch.rs", 42, 7)),
+            Row::file(listed("src/engine/watch.rs", 42, 7)),
             line(LineKind::Added, 258, "    pub fn advance(&mut self) {"),
         ],
         list: Vec::new(),
@@ -6518,7 +6549,7 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
                     listed("src/engine/watch.rs", 42, 7),
                     listed("src/render/frame.rs", 11, 3),
                 ],
-                rows: vec![Row::File(listed("src/engine/watch.rs", 42, 7))],
+                rows: vec![Row::file(listed("src/engine/watch.rs", 42, 7))],
                 files: 40,
                 total_rows: 4_000,
                 ..ragged_counts()

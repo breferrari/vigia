@@ -331,12 +331,16 @@ fn a_bucket_of_elapsed_time_slides_the_column_by_one() {
 #[test]
 fn each_drawn_bucket_covers_a_whole_share_of_the_window() {
     // **The period the spec names, gated where it is computed.** `SPEC.md`
-    // §11.1 says a drawn bucket is ten seconds and a band column eight, and both
-    // are divisions of one window by one constant. A `const` block already
-    // refuses a division that is not exact; this refuses one that is exact and
-    // wrong, which is the case that would leave the spec's numbers false while
-    // everything still compiled.
-    assert_eq!(HISTORY_BUCKET, Duration::from_secs(10));
+    // §5.1 says a source bucket is five seconds, and it is a division of one
+    // window by one constant. A `const` block already refuses a division that is
+    // not exact; this refuses one that is exact and wrong, which is the case that
+    // would leave the spec's numbers false while everything still compiled.
+    //
+    // **Five since [#234](https://github.com/breferrari/vigia/issues/234)**, from
+    // ten, because this constant became the resolution the shell projects *from*
+    // rather than the one it draws: the drawn period is this times the source
+    // buckets a rung groups, so it is ten seconds at the settled rung still.
+    assert_eq!(HISTORY_BUCKET, Duration::from_secs(5));
 
     // And it tiles the window, which is what makes a drawn bucket mean the same
     // amount of time wherever it sits.
@@ -766,10 +770,19 @@ fn a_single_burst_draws_a_wave_rather_than_a_spike() {
 ///
 /// **This is what defends the constant.** A level is a trade between shape and
 /// resolution, and a kernel wide enough to make one burst pretty will merge two.
-/// Measured across candidates, the trough between two bursts thirty seconds
-/// apart sits at 0.40 of the peak at eight seconds, 0.52 at ten and 0.61 at
-/// twelve, where they stop being two things. Half is the line, and this gate is
-/// what fails if the constant is raised past it.
+/// Measured across candidates on this gate's own fixture, the trough between two
+/// bursts thirty seconds apart sits at **0.23** of the peak at six seconds, 0.39
+/// at eight, 0.52 at ten and 0.62 at twelve, where they stop being two things.
+/// Half is the line, and this gate is what fails if the constant is raised past
+/// it.
+///
+/// **Re-derived at the finer source resolution**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)), because these
+/// numbers are read through a bucket and the bucket halved. They moved in the
+/// direction that matters and not the one that decides: six seconds went from
+/// 0.36 to 0.23, so the shipped constant has half again the margin it was
+/// credited with, while the *line* is where it was, between eight seconds and
+/// ten. A finer bucket smears less, which is the whole of it.
 #[test]
 fn two_bursts_thirty_seconds_apart_still_read_as_two() {
     let now = base();

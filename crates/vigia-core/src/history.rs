@@ -70,38 +70,98 @@ use std::time::{Duration, Instant};
 /// number here rather than two that could disagree.
 pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
 
-/// Buckets a sparkline is drawn from, oldest first.
+/// The resolution a sparkline is projected **from**, oldest bucket first.
 ///
-/// Eight, which is what the strip costs in columns. `SPEC.md` §11.1 makes a
-/// sparkline a thing made of items, so at narrow widths it drops whole buckets
-/// rather than being squeezed, and eight halves cleanly on the way down.
+/// **The source rather than the drawn count, since
+/// [#234](https://github.com/breferrari/vigia/issues/234)**, which is what
+/// `HEAT_BUCKETS` has been for the heat strip since
+/// [#161](https://github.com/breferrari/vigia/issues/161). The shell's
+/// `SPARK_RUNGS` halves this on the way down and sums adjacent buckets onto the
+/// rung a pane affords, so a narrow row draws the whole window at a lower
+/// resolution rather than the newest slice of it. `SPEC.md` §11.1 carries that
+/// ruling and the one it amends.
 ///
-/// **This is what one element *draws*, and since
+/// **Twenty-four, and it is the only count available.** The rungs have to halve,
+/// or a strip shedding one bucket at a time leaves widths where the picture is
+/// neither the window nor an obvious fraction of it; and twelve has to stay on
+/// the ladder, because twelve is what every pane wide enough for a sparkline and
+/// narrower than the new top rung draws today. Of the divisions of
+/// [`HISTORY_SAMPLES`] above twelve, only twenty-four gives `24 → 12 → 6`.
+///
+/// **What a finer source buys is columns rather than a finer period, which is
+/// the opposite of what the row asking for it expected.** Measured over forty
+/// seeded series in three work patterns, twelve buckets of five seconds draws
+/// *fewer* distinct heights than twelve of ten: 5.25 against 5.75 on a steady
+/// worktree, 6.20 against 6.35 on a bursty one. Twenty-four of five draws 6.72
+/// and 7.40. So [#223](https://github.com/breferrari/vigia/issues/223)'s
+/// "distinct heights peak near four to five seconds" was taken with the column
+/// count moving with the period, and it is the columns the shape follows.
+///
+/// **This is what one element *draws from*, and since
 /// [#198](https://github.com/breferrari/vigia/issues/198) it is no longer what
 /// the store *samples*.** The two were the same number for two phases, and the
-/// reason was this docblock's own first sentence: a sampling rate chosen from one
-/// element's column count. [`HISTORY_SAMPLES`] is the sampling rate now and
-/// [`History::churn`] projects one onto the other, so this constant keeps its
-/// exact meaning and its exact value.
-pub const HISTORY_BUCKETS: usize = 12;
+/// reason was a sampling rate chosen from one element's column count.
+/// [`HISTORY_SAMPLES`] is the sampling rate, and [`History::churn`] projects one
+/// onto the other.
+///
+/// **Still not an I10 change.** That row bounds the window and the path cap, and
+/// how finely the window is divided sits underneath both. The store's sample
+/// rate is untouched at 120, and twenty-four divides it exactly.
+pub const HISTORY_BUCKETS: usize = 24;
 
-// Twelve since 2026-08-18 ([#161](https://github.com/breferrari/vigia/issues/161)),
-// from eight, and the reason is the one the band's own period was tuned against one
-// element over. A bucket was fifteen seconds, which is coarse enough that a
-// steady worktree drew only five and a half of the ramp's nine rungs and the
-// strip read as a solid block rather than a shape. Ten seconds is finer without
-// crossing into the scatter the band was reported for: measured over forty
-// seeded series, a steady worktree goes from 8% of buckets empty to 17% and from
-// 5.5 distinct heights to 6.5, which is more texture rather than more noise.
+// Eight until 2026-08-18, then twelve
+// ([#161](https://github.com/breferrari/vigia/issues/161)), then twenty-four
+// ([#234](https://github.com/breferrari/vigia/issues/234)), and the three steps
+// were argued from three different things. Eight was one element's column count.
+// Twelve was a period: a fifteen-second bucket is coarse enough that a steady
+// worktree drew five and a half of the ramp's nine rungs, which is a block rather
+// than a shape, and ten seconds took it to 6.5 without crossing into scatter.
+// Twenty-four is neither, because a *rung* has no single period: it is the widest
+// division the ladder can halve twice through twelve.
 //
-// **Twelve rather than fifteen**, and the band's floor was the reason until
-// #232 retired it. What survives is about this element: it has to halve cleanly,
-// because `SPARK_RUNGS` is the narrowing ladder and fifteen does not; and the
-// sparkline is per file and shares its row with a path, where the band has the
-// pane to itself, so four more columns here cost something the
-// band's do not.
+// **Twelve rather than fifteen was ruled on the band's floor, and that floor was
+// retired the same day by #232.** What outlived it is the halving requirement,
+// which is why fifteen is still not available and twenty-four is.
 
-/// How much time one **drawn** bucket covers.
+/// Source buckets one **drawn** bucket may cover, finest first.
+///
+/// **The halving ladder the shell narrows on, seen from the store's side**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)). A row draws
+/// `HISTORY_BUCKETS / group` buckets, each the sum of `group` source ones, so
+/// this table and `render::SPARK_RUNGS` are one ladder written from two ends and
+/// a `const` block over there asserts they agree.
+///
+/// **It lives here because what it decides is a *scale*, not a width.** A drawn
+/// bucket summing four source buckets has to be measured against what four
+/// source buckets are worth, and [`scale_of`] is not linear in the grouping: it
+/// averages the **non-empty** values, and grouping merges empties into their
+/// neighbours. Multiplying one figure by the group is therefore an estimate that
+/// is exact on a busy worktree and wrong by up to the group on a quiet one, which
+/// is the state this element exists to report. Measured before it was believed:
+/// on a sparse fixture the estimate moved 59 of 2400 cells and the worst moved by
+/// **four rungs of the eight-level ramp**. So [`History`] computes one figure per
+/// grouping, in the walk it already makes.
+pub const SPARK_GROUPS: [usize; 3] = [1, 2, 4];
+
+const _: () = {
+    let mut at = 0;
+    while at < SPARK_GROUPS.len() {
+        assert!(
+            HISTORY_BUCKETS % SPARK_GROUPS[at] == 0,
+            "a sparkline grouping does not divide the source resolution, so a \
+             drawn bucket would cover less time than its neighbours"
+        );
+        at += 1;
+    }
+};
+
+/// How much time one **source** bucket covers, which is the finest a rung draws.
+///
+/// **A rung's own period is this times the buckets it groups**, since
+/// [#234](https://github.com/breferrari/vigia/issues/234): five seconds at the
+/// widest rung, ten at the settled one, twenty at the narrowest. Every rung
+/// covers the whole window, which is what makes this a resolution rather than a
+/// span.
 pub const HISTORY_BUCKET: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_BUCKETS as u64);
 
@@ -119,6 +179,15 @@ pub const HISTORY_BUCKET: Duration =
 // The measurement is not lost, only re-aimed: what it found is that the shape
 // lives in the *distinct heights*, and those collapse when columns coarsen.
 // Coarsening was the thing being tuned, and it is gone.
+//
+// **What that left open is closed by [#234](https://github.com/breferrari/vigia/issues/234),
+// and the replacement is a bound rather than an absence.** `GRAPH_PERIOD` was
+// what stopped a drawn bucket going finer than a band column; with it gone the
+// two elements are still read side by side over one store, so what has to agree
+// is the **window** they cover. The band covers all of it at every width, and
+// since #234 so does the sparkline at every rung. `SPEC.md` §11.1 states it and
+// `crates/vigia/tests/masthead.rs` gates the comparison the retired constant
+// used to make.
 
 /// Samples the store keeps per path, oldest first.
 ///
@@ -134,8 +203,8 @@ pub const HISTORY_BUCKET: Duration =
 /// paths are kept.
 ///
 /// **One hundred and twenty, so a sample is exactly one second** and exactly
-/// ten of them make one drawn bucket. Both divisions are exact, which is what
-/// keeps [`HISTORY_BUCKET`] an honest ten seconds rather than a rounding of
+/// five of them make one source bucket. Both divisions are exact, which is what
+/// keeps [`HISTORY_BUCKET`] an honest five seconds rather than a rounding of
 /// one: a projection that did not divide evenly would make some drawn columns
 /// cover more time than others, and a sparkline compared down a list would be
 /// comparing unequal windows.
@@ -156,7 +225,7 @@ pub const HISTORY_SAMPLES: usize = 120;
 const HISTORY_SAMPLE: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
 
-/// How many samples one drawn bucket is the sum of.
+/// How many samples one source bucket is the sum of.
 ///
 /// **Exact, and asserted at compile time rather than by a test**, because a test
 /// is the wrong instrument here twice over: the constants are private, so the
@@ -176,7 +245,7 @@ const SAMPLES_PER_BUCKET: usize = HISTORY_SAMPLES / HISTORY_BUCKETS;
 const _: () = {
     assert!(
         HISTORY_SAMPLES % HISTORY_BUCKETS == 0,
-        "the samples do not divide into the drawn buckets, so a drawn column \
+        "the samples do not divide into the source buckets, so a drawn column \
          would cover more time than its neighbours"
     );
     assert!(
@@ -271,12 +340,21 @@ pub struct Churn(pub [u32; HISTORY_SAMPLES]);
 ///
 /// **Six seconds, and the number is a trade rather than a taste.** A wider
 /// kernel draws a prettier single burst and merges two nearby ones. Measured
-/// against the aggregation these values are actually read through, a sum of ten
-/// smoothed samples per drawn bucket, two bursts thirty seconds apart leave a
-/// trough at 0.36 of the peak here and 0.54 at eight seconds, where they stop
-/// being two things. Half is the line, and
+/// against the aggregation these values are actually read through, a sum of five
+/// smoothed samples per source bucket, two bursts thirty seconds apart leave a
+/// trough at **0.23** of the peak here, 0.39 at eight seconds, 0.52 at ten and
+/// 0.62 at twelve, where they stop being two things. Half is the line, and
 /// `tests/history.rs::two_bursts_thirty_seconds_apart_still_read_as_two` is what
 /// fails if this is raised past it.
+///
+/// **Re-derived when the source halved**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)) rather than carried
+/// over, because every one of those numbers is read through a bucket. This
+/// docblock and the gate's also used to quote *different* figures for eight
+/// seconds, 0.54 against 0.40, having been taken from two fixtures; they are one
+/// measurement on one fixture now. The constant did not move and its margin
+/// improved: a finer bucket smears less, so six seconds is 0.23 where it was
+/// 0.36.
 ///
 /// **Derived twice, and the first derivation was wrong in a way worth keeping.**
 /// Modelled against a *maximum* per bucket it read as eight seconds; the drawn
@@ -288,7 +366,7 @@ pub const HISTORY_LEVEL: Duration = Duration::from_secs(6);
 /// [`HISTORY_LEVEL`] in samples, which is what the filter actually steps in.
 const LEVEL_SAMPLES: f64 = HISTORY_LEVEL.as_nanos() as f64 / HISTORY_SAMPLE.as_nanos() as f64;
 
-/// Sum a retained series into the buckets a sparkline draws.
+/// Sum a retained series into the source buckets a sparkline is drawn from.
 ///
 /// Shared by [`Track::drawn`] and [`Track::levelled`] so the two differ only in
 /// the series handed to them. Reconstructing a whole `Track` to reuse the loop
@@ -489,6 +567,17 @@ pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
         .fold((0u64, 0u64), |(sum, busy), value| {
             (sum + u64::from(value), busy + 1)
         });
+    scale_from(sum, busy)
+}
+
+/// [`scale_of`] once the walk is already done, for a caller accumulating several
+/// figures over one pass.
+///
+/// **Split out rather than written twice**, because [`History::repeak`] computes
+/// one of these per [`SPARK_GROUPS`] entry from a single walk of the levelled
+/// buckets, and a second copy of the thirteen-tenths rule is a rule that can move
+/// in one place and not the other.
+fn scale_from(sum: u64, busy: u64) -> u32 {
     if busy == 0 {
         return 0;
     }
@@ -562,13 +651,20 @@ impl Track {
         self.samples.iter().rev().all(|&count| count == 0)
     }
 
-    /// The samples summed into the buckets a sparkline draws, oldest first.
+    /// The samples summed into the source buckets a sparkline is drawn from,
+    /// oldest first.
     ///
     /// **A projection re-projects; it does not drop items.** That is `heat_at`'s
     /// ruling in the shell, and it is the whole of why raising the sampling rate
-    /// leaves the sparkline where it was: every drawn column is the sum of the
+    /// leaves the sparkline where it was: every column is the sum of the
     /// [`SAMPLES_PER_BUCKET`] samples covering exactly the seconds it always
     /// covered, so the same writes land in the same column.
+    ///
+    /// **This is one projection of two since
+    /// [#234](https://github.com/breferrari/vigia/issues/234).** The shell groups
+    /// these again onto the rung a pane affords, by the same rule and for the
+    /// same reason, so what a reader sees is the whole window at whatever
+    /// resolution the row can hold.
     ///
     /// Saturating, for [`Track::bump`]'s reason one level up: a column summing
     /// past its type is already at the top of the ramp, and wrapping would draw the
@@ -690,8 +786,9 @@ pub struct History {
     tick: u64,
     /// When the newest **sample** opened, which is the grid the window rolls on.
     opened: Instant,
-    /// What a drawn bucket's height is divided by. See [`scale_of`].
-    scale: u32,
+    /// What a drawn bucket's height is divided by, one figure per
+    /// [`SPARK_GROUPS`] entry. See [`scale_of`].
+    scales: [u32; SPARK_GROUPS.len()],
     /// Every tracked path added together, kept current by the walk that finds
     /// the peak. See [`History::worktree_churn`].
     worktree: Churn,
@@ -714,7 +811,7 @@ impl History {
             tracks: HashMap::new(),
             tick: 0,
             opened: now,
-            scale: 0,
+            scales: [0; SPARK_GROUPS.len()],
             worktree: Churn::default(),
             stats: HistoryStats::default(),
         }
@@ -836,7 +933,7 @@ impl History {
     }
 
     /// This path's churn read as a **level** rather than as the writes that made
-    /// it, in the same drawn buckets [`History::churn`] returns.
+    /// it, in the same source buckets [`History::churn`] returns.
     ///
     /// The sparkline's half of [#242](https://github.com/breferrari/vigia/issues/242),
     /// and it shares one kernel with the worktree band so the two cannot
@@ -858,7 +955,15 @@ impl History {
         }
     }
 
-    /// What a drawn bucket's height is divided by, across every tracked path.
+    /// What a **source** bucket's height is divided by, across every tracked path.
+    ///
+    /// **A caller drawing a coarser rung scales this with it**, since
+    /// [#234](https://github.com/breferrari/vigia/issues/234): a drawn column
+    /// summing `n` source buckets is measured against `n` times this figure, so a
+    /// wider bucket is compared with a proportionally wider yardstick rather than
+    /// saturating against a narrow one. That keeps a rung a change of resolution
+    /// and not of height, which is what makes the ladder invisible to a reader
+    /// who never resizes.
     ///
     /// Rows share one denominator rather than each being drawn against its own
     /// maximum, because the question a reader asks across a file list is which
@@ -881,7 +986,22 @@ impl History {
     /// still drawn. The constraint this states is arithmetic and belongs here;
     /// what to draw is the shell's and belongs in `SPEC.md` §5.1.
     pub fn scale(&self) -> u32 {
-        self.scale
+        self.scales[0]
+    }
+
+    /// Every figure [`SPARK_GROUPS`] names, in that order.
+    ///
+    /// **What a caller drawing a coarser rung needs**, since
+    /// [#234](https://github.com/breferrari/vigia/issues/234): a drawn bucket is
+    /// the sum of `group` source ones, and the figure it is measured against is
+    /// this one rather than [`History::scale`] multiplied, for the reason
+    /// [`SPARK_GROUPS`] states with the measurement behind it.
+    ///
+    /// Handed back whole rather than one at a time, so the shell holds a
+    /// consistent set from one tick rather than three reads that could straddle
+    /// two.
+    pub fn scales(&self) -> [u32; SPARK_GROUPS.len()] {
+        self.scales
     }
 
     /// Paths currently tracked. Never more than [`HISTORY_PATHS`].
@@ -916,7 +1036,7 @@ impl History {
             self.stats.evicted_by_window += self.tracks.len() as u64;
             self.tracks.clear();
             self.opened = now;
-            self.scale = 0;
+            self.scales = [0; SPARK_GROUPS.len()];
             return;
         }
 
@@ -985,7 +1105,7 @@ impl History {
         self.worktree
     }
 
-    /// Recompute the busiest drawn bucket and the worktree series, in one walk.
+    /// Recompute the busiest source bucket and the worktree series, in one walk.
     ///
     /// **Two results from one pass, which is why the series is free.** This
     /// already had to touch every sample of every track to find the peak, so
@@ -1029,7 +1149,27 @@ impl History {
         // taken over the raw buckets while the bars are drawn from the levelled
         // ones is two different quantities in one division, and every bar on
         // screen would be wrong by whatever the kernel moved.
-        self.scale = scale_of(self.tracks.values().flat_map(Track::levelled));
+        //
+        // **One figure per [`SPARK_GROUPS`] entry, from the one walk**, since
+        // [#234](https://github.com/breferrari/vigia/issues/234). The kernel is
+        // what costs here and it runs once per track either way; what the ladder
+        // adds is two more folds over twenty-four `u32`s that are already in
+        // cache. Scaling a single figure by the grouping instead was measured and
+        // rejected, and that constant's docblock carries the number.
+        let mut parts = [(0u64, 0u64); SPARK_GROUPS.len()];
+        for track in self.tracks.values() {
+            let buckets = track.levelled();
+            for (part, group) in parts.iter_mut().zip(SPARK_GROUPS) {
+                for chunk in buckets.chunks(group) {
+                    let total = chunk.iter().copied().fold(0u32, u32::saturating_add);
+                    if total > 0 {
+                        part.0 += u64::from(total);
+                        part.1 += 1;
+                    }
+                }
+            }
+        }
+        self.scales = std::array::from_fn(|at| scale_from(parts[at].0, parts[at].1));
         self.worktree = Churn(worktree);
     }
 }

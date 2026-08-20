@@ -36,12 +36,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span, scale_of};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span, scale_of};
 
 use crate::glyphs::Glyphs;
 use crate::input::{Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
-use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, View};
+use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, Scale, View};
 
 /// Columns a tab advances to the next multiple of.
 ///
@@ -168,12 +168,67 @@ pub const HINT_SEPARATOR: &str = " · ";
 
 /// How many buckets a sparkline may show, widest rung first.
 ///
-/// A sparkline is **a thing made of items**, so `SPEC.md` §11.1 makes it break
-/// rather than mark an edge: it drops whole buckets, oldest first, and never
-/// draws a partial one. Halving keeps the remaining strip readable as a shape,
-/// where shaving one bucket at a time would leave widths where the picture is
-/// neither the full window nor an obvious fraction of it.
-const SPARK_RUNGS: [usize; 3] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, 0];
+/// **A sparkline is a projection rather than a list**, ruled 2026-08-20
+/// ([#234](https://github.com/breferrari/vigia/issues/234)), so `SPEC.md` §11.1
+/// has a narrower rung sum adjacent source buckets and draw the whole window at a
+/// lower resolution. It dropped whole buckets oldest first until then, which is
+/// the misdescription the heat strip's own clause refuses one axis over: the
+/// churn band draws the whole window across the masthead, so a strip beside it
+/// showing the newest half of that window is a shorter window presented as the
+/// window.
+///
+/// Halving, so the sum is exact and every drawn bucket covers the same span, and
+/// so a narrowed strip is an obvious fraction of the picture rather than a shaved
+/// one.
+const SPARK_RUNGS: [usize; 4] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, HISTORY_BUCKETS / 4, 0];
+
+// **Asserted rather than documented, for [`HEAT_RUNGS`]'s reason exactly.**
+// [`spark_of`] groups `HISTORY_BUCKETS / rung` and chunks by it, so a rung that
+// leaves a remainder draws a short final group carrying fewer source buckets than
+// its neighbours. That group is the **newest**, so the one column a reader looks
+// at to see whether anything is happening now would be the one covering less
+// time, with nothing failing. `SPARK_RUNGS` is derived from [`HISTORY_BUCKETS`]
+// today and this is what keeps that true if a rung is ever written out by hand.
+const _: () = {
+    let mut rung = 0;
+    while rung < SPARK_RUNGS.len() {
+        assert!(
+            SPARK_RUNGS[rung] == 0 || HISTORY_BUCKETS % SPARK_RUNGS[rung] == 0,
+            "a sparkline rung does not divide the source resolution, so its \
+             newest column would cover less time than the rest"
+        );
+        rung += 1;
+    }
+};
+
+// **And the two ends of one ladder are asserted to be one ladder.**
+// [`SPARK_GROUPS`] is this table seen from the store's side, because the *scale*
+// a drawn bucket is measured against is decided there while its *width* is
+// decided here. Written out separately they can drift, and the drift is silent: a
+// row would draw the right number of buckets against a denominator set for a
+// different width, which is a height rather than a layout and no width sweep can
+// see it. [`Scale::at`] falls back rather than panicking precisely because this
+// holds.
+const _: () = {
+    assert!(
+        SPARK_RUNGS.len() == SPARK_GROUPS.len() + 1,
+        "the rung table and the grouping table are not one ladder plus the rung \
+         that draws nothing"
+    );
+    let mut at = 0;
+    while at < SPARK_GROUPS.len() {
+        assert!(
+            SPARK_RUNGS[at] == HISTORY_BUCKETS / SPARK_GROUPS[at],
+            "a rung and its grouping disagree, so a drawn bucket would be \
+             measured against a denominator set for a different width"
+        );
+        at += 1;
+    }
+    assert!(
+        SPARK_RUNGS[SPARK_RUNGS.len() - 1] == 0,
+        "the ladder no longer ends in the rung that draws nothing"
+    );
+};
 
 /// Columns `buckets` of sparkline occupy at this rung.
 ///
@@ -192,7 +247,7 @@ const fn spark_cells(buckets: usize, glyphs: Glyphs) -> usize {
 
 // **The rounding is asserted rather than only documented, because nothing that
 // runs can reach it.** Every rung of [`SPARK_RUNGS`] is even while
-// [`HISTORY_BUCKETS`] is eight, so `div_ceil` and a plain division agree on
+// [`HISTORY_BUCKETS`] is even, so `div_ceil` and a plain division agree on
 // every input the renderer can produce: swapping one for the other is a mutation
 // the whole suite survives, and a claim no gate can fail is a wish. A `const`
 // block is the right instrument precisely because the case is unreachable at
@@ -1872,40 +1927,36 @@ const COUNT_CELL: usize = 5;
 /// the pulse, and the counts last, because they are the row's content rather
 /// than a signal drawn beside it.
 ///
-/// Six drops for six steps. Two rungs have left this table and neither moved a
-/// boundary under it, which is a property of where they sat rather than luck.
-/// The counts' *width* was one, and it is gone because [`COUNT_CELL`] no longer
-/// has a narrow rung to give up: every row here carries the same cell. The
-/// pulse's *label* was the other, and it opened the ladder, so removing it only
-/// removed the widest layout: a layout's width is the sum of its own slots, and
-/// none of the six left changed. The table is eight entries since #161, and that
-/// sentence is about the six the pulse's label left behind rather than about the
-/// table's length today.
+/// Two rungs have left this table and neither moved a boundary under it, which
+/// is a property of where they sat rather than luck. The counts' *width* was one,
+/// and it is gone because [`COUNT_CELL`] no longer has a narrow rung to give up:
+/// every row here carries the same cell. The pulse's *label* was the other, and
+/// it opened the ladder, so removing it only removed the widest layout: a
+/// layout's width is the sum of its own slots, and none of the six below it
+/// changed.
 ///
-/// **The top row is above the settled ladder and the step below it gives up the
-/// *strip's* resolution rather than the sparkline's**, which amends the drop
-/// order stated above at its top end only
-/// ([#161](https://github.com/breferrari/vigia/issues/161)). The strip is the
-/// element that gained a rung, so the strip's resolution is what the step below
-/// the top gives up.
+/// **Nine entries since [#234](https://github.com/breferrari/vigia/issues/234),
+/// and the drop order stated above is now true from top to bottom.** #161 had
+/// amended it at the top end: the sparkline had no rung above its widest to give
+/// up, so the step below the top gave up the *strip's* resolution instead. The
+/// sparkline has one now, so the two elements alternate all the way down and the
+/// amendment retires with the reason for it.
 ///
-/// **The reason recorded here was that the sparkline had nowhere to grow, and it
-/// is retired** ([#232](https://github.com/breferrari/vigia/issues/232)). It rested
-/// on the band drawing a fixed period, which made a drawn bucket coarser than a
-/// band column by construction and twelve the largest division that cleared it.
-/// The band draws one value per sub-column now, so its period follows the pane
-/// and is finer than a drawn bucket at every width. The bound is gone rather than
-/// replaced, and the question it closed is reopened as
-/// [#234](https://github.com/breferrari/vigia/issues/234) rather than given a
-/// second reason for the same answer.
-const ROW_LAYOUTS: [Columns; 8] = [
+/// **The rungs above [`SETTLED`] are added and nothing below moves, by
+/// construction rather than by a sweep.** A new layout is wider than `SETTLED` by
+/// definition, and [`Columns::plan`]'s share is floored at `SETTLED`'s own width,
+/// so every width that had a layout keeps exactly the one it had. That is the
+/// mechanism; `tests/legibility.rs::the_glance_columns_collapse_in_one_order` is
+/// the evidence, and the two are not the same claim.
+const ROW_LAYOUTS: [Columns; 9] = [
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[0]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[0], SPARK_RUNGS[1]),
     SETTLED,
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[1]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[2]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[3], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[3], SPARK_RUNGS[2]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[3]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[3], SPARK_RUNGS[3]),
+    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[3], SPARK_RUNGS[3]),
     Columns::NOTHING,
 ];
 
@@ -1924,7 +1975,7 @@ const ROW_LAYOUTS: [Columns; 8] = [
 /// false, with only a distant gate catching it and blaming the wrong thing.
 /// Written out here and referenced from [`ROW_LAYOUTS`], the two cannot disagree
 /// however the table is edited.
-const SETTLED: Columns = Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[0]);
+const SETTLED: Columns = Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]);
 
 /// The share of a row the glance elements may take, above the settled ladder.
 ///
@@ -2320,8 +2371,12 @@ impl Band {
     /// because the multiplication is what would overflow, not the counts: a slice
     /// is a sum of `u16` pairs and a large file's busiest slice times three does
     /// not fit the type the counts arrive in.
-    fn of(total: u32, busiest: u32) -> Self {
-        let (total, busiest) = (u64::from(total), u64::from(busiest));
+    ///
+    /// **`busiest` arrives already widened**, for [`level_to`]'s reason: the
+    /// sparkline's yardstick is the store's figure times the source buckets a
+    /// rung groups, and that product is what leaves `u32`.
+    fn of(total: u32, busiest: u64) -> Self {
+        let total = u64::from(total);
         if total * 3 >= busiest * 2 {
             Self::Hot
         } else if total * 3 >= busiest {
@@ -2381,7 +2436,7 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
     summed
         .iter()
         .map(|bucket| {
-            let band = Band::of(bucket.total(), busiest);
+            let band = Band::of(bucket.total(), u64::from(busiest));
             match (bucket.added > 0, bucket.removed > 0) {
                 (false, false) => Heat::Cool,
                 (true, false) => Heat::Added(band),
@@ -2481,29 +2536,48 @@ impl Bucket {
 ///
 /// Rounded **up**, so any non-zero count reaches at least the first level: a
 /// write that drew as empty would be a write the element failed to report.
-fn level_to(total: u32, scale: u32, levels: usize) -> usize {
+///
+/// **`scale` is a `u64` where the store hands one out as a `u32`**, because
+/// [`spark_of`] multiplies it by the source buckets a rung groups and
+/// [`scale_of`] saturates at `u32::MAX`. Widening the parameter is cheaper than
+/// a saturating multiply at the call site, and it is the arithmetic rather than
+/// the caller that would have been wrong.
+fn level_to(total: u32, scale: u64, levels: usize) -> usize {
     if scale == 0 || total == 0 || levels == 0 {
         return 0;
     }
-    let scaled = (total as u64 * levels as u64).div_ceil(scale as u64) as usize;
+    let scaled = (total as u64 * levels as u64).div_ceil(scale) as usize;
     scaled.clamp(1, levels)
 }
 
-/// A path's buckets, packed into the cells this rung draws them in.
+/// A path's window, re-projected onto `rung` buckets and packed into the cells
+/// those buckets are drawn in.
 ///
-/// **Only the first `spark_cells(HISTORY_BUCKETS, glyphs)` entries are
-/// meaningful.** At a dense rung four cells carry all eight buckets and the tail
-/// stays `Empty`, so a caller iterating the whole array paints spurious track
-/// cells. The count is derivable from `glyphs` alone rather than returned,
-/// because returning it made every caller destructure a pair to learn something
-/// it already knew.
+/// **Only the first `spark_cells(rung, glyphs)` entries are meaningful.** At a
+/// dense rung one cell carries two buckets and the tail stays `Empty`, so a
+/// caller iterating the whole array paints spurious track cells. The count is
+/// derivable from `rung` and `glyphs` rather than returned, because returning it
+/// made every caller destructure a pair to learn something it already knew.
 ///
-/// `scale` is the busiest bucket **anywhere on the screen**, so two rows drawn
-/// side by side can be compared by height. A bucket with anything in it is never
-/// blank: it takes the lowest block, because "one write" and "no writes" are the
-/// distinction the strip exists to make and rounding the first down to nothing
-/// would erase it. A bucket with nothing in it takes `SPARK_TRACK`, which is
-/// what keeps that distinction a matter of *shape*.
+/// **A narrower rung re-projects rather than dropping**
+/// ([#234](https://github.com/breferrari/vigia/issues/234)): `rung` divides
+/// [`HISTORY_BUCKETS`], and each drawn bucket is the sum of the source buckets
+/// under it, so every rung covers the whole window at a lower resolution. It took
+/// a suffix until then, which drew the newest half of the window beside a churn
+/// band drawing all of it. `heat_at` is the same projection one element over, and
+/// `SPEC.md` §11.1 now rules them together.
+///
+/// `scale` is [`scale_of`]'s figure over every bucket of every **tracked path**,
+/// so two rows drawn side by side can be compared by height and a row scrolling
+/// into view cannot rescale the ones already there. **It carries one figure per
+/// rung**, because a drawn bucket summing `group` source buckets has to be
+/// measured against what `group` source buckets are worth, and that is not the
+/// finest figure multiplied: [`Scale`] and `vigia_core::SPARK_GROUPS` carry the
+/// measurement that settled it. A bucket with
+/// anything in it is never blank: it takes the lowest block, because "one write"
+/// and "no writes" are the distinction the strip exists to make and rounding the
+/// first down to nothing would erase it. A bucket with nothing in it takes
+/// `SPARK_TRACK`, which is what keeps that distinction a matter of *shape*.
 ///
 /// **Total, where this returned an `Option` before
 /// [#78](https://github.com/breferrari/vigia/issues/78).** There is no longer a
@@ -2514,7 +2588,8 @@ fn level_to(total: u32, scale: u32, levels: usize) -> usize {
 /// every launch.
 fn spark_of(
     buckets: &[u32; HISTORY_BUCKETS],
-    scale: u32,
+    rung: usize,
+    scale: Scale,
     glyphs: Glyphs,
 ) -> [Bucket; HISTORY_BUCKETS] {
     let mut drawn = [Bucket::Empty; HISTORY_BUCKETS];
@@ -2523,15 +2598,37 @@ fn spark_of(
     // inside the loop, because the two say different things: this is "there is
     // no scale yet", and the loop's `busiest == 0` is "this cell is empty on a
     // screen that has one".
-    if scale == 0 {
+    //
+    // A rung of zero is the row that draws no strip at all, and it leaves before
+    // the division that would be by zero.
+    let group = if rung == 0 { 0 } else { HISTORY_BUCKETS / rung };
+    let yardstick = u64::from(scale.at(group));
+    if yardstick == 0 || rung == 0 {
         return drawn;
+    }
+    // **Summed into the rung first, then packed into cells**, which is two
+    // projections rather than one and they answer different questions: the first
+    // is how much of the window one drawn bucket covers, the second is how many
+    // buckets one terminal cell can hold. `SPARK_RUNGS`'s `const` block is what
+    // makes the division exact, so no group is short and the newest column covers
+    // the same span as the rest.
+    //
+    // Saturating, for `heat_at`'s reason verbatim: a group summing past its type
+    // is already at the top of the ramp, and wrapping would draw the busiest file
+    // in the worktree as the quietest.
+    let mut summed = [0u32; HISTORY_BUCKETS];
+    for (at, chunk) in buckets.chunks(group).enumerate() {
+        summed[at] = chunk.iter().copied().fold(0, u32::saturating_add);
     }
     // **One loop at every rung, and the density is the only thing that moves.**
     // A block cell holds one bucket and a dense cell holds two, which is a
     // chunk width rather than a second algorithm: the levels, the band and the
     // track rule are identical either side, and the glyph is
     // [`Glyphs::glyph`]'s business.
-    for (cell, pair) in drawn.iter_mut().zip(buckets.chunks(glyphs.density())) {
+    for (cell, pair) in drawn
+        .iter_mut()
+        .zip(summed[..rung].chunks(glyphs.density()))
+    {
         let (left, right) = (pair[0], pair.get(1).copied().unwrap_or(0));
         // **The busier of the pair decides both**, and at the block rung the
         // pair is one bucket so this is that bucket. A `Cell` carries a single
@@ -2547,13 +2644,13 @@ fn spark_of(
         // **Through [`level_to`], which is where the rounding rule lives.**
         // Written twice, the rule that keeps one write from drawing as empty
         // could move at one rung and not the other.
-        let level = |count: u32| level_to(count, scale, glyphs.levels());
+        let level = |count: u32| level_to(count, yardstick, glyphs.levels());
         // **Against the same `scale` the heights are scaled from**, which is
         // `scale_of`'s figure over every bucket on screen rather than over this
         // file. Height and
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
-        let band = Band::of(busiest, scale);
+        let band = Band::of(busiest, yardstick);
         *cell = Bucket::Written(glyphs.glyph(level(left), level(right)), band);
     }
     drawn
@@ -4339,11 +4436,11 @@ impl Painter<'_> {
             // this is a plain index rather than a second copy of that mapping.
             let at = |sub: usize| series[cell * density + sub];
             let (older, newer) = (at(0), at(density - 1));
-            let full = |total: u32| level_to(total, scale, rows * levels);
+            let full = |total: u32| level_to(total, u64::from(scale), rows * levels);
             let (left, right) = (full(older), full(newer));
             // Against the same denominator the heights are scaled from, so
             // colour and shape say one thing at one scale.
-            let band = Band::of(older.max(newer), scale);
+            let band = Band::of(older.max(newer), u64::from(scale));
             for row in 0..rows {
                 // Drawn bottom up, so `row` counts from the baseline and the
                 // buffer's `y` counts down from the top.
@@ -5116,7 +5213,7 @@ impl Painter<'_> {
         &mut self,
         area: Rect,
         heading: &Heading<'_>,
-        scale: u32,
+        scale: Scale,
         columns: &Columns,
         current: bool,
     ) {
@@ -5173,8 +5270,9 @@ impl Painter<'_> {
         past(&mut right, counts_width(columns.cell));
 
         // Drawn right to left, so each block knows where the one outside it
-        // ended. The strip drawn is the **tail** of the window: dropping buckets
-        // means dropping the oldest, and the oldest are on the left.
+        // ended. The strip drawn is the **whole** window at every rung since
+        // [#234](https://github.com/breferrari/vigia/issues/234); it used to be
+        // the tail of one, and the oldest were on the left.
         //
         // **Unconditional past the width check**, where this used to skip a row
         // whose file had no history: since
@@ -5201,46 +5299,55 @@ impl Painter<'_> {
             // `SPARK_RUNGS` derives every rung from `HISTORY_BUCKETS`, but
             // `ROW_LAYOUTS` is a hand-written table and `Columns::new` takes a
             // bare `usize`.
+            //
+            // **Divides rather than merely fits, since
+            // [#234](https://github.com/breferrari/vigia/issues/234)**, because
+            // [`spark_of`] groups `HISTORY_BUCKETS / rung`: a rung that fitted
+            // without dividing would leave a short newest group covering less time
+            // than the rest, and a rung above the window would divide to zero.
             debug_assert!(
-                columns.spark <= HISTORY_BUCKETS,
-                "a layout asked for {} sparkline buckets where the window holds \
-                 {HISTORY_BUCKETS}",
+                columns.spark > 0 && HISTORY_BUCKETS % columns.spark == 0,
+                "a layout asked for {} sparkline buckets, which does not divide \
+                 the {HISTORY_BUCKETS} the window holds",
                 columns.spark
             );
+            // **Counted in cells rather than buckets, which is the one thing the
+            // glyph rung changes here.** `columns.spark` is a resolution of the
+            // *window*, and how many columns that costs is the terminal's
+            // business: at a dense rung twenty-four buckets arrive in twelve
+            // cells, so a strip measured in buckets would advance the cursor
+            // twice as far as it drew and slide every element left of it.
+            let strip = spark_of(heading.spark, columns.spark, scale, self.glyphs);
+            // The cells `spark_of` actually filled. **This rung rather than the
+            // whole window since
+            // [#234](https://github.com/breferrari/vigia/issues/234)**: the
+            // projection happens in there now, so a narrower rung fills fewer
+            // cells with wider buckets instead of filling the same cells and
+            // handing back a tail to slice.
+            //
             // **Clamped as well as asserted, because the assert is not in the
             // binary that ships.** `debug_assert!` compiles out under
             // `--release`, and `[profile.release]` sets `panic = "abort"`, so a
-            // rung wider than the window would wrap the subtraction below, index
-            // the slice out of range, and take the process down without
-            // restoring the terminal: I8's failure reached by the one path that
-            // skips its handler. The assert keeps the message a developer needs
-            // and this keeps the promise a reader needs.
+            // rung wider than the window would index the slice out of range and
+            // take the process down without restoring the terminal: I8's failure
+            // reached by the one path that skips its handler. The assert keeps
+            // the message a developer needs and this keeps the promise a reader
+            // needs.
             //
-            // **Clamped to the room as well as to the window.** `Columns::plan`
-            // guarantees `right.width` exceeds every reserved slot, so the two
-            // clamps are the same number today. They are not the same *promise*:
-            // one says the strip fits the window, the other says it fits the
-            // rect it was handed. The third term is unreachable today, since
-            // `Painter::list` passes the same `inner` width `plan` used and
-            // moves `x` rather than the width. It stays because what it guards
-            // is arithmetic rather than a claim about callers: a bare
-            // subtraction does not even panic in release, since `u16` wraps,
-            // `x` lands near the top of the range and `x + offset` wraps back
-            // into the pane, so a strip wider than its rect would draw in the
-            // wrong column rather than not at all. The heat strip below has the
-            // identical expression.
-            // **Counted in cells rather than buckets, which is the one thing the
-            // glyph rung changes here.** `columns.spark` is a slice of the
-            // *window*, and how many columns that costs is the terminal's
-            // business: at a dense rung eight buckets arrive in four cells, so a
-            // strip measured in buckets would advance the cursor twice as far as
-            // it drew and slide every element left of it.
-            let strip = spark_of(heading.spark, scale, self.glyphs);
-            // The whole window in cells, which is what `strip` actually holds,
-            // against the slot this width was planned for. They differ at every
-            // rung below the widest, and the smaller is what may be drawn.
-            let filled = spark_cells(HISTORY_BUCKETS, self.glyphs);
-            let take = slot.min(filled).min(right.width as usize);
+            // **Clamped to the room as well, and that is a second promise rather
+            // than the same one twice.** `Columns::plan` guarantees `right.width`
+            // exceeds every reserved slot, so the two are the same number today;
+            // one says the strip fits what was projected, the other says it fits
+            // the rect it was handed. The room term is unreachable today, since
+            // `Painter::list` passes the same `inner` width `plan` used and moves
+            // `x` rather than the width. It stays because what it guards is
+            // arithmetic rather than a claim about callers: a bare subtraction
+            // does not even panic in release, since `u16` wraps, `x` lands near
+            // the top of the range and `x + offset` wraps back into the pane, so
+            // a strip wider than its rect would draw in the wrong column rather
+            // than not at all. The heat strip below has the identical expression.
+            let filled = slot.min(spark_cells(HISTORY_BUCKETS, self.glyphs));
+            let take = filled.min(right.width as usize);
             let x = right.x + right.width.saturating_sub(take as u16);
             for (offset, bucket) in strip[filled - take..filled].iter().enumerate() {
                 // Both out of the one value, which is [`Bucket`]'s whole reason.
@@ -5264,9 +5371,9 @@ impl Painter<'_> {
         // only in the impossible case the clamp exists for, and there the layout
         // is what everything left of this must agree with: the slot was reserved
         // at the planned width, so the cursor moves past the planned width or
-        // every element inside it shifts. A rung wider than the window would
-        // then draw eight cells in a wider slot and leave the remainder blank,
-        // which is a degraded row rather than a corrupted one.
+        // every element inside it shifts. A rung the projection could not fill
+        // would then draw what it had in a wider slot and leave the remainder
+        // blank, which is a degraded row rather than a corrupted one.
         past(&mut right, slot);
 
         // Unguarded, because `heat_at` opens by returning nothing for a zero

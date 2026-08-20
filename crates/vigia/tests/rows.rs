@@ -23,9 +23,7 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{
-    App, Body, FileEntry, Glyphs, Position, Row, Theme, View, Viewport, body_layout, render,
-};
+use vigia::{App, Body, Glyphs, Position, Row, Scale, Theme, View, Viewport, body_layout, render};
 use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
@@ -206,7 +204,8 @@ fn a_file_is_its_heading_then_its_hunks() {
     let mut headings = 0usize;
     for (index, row) in view.rows.iter().enumerate() {
         match row {
-            Row::File(FileEntry { churn, .. }) => {
+            Row::File(entry) => {
+                let churn = &entry.churn;
                 headings += 1;
                 assert!(
                     matches!(view.rows.get(index + 1), Some(Row::Hunk { .. })),
@@ -281,9 +280,7 @@ fn each_kind_of_change_gets_its_own_letter() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            Row::File(FileEntry {
-                kind, path, from, ..
-            }) => Some((*kind, path.clone(), from.clone())),
+            Row::File(entry) => Some((entry.kind, entry.path.clone(), entry.from.clone())),
             _ => None,
         })
         .collect();
@@ -478,6 +475,20 @@ fn a_real_repository_draws() {
 
 #[test]
 fn a_recorded_tick_reaches_the_drawn_sparkline() {
+    /// The figure the store answers with at each grouping, finest first.
+    ///
+    /// **Three since [#234](https://github.com/breferrari/vigia/issues/234)**,
+    /// where this pinned one number. The middle entry is that number: `4_667` was
+    /// measured over twelve buckets, and twelve buckets is what a drawn one holds
+    /// at the settled rung, so the value did not move, it acquired an index.
+    ///
+    /// **And the set is what the gate is now for.** `2_333` and `7_779` are not
+    /// `4_667` halved and doubled, which is exactly the point: `scale_of`
+    /// averages the non-empty values and grouping merges empties into their
+    /// neighbours, so the coarsest figure is 17% under what multiplying would
+    /// have given. A store that returned one figure three times, or one figure
+    /// scaled by the grouping, fails here.
+    const PINNED: [u32; 3] = [2_333, 4_667, 7_779];
     // **The producer, not the decider.** `spark_of` and the painter are mutation
     // tested from every side in `render.rs`, and every one of those fixtures
     // hands `View` a `peak` by hand. Nothing drove a *recorded* one through
@@ -542,7 +553,8 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     // because this gate's whole point is that the value differs from every
     // constant a hardcode would reach for, and it still does.
     assert_eq!(
-        view.scale, 4_667,
+        view.scale,
+        Scale(PINNED),
         "the recorded ticks did not reach the view's shared scale"
     );
 
@@ -610,7 +622,7 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     assert!(
         matches!(
             view.rows.first(),
-            Some(Row::File(FileEntry { churn: None, .. }))
+            Some(Row::File(entry)) if entry.churn.is_none()
         ),
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()

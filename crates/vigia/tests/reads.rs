@@ -22,9 +22,7 @@ mod support;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
-use vigia::{
-    App, Body, FileEntry, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout,
-};
+use vigia::{App, Body, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout};
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
 use support::{Scratch, delta, materialise, settle, settle_spans};
@@ -1072,10 +1070,7 @@ fn a_full_history_costs_the_frame_no_read_and_no_probe() {
         .filter(|row| {
             matches!(
                 row,
-                Row::File(FileEntry {
-                    recency: Recency::Pulse,
-                    ..
-                })
+                Row::File(entry) if entry.recency == Recency::Pulse
             )
         })
         .count();
@@ -1131,7 +1126,7 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
         .rows
         .iter()
         .filter_map(|row| match row {
-            Row::File(FileEntry { heat, .. }) => Some(heat),
+            Row::File(entry) => Some(&entry.heat),
             _ => None,
         })
         .collect();
