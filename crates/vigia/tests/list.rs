@@ -68,6 +68,14 @@ const TALLEST: u16 = 120;
 /// renderer by construction and go on agreeing with it while both were wrong.
 const REFERENCE: u16 = 24;
 
+/// More changed files than any cap the sweeps below can reach.
+///
+/// So the changed-file clamp is never the one doing the work, and what a sweep
+/// measures is the pane's own answer. Shared rather than declared per test,
+/// because it is one fact: two copies would let one sweep's margin be widened
+/// while the other's silently stayed where it was.
+const MANY: usize = 500;
+
 /// The tall pane [#125](https://github.com/breferrari/vigia/issues/125) named
 /// when it filed this rung: *"a 50-row pane keeping six draws void where the map
 /// could be"*. Taken from the issue rather than derived from the share.
@@ -139,10 +147,6 @@ fn the_list_grows_to_the_file_count_and_stops_at_the_cap() {
 /// silently stopped laddering cannot pass this by going quiet.
 #[test]
 fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
-    // More files than any cap this sweep can reach, so the changed-file clamp is
-    // never the one doing the work and what is measured is the pane's own answer.
-    const MANY: usize = 500;
-
     let mut depths = std::collections::BTreeSet::new();
     let mut previous = 0usize;
 
@@ -217,8 +221,6 @@ fn the_list_deepens_on_a_tall_pane_and_keeps_its_settled_cap_below() {
 /// person watching.
 #[test]
 fn a_taller_pane_never_costs_the_band_its_rows() {
-    const MANY: usize = 500;
-
     // The masthead is off by default since #204, and the band only exists with it
     // on, so this gate has to ask for the screen it is about.
     let raised = vigia::Chrome {
