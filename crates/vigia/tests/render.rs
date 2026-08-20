@@ -3378,7 +3378,7 @@ fn an_empty_bucket_draws_the_track_and_a_written_one_draws_a_bar() {
     let drawn: String = slot.iter().map(|&(_, class)| class).collect();
     assert_eq!(
         drawn, "tttttssttttt",
-        "`[0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0]` drew {drawn:?}, so a bucket's emptiness is \
+        "row 2's window, written only in the middle, drew {drawn:?}, so a bucket's emptiness is \
          not where the store says it is"
     );
 }
@@ -3447,6 +3447,48 @@ fn the_track_is_never_the_shape_of_a_written_bucket() {
         blocks_of(&backend, 2, &spark_colours(&theme)).contains(&'▁'),
         "the fixture no longer draws the ramp's floor, so the comparison above \
          is not against the glyph the ruling is about"
+    );
+}
+
+/// A scale answers by grouping, and says something for one it does not name.
+///
+/// **The branch no rendered frame reaches**, which is why it needs a unit test
+/// rather than a screen. `Scale::at` looks its figure up by how many source
+/// buckets one drawn bucket holds, and every grouping a rung divides to is on
+/// the table by construction since
+/// [#234](https://github.com/breferrari/vigia/issues/234) derived `SPARK_RUNGS`
+/// from `SPARK_GROUPS`. What can still ask for an unnamed one is a hand-written
+/// `ROW_LAYOUTS` entry, and `Painter::file_row`'s `debug_assert!` is what refuses
+/// that in a developer's build. This pins what the *shipped* build does with it,
+/// which is answer rather than panic: `render`'s contract is that any area is
+/// legal and a frame draws something.
+///
+/// The groupings are restated rather than imported, on this suite's standing
+/// rule: a test reading the renderer's own table would agree with it by
+/// construction.
+#[test]
+fn a_scale_answers_by_grouping_and_falls_back_to_the_finest() {
+    // One, two and four source buckets to a drawn one, which is the ladder
+    // twenty-four halving twice produces.
+    let scale = Scale([10, 20, 40]);
+
+    assert_eq!(scale.at(1), 10, "the widest rung took the wrong figure");
+    assert_eq!(scale.at(2), 20, "the settled rung took the wrong figure");
+    assert_eq!(scale.at(4), 40, "the narrowest rung took the wrong figure");
+
+    // **Three divides twenty-four and is still not on the ladder**, which is the
+    // case that makes the fallback worth having: a rung of eight would reach it,
+    // pass a divisibility check, and quietly measure a row against a denominator
+    // set for another width.
+    assert_eq!(
+        scale.at(3),
+        10,
+        "an unnamed grouping did not fall back to the finest figure"
+    );
+    assert_eq!(
+        scale.at(0),
+        10,
+        "a grouping of zero did not fall back to the finest figure"
     );
 }
 

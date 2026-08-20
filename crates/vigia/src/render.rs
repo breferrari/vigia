@@ -180,6 +180,17 @@ pub const HINT_SEPARATOR: &str = " · ";
 /// Halving, so the sum is exact and every drawn bucket covers the same span, and
 /// so a narrowed strip is an obvious fraction of the picture rather than a shaved
 /// one.
+/// Where [`SPARK_RUNGS`] keeps the rung that draws no sparkline at all.
+///
+/// **Named rather than written as `[3]`, because the ladder is derived now.**
+/// While the rungs were a literal table the trailing zero sat at a fixed index
+/// and a bare number was safe. `SPARK_RUNGS` is computed from [`SPARK_GROUPS`],
+/// so a fourth grouping would make index three a *real* rung of three buckets
+/// and move the empty one to four, which compiles and passes every gate: the
+/// three narrowest layouts, which are supposed to draw no strip, would quietly
+/// start drawing one. This index moves with the ladder instead.
+const SPARK_NONE: usize = SPARK_GROUPS.len();
+
 const SPARK_RUNGS: [usize; SPARK_GROUPS.len() + 1] = {
     let mut rungs = [0; SPARK_GROUPS.len() + 1];
     let mut at = 0;
@@ -201,6 +212,23 @@ const SPARK_RUNGS: [usize; SPARK_GROUPS.len() + 1] = {
 // that draws nothing comes from the initialiser, so the ladder cannot lose it
 // either.
 //
+// **And the ladder's direction is asserted, not assumed.** Nothing else here
+// reads [`SPARK_GROUPS`]' order, so a reordering would compile, invert this table
+// and hand the widest pane the narrowest rung. `the_glance_columns_collapse_in_one_order`
+// would catch it, one whole sweep later and blaming the layout table; a `const`
+// block catches it at the definition.
+const _: () = {
+    let mut at = 1;
+    while at < SPARK_GROUPS.len() {
+        assert!(
+            SPARK_GROUPS[at] > SPARK_GROUPS[at - 1],
+            "the sparkline groupings are not strictly ascending, so the rung \
+             ladder derived from them is not widest-first"
+        );
+        at += 1;
+    }
+};
+
 // **The divisor property is still asserted**, because it is what [`spark_of`]
 // rests on and it is worth stating where the reliance is rather than one crate
 // over. It follows from `SPARK_GROUPS`' own `const` block, so nothing that runs
@@ -1943,9 +1971,24 @@ const ROW_LAYOUTS: [Columns; 9] = [
     SETTLED,
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[2]),
     Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[2]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[2], SPARK_RUNGS[3]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[3], SPARK_RUNGS[3]),
-    Columns::new(COUNT_CELL, PULSE_RUNGS[1], HEAT_RUNGS[3], SPARK_RUNGS[3]),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[2],
+        SPARK_RUNGS[SPARK_NONE],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[0],
+        HEAT_RUNGS[3],
+        SPARK_RUNGS[SPARK_NONE],
+    ),
+    Columns::new(
+        COUNT_CELL,
+        PULSE_RUNGS[1],
+        HEAT_RUNGS[3],
+        SPARK_RUNGS[SPARK_NONE],
+    ),
     Columns::NOTHING,
 ];
 
@@ -2360,12 +2403,8 @@ impl Band {
     /// because the multiplication is what would overflow, not the counts: a slice
     /// is a sum of `u16` pairs and a large file's busiest slice times three does
     /// not fit the type the counts arrive in.
-    ///
-    /// **`busiest` arrives already widened**, for [`level_to`]'s reason: the
-    /// sparkline's yardstick is the store's figure times the source buckets a
-    /// rung groups, and that product is what leaves `u32`.
-    fn of(total: u32, busiest: u64) -> Self {
-        let total = u64::from(total);
+    fn of(total: u32, busiest: u32) -> Self {
+        let (total, busiest) = (u64::from(total), u64::from(busiest));
         if total * 3 >= busiest * 2 {
             Self::Hot
         } else if total * 3 >= busiest {
@@ -2425,7 +2464,7 @@ fn heat_at(buckets: &[HeatBucket; HEAT_BUCKETS], width: usize) -> Vec<Heat> {
     summed
         .iter()
         .map(|bucket| {
-            let band = Band::of(bucket.total(), u64::from(busiest));
+            let band = Band::of(bucket.total(), busiest);
             match (bucket.added > 0, bucket.removed > 0) {
                 (false, false) => Heat::Cool,
                 (true, false) => Heat::Added(band),
@@ -2526,16 +2565,11 @@ impl Bucket {
 /// Rounded **up**, so any non-zero count reaches at least the first level: a
 /// write that drew as empty would be a write the element failed to report.
 ///
-/// **`scale` is a `u64` where the store hands one out as a `u32`**, because
-/// [`spark_of`] multiplies it by the source buckets a rung groups and
-/// [`scale_of`] saturates at `u32::MAX`. Widening the parameter is cheaper than
-/// a saturating multiply at the call site, and it is the arithmetic rather than
-/// the caller that would have been wrong.
-fn level_to(total: u32, scale: u64, levels: usize) -> usize {
+fn level_to(total: u32, scale: u32, levels: usize) -> usize {
     if scale == 0 || total == 0 || levels == 0 {
         return 0;
     }
-    let scaled = (total as u64 * levels as u64).div_ceil(scale) as usize;
+    let scaled = (total as u64 * levels as u64).div_ceil(scale as u64) as usize;
     scaled.clamp(1, levels)
 }
 
@@ -2606,7 +2640,7 @@ fn spark_of(
     if group == 0 {
         return drawn;
     }
-    let yardstick = u64::from(scale.at(group));
+    let yardstick = scale.at(group);
     if yardstick == 0 {
         return drawn;
     }
@@ -4449,11 +4483,11 @@ impl Painter<'_> {
             // this is a plain index rather than a second copy of that mapping.
             let at = |sub: usize| series[cell * density + sub];
             let (older, newer) = (at(0), at(density - 1));
-            let full = |total: u32| level_to(total, u64::from(scale), rows * levels);
+            let full = |total: u32| level_to(total, scale, rows * levels);
             let (left, right) = (full(older), full(newer));
             // Against the same denominator the heights are scaled from, so
             // colour and shape say one thing at one scale.
-            let band = Band::of(older.max(newer), u64::from(scale));
+            let band = Band::of(older.max(newer), scale);
             for row in 0..rows {
                 // Drawn bottom up, so `row` counts from the baseline and the
                 // buffer's `y` counts down from the top.
@@ -5313,15 +5347,22 @@ impl Painter<'_> {
             // `ROW_LAYOUTS` is a hand-written table and `Columns::new` takes a
             // bare `usize`.
             //
-            // **Divides rather than merely fits, since
-            // [#234](https://github.com/breferrari/vigia/issues/234)**, because
-            // [`spark_of`] groups `HISTORY_BUCKETS / rung`: a rung that fitted
-            // without dividing would leave a short newest group covering less time
-            // than the rest, and a rung above the window would divide to zero.
+            // **On the ladder rather than merely dividing, since
+            // [#234](https://github.com/breferrari/vigia/issues/234)**, and the
+            // difference is a silent wrong picture rather than a loud one.
+            // [`spark_of`] groups `HISTORY_BUCKETS / rung`, and [`Scale::at`]
+            // looks the yardstick up by that grouping: a rung of eight divides
+            // twenty-four perfectly well, groups to three, finds no such grouping
+            // on the table and falls back to the finest figure, so every height
+            // and every band on the row would be measured against a denominator
+            // set for a different width. Nothing panics and no gate reddens.
+            // Checking membership is what refuses that, where checking
+            // divisibility alone let it through.
             debug_assert!(
-                columns.spark > 0 && HISTORY_BUCKETS % columns.spark == 0,
-                "a layout asked for {} sparkline buckets, which does not divide \
-                 the {HISTORY_BUCKETS} the window holds",
+                SPARK_RUNGS.contains(&columns.spark),
+                "a layout asked for {} sparkline buckets, which is not a rung of \
+                 {SPARK_RUNGS:?}, so its yardstick would be one set for another \
+                 width",
                 columns.spark
             );
             // **Counted in cells rather than buckets, which is the one thing the
