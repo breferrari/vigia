@@ -595,6 +595,109 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     );
 }
 
+/// The widest rung draws from the store's own figures, not a fixture's.
+///
+/// **The coverage-shape gap [#234](https://github.com/breferrari/vigia/issues/234)
+/// left, closed here.** Every gate that reaches the twenty-four bucket rung does
+/// it with a hand-set `Scale` on a literal `View`, because the sweeps live in
+/// `tests/legibility.rs` and build their fixtures directly. The only test that
+/// drives a *recorded* store all the way to a drawn row renders at eighty
+/// columns, which is the twelve-bucket rung. So the widest rung had never been
+/// drawn against a denominator the store actually computed, and the denominator
+/// is the half of this feature that is not a width: `History::scales` returns one
+/// figure per grouping precisely because multiplying the finest by the grouping
+/// is wrong on a quiet worktree, and nothing end to end was checking that the
+/// right one of the three arrives.
+///
+/// A hundred and sixty-four columns is the first pane whose share affords the
+/// widest layout at the block rung, which
+/// `tests/legibility.rs::the_glance_columns_collapse_in_one_order` derives and
+/// pins.
+#[test]
+fn the_widest_rung_draws_from_the_stores_own_figures() {
+    /// The first pane that affords the widest layout at the block rung.
+    const WIDE: u16 = 164;
+
+    let scratch = Scratch::new("shell-rows-widest-rung");
+    scratch.write("src/lib.rs", numbered(12));
+    scratch.commit_all("baseline");
+    scratch.edit_line("src/lib.rs", 5, "let changed = true;");
+
+    let now = Instant::now();
+    let mut history = History::starting_at(now);
+    // Two sized writes, as `a_recorded_tick_reaches_the_drawn_sparkline` uses:
+    // a first write is a baseline, so the weight is the second one's growth.
+    history.record_sized([("src/lib.rs", Some(4_000))], now);
+    history.record_sized([("src/lib.rs", Some(28_000))], now);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+
+    let mut terminal = Terminal::new(TestBackend::new(WIDE, 12)).expect("terminal");
+    let area = Rect::new(0, 0, WIDE, 12);
+    let split = body_layout(
+        area,
+        &app.chrome("fixture", None, None, None, None, None),
+        frame.files().len(),
+    );
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split)
+        .expect("view");
+
+    let theme = Theme::default();
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    terminal
+        .draw(|f| {
+            let drawn = f.area();
+            render(f.buffer_mut(), drawn, &view, &theme, Glyphs::Block, &chrome);
+        })
+        .expect("draw");
+
+    // The whole slot, bars and track together, on the busiest row. At the block
+    // rung a bucket is a cell, so this is the rung itself.
+    let buffer = terminal.backend().buffer();
+    let ramp = "▁▂▃▄▅▆▇█";
+    let ink = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
+    let widest = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .filter(|x| {
+                    let cell = &buffer[(*x, y)];
+                    (ramp.contains(cell.symbol()) && ink.contains(&cell.style().fg))
+                        || (cell.symbol() == "_" && cell.style().fg == theme.spark_track.fg)
+                })
+                .count()
+        })
+        .max()
+        .expect("a row");
+
+    assert_eq!(
+        widest, 24,
+        "at {WIDE} columns a recorded store drew {widest} sparkline buckets \
+         rather than the widest rung's twenty-four"
+    );
+
+    // **And the heights came from the store rather than from nothing.** A
+    // denominator of zero draws pure track, which is what a hardcode or the
+    // wrong entry of `Scale` would most easily produce, and it is
+    // indistinguishable from a correct launch by eye.
+    let bars = (0..buffer.area.height)
+        .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+        .filter(|&at| {
+            let cell = &buffer[at];
+            ramp.contains(cell.symbol()) && ink.contains(&cell.style().fg)
+        })
+        .count();
+    assert!(
+        bars > 0,
+        "at {WIDE} columns the widest rung drew no bucket at all, so the \
+         store's figure for this grouping is not reaching the renderer"
+    );
+}
+
 #[test]
 fn a_binary_file_gets_a_reason_instead_of_hunks() {
     // Otherwise it draws as a heading with nothing under it, which reads as a

@@ -248,11 +248,14 @@ impl Scale {
 
     /// The figure a bucket summing `group` source buckets is measured against.
     ///
-    /// Falls back to the finest figure for a grouping the ladder does not name,
-    /// which no layout can ask for: `SPARK_RUNGS` is derived from
-    /// [`SPARK_GROUPS`] and a `const` block in `render.rs` asserts it. Total
-    /// rather than panicking, because `render`'s contract is that a frame draws
-    /// something.
+    /// Falls back to the finest figure for a grouping this ladder does not name.
+    /// **No rung the ladder produces can ask for one**, because `SPARK_RUNGS` is
+    /// computed from [`SPARK_GROUPS`] in `render.rs` rather than written out
+    /// beside it, so every grouping a layout divides to is on this table by
+    /// construction. What can still reach the fallback is a hand-written
+    /// `ROW_LAYOUTS` entry, since `Columns::new` takes a bare `usize`; total
+    /// rather than panicking, because `render`'s contract is that any area is
+    /// legal and a frame draws something.
     pub fn at(self, group: usize) -> u32 {
         SPARK_GROUPS
             .iter()

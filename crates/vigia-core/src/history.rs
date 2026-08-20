@@ -1151,7 +1151,14 @@ impl History {
         // screen would be wrong by whatever the kernel moved.
         //
         // **One figure per [`SPARK_GROUPS`] entry, from the one walk**, since
-        // [#234](https://github.com/breferrari/vigia/issues/234). The kernel is
+        // [#234](https://github.com/breferrari/vigia/issues/234). The shell's
+        // `spark_of` groups these same buckets the same way to get the numerator
+        // this is the denominator for, and the two are deliberately not one
+        // function: this one accumulates a sum and a non-empty count without
+        // materialising the groups, that one materialises them so a drawn row
+        // allocates nothing. `tests/rows.rs::a_recorded_tick_reaches_the_drawn_sparkline`
+        // pins the figures this answers with, so a grouping that moved on one side
+        // and not the other reddens. The kernel is
         // what costs here and it runs once per track either way; what the ladder
         // adds is two more folds over twenty-four `u32`s that are already in
         // cache. Scaling a single figure by the grouping instead was measured and

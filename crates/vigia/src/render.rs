@@ -180,15 +180,33 @@ pub const HINT_SEPARATOR: &str = " · ";
 /// Halving, so the sum is exact and every drawn bucket covers the same span, and
 /// so a narrowed strip is an obvious fraction of the picture rather than a shaved
 /// one.
-const SPARK_RUNGS: [usize; 4] = [HISTORY_BUCKETS, HISTORY_BUCKETS / 2, HISTORY_BUCKETS / 4, 0];
+const SPARK_RUNGS: [usize; SPARK_GROUPS.len() + 1] = {
+    let mut rungs = [0; SPARK_GROUPS.len() + 1];
+    let mut at = 0;
+    while at < SPARK_GROUPS.len() {
+        rungs[at] = HISTORY_BUCKETS / SPARK_GROUPS[at];
+        at += 1;
+    }
+    rungs
+};
 
-// **Asserted rather than documented, for [`HEAT_RUNGS`]'s reason exactly.**
-// [`spark_of`] groups `HISTORY_BUCKETS / rung` and chunks by it, so a rung that
-// leaves a remainder draws a short final group carrying fewer source buckets than
-// its neighbours. That group is the **newest**, so the one column a reader looks
-// at to see whether anything is happening now would be the one covering less
-// time, with nothing failing. `SPARK_RUNGS` is derived from [`HISTORY_BUCKETS`]
-// today and this is what keeps that true if a rung is ever written out by hand.
+// **Derived rather than written out and then asserted equal, which is the shape
+// this replaced.** [`SPARK_GROUPS`] is the same ladder from the store's side,
+// because the *scale* a drawn bucket is measured against is decided there while
+// its *width* is decided here. Written as two literal tables they can disagree,
+// and the disagreement is silent: a row would draw the right number of buckets
+// against a denominator set for a different width, which is a height rather than
+// a layout and no width sweep can see it. An assertion catches that after the
+// fact; computing one from the other makes it unrepresentable. The trailing rung
+// that draws nothing comes from the initialiser, so the ladder cannot lose it
+// either.
+//
+// **The divisor property is still asserted**, because it is what [`spark_of`]
+// rests on and it is worth stating where the reliance is rather than one crate
+// over. It follows from `SPARK_GROUPS`' own `const` block, so nothing that runs
+// can reach it: if `g` divides `HISTORY_BUCKETS` then so does `HISTORY_BUCKETS /
+// g`. That is the same reason the rounding block below is a `const` rather than a
+// test, and it starts failing the build the day either ladder stops being exact.
 const _: () = {
     let mut rung = 0;
     while rung < SPARK_RUNGS.len() {
@@ -199,35 +217,6 @@ const _: () = {
         );
         rung += 1;
     }
-};
-
-// **And the two ends of one ladder are asserted to be one ladder.**
-// [`SPARK_GROUPS`] is this table seen from the store's side, because the *scale*
-// a drawn bucket is measured against is decided there while its *width* is
-// decided here. Written out separately they can drift, and the drift is silent: a
-// row would draw the right number of buckets against a denominator set for a
-// different width, which is a height rather than a layout and no width sweep can
-// see it. [`Scale::at`] falls back rather than panicking precisely because this
-// holds.
-const _: () = {
-    assert!(
-        SPARK_RUNGS.len() == SPARK_GROUPS.len() + 1,
-        "the rung table and the grouping table are not one ladder plus the rung \
-         that draws nothing"
-    );
-    let mut at = 0;
-    while at < SPARK_GROUPS.len() {
-        assert!(
-            SPARK_RUNGS[at] == HISTORY_BUCKETS / SPARK_GROUPS[at],
-            "a rung and its grouping disagree, so a drawn bucket would be \
-             measured against a denominator set for a different width"
-        );
-        at += 1;
-    }
-    assert!(
-        SPARK_RUNGS[SPARK_RUNGS.len() - 1] == 0,
-        "the ladder no longer ends in the rung that draws nothing"
-    );
 };
 
 /// Columns `buckets` of sparkline occupy at this rung.
@@ -2599,11 +2588,26 @@ fn spark_of(
     // no scale yet", and the loop's `busiest == 0` is "this cell is empty on a
     // screen that has one".
     //
-    // A rung of zero is the row that draws no strip at all, and it leaves before
-    // the division that would be by zero.
-    let group = if rung == 0 { 0 } else { HISTORY_BUCKETS / rung };
+    // A rung of zero is the row that draws no strip at all.
+    if rung == 0 {
+        return drawn;
+    }
+    // **Total for a rung wider than the window, and that is a release hazard
+    // rather than tidiness.** `ROW_LAYOUTS` is a hand-written table and
+    // `Columns::new` takes a bare `usize`, so a rung above [`HISTORY_BUCKETS`]
+    // divides to a group of **zero**, and `slice::chunks` opens with a plain
+    // `assert!` that ships: `[profile.release]` sets `panic = "abort"`, so the
+    // process would go down without restoring the terminal, which is I8's failure
+    // reached by the one path that skips its handler. `Painter::file_row`'s clamp
+    // used to be the guard for exactly this and can no longer reach it, because
+    // the division now happens here, one function earlier. It still clamps its
+    // own slice, for the half of the hazard that is this array's length.
+    let group = HISTORY_BUCKETS / rung;
+    if group == 0 {
+        return drawn;
+    }
     let yardstick = u64::from(scale.at(group));
-    if yardstick == 0 || rung == 0 {
+    if yardstick == 0 {
         return drawn;
     }
     // **Summed into the rung first, then packed into cells**, which is two
@@ -2616,6 +2620,15 @@ fn spark_of(
     // Saturating, for `heat_at`'s reason verbatim: a group summing past its type
     // is already at the top of the ramp, and wrapping would draw the busiest file
     // in the worktree as the quietest.
+    //
+    // **`History::repeak` groups the same buckets the same way**, one crate over,
+    // to compute the denominator this numerator is divided by. The two are
+    // deliberately not one function: that one accumulates a sum and a non-empty
+    // count without materialising the groups, this one materialises them into a
+    // fixed array so a drawn row allocates nothing. What holds them together is
+    // `tests/rows.rs::a_recorded_tick_reaches_the_drawn_sparkline`, which pins the
+    // figures the store answers with, so a grouping that moved here and not there
+    // reddens rather than quietly redrawing every height on screen.
     let mut summed = [0u32; HISTORY_BUCKETS];
     for (at, chunk) in buckets.chunks(group).enumerate() {
         summed[at] = chunk.iter().copied().fold(0, u32::saturating_add);
@@ -5333,6 +5346,14 @@ impl Painter<'_> {
             // reached by the one path that skips its handler. The assert keeps
             // the message a developer needs and this keeps the promise a reader
             // needs.
+            //
+            // **This and [`spark_of`]'s own early return are one hazard guarded
+            // at two layers, not the same guard twice.** A hand-written
+            // `ROW_LAYOUTS` entry above the window breaks two different things:
+            // over there it divides to a group of zero and `chunks` asserts, and
+            // here it would slice past what the array holds. Neither clamp can
+            // reach the other's case, so both stay, and the value below never
+            // moves from `slot` for any rung the ladder actually produces.
             //
             // **Clamped to the room as well, and that is a second promise rather
             // than the same one twice.** `Columns::plan` guarantees `right.width`
