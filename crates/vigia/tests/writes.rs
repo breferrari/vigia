@@ -319,6 +319,7 @@ fn drive(root: &Path) -> Driven {
             .take(WARM_FILES)
             .map(|change| change.path.clone())
             .collect(),
+        None,
     );
     // **The watch is read here and torn down by going out of scope**, which is what
     // puts its teardown inside the window: `drive` returns before the caller takes

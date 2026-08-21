@@ -549,7 +549,7 @@ fn cost_of_rehighlighting_a_one_line_edit(scratch: &Scratch) -> Rehighlight {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
     assert_eq!(
         highlighter.stats().parsed,
@@ -699,7 +699,7 @@ fn a_redraw_inside_the_settle_margin_reparses_nothing() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
 
     // Land an edit, and stay inside its margin for the rest of the test.
@@ -748,7 +748,7 @@ fn the_highlight_cache_is_bounded_by_the_viewport() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     for first in 0..STEPS {
         highlight_window(
             &mut frame,
@@ -805,7 +805,7 @@ fn a_hunk_scrolled_back_to_is_not_re_parsed() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
 
     // Read forward over twice the window, so the hunks left behind are genuinely
     // off screen rather than still half drawn.
@@ -925,7 +925,7 @@ fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
 
     // Read the top of the file, then move past it so it is retired rather than
     // live. Off screen and still held is precisely the state under test.

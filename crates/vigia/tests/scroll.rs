@@ -126,7 +126,7 @@ fn scrolling_down_and_back_up_returns_to_where_it_started() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     for rows in [1, 3, SPAN as isize, 17, (SPAN * 12) as isize] {
@@ -170,7 +170,7 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let mut seen = Vec::new();
@@ -212,7 +212,7 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let start = BLOCK * 3;
@@ -329,7 +329,7 @@ fn home_and_end_go_to_the_first_and_last_file() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     assert_eq!(
@@ -367,7 +367,7 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // Three steps rather than one, so "moved once" and "steps every time" are
@@ -441,7 +441,7 @@ fn the_file_step_stops_at_both_ends() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     assert_eq!(
@@ -510,7 +510,7 @@ fn a_page_keeps_one_row_of_overlap() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let rows = body();
@@ -553,7 +553,7 @@ fn a_half_page_keeps_no_overlap_because_it_already_is_one() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let rows = body();
@@ -606,7 +606,7 @@ fn a_position_survives_the_file_it_pointed_into_disappearing() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let far = after(
@@ -665,7 +665,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // Scroll somewhere first, or the assertion below cannot tell a preserved
@@ -762,7 +762,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // position is the thing being measured, so each run starts from a new one.
     let mut frame = worktree.frame();
     materialise(&mut frame);
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let full = body();
 
@@ -810,7 +810,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
 /// the view twice: `App::view` writes its resolved position back, so a second
 /// call is a second resolution of a position the first one already moved.
 fn drawn(app: &mut App, frame: &mut Frame) -> View {
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     app.view(frame, &mut highlighter, &history, split())
         .expect("view")
@@ -1044,7 +1044,7 @@ fn the_counting_twins_agree_with_the_rows_drawn() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // Non-vacuity first, stated as the claim rather than through a number that
@@ -1106,7 +1106,7 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // Scrolled off a boundary first, so a jump has somewhere to come back from

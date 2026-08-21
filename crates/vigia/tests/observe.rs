@@ -966,6 +966,7 @@ impl<'w> Pane<'w> {
                     .take(WARM_FILES)
                     .map(|change| change.path.clone())
                     .collect(),
+                None,
             )
             .join()
             .expect("the warmer thread");

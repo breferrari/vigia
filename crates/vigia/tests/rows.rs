@@ -105,7 +105,7 @@ fn every_line_number_names_the_line_it_is_on() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let view = app
         .view(
@@ -190,7 +190,7 @@ fn a_file_is_its_heading_then_its_hunks() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let view = app
         .view(
@@ -265,7 +265,7 @@ fn each_kind_of_change_gets_its_own_letter() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let view = app
         .view(
@@ -341,7 +341,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let whole = View::collect(
@@ -427,7 +427,7 @@ fn a_real_repository_draws() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
@@ -523,7 +523,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
 
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
     let area = Rect::new(0, 0, 80, 12);
@@ -645,7 +645,7 @@ fn every_rung_draws_from_the_stores_own_figures() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let theme = Theme::default();
     let ramp = "▁▂▃▄▅▆▇█";
     let ink = [theme.spark.fg, theme.spark_warm.fg, theme.spark_hot.fg];
@@ -724,7 +724,7 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let view = app
         .view(
@@ -777,7 +777,7 @@ fn a_files_block_ends_in_a_blank_row() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let view = View::collect(

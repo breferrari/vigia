@@ -188,7 +188,7 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
     const BRANCH: &str = "some-branch";
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let drawn = app.chrome("fixture", Some(BRANCH), None, None, None, None);
     assert!(

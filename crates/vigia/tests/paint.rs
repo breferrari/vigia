@@ -77,7 +77,7 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let area = Rect::new(0, 0, width, height);
     let chrome = app.chrome("fixture", None, None, None, None, None);
@@ -446,7 +446,7 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         // draws exactly once, so without this its single draw *is* that frame and
         // the non-vacuity guard below fires on a run that measured nothing.
         let mut app = App::past_first_paint();
-        let mut highlighter = Highlighter::new();
+        let mut highlighter = Highlighter::eager();
         let history = History::new();
         let chrome = app.chrome("fixture", None, None, None, None, None);
         let screen = body_layout(area, &chrome, BURST_FILES);

@@ -1002,7 +1002,7 @@ fn every_ruled_format_reaches_a_spread_of_classes() {
     // One highlighter for the whole table: the cache keys on path and every
     // snippet's path is distinct, so sharing it also exercises the cache the
     // way a frame full of files does.
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut failures = Vec::new();
     for snippet in SNIPPETS {
         let hunk = Hunk {

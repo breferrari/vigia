@@ -69,7 +69,7 @@ fn scrolling_to_the_bottom_never_leaves_the_pane_half_empty() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 
@@ -113,7 +113,7 @@ fn a_page_down_past_the_end_holds_the_last_screenful() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 
@@ -150,7 +150,7 @@ fn a_diff_shorter_than_the_pane_draws_what_it_has_and_no_more() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 
@@ -187,7 +187,7 @@ fn the_resolved_position_is_stable_once_it_reaches_the_bottom() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 
@@ -243,7 +243,7 @@ fn a_backed_up_body_holds_the_rows_its_own_position_names() {
     // and this gate's subject is where the rows *land*, not what colour they
     // are, so starting past the first paint compares like with like.
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 
@@ -297,7 +297,7 @@ fn the_last_row_of_the_diff_is_always_on_screen_at_the_bottom() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 

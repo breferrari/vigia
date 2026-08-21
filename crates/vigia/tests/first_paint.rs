@@ -117,7 +117,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let worktree = Worktree::discover(root).expect("discover");
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut app = App::new();
     let history = History::new();
 
@@ -299,7 +299,7 @@ fn the_first_frame_is_plain_and_owes_exactly_one_repaint() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = Body::diff_only(8);
 
@@ -357,7 +357,7 @@ fn a_shell_past_its_first_paint_owes_nothing_and_colours_at_once() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let mut app = App::past_first_paint();

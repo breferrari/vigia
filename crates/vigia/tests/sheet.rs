@@ -156,7 +156,7 @@ fn the_shell_starts_with_no_sheet_and_question_mark_is_what_opens_one() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     assert!(!chrome(&app).sheet, "a fresh shell drew a sheet");
@@ -209,7 +209,7 @@ fn the_sheet_moves_no_content() {
     // failed exactly that way, on a `f` that was `Reset` before and `light_red`
     // after, which is I7 working rather than the sheet misbehaving.
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
@@ -249,7 +249,7 @@ fn the_sheet_is_opaque() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // **The wash is injected rather than borrowed from the shipped palette**, and
@@ -316,7 +316,7 @@ fn closing_the_sheet_restores_every_cell() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
@@ -346,7 +346,7 @@ fn the_close_control_brightens_under_the_pointer() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     toggle(&mut app, &mut frame);
@@ -446,7 +446,7 @@ fn a_write_under_the_sheet_does_not_dismiss_it() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     toggle(&mut app, &mut frame);
@@ -476,7 +476,7 @@ fn the_close_control_dismisses_and_the_sheet_swallows_the_rest() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     toggle(&mut app, &mut frame);
@@ -529,7 +529,7 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     toggle(&mut app, &mut frame);
@@ -594,7 +594,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     toggle(&mut app, &mut frame);

@@ -4,19 +4,37 @@
 //! first parse under one costs 74-362ms where loading the whole dump costs
 //! 318µs. `Highlighter::warm_ahead` pays that where nothing is waiting on it.
 //!
-//! **The claim being tested is deliberately weak, and the weakness is the
+//! **The claim about warmth is deliberately weak, and the weakness is a
 //! finding.** There is no such thing as a warm grammar: compilation is per
-//! *pattern*, so warming on one file leaves a different file of the same
-//! language still paying. Measured in release, warming on one document and then
-//! parsing another of the same language: `.rs` 41.41ms residual, `.md` 95.04ms,
-//! `.html` 201.20ms. So what is asserted here is that warming helps **the
-//! content it warmed on**, which is the only thing that is true, and
-//! `SPEC.md` §10 records the rest.
+//! *pattern*, so warming on a small sample leaves a different file of the same
+//! language still paying. Measured in release over a 2.5KB synthetic sibling:
+//! `.js` 80.49ms above floor, `.html` 40.10ms, `.cpp` 37.55ms. So what these
+//! gates assert about warmth is that it helps **the content it warmed on**,
+//! which is the only part that is true.
+//!
+//! **The claim about coldness is exact, and it is the one
+//! [#129](https://github.com/breferrari/vigia/issues/129) is built on.** A
+//! grammar nothing has parsed under has every pattern uncompiled, so the frame
+//! that first meets it pays the whole cliff: measured at frame scale, one
+//! twenty-four line screenful, **123.98ms cold against a 2.40ms floor** under
+//! Rust and 694.75ms against 90.65ms under Markdown. The cliff is flat in
+//! content size, which is what says it is a compile rather than a parse: a
+//! 594-byte screenful costs 631.46ms cold and 0.97ms warm.
+//!
+//! So the frame path declines to parse under a grammar the warmer has not run
+//! over, draws it plain, and says what it wants. The gates below cover both
+//! halves, the way out when the file it asked for has gone, and the population
+//! sweep that keeps the case a reader is actually watching from flickering.
 
 mod support;
 
-use support::{Scratch, absolute_gates_apply, exclusively_timed, time};
-use vigia_core::{Highlighter, WARM_BYTES, WARM_FILES, WARM_PER_GRAMMAR, WARM_TOTAL};
+use std::time::Duration;
+
+use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, time};
+use vigia_core::{
+    Class, Frame, Highlighter, WARM_BYTES, WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL,
+    leading_paths,
+};
 
 #[test]
 fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
@@ -32,6 +50,7 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
         .warm_ahead(
             scratch.root().to_path_buf(),
             vec!["data.unknownext".to_owned()],
+            None,
         )
         .join()
         .expect("the warmer thread")
@@ -47,7 +66,7 @@ fn a_path_with_no_grammar_is_skipped_before_it_is_read() {
 #[test]
 fn an_empty_changed_set_warms_nothing() {
     let highlighter = Highlighter::new();
-    let handle = highlighter.warm_ahead(std::path::PathBuf::from("."), Vec::new());
+    let handle = highlighter.warm_ahead(std::path::PathBuf::from("."), Vec::new(), None);
     assert_eq!(handle.join().expect("the warmer thread").warmed, 0);
 }
 
@@ -65,7 +84,7 @@ fn many_files_of_one_language_warm_only_a_few() {
     let paths: Vec<String> = (0..files).map(|n| format!("src/mod_{n}.rs")).collect();
 
     let warmed = highlighter
-        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .warm_ahead(scratch.root().to_path_buf(), paths, None)
         .join()
         .expect("the warmer thread")
         .warmed;
@@ -96,7 +115,7 @@ fn many_files_of_one_language_are_not_even_read() {
     let paths: Vec<String> = (0..files).map(|n| format!("src/mod_{n}.rs")).collect();
 
     let report = highlighter
-        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .warm_ahead(scratch.root().to_path_buf(), paths, None)
         .join()
         .expect("the warmer thread");
 
@@ -131,7 +150,7 @@ fn the_path_cap_stops_the_walk_before_a_language_it_has_not_reached() {
     paths.push("README.md".to_owned());
 
     let warmed = highlighter
-        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .warm_ahead(scratch.root().to_path_buf(), paths, None)
         .join()
         .expect("the warmer thread")
         .warmed;
@@ -163,6 +182,7 @@ fn a_path_that_is_not_there_is_skipped_rather_than_fatal() {
                 "src/also_gone.rs".to_owned(),
                 "src/mod_1.rs".to_owned(),
             ],
+            None,
         )
         .join()
         .expect("the warmer thread")
@@ -205,14 +225,14 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
     let cold = Highlighter::new();
     let cold_parse = time(|| {
         let _ = cold
-            .warm_ahead(root.clone(), paths.clone())
+            .warm_ahead(root.clone(), paths.clone(), None)
             .join()
             .expect("the warmer thread");
     });
 
     // The same highlighter, so the second run meets its own compiled patterns.
     let after = time(|| {
-        cold.warm_ahead(root.clone(), paths.clone())
+        cold.warm_ahead(root.clone(), paths.clone(), None)
             .join()
             .expect("the warmer thread");
     });
@@ -248,7 +268,7 @@ fn the_per_grammar_cap_is_per_grammar_and_not_one_shared_counter() {
     }
 
     let warmed = Highlighter::new()
-        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .warm_ahead(scratch.root().to_path_buf(), paths, None)
         .join()
         .expect("the warmer thread")
         .warmed;
@@ -287,7 +307,7 @@ fn a_polyglot_changed_set_is_bounded_in_total_and_not_only_per_language() {
     );
 
     let warmed = Highlighter::new()
-        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .warm_ahead(scratch.root().to_path_buf(), paths, None)
         .join()
         .expect("the warmer thread")
         .warmed;
@@ -317,6 +337,7 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
         .warm_ahead(
             scratch.root().to_path_buf(),
             vec!["src/utf16.rs".to_owned()],
+            None,
         )
         .join()
         .expect("the warmer thread")
@@ -331,7 +352,7 @@ fn a_file_that_is_not_text_is_skipped_before_it_spends_the_budget() {
     let mut paths = vec!["src/utf16.rs".to_owned()];
     paths.extend((0..5).map(|n| format!("src/mod_{n}.rs")));
     let warmed = Highlighter::new()
-        .warm_ahead(scratch.root().to_path_buf(), paths)
+        .warm_ahead(scratch.root().to_path_buf(), paths, None)
         .join()
         .expect("the warmer thread")
         .warmed;
@@ -423,7 +444,7 @@ fn the_warmer_reads_nothing_outside_the_worktree() {
     spellings.extend(rooted_spelling(&outside, scratch.root()));
 
     let warmed = Highlighter::new()
-        .warm_ahead(scratch.root().to_path_buf(), spellings)
+        .warm_ahead(scratch.root().to_path_buf(), spellings, None)
         .join()
         .expect("the warmer thread")
         .warmed;
@@ -461,6 +482,7 @@ fn a_file_cut_mid_character_still_parses() {
         .warm_ahead(
             scratch.root().to_path_buf(),
             vec!["src/straddle.rs".to_owned()],
+            None,
         )
         .join()
         .expect("the warmer thread")
@@ -513,6 +535,7 @@ fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
         .warm_ahead(
             scratch.root().to_path_buf(),
             vec!["src/mod_0.rs".to_owned()],
+            None,
         )
         .join()
         .expect("the warmer thread");
@@ -522,13 +545,18 @@ fn the_read_is_bounded_by_bytes_and_not_by_the_size_of_the_file() {
             .warm_ahead(
                 scratch.root().to_path_buf(),
                 vec!["src/small.rs".to_owned()],
+                None,
             )
             .join()
             .expect("the warmer thread");
     });
     let large = time(|| {
         highlighter
-            .warm_ahead(scratch.root().to_path_buf(), vec!["src/big.rs".to_owned()])
+            .warm_ahead(
+                scratch.root().to_path_buf(),
+                vec!["src/big.rs".to_owned()],
+                None,
+            )
             .join()
             .expect("the warmer thread");
     });
@@ -609,6 +637,7 @@ fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
         .warm_ahead(
             scratch.root().to_path_buf(),
             vec!["link/mod_0.rs".to_owned()],
+            None,
         )
         .join()
         .expect("the warmer thread")
@@ -619,5 +648,459 @@ fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
         "the warmer read {warmed} files through a symlink pointing out of the \
          worktree, so its bound is lexical and the docs claiming otherwise are \
          wrong"
+    );
+}
+
+/// Every class one screenful of the first hunk of `path` draws.
+///
+/// The shape a frame drives the highlighter in, reduced to the one thing these
+/// gates assert. Returns a class per span rather than a set, so a caller can say
+/// *all plain* and *some not plain* without either collapsing into the other.
+fn classes_of(frame: &mut Frame, highlighter: &mut Highlighter, path: &str) -> Vec<Class> {
+    let index = frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .unwrap_or_else(|| panic!("{path} is not a changed file"));
+
+    let mut classes = Vec::new();
+    let mut pass = highlighter.pass();
+    let (_, diff) = frame.diff(index).expect("diff");
+    let hunk = diff.hunks.first().expect("the fixture has a hunk");
+    for line in 0..hunk.lines.len() {
+        classes.extend(
+            pass.spans(path, 0, hunk, line, None)
+                .iter()
+                .map(|s| s.class),
+        );
+    }
+    drop(pass);
+    classes
+}
+
+/// I9's budget, restated here because this gate is about a frame rather than
+/// about the warmer's own bounds.
+const FRAME_BUDGET: Duration = Duration::from_millis(16);
+
+/// Rows one screenful shows, and so lines this gate asks the highlighter for.
+const SCREENFUL: usize = 24;
+
+/// Highlight every line of the first hunk of `path`, the way a frame does.
+///
+/// Returns the rows drawn, so a window that drew nothing cannot satisfy a gate
+/// by costing nothing.
+fn draw_one_screenful(frame: &mut Frame, highlighter: &mut Highlighter, path: &str) -> usize {
+    let index = frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .unwrap_or_else(|| panic!("{path} is not a changed file"));
+
+    let mut pass = highlighter.pass();
+    let (_, diff) = frame.diff(index).expect("diff");
+    let hunk = diff.hunks.first().expect("the fixture has a hunk");
+    let mut drawn = 0;
+    for line in 0..hunk.lines.len() {
+        pass.spans(path, 0, hunk, line, None);
+        drawn += 1;
+    }
+    drop(pass);
+    drawn
+}
+
+/// **The frame a reader actually meets, and the one nothing gated.**
+///
+/// `SPEC.md` §7 rules a grammar's first parse onto the cold path that I9
+/// excludes by definition, and that ruling was made when the only way to reach
+/// one was a keypress: §10 lists `G`, a follow jump and a scroll, all of which a
+/// reader asked for. [#129](https://github.com/breferrari/vigia/issues/129)
+/// reports it arriving on **no** keypress, from three directions and on two
+/// platforms, because the agent in the other pane writes a file in a language
+/// this process has not met and the frame that draws it pays the compile.
+///
+/// Measured on the reference machine, release, twenty-four lines: **123.98ms
+/// cold against 2.40ms warm** under Rust, and 694.75ms against 90.65ms under
+/// Markdown. The cliff is flat in content size, which is what says it is a
+/// compile rather than a parse: a 594-byte screenful of Markdown costs 631.46ms
+/// cold and 0.97ms warm, a 650x penalty on half a kilobyte.
+///
+/// So this is I9 over the frame that meets a grammar, and it is the gate the
+/// deferral has to earn. Watched failing before the fix at 93.73ms.
+#[test]
+fn a_frame_that_meets_a_new_grammar_holds_the_frame_budget() {
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("warm-first-frame", 1, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    // Fresh, so every pattern under this grammar is genuinely uncompiled: a
+    // `SyntaxSet` owns its own `OnceCell`s, so a highlighter another test warmed
+    // is a different set and cannot leak into this one.
+    let mut highlighter = Highlighter::new();
+
+    let mut drawn = 0;
+    let cost = time(|| drawn = draw_one_screenful(&mut frame, &mut highlighter, "src/mod_0.rs"));
+
+    assert_eq!(
+        drawn, SCREENFUL,
+        "the fixture drew {drawn} rows rather than a screenful, so the number \
+         below is not a frame's worth of work"
+    );
+    assert!(
+        cost <= budget(FRAME_BUDGET),
+        "the first frame to meet a grammar cost {cost:?} against I9's \
+         {FRAME_BUDGET:?}, so a reader whose agent writes a new language pays \
+         the grammar compile on a frame they did not ask for"
+    );
+}
+
+/// The structural half of the gate above, and the one that survives a fast
+/// machine.
+///
+/// A wall clock says the frame was quick; this says **why**, and it is the claim
+/// a mutation has to break rather than merely slow down. `lines` counts what the
+/// parser actually ran, so zero of them across a full screenful is the deferral
+/// working, and the classes being all `Plain` is what the reader sees while it
+/// does.
+#[test]
+fn a_grammar_nothing_has_compiled_draws_plain_and_parses_nothing() {
+    let scratch = Scratch::large_diff("warm-defer-plain", 1, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+
+    let classes = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+
+    assert_eq!(
+        highlighter.stats().lines,
+        0,
+        "the frame parsed lines under a grammar nothing has compiled, so it \
+         paid the compile cliff on a frame a reader was waiting on"
+    );
+    assert!(
+        classes.iter().all(|class| *class == Class::Plain),
+        "a deferred hunk drew {classes:?} rather than plain, so `sides` was \
+         built for a grammar the warmer has not run over"
+    );
+    assert_eq!(
+        highlighter.wanted(),
+        ["src/mod_0.rs"],
+        "the frame drew plain and asked for nothing, so the colour it is owed \
+         would never arrive"
+    );
+}
+
+/// And the other direction, which is what makes the gate above a deferral rather
+/// than a regression.
+///
+/// **Both halves or neither.** A change that simply stopped highlighting would
+/// pass the test above and fail this one, which is the pairing `SPEC.md` §7 asks
+/// for wherever a gate asserts an absence.
+#[test]
+fn a_warm_turns_the_plain_hunk_into_colour() {
+    let scratch = Scratch::large_diff("warm-defer-thaw", 1, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+
+    let before = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    assert!(
+        before.iter().all(|class| *class == Class::Plain),
+        "the first pass was already coloured, so nothing here is being deferred \
+         and the second pass proves nothing"
+    );
+
+    // The demand the frame raised, served the way the shell serves it.
+    let wanted = highlighter.wanted().to_vec();
+    highlighter
+        .warm_ahead(scratch.root().to_path_buf(), wanted, None)
+        .join()
+        .expect("the warmer thread");
+
+    let after = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    assert!(
+        after.iter().any(|class| *class != Class::Plain),
+        "the hunk was still plain after its grammar was compiled, so a deferred \
+         entry is never rebuilt and the pane loses its colour for the session"
+    );
+    assert!(
+        highlighter.wanted().is_empty(),
+        "the frame asked for a warm it has already been given, which is a wake \
+         per frame for as long as the hunk is on screen"
+    );
+}
+
+/// **A demand that can never be served must still stop.**
+///
+/// The frame path draws a hunk out of the *diff*, which survives the file the
+/// diff was taken from. So a path that vanishes between the frame asking and the
+/// warmer opening it would be asked for again on the next frame, and every ask
+/// spawns a thread and every thread sends a wake: a livelock, at full CPU, on a
+/// monitor whose whole claim is that it costs nothing while idle.
+///
+/// The warmer therefore marks a grammar it merely *had a run at*, not only one
+/// it compiled. What that costs is that such a grammar is parsed cold once,
+/// which is exactly what shipped before any of this existed.
+#[test]
+fn a_path_that_vanished_does_not_leave_the_frame_asking() {
+    let scratch = Scratch::large_diff("warm-defer-vanished", 1, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+
+    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let wanted = highlighter.wanted().to_vec();
+    assert_eq!(
+        wanted.len(),
+        1,
+        "the frame asked for {wanted:?}, so the run below is not the one this \
+         gate means to make fail"
+    );
+
+    // Gone before the warmer reaches it, which beside an agent is ordinary
+    // rather than exotic: a rename, a `git checkout`, a build cleaning up.
+    scratch.remove("src/mod_0.rs");
+    let report = highlighter
+        .warm_ahead(scratch.root().to_path_buf(), wanted, None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        report.warmed, 0,
+        "the file was removed and the warmer still parsed something, so this \
+         gate is not testing the case it names"
+    );
+
+    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    assert!(
+        highlighter.wanted().is_empty(),
+        "the frame asked again for a grammar the warmer has already failed at, \
+         so every frame from here spawns a thread and sends a wake"
+    );
+}
+
+/// The demand describes **this** frame, not every frame there has ever been.
+///
+/// A list that accumulated would hand the warmer paths the reader scrolled off
+/// minutes ago, and would never be empty, so the shell would spawn a warm after
+/// every paint for the life of the process.
+#[test]
+fn a_settled_frame_asks_for_nothing() {
+    let scratch = Scratch::large_diff("warm-defer-settled", 1, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+
+    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let wanted = highlighter.wanted().to_vec();
+    highlighter
+        .warm_ahead(scratch.root().to_path_buf(), wanted, None)
+        .join()
+        .expect("the warmer thread");
+
+    // Two passes past the warm: the first rebuilds the deferred entry, the
+    // second is the steady state a reader sits in for hours.
+    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+
+    assert!(
+        highlighter.wanted().is_empty(),
+        "a settled frame is still asking for a warm, so I1's idle cost is a \
+         thread and a wake per paint rather than nothing"
+    );
+}
+
+/// An eager highlighter has no demand to raise, because it never defers.
+///
+/// The affordance the render gates use, asserted rather than assumed: they build
+/// one and then assert colour, so a version of it that deferred would make every
+/// one of them vacuous at once.
+#[test]
+fn an_eager_highlighter_parses_a_grammar_nothing_has_compiled() {
+    let scratch = Scratch::large_diff("warm-eager", 1, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+
+    let classes = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+
+    assert!(
+        classes.iter().any(|class| *class != Class::Plain),
+        "an eager highlighter drew plain, so every gate that builds one to \
+         assert a colour is asserting nothing"
+    );
+    assert!(
+        highlighter.wanted().is_empty(),
+        "an eager highlighter raised a demand nobody is going to serve"
+    );
+}
+
+/// A repository of `counts` files per extension, committed, so the index holds
+/// them.
+///
+/// `leading_paths` reads the **index** rather than walking the worktree, which
+/// is what makes it free beside a frame path that already opens one. So a
+/// fixture whose files are merely written proves nothing here, and this commits.
+fn indexed(name: &str, counts: &[(&str, usize)]) -> Scratch {
+    let scratch = Scratch::new(name);
+    for (extension, count) in counts {
+        for n in 0..*count {
+            scratch.write(
+                &format!("src/file_{n}.{extension}"),
+                "fn main() {}\nlet x = 1;\n",
+            );
+        }
+    }
+    scratch.commit_all("baseline");
+    scratch
+}
+
+/// Extensions come back commonest first, which is the whole of the ranking.
+///
+/// **What a repository leads with is the only thing that makes a speculative
+/// warm affordable.** Warming the tail costs +58.00 MiB over ten grammars,
+/// measured on the reference machine; warming the language a repository is
+/// mostly made of moves memory the session was near-certain to spend anyway. A
+/// ranking that came back in index order instead would spend the whole budget on
+/// whatever sorts first.
+#[test]
+fn the_leading_extensions_come_back_commonest_first() {
+    let scratch = indexed("warm-leading-rank", &[("rs", 9), ("py", 5), ("go", 2)]);
+
+    let paths = leading_paths(scratch.root(), 3, 1);
+
+    let extensions: Vec<&str> = paths
+        .iter()
+        .filter_map(|path| std::path::Path::new(path).extension()?.to_str())
+        .collect();
+    assert_eq!(
+        extensions,
+        ["rs", "py", "go"],
+        "the ranking came back as {extensions:?} rather than by file count, so \
+         the warm budget is spent on whatever the index happened to hold first"
+    );
+}
+
+/// And it is the same answer every time, which a gate needs and a reader wants.
+///
+/// Two extensions with the same count have no order of their own, and a
+/// `HashMap`'s iteration order is deliberately not one: without a tie-break the
+/// three grammars warmed would differ run to run, so a session's memory and its
+/// first coloured frame would both be luck.
+#[test]
+fn extensions_with_the_same_count_break_their_tie_the_same_way_every_time() {
+    let scratch = indexed("warm-leading-tie", &[("rs", 4), ("py", 4), ("go", 4)]);
+
+    let first = leading_paths(scratch.root(), 3, 1);
+    for _ in 0..4 {
+        assert_eq!(
+            leading_paths(scratch.root(), 3, 1),
+            first,
+            "two runs over one index disagreed, so which grammars get warmed is \
+             decided by hash order"
+        );
+    }
+    let extensions: Vec<&str> = first
+        .iter()
+        .filter_map(|path| std::path::Path::new(path).extension()?.to_str())
+        .collect();
+    assert_eq!(
+        extensions,
+        ["go", "py", "rs"],
+        "the tie broke as {extensions:?} rather than on the extension itself"
+    );
+}
+
+/// The output is bounded, and so is what it costs to produce.
+///
+/// **A bound on the walk, not only on the answer**, which is the same
+/// distinction `WARM_BYTES` records one function over: retaining every path and
+/// truncating afterwards is a copy of the index, and an index is the one
+/// structure in this process that scales with the repository rather than with
+/// the window. I3 is a claim about a process left open for days.
+#[test]
+fn no_more_than_the_asked_for_paths_per_extension_come_back() {
+    let scratch = indexed("warm-leading-bound", &[("rs", 40), ("py", 40)]);
+
+    let paths = leading_paths(scratch.root(), 2, WARM_PER_GRAMMAR);
+
+    assert_eq!(
+        paths.len(),
+        2 * WARM_PER_GRAMMAR,
+        "eighty indexed files produced {} paths against the {} asked for",
+        paths.len(),
+        2 * WARM_PER_GRAMMAR
+    );
+}
+
+/// Somewhere that is not a repository is nothing to warm, not a failure.
+///
+/// This runs on a detached thread that upholds nothing, so every way it can fail
+/// has to end in an empty answer rather than in a panic: the workspace builds
+/// with `panic = "abort"`, so a panic here takes the monitor with it.
+#[test]
+fn a_directory_that_is_not_a_repository_leads_with_nothing() {
+    let scratch = Scratch::new("warm-leading-bare");
+    let outside = scratch.root().join("..").join("definitely-not-here");
+
+    assert!(leading_paths(&outside, 3, 1).is_empty());
+    assert!(leading_paths(scratch.root(), 0, 1).is_empty());
+    assert!(leading_paths(scratch.root(), 3, 0).is_empty());
+}
+
+/// **The product claim: a language the repository leads with is compiled before
+/// anybody writes to it, and the tail is not.**
+///
+/// This is the half of [#129](https://github.com/breferrari/vigia/issues/129)
+/// that keeps the pane from flickering at all in the case being watched. A
+/// monitor opened beside an agent that has not started yet has an empty changed
+/// set, so the warm over *that* has nothing to do; the index still knows the
+/// repository is mostly Rust.
+///
+/// Both directions, because a warm with no cap would pass the first assertion
+/// and spend the +58.00 MiB the cap exists to refuse.
+#[test]
+fn the_repositorys_leading_grammars_are_compiled_and_its_tail_is_not() {
+    let scratch = indexed(
+        "warm-leading-product",
+        &[("rs", 9), ("py", 7), ("go", 5), ("css", 3)],
+    );
+    let highlighter = Highlighter::new();
+
+    highlighter
+        .warm_repository(scratch.root().to_path_buf(), None)
+        .join()
+        .expect("the warmer thread");
+
+    // Written after the warm, so these are files the sweep never saw: what is
+    // being asserted is the *grammar*, not the path.
+    scratch.write("src/late.rs", "fn late() -> u32 { 1 }\n");
+    scratch.write("src/late.css", "a { color: red; }\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = highlighter;
+
+    let leading = classes_of(&mut frame, &mut highlighter, "src/late.rs");
+    assert!(
+        leading.iter().any(|class| *class != Class::Plain),
+        "the repository is mostly Rust and a Rust file still drew plain, so the \
+         population sweep bought the reader nothing"
+    );
+
+    let tail = classes_of(&mut frame, &mut highlighter, "src/late.css");
+    assert!(
+        tail.iter().all(|class| *class == Class::Plain),
+        "a grammar past the {WARM_LEADING} the cap allows was compiled anyway, \
+         so the sweep is spending memory on the tail it exists to refuse"
     );
 }

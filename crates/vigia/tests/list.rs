@@ -121,7 +121,7 @@ fn each_region_reports_its_own_bar_column() {
     let mut frame = worktree.frame();
     materialise(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // Wide and tall enough that both regions overflow and both draw a bar, which
@@ -427,7 +427,7 @@ fn the_list_window_slides_to_keep_the_current_file_visible() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
     assert_eq!(
@@ -487,7 +487,7 @@ fn the_caret_follows_a_jump_rather_than_the_position_it_was_asked_for() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
 
@@ -538,7 +538,7 @@ fn scrolling_the_list_leaves_the_diff_where_it_was() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
 
@@ -597,7 +597,7 @@ fn the_window_is_overtaken_when_the_diff_leaves_it() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
 
@@ -656,7 +656,7 @@ fn the_region_at_fifty_files() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     for (label, top) in [
@@ -718,7 +718,7 @@ fn the_window_survives_a_pane_too_short_to_show_it() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let tall = split(WIDE, 24, FILES);
 
@@ -827,7 +827,7 @@ fn collect_resolves_every_degenerate_viewport() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     for list_top in [0usize, 1, FILES - 1, FILES, FILES + 9, usize::MAX] {
@@ -904,7 +904,7 @@ fn browsing_back_up_returns_the_window_to_the_top() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
 
@@ -961,7 +961,7 @@ fn dragging_the_list_bar_reaches_the_first_file_and_the_last() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
 
@@ -1029,7 +1029,7 @@ fn the_caret_travels_the_window_before_the_window_moves() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
     assert_eq!(
@@ -1125,7 +1125,7 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
         materialise(&mut frame);
 
         let mut app = App::new();
-        let mut highlighter = Highlighter::new();
+        let mut highlighter = Highlighter::eager();
         let history = History::new();
         let body = split(WIDE, height, FILES);
         let view = app
@@ -1211,7 +1211,7 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
     assert_eq!(
@@ -1301,7 +1301,7 @@ fn a_digit_after_the_diff_shrank_names_no_file() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FILES);
     assert_eq!(
@@ -1361,7 +1361,7 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = split(WIDE, 24, FEW);
     assert_eq!(body.list, FEW, "the fixture does not draw one row per file");
