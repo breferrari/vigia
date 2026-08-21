@@ -6106,3 +6106,119 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
         examined,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! What [`Painter::scrollbar`] draws when two regions start on one row.
+    //!
+    //! **`tests/render.rs` cannot reach this, which is why it is here.** That
+    //! file drives the whole of [`render`], and every layout it can ask for
+    //! stacks the list above the diff, so `list.y < diff.y` on every fixture
+    //! that exists. A drawer that told the two apart by the `y` of the rect it
+    //! was handed was therefore correct on every screen anyone could draw and
+    //! wrong on the one [#252](https://github.com/breferrari/vigia/issues/252)
+    //! draws, and no gate above this level could see the difference.
+    //!
+    //! This calls the private drawer with the rail's own shape: same `y`, same
+    //! height, different columns. It is the smallest thing that can express the
+    //! case at all.
+
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    use super::*;
+
+    /// Paint both regions' bars into one buffer, side by side over one row range.
+    ///
+    /// Returns the buffer, and the two bar columns are 29 and 79. The only thing
+    /// telling the regions apart is the [`Grabbed`] each is painted with: their
+    /// `y` and their height are deliberately identical.
+    fn rail(gripped: Option<Grabbed>, scrolling: Option<(Grabbed, isize)>) -> Buffer {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 24));
+        let theme = Theme::default();
+        let (list, diff) = (Rect::new(0, 1, 30, 20), Rect::new(30, 1, 50, 20));
+        assert_eq!(
+            (list.y, list.height),
+            (diff.y, diff.height),
+            "the fixture is not the case this module exists for"
+        );
+
+        let mut painter = Painter {
+            buf: &mut buf,
+            theme: &theme,
+            glyphs: Glyphs::default(),
+            gutter: 0,
+            inset: 0,
+            trailing: 0,
+            paint: PaintStats::default(),
+            pressed: None,
+            gripped,
+            hovered: None,
+            scrolling,
+        };
+        // Scrollable by a wide margin, so both bars draw a thumb well short of
+        // their track and the arrows exist to be read.
+        painter.scrollbar(list, Grabbed::List, Bar::Stepped, 0, 10, 100);
+        painter.scrollbar(diff, Grabbed::Diff, Bar::Stepped, 0, 10, 100);
+        buf
+    }
+
+    #[test]
+    fn only_the_scrolled_regions_arrows_light_when_both_start_on_one_row() {
+        // **The assertion that would have caught 0.5.0**, on the layout that
+        // brings the defect back. A bare direction lit the matching arrow on
+        // both bars; a direction plus a row fixed it only for as long as the two
+        // rows differ.
+        let theme = Theme::default();
+        let buf = rail(None, Some((Grabbed::Diff, -1)));
+        let fg = |x: u16, y: u16| buf[(x, y)].style().fg;
+
+        assert_eq!(
+            fg(79, 1),
+            theme.bar_active.fg,
+            "the scrolled region's own up arrow did not light"
+        );
+        assert_eq!(
+            fg(29, 1),
+            theme.bar_track.fg,
+            "scrolling the diff lit the *list's* up arrow, because both bars \
+             start on one row"
+        );
+        // The direction half, so a mark that lit its whole bar would still fail.
+        assert_eq!(
+            fg(79, 20),
+            theme.bar_track.fg,
+            "the arrow the scroll moves away from lit"
+        );
+    }
+
+    #[test]
+    fn only_the_gripped_regions_thumb_lights_when_both_start_on_one_row() {
+        // The drag mark, on the same fixture. `Chrome::gripped` carried its
+        // region from the start and was correct throughout, and it was correct
+        // *because* the tops differed rather than because it said which region.
+        let theme = Theme::default();
+        let buf = rail(Some(Grabbed::Diff), None);
+        let thumbs = |x: u16| {
+            (2..20)
+                .filter(|y| buf[(x, *y)].symbol() == BAR_THUMB.to_string())
+                .map(|y| buf[(x, y)].style().fg)
+                .collect::<Vec<_>>()
+        };
+
+        let (list, diff) = (thumbs(29), thumbs(79));
+        assert!(
+            !list.is_empty() && !diff.is_empty(),
+            "the fixture drew no thumb on one of the bars"
+        );
+        assert!(
+            diff.iter().all(|f| *f == theme.bar_active.fg),
+            "the gripped region's thumb did not light"
+        );
+        assert!(
+            list.iter().all(|f| *f == theme.bar.fg),
+            "gripping the diff lit the *list's* thumb, because both bars start \
+             on one row"
+        );
+    }
+}

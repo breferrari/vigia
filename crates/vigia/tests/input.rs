@@ -1896,3 +1896,54 @@ fn a_region_with_no_rows_lights_nothing() {
         Some((Grabbed::Diff, 1))
     );
 }
+
+#[test]
+fn a_mark_names_its_region_when_both_share_a_first_row() {
+    // **The screen [#252](https://github.com/breferrari/vigia/issues/252) draws,
+    // which nothing in this file draws today**: the list beside the diff rather
+    // than above it, so the two regions share a first row and a row count and
+    // differ only in their columns.
+    //
+    // Every mark that named a region by its top collapses on this fixture, which
+    // is why it is the gate on
+    // [#254](https://github.com/breferrari/vigia/issues/254) and why no existing
+    // test could have caught the assumption: on every layout that ships,
+    // `list.top < diff.top`, so a top and a region are the same answer and the
+    // wrong one is indistinguishable from the right one.
+    let regions = Regions {
+        list: Region::bare(1, 20, 0, 30, Some(29)),
+        diff: Region::bare(1, 20, 30, 50, Some(79)),
+        sheet: None,
+    };
+    assert_eq!(
+        (regions.list.top, regions.list.rows),
+        (regions.diff.top, regions.diff.rows),
+        "the fixture is not the case this test exists for"
+    );
+
+    // **The routing half.** `J` moves the map's window and `j` moves the diff's
+    // viewport, and under the old encoding both answered `1`.
+    assert_eq!(
+        scroll_mark(Action::ScrollList(1), regions),
+        Some((Grabbed::List, 1)),
+        "the map's own key named a region by a row both regions start on"
+    );
+    assert_eq!(
+        scroll_mark(Action::Scroll(1), regions),
+        Some((Grabbed::Diff, 1)),
+        "the diff's key named a region by a row both regions start on"
+    );
+
+    // **The hover half**, one bar column each, which is the coordinate that
+    // actually separates them on this layout.
+    assert_eq!(
+        regions.hover_at(29, 10),
+        Some(Hovered::Track(Grabbed::List)),
+        "a pointer on the rail's own bar marked the diff's"
+    );
+    assert_eq!(
+        regions.hover_at(79, 10),
+        Some(Hovered::Track(Grabbed::Diff)),
+        "a pointer on the diff's own bar marked the rail's"
+    );
+}
