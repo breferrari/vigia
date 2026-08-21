@@ -187,6 +187,29 @@ enum Wake {
     Warmed,
 }
 
+/// Whether a demand is worth handing to a warmer, given what the last one was
+/// handed.
+///
+/// **The rule lives here rather than inside `Shell::request_warm` for the reason
+/// `Held::ends` is a free function: that loop cannot be driven by a test, and a
+/// rule written inline is a rule with no gate.**
+///
+/// Two answers, and the second is the one that exists for a defect. An empty
+/// demand is nothing to do. A demand **identical** to the one the last completed
+/// warm was given is nothing to do either, because that warm has already had its
+/// turn at exactly these paths and finished: asking again spawns a thread that
+/// will do the same nothing and send a wake for it, on a tree nobody is
+/// touching, which is I1's *0 wakeups while idle* breached.
+///
+/// **It cannot stall a demand that is making progress**, and that is why the
+/// comparison is on the whole list rather than on a flag. A warm that compiles
+/// two of three grammars leaves a *shorter* demand, which is a different list,
+/// which is offered immediately. Only a demand that moved not at all is held
+/// back, and only until the next tick clears it.
+pub fn worth_warming(wanted: &[String], served: &[String]) -> bool {
+    !wanted.is_empty() && wanted != served
+}
+
 /// The callback a warm ends with, wired to this shell's wake channel.
 ///
 /// One line, and it is here rather than written out at its three call sites so
@@ -413,6 +436,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         hovered: None,
         scrolling: None,
         scrolling_until: None,
+        served: Vec::new(),
         warming: None,
     };
 
@@ -731,6 +755,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 Wake::Tick(paths) => {
                     shell.app.clear_notice();
+                    // **A tick is the world changing, so a demand that could not
+                    // be served a moment ago is worth offering again.** See
+                    // `Shell::served`: without this, one unservable demand would
+                    // keep its file plain for the rest of the session however
+                    // many times it was rewritten.
+                    shell.served.clear();
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only
                     // thing that moves it is a wake the loop was already having.
@@ -1066,6 +1096,23 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
+    /// The demand the last warm was handed, so a demand nothing can serve is
+    /// asked for once rather than on every frame.
+    ///
+    /// **The backstop for a demand the core cannot mark**, which is a narrower
+    /// set than it sounds and is not empty. `warm_run` marks the grammar it had
+    /// a run at, so an ordinary vanished file stops being asked for; what it
+    /// cannot do is mark the *right* grammar for a file it never opened whose
+    /// extension lies about its language. A Qt `.ts` translation file draws as
+    /// XML because the frame has its first line, and if it is deleted before the
+    /// warmer opens it the warmer can only mark TypeScript, which the frame was
+    /// never waiting on. Without this that hunk is demanded on every frame, and
+    /// every demand spawns a thread and sends a wake.
+    ///
+    /// Cleared on a tick, because a tick is the world changing and a warm that
+    /// could not be served a second ago may be servable now. See
+    /// [`worth_warming`], which is where the rule lives so that it can be gated.
+    served: Vec<String>,
     /// The warm this shell last asked for, if any.
     ///
     /// **Held to be asked whether it has finished, never to be joined.** See
@@ -1240,18 +1287,24 @@ impl Shell {
     /// than joining; `is_finished` is what says the previous run is over without
     /// blocking a frame on it.
     fn request_warm(&mut self, worktree: &Worktree, tx: &Sender<Wake>) {
-        if self.warming.as_ref().is_some_and(|h| !h.is_finished()) {
+        if self
+            .warming
+            .as_ref()
+            .is_some_and(|handle| !handle.is_finished())
+        {
             return;
         }
-        let wanted = self.highlighter.wanted();
-        if wanted.is_empty() {
+        if !worth_warming(self.highlighter.wanted(), &self.served) {
             self.warming = None;
+            if self.highlighter.wanted().is_empty() {
+                self.served.clear();
+            }
             return;
         }
-        let paths = wanted.to_vec();
+        self.served = self.highlighter.wanted().to_vec();
         self.warming = Some(self.highlighter.warm_ahead(
             worktree.workdir().to_path_buf(),
-            paths,
+            self.served.clone(),
             Some(warmed(tx)),
         ));
     }

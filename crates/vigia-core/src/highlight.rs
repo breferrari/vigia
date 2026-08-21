@@ -477,8 +477,8 @@ impl Entry {
             live: true,
             // The one branch this whole change turns on. A grammar the warmer
             // has not run over is a grammar whose every pattern is still an
-            // uncompiled `OnceCell`, so parsing here is the 74-694ms the reader
-            // is waiting on.
+            // uncompiled `OnceCell`, so parsing here is the 124 to 695ms a cold
+            // screenful measures, which is what the reader is waiting on.
             parse: match syntax_for(syntaxes, path, first_line) {
                 None => Parse::Unsupported,
                 Some(syntax) if !compiled(syntax.scope, attempted) => Parse::Deferred(syntax.scope),
@@ -669,7 +669,8 @@ pub struct Highlighter {
     /// grammar, and it is the **absence** that the frame path acts on: a scope
     /// that is not in here has had no `ParseState` built for it by either of the
     /// two places in this crate that build one, so every pattern it owns is an
-    /// uncompiled `OnceCell` and parsing it costs the whole 74-694ms cliff.
+    /// uncompiled `OnceCell` and parsing it costs the whole cliff: 74-362ms of
+    /// compile per grammar, which is 124 to 695ms measured over a screenful.
     /// That claim is exact, and the frame path only ever moves on it in the
     /// **safe** direction: draw plain and ask for a warm. Nothing here ever
     /// concludes that parsing will be cheap.
@@ -757,7 +758,7 @@ impl Highlighter {
     /// of a single pass would otherwise be measuring the one pass that
     /// deliberately does not parse.
     ///
-    /// **Never reach for this in the shell.** It puts the 74-694ms compile back
+    /// **Never reach for this in the shell.** It puts the 74-362ms compile back
     /// on a frame a reader is waiting on, and nothing would go red: the gate
     /// that would notice builds its own [`Self::new`].
     pub fn eager() -> Self {
@@ -1010,30 +1011,59 @@ impl Highlighter {
             // by extension, so charging here spent TypeScript's budget on
             // XML's work and could starve the real TypeScript file later in
             // the same run.
-            let Some(by_path) = syntax_for(syntaxes, &path, None) else {
-                continue;
-            };
-            // **And the cap, cheaply, on the answer the path alone gives.**
+            //
+            // **A miss here is not the end of the path's turn, and treating it
+            // as one was an I1 breach.** An extensionless script's grammar is
+            // named by its own first line, so `Entry::new` resolves it, defers,
+            // and asks for a warm; this resolution has no first line to consult,
+            // returned `None`, and skipped the file before [`Attempt`] existed
+            // to mark anything. The frame then asked again on the next frame,
+            // and every ask spawned a thread and sent a wake, on a tree nobody
+            // was touching. So a path the extension cannot answer for falls
+            // through to the read below rather than being skipped, which also
+            // makes a shebang script warmable for the first time.
+            let by_path = syntax_for(syntaxes, &path, None);
+
+            // **The cap, cheaply, on the answer the path alone gives.**
             // This is what keeps a single-language changed set to three
             // reads: without it every file past the cap was read and
             // canonicalized before being discarded, which is the I/O
             // amplification the cap exists to prevent. It is sound for any
             // path whose grammar the first line cannot change; the ones it
             // can are named by [`CONTENT_SENSITIVE`] and pay the read to
-            // find out.
-            // **Armed here, where the grammar first has a name, and fired on
-            // the way out however this turn ends.** See [`Attempt`]: six
-            // explicit calls sat on the `continue`s below, and a seventh way out
-            // added later would have silently not marked.
-            let mut attempt = Attempt::new(attempted, by_path.scope);
-
+            // find out, and so does one the extension cannot answer for at all.
+            //
+            // **The cap is charged after the read, not here**, and the two
+            // are different questions. This one is *is there anything to
+            // compile*, which the path answers on its own. Charging needs
+            // the grammar that will actually be compiled, and one of the
+            // resolution steps reads the file's first line: a Qt `.ts`
+            // translation file compiles XML while resolving to TypeScript
+            // by extension, so charging here spent TypeScript's budget on
+            // XML's work and could starve the real TypeScript file later in
+            // the same run.
             if !content_sensitive(&path)
-                && per_grammar
-                    .get(&by_path.scope)
-                    .is_some_and(|seen| *seen >= WARM_PER_GRAMMAR)
+                && by_path.is_some_and(|by_path| {
+                    per_grammar
+                        .get(&by_path.scope)
+                        .is_some_and(|seen| *seen >= WARM_PER_GRAMMAR)
+                })
             {
                 continue;
             }
+
+            // **Armed as soon as any grammar has a name, and fired on the way
+            // out however this turn ends.** See [`Attempt`]: six explicit calls
+            // sat on the `continue`s below, and a seventh way out added later
+            // would have silently not marked.
+            //
+            // `None` while the extension has told us nothing, because there is
+            // no scope to mark yet and no honest one to guess. It is retargeted
+            // below the moment the first line settles the question, and a path
+            // that reaches neither resolution is one the frame path also
+            // resolves to nothing, so it is never demanded and never needs a
+            // mark.
+            let mut attempt = Attempt::new(attempted, by_path.map(|by_path| by_path.scope));
 
             // **And where it actually lands, which the component check
             // cannot know.** That one is lexical, so it stops `..` and every
@@ -1052,6 +1082,16 @@ impl Highlighter {
             // [`WARM_TOTAL`], against a compile of 74-362ms. A path that
             // cannot be resolved has vanished, which is the `continue` the
             // open below would have taken anyway.
+            //
+            // **It is stat-then-act, and the window is real**, which the
+            // adversarial review named and which is not closed here. A path
+            // component swapped for a symlink between this call and the open
+            // below reads wherever it points, because there is no portable way
+            // to ask an open handle for its own path. What it reaches is parsed
+            // to compile regex patterns and is never drawn, stored or reported,
+            // so what leaks through the window is the timing of a parse. Stated
+            // rather than defended against, because the honest options are a
+            // platform-specific handle API or nothing.
             let Ok(target) = std::fs::canonicalize(root.join(&path)) else {
                 continue;
             };
@@ -1274,7 +1314,14 @@ impl Highlighter {
                     .deferred()
                     .is_some_and(|scope| compiled(scope, attempted));
                 if entries[slot].digest == content.digest && !thaw {
-                    stats.reused += 1;
+                    // **Neither parsed nor reused when the entry is deferred**,
+                    // for the reason the `parsed` counter is guarded the same
+                    // way below: a deferred hunk has no `Sides`, so no parse
+                    // survived from an earlier frame and saying one did would
+                    // overclaim exactly what `HighlightStats::reused` promises.
+                    if entries[slot].deferred().is_none() {
+                        stats.reused += 1;
+                    }
                     entries[slot].live = true;
                     slot
                 } else {
@@ -1463,28 +1510,38 @@ impl std::fmt::Debug for Highlighter {
 /// not worth taking the monitor down over.
 struct Attempt<'a> {
     attempted: Option<&'a Mutex<HashSet<Scope>>>,
-    scope: Scope,
+    /// `None` while no grammar has a name yet, which is an extensionless path
+    /// before its first line has been read. Marking nothing is right there: the
+    /// frame path resolves such a file the same way and, finding nothing either,
+    /// never asks for it.
+    scope: Option<Scope>,
 }
 
 impl<'a> Attempt<'a> {
-    fn new(attempted: Option<&'a Mutex<HashSet<Scope>>>, scope: Scope) -> Self {
+    fn new(attempted: Option<&'a Mutex<HashSet<Scope>>>, scope: Option<Scope>) -> Self {
         Self { attempted, scope }
     }
 
-    /// Mark a different grammar than the path named, once the file's first line
-    /// has said which one it really is.
+    /// Name the grammar this turn is really about, once the file's first line
+    /// has settled it.
+    ///
+    /// **Two paths reach here and they fail differently without it.** A Qt `.ts`
+    /// translation file resolves to TypeScript by extension and compiles XML, so
+    /// leaving the pre-read answer in place would mark a grammar nothing
+    /// compiled and leave the one that *was* compiled unmarked. An extensionless
+    /// script resolves to nothing at all until this is called.
     fn retarget(&mut self, scope: Scope) {
-        self.scope = scope;
+        self.scope = Some(scope);
     }
 }
 
 impl Drop for Attempt<'_> {
     fn drop(&mut self) {
-        if let Some(attempted) = self.attempted {
+        if let (Some(attempted), Some(scope)) = (self.attempted, self.scope) {
             attempted
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .insert(self.scope);
+                .insert(scope);
         }
     }
 }

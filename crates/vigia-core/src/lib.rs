@@ -66,4 +66,7 @@ pub use history::{
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
-pub use worktree::{ChangeOptions, Changes, Indexed, Worktree, indexed_extensions};
+pub use worktree::{
+    ChangeOptions, Changes, INDEXED_EXTENSION, INDEXED_EXTENSIONS, Indexed, Worktree,
+    indexed_extensions,
+};

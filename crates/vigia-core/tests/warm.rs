@@ -32,8 +32,8 @@ use std::time::Duration;
 
 use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_window, time};
 use vigia_core::{
-    Class, Highlighter, WARM_BYTES, WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL,
-    indexed_extensions,
+    Class, Frame, Highlighter, INDEXED_EXTENSION, INDEXED_EXTENSIONS, WARM_BYTES, WARM_FILES,
+    WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, indexed_extensions,
 };
 
 #[test]
@@ -1121,3 +1121,303 @@ fn the_repositorys_leading_grammars_are_compiled_and_its_tail_is_not() {
          so the sweep is spending memory on the tail it exists to refuse"
     );
 }
+
+/// A shebang script's grammar is knowable only from its first line, and the
+/// warmer gave up before it could be marked.
+///
+/// **The one I1 breach this change was able to produce**, found by the
+/// concurrency review rather than by a gate. `Entry::new` resolves with the
+/// file's first line, so `bin/setup` opening `#!/usr/bin/env python` defers and
+/// asks for a warm. `warm_run` resolved from the **path alone** to decide
+/// whether there was anything to compile, got nothing, and `continue`d before
+/// [`Attempt`] was armed. So the grammar was never marked, the next frame asked
+/// again, and every ask spawned a thread and sent a wake: a monitor at full tilt
+/// on a tree nobody was touching, which is precisely what I1's *0 wakeups while
+/// idle* forbids.
+///
+/// The fix is to pay the bounded read the extension could not spare us, which is
+/// the same read `CONTENT_SENSITIVE` already pays for a Qt `.ts` file. It closes
+/// a second gap in passing: a shebang script was never warmable at all, and
+/// `warm`'s docblock said so.
+///
+/// **Both halves, because either alone passes on a broken build.** A warmer that
+/// marked without compiling would satisfy the second assertion and leave the
+/// reader with a permanently plain file; one that compiled without marking is
+/// today's breach.
+#[test]
+fn a_grammar_only_the_first_line_knows_does_not_spin_the_warmer() {
+    let scratch = Scratch::new("warm-shebang");
+    scratch.write("bin/setup", "#!/usr/bin/env python\nold = 1\n");
+    scratch.commit_all("baseline");
+    scratch.write(
+        "bin/setup",
+        "#!/usr/bin/env python\nimport os\n\n\ndef main():\n    return os.getcwd()\n",
+    );
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+
+    let first = shebang_classes(&mut frame, &mut highlighter);
+    assert!(
+        first.iter().all(|class| *class == Class::Plain),
+        "the script drew coloured on the frame that met it, so nothing is being \
+         deferred here and the rest of this gate proves nothing"
+    );
+    assert_eq!(
+        highlighter.wanted(),
+        ["bin/setup"],
+        "the frame drew plain and asked for nothing, so this fixture cannot \
+         reach the case"
+    );
+
+    // Served exactly the way the shell serves it.
+    let wanted = highlighter.wanted().to_vec();
+    let report = highlighter
+        .warm_ahead(scratch.root().to_path_buf(), wanted, None)
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        report.warmed, 1,
+        "the warmer compiled {} files for a script whose grammar its own first \
+         line names, so an extensionless path is still unwarmable",
+        report.warmed
+    );
+
+    let second = shebang_classes(&mut frame, &mut highlighter);
+    assert!(
+        highlighter.wanted().is_empty(),
+        "the frame asked again for a grammar the warmer has already run over, \
+         so every frame from here spawns a thread and sends a wake on a tree \
+         nobody is touching, which is I1's budget breached"
+    );
+    assert!(
+        second.iter().any(|class| *class != Class::Plain),
+        "the script never gained its colour, so the warm marked a grammar it \
+         had not compiled"
+    );
+}
+
+/// Drive one screenful of the shebang fixture, passing the first line the frame
+/// path passes.
+///
+/// Written out rather than routed through `highlight_window`, because the shared
+/// helper passes `None` and `None` is exactly what this gate must not do: with
+/// no first line the grammar resolves to nothing on **both** sides, the entry is
+/// `Parse::Unsupported`, no demand is raised, and the breach is unreachable.
+fn shebang_classes(frame: &mut Frame, highlighter: &mut Highlighter) -> Vec<Class> {
+    let index = frame
+        .files()
+        .iter()
+        .position(|change| change.path == "bin/setup")
+        .expect("bin/setup is a changed file");
+    let mut classes = Vec::new();
+    let mut pass = highlighter.pass();
+    let (_, diff) = frame.diff(index).expect("diff");
+    let hunk = diff.hunks.first().expect("the fixture has a hunk");
+    for line in 0..hunk.lines.len() {
+        classes.extend(
+            pass.spans("bin/setup", 0, hunk, line, Some("#!/usr/bin/env python"))
+                .iter()
+                .map(|span| span.class),
+        );
+    }
+    drop(pass);
+    classes
+}
+
+/// A hostile index cannot turn one background scan into an unbounded
+/// allocation.
+///
+/// **Filed by the adversarial review, and the shape is worth keeping.** `.git/index`
+/// in a cloned repository is somebody else's bytes, and `indexed_extensions`
+/// retains a `Vec` per distinct extension. Two hundred thousand entries each
+/// carrying a unique extension is an allocation measured in gigabytes on a
+/// thread that runs at every launch, and under `panic = "abort"` an allocation
+/// failure takes the monitor rather than the thread.
+///
+/// The fixture is deliberately just over the cap rather than enormous: what is
+/// being asserted is that a cap exists and holds, and a gate that needed two
+/// hundred thousand files to say so would never be run.
+#[test]
+fn an_index_of_many_distinct_extensions_is_bounded() {
+    let scratch = Scratch::new("warm-index-flood");
+    let flood = INDEXED_EXTENSIONS + 200;
+    for n in 0..flood {
+        scratch.write(&format!("f{n}.x{n}"), "body\n");
+    }
+    scratch.git(&["add", "-A"]);
+
+    let tally = indexed_extensions(scratch.root(), 1);
+
+    assert_eq!(
+        tally.len(),
+        INDEXED_EXTENSIONS,
+        "{flood} distinct extensions produced {} entries, so the tally is \\
+         bounded by the index rather than by this crate",
+        tally.len()
+    );
+}
+
+/// An extension no grammar could register is not worth a `HashMap` entry.
+///
+/// The cheaper of the two rejections and the one that bounds a single entry: the
+/// longest extension the dump registers is `sublime-syntax` at fourteen bytes.
+#[test]
+fn an_extension_longer_than_any_grammar_registers_is_skipped() {
+    let scratch = Scratch::new("warm-index-long");
+    let long = "z".repeat(INDEXED_EXTENSION + 1);
+    scratch.write(&format!("bloated.{long}"), "body\\n");
+    scratch.write("ordinary.rs", "fn main() {}\\n");
+    scratch.git(&["add", "-A"]);
+
+    let tally = indexed_extensions(scratch.root(), 1);
+
+    let extensions: Vec<&str> = tally
+        .iter()
+        .map(|indexed| indexed.extension.as_str())
+        .collect();
+    assert_eq!(
+        extensions,
+        ["rs"],
+        "the tally came back as {extensions:?}, so an extension no grammar can \\
+         register is still being kept"
+    );
+}
+
+/// **The count stays exact past the cap, which is the half that decides the
+/// merge.**
+///
+/// Bounding how many distinct extensions are *tracked* is fine; dropping later
+/// entries of one already being tracked would make its count wrong, and the
+/// merge in `highlight.rs` ranks on exactly those counts. So an extension that
+/// made it into the tally keeps counting however full the tally is.
+#[test]
+fn an_extension_already_tracked_keeps_counting_past_the_cap() {
+    let scratch = Scratch::new("warm-index-exact");
+    // Written first, so it is in the tally before the flood fills it.
+    for n in 0..3 {
+        scratch.write(&format!("aaa_early_{n}.rs"), "fn main() {}\\n");
+    }
+    for n in 0..(INDEXED_EXTENSIONS + 50) {
+        scratch.write(&format!("mid_{n}.y{n}"), "body\\n");
+    }
+    for n in 0..4 {
+        scratch.write(&format!("zzz_late_{n}.rs"), "fn main() {}\\n");
+    }
+    scratch.git(&["add", "-A"]);
+
+    let tally = indexed_extensions(scratch.root(), 1);
+
+    let rust = tally
+        .iter()
+        .find(|indexed| indexed.extension == "rs")
+        .expect("the tally kept the extension it saw first");
+    assert_eq!(
+        rust.files, 7,
+        "Rust counted {} of its 7 files, so the tally's cap is silently \\
+         truncating a count the merge ranks on",
+        rust.files
+    );
+}
+
+/// **The grammar charged is the one compiled, not the one the extension named.**
+///
+/// `SPEC.md` §6's Qt rule: a `.ts` file whose first line is an XML declaration is
+/// a translation file, so it resolves to TypeScript by extension and compiles
+/// **XML**. `Attempt::retarget` is what moves the mark onto the grammar that was
+/// really compiled, and until this gate existed nothing exercised it: dropping
+/// the call would have left the warmer marking TypeScript for work XML did, so
+/// the reader's next real TypeScript file would draw coloured off a grammar
+/// nothing had compiled and pay the whole cliff on that frame.
+///
+/// Both directions, because marking everything would pass the first assertion.
+#[test]
+fn a_qt_translation_file_charges_xml_and_not_typescript() {
+    // Committed thin and then written full, so every one of the three differs
+    // from the index and reaches the frame. Written identically on both sides
+    // they are unchanged files, and a frame has nothing to draw for them.
+    let scratch = Scratch::new("warm-qt-retarget");
+    for path in ["ui/strings.ts", "ui/app.ts", "ui/config.xml"] {
+        scratch.write(
+            path, "
+",
+        );
+    }
+    scratch.commit_all("baseline");
+    scratch.write("ui/strings.ts", QT_TRANSLATION);
+    scratch.write("ui/app.ts", TYPESCRIPT);
+    scratch.write("ui/config.xml", XML);
+
+    let highlighter = Highlighter::new();
+    let report = highlighter
+        .warm_ahead(
+            scratch.root().to_path_buf(),
+            vec!["ui/strings.ts".to_owned()],
+            None,
+        )
+        .join()
+        .expect("the warmer thread");
+    assert_eq!(
+        report.warmed, 1,
+        "the Qt file was not warmed at all, so this gate cannot say which \\
+         grammar it charged"
+    );
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = highlighter;
+
+    let xml = highlight_window(&mut frame, &mut highlighter, "ui/config.xml", 0, 1).classes;
+    assert!(
+        xml.iter().any(|class| *class != Class::Plain),
+        "XML drew plain after a Qt translation file compiled it, so the warm \\
+         charged the grammar the extension named rather than the one it ran"
+    );
+
+    let typescript = highlight_window(&mut frame, &mut highlighter, "ui/app.ts", 0, 1).classes;
+    assert!(
+        typescript.iter().all(|class| *class == Class::Plain),
+        "TypeScript drew coloured off a Qt translation file's warm, so its \\
+         budget was spent on XML's work and a real TypeScript file will pay the \\
+         compile on a frame the reader is waiting on"
+    );
+}
+
+/// A Qt `.ts` translation file: TypeScript by extension, XML by first line.
+const QT_TRANSLATION: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="pt_BR">
+  <context>
+    <name>MainWindow</name>
+    <message>
+      <source>Watch</source>
+      <translation>Vigia</translation>
+    </message>
+  </context>
+</TS>
+"#;
+
+const TYPESCRIPT: &str = r#"export interface Watcher {
+  readonly root: string;
+  start(): Promise<void>;
+}
+
+export class Pane implements Watcher {
+  constructor(public readonly root: string) {}
+  async start(): Promise<void> {
+    const rows = [1, 2, 3].map((n) => n * 2);
+    console.log(`rows: ${rows.length}`);
+  }
+}
+"#;
+
+const XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<config name="vigia">
+  <pane width="80" height="24"/>
+  <!-- a comment -->
+  <theme>dark</theme>
+</config>
+"#;
