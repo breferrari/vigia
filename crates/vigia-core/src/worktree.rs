@@ -568,8 +568,20 @@ impl Iterator for Changes {
     }
 }
 
-/// Representative working-tree paths for the extensions this repository leads
-/// with, commonest first.
+/// One extension the index carries, with how many entries have it and a bounded
+/// sample of their paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed {
+    /// Lowercased, because a repository holding both `.MD` and `.md` is one
+    /// language rather than two.
+    pub extension: String,
+    /// Index entries carrying it, counted in full.
+    pub files: usize,
+    /// Working-tree paths that have it, at most `per_extension` of them.
+    pub paths: Vec<String>,
+}
+
+/// Every extension the index carries, commonest first.
 ///
 /// **What a repository is made of, before anybody writes to it.** The warmer's
 /// other entry point walks the *changed* set, and a monitor is very often opened
@@ -578,29 +590,32 @@ impl Iterator for Changes {
 /// compiled. The index knows the answer already and costs no walk of the
 /// worktree to ask.
 ///
-/// **Ranked by extension rather than by grammar**, because `SPEC.md` §6 puts
-/// `syntect` on the other side of this file and an extension is a many-to-one
-/// proxy for a grammar that is good enough to rank on. The caller is expected to
-/// ask for more extensions than it means to warm and to spend its budget on the
-/// ones that actually resolve, since `.snap` and `.lock` can lead a repository
-/// while resolving to nothing.
+/// **A tally rather than a ranking, and that is the seam.** `SPEC.md` §6 puts
+/// `syntect` on the other side of this file, so this cannot know that `.yml` and
+/// `.yaml` are one grammar, or `.h` and `.hpp`. An earlier version ranked and
+/// truncated here anyway, on the argument that an extension is a good enough
+/// proxy for a grammar — which is true of one path and **false of the selection
+/// step**, because a language spelled two ways is counted twice at exactly the
+/// point where the counts decide who wins. Handing back the whole tally lets the
+/// caller merge on the grammar it can see, and leaves nothing here to be wrong
+/// about.
 ///
-/// Ties break on the extension itself, so two extensions with the same count
-/// come back in the same order every time and a gate can assert the ranking.
+/// **Complete, so the merge has nothing to miss**: no cutoff, every extension in
+/// the index. What is bounded is the *paths*, at `per_extension` each, which is
+/// the part that scales with the repository. The tally itself scales with how
+/// many distinct extensions a tree has, which is a fact about its shape rather
+/// than its size: a hundred-thousand-file checkout still has a few dozen.
 ///
-/// **Bounded in memory rather than only in output.** At most `per_extension`
-/// paths are retained per extension while counting, so an index of a hundred
-/// thousand entries costs a scan and a count rather than a copy of itself. I3 is
-/// a claim about a process left open for days and this runs on a thread inside
-/// one.
+/// Ties break on the extension itself, so the order is total and a caller
+/// merging with a **stable** sort inherits a deterministic answer.
 ///
 /// Opens its own repository, because `gix::Repository` is `Send` and not `Sync`
 /// so the frame path's cannot be borrowed across a thread boundary; the shell's
 /// watch thread already pays the same second open for the same reason. A
 /// repository that cannot be opened, or has no index at all, is **nothing to
 /// warm** rather than an error: this only ever makes a later frame cheaper.
-pub fn leading_paths(root: &Path, extensions: usize, per_extension: usize) -> Vec<String> {
-    if extensions == 0 || per_extension == 0 {
+pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
+    if per_extension == 0 {
         return Vec::new();
     }
     let Ok(repo) = gix::discover(root) else {
@@ -610,9 +625,6 @@ pub fn leading_paths(root: &Path, extensions: usize, per_extension: usize) -> Ve
         return Vec::new();
     };
 
-    // Keyed on the lowercased extension, because `syntax_for` resolves
-    // case-insensitively and a repository holding both `.MD` and `.md` is one
-    // language rather than two budgets.
     let mut counts: std::collections::HashMap<String, (usize, Vec<String>)> =
         std::collections::HashMap::new();
     for entry in index.entries() {
@@ -632,15 +644,21 @@ pub fn leading_paths(root: &Path, extensions: usize, per_extension: usize) -> Ve
         }
     }
 
-    let mut ranked: Vec<(String, (usize, Vec<String>))> = counts.into_iter().collect();
-    ranked.sort_by(|(left_ext, (left, _)), (right_ext, (right, _))| {
-        right.cmp(left).then_with(|| left_ext.cmp(right_ext))
+    let mut ranked: Vec<Indexed> = counts
+        .into_iter()
+        .map(|(extension, (files, paths))| Indexed {
+            extension,
+            files,
+            paths,
+        })
+        .collect();
+    ranked.sort_by(|left, right| {
+        right
+            .files
+            .cmp(&left.files)
+            .then_with(|| left.extension.cmp(&right.extension))
     });
     ranked
-        .into_iter()
-        .take(extensions)
-        .flat_map(|(_, (_, paths))| paths)
-        .collect()
 }
 
 #[cfg(test)]

@@ -30,10 +30,10 @@ mod support;
 
 use std::time::Duration;
 
-use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, time};
+use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_window, time};
 use vigia_core::{
-    Class, Frame, Highlighter, WARM_BYTES, WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL,
-    leading_paths,
+    Class, Highlighter, WARM_BYTES, WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL,
+    indexed_extensions,
 };
 
 #[test]
@@ -651,62 +651,12 @@ fn the_warmer_reads_nothing_through_a_symlink_out_of_the_worktree() {
     );
 }
 
-/// Every class one screenful of the first hunk of `path` draws.
-///
-/// The shape a frame drives the highlighter in, reduced to the one thing these
-/// gates assert. Returns a class per span rather than a set, so a caller can say
-/// *all plain* and *some not plain* without either collapsing into the other.
-fn classes_of(frame: &mut Frame, highlighter: &mut Highlighter, path: &str) -> Vec<Class> {
-    let index = frame
-        .files()
-        .iter()
-        .position(|change| change.path == path)
-        .unwrap_or_else(|| panic!("{path} is not a changed file"));
-
-    let mut classes = Vec::new();
-    let mut pass = highlighter.pass();
-    let (_, diff) = frame.diff(index).expect("diff");
-    let hunk = diff.hunks.first().expect("the fixture has a hunk");
-    for line in 0..hunk.lines.len() {
-        classes.extend(
-            pass.spans(path, 0, hunk, line, None)
-                .iter()
-                .map(|s| s.class),
-        );
-    }
-    drop(pass);
-    classes
-}
-
 /// I9's budget, restated here because this gate is about a frame rather than
 /// about the warmer's own bounds.
 const FRAME_BUDGET: Duration = Duration::from_millis(16);
 
 /// Rows one screenful shows, and so lines this gate asks the highlighter for.
 const SCREENFUL: usize = 24;
-
-/// Highlight every line of the first hunk of `path`, the way a frame does.
-///
-/// Returns the rows drawn, so a window that drew nothing cannot satisfy a gate
-/// by costing nothing.
-fn draw_one_screenful(frame: &mut Frame, highlighter: &mut Highlighter, path: &str) -> usize {
-    let index = frame
-        .files()
-        .iter()
-        .position(|change| change.path == path)
-        .unwrap_or_else(|| panic!("{path} is not a changed file"));
-
-    let mut pass = highlighter.pass();
-    let (_, diff) = frame.diff(index).expect("diff");
-    let hunk = diff.hunks.first().expect("the fixture has a hunk");
-    let mut drawn = 0;
-    for line in 0..hunk.lines.len() {
-        pass.spans(path, 0, hunk, line, None);
-        drawn += 1;
-    }
-    drop(pass);
-    drawn
-}
 
 /// **The frame a reader actually meets, and the one nothing gated.**
 ///
@@ -744,7 +694,8 @@ fn a_frame_that_meets_a_new_grammar_holds_the_frame_budget() {
     let mut highlighter = Highlighter::new();
 
     let mut drawn = 0;
-    let cost = time(|| drawn = draw_one_screenful(&mut frame, &mut highlighter, "src/mod_0.rs"));
+    let cost =
+        time(|| drawn = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).rows);
 
     assert_eq!(
         drawn, SCREENFUL,
@@ -775,7 +726,7 @@ fn a_grammar_nothing_has_compiled_draws_plain_and_parses_nothing() {
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::new();
 
-    let classes = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let classes = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
 
     assert_eq!(
         highlighter.stats().lines,
@@ -810,7 +761,7 @@ fn a_warm_turns_the_plain_hunk_into_colour() {
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::new();
 
-    let before = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let before = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
     assert!(
         before.iter().all(|class| *class == Class::Plain),
         "the first pass was already coloured, so nothing here is being deferred \
@@ -824,7 +775,7 @@ fn a_warm_turns_the_plain_hunk_into_colour() {
         .join()
         .expect("the warmer thread");
 
-    let after = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let after = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
     assert!(
         after.iter().any(|class| *class != Class::Plain),
         "the hunk was still plain after its grammar was compiled, so a deferred \
@@ -856,7 +807,7 @@ fn a_path_that_vanished_does_not_leave_the_frame_asking() {
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::new();
 
-    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let _ = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
     let wanted = highlighter.wanted().to_vec();
     assert_eq!(
         wanted.len(),
@@ -878,7 +829,7 @@ fn a_path_that_vanished_does_not_leave_the_frame_asking() {
          gate is not testing the case it names"
     );
 
-    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let _ = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
     assert!(
         highlighter.wanted().is_empty(),
         "the frame asked again for a grammar the warmer has already failed at, \
@@ -899,7 +850,7 @@ fn a_settled_frame_asks_for_nothing() {
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::new();
 
-    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let _ = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
     let wanted = highlighter.wanted().to_vec();
     highlighter
         .warm_ahead(scratch.root().to_path_buf(), wanted, None)
@@ -908,8 +859,8 @@ fn a_settled_frame_asks_for_nothing() {
 
     // Two passes past the warm: the first rebuilds the deferred entry, the
     // second is the steady state a reader sits in for hours.
-    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
-    let _ = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let _ = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
+    let _ = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
 
     assert!(
         highlighter.wanted().is_empty(),
@@ -931,7 +882,7 @@ fn an_eager_highlighter_parses_a_grammar_nothing_has_compiled() {
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::eager();
 
-    let classes = classes_of(&mut frame, &mut highlighter, "src/mod_0.rs");
+    let classes = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
 
     assert!(
         classes.iter().any(|class| *class != Class::Plain),
@@ -970,40 +921,41 @@ fn indexed(name: &str, counts: &[(&str, usize)]) -> Scratch {
 /// warm affordable.** Warming the tail costs +58.00 MiB over ten grammars,
 /// measured on the reference machine; warming the language a repository is
 /// mostly made of moves memory the session was near-certain to spend anyway. A
-/// ranking that came back in index order instead would spend the whole budget on
+/// tally that came back in index order instead would spend the whole budget on
 /// whatever sorts first.
 #[test]
-fn the_leading_extensions_come_back_commonest_first() {
+fn the_indexed_extensions_come_back_commonest_first() {
     let scratch = indexed("warm-leading-rank", &[("rs", 9), ("py", 5), ("go", 2)]);
 
-    let paths = leading_paths(scratch.root(), 3, 1);
+    let tally = indexed_extensions(scratch.root(), 1);
 
-    let extensions: Vec<&str> = paths
+    let ranked: Vec<(&str, usize)> = tally
         .iter()
-        .filter_map(|path| std::path::Path::new(path).extension()?.to_str())
+        .map(|indexed| (indexed.extension.as_str(), indexed.files))
         .collect();
     assert_eq!(
-        extensions,
-        ["rs", "py", "go"],
-        "the ranking came back as {extensions:?} rather than by file count, so \
-         the warm budget is spent on whatever the index happened to hold first"
+        ranked,
+        [("rs", 9), ("py", 5), ("go", 2)],
+        "the tally came back as {ranked:?} rather than by file count, so the \
+         warm budget is spent on whatever the index happened to hold first"
     );
 }
 
 /// And it is the same answer every time, which a gate needs and a reader wants.
 ///
 /// Two extensions with the same count have no order of their own, and a
-/// `HashMap`'s iteration order is deliberately not one: without a tie-break the
-/// three grammars warmed would differ run to run, so a session's memory and its
-/// first coloured frame would both be luck.
+/// `HashMap`'s iteration order is deliberately not one. The merge in
+/// `highlight.rs` sorts this tally **stably**, so a total order here is what
+/// makes the three grammars it picks the same three every run; without it a
+/// session's memory and its first coloured frame would both be luck.
 #[test]
 fn extensions_with_the_same_count_break_their_tie_the_same_way_every_time() {
     let scratch = indexed("warm-leading-tie", &[("rs", 4), ("py", 4), ("go", 4)]);
 
-    let first = leading_paths(scratch.root(), 3, 1);
+    let first = indexed_extensions(scratch.root(), 1);
     for _ in 0..4 {
         assert_eq!(
-            leading_paths(scratch.root(), 3, 1),
+            indexed_extensions(scratch.root(), 1),
             first,
             "two runs over one index disagreed, so which grammars get warmed is \
              decided by hash order"
@@ -1011,7 +963,7 @@ fn extensions_with_the_same_count_break_their_tie_the_same_way_every_time() {
     }
     let extensions: Vec<&str> = first
         .iter()
-        .filter_map(|path| std::path::Path::new(path).extension()?.to_str())
+        .map(|indexed| indexed.extension.as_str())
         .collect();
     assert_eq!(
         extensions,
@@ -1020,26 +972,40 @@ fn extensions_with_the_same_count_break_their_tie_the_same_way_every_time() {
     );
 }
 
-/// The output is bounded, and so is what it costs to produce.
+/// The paths are bounded, and so is what it costs to produce them.
 ///
 /// **A bound on the walk, not only on the answer**, which is the same
 /// distinction `WARM_BYTES` records one function over: retaining every path and
 /// truncating afterwards is a copy of the index, and an index is the one
 /// structure in this process that scales with the repository rather than with
 /// the window. I3 is a claim about a process left open for days.
+///
+/// The **counts** are deliberately not bounded, and that is what lets the merge
+/// be exact: a count is a `usize` beside an extension that already exists, where
+/// a path is a fresh `String` per file.
 #[test]
 fn no_more_than_the_asked_for_paths_per_extension_come_back() {
     let scratch = indexed("warm-leading-bound", &[("rs", 40), ("py", 40)]);
 
-    let paths = leading_paths(scratch.root(), 2, WARM_PER_GRAMMAR);
+    let tally = indexed_extensions(scratch.root(), WARM_PER_GRAMMAR);
 
-    assert_eq!(
-        paths.len(),
-        2 * WARM_PER_GRAMMAR,
-        "eighty indexed files produced {} paths against the {} asked for",
-        paths.len(),
-        2 * WARM_PER_GRAMMAR
-    );
+    for indexed in &tally {
+        assert_eq!(
+            indexed.paths.len(),
+            WARM_PER_GRAMMAR,
+            ".{} kept {} paths of its {} files, against the {WARM_PER_GRAMMAR} \
+             asked for",
+            indexed.extension,
+            indexed.paths.len(),
+            indexed.files
+        );
+        assert_eq!(
+            indexed.files, 40,
+            ".{} counted {} files, so bounding the paths also bounded the count \
+             and the merge can no longer be exact",
+            indexed.extension, indexed.files
+        );
+    }
 }
 
 /// Somewhere that is not a repository is nothing to warm, not a failure.
@@ -1052,9 +1018,60 @@ fn a_directory_that_is_not_a_repository_leads_with_nothing() {
     let scratch = Scratch::new("warm-leading-bare");
     let outside = scratch.root().join("..").join("definitely-not-here");
 
-    assert!(leading_paths(&outside, 3, 1).is_empty());
-    assert!(leading_paths(scratch.root(), 0, 1).is_empty());
-    assert!(leading_paths(scratch.root(), 3, 0).is_empty());
+    assert!(indexed_extensions(&outside, 1).is_empty());
+    assert!(indexed_extensions(scratch.root(), 0).is_empty());
+}
+
+/// **A language spelled two ways is one grammar, and the budget must see it
+/// that way.**
+///
+/// Found by the altitude review rather than by a failing test, which is the
+/// finding: ranking on the extension counts `.yml` and `.yaml` separately at
+/// exactly the point where the counts decide which three grammars get compiled,
+/// so a repository whose YAML outweighs everything loses to smaller
+/// single-extension languages. `.h`/`.hpp` and `.md`/`.markdown` are the same
+/// shape.
+///
+/// The fixture is built so the two rankings disagree: by extension the top three
+/// are `.rs` 9, `.go` 8 and `.py` 7 with YAML nowhere, and by **grammar** YAML
+/// leads outright at 12. So Python colouring is the old answer and YAML
+/// colouring is the new one, and the gate fails in both directions.
+#[test]
+fn a_language_spelled_two_ways_is_counted_once() {
+    let scratch = indexed(
+        "warm-leading-merge",
+        &[("rs", 9), ("go", 8), ("py", 7), ("yml", 6), ("yaml", 6)],
+    );
+    let highlighter = Highlighter::new();
+
+    highlighter
+        .warm_repository(scratch.root().to_path_buf(), None)
+        .join()
+        .expect("the warmer thread");
+
+    // Written after the sweep, so these are files it never saw: what is being
+    // asserted is the grammar, not the path.
+    scratch.write("late.yaml", "key: value\nlist:\n  - 1\n");
+    scratch.write("late.py", "def f():\n    return 'x'\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = highlighter;
+
+    let merged = highlight_window(&mut frame, &mut highlighter, "late.yaml", 0, 1).classes;
+    assert!(
+        merged.iter().any(|class| *class != Class::Plain),
+        "YAML is this repository's commonest language across .yml and .yaml \
+         together, and it still drew plain, so the two spellings are being \
+         counted as two languages"
+    );
+
+    let outranked = highlight_window(&mut frame, &mut highlighter, "late.py", 0, 1).classes;
+    assert!(
+        outranked.iter().all(|class| *class == Class::Plain),
+        "Python is fourth by grammar and was compiled anyway, so the \
+         {WARM_LEADING} cap is not being spent on the leaders"
+    );
 }
 
 /// **The product claim: a language the repository leads with is compiled before
@@ -1090,14 +1107,14 @@ fn the_repositorys_leading_grammars_are_compiled_and_its_tail_is_not() {
     frame.advance().expect("advance");
     let mut highlighter = highlighter;
 
-    let leading = classes_of(&mut frame, &mut highlighter, "src/late.rs");
+    let leading = highlight_window(&mut frame, &mut highlighter, "src/late.rs", 0, 1).classes;
     assert!(
         leading.iter().any(|class| *class != Class::Plain),
         "the repository is mostly Rust and a Rust file still drew plain, so the \
          population sweep bought the reader nothing"
     );
 
-    let tail = classes_of(&mut frame, &mut highlighter, "src/late.css");
+    let tail = highlight_window(&mut frame, &mut highlighter, "src/late.css", 0, 1).classes;
     assert!(
         tail.iter().all(|class| *class == Class::Plain),
         "a grammar past the {WARM_LEADING} the cap allows was compiled anyway, \

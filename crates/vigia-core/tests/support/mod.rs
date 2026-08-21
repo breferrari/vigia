@@ -15,7 +15,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use vigia_core::{CONTEXT, FileChange, Frame, FrameStats, HighlightStats, Samples, Worktree};
+use vigia_core::{
+    CONTEXT, Class, FileChange, Frame, FrameStats, HighlightStats, Highlighter, Samples, Worktree,
+};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -599,6 +601,69 @@ pub fn settle_spans(frame: &mut Frame) -> u64 {
     frame.advance().expect("advance");
     frame.height(|_, _| 0).expect("height");
     frame.stats().measured - before
+}
+
+/// What one drive of the highlighter drew, in the two shapes gates ask for.
+///
+/// Two fields rather than one, because the counts are not the same number and a
+/// caller reaching for the wrong one gets a gate that cannot fail. `rows` is
+/// what a non-vacuity check wants (*did this window draw a screenful, or did it
+/// satisfy the budget by drawing nothing*), and `classes` is one entry per
+/// **span**, which is fewer than `rows` for a hunk of blank lines and more for
+/// any line that changes colour partway.
+pub struct Drawn {
+    /// Display rows the walk asked the highlighter for.
+    pub rows: usize,
+    /// The class of every span those rows produced, in draw order.
+    pub classes: Vec<Class>,
+}
+
+/// Highlight `hunks` hunks of `path` starting at `first`, every line of each,
+/// the way a frame standing on that part of the file does.
+///
+/// **The `ordinal` passed is the hunk's real position in the file**, not its
+/// position in the window, because that is what makes a hunk the same hunk after
+/// the view scrolls.
+///
+/// Here rather than in one test binary because three gates in two crates drive
+/// the highlighter this way and each `tests/*.rs` compiles separately: a copy
+/// per binary is a copy of the `ordinal` rule above, which is the half that is
+/// easy to get wrong and impossible to notice.
+pub fn highlight_window(
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    path: &str,
+    first: usize,
+    hunks: usize,
+) -> Drawn {
+    let index = frame
+        .files()
+        .iter()
+        .position(|change| change.path == path)
+        .unwrap_or_else(|| panic!("{path} is not a changed file"));
+
+    let mut pass = highlighter.pass();
+    let (_, diff) = frame.diff(index).expect("diff");
+    assert!(
+        diff.hunks.len() >= first + hunks,
+        "the fixture has {} hunks, so a window of {hunks} at {first} runs off \
+         the end and the gate would measure a short window",
+        diff.hunks.len()
+    );
+
+    let mut drawn = Drawn {
+        rows: 0,
+        classes: Vec::new(),
+    };
+    for (offset, hunk) in diff.hunks[first..first + hunks].iter().enumerate() {
+        for line in 0..hunk.lines.len() {
+            let spans = pass.spans(path, first + offset, hunk, line, None);
+            drawn.classes.extend(spans.iter().map(|span| span.class));
+            drawn.rows += 1;
+        }
+    }
+    drop(pass);
+    drawn
 }
 
 /// What one frame cost the highlighter, as the difference between two readings.

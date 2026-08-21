@@ -415,22 +415,38 @@ struct Entry {
     checkpoints: Vec<Sides>,
     /// Whether the frame in progress has claimed it. See [`Highlighter::sweep`].
     live: bool,
-    /// `None` when nothing recognises the file type, which is not an error.
-    sides: Option<Sides>,
-    /// The grammar this entry would use, when it is drawing plain because
-    /// nothing has compiled that grammar yet.
-    ///
-    /// **Not the same `None` as `sides`, and conflating the two would be a bug
-    /// with no symptom.** `sides: None` with `deferred: None` is a file type the
-    /// dump has no grammar for, which never changes and must never be asked for
-    /// again. `sides: None` with `deferred: Some(scope)` is a file the reader
-    /// *will* see in colour, one warm from now, and it is what
-    /// [`Highlighter::spans`] rebuilds on.
-    deferred: Option<Scope>,
+    /// Whether this entry is parsing, waiting on a warm, or will never parse.
+    parse: Parse,
     /// Spans per display line, filled forward on demand and never rebuilt.
     lines: Vec<Vec<Span>>,
     /// Scratch for the newline the grammars expect. One per hunk, not per line.
     buf: String,
+}
+
+/// What an entry is doing about colour, which is three things and not two.
+///
+/// **It was two `Option`s, and the fourth combination they admit is the reason
+/// this is an enum.** `sides: Option<Sides>` beside `deferred: Option<Scope>`
+/// can spell *parsing **and** waiting on a warm*, which is meaningless, and the
+/// only thing keeping it from being constructed was a paragraph on the field
+/// saying so. A state that has to be argued for in prose is a state the type
+/// should refuse, and the audit that found this said exactly that: the comment
+/// is the evidence the enum was missing.
+///
+/// The distinction the prose was protecting is real and survives here as two
+/// named variants: [`Self::Unsupported`] never changes and must never be asked
+/// for again, while [`Self::Deferred`] is a file the reader *will* see in
+/// colour, one warm from now.
+enum Parse {
+    /// Nothing in the dump recognises the file type, which is not an error and
+    /// never becomes one. Every line is plain forever.
+    Unsupported,
+    /// The grammar is known and nothing has compiled it yet, so this draws plain
+    /// and [`Highlighter::spans`] rebuilds the entry once the warmer has been
+    /// over that scope.
+    Deferred(Scope),
+    /// Parsing, forward-only, from the position these sides hold.
+    Ready(Sides),
 }
 
 impl Entry {
@@ -452,11 +468,6 @@ impl Entry {
         first_line: Option<&str>,
         attempted: Option<&Mutex<HashSet<Scope>>>,
     ) -> Self {
-        let syntax = syntax_for(syntaxes, path, first_line);
-        // The one branch this whole change turns on. A grammar the warmer has
-        // not run over is a grammar whose every pattern is still an uncompiled
-        // `OnceCell`, so parsing here is the 74-694ms the reader is waiting on.
-        let cold = syntax.is_some_and(|syntax| !compiled(syntax.scope, attempted));
         Self {
             path: path.to_owned(),
             ordinal,
@@ -464,10 +475,25 @@ impl Entry {
             marks: content.marks,
             checkpoints: Vec::new(),
             live: true,
-            sides: if cold { None } else { syntax.map(Sides::new) },
-            deferred: cold.then(|| syntax.expect("cold implies a resolved grammar").scope),
+            // The one branch this whole change turns on. A grammar the warmer
+            // has not run over is a grammar whose every pattern is still an
+            // uncompiled `OnceCell`, so parsing here is the 74-694ms the reader
+            // is waiting on.
+            parse: match syntax_for(syntaxes, path, first_line) {
+                None => Parse::Unsupported,
+                Some(syntax) if !compiled(syntax.scope, attempted) => Parse::Deferred(syntax.scope),
+                Some(syntax) => Parse::Ready(Sides::new(syntax)),
+            },
             lines: Vec::new(),
             buf: String::new(),
+        }
+    }
+
+    /// The grammar this entry is waiting on a warm for, if it is waiting.
+    fn deferred(&self) -> Option<Scope> {
+        match self.parse {
+            Parse::Deferred(scope) => Some(scope),
+            _ => None,
         }
     }
 
@@ -514,7 +540,7 @@ impl Entry {
         self.lines.truncate(usable * CHECKPOINT_STRIDE);
         // Cloned rather than taken: the reader may sit here for many frames, and
         // each one needs to rewind to this same position again.
-        self.sides = Some(self.checkpoints[usable - 1].clone());
+        self.parse = Parse::Ready(self.checkpoints[usable - 1].clone());
         self.digest = content.digest;
         self.marks = content.marks;
         true
@@ -543,21 +569,22 @@ impl Entry {
             if done > 0
                 && done % CHECKPOINT_STRIDE == 0
                 && self.checkpoints.len() < done / CHECKPOINT_STRIDE
-                && let Some(sides) = &self.sides
+                && let Parse::Ready(sides) = &self.parse
             {
                 self.checkpoints.push(sides.clone());
             }
 
             let line = &hunk.lines[self.lines.len()];
-            let spans = match &mut self.sides {
-                Some(sides) => {
+            let spans = match &mut self.parse {
+                Parse::Ready(sides) => {
                     stats.lines += 1;
                     stats.bytes += line.text.len() as u64;
                     sides.parse(line, &mut self.buf, syntaxes, table)
                 }
-                // Nothing recognises the file type, so every byte is plain and
-                // nothing is parsed. Counted nowhere for that reason.
-                None => plain(line.text.len()),
+                // Either nothing recognises the file type, or its grammar is
+                // uncompiled and a warm has been asked for. Every byte is plain
+                // and nothing is parsed, counted nowhere for that reason.
+                Parse::Unsupported | Parse::Deferred(_) => plain(line.text.len()),
             };
             self.lines.push(spans);
         }
@@ -843,7 +870,7 @@ impl Highlighter {
         let syntaxes = Arc::clone(&self.syntaxes);
         let attempted = self.attempted.clone();
         std::thread::spawn(move || {
-            let report = Self::warm_run(&syntaxes, attempted.as_deref(), &root, paths, usize::MAX);
+            let report = Self::warm_run(&syntaxes, attempted.as_deref(), &root, paths);
             // After the work rather than before it, so a wake means there is
             // something new to draw. Ignored on failure: the receiver having
             // gone is the shell shutting down, which is nothing to report to.
@@ -875,7 +902,10 @@ impl Highlighter {
     ///
     /// Its own thread rather than a second phase of [`Self::warm_ahead`],
     /// because the changed set is what is **on screen** and must not queue
-    /// behind a sweep of the index.
+    /// behind a sweep of the index. **At most two warms therefore run at once**,
+    /// and which two is the point: the shell's `request_warm` holds the demand
+    /// side to one at a time, and this is the other. Both are bounded by
+    /// [`WARM_TOTAL`] files, so the ceiling is a constant rather than a race.
     ///
     /// Opens its own repository, for the reason the shell's watch thread does:
     /// `gix::Repository` is `Send` and not `Sync`, so a borrow of the frame
@@ -889,20 +919,8 @@ impl Highlighter {
         let syntaxes = Arc::clone(&self.syntaxes);
         let attempted = self.attempted.clone();
         std::thread::spawn(move || {
-            // Wider than the grammar budget on purpose: `leading_paths` ranks by
-            // **extension**, because `SPEC.md` §6 keeps `syntect` out of
-            // `worktree.rs`, and an extension is a many-to-one proxy for a
-            // grammar. A repository whose commonest extensions are `.snap` and
-            // `.lock` would otherwise spend the budget on candidates that
-            // resolve to no grammar at all, so the budget is spent below, on
-            // what actually compiled.
-            let paths = crate::worktree::leading_paths(
-                &root,
-                WARM_FILES / WARM_PER_GRAMMAR,
-                WARM_PER_GRAMMAR,
-            );
-            let report =
-                Self::warm_run(&syntaxes, attempted.as_deref(), &root, paths, WARM_LEADING);
+            let paths = leading_paths(&syntaxes, &root);
+            let report = Self::warm_run(&syntaxes, attempted.as_deref(), &root, paths);
             if let Some(done) = done {
                 done();
             }
@@ -921,14 +939,17 @@ impl Highlighter {
     /// spawned thread and a `&self` there would be a borrow of the highlighter
     /// the frame path is using.
     ///
-    /// `grammars` caps how many *distinct* grammars this run will compile, which
-    /// is the population sweep's bound and is `usize::MAX` for a changed set.
+    /// **It knows nothing about which grammars are worth warming**, and that is
+    /// the seam: both callers hand it a path list they have already chosen, and
+    /// what it owns is the four bounds below and nothing else. A
+    /// distinct-grammar cap lived here briefly, so that the population sweep
+    /// could stop after three; it moved to `leading_paths`, where the choosing
+    /// happens, and took a `usize::MAX` sentinel with it.
     fn warm_run(
         syntaxes: &SyntaxSet,
         attempted: Option<&Mutex<HashSet<Scope>>>,
         root: &Path,
         paths: Vec<String>,
-        grammars: usize,
     ) -> WarmReport {
         // Resolved once: every path below is checked against it, and a root
         // that cannot be resolved is a worktree that has gone away, which is
@@ -938,36 +959,7 @@ impl Highlighter {
         };
         let mut report = WarmReport::default();
         let mut per_grammar: HashMap<Scope, usize> = HashMap::new();
-        // **Called at every way out of one path's turn below, not only at the
-        // successful one**, and that is what keeps a demand from becoming a
-        // livelock. A file that vanished between the frame asking and this
-        // thread opening it can never be compiled from, and a frame path still
-        // drawing its hunk out of the diff would otherwise ask again on every
-        // frame, each ask spawning a thread and each thread sending a wake.
-        // Marking it means such a grammar is parsed cold **once**, which is
-        // exactly what shipped before any of this existed.
-        //
-        // Poisoning is unreachable: the workspace builds with `panic = "abort"`,
-        // so no thread unwinds while holding this. Unwrapped through rather than
-        // expected, because the set only ever grows and a lock that somehow
-        // failed is not worth taking the monitor down over.
-        let mark = |scope: Scope| {
-            if let Some(attempted) = attempted {
-                attempted
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .insert(scope);
-            }
-        };
         for path in paths.into_iter().take(WARM_FILES) {
-            // **The distinct-grammar budget**, which only the population
-            // sweep sets. `WARM_TOTAL` bounds files and this bounds
-            // languages, and they are not the same bound: twelve files is
-            // four languages fully warmed, and the RSS that decides how many
-            // languages are affordable follows the languages.
-            if per_grammar.len() >= grammars {
-                break;
-            }
             // **The total, which the per-grammar cap does not bound.** A
             // polyglot changed set has as many budgets as it has languages:
             // fifty distinct extensions warmed forty-three files in
@@ -1029,6 +1021,12 @@ impl Highlighter {
             // path whose grammar the first line cannot change; the ones it
             // can are named by [`CONTENT_SENSITIVE`] and pay the read to
             // find out.
+            // **Armed here, where the grammar first has a name, and fired on
+            // the way out however this turn ends.** See [`Attempt`]: six
+            // explicit calls sat on the `continue`s below, and a seventh way out
+            // added later would have silently not marked.
+            let mut attempt = Attempt::new(attempted, by_path.scope);
+
             if !content_sensitive(&path)
                 && per_grammar
                     .get(&by_path.scope)
@@ -1055,11 +1053,9 @@ impl Highlighter {
             // cannot be resolved has vanished, which is the `continue` the
             // open below would have taken anyway.
             let Ok(target) = std::fs::canonicalize(root.join(&path)) else {
-                mark(by_path.scope);
                 continue;
             };
             if !target.starts_with(&canonical_root) {
-                mark(by_path.scope);
                 continue;
             }
 
@@ -1068,12 +1064,10 @@ impl Highlighter {
             // reaching it is ordinary beside an agent, and so is one that is
             // not text; both mean there is nothing here to compile with.
             let Ok(file) = std::fs::File::open(&target) else {
-                mark(by_path.scope);
                 continue;
             };
             let mut buf = Vec::with_capacity(WARM_BYTES);
             if file.take(WARM_BYTES as u64).read_to_end(&mut buf).is_err() {
-                mark(by_path.scope);
                 continue;
             }
             // Counted here, at the read itself, so the number means what
@@ -1095,7 +1089,6 @@ impl Highlighter {
             // string, parses zero lines, and would otherwise burn one of
             // three per-grammar slots and be counted as a warm.
             if text.is_empty() {
-                mark(by_path.scope);
                 continue;
             }
 
@@ -1106,7 +1099,6 @@ impl Highlighter {
             // bit-packed atom; the `name` is a display string, so keying
             // on it would allocate per path.
             let Some(grammar) = syntax_for(syntaxes, &path, text.lines().next()) else {
-                mark(by_path.scope);
                 continue;
             };
             let seen = per_grammar.entry(grammar.scope).or_insert(0);
@@ -1114,16 +1106,21 @@ impl Highlighter {
                 continue;
             }
 
+            // **The grammar that was actually compiled, which is not always the
+            // one the path named.** A Qt `.ts` translation file resolves to
+            // TypeScript by extension and compiles XML, so the guard is
+            // retargeted here rather than left holding the pre-read answer.
+            //
+            // It still fires on **drop**, after `warm` below, and that ordering
+            // is the point: marking on the way in would let a frame on the other
+            // thread see the grammar as attempted and parse it while this one is
+            // still mid-compile, which is the cliff back on the frame and the
+            // whole thing this is for.
+            attempt.retarget(grammar.scope);
+
             warm(syntaxes, &path, text);
             *seen += 1;
             report.warmed += 1;
-            // **After the parse and never before it.** Marking on the way in
-            // would let a frame on the other thread see the grammar as
-            // attempted and parse it while this one is still mid-compile,
-            // which is the cliff back on the frame and the whole thing this
-            // is for. The set is written at the one point where the patterns
-            // this file reaches are genuinely compiled.
-            mark(grammar.scope);
         }
         report
     }
@@ -1257,6 +1254,9 @@ impl Highlighter {
         } = self;
         let attempted = attempted.as_deref();
 
+        // `built` is set by the two arms that construct or re-construct a parse,
+        // so the counter below is written once instead of in both of them.
+        let mut built = false;
         let slot = match found {
             // Already claimed this frame, so its content has been checked
             // already. This is what keeps the digest to once per hunk per frame
@@ -1271,33 +1271,29 @@ impl Highlighter {
                 // session; what changed is not the hunk but the world outside
                 // it, one warm ago.
                 let thaw = entries[slot]
-                    .deferred
+                    .deferred()
                     .is_some_and(|scope| compiled(scope, attempted));
                 if entries[slot].digest == content.digest && !thaw {
                     stats.reused += 1;
                     entries[slot].live = true;
+                    slot
                 } else {
-                    // A deferred entry has no parse to rewind into, because it
-                    // never made one: `sides` is `None`, so `checkpoints` is
-                    // empty and `rewind` could only ever start over. Said here
-                    // rather than left to be rediscovered from two files away.
-                    let fresh = thaw
-                        || entries[slot].deferred.is_some()
-                        || !entries[slot].rewind(content.clone());
-                    if fresh {
+                    // **A deferred entry always starts over, whether or not its
+                    // grammar has arrived.** It has no parse to rewind into,
+                    // because it never made one: `Parse::Deferred` holds no
+                    // `Sides`, so `checkpoints` is empty and `rewind` could only
+                    // ever return false. Said here rather than left to be
+                    // rediscovered from two files away. `thaw` is not a third
+                    // disjunct, because it already implies this one.
+                    if entries[slot].deferred().is_some() || !entries[slot].rewind(content.clone())
+                    {
                         entries[slot] =
                             Entry::new(path, ordinal, content, syntaxes, first_line, attempted);
                     }
-                    // Counted only when something was actually parsed. A
-                    // deferred hunk is a hunk this frame declined to parse, and
-                    // reporting it as parsed would put a number I2b's gates read
-                    // out by exactly the hunks the deferral saved.
-                    if entries[slot].deferred.is_none() {
-                        stats.parsed += 1;
-                    }
                     entries[slot].live = true;
+                    built = true;
+                    slot
                 }
-                slot
             }
             None => {
                 entries.push(Entry::new(
@@ -1308,18 +1304,25 @@ impl Highlighter {
                     first_line,
                     attempted,
                 ));
-                if entries[entries.len() - 1].deferred.is_none() {
-                    stats.parsed += 1;
-                }
+                built = true;
                 entries.len() - 1
             }
         };
+
+        // **Counted once, and only when something was actually parsed.** A
+        // deferred hunk is a hunk this frame declined to parse, and reporting it
+        // as parsed would put a number I2b's gates read out by exactly the hunks
+        // the deferral saved. One place rather than the two arms above, which
+        // had the same three lines twice and so had two chances to disagree.
+        if built && entries[slot].deferred().is_none() {
+            stats.parsed += 1;
+        }
 
         // **The demand, renewed every frame it is still true.** Not raised once
         // and remembered: the caller may ignore it, the warmer may fail, and the
         // screen may move, so the honest list is the one this frame would draw
         // in colour if it could.
-        if let Some(scope) = entries[slot].deferred
+        if let Some(scope) = entries[slot].deferred()
             && demanded.insert(scope)
         {
             wanted.push(path.to_owned());
@@ -1428,6 +1431,114 @@ impl std::fmt::Debug for Highlighter {
             .field("stats", &self.stats)
             .finish_non_exhaustive()
     }
+}
+
+/// One path's turn at the warmer, which marks its grammar as attempted however
+/// that turn ends.
+///
+/// **A guard rather than a call at every exit, and this module has already paid
+/// for learning the difference.** [`Pass`] is the same shape one type over, and
+/// its docblock records why: the sweep began as a call the caller had to bracket
+/// by hand, and *"two of the five call sites in that same commit had already
+/// forgotten it"*. Here there were six `continue`s between a grammar being named
+/// and a file being parsed, each carrying the same two lines, and a seventh
+/// added later would have compiled, passed, and marked nothing.
+///
+/// **What forgetting costs is a livelock, not a missed optimisation.** The frame
+/// path draws a hunk out of the *diff*, which outlives the file it came from, so
+/// a path that vanished between the frame asking and this thread opening it can
+/// never be compiled from. Unmarked, it is demanded again on the next frame, and
+/// every demand spawns a thread and every thread sends a wake. Marked, such a
+/// grammar is parsed cold **once**, which is exactly what shipped before any of
+/// this existed.
+///
+/// Firing on **drop** is also what keeps the ordering right on the way through:
+/// a mark written on the way *in* would let a frame on the other thread see the
+/// grammar as attempted and parse it while this thread is still mid-compile,
+/// which is the cliff back on the frame.
+///
+/// Poisoning is unreachable: the workspace builds with `panic = "abort"`, so no
+/// thread unwinds while holding this lock. Unwrapped through rather than
+/// expected, because the set only ever grows and a lock that somehow failed is
+/// not worth taking the monitor down over.
+struct Attempt<'a> {
+    attempted: Option<&'a Mutex<HashSet<Scope>>>,
+    scope: Scope,
+}
+
+impl<'a> Attempt<'a> {
+    fn new(attempted: Option<&'a Mutex<HashSet<Scope>>>, scope: Scope) -> Self {
+        Self { attempted, scope }
+    }
+
+    /// Mark a different grammar than the path named, once the file's first line
+    /// has said which one it really is.
+    fn retarget(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+}
+
+impl Drop for Attempt<'_> {
+    fn drop(&mut self) {
+        if let Some(attempted) = self.attempted {
+            attempted
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(self.scope);
+        }
+    }
+}
+
+/// Files to warm from the repository's own population: the grammars it leads
+/// with, merged across every extension that spells them.
+///
+/// **The merge is the whole of this function, and it is why the tally comes back
+/// unranked.** [`crate::worktree::indexed_extensions`] cannot know that `.yml`
+/// and `.yaml` are one grammar, or `.h` and `.hpp`, or `.md` and `.markdown`,
+/// because `SPEC.md` §6 keeps `syntect` out of that file. Ranking there would
+/// count a language once per spelling at exactly the point where the counts
+/// decide which three grammars get compiled, so a repository whose YAML is split
+/// evenly across two extensions loses to a smaller single-extension language.
+/// Here the grammar is knowable, so the counts are summed on it and the ranking
+/// is exact.
+///
+/// **Resolved from a synthesised `a.<extension>` rather than from a real path**,
+/// which is deliberate and narrower than it looks: the group being merged *is*
+/// an extension, so the extension rule is the one that has to decide it.
+/// Resolving a real path would let `SPEC.md` §6's whole-filename step answer for
+/// the group, so one `CMakeLists.txt` would make every `.txt` in the repository
+/// warm CMake.
+///
+/// Ties keep the tally's order, because [`slice::sort_by`] is stable and
+/// `indexed_extensions` returns a total order. So two grammars with the same
+/// file count are warmed in the same sequence every run, and a gate can assert
+/// which three were chosen.
+///
+/// Bounded at [`WARM_LEADING`] grammars and [`WARM_PER_GRAMMAR`] files each,
+/// which is nine against [`WARM_TOTAL`]'s twelve, so `warm_run`'s own caps are
+/// the ceiling rather than the plan.
+fn leading_paths(syntaxes: &SyntaxSet, root: &Path) -> Vec<String> {
+    let mut merged: Vec<(Scope, usize, Vec<String>)> = Vec::new();
+    for indexed in crate::worktree::indexed_extensions(root, WARM_PER_GRAMMAR) {
+        let probe = format!("a.{}", indexed.extension);
+        let Some(syntax) = syntax_for(syntaxes, &probe, None) else {
+            continue;
+        };
+        match merged.iter_mut().find(|(scope, ..)| *scope == syntax.scope) {
+            Some((_, files, paths)) => {
+                *files += indexed.files;
+                let room = WARM_PER_GRAMMAR.saturating_sub(paths.len());
+                paths.extend(indexed.paths.into_iter().take(room));
+            }
+            None => merged.push((syntax.scope, indexed.files, indexed.paths)),
+        }
+    }
+    merged.sort_by(|left, right| right.1.cmp(&left.1));
+    merged
+        .into_iter()
+        .take(WARM_LEADING)
+        .flat_map(|(_, _, paths)| paths)
+        .collect()
 }
 
 /// What a warm calls when it ends, so a caller blocked on something else can
