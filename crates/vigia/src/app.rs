@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
-use crate::input::{Action, Hovered};
+use crate::input::{Action, Grabbed, Hovered};
 use crate::memory;
 use crate::render::{Body, Chrome, Mode};
 use crate::view::{Position, View, Viewport, rows_in};
@@ -387,9 +387,9 @@ impl App {
         worktree: &str,
         branch: Option<&str>,
         pressed: Option<(u16, u16)>,
-        gripped: Option<u16>,
+        gripped: Option<Grabbed>,
         hovered: Option<Hovered>,
-        scrolling: Option<(u16, isize)>,
+        scrolling: Option<(Grabbed, isize)>,
     ) -> Chrome {
         Chrome {
             pressed,
@@ -894,19 +894,23 @@ mod tests {
             "fixture",
             None,
             Some((79, 5)),
-            Some(11),
+            Some(Grabbed::Diff),
             Some(Hovered::Button(79, 19)),
-            Some((11, -1)),
+            Some((Grabbed::List, -1)),
         );
 
         assert_eq!(chrome.pressed, Some((79, 5)), "the pressed cell");
-        assert_eq!(chrome.gripped, Some(11), "the dragged bar");
+        assert_eq!(chrome.gripped, Some(Grabbed::Diff), "the dragged bar");
         assert_eq!(
             chrome.hovered,
             Some(Hovered::Button(79, 19)),
             "the hover mark"
         );
-        assert_eq!(chrome.scrolling, Some((11, -1)), "the scrolled bar");
+        assert_eq!(
+            chrome.scrolling,
+            Some((Grabbed::List, -1)),
+            "the scrolled bar"
+        );
     }
 
     #[test]

@@ -39,7 +39,7 @@ use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span, scale_of};
 
 use crate::glyphs::Glyphs;
-use crate::input::{Hovered, Region, Regions, Sheet};
+use crate::input::{Grabbed, Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
 use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, Scale, View};
 
@@ -1266,14 +1266,18 @@ pub struct Chrome {
     /// costs no row, no rect and no wake: the frames it changes are frames the
     /// step was already painting.
     pub pressed: Option<(u16, u16)>,
-    /// The first row of the region whose bar is being **dragged**, when one is.
+    /// Which region's bar is being **dragged**, when one is.
     ///
-    /// A row rather than a region, because that is what the drawer already has
-    /// in hand: `scrollbar` is given its own `Rect` and compares `area.y`. It is
-    /// the same lifetime as [`Chrome::pressed`] and a different gesture: a press
-    /// on a step button lights one cell, a press on the track lights the thumb
-    /// it is moving.
-    pub gripped: Option<u16>,
+    /// The region rather than its first row, which is what this carried until
+    /// [#254](https://github.com/breferrari/vigia/issues/254): the row read as
+    /// the cheaper shape because `scrollbar` is handed its own `Rect` and could
+    /// compare `area.y`, and it is an identity only while the two regions are
+    /// stacked. [`Hovered::Track`] records the rest of that argument.
+    ///
+    /// It is the same lifetime as [`Chrome::pressed`] and a different gesture: a
+    /// press on a step button lights one cell, a press on the track lights the
+    /// thumb it is moving.
+    pub gripped: Option<Grabbed>,
     /// What the pointer is resting on, when it is on something a click acts on.
     ///
     /// **Acknowledgment before action, which is the whole of `SPEC.md` §11.2
@@ -1296,15 +1300,20 @@ pub struct Chrome {
     /// whichever device asked. Negative is up, positive is down, `None` is at
     /// rest.
     ///
-    /// **The row is which region, and it was missing until 2026-08-16.** The two
-    /// bars move different things and answer different keys, so a bare direction
-    /// lit the matching arrow on *both* at once, which is what 0.5.0 shipped.
+    /// **Which region, and it was missing until 2026-08-16.** The two bars move
+    /// different things and answer different keys, so a bare direction lit the
+    /// matching arrow on *both* at once, which is what 0.5.0 shipped.
     /// [`Chrome::gripped`] one field up had carried its region from the start and
     /// was correct throughout, which is why a drag lit only its own bar while a
     /// keypress lit both: the right shape was one field away and the newer mark
-    /// did not copy it. Same convention now, the region's first row, compared
-    /// against the `Rect` each bar is drawn into.
-    pub scrolling: Option<(u16, isize)>,
+    /// did not copy it.
+    ///
+    /// **The decision was carry the region; the encoding was the region's first
+    /// row, and only the encoding changed in
+    /// [#254](https://github.com/breferrari/vigia/issues/254).** A top tells the
+    /// two bars apart only while they are stacked, and a rail ends that, so what
+    /// both marks carry now is the [`Grabbed`] the shell was already holding.
+    pub scrolling: Option<(Grabbed, isize)>,
     /// Something the reader should see instead of the key hints.
     ///
     /// A monitor survives a failed frame rather than exiting, so this is where a
@@ -3561,6 +3570,7 @@ pub fn render(
         if bar.drawn() {
             painter.scrollbar(
                 full,
+                Grabbed::List,
                 bar,
                 view.list_top as u64,
                 body.list as u64,
@@ -3668,6 +3678,7 @@ pub fn render(
         if bar.drawn() {
             painter.scrollbar(
                 full,
+                Grabbed::Diff,
                 bar,
                 view.rows_above as u64,
                 u64::from(body.diff as u16),
@@ -3939,13 +3950,13 @@ struct Painter<'a> {
     /// the whole screen, and a drawer that reached back into the chrome for it
     /// would be one more thing the two regions could answer differently.
     pressed: Option<(u16, u16)>,
-    /// The first row of the bar being dragged, from [`Chrome::gripped`].
-    gripped: Option<u16>,
+    /// Which region's bar is being dragged, from [`Chrome::gripped`].
+    gripped: Option<Grabbed>,
     /// What the pointer is resting on, from [`Chrome::hovered`].
     hovered: Option<Hovered>,
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
-    scrolling: Option<(u16, isize)>,
+    scrolling: Option<(Grabbed, isize)>,
 }
 
 impl Painter<'_> {
@@ -4803,7 +4814,7 @@ impl Painter<'_> {
     /// **`bar` is passed rather than re-decided**, because [`bar_for`] needs the
     /// pane's width and this has only a region's. Re-deriving it here is the one
     /// way the pointer and the screen could come to hold different tracks.
-    fn scrollbar(&mut self, area: Rect, bar: Bar, at: u64, span: u64, of: u64) {
+    fn scrollbar(&mut self, area: Rect, whose: Grabbed, bar: Bar, at: u64, span: u64, of: u64) {
         // **Width and height guarded here as well as by the caller.** `render`
         // only calls this above `BAR_FLOOR` and only through `bar_for`, so a zero
         // width cannot reach it today, and the subtractions below would underflow
@@ -4871,8 +4882,8 @@ impl Painter<'_> {
         // [`Theme::bar`] and drags at [`Theme::bar_active`] with nothing
         // between. That was true and the conclusion drawn from it was wrong: the
         // missing rung was a thing to build rather than a reason to decline.
-        let dragging = self.gripped == Some(area.y);
-        let hovering = self.hovered == Some(Hovered::Track(area.y));
+        let dragging = self.gripped == Some(whose);
+        let hovering = self.hovered == Some(Hovered::Track(whose));
         let thumb_style = if dragging {
             self.theme.bar_active
         } else if hovering {
@@ -4923,12 +4934,12 @@ impl Painter<'_> {
                 // **This bar's own scroll, not any scroll.** The two regions move
                 // different things: `j` moves the diff's viewport and `J` moves
                 // the list's window, so a mark that carried only a direction lit
-                // the matching arrow on both bars at once. The row is what says
-                // which, exactly as it does for a drag one block up.
+                // the matching arrow on both bars at once. The region is what
+                // says which, exactly as it does for a drag one block up.
                 let keyed = self
                     .scrolling
-                    .is_some_and(|(top, by)| top == area.y && by.signum() == way)
-                    && self.gripped != Some(area.y);
+                    .is_some_and(|(on, by)| on == whose && by.signum() == way)
+                    && self.gripped != Some(whose);
                 // **Three rungs, and a press beats a hover.** `bar_track` at
                 // rest, `bar` under a pointer, `bar_active` while a gesture is
                 // on it. The ordering is the load-bearing half: #166 added the
