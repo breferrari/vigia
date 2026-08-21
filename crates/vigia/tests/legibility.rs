@@ -27,7 +27,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
     Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row,
-    Scale, Theme, View, body_layout, diff_height, render,
+    Scale, Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -1554,6 +1554,138 @@ fn the_header_facts_degrade_through_one_recorded_sequence() {
             }
         }
     }
+}
+
+/// The body's parts tile the pane: no gap, no overlap, nothing outside it.
+///
+/// **The property that used to be true by two functions being written correctly**
+/// ([#251](https://github.com/breferrari/vigia/issues/251)). `render` walked a
+/// running `y` cursor down the body and `regions` rebuilt the same offsets from
+/// the same `Body`, so the painter and the pointer agreed because both were
+/// right, and nothing would have said so if one stopped being. `Body::areas` is
+/// now the single answer and this is the gate over it.
+///
+/// **It is the gate the rail inherits**, which is why it is written as a
+/// partition rather than as a list of expected row numbers.
+/// [#252](https://github.com/breferrari/vigia/issues/252) puts the list beside
+/// the diff, where the two share rows and differ in columns: a gate pinning
+/// `diff.y == list.y + list.height` would have to be rewritten for that layout,
+/// and a gate saying *the parts cover the body exactly and never each other*
+/// holds in both.
+///
+/// Three claims, and the third is the one a stacked layout makes trivially and a
+/// rail does not: the parts do not overlap **as rectangles**, not merely as row
+/// ranges.
+#[test]
+fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
+    // **A view that carries a list, because `clamped_to` gives the band and the
+    // lead blank back whenever the list has no entries.** `every_row_kind` holds
+    // diff rows and an empty `list`, so on that fixture there is never a band and
+    // never a rule, and the non-vacuity guard at the end of this gate says so
+    // rather than letting the overlap rule pass over two rectangles.
+    let view = pinned_and_streamed();
+    let chrome = chrome();
+    let mut saw_band = false;
+    let mut saw_rule = false;
+
+    for width in [1u16, 20, 40, 80, 120] {
+        for height in 1..=40u16 {
+            let area = Rect::new(0, 0, width, height);
+            // **Clamped, because both real consumers clamp.** `render` and
+            // `regions` each take `Body::split(...).clamped_to(view.list.len())`:
+            // the split says what the *pane* affords and only the view knows how
+            // many entries it holds. Comparing against the unclamped body is
+            // comparing two different screens, and this gate said so on its first
+            // run at 1x8, where the pane affords a list row and the fixture's view
+            // carries none.
+            let body = body_layout(area, &chrome, view.files).clamped_to(view.list.len());
+            let areas = body.areas(area);
+            let drawn: Vec<(&str, Rect)> = [
+                ("band", areas.band),
+                ("list", areas.list),
+                ("rule", areas.rule),
+                ("diff", areas.diff),
+            ]
+            .into_iter()
+            .filter(|(_, rect)| rect.height > 0 && rect.width > 0)
+            .collect();
+            saw_band |= areas.band.height > 0;
+            saw_rule |= areas.rule.height > 0;
+
+            // **Inside the pane, under the header.** Row zero is the header's and
+            // no region may reach it, which is the one row `Body` never counts.
+            for (name, rect) in &drawn {
+                assert!(
+                    rect.y > area.y,
+                    "at {width}x{height} the {name} starts at row {}, on or above \
+                     the header's own row",
+                    rect.y
+                );
+                assert!(
+                    rect.y + rect.height <= area.y + area.height,
+                    "at {width}x{height} the {name} runs past the pane's last row"
+                );
+            }
+
+            // **No two parts share a cell.** Written as rectangles rather than as
+            // row ranges, because that is the claim a rail still has to meet.
+            for (at, (name, rect)) in drawn.iter().enumerate() {
+                for (other, sibling) in drawn.iter().skip(at + 1) {
+                    let apart = rect.y + rect.height <= sibling.y
+                        || sibling.y + sibling.height <= rect.y
+                        || rect.x + rect.width <= sibling.x
+                        || sibling.x + sibling.width <= rect.x;
+                    assert!(
+                        apart,
+                        "at {width}x{height} the {name} and the {other} overlap: \
+                         {rect:?} against {sibling:?}"
+                    );
+                }
+            }
+
+            // **And the body ends where `Body::rows` says**, so the footer starts
+            // on the row after the last drawn part and no row between the header
+            // and it is left unaccounted for.
+            let ends = drawn
+                .iter()
+                .map(|(_, rect)| rect.y + rect.height)
+                .max()
+                .unwrap_or(area.y + 1);
+            assert_eq!(
+                usize::from(ends),
+                usize::from(area.y + 1) + body.rows(),
+                "at {width}x{height} the body's parts end at {ends} where \
+                 `Body::rows` says {}",
+                body.rows()
+            );
+
+            // **The pointer is told the same geometry the painter drew into.**
+            // Both come from `Body::areas` now, and this is the evidence rather
+            // than the mechanism, which is the distinction `SETTLED` already draws
+            // one file over.
+            let told = regions(area, &chrome, &view);
+            assert_eq!(
+                (told.list.top, told.list.rows),
+                (areas.list.y, areas.list.height),
+                "at {width}x{height} the pointer's list region is not the rect the \
+                 painter draws the list into"
+            );
+            assert_eq!(
+                (told.diff.top, told.diff.rows),
+                (areas.diff.y, areas.diff.height),
+                "at {width}x{height} the pointer's diff region is not the rect the \
+                 painter draws the diff into"
+            );
+        }
+    }
+
+    // Or the sweep never reached a pane with a masthead or a rule on it, and the
+    // overlap rule above is being asserted about two rectangles.
+    assert!(
+        saw_band && saw_rule,
+        "the sweep drew a band at some size = {saw_band} and a rule = {saw_rule}, \
+         so it did not cover the parts it is about"
+    );
 }
 
 #[test]

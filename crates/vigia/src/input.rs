@@ -63,6 +63,23 @@ pub struct Region {
     /// the bar has no buttons, so a caller that does not care may ask
     /// unconditionally.
     pub track: (u16, u16),
+    /// The column **this region's** bar is drawn in, when it has one.
+    ///
+    /// **Per region since [#251](https://github.com/breferrari/vigia/issues/251)**,
+    /// where it was one `Option<u16>` on [`Regions`] documented as *"the column
+    /// both scrollbars are drawn in"*. That was true only because both regions
+    /// span the pane and their bars land on the same right edge, and every reader
+    /// then told the two apart **by row**, which is the vertical stack written
+    /// into the hit-test model. Beside a rail
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)) the two regions
+    /// share their rows and differ in their columns, so the row can no longer
+    /// answer it and the column already can.
+    ///
+    /// Paired with `top`, `rows` and `track` here for the reason `track` gives
+    /// one field up: a `Region` holding one region's rows beside another's bar is
+    /// a bug with no symptom on screen, so the pairing is closed by construction
+    /// in `Bar::region` rather than left to a gate.
+    pub bar: Option<u16>,
 }
 
 impl Region {
@@ -70,11 +87,20 @@ impl Region {
     ///
     /// The shape every region had before there were step buttons, and the one a
     /// caller wants whenever the bar is bare or absent.
-    pub fn bare(top: u16, rows: u16) -> Self {
+    ///
+    /// **`bar` is the column, not whether there are buttons**, and the two are
+    /// different questions since
+    /// [#251](https://github.com/breferrari/vigia/issues/251) gave a region its
+    /// own bar column. `bare` says this bar has no buttons; `None` here says it
+    /// has no bar at all. A fixture that took the first to mean the second would
+    /// describe a region a pointer can never grab, which is a screen the renderer
+    /// does not draw.
+    pub fn bare(top: u16, rows: u16, bar: Option<u16>) -> Self {
         Self {
             top,
             rows,
             track: (top, rows),
+            bar,
         }
     }
 
@@ -185,8 +211,6 @@ pub struct Regions {
     pub list: Region,
     /// The diff region.
     pub diff: Region,
-    /// The column both scrollbars are drawn in, when either is.
-    pub bar: Option<u16>,
     /// The gestures sheet, when it is drawn.
     ///
     /// **The only region here that is *over* the others rather than beside
@@ -273,10 +297,15 @@ impl Regions {
     /// [#166](https://github.com/breferrari/vigia/issues/166) found two
     /// expressions of and reduced to one.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
-        if self.bar != Some(column) {
-            return None;
+        if self.list.bar == Some(column)
+            && let Some(rows) = self.list.button(row)
+        {
+            return Some(Action::ScrollList(rows));
         }
-        self.step(row)
+        if self.diff.bar == Some(column) {
+            return self.diff.button(row).map(Action::Scroll);
+        }
+        None
     }
 
     /// The bar a press at `column`, `row` takes hold of, or `None` off them.
@@ -286,13 +315,10 @@ impl Regions {
     /// gesture that *continues*, so the loop knows to keep routing motion to this
     /// region however far the pointer travels afterwards.
     pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
-        if self.bar != Some(column) {
-            return None;
-        }
-        if self.list.along(row).is_some() {
+        if self.list.bar == Some(column) && self.list.along(row).is_some() {
             return Some(Grabbed::List);
         }
-        self.diff.along(row).is_some().then_some(Grabbed::Diff)
+        (self.diff.bar == Some(column) && self.diff.along(row).is_some()).then_some(Grabbed::Diff)
     }
 
     /// What a pointer at `column`, `row` is **over**, for the mark `SPEC.md`
@@ -344,17 +370,19 @@ impl Regions {
         // function up**: the scrollbar is drawn *inside* whichever region owns
         // those rows, so asking the list first would answer `Row` for a pointer
         // resting on the bar and mark a file the reader is not pointing at.
-        if self.bar == Some(column) {
+        //
+        // **Either region's bar, asked as one branch**, so a pointer on a bar
+        // column never falls through to the list below. That is the whole of the
+        // precedence above, and splitting it into two branches would let a cell
+        // that is one region's bar but nobody's track answer `Row`.
+        if self.list.bar == Some(column) || self.diff.bar == Some(column) {
             if self.step_at(column, row).is_some() {
                 return Some(Hovered::Button(column, row));
             }
-            if self.list.along(row).is_some() {
+            if self.list.bar == Some(column) && self.list.along(row).is_some() {
                 return Some(Hovered::Track(self.list.top));
             }
-            return self
-                .diff
-                .along(row)
-                .is_some()
+            return (self.diff.bar == Some(column) && self.diff.along(row).is_some())
                 .then_some(Hovered::Track(self.diff.top));
         }
         // A listed file, which is a surface a click acts on: it puts the diff at
@@ -1239,7 +1267,7 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     // scrollbar column is a gesture about position, and the same column is inside
     // whichever region drew it, so testing the region first would turn every drag
     // into a wheel.
-    let on_bar = regions.bar == Some(mouse.column);
+    let on_bar = regions.list.bar == Some(mouse.column) || regions.diff.bar == Some(mouse.column);
     if on_bar
         && matches!(
             mouse.kind,

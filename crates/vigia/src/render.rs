@@ -1780,11 +1780,23 @@ impl Bar {
     /// holding one region's rows beside another's track. That is a bug with no
     /// symptom on screen, which is why it is closed by construction here rather
     /// than left to a gate.
-    fn region(self, top: u16, rows: u16) -> Region {
+    /// **Takes the region's rect rather than its rows**, since
+    /// [#251](https://github.com/breferrari/vigia/issues/251), because the bar's
+    /// column is now part of the same fact: `Painter::with_bar` narrows a region
+    /// from **its own** right edge, so that edge is where this region's bar is,
+    /// and a rect is what carries it.
+    fn region(self, at: Rect) -> Region {
         Region {
-            top,
-            rows,
-            track: self.track(top, rows),
+            top: at.y,
+            rows: at.height,
+            track: self.track(at.y, at.height),
+            // The rect's own right edge, which is where `Painter::scrollbar`
+            // draws: it takes the region **before** `with_bar` narrows it and
+            // draws down the right of what it was given. `None` where no bar is
+            // drawn, so a pointer is never told about a column nothing occupies.
+            bar: self
+                .drawn()
+                .then(|| at.x.saturating_add(at.width).saturating_sub(1)),
         }
     }
 }
@@ -3215,6 +3227,91 @@ impl Body {
     }
 }
 
+/// Where each part of the body sits inside a pane.
+///
+/// **The geometry written once, for the two consumers that used to derive it
+/// separately** ([#251](https://github.com/breferrari/vigia/issues/251)).
+/// [`render`] walked a running `y` cursor down the body and [`regions`] rebuilt
+/// the same offsets from the same [`Body`], so the painter and the pointer agreed
+/// only by both being written correctly. That is the argument
+/// [`Body::above_list`] already makes about the rows above the list; this is the
+/// rest of it.
+///
+/// **Rects rather than rows, and that is the point rather than a convenience.**
+/// A row offset can only describe regions stacked one above another.
+/// [#252](https://github.com/breferrari/vigia/issues/252) puts the list *beside*
+/// the diff on a wide pane, where the two share a `y` range and differ in `x`,
+/// and a `Rect` can already say that. So the type that carries this does not have
+/// to change again for the rail: what changes is what [`Body::areas`] computes,
+/// and in that layout [`Areas::rule`] is simply empty.
+///
+/// A part that is not drawn gets a rect of **zero height** rather than an
+/// `Option`, because every consumer's question is "how many rows do I paint
+/// here", which zero already answers, and because the tiling property a gate
+/// checks is a sum over four rects rather than over four maybes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Areas {
+    /// The worktree churn band, empty when the pane cannot spare it.
+    ///
+    /// The blank row under it is [`Body::air`] and is deliberately *not* part of
+    /// this rect: it is skipped rather than painted, which is what a blank row is
+    /// here, and a rect claiming it would make the band look like furniture that
+    /// owns a row it never draws in.
+    pub band: Rect,
+    /// The pinned file list, empty when there is no room for one.
+    pub list: Rect,
+    /// The rule under the list, empty when there is no list to put it under.
+    pub rule: Rect,
+    /// Everything left for the diff.
+    pub diff: Rect,
+}
+
+impl Body {
+    /// Where each part of this body sits inside `area`.
+    ///
+    /// `area` is the whole pane, header and footer included: the header's row is
+    /// skipped here exactly as [`render`] skips it, and the footer is whatever is
+    /// left under [`Body::diff`]. Both are drawn from `area` directly and neither
+    /// is a region, so neither is here.
+    ///
+    /// Saturating throughout, for [`Body::split`]'s reason one level up: a pane
+    /// too short to hold what it was asked for should draw something cramped
+    /// rather than underflow.
+    pub fn areas(&self, area: Rect) -> Areas {
+        // The header's row, then the lead blank. `above_list` is the sum of that
+        // blank and the whole masthead, and it is what `regions` has always added
+        // to `area.y + 1`, so the band's own top is the only offset here that
+        // cannot be asked for by name.
+        let top = area.y.saturating_add(1);
+        let band = Rect {
+            y: top.saturating_add(self.lead as u16),
+            height: self.graph as u16,
+            ..area
+        };
+        let list = Rect {
+            y: top.saturating_add(self.above_list() as u16),
+            height: self.list as u16,
+            ..area
+        };
+        let rule = Rect {
+            y: list.y.saturating_add(list.height),
+            height: u16::from(self.rule),
+            ..area
+        };
+        let diff = Rect {
+            y: rule.y.saturating_add(rule.height),
+            height: self.diff as u16,
+            ..area
+        };
+        Areas {
+            band,
+            list,
+            rule,
+            diff,
+        }
+    }
+}
+
 /// Split this area's body between the file list and the diff.
 ///
 /// One line goes to the header and one or two to the footer, so this needs the
@@ -3312,28 +3409,30 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
     let wide = affords_bar(area.width);
 
-    // The lead blank and the masthead sit between the header and the list, so
-    // both regions below them move down by whatever they take. Derived from the
-    // same `Body` the painter uses, which is what keeps the pointer and the
-    // screen one answer: a hover resolved against a stale row offset would light
-    // the file above the one under the pointer.
-    let list_top = area.y + 1 + body.above_list() as u16;
-    let diff_top = list_top + body.list as u16 + u16::from(body.rule);
+    // **The same geometry the painter draws into**, asked for by name rather than
+    // rebuilt here ([#251](https://github.com/breferrari/vigia/issues/251)). This
+    // was two offsets computed from `Body` a second time, which kept the pointer
+    // and the screen one answer only while both expressions stayed correct: a
+    // hover resolved against a stale row offset lights the file above the one
+    // under the pointer, and nothing would have said so.
+    let areas = body.areas(area);
 
     // **Asked through `bar_for`, which is what `render` asks.** A bar column only
     // where a bar is actually drawn, and only where it can express more than one
     // position: a one-row track is full at every window, so it says nothing and
     // would still swallow a click. The same call also says where each track is,
     // which is the part a pointer cannot derive for itself.
-    let list_rows = body.list as u16;
-    let diff_rows = body.diff as u16;
-    let list_bar = bar_for(wide, list_rows, body.list as u64, view.files as u64);
-    let diff_bar = bar_for(wide, diff_rows, body.diff as u64, view.total_rows as u64);
+    let list_bar = bar_for(wide, areas.list.height, body.list as u64, view.files as u64);
+    let diff_bar = bar_for(
+        wide,
+        areas.diff.height,
+        body.diff as u64,
+        view.total_rows as u64,
+    );
 
     Regions {
-        list: list_bar.region(list_top, list_rows),
-        diff: diff_bar.region(diff_top, diff_rows),
-        bar: (list_bar.drawn() || diff_bar.drawn()).then(|| area.x + area.width - 1),
+        list: list_bar.region(areas.list),
+        diff: diff_bar.region(areas.diff),
         // **From the same plan the painter draws**, which is what keeps the
         // pointer and the screen one answer: a sheet the reader can see but the
         // pointer cannot would swallow nothing and let a click seek a bar behind
@@ -3415,36 +3514,27 @@ pub fn render(
     // it has anywhere to scroll, because a list of three files and a diff of
     // thirty thousand rows are different questions.
     let bars = affords_bar(area.width);
-    let mut y = area.y + 1;
 
-    // **The body opens with air, band or no band**
-    // ([#174](https://github.com/breferrari/vigia/issues/174)). Skipped rather
-    // than painted, which is what a blank row is here: the pane's own background,
-    // with no furniture claiming a row it does not use. That is also why nothing
-    // below has to know whether this row is the header's separator or the band's
-    // leading air, because it is both.
-    y += body.lead as u16;
+    // **The geometry, once, from the same method the pointer reads**
+    // ([#251](https://github.com/breferrari/vigia/issues/251)). This used to be a
+    // running `y` cursor walked down the body here and rebuilt from the same
+    // `Body` in `regions`, so the painter and the pointer agreed only by both
+    // being written correctly.
+    //
+    // **The body still opens with air, band or no band**
+    // ([#174](https://github.com/breferrari/vigia/issues/174)), and that blank is
+    // inside `Body::lead` rather than drawn. Skipped rather than painted is what a
+    // blank row is here: the pane's own background, with no furniture claiming a
+    // row it does not use. Nothing below has to know whether the row is the
+    // header's separator or the band's leading air, because it is both.
+    let areas = body.areas(area);
 
-    if body.graph > 0 {
-        painter.band(
-            Rect {
-                y,
-                height: body.graph as u16,
-                ..area
-            },
-            view,
-        );
-        // The band and the blank under it, the latter skipped for the reason
-        // above.
-        y += body.graph as u16 + body.air as u16;
+    if areas.band.height > 0 {
+        painter.band(areas.band, view);
     }
 
     if body.list > 0 {
-        let region = Rect {
-            y,
-            height: body.list as u16,
-            ..area
-        };
+        let region = areas.list;
         // Counted in **files**, which is exactly what this region shows.
         let full = region;
         let (region, bar) = painter.with_bar(region, bars, body.list as u64, view.files as u64);
@@ -3462,24 +3552,14 @@ pub fn render(
             );
         }
         painter.list(region, view, area.width);
-        y += body.list as u16;
     }
 
-    if body.rule {
-        painter.rule(Rect {
-            y,
-            height: 1,
-            ..area
-        });
-        y += 1;
+    if areas.rule.height > 0 {
+        painter.rule(areas.rule);
     }
 
     if body.diff > 0 {
-        let region = Rect {
-            y,
-            height: body.diff as u16,
-            ..area
-        };
+        let region = areas.diff;
         // **Counted in rows**, which is what the call below passes: `rows_above`
         // over `total_rows`, with the thumb spanning the screen's own height.
         // Two superseded rulings are recorded under this one, because both were

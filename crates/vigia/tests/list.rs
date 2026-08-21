@@ -34,7 +34,9 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Glyphs, LIST_SETTLED, Position, View, Viewport, body_layout};
+use vigia::{
+    Action, App, Body, Glyphs, LIST_SETTLED, Position, View, Viewport, body_layout, regions,
+};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -87,6 +89,68 @@ fn chrome(app: &App) -> vigia::Chrome {
 
 fn split(width: u16, height: u16, files: usize) -> Body {
     body_layout(Rect::new(0, 0, width, height), &chrome(&App::new()), files)
+}
+
+/// Each region reports its **own** bar's column, not the pane's.
+///
+/// **The claim the removed field could not make**
+/// ([#251](https://github.com/breferrari/vigia/issues/251)). `Regions` used to
+/// carry one `Option<u16>` documented as *"the column both scrollbars are drawn
+/// in"*, which was true only because both regions span the pane and their bars
+/// land on the same right edge. Beside a rail
+/// ([#252](https://github.com/breferrari/vigia/issues/252)) they do not.
+///
+/// **Derived from each region's own rect rather than restated from the pane**, or
+/// it would agree with the renderer by construction and gate nothing: the
+/// expected column here is where `Painter::scrollbar` draws, which is the right
+/// edge of the region it was handed.
+#[test]
+fn each_region_reports_its_own_bar_column() {
+    // Enough files to overflow the list and enough rows to overflow the diff, so
+    // both regions have somewhere to scroll and both draw a bar.
+    let scratch = Scratch::large_diff("list-own-bar", 40, 12);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::new();
+    let history = History::new();
+
+    // Wide and tall enough that both regions overflow and both draw a bar, which
+    // is the only screen this gate is about.
+    let area = Rect::new(0, 0, 100, 20);
+    let chrome = chrome(&app);
+    let body = body_layout(area, &chrome, frame.files().len());
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    let drawn = regions(area, &chrome, &view);
+
+    let edge = area.x + area.width - 1;
+    assert_eq!(
+        drawn.list.bar,
+        Some(edge),
+        "the list's bar is not on the right edge of the region it is drawn in"
+    );
+    assert_eq!(
+        drawn.diff.bar,
+        Some(edge),
+        "the diff's bar is not on the right edge of the region it is drawn in"
+    );
+
+    // Non-vacuity from the other side: a screen with nothing to scroll reports no
+    // bar at all, so the two assertions above are about a drawn bar rather than
+    // about a field that is always `Some`.
+    let bare = View {
+        total_rows: 1,
+        ..View::default()
+    };
+    let none = regions(area, &chrome, &bare);
+    assert_eq!(
+        (none.list.bar, none.diff.bar),
+        (None, None),
+        "a screen with nothing to scroll still told the pointer about a bar"
+    );
 }
 
 #[test]
