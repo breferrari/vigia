@@ -100,10 +100,18 @@ fn split(width: u16, height: u16, files: usize) -> Body {
 /// land on the same right edge. Beside a rail
 /// ([#252](https://github.com/breferrari/vigia/issues/252)) they do not.
 ///
-/// **Derived from each region's own rect rather than restated from the pane**, or
-/// it would agree with the renderer by construction and gate nothing: the
-/// expected column here is where `Painter::scrollbar` draws, which is the right
-/// edge of the region it was handed.
+/// **What this proves, and what it does not.** The expected column is restated
+/// from the pane rather than read off the renderer's ladder, so a bar drawn in
+/// the wrong column reddens it. It cannot tell the two regions apart on its own:
+/// on every layout that exists today `Body::areas` spreads `..area` to both, so
+/// their rects share an `x` and a `width` and therefore a bar column, and a
+/// `regions` that handed `Bar::region` the wrong rect would still produce these
+/// two numbers. What catches that is
+/// `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`,
+/// which compares each region's reported rect against the one the painter draws
+/// into, and a mutation swapping the two reddens it along with eleven render
+/// gates. This one owns the narrower claim: the column is a region's own right
+/// edge, and it is `None` where no bar is drawn.
 #[test]
 fn each_region_reports_its_own_bar_column() {
     // Enough files to overflow the list and enough rows to overflow the diff, so
