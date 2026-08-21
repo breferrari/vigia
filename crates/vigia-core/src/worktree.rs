@@ -568,6 +568,81 @@ impl Iterator for Changes {
     }
 }
 
+/// Representative working-tree paths for the extensions this repository leads
+/// with, commonest first.
+///
+/// **What a repository is made of, before anybody writes to it.** The warmer's
+/// other entry point walks the *changed* set, and a monitor is very often opened
+/// on a clean tree beside an agent that has not started yet: there is then
+/// nothing to warm, and the first write arrives under a grammar nothing has
+/// compiled. The index knows the answer already and costs no walk of the
+/// worktree to ask.
+///
+/// **Ranked by extension rather than by grammar**, because `SPEC.md` §6 puts
+/// `syntect` on the other side of this file and an extension is a many-to-one
+/// proxy for a grammar that is good enough to rank on. The caller is expected to
+/// ask for more extensions than it means to warm and to spend its budget on the
+/// ones that actually resolve, since `.snap` and `.lock` can lead a repository
+/// while resolving to nothing.
+///
+/// Ties break on the extension itself, so two extensions with the same count
+/// come back in the same order every time and a gate can assert the ranking.
+///
+/// **Bounded in memory rather than only in output.** At most `per_extension`
+/// paths are retained per extension while counting, so an index of a hundred
+/// thousand entries costs a scan and a count rather than a copy of itself. I3 is
+/// a claim about a process left open for days and this runs on a thread inside
+/// one.
+///
+/// Opens its own repository, because `gix::Repository` is `Send` and not `Sync`
+/// so the frame path's cannot be borrowed across a thread boundary; the shell's
+/// watch thread already pays the same second open for the same reason. A
+/// repository that cannot be opened, or has no index at all, is **nothing to
+/// warm** rather than an error: this only ever makes a later frame cheaper.
+pub fn leading_paths(root: &Path, extensions: usize, per_extension: usize) -> Vec<String> {
+    if extensions == 0 || per_extension == 0 {
+        return Vec::new();
+    }
+    let Ok(repo) = gix::discover(root) else {
+        return Vec::new();
+    };
+    let Ok(index) = repo.index_or_empty() else {
+        return Vec::new();
+    };
+
+    // Keyed on the lowercased extension, because `syntax_for` resolves
+    // case-insensitively and a repository holding both `.MD` and `.md` is one
+    // language rather than two budgets.
+    let mut counts: std::collections::HashMap<String, (usize, Vec<String>)> =
+        std::collections::HashMap::new();
+    for entry in index.entries() {
+        let path = entry.path(&index);
+        let Ok(path) = path.to_str() else {
+            continue;
+        };
+        let Some(extension) = Path::new(path).extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let slot = counts
+            .entry(extension.to_ascii_lowercase())
+            .or_insert_with(|| (0, Vec::with_capacity(per_extension)));
+        slot.0 += 1;
+        if slot.1.len() < per_extension {
+            slot.1.push(path.to_owned());
+        }
+    }
+
+    let mut ranked: Vec<(String, (usize, Vec<String>))> = counts.into_iter().collect();
+    ranked.sort_by(|(left_ext, (left, _)), (right_ext, (right, _))| {
+        right.cmp(left).then_with(|| left_ext.cmp(right_ext))
+    });
+    ranked
+        .into_iter()
+        .take(extensions)
+        .flat_map(|(_, (_, paths))| paths)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::git_separators;
