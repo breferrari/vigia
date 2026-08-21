@@ -433,12 +433,27 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
     let first = draw(&mut app, &mut highlighter);
     let second = draw(&mut app, &mut highlighter);
 
+    // **Asserted apart, because only one of them is about this change.** The
+    // first frame parses nothing whatever the highlighter is: `App`'s `Paint`
+    // ladder leaves `Viewport::highlight` false until a frame is on screen,
+    // which is I7's original half and which `Highlighter::eager` satisfies too.
+    // Reported here so the second assertion has a stated baseline rather than
+    // looking like the same claim twice.
     assert_eq!(
-        (first, second),
-        (0, 0),
-        "the opening frames parsed {first} and {second} lines under a grammar \
-         nothing has compiled, so the reader is waiting on the 74-362ms it \
-         costs on a frame they did not ask for"
+        first, 0,
+        "the first frame parsed {first} lines, so I7's opening rule is broken \
+         before this gate's own subject is even reached"
+    );
+    // **The one the deferral owns.** With `Highlighter::eager` this is where
+    // the compile lands and the number is in the hundreds
+    // (`cold_start` above reports it); with the shipped constructor it is zero,
+    // because the grammar is uncompiled and the frame declines to be the one
+    // that compiles it.
+    assert_eq!(
+        second, 0,
+        "the second frame parsed {second} lines under a grammar nothing has \
+         compiled, so the reader waits on the 74-362ms it costs on a frame they \
+         did not ask for"
     );
     assert!(
         !highlighter.wanted().is_empty(),

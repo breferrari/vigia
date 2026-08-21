@@ -12,7 +12,7 @@
 //! one change, which is I1's, and the policy stays there because that is where
 //! it is testable. `run` below coalesces **paints**: how many frames one burst
 //! of wakes is worth, which is I9's, and it can only live here because a paint
-//! is the shell's and because one of the three wake sources is the terminal. It
+//! is the shell's and because one of the four wake sources is the terminal. It
 //! decides nothing about which events are real, which is what the sentence
 //! above is protecting.
 //!

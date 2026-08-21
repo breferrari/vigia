@@ -736,8 +736,8 @@ fn a_grammar_nothing_has_compiled_draws_plain_and_parses_nothing() {
     );
     assert!(
         classes.iter().all(|class| *class == Class::Plain),
-        "a deferred hunk drew {classes:?} rather than plain, so `sides` was \
-         built for a grammar the warmer has not run over"
+        "a deferred hunk drew {classes:?} rather than plain, so the entry was \
+         built `Parse::Ready` for a grammar the warmer has not run over"
     );
     assert_eq!(
         highlighter.wanted(),
