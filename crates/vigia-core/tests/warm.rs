@@ -1421,3 +1421,61 @@ const XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   <theme>dark</theme>
 </config>
 "#;
+
+/// A hunk that scrolled away while it was plain comes back in colour.
+///
+/// **The interaction the round-four sweep traced and nothing gated.** Both
+/// halves of this were already covered on their own: a deferred hunk redrawn in
+/// place thaws (`a_warm_turns_the_plain_hunk_into_colour`), and a hunk that
+/// leaves the screen is kept in [`RETAINED_HUNKS`] so a reader who scrolls back
+/// does not pay the walk again (`crates/vigia-core/tests/budgets.rs`). What
+/// nothing reached is the two together, and it is the one place a deferred entry
+/// can be handed back **by a different route**: `recover` lifts it out of the
+/// retired queue rather than finding it in `entries`.
+///
+/// The reason that route is dangerous is that its digest still matches. The
+/// hunk did not change; the world outside it did, one warm ago. An entry
+/// recovered on the digest alone would be called a reuse and hand back the plain
+/// spans it was retired with, for the rest of the session, and a reader who
+/// scrolled away and back would be the only one who ever saw it.
+///
+/// Three passes, because the middle one is what does the retiring: a pass that
+/// draws a different file leaves the first hunk unclaimed, and `Pass`'s `Drop`
+/// sweeps it out.
+#[test]
+fn a_hunk_recovered_after_its_warm_comes_back_coloured() {
+    let scratch = Scratch::large_diff("warm-recovered", 2, SCREENFUL / 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::new();
+
+    let plain = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
+    assert!(
+        plain.iter().all(|class| *class == Class::Plain),
+        "the first pass was already coloured, so nothing is being deferred and \
+         the recovery below proves nothing"
+    );
+
+    let wanted = highlighter.wanted().to_vec();
+    highlighter
+        .warm_ahead(scratch.root().to_path_buf(), wanted, None)
+        .join()
+        .expect("the warmer thread");
+
+    // The pass that retires it: `mod_0` is not claimed here, so the sweep in
+    // `Pass::drop` moves it out of `entries` and into the retired queue.
+    let _ = highlight_window(&mut frame, &mut highlighter, "src/mod_1.rs", 0, 1).classes;
+
+    let recovered = highlight_window(&mut frame, &mut highlighter, "src/mod_0.rs", 0, 1).classes;
+    assert!(
+        recovered.iter().any(|class| *class != Class::Plain),
+        "a hunk recovered from the retired queue kept the plain spans it was \
+         retired with, so a reader who scrolled away and back is the one reader \
+         whose screen never gains its colour"
+    );
+    assert!(
+        highlighter.wanted().is_empty(),
+        "the recovered hunk asked for a warm it has already been given"
+    );
+}
