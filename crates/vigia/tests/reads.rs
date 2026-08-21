@@ -161,7 +161,7 @@ fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
     );
 
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let before = frame.stats();
     let view = app
@@ -312,7 +312,7 @@ fn scrolling_for_a_long_time_does_not_grow_the_highlight_cache() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body();
 
@@ -464,7 +464,7 @@ fn a_tick_re_measures_only_what_changed() {
     );
 
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // One file changes. It is the file the viewport is on, so the frame has to
@@ -706,7 +706,7 @@ fn a_redraw_with_nothing_changed_reads_nothing() {
     settle(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let before = frame.stats();
     let view = app
@@ -801,7 +801,7 @@ fn bulk_rewrite_window(name: &str, files: usize) -> Margin {
     );
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let before = frame.stats();
@@ -912,7 +912,7 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
     settle(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     // Each file here is one rewritten line: a file row, a hunk row, two content
     // rows, and since [#165](https://github.com/breferrari/vigia/issues/165) the
@@ -967,7 +967,7 @@ fn a_taller_screen_reads_more_files_and_a_shorter_one_reads_fewer() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     // A whole block: heading, hunk header, two content rows and the closing
     // blank, so a screen of exactly `span` rows is exactly one file's worth.
@@ -1018,7 +1018,7 @@ fn a_full_history_costs_the_frame_no_read_and_no_probe() {
     settle(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
 
     let empty = History::new();
     let before = frame.stats();
@@ -1100,7 +1100,7 @@ fn a_heat_strip_is_drawn_from_a_reused_diff_without_reading() {
     settle(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let before = frame.stats();
@@ -1237,7 +1237,7 @@ fn a_list_row_for_an_unchanged_file_reads_no_bytes() {
     settle(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // One view to warm whatever this screen touches, then measure the next.
@@ -1301,7 +1301,7 @@ fn the_list_reads_no_more_when_its_window_has_moved() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let at_origin = app
@@ -1397,7 +1397,7 @@ fn margin_screen(name: &str, files: usize) -> u64 {
     frame.advance().expect("advance");
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let before = frame.stats();
     app.view(&mut frame, &mut highlighter, &history, layout())
@@ -1437,7 +1437,7 @@ fn what_a_row_exact_scrollbar_would_cost() {
         // Built outside the timer, or the figure carries `Highlighter::new`'s
         // grammar loading and stops being a screen's cost.
         let mut app = App::new();
-        let mut highlighter = Highlighter::new();
+        let mut highlighter = Highlighter::eager();
         let history = History::new();
 
         // What one screen costs today: the diff's file plus the region's rows.
@@ -1516,7 +1516,7 @@ fn a_tick_recounts_the_height_and_a_redraw_does_not() {
     frame.advance().expect("advance");
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let before = frame.stats();
@@ -1577,7 +1577,7 @@ fn the_position_counts_the_rows_above_it_including_part_of_a_file() {
     materialise(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let split = layout();
 

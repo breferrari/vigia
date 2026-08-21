@@ -12,7 +12,7 @@
 //! one change, which is I1's, and the policy stays there because that is where
 //! it is testable. `run` below coalesces **paints**: how many frames one burst
 //! of wakes is worth, which is I9's, and it can only live here because a paint
-//! is the shell's and because one of the three wake sources is the terminal. It
+//! is the shell's and because one of the four wake sources is the terminal. It
 //! decides nothing about which events are real, which is what the sentence
 //! above is protecting.
 //!
@@ -27,12 +27,25 @@
 //! reads input the same way. **The first two** blocking sources need two threads
 //! and one channel, or a poll loop, and a poll loop is the timer I1 forbids.
 //!
-//! The third is [`vigia_core::Highlighter::warm_ahead`], and it is not on that
-//! channel at all: it sends no wake, so it cannot make an idle monitor do work
-//! and I1 never sees it. It compiles grammars ahead of the reader and ends by
-//! itself. That it reports nothing back is the design rather than a shortcut —
-//! there is no such thing as a warm grammar for the frame path to believe in,
-//! which `warm_ahead` documents in full.
+//! The third is [`vigia_core::Highlighter::warm_ahead`], and **it is a sender on
+//! that channel too** since [#129](https://github.com/breferrari/vigia/issues/129).
+//! It compiles grammars ahead of the reader and ends by itself, and it now says
+//! so when it does, because the frame path draws a hunk plain while its grammar
+//! is uncompiled and a loop blocked on `recv` has no other reason to look again.
+//!
+//! **That does not make it a timer and I1 does not reach it.** I1's words are
+//! *no filesystem event and no git index change means no work*, and its budget
+//! is *0 wakeups while idle*: a warm exists only because something was written
+//! or because a diff was already on screen, it is bounded by the number of
+//! grammars a session meets rather than by time, and on a tree nobody touches
+//! nothing is spawned and nothing is ever sent. The licence sentence about
+//! clocks is not being stretched to cover it, because it is not one.
+//!
+//! What `warm_ahead` still does **not** report is which grammars it managed,
+//! and that has not changed: there is no such thing as a warm grammar for the
+//! frame path to believe in. What the frame path acts on is the opposite claim,
+//! that a grammar has never been parsed under at all, which is exact.
+//! `Highlighter::attempted` carries the distinction in full.
 //!
 //! The fourth is [`signal`]'s, and it is a **third wake source on the same
 //! channel** rather than a new mechanism: an externally delivered signal ends
@@ -154,6 +167,68 @@ enum Wake {
     /// through the `Drop` on the way out. [`signal`] is where the reasoning
     /// lives, above all why the handler must restore nothing itself.
     Signalled,
+    /// A warm finished, so a hunk that drew plain can draw in colour.
+    ///
+    /// **It carries nothing, and the arm below does nothing**, because the paint
+    /// after the batch *is* the whole of the response: the highlighter already
+    /// holds the compiled patterns, and what was missing was a reason for a loop
+    /// blocked on `recv` to look again.
+    ///
+    /// **A fourth sender on the channel the other three share**, which is the
+    /// shape [`signal`] already established as a third rather than a new
+    /// mechanism. I1 does not reach it, and the row's own words are why: *no
+    /// filesystem event and no git index change means no work*, budget **0
+    /// wakeups while idle**. A warm happens only because something was written
+    /// or because the reader is looking at a diff that already existed, it is
+    /// bounded by the number of grammars a session meets rather than by time,
+    /// and with nothing to warm nothing is ever spawned and nothing is ever
+    /// sent. It is not a clock and the licence sentence about clocks does not
+    /// have to be stretched to cover it.
+    Warmed,
+}
+
+/// Whether a demand is worth handing to a warmer, given what the last one was
+/// handed and whether the tree has changed since.
+///
+/// **The rule lives here rather than inside `Shell::request_warm` for the reason
+/// `Held::ends` is a free function: that loop cannot be driven by a test, and a
+/// rule written inline is a rule with no gate.**
+///
+/// Three answers. An empty demand is nothing to do. A demand **identical** to
+/// the one the last warm was handed is nothing to do either, because that warm
+/// has already had its turn at exactly these paths and finished: asking again
+/// spawns a thread that will do the same nothing and send a wake for it, which
+/// on a tree nobody is touching is I1's *0 wakeups while idle* breached. And
+/// `written` overrides both, because a warm that could not be served a moment
+/// ago may be servable now.
+///
+/// **It cannot stall a demand that is making progress**, and that is why the
+/// comparison is on the whole list rather than on a flag. A warm that compiles
+/// two of three grammars leaves a *shorter* demand, which is a different list,
+/// which is offered immediately. Only a demand that moved not at all is held
+/// back.
+///
+/// **`written` is a flag rather than a clearing of `served`, and that is a round
+/// two correction.** Clearing on the tick itself wiped the record of a warm that
+/// was still in flight, so when that warm finished there was nothing left to
+/// compare its result against and the same unservable demand was spawned for
+/// again. During active editing a tick lands inside a warm often, which is the
+/// case this exists for. A flag cannot lose that record: it is set by the tick,
+/// read here, and cleared by the spawn.
+pub fn worth_warming(wanted: &[String], served: &[String], written: bool) -> bool {
+    !wanted.is_empty() && (written || wanted != served)
+}
+
+/// The callback a warm ends with, wired to this shell's wake channel.
+///
+/// One line, and it is here rather than written out at its three call sites so
+/// that what a warm does when it finishes is one decision. Failure is dropped:
+/// a closed channel is the shell on its way out, and there is nothing to tell.
+fn warmed(tx: &Sender<Wake>) -> vigia_core::Warmed {
+    let tx = tx.clone();
+    Box::new(move || {
+        let _ = tx.send(Wake::Warmed);
+    })
 }
 
 /// The version this binary reports, which is the package's.
@@ -370,6 +445,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         hovered: None,
         scrolling: None,
         scrolling_until: None,
+        served: Vec::new(),
+        written: false,
+        warming: None,
     };
 
     // The arming from above, reported now that there is somewhere to report it. A
@@ -402,24 +480,37 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // [#48](https://github.com/breferrari/vigia/issues/48) contemplates, every
     // one of them dropped unread.
     //
-    // Detached by dropping the handle, like the two threads below and for a
-    // simpler reason: it ends by itself, and nothing waits for a result that
-    // only ever makes a later frame cheaper.
+    // **The handle is kept now rather than dropped**, and it is `Shell::warming`
+    // for the reason that field exists: a warm in flight is what stops the next
+    // one being spawned. Dropped, the `request_warm` below saw no warm running
+    // and started a second thread over the same paths the moment the opening
+    // frames raised their demand. Nothing broke, because the compiled patterns
+    // land in one shared `SyntaxSet` either way, but it is two threads and two
+    // wakes for one grammar and the bound that field documents was not being
+    // held. Detached still: it is never joined, only asked whether it is done.
     //
     // **Above the draw, so it overlaps the frame that compiles.** Below it,
     // the warm starts only once paint two has finished paying the 74-362ms
     // for what is on screen, which turns `max(paint, warm)` into their sum
     // and widens the window in which a first scroll below the fold meets a
     // cold grammar. That window is the whole reason this thread exists.
+    //
+    // **It sends a wake now, where before it reported to nobody.** A hunk whose
+    // grammar nothing has compiled draws plain (`Highlighter::wanted`), so the
+    // frame that finishes this warm is the frame that has colour to add, and a
+    // loop blocked on `recv` has no other reason to look.
     if !frame.files().is_empty() {
-        shell.highlighter.warm_ahead(
-            worktree.workdir().to_path_buf(),
-            frame
-                .files()
-                .iter()
-                .take(vigia_core::WARM_FILES)
-                .map(|change| change.path.clone())
-                .collect(),
+        shell.warming = Some(
+            shell.highlighter.warm_ahead(
+                worktree.workdir().to_path_buf(),
+                frame
+                    .files()
+                    .iter()
+                    .take(vigia_core::WARM_FILES)
+                    .map(|change| change.path.clone())
+                    .collect(),
+                Some(warmed(&tx)),
+            ),
         );
     }
 
@@ -442,7 +533,31 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // they are: the signal handler above shares it, and has the opposite
     // requirement about when it is armed.
     spawn_watch(path.to_path_buf(), tx.clone());
-    spawn_input(tx);
+
+    // **What the tree is made of, which the changed set cannot say on a tree
+    // nobody has written to yet.** A pane is opened beside an agent *before* the
+    // agent writes, so the warm above very often has nothing to warm, and then
+    // the agent's first write arrives under a grammar nothing has compiled.
+    //
+    // Below the draw rather than above it, unlike the warm over the changed set:
+    // that one is racing the frame that draws those very files and has to
+    // overlap it, while this one reads `.git/index` and would put that read on
+    // the path I7 measures. Nothing on screen is waiting for it.
+    shell
+        .highlighter
+        .warm_repository(worktree.workdir().to_path_buf(), Some(warmed(&tx)));
+
+    // Demands the opening two frames raised, dispatched before the loop blocks.
+    // Without this the screen keeps whatever the two paints managed until the
+    // agent's next write, which on a tree nobody is touching is never.
+    shell.request_warm(&worktree, &tx);
+
+    // Cloned rather than moved, because the loop below keeps `tx` to hand a
+    // sender to each warm it spawns. That the channel can therefore never
+    // disconnect is not a change: `spawn_input` reports the one end that
+    // matters as `Wake::InputLost` before its thread returns, and the
+    // disconnect arm below was already unreachable through it.
+    spawn_input(tx.clone());
 
     // Reused across iterations rather than allocated per wake. A monitor is left
     // open for days and I3 is the invariant that notices, so the one buffer the
@@ -495,6 +610,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             shell.settle_scroll(Instant::now());
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree)?;
+            shell.request_warm(&worktree, &tx);
             continue;
         };
         // Started before the drain, not after it, because the drain is part of
@@ -649,6 +765,18 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 Wake::Tick(paths) => {
                     shell.app.clear_notice();
+                    // **A tick is the world changing, so a demand that could not
+                    // be served a moment ago is worth offering again.** See
+                    // `Shell::served`: without this, one unservable demand would
+                    // keep its file plain for the rest of the session however
+                    // many times it was rewritten.
+                    //
+                    // A flag rather than `served.clear()`, which is what this
+                    // was in round one of #129's audit: a tick lands inside a
+                    // running warm often during active editing, and clearing
+                    // there destroyed the record of what that warm had been
+                    // handed, so its result had nothing to be compared against.
+                    shell.written = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only
                     // thing that moves it is a wake the loop was already having.
@@ -698,6 +826,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.app.watch_lost();
                     shell.app.warn(message);
                 }
+                // Deliberately nothing. The patterns are compiled and sitting in
+                // the `SyntaxSet` the highlighter already holds, so the paint
+                // below is the whole of the response and any state changed here
+                // would be state two mechanisms could disagree about.
+                Wake::Warmed => {}
             }
         }
 
@@ -712,6 +845,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // coalescing: every wake above was handled, in arrival order, and only
         // the paint is shared. See `drain`.
         shell.draw(&mut frame, &worktree)?;
+
+        // **After the paint, because the paint is what raises the demand.**
+        // `Highlighter::wanted` describes the frame that just drew, so asking
+        // before it would be acting on the previous screen's answer. Inside the
+        // timed region deliberately: spawning a thread is part of what this
+        // frame cost and a readout that excluded it would be measuring a frame
+        // the product does not have.
+        shell.request_warm(&worktree, &tx);
 
         // After the paint, because the paint is the last third of what a frame
         // costs. The consequence is that the p99 drawn above is always the
@@ -971,6 +1112,40 @@ struct Shell {
     scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
+    /// The demand the last warm was handed, so a demand nothing can serve is
+    /// asked for once rather than on every frame.
+    ///
+    /// **The backstop for a demand the core cannot mark**, which is a narrower
+    /// set than it sounds and is not empty. `warm_run` marks the grammar it had
+    /// a run at, so an ordinary vanished file stops being asked for; what it
+    /// cannot do is mark the *right* grammar for a file it never opened whose
+    /// extension lies about its language. A Qt `.ts` translation file draws as
+    /// XML because the frame has its first line, and if it is deleted before the
+    /// warmer opens it the warmer can only mark TypeScript, which the frame was
+    /// never waiting on. Without this that hunk is demanded on every frame, and
+    /// every demand spawns a thread and sends a wake.
+    ///
+    /// Overridden by [`Self::written`] rather than cleared, because a tick can
+    /// land while the warm this describes is still running. See
+    /// [`worth_warming`], which is where the rule lives so that it can be gated.
+    served: Vec<String>,
+    /// Whether the tree has changed since the last warm was spawned.
+    ///
+    /// A tick is the world changing, so a demand that could not be served a
+    /// moment ago is worth offering once more. Set by the tick and spent by the
+    /// spawn, so one tick buys exactly one re-offer.
+    written: bool,
+    /// The warm this shell last asked for, if any.
+    ///
+    /// **Held to be asked whether it has finished, never to be joined.** See
+    /// [`Shell::request_warm`]: it is the one bound keeping the thread count to
+    /// the grammars a session meets, and joining it would be a frame waiting on
+    /// the compile the whole deferral exists to get off the frame.
+    ///
+    /// Detached on the way out like every other thread here, which
+    /// [`vigia_core::Highlighter::warm_ahead`] is written for: it ends on its
+    /// own and holds nothing but an `Arc` to the grammars.
+    warming: Option<std::thread::JoinHandle<vigia_core::WarmReport>>,
 }
 
 impl Shell {
@@ -1114,6 +1289,52 @@ impl Shell {
     /// next wake, where the reader is looking at the plain frame rather than at
     /// nothing. That is the same "report and keep the previous screen" rule the
     /// rest of the frame path already follows.
+    /// Hand the warmer whatever the last paint drew plain, and let it wake us.
+    ///
+    /// **The other half of the deferral.** `Highlighter::wanted` lists the paths
+    /// whose grammar nothing has compiled, one per grammar, as of the frame that
+    /// just drew; those hunks are on screen in plain text right now, and this is
+    /// what turns them into colour.
+    ///
+    /// **One warm in flight at a time**, which is what keeps the thread count
+    /// bounded by grammars rather than by frames. A demand that arrives while
+    /// one is running is not lost and is not queued either: the running warm
+    /// ends with a wake, that wake paints, that paint raises the demand again if
+    /// it is still true, and this spawns the next. The loop is self-driving and
+    /// it terminates, because the warmer marks every grammar it had a run at
+    /// even when the file it meant to read has gone.
+    ///
+    /// **A finished handle is not the same as no handle.** Checking only for
+    /// `Some` would spawn once and never again, since the shell detaches rather
+    /// than joining; `is_finished` is what says the previous run is over without
+    /// blocking a frame on it.
+    fn request_warm(&mut self, worktree: &Worktree, tx: &Sender<Wake>) {
+        if self
+            .warming
+            .as_ref()
+            .is_some_and(|handle| !handle.is_finished())
+        {
+            return;
+        }
+        if !worth_warming(self.highlighter.wanted(), &self.served, self.written) {
+            self.warming = None;
+            if self.highlighter.wanted().is_empty() {
+                self.served.clear();
+                self.written = false;
+            }
+            return;
+        }
+        self.served = self.highlighter.wanted().to_vec();
+        // Spent here, so one tick buys one re-offer of a demand that has not
+        // moved. Left set, every frame after the tick would spawn again.
+        self.written = false;
+        self.warming = Some(self.highlighter.warm_ahead(
+            worktree.workdir().to_path_buf(),
+            self.served.clone(),
+            Some(warmed(tx)),
+        ));
+    }
+
     fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
         self.paint(frame, worktree)?;
         if self.app.owes_repaint() {

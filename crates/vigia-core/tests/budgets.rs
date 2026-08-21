@@ -29,8 +29,8 @@ use std::cell::RefCell;
 use std::time::Duration;
 
 use support::{
-    Scratch, absolute_gates_apply, budget, delta, highlight_delta, holds_p99, holds_p99_rounds,
-    materialise, settle, time, time_cpu,
+    Scratch, absolute_gates_apply, budget, delta, highlight_delta, highlight_window, holds_p99,
+    holds_p99_rounds, materialise, settle, time, time_cpu,
 };
 use vigia_core::{
     FileChange, Frame, FrameStats, HighlightStats, Highlighter, LineKind, RETAINED_HUNKS, Samples,
@@ -465,48 +465,6 @@ const WINDOW_HUNKS: usize = 3;
 const SMALL_FILE: usize = 500;
 const LARGE_FILE: usize = 5_000;
 
-/// Highlight `hunks` hunks starting at `first`, every line of each.
-///
-/// One frame's worth of work for a viewport standing on that part of the file.
-/// The **ordinal passed is the hunk's real position in the file**, not its
-/// position in the window, because that is what makes a hunk the same hunk after
-/// the view scrolls.
-///
-/// Returns the lines drawn, so a window that drew nothing cannot satisfy a gate
-/// by costing nothing.
-fn highlight_window(
-    frame: &mut Frame,
-    highlighter: &mut Highlighter,
-    path: &str,
-    first: usize,
-    hunks: usize,
-) -> usize {
-    let index = frame
-        .files()
-        .iter()
-        .position(|change| change.path == path)
-        .unwrap_or_else(|| panic!("{path} is not a changed file"));
-
-    let mut pass = highlighter.pass();
-    let (_, diff) = frame.diff(index).expect("diff");
-    assert!(
-        diff.hunks.len() >= first + hunks,
-        "the fixture has {} hunks, so a window of {hunks} at {first} runs off \
-         the end and the gate would measure a short window",
-        diff.hunks.len()
-    );
-
-    let mut drawn = 0;
-    for (offset, hunk) in diff.hunks[first..first + hunks].iter().enumerate() {
-        for line in 0..hunk.lines.len() {
-            pass.spans(path, first + offset, hunk, line, None);
-            drawn += 1;
-        }
-    }
-    drop(pass);
-    drawn
-}
-
 /// Bytes of one hunk's lines, which is what highlighting that hunk has to cost.
 fn hunk_bytes(frame: &mut Frame, path: &str, ordinal: usize) -> u64 {
     let index = frame
@@ -549,8 +507,8 @@ fn cost_of_rehighlighting_a_one_line_edit(scratch: &Scratch) -> Rehighlight {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
-    let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    let mut highlighter = Highlighter::eager();
+    let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS).rows;
     assert_eq!(
         highlighter.stats().parsed,
         WINDOW_HUNKS as u64,
@@ -699,7 +657,7 @@ fn a_redraw_inside_the_settle_margin_reparses_nothing() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
 
     // Land an edit, and stay inside its margin for the rest of the test.
@@ -748,7 +706,7 @@ fn the_highlight_cache_is_bounded_by_the_viewport() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     for first in 0..STEPS {
         highlight_window(
             &mut frame,
@@ -805,7 +763,7 @@ fn a_hunk_scrolled_back_to_is_not_re_parsed() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
 
     // Read forward over twice the window, so the hunks left behind are genuinely
     // off screen rather than still half drawn.
@@ -836,7 +794,7 @@ fn a_hunk_scrolled_back_to_is_not_re_parsed() {
     // Then back to where the reader started, which is the motion a wheel flick
     // and its reversal produce.
     let before = highlighter.stats();
-    let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS);
+    let drawn = highlight_window(&mut frame, &mut highlighter, SHARED_PATH, 0, WINDOW_HUNKS).rows;
     let cost = highlight_delta(before, highlighter.stats());
 
     assert!(drawn > 0, "the window back at the top drew nothing");
@@ -925,7 +883,7 @@ fn a_hunk_edited_while_off_screen_is_re_parsed_when_it_comes_back() {
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
 
     // Read the top of the file, then move past it so it is retired rather than
     // live. Off screen and still held is precisely the state under test.

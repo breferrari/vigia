@@ -568,6 +568,152 @@ impl Iterator for Changes {
     }
 }
 
+/// Distinct extensions [`indexed_extensions`] will track, at most.
+///
+/// Generous by two orders of magnitude against any real tree, because it is not
+/// there to shape the answer: it is there so that an index somebody else wrote
+/// cannot turn one background scan into an unbounded allocation.
+pub const INDEXED_EXTENSIONS: usize = 1024;
+
+/// Bytes of a path [`indexed_extensions`] will retain, at most.
+///
+/// The third side of the same bound, and it was missing: capping how many
+/// extensions are tracked and how long each may be still leaves
+/// [`INDEXED_EXTENSIONS`] times `per_extension` **path** strings of any length
+/// at all, which against the hostile index the caps exist for is the two-thirds
+/// defence that reads as a whole one. Four kilobytes is past what any tier-1
+/// platform will open, so nothing real is refused by it.
+pub const INDEXED_PATH: usize = 4096;
+
+/// Bytes of an extension [`indexed_extensions`] will consider, at most.
+///
+/// The longest any grammar in the dump registers is `sublime-syntax` at
+/// fourteen, so this is twice the longest real answer and a hundredth of what a
+/// hostile index can spell.
+pub const INDEXED_EXTENSION: usize = 32;
+
+/// One extension the index carries, with how many entries have it and a bounded
+/// sample of their paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed {
+    /// Lowercased, because a repository holding both `.MD` and `.md` is one
+    /// language rather than two.
+    pub extension: String,
+    /// Index entries carrying it, counted in full.
+    pub files: usize,
+    /// Working-tree paths that have it, at most `per_extension` of them.
+    pub paths: Vec<String>,
+}
+
+/// Every extension the index carries, commonest first.
+///
+/// **What a repository is made of, before anybody writes to it.** The warmer's
+/// other entry point walks the *changed* set, and a monitor is very often opened
+/// on a clean tree beside an agent that has not started yet: there is then
+/// nothing to warm, and the first write arrives under a grammar nothing has
+/// compiled. The index knows the answer already and costs no walk of the
+/// worktree to ask.
+///
+/// **A tally rather than a ranking, and that is the seam.** `SPEC.md` §6 puts
+/// `syntect` on the other side of this file, so this cannot know that `.yml` and
+/// `.yaml` are one grammar, or `.h` and `.hpp`. An earlier version ranked and
+/// truncated here anyway, on the argument that an extension is a good enough
+/// proxy for a grammar — which is true of one path and **false of the selection
+/// step**, because a language spelled two ways is counted twice at exactly the
+/// point where the counts decide who wins. Handing back the whole tally lets the
+/// caller merge on the grammar it can see, and leaves nothing here to be wrong
+/// about.
+///
+/// **Complete for any tree that is one**, which is the bound rather than an
+/// absence of one. Every extension in the index is counted, so the merge has
+/// nothing to miss, and the two things that scale are both capped: the *paths*
+/// at `per_extension` each, and the tally itself at [`INDEXED_EXTENSIONS`]
+/// distinct extensions of at most [`INDEXED_EXTENSION`] bytes.
+///
+/// **Both caps are for a hostile index rather than for a large one.** A tree's
+/// distinct-extension count is a fact about its shape and not its size, so a
+/// hundred-thousand-file checkout still has a few dozen and neither cap is in
+/// play. `.git/index` in a cloned repository is somebody else's bytes, though,
+/// and two hundred thousand entries each carrying a unique two-hundred-byte
+/// extension is an allocation measured in gigabytes on a background thread at
+/// every launch — which under `panic = "abort"` takes the monitor with it rather
+/// than the thread. What is dropped past the caps is said here rather than left
+/// silent: it is whatever the index named last, and a tree with more distinct
+/// extensions than that has no leading language for this to find.
+///
+/// Ties break on the extension itself, so the order is total and a caller
+/// merging with a **stable** sort inherits a deterministic answer.
+///
+/// Opens its own repository, because `gix::Repository` is `Send` and not `Sync`
+/// so the frame path's cannot be borrowed across a thread boundary; the shell's
+/// watch thread already pays the same second open for the same reason. A
+/// repository that cannot be opened, or has no index at all, is **nothing to
+/// warm** rather than an error: this only ever makes a later frame cheaper.
+pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
+    if per_extension == 0 {
+        return Vec::new();
+    }
+    let Ok(repo) = gix::discover(root) else {
+        return Vec::new();
+    };
+    let Ok(index) = repo.index_or_empty() else {
+        return Vec::new();
+    };
+
+    let mut counts: std::collections::HashMap<String, (usize, Vec<String>)> =
+        std::collections::HashMap::new();
+    for entry in index.entries() {
+        let path = entry.path(&index);
+        let Ok(path) = path.to_str() else {
+            continue;
+        };
+        let Some(extension) = Path::new(path).extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        // Length first, because it is the cheaper of the two rejections and the
+        // one that bounds a single entry. No grammar in the dump registers an
+        // extension anywhere near this long.
+        if extension.len() > INDEXED_EXTENSION {
+            continue;
+        }
+        let extension = extension.to_ascii_lowercase();
+        // A known extension is always counted, however full the tally is: the
+        // cap bounds how many distinct ones are *tracked*, and dropping later
+        // entries of one already being tracked would make its count wrong, which
+        // is the one thing the caller cannot recover from.
+        if counts.len() >= INDEXED_EXTENSIONS && !counts.contains_key(&extension) {
+            continue;
+        }
+        let slot = counts
+            .entry(extension)
+            .or_insert_with(|| (0, Vec::with_capacity(per_extension)));
+        // Counted whatever its length, because the count is what the merge
+        // ranks on and a path too long to open is still a file of that language.
+        // Only the retained sample is bounded, and a path this long cannot be
+        // warmed from anyway.
+        slot.0 += 1;
+        if slot.1.len() < per_extension && path.len() <= INDEXED_PATH {
+            slot.1.push(path.to_owned());
+        }
+    }
+
+    let mut ranked: Vec<Indexed> = counts
+        .into_iter()
+        .map(|(extension, (files, paths))| Indexed {
+            extension,
+            files,
+            paths,
+        })
+        .collect();
+    ranked.sort_by(|left, right| {
+        right
+            .files
+            .cmp(&left.files)
+            .then_with(|| left.extension.cmp(&right.extension))
+    });
+    ranked
+}
+
 #[cfg(test)]
 mod tests {
     use super::git_separators;

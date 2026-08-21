@@ -30,6 +30,54 @@ The rule for what lives where: **an active constraint belongs in `SPEC.md`; the 
 
 ---
 
+## I1 — a warm that finishes is a fourth sender, and the row does not reach it
+
+Ruled 2026-08-21 with [#129](https://github.com/breferrari/vigia/issues/129). The frame path stopped parsing under grammars nothing has compiled, which means a hunk can be on screen in plain text with its colour owed; something has to tell a loop blocked on `recv` that the colour has arrived.
+
+**Quoted before it was cited, which is the rule this repository keeps having to relearn.** I1's row: *"Redraw is **event-driven**, never a timer that runs unbidden. No filesystem event and no git index change means no work."* Budget: *"**0 wakeups** while idle."* Measure: *"CPU sampled over a 60s idle window; assert no render calls"*, plus `nothing_held_means_no_timer_at_all` on the untimed wait.
+
+**It does not reach a warm.** A warm exists only because a file was written or because a diff was already on screen when the process opened; on a tree nobody touches, nothing is spawned and nothing is ever sent, so *no filesystem event means no work* holds literally. It is bounded by the number of distinct grammars a session meets rather than by time, so it cannot repeat. And it leaves the wait untimed, so the structural half of the measure is untouched: `Shell::patience` still returns `None` with nothing held, and a warm arriving is a `recv` returning rather than a `recv_timeout` expiring.
+
+**The licence sentence about clocks was deliberately not stretched to cover it.** That sentence is about a clock a gesture holds open, and this is not a clock at all. Reaching for it would have been the shape [#166](https://github.com/breferrari/vigia/issues/166) and §11.2 B10 both went wrong on from the other direction: citing I1 at a case its budget could never have measured.
+
+**What it is, structurally, is the third sender becoming a fourth.** `crates/vigia/src/lib.rs` already describes the signal handler as *"a **third wake source on the same channel** rather than a new mechanism"*. This is the same move: `Highlighter::warm_ahead` takes a callback, the shell hands it one that sends `Wake::Warmed`, and the arm for it does **nothing**, because the paint after the batch is the whole response.
+
+**The bound is `Shell::request_warm`, and it is one warm in flight.** A demand raised while a warm is running is not queued: the running warm ends with a wake, that wake paints, that paint raises the demand again if it is still true, and the next warm starts. The loop terminates because the warmer marks every grammar it *had a run at*, including one whose file had vanished by the time it opened it. Otherwise a hunk drawn from a diff whose file is gone would be demanded on every frame forever, which is a livelock with a wake attached; `a_path_that_vanished_does_not_leave_the_frame_asking` is that case, and it was watched failing.
+
+---
+
+## I7 — the residual table that made #51 decline more than it had to
+
+Corrected 2026-08-21 with [#129](https://github.com/breferrari/vigia/issues/129).
+
+**What #51 recorded.** Two rejections, both reasonable on their evidence: a per-grammar warmth predicate the frame path could act on, *"because compilation is per pattern: warming on one Rust file leaves a sibling paying 41.41ms, Markdown 95.04ms, HTML 201.20ms"*; and per-hunk deferral, *"the only exact fix"*, because it would add a colour lag to every scroll into new territory, thousands of times a session, to remove a cost paid once per grammar.
+
+**The second reason still holds and was not relitigated.** #129 defers once per **grammar** per session, not once per hunk, so a scroll into new territory under a grammar already met parses inline exactly as it does today.
+
+**The first reason rested on a number measured at the wrong scale.** Those residuals are **whole-file** parses, so each carries a large parse beside the compile it was meant to isolate, and a frame parses one screenful. Re-measured at frame scale, twenty-four lines, release, fresh `SyntaxSet` per case:
+
+| | cold | after the warmer read one real 64KB sibling | floor |
+|---|---|---|---|
+| `.rs` | 123.98ms | **2.40ms** | 2.40ms |
+| `.md` | 694.75ms | 89.77ms | 90.65ms |
+| `.toml` | 15.26ms | 0.43ms | 0.40ms |
+
+The middle column **is** the floor. The compile is fully paid by one real sibling, and what the old table was reporting was the cost of parsing another whole file.
+
+**The half of #51's finding that survives, because it decides the implementation.** A *small* sibling is not enough: over a 2.5KB hand-written sample the residual is real, `.js` 80.49ms above floor, `.html` 40.10ms, `.cpp` 37.55ms. So the warmer reads `WARM_BYTES` of a real file, and a fixture would not have done.
+
+**And the claim the frame path actually acts on is not the one #51 rejected.** *This grammar is warm* is unavailable at any price and nothing asserts it. *Nothing has ever parsed under this grammar* is exact: `syntect` holds every pattern in its own `OnceCell` and exposes no way to fill one but a parse, so the two places in `vigia-core` that build a `ParseState` are the whole population. Checked against the source rather than assumed: `SyntaxReference::contexts` is private, `ContextId`'s fields are `pub(crate)`, and `Regex::try_compile` compiles a throwaway rather than filling the set's own cell, so there is no eager path to reach for.
+
+**The cliff is flat in content size**, which is the observation that separates a compile from a parse and which nothing had recorded: a 594-byte Markdown screenful costs **631.46ms cold and 0.97ms warm**, a 650x penalty on half a kilobyte.
+
+**Why the population is warmed to three grammars and no further.** Measured over this repository, warming one grammar at a time and reading RSS after each: baseline **6.73 MiB**, ten grammars later **64.73 MiB**, with Rust +12.43 MiB and Markdown +19 to +35 MiB. I3's budget is drift rather than a plateau, so that is a bad trade rather than a breach. What a repository *leads* with is different in kind: the agent is near-certain to write the language the repository is mostly made of, so those megabytes are spent within seconds either way and the sweep only moves them earlier. The tail is the speculative part and the cap is what removes it.
+
+**And what "leads with" counts is a grammar, which the index cannot see.** A tally of `.git/index` can only key on the extension, because §6 keeps `syntect` out of `worktree.rs`, and that proxy is sound for one path and unsound for the *selection*: a repository whose YAML is split evenly across `.yml` and `.yaml` has each spelling counted separately at the one moment the counts decide which three grammars are compiled, so it loses to a smaller single-extension language. The first implementation ranked and truncated in `worktree.rs` on the many-to-one-proxy argument, and the altitude review found it with no failing test behind it. The tally now comes back complete and unranked, the merge happens in `highlight.rs` where a `Scope` is available, and `a_language_spelled_two_ways_is_counted_once` is the gate, watched failing against the per-extension ranking.
+
+**One finding turned up beside this one and is not it.** A 16.8KB Markdown screenful costs **117.00ms with every pattern already compiled**, which is the opposite shape to the cliff above: it tracks bytes on screen instead of being flat in them, and it survives every warm. That is a long-line parse cost, it is I2b and I4 territory rather than I7's, and it is [#261](https://github.com/breferrari/vigia/issues/261).
+
+---
+
 ## I1 — a held mouse button is not an event, so a gesture-bounded clock is licensed
 
 > [!IMPORTANT]

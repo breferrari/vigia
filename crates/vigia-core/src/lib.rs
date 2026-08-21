@@ -57,7 +57,7 @@ pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
 pub use highlight::{
     CHECKPOINT_STRIDE, Class, HighlightStats, Highlighter, Pass, RETAINED_HUNKS, Span, WARM_BYTES,
-    WARM_FILES, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport,
+    WARM_FILES, WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, WarmReport, Warmed,
 };
 pub use history::{
     Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
@@ -66,4 +66,7 @@ pub use history::{
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
-pub use worktree::{ChangeOptions, Changes, Worktree};
+pub use worktree::{
+    ChangeOptions, Changes, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed, Worktree,
+    indexed_extensions,
+};

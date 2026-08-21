@@ -1139,6 +1139,7 @@ fn drive(
                 .take(vigia_core::WARM_FILES)
                 .map(|change| change.path.clone())
                 .collect(),
+            None,
         )
         .join()
         .expect("the warmer thread");

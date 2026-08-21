@@ -287,7 +287,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
     settle(&mut frame);
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let screen = layout(&app, 4);
     let theme = Theme::default();
@@ -356,7 +356,7 @@ fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
     let mut frame = worktree.frame();
     settle(&mut frame);
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut history = History::new();
     let screen = layout(&app, FILES);
     let theme = Theme::default();
@@ -540,7 +540,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut history = History::new();
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
@@ -717,7 +717,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     );
 
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut history = History::new();
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
@@ -865,7 +865,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     );
 
     let mut app = App::past_first_paint();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut history = History::new();
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
@@ -1060,7 +1060,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut history = History::new();
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
@@ -1581,7 +1581,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
     assert_eq!(frame.files().len(), files, "fixture is not {files} files");
 
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let height = body(&app, files);
     let screen = layout(&app, files);

@@ -109,7 +109,7 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let target = path_at(&frame, TARGET);
@@ -156,7 +156,7 @@ fn a_scripted_edit_sequence_draws_the_file_that_changed_last() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     // The script. Each step is an edit and the tick it produces, in the order
@@ -209,7 +209,7 @@ fn scrolling_disengages_follow_and_the_next_change_does_not_move_the_view() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let target = path_at(&frame, TARGET);
@@ -248,7 +248,7 @@ fn f_re_engages_follow_and_jumps_to_the_newest_change() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     app.apply(Action::Scroll(1), &mut frame, body())
@@ -297,7 +297,7 @@ fn a_resize_does_not_disengage_follow() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     app.apply(Action::Redraw, &mut frame, body())
@@ -443,7 +443,7 @@ fn a_position_survives_the_file_it_points_at_being_committed() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut app = App::new();
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let last = path_at(&frame, FILES - 1);

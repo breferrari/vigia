@@ -117,7 +117,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let worktree = Worktree::discover(root).expect("discover");
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let mut app = App::new();
     let history = History::new();
 
@@ -135,10 +135,21 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let parsed_first = highlight_delta(before, highlighter.stats()).lines;
     let plain = stripped(&view.rows);
 
-    // The frame after it, timed separately. This is where the compile lands once
-    // the first frame stops paying for it, and it is reported rather than gated:
-    // `SPEC.md` §7 puts a first parse on the cold path that I9 excludes by
-    // definition. Reporting it is what stops it going unmeasured again.
+    // The frame after it, timed separately, and **it is an eager highlighter's
+    // second frame rather than the product's**. `Highlighter::eager` parses
+    // whatever it resolves, so this is where the compile lands for a caller with
+    // nowhere to send a demand, which is what this gate wants: it holds
+    // `parsed_second > 0` below, and that non-vacuity check is the whole reason
+    // the first frame's zero means anything.
+    //
+    // The shipped shell builds `Highlighter::new`, which defers instead, so the
+    // number reported here is **not** what a reader's second frame costs since
+    // [#129](https://github.com/breferrari/vigia/issues/129).
+    // `the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached`
+    // is the gate over that, and it is the one to read for the product. This
+    // stays reported rather than gated for the reason it always was: `SPEC.md`
+    // §7 puts a first parse on the cold path I9 excludes by definition, and
+    // reporting it is what stops it going unmeasured again.
     let before = highlighter.stats();
     let began = Instant::now();
     let view = app
@@ -299,7 +310,7 @@ fn the_first_frame_is_plain_and_owes_exactly_one_repaint() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
     let body = Body::diff_only(8);
 
@@ -357,7 +368,7 @@ fn a_shell_past_its_first_paint_owes_nothing_and_colours_at_once() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let mut highlighter = Highlighter::new();
+    let mut highlighter = Highlighter::eager();
     let history = History::new();
 
     let mut app = App::past_first_paint();
@@ -371,4 +382,96 @@ fn a_shell_past_its_first_paint_owes_nothing_and_colours_at_once() {
          to measure a coloured screen is measuring the opposite"
     );
     assert!(!app.owes_repaint());
+}
+
+/// **The opening the shipped shell actually has**, which the gate above
+/// deliberately does not measure.
+///
+/// I7 has two halves since [#129](https://github.com/breferrari/vigia/issues/129).
+/// The first is that the frame a reader waits for at startup draws without
+/// colour, and `the_shells_first_paint_holds_the_startup_budget` covers it. The
+/// second is that **no** frame parses under a grammar nothing has compiled, and
+/// until this gate existed the shell had no test for it: `warm.rs` covers the
+/// core, and every gate in this file builds `Highlighter::eager`, which is
+/// precisely the highlighter that does not defer.
+///
+/// So the opening two frames both draw plain, both parse nothing, and the
+/// second one costs a frame rather than a compile. The reader gets colour when
+/// the warm they asked for lands, which the third act here stands in for.
+///
+/// **Three assertions and each rules out a different way of passing wrongly.**
+/// A shell that never highlighted at all would satisfy the first two and fail
+/// the third. A shell that drew plain without asking would satisfy the first
+/// two and fail the demand check, and would leave a reader on a permanently
+/// uncoloured screen, which is the I5 failure `App::paint` records being caught
+/// by mutation once already.
+#[test]
+fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
+    let scratch = Scratch::large_diff("first-paint-deferred", 4, 40);
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    // The shipped constructor, not the affordance every other gate here uses.
+    let mut highlighter = Highlighter::new();
+    let mut app = App::new();
+    let history = History::new();
+    let theme = Theme::default();
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let body = body_layout(area(), &chrome, frame.files().len());
+    let mut buf = Buffer::empty(area());
+
+    let mut draw = |app: &mut App, highlighter: &mut Highlighter| {
+        let before = highlighter.stats();
+        let view = app
+            .view(&mut frame, highlighter, &history, body)
+            .expect("view");
+        render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
+        highlight_delta(before, highlighter.stats()).lines
+    };
+
+    let first = draw(&mut app, &mut highlighter);
+    let second = draw(&mut app, &mut highlighter);
+
+    // **Asserted apart, because only one of them is about this change.** The
+    // first frame parses nothing whatever the highlighter is: `App`'s `Paint`
+    // ladder leaves `Viewport::highlight` false until a frame is on screen,
+    // which is I7's original half and which `Highlighter::eager` satisfies too.
+    // Reported here so the second assertion has a stated baseline rather than
+    // looking like the same claim twice.
+    assert_eq!(
+        first, 0,
+        "the first frame parsed {first} lines, so I7's opening rule is broken \
+         before this gate's own subject is even reached"
+    );
+    // **The one the deferral owns.** With `Highlighter::eager` this is where
+    // the compile lands and the number is in the hundreds
+    // (`cold_start` above reports it); with the shipped constructor it is zero,
+    // because the grammar is uncompiled and the frame declines to be the one
+    // that compiles it.
+    assert_eq!(
+        second, 0,
+        "the second frame parsed {second} lines under a grammar nothing has \
+         compiled, so the reader waits on the 74-362ms it costs on a frame they \
+         did not ask for"
+    );
+    assert!(
+        !highlighter.wanted().is_empty(),
+        "neither opening frame asked for a warm, so the diff on screen would \
+         stay plain until the agent in the other pane happened to write again, \
+         which on a tree nobody is touching is never"
+    );
+
+    // The warm the shell would spawn, served the way the shell serves it.
+    let wanted = highlighter.wanted().to_vec();
+    highlighter
+        .warm_ahead(scratch.root().to_path_buf(), wanted, None)
+        .join()
+        .expect("the warmer thread");
+
+    assert!(
+        draw(&mut app, &mut highlighter) > 0,
+        "the frame after the warm still parsed nothing, so the deferral is a \
+         screen that never gains its colour rather than one that gains it late"
+    );
 }
