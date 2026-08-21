@@ -449,7 +449,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | Under a level, the braille rung draws a coarser graph than the block rung | [#244](https://github.com/breferrari/vigia/issues/244) |
 | ⬜ | decision: the graph does not age, and I1 forbids the clock that would age it | [#243](https://github.com/breferrari/vigia/issues/243) |
 | ⬜ | One loud burst sets the band's yardstick, so a sparse window draws as spikes on a floor | [#256](https://github.com/breferrari/vigia/issues/256) |
-| ⬜ | Three paint marks name a region by its first row, which a rail makes ambiguous | [#254](https://github.com/breferrari/vigia/issues/254) |
+| ✅ | Three paint marks name a region by its first row, which a rail makes ambiguous | [#254](https://github.com/breferrari/vigia/issues/254) |
 | ⬜ | Side-by-side regions at real width: the list becomes a left rail | [#252](https://github.com/breferrari/vigia/issues/252) |
 | ✅ | The sigil sits flush against the line, where the picture puts a column between them | [#164](https://github.com/breferrari/vigia/issues/164) |
 | ✅ | Nothing separates a file's last line from the next file's heading | [#165](https://github.com/breferrari/vigia/issues/165) |
