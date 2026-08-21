@@ -188,26 +188,35 @@ enum Wake {
 }
 
 /// Whether a demand is worth handing to a warmer, given what the last one was
-/// handed.
+/// handed and whether the tree has changed since.
 ///
 /// **The rule lives here rather than inside `Shell::request_warm` for the reason
 /// `Held::ends` is a free function: that loop cannot be driven by a test, and a
 /// rule written inline is a rule with no gate.**
 ///
-/// Two answers, and the second is the one that exists for a defect. An empty
-/// demand is nothing to do. A demand **identical** to the one the last completed
-/// warm was given is nothing to do either, because that warm has already had its
-/// turn at exactly these paths and finished: asking again spawns a thread that
-/// will do the same nothing and send a wake for it, on a tree nobody is
-/// touching, which is I1's *0 wakeups while idle* breached.
+/// Three answers. An empty demand is nothing to do. A demand **identical** to
+/// the one the last warm was handed is nothing to do either, because that warm
+/// has already had its turn at exactly these paths and finished: asking again
+/// spawns a thread that will do the same nothing and send a wake for it, which
+/// on a tree nobody is touching is I1's *0 wakeups while idle* breached. And
+/// `written` overrides both, because a warm that could not be served a moment
+/// ago may be servable now.
 ///
 /// **It cannot stall a demand that is making progress**, and that is why the
 /// comparison is on the whole list rather than on a flag. A warm that compiles
 /// two of three grammars leaves a *shorter* demand, which is a different list,
 /// which is offered immediately. Only a demand that moved not at all is held
-/// back, and only until the next tick clears it.
-pub fn worth_warming(wanted: &[String], served: &[String]) -> bool {
-    !wanted.is_empty() && wanted != served
+/// back.
+///
+/// **`written` is a flag rather than a clearing of `served`, and that is a round
+/// two correction.** Clearing on the tick itself wiped the record of a warm that
+/// was still in flight, so when that warm finished there was nothing left to
+/// compare its result against and the same unservable demand was spawned for
+/// again. During active editing a tick lands inside a warm often, which is the
+/// case this exists for. A flag cannot lose that record: it is set by the tick,
+/// read here, and cleared by the spawn.
+pub fn worth_warming(wanted: &[String], served: &[String], written: bool) -> bool {
+    !wanted.is_empty() && (written || wanted != served)
 }
 
 /// The callback a warm ends with, wired to this shell's wake channel.
@@ -437,6 +446,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         scrolling: None,
         scrolling_until: None,
         served: Vec::new(),
+        written: false,
         warming: None,
     };
 
@@ -760,7 +770,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // `Shell::served`: without this, one unservable demand would
                     // keep its file plain for the rest of the session however
                     // many times it was rewritten.
-                    shell.served.clear();
+                    //
+                    // A flag rather than `served.clear()`, which is what this
+                    // was in round one of #129's audit: a tick lands inside a
+                    // running warm often during active editing, and clearing
+                    // there destroyed the record of what that warm had been
+                    // handed, so its result had nothing to be compared against.
+                    shell.written = true;
                     // Sampled here and nowhere else, which is the whole of I10's
                     // relationship with I1: the window is real time, and the only
                     // thing that moves it is a wake the loop was already having.
@@ -1109,10 +1125,16 @@ struct Shell {
     /// never waiting on. Without this that hunk is demanded on every frame, and
     /// every demand spawns a thread and sends a wake.
     ///
-    /// Cleared on a tick, because a tick is the world changing and a warm that
-    /// could not be served a second ago may be servable now. See
+    /// Overridden by [`Self::written`] rather than cleared, because a tick can
+    /// land while the warm this describes is still running. See
     /// [`worth_warming`], which is where the rule lives so that it can be gated.
     served: Vec<String>,
+    /// Whether the tree has changed since the last warm was spawned.
+    ///
+    /// A tick is the world changing, so a demand that could not be served a
+    /// moment ago is worth offering once more. Set by the tick and spent by the
+    /// spawn, so one tick buys exactly one re-offer.
+    written: bool,
     /// The warm this shell last asked for, if any.
     ///
     /// **Held to be asked whether it has finished, never to be joined.** See
@@ -1294,14 +1316,18 @@ impl Shell {
         {
             return;
         }
-        if !worth_warming(self.highlighter.wanted(), &self.served) {
+        if !worth_warming(self.highlighter.wanted(), &self.served, self.written) {
             self.warming = None;
             if self.highlighter.wanted().is_empty() {
                 self.served.clear();
+                self.written = false;
             }
             return;
         }
         self.served = self.highlighter.wanted().to_vec();
+        // Spent here, so one tick buys one re-offer of a demand that has not
+        // moved. Left set, every frame after the tick would spawn again.
+        self.written = false;
         self.warming = Some(self.highlighter.warm_ahead(
             worktree.workdir().to_path_buf(),
             self.served.clone(),

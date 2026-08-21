@@ -1031,7 +1031,18 @@ impl Highlighter {
             // amplification the cap exists to prevent. It is sound for any
             // path whose grammar the first line cannot change; the ones it
             // can are named by [`CONTENT_SENSITIVE`] and pay the read to
-            // find out, and so does one the extension cannot answer for at all.
+            // find out.
+            //
+            // **The three-reads claim is about a set whose paths name their own
+            // grammar, and one whose paths do not is the exception rather than a
+            // hole in it.** A changed set of `LICENSE`, `AUTHORS` and `COPYING`
+            // has nothing for this cap to consult, so each pays a read and finds
+            // nothing, up to [`WARM_FILES`] of them. That is the price of
+            // resolving a shebang script at all, it is bounded, and it is on a
+            // thread with nothing waiting on it: the only caller that hands over
+            // an unfiltered changed set is the shell's opening warm, since every
+            // later one comes from [`Highlighter::wanted`], whose paths the
+            // frame has already resolved a grammar for.
             //
             // **The cap is charged after the read, not here**, and the two
             // are different questions. This one is *is there anything to

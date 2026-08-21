@@ -575,6 +575,16 @@ impl Iterator for Changes {
 /// cannot turn one background scan into an unbounded allocation.
 pub const INDEXED_EXTENSIONS: usize = 1024;
 
+/// Bytes of a path [`indexed_extensions`] will retain, at most.
+///
+/// The third side of the same bound, and it was missing: capping how many
+/// extensions are tracked and how long each may be still leaves
+/// [`INDEXED_EXTENSIONS`] times `per_extension` **path** strings of any length
+/// at all, which against the hostile index the caps exist for is the two-thirds
+/// defence that reads as a whole one. Four kilobytes is past what any tier-1
+/// platform will open, so nothing real is refused by it.
+pub const INDEXED_PATH: usize = 4096;
+
 /// Bytes of an extension [`indexed_extensions`] will consider, at most.
 ///
 /// The longest any grammar in the dump registers is `sublime-syntax` at
@@ -677,8 +687,12 @@ pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
         let slot = counts
             .entry(extension)
             .or_insert_with(|| (0, Vec::with_capacity(per_extension)));
+        // Counted whatever its length, because the count is what the merge
+        // ranks on and a path too long to open is still a file of that language.
+        // Only the retained sample is bounded, and a path this long cannot be
+        // warmed from anyway.
         slot.0 += 1;
-        if slot.1.len() < per_extension {
+        if slot.1.len() < per_extension && path.len() <= INDEXED_PATH {
             slot.1.push(path.to_owned());
         }
     }

@@ -27,17 +27,18 @@ use vigia::worth_warming;
 /// measured.
 #[test]
 fn an_empty_demand_is_not_worth_a_thread() {
-    assert!(!worth_warming(&[], &[]));
-    assert!(!worth_warming(&[], &["src/a.rs".to_owned()]));
+    assert!(!worth_warming(&[], &[], false));
+    assert!(!worth_warming(&[], &["src/a.rs".to_owned()], false));
 }
 
 /// A demand nobody has been handed yet is spawned for.
 #[test]
 fn a_fresh_demand_is_worth_a_thread() {
-    assert!(worth_warming(&["src/a.rs".to_owned()], &[]));
+    assert!(worth_warming(&["src/a.rs".to_owned()], &[], false));
     assert!(worth_warming(
         &["src/a.rs".to_owned()],
-        &["src/b.rs".to_owned()]
+        &["src/b.rs".to_owned()],
+        false
     ));
 }
 
@@ -51,9 +52,9 @@ fn a_fresh_demand_is_worth_a_thread() {
 #[test]
 fn a_demand_that_did_not_move_is_not_offered_twice() {
     let demand = vec!["ui/strings.ts".to_owned()];
-    assert!(worth_warming(&demand, &[]));
+    assert!(worth_warming(&demand, &[], false));
     assert!(
-        !worth_warming(&demand, &demand),
+        !worth_warming(&demand, &demand, false),
         "the same demand was offered to a second warm, so a file the warmer \
          cannot serve costs a thread and a wake on every frame it is on screen"
     );
@@ -74,7 +75,7 @@ fn a_demand_that_shrank_is_offered_again_immediately() {
     let after = vec!["ui/c.ts".to_owned()];
 
     assert!(
-        worth_warming(&after, &before),
+        worth_warming(&after, &before, false),
         "a demand that lost two of its three grammars was treated as the same \
          demand, so a warm that made partial progress stops the rest arriving"
     );
@@ -92,5 +93,39 @@ fn a_reordered_demand_is_a_different_demand() {
     let before = vec!["src/a.rs".to_owned(), "docs/b.md".to_owned()];
     let after = vec!["docs/b.md".to_owned(), "src/a.rs".to_owned()];
 
-    assert!(worth_warming(&after, &before));
+    assert!(worth_warming(&after, &before, false));
+}
+
+/// **A tick overrides the memo, and exactly once.**
+///
+/// A tick is the world changing, so a demand that could not be served a moment
+/// ago is worth offering again: a file that had vanished may be back, and the
+/// `SPEC.md` §6 Qt case that motivates the memo is precisely a file the warmer
+/// could not open. Without this, one unservable demand keeps its hunk plain for
+/// the rest of the session however many times it is rewritten.
+#[test]
+fn a_write_reopens_a_demand_the_memo_is_holding_back() {
+    let demand = vec!["ui/strings.ts".to_owned()];
+
+    assert!(
+        !worth_warming(&demand, &demand, false),
+        "the memo is not holding this back, so the case below proves nothing"
+    );
+    assert!(
+        worth_warming(&demand, &demand, true),
+        "a write landed and the demand was still held back, so a file the \
+         warmer could not open once stays plain for the session"
+    );
+}
+
+/// And a write does not make an **empty** demand worth a thread.
+///
+/// The one place the override must not reach: with nothing on screen waiting
+/// for colour there is nothing to warm, and a tick is the most common wake this
+/// program has. Spawning a thread per tick on a settled screen is the busy loop
+/// the whole memo exists to prevent, arriving from the other side.
+#[test]
+fn a_write_does_not_conjure_a_demand_from_nothing() {
+    assert!(!worth_warming(&[], &[], true));
+    assert!(!worth_warming(&[], &["src/a.rs".to_owned()], true));
 }
