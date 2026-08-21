@@ -1601,7 +1601,7 @@ fn leading_paths(syntaxes: &SyntaxSet, root: &Path) -> Vec<String> {
             None => merged.push((syntax.scope, indexed.files, indexed.paths)),
         }
     }
-    merged.sort_by(|left, right| right.1.cmp(&left.1));
+    merged.sort_by_key(|left| std::cmp::Reverse(left.1));
     merged
         .into_iter()
         .take(WARM_LEADING)
