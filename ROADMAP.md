@@ -443,7 +443,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The list keeps six rows on a fifty-row pane, so the map is void where it could be | [#160](https://github.com/breferrari/vigia/issues/160) |
 | ✅ | The glance elements are postage stamps at width: bucket counts as a width rung | [#161](https://github.com/breferrari/vigia/issues/161) |
 | ✅ | The sparkline's bucket ceiling was the band's period, and that period is gone | [#234](https://github.com/breferrari/vigia/issues/234) |
-| ⬜ | The region model assumes a vertical stack, so a rail cannot be expressed in it | [#251](https://github.com/breferrari/vigia/issues/251) |
+| ✅ | The region model assumes a vertical stack, so a rail cannot be expressed in it | [#251](https://github.com/breferrari/vigia/issues/251) |
 | ⬜ | Three paint marks name a region by its first row, which a rail makes ambiguous | [#254](https://github.com/breferrari/vigia/issues/254) |
 | ⬜ | Side-by-side regions at real width: the list becomes a left rail | [#252](https://github.com/breferrari/vigia/issues/252) |
 | ⬜ | An agent's write is how the grammar compile arrives, and the warmer only ran at launch | [#129](https://github.com/breferrari/vigia/issues/129) |
