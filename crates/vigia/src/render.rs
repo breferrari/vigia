@@ -1789,16 +1789,32 @@ impl Bar {
         Region {
             top: at.y,
             rows: at.height,
+            left: at.x,
+            width: at.width,
             track: self.track(at.y, at.height),
             // The rect's own right edge, which is where `Painter::scrollbar`
             // draws: it takes the region **before** `with_bar` narrows it and
             // draws down the right of what it was given. `None` where no bar is
             // drawn, so a pointer is never told about a column nothing occupies.
-            bar: self
-                .drawn()
-                .then(|| at.x.saturating_add(at.width).saturating_sub(1)),
+            bar: self.drawn().then(|| bar_column(at)),
         }
     }
+}
+
+/// The column a region's scrollbar is drawn in.
+///
+/// **One formula, read by the painter and by the pointer**, which is the same
+/// split [`Body::areas`] closes for rows one type up. `Painter::scrollbar` draws
+/// down the right of the region it is handed and [`Bar::region`] tells a pointer
+/// where that is; written twice they agree by both being correct, and a future
+/// edit to one desyncs the pointer from the screen on the bar's own column.
+///
+/// Saturating, so a zero-width region asks for a column instead of underflowing.
+/// No such region reaches this today, because `regions` returns early on a pane
+/// with no width and `affords_bar` refuses one too narrow, and that is a
+/// property of two callers rather than of the arithmetic.
+const fn bar_column(rect: Rect) -> u16 {
+    rect.x.saturating_add(rect.width).saturating_sub(1)
 }
 
 /// Decide a region's bar from what it holds and what the pane can afford.
@@ -4822,7 +4838,9 @@ impl Painter<'_> {
         // this cannot divide by zero.
         let travel = of - span;
         let start = (at.min(travel) * (rows - thumb)) / travel;
-        let x = area.x + area.width - 1;
+        // Through [`bar_column`], so the column a pointer is told about and the
+        // column this paints in are one formula rather than two that agree.
+        let x = bar_column(area);
 
         // **Lit while the reader is dragging this bar**, which is the same
         // reading the step buttons already carry one block down: bright means

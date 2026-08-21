@@ -639,10 +639,12 @@ fn without_bars(regions: Regions) -> Regions {
 
 fn two_regions() -> Regions {
     Regions {
-        list: Region::bare(1, 3, Some(79)),
+        list: Region::bare(1, 3, 0, 80, Some(79)),
         diff: Region {
             top: 5,
             rows: 15,
+            left: 0,
+            width: 80,
             track: (6, 13),
             bar: Some(79),
         },
@@ -696,6 +698,67 @@ fn the_wheel_scrolls_whichever_region_it_is_over() {
     );
 }
 
+/// A gesture in one region's columns is not a gesture in the other's.
+///
+/// **The bar gate's sibling, and the larger half of the same assumption**
+/// ([#251](https://github.com/breferrari/vigia/issues/251)). Region *membership*
+/// was a row test: `over_list` asked `contains(row)`, and the wheel router and
+/// the click arm asked it through that. Sound only while the list sits above the
+/// diff, which is the vertical stack this model stops assuming.
+///
+/// Written against two regions that **share every row and differ in columns**,
+/// which the shipped layout does not draw today and
+/// [#252](https://github.com/breferrari/vigia/issues/252) will. Under the old
+/// model every assertion below would answer for the list, because the list's rows
+/// are the diff's rows and the row was all anything asked.
+#[test]
+fn a_gesture_in_one_regions_columns_is_not_the_others() {
+    let rail = Regions {
+        list: Region::bare(1, 18, 0, 30, Some(29)),
+        diff: Region::bare(1, 18, 30, 70, Some(99)),
+        sheet: None,
+    };
+    // A row both regions hold, and a column each of them holds alone.
+    let row = 7;
+    let (in_rail, in_diff) = (4, 60);
+
+    assert_eq!(
+        action_for(&at(MouseEventKind::ScrollDown, in_rail, row), rail),
+        Some(Action::ScrollList(1)),
+        "a wheel over the rail did not scroll the map"
+    );
+    assert_eq!(
+        action_for(&at(MouseEventKind::ScrollDown, in_diff, row), rail),
+        Some(Action::Scroll(WHEEL_ROWS)),
+        "a wheel over the diff scrolled the map, because the row is the rail's too"
+    );
+
+    let press = MouseEventKind::Down(MouseButton::Left);
+    assert_eq!(
+        action_for(&at(press, in_rail, row), rail),
+        Some(Action::ListRow(row - rail.list.top)),
+        "a click in the rail did not send the diff to that file"
+    );
+    assert_eq!(
+        action_for(&at(press, in_diff, row), rail),
+        None,
+        "a click in the diff acted, and B4 rules the diff's own rows inert"
+    );
+
+    // And the hover mark follows the same boundary, or the pointer would light a
+    // file in a region it is not over.
+    assert_eq!(
+        rail.hover_at(in_rail, row),
+        Some(Hovered::Row(row)),
+        "the pointer in the rail did not mark the row it is on"
+    );
+    assert_eq!(
+        rail.hover_at(in_diff, row),
+        None,
+        "the pointer in the diff marked a listed file"
+    );
+}
+
 /// A press on one region's bar column is not a press on the other's.
 ///
 /// **The distinction the pane-wide field could not express.** With one column for
@@ -711,8 +774,8 @@ fn the_wheel_scrolls_whichever_region_it_is_over() {
 #[test]
 fn a_press_on_one_regions_bar_is_not_the_others() {
     let side_by_side = Regions {
-        list: Region::bare(1, 18, Some(29)),
-        diff: Region::bare(1, 18, Some(99)),
+        list: Region::bare(1, 18, 0, 30, Some(29)),
+        diff: Region::bare(1, 18, 30, 70, Some(99)),
         sheet: None,
     };
     // Same row in both, which is the whole case: under the old model the row was
@@ -733,6 +796,32 @@ fn a_press_on_one_regions_bar_is_not_the_others() {
         side_by_side.grab_at(64, row),
         None,
         "a press between the two bars took hold of one of them"
+    );
+
+    // **And the seek that follows resolves to the same bar**, which is a separate
+    // claim from which bar was grabbed and was not covered until a mutation said
+    // so: dropping the column check on the list's seek arm passed the whole suite,
+    // because on the stacked layout the two regions never share a row and on the
+    // rail nothing was asking.
+    //
+    // **The variant rather than the position**, because which region a seek
+    // belongs to is this gate's claim and where along the track it lands is
+    // `dragging_a_bar_reports_where_along_its_own_track`'s. Asserting the scaled
+    // figure here would restate that gate and couple this one to `TRACK_SCALE`.
+    let drag = MouseEventKind::Drag(MouseButton::Left);
+    assert!(
+        matches!(
+            action_for(&at(drag, 29, row), side_by_side),
+            Some(Action::ListTo(_))
+        ),
+        "a drag on the rail's bar did not seek the map"
+    );
+    assert!(
+        matches!(
+            action_for(&at(drag, 99, row), side_by_side),
+            Some(Action::DiffTo(_))
+        ),
+        "a drag on the diff's bar seeked the map, because the row is the rail's too"
     );
 }
 
@@ -860,12 +949,16 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
         list: Region {
             top: 1,
             rows: 6,
+            left: 0,
+            width: 80,
             track: (2, 4),
             bar: Some(79),
         },
         diff: Region {
             top: 8,
             rows: 12,
+            left: 0,
+            width: 80,
             track: (9, 10),
             bar: Some(79),
         },
@@ -1190,12 +1283,16 @@ fn a_step_button_inherits_the_follow_rule_of_the_region_it_is_on() {
         list: Region {
             top: 1,
             rows: 6,
+            left: 0,
+            width: 80,
             track: (2, 4),
             bar: Some(79),
         },
         diff: Region {
             top: 8,
             rows: 12,
+            left: 0,
+            width: 80,
             track: (9, 10),
             bar: Some(79),
         },
@@ -1332,7 +1429,7 @@ fn a_repaint_that_moves_the_bars_retires_the_hover_mark() {
     // cell against the new layout reduces to "is this still a button" and is
     // blind to "is this now a *different* button", which is the whole case.
     let grown = Regions {
-        list: Region::bare(1, 5, Some(79)),
+        list: Region::bare(1, 5, 0, 80, Some(79)),
         ..before
     };
     let moved_bar = bars_at(before, 60);
@@ -1703,8 +1800,8 @@ fn a_region_with_no_rows_lights_nothing() {
     // the diff starts where the list would have. So an unguarded mark would light
     // the diff's arrows for a movement of a map nobody can see.
     let regions = Regions {
-        list: Region::bare(1, 0, Some(79)),
-        diff: Region::bare(1, 20, Some(79)),
+        list: Region::bare(1, 0, 0, 80, Some(79)),
+        diff: Region::bare(1, 20, 0, 80, Some(79)),
         sheet: None,
     };
     assert_eq!(

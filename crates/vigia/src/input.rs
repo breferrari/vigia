@@ -53,6 +53,23 @@ pub struct Region {
     pub top: u16,
     /// How many rows it has.
     pub rows: u16,
+    /// First column of the region, absolute within the pane.
+    ///
+    /// **A region has columns since
+    /// [#251](https://github.com/breferrari/vigia/issues/251)**, and until then
+    /// membership was a row test: `over_list` asked `contains(row)` and the wheel
+    /// router and the click arm asked it too. That is sound only while the list
+    /// sits *above* the diff, which is the vertical stack this type exists to
+    /// stop assuming. Beside a rail
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)) both regions hold
+    /// every row of the body and only the column says which one a pointer is in.
+    ///
+    /// Bare `u16`s rather than a `Rect`, matching [`Sheet`] one type down and for
+    /// its stated reason: everything in this module is absolute within the pane,
+    /// and the module deliberately carries no layout types.
+    pub left: u16,
+    /// How many columns it has.
+    pub width: u16,
     /// First row of its bar's **track**, and how many rows that is.
     ///
     /// **Passed rather than derived, which is this module's whole rule.** A
@@ -95,10 +112,12 @@ impl Region {
     /// has no bar at all. A fixture that took the first to mean the second would
     /// describe a region a pointer can never grab, which is a screen the renderer
     /// does not draw.
-    pub fn bare(top: u16, rows: u16, bar: Option<u16>) -> Self {
+    pub fn bare(top: u16, rows: u16, left: u16, width: u16, bar: Option<u16>) -> Self {
         Self {
             top,
             rows,
+            left,
+            width,
             track: (top, rows),
             bar,
         }
@@ -112,6 +131,24 @@ impl Region {
     /// wanted three edits with gates behind only two of them.
     fn contains(self, row: u16) -> bool {
         Self::within(row, (self.top, self.rows))
+    }
+
+    /// Whether `column`, `row` falls inside this region.
+    ///
+    /// **What membership means since
+    /// [#251](https://github.com/breferrari/vigia/issues/251)**, where every
+    /// caller asked [`Region::contains`] and bounded nothing horizontally.
+    /// Spelled the way [`Sheet::covers`] already spells it, because a region and
+    /// the sheet over it are the same kind of question asked of the same pane.
+    ///
+    /// [`Region::contains`] stays for the callers that genuinely mean a row: a
+    /// bar's track runs down one column and `along` maps a row on it to an
+    /// offset, and by then the column has already been matched.
+    pub fn covers(self, column: u16, row: u16) -> bool {
+        self.contains(row)
+            && self.width > 0
+            && column >= self.left
+            && column < self.left.saturating_add(self.width)
     }
 
     /// The same test against a bare `(top, rows)` span, for the track.
@@ -253,36 +290,15 @@ impl Sheet {
 }
 
 impl Regions {
-    /// Whether `row` is inside the pinned list.
-    fn over_list(self, row: u16) -> bool {
-        self.list.contains(row)
-    }
-
-    /// The step a press on `row` asks for, or `None` where it is not on a button.
+    /// Whether `column`, `row` is inside the pinned list.
     ///
-    /// **The region is what decides which action**, and the two are not
-    /// interchangeable: moving the map expresses no intent about the diff, so the
-    /// list's buttons step the window and the diff's step the viewport, exactly
-    /// as the drag on the same column already does. `SPEC.md` §11.1.
-    ///
-    /// **One step per press, and holding it repeats through a clock the loop
-    /// owns rather than through anything reported here.** No mouse protocol
-    /// reports a button that is *still* down: `crossterm` has `Down`, `Up`,
-    /// `Drag` and `Moved`, and a drag needs motion, so this function sees one
-    /// press and nothing further. That is why the repeat is [`Held`]'s and not
-    /// this module's, which keeps the map a pure function of an event and a
-    /// layout. `RULINGS.md`'s second I1 section carries the measurement.
-    ///
-    /// This doc said *"there is no other option"* and that repeat *"would have
-    /// to be driven by a clock I1 forbids* until 2026-08-16. Both halves were
-    /// wrong by then: `SPEC.md` §11.1 reversed that on 2026-08-15 and I1 now
-    /// states three conditions a gesture-bounded clock may meet. Corrected while
-    /// reversing §11.2 B10, which had gone the same way for the same reason.
-    fn step(self, row: u16) -> Option<Action> {
-        if let Some(rows) = self.list.button(row) {
-            return Some(Action::ScrollList(rows));
-        }
-        self.diff.button(row).map(Action::Scroll)
+    /// **A cell rather than a row since
+    /// [#251](https://github.com/breferrari/vigia/issues/251)**, for
+    /// [`Region::covers`]'s reason: a row alone answers this only while the list
+    /// sits above the diff, and every caller of it here is a gesture that has a
+    /// column too.
+    fn over_list(self, column: u16, row: u16) -> bool {
+        self.list.covers(column, row)
     }
 
     /// The step a pointer at `column`, `row` is over, whatever it is doing there.
@@ -375,20 +391,22 @@ impl Regions {
         // column never falls through to the list below. That is the whole of the
         // precedence above, and splitting it into two branches would let a cell
         // that is one region's bar but nobody's track answer `Row`.
-        if self.list.bar == Some(column) || self.diff.bar == Some(column) {
+        let (on_list_bar, on_diff_bar) =
+            (self.list.bar == Some(column), self.diff.bar == Some(column));
+        if on_list_bar || on_diff_bar {
             if self.step_at(column, row).is_some() {
                 return Some(Hovered::Button(column, row));
             }
-            if self.list.bar == Some(column) && self.list.along(row).is_some() {
+            if on_list_bar && self.list.along(row).is_some() {
                 return Some(Hovered::Track(self.list.top));
             }
-            return (self.diff.bar == Some(column) && self.diff.along(row).is_some())
+            return (on_diff_bar && self.diff.along(row).is_some())
                 .then_some(Hovered::Track(self.diff.top));
         }
         // A listed file, which is a surface a click acts on: it puts the diff at
         // that file. The diff's own rows are deliberately absent, because
         // nothing there is clickable and a mark would imply it is.
-        self.over_list(row).then_some(Hovered::Row(row))
+        self.over_list(column, row).then_some(Hovered::Row(row))
     }
 }
 
@@ -1283,18 +1301,31 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         // walk the view up a row per twitch, and clamping to the end would
         // teleport it there; both need to know a drag *began* on a button, which
         // is state, and this module has none by design.
+        // **Through `step_at`, which knows whose bar the column is**, since
+        // [#251](https://github.com/breferrari/vigia/issues/251). This asked
+        // `Regions::step`, which walked both regions' buttons by row alone: with
+        // the two bars sharing a column that is the same answer, and beside a rail
+        // it is a press on the diff's bar stepping the map.
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-            && let Some(step) = regions.step(mouse.row)
+            && let Some(step) = regions.step_at(mouse.column, mouse.row)
         {
             return Some(step);
         }
         // **The track, not the region**, so a stepped bar seeks from the rows its
         // thumb actually occupies. Where there are no buttons the two are the
         // same span and this is what it always was.
-        if let Some(at) = regions.list.along(mouse.row) {
+        //
+        // **Each gated on its own region's bar**, for the reason above: the row
+        // says where along a track a press landed, and only the column says which
+        // track it was.
+        if regions.list.bar == Some(mouse.column)
+            && let Some(at) = regions.list.along(mouse.row)
+        {
             return Some(Action::ListTo(at));
         }
-        if let Some(at) = regions.diff.along(mouse.row) {
+        if regions.diff.bar == Some(mouse.column)
+            && let Some(at) = regions.diff.along(mouse.row)
+        {
             return Some(Action::DiffTo(at));
         }
         return None;
@@ -1310,15 +1341,19 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
         // test above reads `mouse.column`, and the click arm below reads
         // `mouse.row` through the same `over_list`. What is true is that reading
         // the position never *remembers* it, which is what §11.2 B4 turns on.
-        MouseEventKind::ScrollDown if regions.over_list(mouse.row) => Some(Action::ScrollList(1)),
-        MouseEventKind::ScrollUp if regions.over_list(mouse.row) => Some(Action::ScrollList(-1)),
+        MouseEventKind::ScrollDown if regions.over_list(mouse.column, mouse.row) => {
+            Some(Action::ScrollList(1))
+        }
+        MouseEventKind::ScrollUp if regions.over_list(mouse.column, mouse.row) => {
+            Some(Action::ScrollList(-1))
+        }
         MouseEventKind::ScrollDown => Some(Action::Scroll(WHEEL_ROWS)),
         MouseEventKind::ScrollUp => Some(Action::Scroll(-WHEEL_ROWS)),
         // **A click on a listed file sends the diff to it.** The row is reported
         // as an offset into the window; the app owns where the window is. Only
         // the list, because the diff below is already showing what it is showing
         // and a click on it would have nothing to mean.
-        MouseEventKind::Down(MouseButton::Left) if regions.over_list(mouse.row) => {
+        MouseEventKind::Down(MouseButton::Left) if regions.over_list(mouse.column, mouse.row) => {
             Some(Action::ListRow(mouse.row - regions.list.top))
         }
         // Everything else is deliberately inert. Horizontal wheels exist and

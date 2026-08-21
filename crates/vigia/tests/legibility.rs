@@ -1665,14 +1665,34 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
             // one file over.
             let told = regions(area, &chrome, &view);
             assert_eq!(
-                (told.list.top, told.list.rows),
-                (areas.list.y, areas.list.height),
+                (
+                    told.list.top,
+                    told.list.rows,
+                    told.list.left,
+                    told.list.width
+                ),
+                (
+                    areas.list.y,
+                    areas.list.height,
+                    areas.list.x,
+                    areas.list.width
+                ),
                 "at {width}x{height} the pointer's list region is not the rect the \
                  painter draws the list into"
             );
             assert_eq!(
-                (told.diff.top, told.diff.rows),
-                (areas.diff.y, areas.diff.height),
+                (
+                    told.diff.top,
+                    told.diff.rows,
+                    told.diff.left,
+                    told.diff.width
+                ),
+                (
+                    areas.diff.y,
+                    areas.diff.height,
+                    areas.diff.x,
+                    areas.diff.width
+                ),
                 "at {width}x{height} the pointer's diff region is not the rect the \
                  painter draws the diff into"
             );
