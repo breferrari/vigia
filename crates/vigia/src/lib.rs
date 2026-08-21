@@ -446,9 +446,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // [#48](https://github.com/breferrari/vigia/issues/48) contemplates, every
     // one of them dropped unread.
     //
-    // Detached by dropping the handle, like the two threads below and for a
-    // simpler reason: it ends by itself, and nothing waits for a result that
-    // only ever makes a later frame cheaper.
+    // **The handle is kept now rather than dropped**, and it is `Shell::warming`
+    // for the reason that field exists: a warm in flight is what stops the next
+    // one being spawned. Dropped, the `request_warm` below saw no warm running
+    // and started a second thread over the same paths the moment the opening
+    // frames raised their demand. Nothing broke, because the compiled patterns
+    // land in one shared `SyntaxSet` either way, but it is two threads and two
+    // wakes for one grammar and the bound that field documents was not being
+    // held. Detached still: it is never joined, only asked whether it is done.
     //
     // **Above the draw, so it overlaps the frame that compiles.** Below it,
     // the warm starts only once paint two has finished paying the 74-362ms
@@ -461,15 +466,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // frame that finishes this warm is the frame that has colour to add, and a
     // loop blocked on `recv` has no other reason to look.
     if !frame.files().is_empty() {
-        shell.highlighter.warm_ahead(
-            worktree.workdir().to_path_buf(),
-            frame
-                .files()
-                .iter()
-                .take(vigia_core::WARM_FILES)
-                .map(|change| change.path.clone())
-                .collect(),
-            Some(warmed(&tx)),
+        shell.warming = Some(
+            shell.highlighter.warm_ahead(
+                worktree.workdir().to_path_buf(),
+                frame
+                    .files()
+                    .iter()
+                    .take(vigia_core::WARM_FILES)
+                    .map(|change| change.path.clone())
+                    .collect(),
+                Some(warmed(&tx)),
+            ),
         );
     }
 
