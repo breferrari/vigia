@@ -652,6 +652,26 @@ fn two_regions() -> Regions {
     }
 }
 
+/// Two regions **beside** each other: one first row, one row count, told apart
+/// by their columns alone.
+///
+/// The layout [#252](https://github.com/breferrari/vigia/issues/252) draws, and
+/// the shape every model in this module has to be able to express before that
+/// row can be built. The shipped ladder never produces it, which is exactly why
+/// it is worth a name: a fixture that only ever appears inline reads as a local
+/// quirk of whichever test spelled it, and this is the case three of them share.
+///
+/// The list takes the left thirty columns with its bar at 29, the diff takes the
+/// remaining seventy with its bar at 99. Both start on row 1 and hold 18 rows, so
+/// **no row distinguishes them and no assertion here may rest on one**.
+fn beside() -> Regions {
+    Regions {
+        list: Region::bare(1, 18, 0, 30, Some(29)),
+        diff: Region::bare(1, 18, 30, 70, Some(99)),
+        sheet: None,
+    }
+}
+
 fn at(kind: MouseEventKind, column: u16, row: u16) -> Event {
     Event::Mouse(MouseEvent {
         kind,
@@ -777,11 +797,7 @@ fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
 /// are the diff's rows and the row was all anything asked.
 #[test]
 fn a_gesture_in_one_regions_columns_is_not_the_others() {
-    let rail = Regions {
-        list: Region::bare(1, 18, 0, 30, Some(29)),
-        diff: Region::bare(1, 18, 30, 70, Some(99)),
-        sheet: None,
-    };
+    let rail = beside();
     // A row both regions hold, and a column each of them holds alone.
     let row = 7;
     let (in_rail, in_diff) = (4, 60);
@@ -837,11 +853,7 @@ fn a_gesture_in_one_regions_columns_is_not_the_others() {
 /// model has to be able to say it before the layout can.
 #[test]
 fn a_press_on_one_regions_bar_is_not_the_others() {
-    let side_by_side = Regions {
-        list: Region::bare(1, 18, 0, 30, Some(29)),
-        diff: Region::bare(1, 18, 30, 70, Some(99)),
-        sheet: None,
-    };
+    let side_by_side = beside();
     // Same row in both, which is the whole case: under the old model the row was
     // the only thing distinguishing them and here it distinguishes nothing.
     let row = 5;
@@ -1561,26 +1573,26 @@ fn a_hover_resolves_to_a_button_a_bar_or_a_listed_file() {
     assert_eq!(regions.hover_at(79, 5), Some(Hovered::Button(79, 5)));
     assert_eq!(regions.hover_at(79, 19), Some(Hovered::Button(79, 19)));
 
-    // A track answers as its **region's first row**, which is the key
-    // `Chrome::gripped` uses, because what a hover on this column means is
-    // *this bar* and the thumb is what answers. The track and the thumb are one
-    // target: a press anywhere on a track seeks.
+    // A track answers as **its region**, which is the key `Chrome::gripped`
+    // uses, because what a hover on this column means is *this bar* and the
+    // thumb is what answers. The track and the thumb are one target: a press
+    // anywhere on a track seeks.
     assert_eq!(
         regions.hover_at(79, 12),
-        Some(Hovered::Track(5)),
+        Some(Hovered::Track(Grabbed::Diff)),
         "the diff's"
     );
     assert_eq!(
         regions.hover_at(79, 2),
-        Some(Hovered::Track(1)),
+        Some(Hovered::Track(Grabbed::List)),
         "the list's"
     );
 
     // The list's bar has no buttons at all in this fixture, so every row of it
     // is track. A resolver that assumed both bars were stepped would answer
     // `Button` here and light a cell that is drawing a thumb.
-    assert_eq!(regions.hover_at(79, 1), Some(Hovered::Track(1)));
-    assert_eq!(regions.hover_at(79, 3), Some(Hovered::Track(1)));
+    assert_eq!(regions.hover_at(79, 1), Some(Hovered::Track(Grabbed::List)));
+    assert_eq!(regions.hover_at(79, 3), Some(Hovered::Track(Grabbed::List)));
 
     // **A listed file, off the bar's column**, which is a surface a click acts
     // on because it puts the diff at that file.
@@ -1596,7 +1608,7 @@ fn a_hover_resolves_to_a_button_a_bar_or_a_listed_file() {
     // ordering this resolver has to get right: the scrollbar is drawn inside the
     // region that owns those rows, so asking the list first would mark a file
     // the reader is pointing past.
-    assert_eq!(regions.hover_at(79, 2), Some(Hovered::Track(1)));
+    assert_eq!(regions.hover_at(79, 2), Some(Hovered::Track(Grabbed::List)));
 
     // **The diff's body answers nothing**, which §11.1 rules: it is not
     // clickable and a mark would imply it is.
@@ -1658,7 +1670,7 @@ fn a_hover_mark_is_retired_by_its_replacement_and_by_focus_lost() {
     // the same event that leaves a button arrives on a bar or on a file.
     assert_eq!(
         hover_after(&at(MouseEventKind::Moved, 79, 12), regions, button),
-        Some(Hovered::Track(5)),
+        Some(Hovered::Track(Grabbed::Diff)),
         "a pointer moving from a button onto the diff's bar lost the mark"
     );
     assert_eq!(
@@ -1825,7 +1837,7 @@ fn each_bar_answers_only_the_keys_that_move_it() {
     // The two regions move different things: `j`/`k`/`d`/`u`/`Space`/`g`/`G` and
     // the file steps move the diff's viewport, `J`/`K` move the list's window.
     let regions = two_regions();
-    let (list, diff) = (regions.list.top, regions.diff.top);
+    let (list, diff) = (Grabbed::List, Grabbed::Diff);
 
     for (action, want) in [
         (Action::Scroll(1), Some((diff, 1))),
@@ -1860,9 +1872,21 @@ fn each_bar_answers_only_the_keys_that_move_it() {
 
 #[test]
 fn a_region_with_no_rows_lights_nothing() {
-    // With no list on screen the two regions report the **same** top row, because
-    // the diff starts where the list would have. So an unguarded mark would light
-    // the diff's arrows for a movement of a map nobody can see.
+    // **A mark nobody can see still costs a wake**, which is what this guard is
+    // for now and is not what it was for.
+    //
+    // Until [#254](https://github.com/breferrari/vigia/issues/254) the mark was
+    // the region's first row and the danger was a *collision*: with no list on
+    // screen the diff starts where the list would have, both reported top 1, and
+    // an unguarded `ScrollList` lit the **diff's** arrows for a movement of a map
+    // nobody can see. The mark names its region now, so that confusion cannot be
+    // spelled at all, and deleting this guard would draw nothing wrong.
+    //
+    // It stays because the drawing is not the only consumer. `Shell` arms
+    // `scrolling_until` on every mark it is handed, so a mark naming a bar that
+    // is not drawn buys a `SCROLL_LINGER` timer, a wake, and a repaint that
+    // changes no cell. I1 is what that spends, and the `None` below is what does
+    // not spend it.
     let regions = Regions {
         list: Region::bare(1, 0, 0, 80, Some(79)),
         diff: Region::bare(1, 20, 0, 80, Some(79)),
@@ -1876,8 +1900,58 @@ fn a_region_with_no_rows_lights_nothing() {
     assert_eq!(
         scroll_mark(Action::ScrollList(1), regions),
         None,
-        "scrolling a list that is not drawn lit the diff's bar, because the two \
-         share a top row when the list has no rows"
+        "scrolling a list that is not drawn armed a linger clock and bought a \
+         wake for a mark with no bar to draw it on"
     );
-    assert_eq!(scroll_mark(Action::Scroll(1), regions), Some((1, 1)));
+    assert_eq!(
+        scroll_mark(Action::Scroll(1), regions),
+        Some((Grabbed::Diff, 1))
+    );
+}
+
+#[test]
+fn a_mark_names_its_region_when_both_share_a_first_row() {
+    // **The [`beside`] shape, now pointed at the paint marks.** Two tests above
+    // already drive it, which is worth stating because an earlier draft of this
+    // comment claimed the file drew no such screen: it draws it twice, for the
+    // *region geometry* [#251](https://github.com/breferrari/vigia/issues/251)
+    // fixed. What no test drove it for is the three marks, which is the whole of
+    // [#254](https://github.com/breferrari/vigia/issues/254) and the reason the
+    // assumption survived that pass.
+    //
+    // Every mark that named a region by its top collapses here, and on every
+    // layout that ships `list.top < diff.top`, so a top and a region are the same
+    // answer and the wrong one cannot be told from the right one.
+    let regions = beside();
+    assert_eq!(
+        (regions.list.top, regions.list.rows),
+        (regions.diff.top, regions.diff.rows),
+        "the fixture is not the case this test exists for"
+    );
+
+    // **The routing half.** `J` moves the map's window and `j` moves the diff's
+    // viewport, and under the old encoding both answered `1`.
+    assert_eq!(
+        scroll_mark(Action::ScrollList(1), regions),
+        Some((Grabbed::List, 1)),
+        "the map's own key named a region by a row both regions start on"
+    );
+    assert_eq!(
+        scroll_mark(Action::Scroll(1), regions),
+        Some((Grabbed::Diff, 1)),
+        "the diff's key named a region by a row both regions start on"
+    );
+
+    // **The hover half**, one bar column each, which is the coordinate that
+    // actually separates them on this layout.
+    assert_eq!(
+        regions.hover_at(29, 10),
+        Some(Hovered::Track(Grabbed::List)),
+        "a pointer on the rail's own bar marked the diff's"
+    );
+    assert_eq!(
+        regions.hover_at(99, 10),
+        Some(Hovered::Track(Grabbed::Diff)),
+        "a pointer on the diff's own bar marked the rail's"
+    );
 }

@@ -33,8 +33,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
-    Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region, Row,
-    Scale, Theme, View, body_layout, diff_height, regions, render,
+    Chrome, FileEntry, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region,
+    Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
 
@@ -4485,12 +4485,12 @@ fn a_dragged_bar_lights_its_thumb_and_the_other_bar_stays_put() {
     let x = width - 1;
     let laid = regions(Rect::new(0, 0, width, height), &chrome(), &view);
 
-    for (name, gripped, other) in [
-        ("the list", laid.list, laid.diff),
-        ("the diff", laid.diff, laid.list),
+    for (name, whose, gripped, other) in [
+        ("the list", Grabbed::List, laid.list, laid.diff),
+        ("the diff", Grabbed::Diff, laid.diff, laid.list),
     ] {
         let held = Chrome {
-            gripped: Some(gripped.top),
+            gripped: Some(whose),
             ..chrome()
         };
         let backend = screen(width, height, &view, &held);
@@ -4546,10 +4546,10 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
     let (diff_up, diff_down) = ends(laid.diff);
     let (list_up, list_down) = ends(laid.list);
 
-    for (name, scrolled, way, lit, dark, other) in [
+    for (name, whose, way, lit, dark, other) in [
         (
             "the diff",
-            laid.diff,
+            Grabbed::Diff,
             -1isize,
             diff_up,
             diff_down,
@@ -4557,7 +4557,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
         ),
         (
             "the diff",
-            laid.diff,
+            Grabbed::Diff,
             1,
             diff_down,
             diff_up,
@@ -4565,7 +4565,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
         ),
         (
             "the list",
-            laid.list,
+            Grabbed::List,
             -1,
             list_up,
             list_down,
@@ -4573,7 +4573,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
         ),
         (
             "the list",
-            laid.list,
+            Grabbed::List,
             1,
             list_down,
             list_up,
@@ -4581,7 +4581,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
         ),
     ] {
         let scrolling = Chrome {
-            scrolling: Some((scrolled.top, way)),
+            scrolling: Some((whose, way)),
             ..chrome()
         };
         let backend = screen(width, height, &view, &scrolling);
@@ -4609,7 +4609,7 @@ fn a_scroll_lights_one_arrow_on_one_bar() {
     // Magnitude is not direction: a half page lights what a single row lights.
     for way in [-9isize, -1, 1, 9] {
         let scrolling = Chrome {
-            scrolling: Some((laid.diff.top, way)),
+            scrolling: Some((Grabbed::Diff, way)),
             ..chrome()
         };
         let backend = screen(width, height, &view, &scrolling);
@@ -5128,7 +5128,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     );
 
     let hovering = Chrome {
-        hovered: Some(Hovered::Track(laid.diff.top)),
+        hovered: Some(Hovered::Track(Grabbed::Diff)),
         ..chrome()
     };
     assert!(
@@ -5140,7 +5140,7 @@ fn a_gesture_is_always_brighter_than_a_pointer_at_rest() {
     assert!(
         thumb_fg(
             &Chrome {
-                gripped: Some(laid.diff.top),
+                gripped: Some(Grabbed::Diff),
                 ..hovering.clone()
             },
             laid.diff

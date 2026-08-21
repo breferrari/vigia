@@ -968,7 +968,7 @@ struct Shell {
     /// nowhere else. The rule is at one address on purpose, because the same
     /// reasoning restated per field is what left `Regions::step`'s doc claiming
     /// a held button cannot repeat for a day after it could.
-    scrolling: Option<(u16, isize)>,
+    scrolling: Option<(Grabbed, isize)>,
     /// When the mark above stops being true.
     scrolling_until: Option<Instant>,
 }
@@ -979,10 +979,14 @@ impl Shell {
         self.held.map(Held::at)
     }
 
-    /// The first row of the region whose bar is being dragged, for the frame that
-    /// draws its thumb lit.
-    fn gripped(&self) -> Option<u16> {
-        self.grabbed.map(|on| on.top(self.regions))
+    /// Which region's bar is being dragged, for the frame that draws its thumb
+    /// lit.
+    ///
+    /// A plain read, since [#254](https://github.com/breferrari/vigia/issues/254):
+    /// this used to convert the [`Grabbed`] it is holding into that region's
+    /// first row, which is an identity only while the regions are stacked.
+    fn gripped(&self) -> Option<Grabbed> {
+        self.grabbed
     }
 
     /// What the pointer is over, for the frame that marks it.

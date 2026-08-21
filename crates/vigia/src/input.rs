@@ -423,10 +423,10 @@ impl Regions {
                 return Some(Hovered::Button(column, row));
             }
             if on_list_bar && self.list.along(row).is_some() {
-                return Some(Hovered::Track(self.list.top));
+                return Some(Hovered::Track(Grabbed::List));
             }
             return (on_diff_bar && self.diff.along(row).is_some())
-                .then_some(Hovered::Track(self.diff.top));
+                .then_some(Hovered::Track(Grabbed::Diff));
         }
         // A listed file, which is a surface a click acts on: it puts the diff at
         // that file. The diff's own rows are deliberately absent, because
@@ -459,15 +459,22 @@ pub enum Hovered {
     /// weight, and a click that acts immediately. Named for the shape rather than
     /// for the scrollbar since B12 gave the pane its second one.
     Button(u16, u16),
-    /// A bar, by the first row of the region it belongs to.
+    /// A bar, by the region it belongs to.
     ///
     /// **The track and the thumb are one target**, because a press anywhere on a
     /// track seeks: the surface a click acts on is the whole column, and the
-    /// thumb is what answers because it is what would move. Carried as the
-    /// region's first row rather than the pointer's, which is the key
-    /// `Chrome::gripped` already uses and what the drawer compares `area.y`
-    /// against.
-    Track(u16),
+    /// thumb is what answers because it is what would move.
+    ///
+    /// **Carried as the region rather than as the region's first row**, which is
+    /// what this was until [#254](https://github.com/breferrari/vigia/issues/254).
+    /// A row is an identity only while the two regions are stacked and their tops
+    /// differ. [#252](https://github.com/breferrari/vigia/issues/252) puts the
+    /// list beside the diff, where both start on the same row and a comparison
+    /// against one top starts matching for both bars at once. [`Grabbed`] is the
+    /// name for *which of the two bars* that the shell is already holding, so the
+    /// mark carries that and the drawer is told which bar it is drawing instead
+    /// of inferring it from the `Rect` it was handed.
+    Track(Grabbed),
     /// A listed file, by the screen row it is drawn on.
     ///
     /// A row rather than an index into the list, for the reason a button is a
@@ -563,13 +570,30 @@ pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) ->
     (before == after).then_some(was).flatten()
 }
 
-/// Which region a drag that is already under way belongs to.
+/// Which of the two scrollable regions a mark belongs to.
 ///
-/// **A gesture outlives the target it began on**, which is the whole reason this
-/// exists. `Regions` answers *what is under the pointer now*; once a button is
-/// down that question has stopped being the relevant one, and the answer that
-/// matters is *what did this drag start on*. Keeping the two apart is what lets
-/// the pointer wander off the bar's one column without the drag ending.
+/// **A gesture outlives the target it began on**, which is why this exists and
+/// is all it meant at first: a drag. [`Regions`] answers *what is under the
+/// pointer now*; once a button is down that question has stopped being the
+/// relevant one, and the answer that matters is *what did this drag start on*.
+/// Keeping the two apart is what lets the pointer wander off the bar's one
+/// column without the drag ending, and [`drag_action`] is where it is spent.
+///
+/// **It names the region for all three paint marks since
+/// [#254](https://github.com/breferrari/vigia/issues/254), and only one of the
+/// three is a drag.** [`Hovered::Track`] is a pointer resting on a bar and
+/// `Chrome::scrolling` is a key burst with nothing under a finger. Both used to
+/// carry the region's **first row** instead, which tells the two regions apart
+/// only while they are stacked: every shipped layout stacks them and
+/// [#252](https://github.com/breferrari/vigia/issues/252) is the one that does
+/// not. So this is wider than its own name now, and says *which bar* whatever
+/// asked.
+///
+/// **Renaming it was considered and rejected.** `Bar` is taken by `render::Bar`,
+/// the `None`/`Bare`/`Stepped` style enum, and a second two-variant type
+/// carrying the same fact would need a conversion at every boundary to buy
+/// nothing. A rename is a naming question and this was a defect fix, so the
+/// wider docblock carries the width instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grabbed {
     /// The pinned list's bar.
@@ -607,12 +631,6 @@ impl Grabbed {
             Self::List => regions.list,
             Self::Diff => regions.diff,
         }
-    }
-
-    /// The first row of that region, which is what the paint compares against to
-    /// draw the gripped bar lit.
-    pub fn top(self, regions: Regions) -> u16 {
-        self.region(regions).top
     }
 }
 
@@ -652,22 +670,26 @@ pub fn drag_action(event: &Event, regions: Regions, on: Grabbed) -> Option<Actio
 /// list's window. An arrow that lit from a bare direction lit the matching one on
 /// both bars at once, which is what 0.5.0 shipped.
 ///
-/// The `u16` is the region's first row, which is what a drawer compares its own
-/// `Rect` against. A region with no rows reports nothing: with no list on screen
-/// the two tops are the same number, so an unguarded answer would light the
-/// diff's arrows for a movement of a map nobody can see.
+/// The [`Grabbed`] is which bar, which is what a drawer is told rather than left
+/// to infer from the `Rect` it was handed. It was the region's first row until
+/// [#254](https://github.com/breferrari/vigia/issues/254), for the reason
+/// [`Hovered::Track`] records: a top is an identity only while the regions are
+/// stacked. A region with no rows still reports nothing, and the guard is why
+/// this reads the layout at all rather than the action alone: with no list on
+/// screen there is no bar to light, so an unguarded answer would mark a movement
+/// of a map nobody can see.
 ///
 /// A free function rather than a method on the shell, for the reason
 /// [`patience`] is one: the shell owns a terminal and three threads, and the
 /// routing is exactly the part worth driving from a test.
-pub fn scroll_mark(action: Action, regions: Regions) -> Option<(u16, isize)> {
-    let (region, way) = match action {
+pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)> {
+    let (whose, way) = match action {
         Action::Scroll(by) | Action::Page(by) | Action::HalfPage(by) | Action::File(by) => {
-            (regions.diff, by.signum())
+            (Grabbed::Diff, by.signum())
         }
-        Action::Top => (regions.diff, -1),
-        Action::Bottom => (regions.diff, 1),
-        Action::ScrollList(by) => (regions.list, by.signum()),
+        Action::Top => (Grabbed::Diff, -1),
+        Action::Bottom => (Grabbed::Diff, 1),
+        Action::ScrollList(by) => (Grabbed::List, by.signum()),
         // A jump to a listed file moves the diff to somewhere rather than by
         // something, and a drag on either bar already lights its own thumb.
         Action::ListRow(_)
@@ -679,7 +701,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(u16, isize)> {
         | Action::Redraw
         | Action::Quit => return None,
     };
-    (way != 0 && region.rows > 0).then_some((region.top, way))
+    (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
 }
 
 /// How long the loop may block before some clock here has to act.
