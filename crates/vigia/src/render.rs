@@ -6125,15 +6125,38 @@ mod tests {
 
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use ratatui::style::Color;
 
     use super::*;
+
+    /// A cell's style reduced to what the bar's rungs actually differ in.
+    ///
+    /// **Colour alone cannot tell them apart, which a mutation proved.**
+    /// [`Theme::bar_hover`] is [`Theme::bar`]'s colour plus `BOLD` on the
+    /// default palette, so a gate reading only `fg` let a drawn hover that
+    /// ignored its region pass. `tests/render.rs` spells the same reduction
+    /// under the same name, and both exist because the palette is free to move
+    /// a rung into the weight channel.
+    fn weight(style: Style) -> (Option<Color>, Modifier) {
+        (style.fg, style.add_modifier)
+    }
 
     /// Paint both regions' bars into one buffer, side by side over one row range.
     ///
     /// Returns the buffer, and the two bar columns are 29 and 79. The only thing
     /// telling the regions apart is the [`Grabbed`] each is painted with: their
     /// `y` and their height are deliberately identical.
-    fn rail(gripped: Option<Grabbed>, scrolling: Option<(Grabbed, isize)>) -> Buffer {
+    ///
+    /// All three marks are parameters and each test sets exactly one, which is
+    /// the shape [`Painter`] itself has. Taking fewer of them is how the hover
+    /// mark went untested: an earlier draft of this module took only `gripped`
+    /// and `scrolling`, and a mutation making the drawn hover ignore its region
+    /// then survived the whole suite.
+    fn rail(
+        gripped: Option<Grabbed>,
+        hovered: Option<Hovered>,
+        scrolling: Option<(Grabbed, isize)>,
+    ) -> Buffer {
         let mut buf = Buffer::empty(Rect::new(0, 0, 80, 24));
         let theme = Theme::default();
         let (list, diff) = (Rect::new(0, 1, 30, 20), Rect::new(30, 1, 50, 20));
@@ -6153,7 +6176,7 @@ mod tests {
             paint: PaintStats::default(),
             pressed: None,
             gripped,
-            hovered: None,
+            hovered,
             scrolling,
         };
         // Scrollable by a wide margin, so both bars draw a thumb well short of
@@ -6170,24 +6193,24 @@ mod tests {
         // both bars; a direction plus a row fixed it only for as long as the two
         // rows differ.
         let theme = Theme::default();
-        let buf = rail(None, Some((Grabbed::Diff, -1)));
-        let fg = |x: u16, y: u16| buf[(x, y)].style().fg;
+        let buf = rail(None, None, Some((Grabbed::Diff, -1)));
+        let at = |x: u16, y: u16| weight(buf[(x, y)].style());
 
         assert_eq!(
-            fg(79, 1),
-            theme.bar_active.fg,
+            at(79, 1),
+            weight(theme.bar_active),
             "the scrolled region's own up arrow did not light"
         );
         assert_eq!(
-            fg(29, 1),
-            theme.bar_track.fg,
+            at(29, 1),
+            weight(theme.bar_track),
             "scrolling the diff lit the *list's* up arrow, because both bars \
              start on one row"
         );
         // The direction half, so a mark that lit its whole bar would still fail.
         assert_eq!(
-            fg(79, 20),
-            theme.bar_track.fg,
+            at(79, 20),
+            weight(theme.bar_track),
             "the arrow the scroll moves away from lit"
         );
     }
@@ -6198,12 +6221,12 @@ mod tests {
         // region from the start and was correct throughout, and it was correct
         // *because* the tops differed rather than because it said which region.
         let theme = Theme::default();
-        let buf = rail(Some(Grabbed::Diff), None);
+        let buf = rail(Some(Grabbed::Diff), None, None);
         let thumbs = |x: u16| {
             (2..20)
                 .filter(|y| buf[(x, *y)].symbol() == BAR_THUMB.to_string())
-                .map(|y| buf[(x, y)].style().fg)
-                .collect::<Vec<_>>()
+                .map(|y| weight(buf[(x, y)].style()))
+                .collect::<Vec<(Option<Color>, Modifier)>>()
         };
 
         let (list, diff) = (thumbs(29), thumbs(79));
@@ -6212,13 +6235,49 @@ mod tests {
             "the fixture drew no thumb on one of the bars"
         );
         assert!(
-            diff.iter().all(|f| *f == theme.bar_active.fg),
+            diff.iter().all(|f| *f == weight(theme.bar_active)),
             "the gripped region's thumb did not light"
         );
         assert!(
-            list.iter().all(|f| *f == theme.bar.fg),
+            list.iter().all(|f| *f == weight(theme.bar)),
             "gripping the diff lit the *list's* thumb, because both bars start \
              on one row"
+        );
+    }
+
+    #[test]
+    fn only_the_hovered_regions_thumb_lights_when_both_start_on_one_row() {
+        // **Added because a mutation survived**, which is the only reason worth
+        // adding a test for. Replacing the drawn hover's `Hovered::Track(whose)`
+        // with a `matches!(.., Track(_))` that ignores which region passed the
+        // entire suite: the two gates above set `gripped` and `scrolling`, and
+        // neither ever set `hovered`, so the third mark reached the drawer with
+        // nothing checking that it told the two bars apart.
+        //
+        // On a rail that is a pointer resting on the map's bar lighting the
+        // diff's thumb, which is this issue's own defect on the third surface it
+        // was filed for.
+        let theme = Theme::default();
+        let buf = rail(None, Some(Hovered::Track(Grabbed::Diff)), None);
+        let thumbs = |x: u16| {
+            (2..20)
+                .filter(|y| buf[(x, *y)].symbol() == BAR_THUMB.to_string())
+                .map(|y| weight(buf[(x, y)].style()))
+                .collect::<Vec<(Option<Color>, Modifier)>>()
+        };
+
+        let (list, diff) = (thumbs(29), thumbs(79));
+        assert!(
+            !list.is_empty() && !diff.is_empty(),
+            "the fixture drew no thumb on one of the bars"
+        );
+        assert!(
+            diff.iter().all(|f| *f == weight(theme.bar_hover)),
+            "the hovered region's thumb did not take the hover rung"
+        );
+        assert!(
+            list.iter().all(|f| *f == weight(theme.bar)),
+            "hovering the diff lit the list's thumb, both bars starting on one row"
         );
     }
 }

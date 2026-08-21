@@ -570,13 +570,30 @@ pub fn hover_repainted(was: Option<Hovered>, before: Regions, after: Regions) ->
     (before == after).then_some(was).flatten()
 }
 
-/// Which region a drag that is already under way belongs to.
+/// Which of the two scrollable regions a mark belongs to.
 ///
-/// **A gesture outlives the target it began on**, which is the whole reason this
-/// exists. `Regions` answers *what is under the pointer now*; once a button is
-/// down that question has stopped being the relevant one, and the answer that
-/// matters is *what did this drag start on*. Keeping the two apart is what lets
-/// the pointer wander off the bar's one column without the drag ending.
+/// **A gesture outlives the target it began on**, which is why this exists and
+/// is all it meant at first: a drag. [`Regions`] answers *what is under the
+/// pointer now*; once a button is down that question has stopped being the
+/// relevant one, and the answer that matters is *what did this drag start on*.
+/// Keeping the two apart is what lets the pointer wander off the bar's one
+/// column without the drag ending, and [`drag_action`] is where it is spent.
+///
+/// **It names the region for all three paint marks since
+/// [#254](https://github.com/breferrari/vigia/issues/254), and only one of the
+/// three is a drag.** [`Hovered::Track`] is a pointer resting on a bar and
+/// `Chrome::scrolling` is a key burst with nothing under a finger. Both used to
+/// carry the region's **first row** instead, which tells the two regions apart
+/// only while they are stacked: every shipped layout stacks them and
+/// [#252](https://github.com/breferrari/vigia/issues/252) is the one that does
+/// not. So this is wider than its own name now, and says *which bar* whatever
+/// asked.
+///
+/// **Renaming it was considered and rejected.** `Bar` is taken by `render::Bar`,
+/// the `None`/`Bare`/`Stepped` style enum, and a second two-variant type
+/// carrying the same fact would need a conversion at every boundary to buy
+/// nothing. A rename is a naming question and this was a defect fix, so the
+/// wider docblock carries the width instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grabbed {
     /// The pinned list's bar.

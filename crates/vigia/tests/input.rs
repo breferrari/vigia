@@ -652,6 +652,26 @@ fn two_regions() -> Regions {
     }
 }
 
+/// Two regions **beside** each other: one first row, one row count, told apart
+/// by their columns alone.
+///
+/// The layout [#252](https://github.com/breferrari/vigia/issues/252) draws, and
+/// the shape every model in this module has to be able to express before that
+/// row can be built. The shipped ladder never produces it, which is exactly why
+/// it is worth a name: a fixture that only ever appears inline reads as a local
+/// quirk of whichever test spelled it, and this is the case three of them share.
+///
+/// The list takes the left thirty columns with its bar at 29, the diff takes the
+/// remaining seventy with its bar at 99. Both start on row 1 and hold 18 rows, so
+/// **no row distinguishes them and no assertion here may rest on one**.
+fn beside() -> Regions {
+    Regions {
+        list: Region::bare(1, 18, 0, 30, Some(29)),
+        diff: Region::bare(1, 18, 30, 70, Some(99)),
+        sheet: None,
+    }
+}
+
 fn at(kind: MouseEventKind, column: u16, row: u16) -> Event {
     Event::Mouse(MouseEvent {
         kind,
@@ -777,11 +797,7 @@ fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
 /// are the diff's rows and the row was all anything asked.
 #[test]
 fn a_gesture_in_one_regions_columns_is_not_the_others() {
-    let rail = Regions {
-        list: Region::bare(1, 18, 0, 30, Some(29)),
-        diff: Region::bare(1, 18, 30, 70, Some(99)),
-        sheet: None,
-    };
+    let rail = beside();
     // A row both regions hold, and a column each of them holds alone.
     let row = 7;
     let (in_rail, in_diff) = (4, 60);
@@ -837,11 +853,7 @@ fn a_gesture_in_one_regions_columns_is_not_the_others() {
 /// model has to be able to say it before the layout can.
 #[test]
 fn a_press_on_one_regions_bar_is_not_the_others() {
-    let side_by_side = Regions {
-        list: Region::bare(1, 18, 0, 30, Some(29)),
-        diff: Region::bare(1, 18, 30, 70, Some(99)),
-        sheet: None,
-    };
+    let side_by_side = beside();
     // Same row in both, which is the whole case: under the old model the row was
     // the only thing distinguishing them and here it distinguishes nothing.
     let row = 5;
@@ -1899,22 +1911,18 @@ fn a_region_with_no_rows_lights_nothing() {
 
 #[test]
 fn a_mark_names_its_region_when_both_share_a_first_row() {
-    // **The screen [#252](https://github.com/breferrari/vigia/issues/252) draws,
-    // which nothing in this file draws today**: the list beside the diff rather
-    // than above it, so the two regions share a first row and a row count and
-    // differ only in their columns.
+    // **The [`beside`] shape, now pointed at the paint marks.** Two tests above
+    // already drive it, which is worth stating because an earlier draft of this
+    // comment claimed the file drew no such screen: it draws it twice, for the
+    // *region geometry* [#251](https://github.com/breferrari/vigia/issues/251)
+    // fixed. What no test drove it for is the three marks, which is the whole of
+    // [#254](https://github.com/breferrari/vigia/issues/254) and the reason the
+    // assumption survived that pass.
     //
-    // Every mark that named a region by its top collapses on this fixture, which
-    // is why it is the gate on
-    // [#254](https://github.com/breferrari/vigia/issues/254) and why no existing
-    // test could have caught the assumption: on every layout that ships,
-    // `list.top < diff.top`, so a top and a region are the same answer and the
-    // wrong one is indistinguishable from the right one.
-    let regions = Regions {
-        list: Region::bare(1, 20, 0, 30, Some(29)),
-        diff: Region::bare(1, 20, 30, 50, Some(79)),
-        sheet: None,
-    };
+    // Every mark that named a region by its top collapses here, and on every
+    // layout that ships `list.top < diff.top`, so a top and a region are the same
+    // answer and the wrong one cannot be told from the right one.
+    let regions = beside();
     assert_eq!(
         (regions.list.top, regions.list.rows),
         (regions.diff.top, regions.diff.rows),
@@ -1942,7 +1950,7 @@ fn a_mark_names_its_region_when_both_share_a_first_row() {
         "a pointer on the rail's own bar marked the diff's"
     );
     assert_eq!(
-        regions.hover_at(79, 10),
+        regions.hover_at(99, 10),
         Some(Hovered::Track(Grabbed::Diff)),
         "a pointer on the diff's own bar marked the rail's"
     );
