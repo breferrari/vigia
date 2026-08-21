@@ -133,6 +133,27 @@ impl Region {
         Self::within(row, (self.top, self.rows))
     }
 
+    /// Whether `column`, `row` is a cell of **this region's** scrollbar.
+    ///
+    /// **The column and the rows together**, which is what "on the bar" has
+    /// always meant in prose and did not mean in code. `mouse_action`'s gate and
+    /// [`Regions::hover_at`]'s asked the column alone, and both bars sat on the
+    /// pane's right edge, so once *either* region drew one the whole right column
+    /// counted as bar from the top of the body to the bottom. On the most
+    /// ordinary screen there is, a handful of files beside a diff too tall for the
+    /// pane, that is a list with no bar of its own whose rightmost column stopped
+    /// answering: before this it seeked a bar that is not drawn, and after the
+    /// per-region columns landed it did nothing at all. Neither is what a click on
+    /// a file should do.
+    ///
+    /// Not used by [`Regions::step_at`] or [`Regions::grab_at`], and that is not
+    /// an oversight: each of those pairs the column test with `button` or `along`,
+    /// which already answer `None` off their own region's rows, so asking here
+    /// would be the containment test twice.
+    fn on_bar(self, column: u16, row: u16) -> bool {
+        self.bar == Some(column) && self.contains(row)
+    }
+
     /// Whether `column`, `row` falls inside this region.
     ///
     /// **What membership means since
@@ -154,7 +175,11 @@ impl Region {
     /// The same test against a bare `(top, rows)` span, for the track.
     fn within(row: u16, span: (u16, u16)) -> bool {
         let (top, rows) = span;
-        rows > 0 && row >= top && row < top + rows
+        // Saturating, matching [`Region::covers`] beside it. Every live `Region`
+        // comes from `Body::areas`, whose own arithmetic saturates and is bounded
+        // by a real terminal, so nothing reaches the overflow; the fields are
+        // `pub` and the two tests should not disagree at the edge of the type.
+        rows > 0 && row >= top && row < top.saturating_add(rows)
     }
 
     /// `-1` on this region's leading step button, `1` on its trailing one, and
@@ -392,7 +417,7 @@ impl Regions {
         // precedence above, and splitting it into two branches would let a cell
         // that is one region's bar but nobody's track answer `Row`.
         let (on_list_bar, on_diff_bar) =
-            (self.list.bar == Some(column), self.diff.bar == Some(column));
+            (self.list.on_bar(column, row), self.diff.on_bar(column, row));
         if on_list_bar || on_diff_bar {
             if self.step_at(column, row).is_some() {
                 return Some(Hovered::Button(column, row));
@@ -1285,7 +1310,10 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     // scrollbar column is a gesture about position, and the same column is inside
     // whichever region drew it, so testing the region first would turn every drag
     // into a wheel.
-    let on_bar = regions.list.bar == Some(mouse.column) || regions.diff.bar == Some(mouse.column);
+    // **A cell of a bar, not merely its column.** Asking the column alone let one
+    // region's bar swallow the other's rows, which `Region::on_bar` records.
+    let on_bar = regions.list.on_bar(mouse.column, mouse.row)
+        || regions.diff.on_bar(mouse.column, mouse.row);
     if on_bar
         && matches!(
             mouse.kind,

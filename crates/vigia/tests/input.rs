@@ -698,6 +698,70 @@ fn the_wheel_scrolls_whichever_region_it_is_over() {
     );
 }
 
+/// One region's bar does not swallow the other region's rows.
+///
+/// **The most ordinary screen there is, and it had no gate.** A handful of
+/// changed files fit the pinned list, so the list has nothing to scroll and draws
+/// no bar; the diff is taller than the pane, so it draws one. Both bars sit on
+/// the pane's right edge when both exist, so "am I on a bar" was asked as *is
+/// this the bar's column*, and once **either** region drew one the whole right
+/// column counted as bar from the top of the body to the bottom.
+///
+/// What that cost is a list row whose rightmost cell stopped answering. Before
+/// the per-region columns landed it seeked a bar that is not drawn, because a
+/// bar-less region's track is the whole of it and `along` answered for any row in
+/// it; after they landed it did nothing at all, because the gate was still the
+/// column alone and no region's `along` matched. A click on a file is neither of
+/// those.
+///
+/// `Region::on_bar` is the column **and** the rows, which is what the comment
+/// above the gate had always claimed.
+#[test]
+fn a_bar_in_one_region_leaves_the_others_rows_clickable() {
+    let scrolling_diff = Regions {
+        // No bar: three files fit, so there is nothing to scroll.
+        list: Region::bare(1, 3, 0, 80, None),
+        // A bar: the diff runs past the pane.
+        diff: Region::bare(5, 15, 0, 80, Some(79)),
+        sheet: None,
+    };
+    // The list's last row, in the column the diff's bar occupies further down.
+    let (column, row) = (79, 3);
+    // Guarded from the fixture's own numbers rather than through a private
+    // predicate: row 3 is inside the list's rows 1..4 and outside the diff's
+    // 5..20, which is what makes this the case at all.
+    assert!(
+        row >= scrolling_diff.list.top
+            && row < scrolling_diff.list.top + scrolling_diff.list.rows
+            && row < scrolling_diff.diff.top,
+        "the fixture is not the case: row {row} has to be the list's and not \
+         the diff's"
+    );
+
+    assert_eq!(
+        action_for(
+            &at(MouseEventKind::Down(MouseButton::Left), column, row),
+            scrolling_diff
+        ),
+        Some(Action::ListRow(row - scrolling_diff.list.top)),
+        "a click on the last column of a list row did not select that file, so \
+         the diff's bar is swallowing rows it does not own"
+    );
+    assert_eq!(
+        scrolling_diff.hover_at(column, row),
+        Some(Hovered::Row(row)),
+        "the pointer on the last column of a list row marked nothing"
+    );
+
+    // And the diff's own bar still answers, or the fix above traded one swallow
+    // for the opposite one.
+    assert_eq!(
+        scrolling_diff.grab_at(column, 8),
+        Some(Grabbed::Diff),
+        "a press on the diff's bar, on a diff row, no longer takes hold of it"
+    );
+}
+
 /// A gesture in one region's columns is not a gesture in the other's.
 ///
 /// **The bar gate's sibling, and the larger half of the same assumption**
