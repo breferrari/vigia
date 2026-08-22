@@ -1259,36 +1259,6 @@ impl Shell {
         self.regions
     }
 
-    /// Collect a screenful and paint it, settling any repaint it leaves owed.
-    ///
-    /// **The opening two frames are one call, and that is the point.** The first
-    /// frame of a process draws plain, because a grammar's patterns compile on
-    /// first use at 74-362ms and I7 gives the whole of startup 50ms; the frame
-    /// after it colours. Written as two `draw` statements in [`run`] that held
-    /// only by statement order, deleting the second left the entire suite green
-    /// while the product sat on a permanently uncoloured screen for any tree
-    /// nobody was writing to — an I5 failure, since a monitor is meant to be
-    /// correct untouched. Found by mutation.
-    ///
-    /// So [`App::owes_repaint`] carries the debt and this collects it, which
-    /// makes the pair impossible to separate by editing one line. It costs one
-    /// extra frame once per process: measured at ~1.8ms on the hundred-file
-    /// fixture, against the 91.51ms compile it exists to hide.
-    ///
-    /// **At most one repaint, and the bound is structural rather than argued.**
-    /// Written as a `while` this spun forever: [`Self::paint`] swallows a failed
-    /// collect into [`App::warn`] and returns `Ok`, while [`App::view`] advances
-    /// its state only past the `?`, so a collect that keeps failing leaves the
-    /// debt standing and the condition can never clear — 100% CPU with the
-    /// alternate screen held and the quit key unreachable, which is the terminal
-    /// this shell refuses to leave a reader in. It is reachable rather than
-    /// exotic: `Frame::diff` re-reads any file written in the last two seconds,
-    /// so a `git checkout` landing between the two paints does it.
-    ///
-    /// An `if` cannot spin, and a debt that survives it is simply carried to the
-    /// next wake, where the reader is looking at the plain frame rather than at
-    /// nothing. That is the same "report and keep the previous screen" rule the
-    /// rest of the frame path already follows.
     /// Hand the warmer whatever the last paint drew plain, and let it wake us.
     ///
     /// **The other half of the deferral.** `Highlighter::wanted` lists the paths
@@ -1335,6 +1305,36 @@ impl Shell {
         ));
     }
 
+    /// Collect a screenful and paint it, settling any repaint it leaves owed.
+    ///
+    /// **The opening two frames are one call, and that is the point.** The first
+    /// frame of a process draws plain, because a grammar's patterns compile on
+    /// first use at 74-362ms and I7 gives the whole of startup 50ms; the frame
+    /// after it colours. Written as two `draw` statements in [`run`] that held
+    /// only by statement order, deleting the second left the entire suite green
+    /// while the product sat on a permanently uncoloured screen for any tree
+    /// nobody was writing to — an I5 failure, since a monitor is meant to be
+    /// correct untouched. Found by mutation.
+    ///
+    /// So [`App::owes_repaint`] carries the debt and this collects it, which
+    /// makes the pair impossible to separate by editing one line. It costs one
+    /// extra frame once per process: measured at ~1.8ms on the hundred-file
+    /// fixture, against the 91.51ms compile it exists to hide.
+    ///
+    /// **At most one repaint, and the bound is structural rather than argued.**
+    /// Written as a `while` this spun forever: [`Self::paint`] swallows a failed
+    /// collect into [`App::warn`] and returns `Ok`, while [`App::view`] advances
+    /// its state only past the `?`, so a collect that keeps failing leaves the
+    /// debt standing and the condition can never clear — 100% CPU with the
+    /// alternate screen held and the quit key unreachable, which is the terminal
+    /// this shell refuses to leave a reader in. It is reachable rather than
+    /// exotic: `Frame::diff` re-reads any file written in the last two seconds,
+    /// so a `git checkout` landing between the two paints does it.
+    ///
+    /// An `if` cannot spin, and a debt that survives it is simply carried to the
+    /// next wake, where the reader is looking at the plain frame rather than at
+    /// nothing. That is the same "report and keep the previous screen" rule the
+    /// rest of the frame path already follows.
     fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
         self.paint(frame, worktree)?;
         if self.app.owes_repaint() {

@@ -271,7 +271,7 @@ pub fn holds_p99_rounds(
         let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
         // **Both sides are sums over the round, and that is the whole
-        // correction.** This compared `deficit`, a whole round's off-CPU time,
+        // correction, in two parts.** This compared `deficit`, a whole round's off-CPU time,
         // against a single frame's excess over budget. Over a long round the
         // ordinary per-frame scheduling noise sums to more than one frame's
         // overshoot, so the test drifted toward "the host did it" as the sample
@@ -281,8 +281,9 @@ pub fn holds_p99_rounds(
         // grammarless control arm at 0.44ms proving the parse, was excused by
         // 107.92ms of deficit summed over 250 frames.
         //
-        // **Both sides are sums over the whole round, and the alternative was
-        // tried and reverted.** Restricting each to the samples that actually
+        // The second part is that they are sums over the **whole** round rather
+        // than over the samples that breached, and that alternative was tried
+        // and reverted. Restricting each to the samples that actually
         // breached is more precise about credit: summed over everything, the
         // off-CPU noise of frames comfortably inside budget can pay for the
         // excess of a few slow ones (247 frames at 5ms wall against 4.9ms CPU
@@ -1381,7 +1382,8 @@ impl Drop for Scratch {
 /// constant against a literal and proved nothing about either fixture.
 ///
 /// What actually proves the fixture resolves to a real grammar is the budget
-/// gate's own `parsed.lines > 0`, which fails if nothing was highlighted.
+/// gate's own `parsed.lines >= SAMPLED_FRAMES`, which fails unless the
+/// highlighter parsed at least a line for every frame it sampled.
 pub const PROSE_EXT: &str = "md";
 
 /// Inline code spans per line of a [`prose_generated`] line.
@@ -1405,7 +1407,7 @@ pub const PROSE_EXT: &str = "md";
 /// the pattern twice as expensive would not move them. Six is the largest value
 /// still on the steep part of the curve. It is not chosen for strength, which
 /// both would have: in the frame, six spans breach at **102.39ms p99 against
-/// the 16ms budget** and seven at 103.36ms, and the guard takes six to 1.12ms.
+/// the 16ms budget** and seven at 103.36ms, and the guard takes six to 1.11ms.
 pub const PROSE_SPANS: usize = 6;
 
 /// **The floor, checked at compile time rather than by a test.**

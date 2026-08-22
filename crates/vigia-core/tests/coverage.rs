@@ -1234,8 +1234,11 @@ fn the_guarded_grammar_highlights_identically() {
 /// coverage.** The control arm is the *unguarded* grammar, which is the slow one
 /// by construction, so this gate pays the full pre-fix cost twice over in an
 /// unoptimised test binary: uncapped it ran 82s, which is the kind of number
-/// that gets a suite reached for less often. At 250 it compares 1,156 lines of
-/// the 2,977 these files hold, so **the tail of every file over 250 lines is not
+/// that gets a suite reached for less often. At 250 it compares about 1,200
+/// lines of the roughly 3,000 these files hold (deliberately imprecise: an exact
+/// denominator is wrong the moment anyone edits one of these files, and this
+/// loop's own commits moved it twice), so **the tail of every file over 250
+/// lines is not
 /// covered here** and a pathological shape written below that line would be
 /// missed. The hand-written corpus covers shapes by kind; this one covers them
 /// by volume, and neither covers the other's blind spot.

@@ -143,10 +143,13 @@ fn main() {
 /// match either. The engine does not know that: it explores every parse of the
 /// embedded inline-content alternation first, which embeds the code-span
 /// pattern about twelve times, and only then concludes "no match". Cost is
-/// roughly 4x per code span on the line, plateauing near 14.6ms where
-/// `fancy-regex`'s 1,000,000 backtrack limit cuts it off. Measured against this
+/// roughly 4x per code span on the line, until `fancy-regex`'s 1,000,000
+/// backtrack limit cuts the search off and the curve plateaus (measured on
+/// Linux against the fixture in `crates/vigia-core/tests/support/mod.rs`:
+/// 0.803ms at 4 spans, 3.040ms at 5, 12.006ms at 6, then 16.884ms and
+/// 16.686ms at 7 and 8, which is the plateau). Measured against this
 /// repository's own prose, a worst 24-line screenful of `ROADMAP.md` cost
-/// **229.48ms against I9's 16ms budget**, fully warm, on every frame that
+/// **229.48ms against I9's 16ms budget** on Linux, fully warm, on every frame that
 /// redrew it.
 ///
 /// The guard is a zero-width lookahead for a pipe anywhere on the line, which
