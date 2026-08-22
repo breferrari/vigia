@@ -1838,6 +1838,15 @@ fn nothing_armed_means_no_deadline_at_all() {
     // directions, because it is the slowest of the three by orders of magnitude
     // and a `min` written the wrong way round would be invisible against the
     // other two: they would simply always win.
+    //
+    // **Here rather than in a gate of its own**, which is what
+    // [#277](https://github.com/breferrari/vigia/issues/277)'s plan named. The
+    // property is *the nearest deadline wins*, this test is where that property
+    // already lives for the other two clocks, and a second gate would have
+    // rebuilt the same fixture to assert the same rule about a third. Recorded
+    // rather than done silently, because a promise kept somewhere other than
+    // where it was promised is indistinguishable from one dropped unless
+    // somebody says so.
     assert_eq!(
         patience(None, Some(now + SCROLL_LINGER), Some(HISTORY_SAMPLE), now),
         Some(SCROLL_LINGER),
