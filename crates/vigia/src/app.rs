@@ -448,17 +448,6 @@ impl App {
     pub fn follow(&mut self, path: &str, frame: &Frame) -> bool {
         // Stored even while disengaged, so `f` has somewhere to jump to.
         self.newest = Some(path.to_owned());
-        // **A tick supersedes the one before it, including its debt.** Ticks
-        // coalesce into one batch and the paint is shared, so two can land
-        // between frames with a [`vigia_core::Frame::advance`] between them.
-        // When the second names a path the walk no longer reports (an edit
-        // reverted, a file committed) the jump below returns early and writes no
-        // position, and a landing left armed by the first would then resolve
-        // against an *index*, which the advance has just renumbered: the
-        // viewport lands deep inside whichever file inherited the number.
-        // Cleared here rather than in `jump_to_newest`'s early return, so it is
-        // one rule about ticks rather than a branch of the lookup.
-        self.landing = false;
         self.following && self.jump_to_newest(frame)
     }
 
@@ -509,6 +498,21 @@ impl App {
         true
     }
 
+    /// Whether the viewport still points at the file [`Self::newest`] names.
+    ///
+    /// The guard on an owed landing, and the reason is on the call site in
+    /// [`Self::view`]. False when the changed set has moved under the position,
+    /// which is ordinary rather than exceptional on the pane this tool is for.
+    fn still_the_followed_file(&self, frame: &Frame) -> bool {
+        let Some(newest) = self.newest.as_deref() else {
+            return false;
+        };
+        frame
+            .files()
+            .get(self.position.file)
+            .is_some_and(|change| change.path == newest)
+    }
+
     /// Apply one intention.
     ///
     /// Takes the frame because scrolling is not arithmetic on a single number:
@@ -526,6 +530,15 @@ impl App {
         // silently: follow mode would simply keep dragging the reader back.
         if action.is_manual_scroll() {
             self.following = false;
+            // **And an owed landing is settled**, which belongs here for the
+            // reason the line above does. A tick and a keystroke coalesce into
+            // one batch, so a request armed by the follow can still be
+            // unresolved when this runs, and resolving it afterwards draws over
+            // the row the reader just asked for. Above the match rather than in
+            // `Self::scroll`, because `n` and `p` are manual scrolls that do not
+            // go through it and at either end of the changed set they reach no
+            // jump either: they disengaged follow and kept its debt.
+            self.landing = false;
             // **And the map is handed back.** Every action that reaches here
             // moves the diff, and a reader who moves the diff is asking to see
             // where it went; a window left behind from an earlier `J` would be
@@ -823,13 +836,6 @@ impl App {
     /// callers set it.
     fn scroll(&mut self, rows: isize, frame: &mut Frame) -> Result<()> {
         self.anchored = true;
-        // **A reader's own scroll settles an owed landing**, the way a jump does
-        // in [`Self::jump_to`]. A tick and a keystroke can coalesce into one
-        // batch, so a request armed by the follow above can still be unresolved
-        // when this runs, and a frame that then resolved it would draw over the
-        // row the reader had just asked for. Beside `anchored` because these are
-        // the three places a viewport is moved by anything but a resolution.
-        self.landing = false;
         match rows.cmp(&0) {
             std::cmp::Ordering::Equal => Ok(()),
             std::cmp::Ordering::Greater => {
@@ -904,7 +910,26 @@ impl App {
                 // `body_layout` already decided by giving the diff more than one
                 // row. A pane too short for a bar pays nothing.
                 measured: body.diff > 1,
-                landing: self.landing,
+                // **Only for the file it was armed for**, which is the whole of
+                // the staleness rule and is one rule rather than a list of the
+                // ways an index can go stale. A landing names a *row inside a
+                // file* and the position holds an index, and
+                // [`vigia_core::Frame::advance`] renumbers every index whenever
+                // the changed set moves: a file committed, an edit reverted, a
+                // branch switched. Ticks coalesce and only the paint is shared,
+                // so an advance can happen between the follow that armed this
+                // and the frame that would resolve it, including on a tick that
+                // names no path at all and so never reaches [`Self::follow`] —
+                // a `.git/index` write is exactly that. Resolved against the
+                // renumbered index, the viewport lands deep inside whichever
+                // file inherited the number, which is worse than the heading it
+                // replaced.
+                //
+                // [`Self::newest`] is the path the jump was made for, set by
+                // `follow` immediately before it, so this is a string compare
+                // against a list the frame already holds: no read, no `stat`,
+                // no diff, exactly as `follow` itself is.
+                landing: self.landing && self.still_the_followed_file(frame),
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].

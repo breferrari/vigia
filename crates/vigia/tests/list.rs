@@ -834,7 +834,7 @@ fn collect_resolves_every_degenerate_viewport() {
         for list_rows in [0usize, 1, LIST_SETTLED, FILES, FILES + 5, 10_000] {
             for diff_rows in [0usize, 1, 22] {
                 for file in [0usize, FILES - 1, FILES, FILES + 3] {
-                    for list_follows in [true, false] {
+                    for (list_follows, landing) in [(true, false), (false, false), (true, true)] {
                         let view = View::collect(
                             &mut frame,
                             &mut highlighter,
@@ -847,11 +847,12 @@ fn collect_resolves_every_degenerate_viewport() {
                                 list_rows,
                                 list_follows,
                                 measured: true,
-                                // No landing owed: this sweep drives `collect`
-                                // directly rather than through follow, and the
-                                // rows a landing would move are what it is
-                                // measuring.
-                                landing: false,
+                                // **A sweep dimension rather than a constant**,
+                                // because a landing resolves inside the same
+                                // walk and every degenerate shape here is one it
+                                // can be asked for in. Pinned at `false` it left
+                                // the whole grid blind to it.
+                                landing,
                                 // This sweep is about where the two regions
                                 // land, which is decided before anything is
                                 // coloured. Highlighting on keeps it the same

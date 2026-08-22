@@ -134,7 +134,7 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
         "the view did not move to the file that changed"
     );
     // **And this is the other half of #257's rule**, on the fixture that has
-    // it: every block here is five rows against a fifteen-row region, so the
+    // it: every block here is five rows against a thirteen-row region, so the
     // busiest hunk is already drawn from the heading and the heading stays. A
     // landing that fired unconditionally would cost the path, the counts, the
     // sigil and the heat strip to show the reader rows they could already see,
@@ -729,6 +729,10 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
         // A drag of the diff's own bar to the very top, which writes a position
         // of its own rather than going through either of the two above.
         ("a drag", Action::DiffTo(0), 0),
+        // **`n` at the end of the changed set**, which moves nothing and so
+        // reaches no jump at all, while still disengaging follow. The fixture is
+        // one file, so a step forward from it is always that case.
+        ("n at the end", Action::File(1), 0),
     ] {
         let mut app = App::new();
         assert!(app.follow(TALL, &frame), "the follow did not arm anything");
@@ -862,9 +866,11 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
 ///
 /// Deliberately not [`tall`], which cannot show this: there the busiest hunk is
 /// a 76-line deletion, so landing on it fills any pane from its own rows and no
-/// tail is left over. This one is four one-line tweaks and then a four-line
-/// rewrite low down, so the busiest hunk is fifteen rows against an eighteen-row
-/// region and the rows under it run out.
+/// tail is left over. This one is four one-line tweaks and then a two-line
+/// rewrite low down, so the busiest hunk is eleven rows against an eighteen-row
+/// region and the rows under it run out. A block ends at its last hunk, so what
+/// is left below a landing is that hunk and nothing else, however long the file
+/// is.
 fn tail(name: &str) -> Scratch {
     let scratch = Scratch::new(name);
     scratch.write(TAIL, support::numbered_lines(TALL_LINES));
@@ -922,6 +928,14 @@ fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
         layout.diff.saturating_sub(view.rows.len()),
         layout.diff
     );
+    // **And the bottom row is the diff's last**, which fullness alone does not
+    // say: a back-up one row too far also fills the pane, and leaves the final
+    // row of the diff undrawn under it.
+    assert_eq!(
+        view.rows_above + view.rows.len(),
+        view.total_rows,
+        "the pane is full but the diff's last row is not on it"
+    );
     // And the change is still on screen, which is what the clamp must not cost:
     // resting the tail moves the busiest hunk down the pane, never off it.
     assert!(
@@ -934,4 +948,182 @@ fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
         )),
         "resting the tail on the bottom row scrolled the change off the top"
     );
+}
+
+#[test]
+fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
+    // **A tick that names no path never reaches `App::follow`.** The drain
+    // advances the frame on every tick and follows only when the burst carried
+    // one, and a `.git/index` write carries none: an agent running `git add` or
+    // `git commit` beside the pane produces exactly that. The advance renumbers
+    // every index, and a landing armed by the tick before it holds nothing but
+    // an index, so resolving it puts the viewport deep inside whichever file
+    // inherited the number.
+    //
+    // Driven the way the loop drives it, with no `follow` call for the second
+    // tick, because that is the state the defect needs and a test that called
+    // `follow` would be testing a different rule.
+    let scratch = Scratch::new("shell-follow-renumbered");
+    scratch.write("src/aaa.rs", "fn a() {}\n");
+    scratch.write(TALL, support::numbered_lines(TALL_LINES));
+    scratch.commit_all("baseline");
+
+    scratch.write("src/aaa.rs", "fn a() { let staged = 1; }\n");
+    let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    for at in TWEAKS {
+        lines[at] = format!("line {} rewritten", at + 1);
+    }
+    lines.drain(CUT_AT..CUT_AT + CUT_LINES);
+    scratch.write(TALL, format!("{}\n", lines.join("\n")));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        2,
+        "the fixture is not two changed files"
+    );
+    assert!(app.follow(TALL, &frame), "the tick armed nothing");
+    let armed = app.position().file;
+
+    // The agent commits the file that sorts first, which is the tick that
+    // carries no path. Only the advance runs.
+    scratch.commit_all("the agent in the other pane stages and commits");
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 0, "the commit left changes behind");
+
+    let layout = body_layout(
+        Rect::new(0, 0, 80, 24),
+        &app.chrome("fixture", None, None, None, None, None),
+        frame.files().len(),
+    );
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("a renumbered list must not land anywhere");
+
+    assert_eq!(armed, 1, "the fixture did not arm on the second file");
+    assert!(
+        !view.landed,
+        "a landing armed before the advance was resolved after it, against an \
+         index the advance renumbered"
+    );
+}
+
+#[test]
+fn a_landing_above_a_hunkless_tail_leaves_no_blank_rows() {
+    // The last file is not the only one whose rows can run out. A file followed
+    // only by hunkless ones has a one-row block under it and cannot fill the
+    // pane either, which is why the first fix here, a clamp on the last file,
+    // covered one case of the class rather than the class. A binary file is the
+    // cheapest hunkless block the default view can hold: a heading and one line
+    // saying why. (A rename is cheaper still and unreachable here, because
+    // `git mv` stages it and the default view is the unstaged one.)
+    //
+    // Built here rather than on top of [`tail`], which has already committed its
+    // baseline: a second `commit_all` would take the tall file's own diff with
+    // it and leave the fixture with nothing to follow.
+    let scratch = Scratch::new("shell-follow-hunkless");
+    scratch.write(TAIL, support::numbered_lines(TALL_LINES));
+    scratch.write("src/zzz.bin", b"\0\0committed\0\0".as_slice());
+    scratch.commit_all("baseline");
+
+    let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    for at in [10, 40, 70, 100] {
+        lines[at] = format!("line {} rewritten", at + 1);
+    }
+    for (at, line) in lines.iter_mut().enumerate().skip(CUT_AT).take(2) {
+        *line = format!("line {} rewritten", at + 1);
+    }
+    scratch.write(TAIL, format!("{}\n", lines.join("\n")));
+    scratch.write("src/zzz.bin", b"\0\0rewritten\0\0".as_slice());
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let layout = body_layout(
+        Rect::new(0, 0, 80, 24),
+        &app.chrome("fixture", None, None, None, None, None),
+        frame.files().len(),
+    );
+
+    assert!(
+        frame.files().len() > 1 && frame.files().last().expect("a file").path != TAIL,
+        "the followed file is the last one, so this is the last-file case again"
+    );
+    assert!(app.follow(TAIL, &frame), "the follow did not move the view");
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    assert!(view.landed, "this measured a frame that landed nowhere");
+    assert!(
+        app.position().row > 0,
+        "the landing did not fire, so the back-up under test never ran"
+    );
+    assert_eq!(
+        view.rows.len(),
+        layout.diff,
+        "the landing left {} of {} rows blank above a hunkless tail",
+        layout.diff.saturating_sub(view.rows.len()),
+        layout.diff
+    );
+}
+
+#[test]
+fn a_landing_survives_a_pane_with_no_diff_region() {
+    // **The reason the request is cleared on `View::landed` rather than
+    // unconditionally.** A pane dragged below the floor draws no diff at all, so
+    // that frame resolves nothing, and forgetting the request there would leave
+    // the reader on the heading for good: the tick that armed it has been spent
+    // and no other will re-arm it until the agent writes again.
+    //
+    // A resize is `SPEC.md` §11.1's "no state change", so this is the same
+    // ruling the follow mode paragraph already makes about disengaging.
+    let scratch = tall("shell-follow-kept");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    assert!(app.follow(TALL, &frame), "the follow did not arm anything");
+
+    let squeezed = Body {
+        diff: 0,
+        ..tall_layout(&app)
+    };
+    let none = app
+        .view(&mut frame, &mut highlighter, &history, squeezed)
+        .expect("view");
+    assert!(
+        none.rows.is_empty() && !none.landed,
+        "a pane with no diff region drew rows or resolved a landing"
+    );
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, tall_layout(&app))
+        .expect("view");
+
+    assert!(
+        view.landed,
+        "the request was forgotten by the frame that could not serve it, so the \
+         reader stays on the heading until the agent writes again"
+    );
+    assert!(app.position().row > 0, "the kept request landed nowhere");
 }
