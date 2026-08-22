@@ -1127,3 +1127,45 @@ fn a_landing_survives_a_pane_with_no_diff_region() {
     );
     assert!(app.position().row > 0, "the kept request landed nowhere");
 }
+
+#[test]
+fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
+    // **The one guard here that nothing else can see.** The walk records an
+    // entry for the file the viewport is inside so the pinned list does not ask
+    // the frame for it a second time, and on a pane too short for a list there
+    // is no list to serve: the record is dropped unread, and building it is the
+    // heat projection over that file's whole diff, every frame.
+    //
+    // No counter in `FrameStats` moves for it, because building an entry reads
+    // nothing: it walks lines the frame already holds. So `View::entries` is
+    // what this asserts on, and it exists for this. Mutating the guard to `true`
+    // survived every other gate in the suite, which is what asked for it.
+    let scratch = tall("shell-follow-listless");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    assert!(app.follow(TALL, &frame), "the follow did not arm anything");
+    let listless = Body {
+        list: 0,
+        ..tall_layout(&app)
+    };
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, listless)
+        .expect("view");
+
+    assert!(view.landed, "this measured a frame that landed nowhere");
+    assert!(
+        app.position().row > 0,
+        "the landing did not fire, so the heading is drawn and its entry is the \
+         row rather than a record"
+    );
+    assert_eq!(
+        view.entries, 0,
+        "a pane with no list built {} entries, and nothing on it can draw one",
+        view.entries
+    );
+}

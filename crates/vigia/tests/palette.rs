@@ -87,6 +87,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 fn three_kinds() -> View {
     View {
         landed: false,
+        entries: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -675,6 +676,7 @@ fn graded_heat() -> View {
     };
     View {
         landed: false,
+        entries: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
