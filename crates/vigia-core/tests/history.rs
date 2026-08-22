@@ -739,14 +739,15 @@ fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
     // **And one whose answer is mid-range, because the assertion above lands on
     // the arithmetic floor.** Any rule that keeps a small enough set answers one
     // there, so it kills "no cut" and not much else. Here the pivot is the whole
-    // question: the median is 40 and drops the 2_000; a mean pivot is 236 and
-    // keeps everything; a minimum pivot is 1 and keeps only the 1. Three
-    // different figures, so this fixture tells them apart where the first cannot.
+    // question: the median is 40 and drops the 2_000, leaving 281 over 8; a mean
+    // pivot is 253 and its cut of 2_530 keeps everything, leaving 2_281 over 9; a
+    // minimum pivot is 1 and its cut of 10 keeps only the 1. Three different
+    // figures, so this fixture tells them apart where the first cannot.
     let bulk = [1u32, 40, 40, 40, 40, 40, 40, 40, 2_000];
     assert_eq!(
         scale_of(bulk.into_iter()),
         45,
-        "the cut is not taken at the median: a mean pivot answers 306 here and a \
+        "the cut is not taken at the median: a mean pivot answers 329 here and a \
          minimum pivot answers 1"
     );
 

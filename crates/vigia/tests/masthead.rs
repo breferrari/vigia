@@ -1163,9 +1163,15 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
             }
 
             if let Some((was, was_on_projection)) = previous {
-                worst = worst.max(step(was, shipped));
-                worst_on_projection =
-                    worst_on_projection.max(step(was_on_projection, on_projection));
+                // Only where the two shapes differ. The fixtures with nothing
+                // outlying are pinned exactly by the assertion above at every
+                // width, so accumulating a worst step for them would be
+                // arithmetic that nothing reads.
+                if outlying {
+                    worst = worst.max(step(was, shipped));
+                    worst_on_projection =
+                        worst_on_projection.max(step(was_on_projection, on_projection));
+                }
                 compared += 1;
             }
             previous = Some((shipped, on_projection));
