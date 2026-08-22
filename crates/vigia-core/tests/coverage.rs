@@ -1186,6 +1186,19 @@ fn the_guarded_grammar_highlights_identically() {
             "rs",
             "fn main() { let a = 1 | 2; }\n",
         ),
+        // CRLF, reachable only since this gate stopped stripping terminators.
+        // `.gitattributes` normalises this repository to LF, so a reader whose
+        // checkout carries CRLF is the case nothing else here covers.
+        (
+            "table, CRLF",
+            "md",
+            "| `a` | b |\r\n|---|---|\r\n| x | y |\r\n",
+        ),
+        (
+            "code spans no pipe, CRLF",
+            "md",
+            "The `a` and `b` and `c` and `d`.\r\n",
+        ),
     ];
 
     let mut failures = Vec::new();
@@ -1342,7 +1355,15 @@ fn op_stream(set: &SyntaxSet, ext: &str, body: &str) -> Vec<String> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut ops = Vec::new();
-    for line in body.lines() {
+    // **`split_inclusive`, not `lines`, and it is the guard's own alphabet that
+    // makes the difference.** The dump is the `extra_newlines` variant and the
+    // shipped path hands `syntect` newline-terminated lines (`Side::spans`, and
+    // the warmer's own `split_inclusive('\n')`). The guard is `(?=[^|\n]*\|)`,
+    // so half of its character class is the newline: stripping the terminator
+    // means this gate never parsed the shape the product parses and never
+    // exercised the `\n` half at all. It also drops `\r`, so every CRLF body was
+    // outside the one gate that holds "the guard changes no match".
+    for line in body.split_inclusive('\n') {
         for (offset, op) in state
             .parse_line(line, set)
             .expect("the corpus parses under the shipped engine")

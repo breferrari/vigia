@@ -25,8 +25,10 @@
 //! `codegen-units = 1`, and it overstates what ships.**
 //! [#261](https://github.com/breferrari/vigia/issues/261) found that setting
 //! inflates `fancy-regex` compilation on the MSVC target by roughly 6x; the
-//! profile now sets 2, where the same cold parse is 17.59ms rather than
-//! 107.88ms. The figures are left with their provenance rather than retyped,
+//! profile now sets 2, where this file's own cold parse (the `warm-cost`
+//! fixture in the gate below, which is a different measurement from the
+//! screenful figures above and the one taken at both settings) is 17.59ms
+//! rather than 107.88ms. The figures are left with their provenance rather than retyped,
 //! because re-measuring them honestly needs the platform they came from.
 //!
 //! **And the cliff is a Windows one.** On Linux (rustc 1.98.0) the cold parse

@@ -1857,10 +1857,17 @@ fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
          no longer grammarless and this subtraction is between two parses",
         plain.lines
     );
+    // At least one parsed line **per frame**, not one across the whole sample.
+    // `> 0` is satisfied by a single line in two hundred and fifty frames, so if
+    // hunk reuse ever started hitting here the gate would keep passing while
+    // measuring a frame path with the parser idle, and still call itself a parse
+    // measurement. The steady state this gate claims is one re-parse a frame.
     assert!(
-        parsed.lines > 0,
-        "the run under a grammar highlighted nothing across the sample, so this \
-         gate is measuring the frame path and calling it a parse"
+        parsed.lines >= SAMPLED_FRAMES as u64,
+        "{} lines were highlighted across {SAMPLED_FRAMES} frames, under the one \
+         a frame this gate's steady state claims, so the parser is idle for most \
+         of the sample and this is not the measurement it reports",
+        parsed.lines
     );
 
     let with = parsed.samples.percentile(0.99).unwrap_or_default();

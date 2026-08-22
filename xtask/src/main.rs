@@ -176,10 +176,15 @@ const TABLE_ANCHORS: [(&str, &str); 2] = [
 ///
 /// **It is a performance rewrite and not a semantic one.** Nothing here may
 /// change what the grammar matches, only how fast it declines to match.
+/// **Two checks hold that line and neither is sufficient alone.**
 /// `crates/vigia-core/tests/coverage.rs::the_guarded_grammar_highlights_identically`
-/// is what holds that line, by reconstructing the unguarded pattern from the
-/// shipped dump and asserting the full `(offset, ScopeStackOp)` stream is
-/// identical across a corpus.
+/// reconstructs the unguarded pattern from the shipped dump and asserts the full
+/// `(offset, ScopeStackOp)` stream is identical across a corpus, which proves the
+/// guard inert **relative to the dump that ships**. Because its control is
+/// derived from that same artefact, any further change this function made would
+/// sit in both of its arms and compare equal. The insertion-only assertion below
+/// is what closes that: it pins the guarded pattern to the upstream string while
+/// that string is still in hand, which is only possible here.
 ///
 /// # Panics
 ///
@@ -207,6 +212,15 @@ fn guard_markdown_tables(
                     // pattern holding only the second one, and rewriting that
                     // would be a second, unmeasured change riding along with
                     // this one.
+                    //
+                    // **And leaving it costs nothing, which is measured rather
+                    // than assumed.** That copy is only reachable from inside a
+                    // table, so it cannot fire for the pipe-free prose #261 is
+                    // about. Twelve one-line paragraphs cost 0.682ms alone and
+                    // 0.718ms placed directly after a table, and a 24-row table
+                    // carrying inline code and bold costs 0.526ms: the context
+                    // does not leak into the lines that follow it, and a
+                    // table-heavy screenful is nowhere near the 16ms budget.
                     if TABLE_ANCHORS.iter().all(|(from, _)| regex.contains(from)) {
                         let guarded = TABLE_ANCHORS
                             .iter()
@@ -410,14 +424,32 @@ fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
             md.push('\n');
         }
 
-        // **What we changed, which both licences ask to be stated.** Only
-        // PowerShell is modified today; the patch is named beside the pattern
-        // it replaced in the vendored file.
+        // **What we changed, which both licences ask to be stated.** Two
+        // grammars are modified, and this list is the shipped statement of it:
+        // `NOTICE.md` travels in every release archive (SPEC.md section 6),
+        // where `SPEC.md` itself does not, so a modification recorded only in
+        // the spec is a modification the recipient never sees.
+        //
+        // **The Markdown row is a modification of a `two-face`/`bat` grammar
+        // rather than of a file in this repository**, which is why it is easy
+        // to forget: nothing under `assets/syntaxes/` changed for it, so the
+        // per-file hash table below cannot mention it and the vendored-source
+        // walk never reaches it.
         md.push_str(
             "### Modifications\n\n- `PowerShell.sublime-syntax`: one match \
              pattern rewritten, replacing a regex subroutine call the shipped \
              engine cannot compile with the class it referenced. The change is \
-             marked in place, beside the pattern.\n\n",
+             marked in place, beside the pattern.\n- `Markdown.sublime-syntax` \
+             (from the base set, not vendored here): one match pattern \
+             rewritten. A zero-width guard, `(?=[^|\\n]*\\|)`, is inserted \
+             before each of the two alternatives of the block-start \
+             lookahead's table-row test. Both alternatives already require a \
+             literal `|`, so the guard changes no match and only lets a line \
+             without one fail in constant time instead of exploring the inline \
+             alternation first. The rewrite is applied by `xtask`, which \
+             asserts it is a pure insertion against the upstream string, and \
+             the emitted scope stream is asserted identical in \
+             `crates/vigia-core/tests/coverage.rs`.\n\n",
         );
         md.push_str(
             "## Sources\n\nFNV-1a 64 of each vendored source as compiled into \

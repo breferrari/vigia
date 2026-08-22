@@ -281,12 +281,29 @@ pub fn holds_p99_rounds(
         // grammarless control arm at 0.44ms proving the parse, was excused by
         // 107.92ms of deficit summed over 250 frames.
         //
-        // Asking it of the *round's* excess keeps every shape the old form got
-        // right and fixes the one it did not. A sustained stall still acquits,
-        // because 500ms of wall against 1ms of work on every sample leaves a
-        // deficit that covers the excess it produced. A single stalled frame
-        // still acquits, because it contributes only its own excess. Work does
-        // not, at any sample count, because work leaves no deficit to spend.
+        // **Both sides are sums over the whole round, and the alternative was
+        // tried and reverted.** Restricting each to the samples that actually
+        // breached is more precise about credit: summed over everything, the
+        // off-CPU noise of frames comfortably inside budget can pay for the
+        // excess of a few slow ones (247 frames at 5ms wall against 4.9ms CPU
+        // bank 24.7ms, enough to acquit three 18ms frames that used 18ms of CPU
+        // and were pure work).
+        //
+        // It cannot be had with this clock. `GetThreadTimes` is quantized to the
+        // scheduler tick, about 15.6ms, which is the same order as the 16ms
+        // budget these gates are written against. Over a whole round that
+        // quantisation averages to a couple of percent, which is the only reason
+        // any of this is measurable; over the three samples of a tail breach it
+        // is larger than the thing being measured, and three 20ms frames of
+        // genuine work read as 15.625ms of CPU each and acquit themselves. So
+        // the precise form trades a credit-transfer error for a quantisation
+        // error, on a shipped tier, in the same direction: a small tail breach of
+        // real work gets excused either way.
+        //
+        // The round sum is the one that survives the instrument, so it is what
+        // ships. [#270](https://github.com/breferrari/vigia/issues/270) carries
+        // the resolution-aware form, which needs a floor below which the clock
+        // is refused rather than trusted.
         if deficit >= excess {
             eprintln!(
                 "note: {claim} was over the {budget:?} budget on wall clock twice \
@@ -1390,6 +1407,27 @@ pub const PROSE_EXT: &str = "md";
 /// both would have: in the frame, six spans breach at **102.39ms p99 against
 /// the 16ms budget** and seven at 103.36ms, and the guard takes six to 1.12ms.
 pub const PROSE_SPANS: usize = 6;
+
+/// **The floor, checked at compile time rather than by a test.**
+///
+/// Cost is exponential in [`PROSE_SPANS`], so a drift from 6 to 4 does not
+/// weaken the gates built on it by a third, it weakens them by fifteen times
+/// (12.006ms a line against 0.803ms, measured against the unguarded grammar),
+/// and every assertion downstream still passes: the fixture-shape gate is
+/// self-consistent at any count, and a budget gate that stops breaching when
+/// the guard is removed simply goes quiet.
+///
+/// A `const` assertion rather than a runtime one because the subject is a
+/// constant: this fails the **build**, where a test would have to be run and
+/// clippy rightly rejects an assertion whose value is known at compile time.
+const _: () = assert!(
+    PROSE_SPANS >= 6,
+    "PROSE_SPANS is below the 6 the fixture was calibrated at. The curve, \
+     measured against the unguarded grammar on one line of this exact shape: \
+     4 spans 0.803ms, 5 spans 3.040ms, 6 spans 12.006ms. Below 6 the unguarded \
+     frame stops breaching the 16ms budget, and the gate that depends on it \
+     passes whether or not the guard is present."
+);
 
 /// Markdown prose carrying [`PROSE_SPANS`] inline code spans per line and **no
 /// pipe character**, newline terminated.
