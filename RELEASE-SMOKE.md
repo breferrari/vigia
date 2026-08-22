@@ -140,6 +140,11 @@ by minting a token scoped to this repository alone and pointing the bump at it.
       (instant), file list + diff drawn, header names the worktree.
 - [ ] Edit a file while it watches: the change lands without input, follow
       works, `f` re-engages after a scroll.
+- [ ] Edit a file whose diff is **taller than the pane**, low down in it: the
+      change itself is on screen, not the filename above it. That is the only
+      shape [#257](https://github.com/breferrari/vigia/issues/257) is visible
+      in, and a fixture cannot judge it: the question is whether a reader
+      glancing over sees what the agent just did.
 - [ ] Quit with `q` AND with Ctrl-C: terminal restored both times, no raw-mode
       residue.
 - [ ] Kill it from outside and look at the terminal it was in. Unix:

@@ -726,6 +726,9 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
         ("g", Action::Top, 0),
         // A scroll: the reader asked for exactly one row.
         ("a scroll", Action::Scroll(1), 1),
+        // A drag of the diff's own bar to the very top, which writes a position
+        // of its own rather than going through either of the two above.
+        ("a drag", Action::DiffTo(0), 0),
     ] {
         let mut app = App::new();
         assert!(app.follow(TALL, &frame), "the follow did not arm anything");
@@ -745,4 +748,190 @@ fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
             "{name} was overridden by a landing the follow before it armed"
         );
     }
+}
+
+#[test]
+fn disengaging_follow_settles_an_owed_landing() {
+    // `f` is the reader asking the view to stop moving itself, and a tick can
+    // land in the same batch as the keystroke. A request the frame has not
+    // resolved yet would move the viewport once more after that, which is the
+    // one thing the key was pressed to stop.
+    let scratch = tall("shell-follow-disengaged");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let layout = tall_layout(&app);
+
+    assert!(app.follow(TALL, &frame), "the follow did not arm anything");
+    app.apply(Action::ToggleFollow, &mut frame, layout.diff)
+        .expect("apply");
+    assert!(!app.following(), "`f` did not disengage");
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    assert!(
+        !view.landed,
+        "the frame after `f` resolved a landing anyway"
+    );
+    assert_eq!(
+        app.position().row,
+        0,
+        "the view moved itself once more after the reader asked it to stop"
+    );
+}
+
+#[test]
+fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
+    // **Two ticks in one batch, with an advance between them**, which is what
+    // the drain does: every wake is handled in arrival order and only the paint
+    // is shared. The second names a path the walk no longer reports, an edit
+    // reverted before the tick landed, so it writes no position at all. A debt
+    // left over from the first would then resolve against an *index*, and the
+    // advance has just renumbered every one of them.
+    let scratch = Scratch::new("shell-follow-stale-debt");
+    scratch.write(TALL, support::numbered_lines(TALL_LINES));
+    scratch.write("src/aaa.rs", "fn a() {}\n");
+    scratch.write("src/zzz.rs", support::numbered_lines(TALL_LINES));
+    scratch.commit_all("baseline");
+
+    // The tall file is the one the first tick follows, and `src/zzz.rs` is a
+    // second long file so that landing in the wrong one is a visible row rather
+    // than a clamp back to zero.
+    let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    for at in TWEAKS {
+        lines[at] = format!("line {} rewritten", at + 1);
+    }
+    lines.drain(CUT_AT..CUT_AT + CUT_LINES);
+    let cut = format!("{}\n", lines.join("\n"));
+    scratch.write(TALL, &cut);
+    scratch.write("src/zzz.rs", &cut);
+    scratch.write("src/aaa.rs", "fn a() { let reverted = 1; }\n");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    frame.advance().expect("advance");
+    assert!(app.follow(TALL, &frame), "the first tick armed nothing");
+
+    // The agent reverts the file the second tick is about, so the walk stops
+    // reporting it and the follow below finds nothing to jump to.
+    scratch.write("src/aaa.rs", "fn a() {}\n");
+    frame.advance().expect("advance");
+    assert!(
+        !frame.files().iter().any(|f| f.path == "src/aaa.rs"),
+        "the revert did not take the file out of the changed set"
+    );
+    assert!(
+        !app.follow("src/aaa.rs", &frame),
+        "a path with no change in it reported a jump"
+    );
+
+    let layout = body_layout(
+        Rect::new(0, 0, 80, 24),
+        &app.chrome("fixture", None, None, None, None, None),
+        frame.files().len(),
+    );
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    assert!(
+        !view.landed,
+        "the landing the first tick armed was resolved by a tick that followed \
+         nothing, against an index the advance in between renumbered"
+    );
+    assert_eq!(
+        app.position().row,
+        0,
+        "the viewport landed inside a file no tick ever named"
+    );
+}
+
+/// A file whose busiest hunk is **near its end and shorter than the pane**.
+///
+/// Deliberately not [`tall`], which cannot show this: there the busiest hunk is
+/// a 76-line deletion, so landing on it fills any pane from its own rows and no
+/// tail is left over. This one is four one-line tweaks and then a four-line
+/// rewrite low down, so the busiest hunk is fifteen rows against an eighteen-row
+/// region and the rows under it run out.
+fn tail(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(TAIL, support::numbered_lines(TALL_LINES));
+    scratch.commit_all("baseline");
+
+    let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    for at in [10, 40, 70, 100] {
+        lines[at] = format!("line {} rewritten", at + 1);
+    }
+    for (at, line) in lines.iter_mut().enumerate().skip(CUT_AT).take(4) {
+        *line = format!("line {} rewritten", at + 1);
+    }
+    scratch.write(TAIL, format!("{}\n", lines.join("\n")));
+    scratch
+}
+
+/// The one file in the [`tail`] fixture.
+const TAIL: &str = "src/shallow.rs";
+
+#[test]
+fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
+    // A jump clears `anchored`, which switches the short-tail back-up off on
+    // purpose: follow's claim is about what belongs at the top. The claim is met
+    // by any row the change is visible from, though, so honouring it past the
+    // end of the diff draws a handful of rows over a block of blanks. Every
+    // other file has the next one's rows under it and cannot do this.
+    let scratch = tail("shell-follow-tail");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let layout = tall_layout(&app);
+
+    assert_eq!(frame.files().len(), 1, "this fixture is one file");
+    app.follow(TAIL, &frame);
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    assert!(view.landed, "this measured a frame that landed nowhere");
+    assert!(
+        app.position().row > 0,
+        "the landing did not fire, so the clamp under test never ran"
+    );
+    assert_eq!(
+        view.rows.len(),
+        layout.diff,
+        "the landing left {} of {} rows blank under the last file",
+        layout.diff.saturating_sub(view.rows.len()),
+        layout.diff
+    );
+    // And the change is still on screen, which is what the clamp must not cost:
+    // resting the tail moves the busiest hunk down the pane, never off it.
+    assert!(
+        view.rows.iter().any(|row| matches!(
+            row,
+            Row::Line {
+                kind: vigia_core::LineKind::Added,
+                ..
+            }
+        )),
+        "resting the tail on the bottom row scrolled the change off the top"
+    );
 }

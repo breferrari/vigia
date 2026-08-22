@@ -802,7 +802,6 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
 /// zero: a zero peak is the empty-store path and draws nothing but track.
 fn climbing() -> View {
     View {
-        landed: false,
         rows: vec![Row::file(FileEntry {
             path: "src/a.rs".to_owned(),
             from: None,

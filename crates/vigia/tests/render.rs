@@ -824,7 +824,6 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
 
         for files in [1usize, 3, 100] {
             let view = View {
-                landed: false,
                 files,
                 ..one_file()
             };
@@ -1535,12 +1534,10 @@ fn scrolling_the_list_does_not_move_the_columns() {
     view.files = 3;
 
     let narrow = View {
-        landed: false,
         list: view.list[..2].to_vec(),
         ..view.clone()
     };
     let wide = View {
-        landed: false,
         list: view.list[1..].to_vec(),
         list_top: 1,
         ..view.clone()
@@ -1597,7 +1594,6 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
         .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
         .collect();
     let view_of = |files: usize| View {
-        landed: false,
         list: entries[..files.min(entries.len())].to_vec(),
         rows: entries[..files.min(entries.len())]
             .iter()
@@ -1642,13 +1638,11 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
     // count.** A separate fixture pair, because nothing about the list can make
     // the stream's bar appear.
     let short = View {
-        landed: false,
         total_rows: 2,
         rows_above: 0,
         ..view_of(2)
     };
     let tall = View {
-        landed: false,
         total_rows: 4_000,
         rows_above: 0,
         ..view_of(2)
@@ -1731,7 +1725,6 @@ fn the_headers_two_tree_facts_are_drawn_in_one_weight() {
     // legibility sweep reads symbols rather than cells. Drawing the left in
     // `chrome_dim` restores the seam and reddens nothing without this.
     let view = View {
-        landed: false,
         files: 3,
         ..one_file()
     };
@@ -1859,7 +1852,6 @@ fn a_nameless_worktree_draws_no_separator_with_nothing_on_its_left() {
     // here: Windows strips a trailing space, so a name of one space resolves to
     // the parent, and it refuses a tab outright. The rest are legal everywhere.
     let view = View {
-        landed: false,
         files: 3,
         ..one_file()
     };
@@ -2655,7 +2647,6 @@ fn a_rename_never_names_only_the_file_it_came_from() {
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     let view = View {
-        landed: false,
         list: vec![renamed.clone()],
         rows: vec![Row::file(renamed)],
         files: 1,
@@ -2736,7 +2727,6 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
     let mut added_at = Vec::new();
     for (lines, want) in BOUNDARIES {
         let view = View {
-            landed: false,
             list: vec![listed("src/f.rs", lines, 0)],
             files: 1,
             ..ragged_counts()
@@ -4001,7 +3991,6 @@ fn the_list_scrollbar_spans_the_visible_window() {
     let mut seen = Vec::new();
     for list_top in [0usize, 3, 7] {
         let view = View {
-            landed: false,
             list_top,
             files: 10,
             ..two_regions(list_top)
@@ -4075,7 +4064,6 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     let mut lengths = Vec::new();
     for total in [rows * 2, rows * 4, rows * 8] {
         let view = View {
-            landed: false,
             total_rows: total,
             rows_above: 0,
             ..a_list_of(3, 3, 0)
@@ -4101,7 +4089,6 @@ fn the_diff_scrollbar_is_proportional_to_the_rows_it_shows() {
     let mut firsts = Vec::new();
     for above in [0, total / 4, total / 2, total - rows] {
         let view = View {
-            landed: false,
             total_rows: total,
             rows_above: above,
             ..a_list_of(3, 3, 0)
@@ -4168,7 +4155,6 @@ fn the_scrollbars_degrade_once_and_never_flicker() {
     let drawn: Vec<bool> = (1..=60u16)
         .map(|width| {
             let view = View {
-                landed: false,
                 files: 10,
                 ..two_regions(1)
             };
@@ -4384,7 +4370,6 @@ fn has_bar(backend: &TestBackend, region: Region) -> bool {
 /// three constructions to confirm that.
 fn a_stepped_screen() -> View {
     View {
-        landed: false,
         total_rows: 4_000,
         rows_above: 0,
         ..a_list_of(30, 6, 0)
@@ -5264,12 +5249,10 @@ fn the_painted_track_is_the_track_the_pointer_is_told_about() {
     for above in [0usize, 1, 800, 2_000, 3_970] {
         for list_top in [0usize, 12, 24] {
             let view = View {
-                landed: false,
                 rows_above: above,
                 ..a_list_of(30, 6, list_top)
             };
             let view = View {
-                landed: false,
                 total_rows: 4_000,
                 ..view
             };
@@ -5391,7 +5374,6 @@ fn a_bar_below_the_step_floor_draws_what_it_drew_before() {
     // Three listed rows over thirty files: a bar, and a region one row short of
     // the floor.
     let view = View {
-        landed: false,
         total_rows: 4_000,
         rows_above: 0,
         ..a_list_of(30, (STEP_FLOOR - 1) as usize, 0)
@@ -5681,7 +5663,6 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         a_list_of(40, 20, 0),
         // Nothing to be inside, so the diff bar is told a whole of zero.
         View {
-            landed: false,
             current_span: 0,
             total_rows: 0,
             rows_above: 0,
@@ -5689,7 +5670,6 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         },
         // A path of wide glyphs, at the caret and bar boundary.
         View {
-            landed: false,
             list: vec![entry("src/日本語/テスト.rs", 3, 1)],
             ..a_list_of(9, 1, 0)
         },
@@ -5779,7 +5759,6 @@ fn washed_screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestB
 fn a_wash_runs_under_the_scrollbar_column() {
     let width = 64u16;
     let view = View {
-        landed: false,
         total_rows: 400,
         rows_above: 40,
         rows: vec![
@@ -5950,7 +5929,6 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
 
     for (what, rows) in fixtures {
         let view = View {
-            landed: false,
             total_rows: 400,
             rows_above: 40,
             rows,
@@ -6078,7 +6056,6 @@ fn a_row_washs_modifier_never_reaches_the_scrollbar() {
     use ratatui::style::Modifier;
 
     let view = View {
-        landed: false,
         total_rows: 400,
         rows_above: 40,
         rows: vec![
@@ -6164,7 +6141,6 @@ fn a_bar_styles_own_background_wins_over_the_band() {
         theme: &vigia::Theme,
     ) -> (ratatui::style::Color, ratatui::style::Color) {
         let view = View {
-            landed: false,
             total_rows: 400,
             rows_above: 40,
             rows: vec![
@@ -6559,7 +6535,6 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
     // digit count rather than at a single boundary; it was reachable at 29 and
     // 30 columns for three-digit numbers.
     let body = |total_rows: usize| View {
-        landed: false,
         rows: vec![
             Row::file(listed("src/engine/watch.rs", 42, 7)),
             line(LineKind::Added, 258, "    pub fn advance(&mut self) {"),
@@ -6618,7 +6593,6 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
         for view in [
             one_file(),
             View {
-                landed: false,
                 files: 0,
                 list: Vec::new(),
                 rows: Vec::new(),
@@ -6627,7 +6601,6 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
             // A heat strip, a pinned list to put a rule on screen, and enough
             // files to make the list scrollable so the bar is drawn too.
             View {
-                landed: false,
                 list: vec![
                     listed("src/engine/watch.rs", 42, 7),
                     listed("src/render/frame.rs", 11, 3),
@@ -6699,7 +6672,6 @@ fn the_wash_bleeds_under_the_inset() {
              nothing to be about"
         );
         let view = View {
-            landed: false,
             total_rows: 400,
             rows_above: 40,
             rows: vec![
@@ -6904,7 +6876,6 @@ fn a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge() {
         // glyph is the edge rather than the end of its text.
         let long = "    let stale = self.pending.take(); ".repeat(12);
         let view = View {
-            landed: false,
             total_rows: 4000,
             rows_above: 40,
             rows: vec![

@@ -360,7 +360,6 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
     );
 
     let view = View {
-        landed: false,
         rows: vec![Row::Line {
             kind: vigia_core::LineKind::Context,
             number: 1,
@@ -420,7 +419,6 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
     // fixture that had them would be testing the fixture.
     let area = Rect::new(0, 0, 40, 6);
     let view = View {
-        landed: false,
         rows: vec![Row::Line {
             kind: vigia_core::LineKind::Context,
             number: 1,

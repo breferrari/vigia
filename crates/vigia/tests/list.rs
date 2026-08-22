@@ -150,7 +150,6 @@ fn each_region_reports_its_own_bar_column() {
     // bar at all, so the two assertions above are about a drawn bar rather than
     // about a field that is always `Some`.
     let bare = View {
-        landed: false,
         total_rows: 1,
         ..View::default()
     };

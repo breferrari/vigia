@@ -448,6 +448,17 @@ impl App {
     pub fn follow(&mut self, path: &str, frame: &Frame) -> bool {
         // Stored even while disengaged, so `f` has somewhere to jump to.
         self.newest = Some(path.to_owned());
+        // **A tick supersedes the one before it, including its debt.** Ticks
+        // coalesce into one batch and the paint is shared, so two can land
+        // between frames with a [`vigia_core::Frame::advance`] between them.
+        // When the second names a path the walk no longer reports (an edit
+        // reverted, a file committed) the jump below returns early and writes no
+        // position, and a landing left armed by the first would then resolve
+        // against an *index*, which the advance has just renumbered: the
+        // viewport lands deep inside whichever file inherited the number.
+        // Cleared here rather than in `jump_to_newest`'s early return, so it is
+        // one rule about ticks rather than a branch of the lookup.
+        self.landing = false;
         self.following && self.jump_to_newest(frame)
     }
 
@@ -458,9 +469,14 @@ impl App {
     /// to the bytes the index already holds. There is no newest *change* then,
     /// so the view stays where it is instead of jumping somewhere arbitrary.
     ///
-    /// Row zero rather than a computed offset. The heading is the top of what
-    /// changed, and finding any other row would mean asking how tall the file
-    /// is, which costs the diff this method exists to avoid.
+    /// **Names the file and owes the row**, which is
+    /// [#257](https://github.com/breferrari/vigia/issues/257) and is the one
+    /// place this map does not resolve a jump to row zero. The heading is the
+    /// top of what changed and not always the change itself, and finding the
+    /// row that is means asking how tall the file is, which costs the diff this
+    /// method exists to avoid. So it is not asked here: [`Self::landing`] is set
+    /// instead, and [`View::collect`] resolves the row from a diff it has
+    /// already fetched. Until #257 this landed on the heading and said so.
     fn jump_to_newest(&mut self, frame: &Frame) -> bool {
         let Some(newest) = self.newest.as_deref() else {
             return false;
@@ -530,6 +546,13 @@ impl App {
                 self.following = !self.following;
                 if self.following {
                     self.jump_to_newest(frame);
+                } else {
+                    // **Disengaging settles an owed landing.** A tick and the
+                    // keystroke can arrive in one batch, so `f` can run with a
+                    // request the frame has not resolved yet, and resolving it
+                    // afterwards would move the viewport for a reader who has
+                    // just asked the view to stop moving itself.
+                    self.landing = false;
                 }
             }
             // **No jump, unlike follow.** Re-engaging follow is a move as well
@@ -716,8 +739,11 @@ impl App {
     ///
     /// Row zero because a jump lands on the file's **heading**. Finding any
     /// other row means asking how tall the file is, which costs the diff I4
-    /// forbids, so this is the one resolution every jump on this map shares:
-    /// follow, `g`, `G`, a click on a listed file, a digit, and `n`/`p`.
+    /// forbids, so this is the resolution every jump on this map shares: `g`,
+    /// `G`, a click on a listed file, a digit, and `n`/`p`. **Follow starts
+    /// here too and is then moved off it**, which is [`Self::landing`] and
+    /// #257; every one of the keys named above keeps the heading, because
+    /// `SPEC.md` §11.1 gives them the *file* as their unit.
     ///
     /// `anchored` is cleared because that word means "reached by scrolling", and
     /// a jump is the other thing. See [`App::anchored`] for what it costs to get
