@@ -224,7 +224,14 @@ pub const HISTORY_BUCKET: Duration =
 pub const HISTORY_SAMPLES: usize = 120;
 
 /// How much time one **sample** covers, which is the grid the window rolls on.
-const HISTORY_SAMPLE: Duration =
+///
+/// **Public since [#243](https://github.com/breferrari/vigia/issues/243)**,
+/// because it stopped being an internal grid and became a term in I1's budget:
+/// the ageing clock wakes at most once per sample, and a rate nobody outside
+/// this module can name is a rate no gate can assert. It is also the *derivation*
+/// that ruling rests on, since a sample is the finest interval at which any drawn
+/// cell can change.
+pub const HISTORY_SAMPLE: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
 
 /// How many samples one source bucket is the sum of.
@@ -1081,6 +1088,36 @@ impl History {
             self.tracks.remove(&path);
             self.stats.evicted_by_cap += 1;
         }
+    }
+
+    /// How long until the window's next sample boundary, or `None` when it holds
+    /// nothing to age.
+    ///
+    /// **The whole of [#243](https://github.com/breferrari/vigia/issues/243)'s
+    /// budget, and `None` is the load-bearing half.** The shell's loop waits
+    /// untimed when every deadline it can see is `None`, so returning a duration
+    /// here for an empty window would put an idle monitor on a poll loop while
+    /// looking entirely reasonable. That is the same shape `Held::wait` is
+    /// written in, and for the same reason: the answer is a value a test can
+    /// read rather than a behaviour it has to observe.
+    ///
+    /// **A window with no tracks holds nothing**, which is exactly when it is
+    /// safe to stop: [`Self::repeak`] rebuilds the worktree series from the
+    /// tracks, so an empty map is an all-zero series, and [`Self::roll`] clears
+    /// the map once the whole window has turned over. That bounds the clock at
+    /// [`HISTORY_SAMPLES`] wakes after any burst, and it is why I1's *0 wakeups
+    /// while idle* survives the amendment: the state a monitor left open
+    /// overnight is in is an empty window.
+    ///
+    /// Saturating, so a boundary already passed asks for zero rather than
+    /// panicking. That happens whenever the process was not woken for longer
+    /// than a sample, which is the ordinary case on the first ageing wake after
+    /// a quiet stretch, and asking for zero is right: the roll is overdue.
+    pub fn ages_in(&self, now: Instant) -> Option<Duration> {
+        if self.tracks.is_empty() {
+            return None;
+        }
+        Some((self.opened + HISTORY_SAMPLE).saturating_duration_since(now))
     }
 
     /// Every tracked path's churn added together, oldest sample first.

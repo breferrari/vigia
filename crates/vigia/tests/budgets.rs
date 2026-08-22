@@ -2006,3 +2006,102 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
         lines: cost.lines,
     })
 }
+
+/// Rounds the ageing comparison samples, warmed the way every gate here warms.
+const SAMPLED_AGEINGS: usize = 60;
+
+#[test]
+fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
+    // **The number [#243](https://github.com/breferrari/vigia/issues/243)'s
+    // ruling rests on, gated so it cannot quietly stop being true.** I1 was
+    // amended to let a clock run while the history window holds a sample, and
+    // the amendment is affordable because an ageing wake is not a filesystem
+    // event: nothing on disk changed, so it does not walk status. If a later
+    // edit puts `Frame::advance` back on that path the clock stays correct, the
+    // graph still ages, and the cost quietly becomes a tick's.
+    //
+    // **Two arms rather than one number against a ceiling**, which is this
+    // file's rule and the reason it exists: a lone figure has nothing to be
+    // compared against and gets compared against a budget instead. Interleaved,
+    // because a sequential pair under varying load is not a controlled
+    // experiment.
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("ageing-wake", 20, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+    let screen = layout(&app, 20);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+
+    // A window with something in it, which is the only state the clock runs in.
+    let paths: Vec<String> = frame.files().iter().map(|c| c.path.clone()).collect();
+    let start = Instant::now();
+    sample_all(&mut history, scratch.root(), &paths);
+    let _ = start;
+
+    let (mut ageing, mut ticking) = (Samples::new(SAMPLED_AGEINGS), Samples::new(SAMPLED_AGEINGS));
+    for round in 1..=SAMPLED_AGEINGS {
+        for walks in [false, true] {
+            let (wall, _) = time_cpu(|| {
+                // The ageing arm is exactly what the loop's timeout does: roll
+                // the window, then draw. The ticking arm adds the status walk a
+                // filesystem event brings with it, and nothing else.
+                if walks {
+                    frame.advance().expect("advance");
+                }
+                history.record_sized([], Instant::now());
+                app.sample_memory();
+                let chrome = app.chrome("fixture", None, None, None, None, None);
+                let view = app
+                    .view(&mut frame, &mut highlighter, &history, screen)
+                    .expect("view");
+                render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
+            });
+            if round > SAMPLED_AGEINGS / 4 {
+                if walks {
+                    ticking.push(wall)
+                } else {
+                    ageing.push(wall)
+                }
+            }
+        }
+    }
+
+    let aged = ageing.percentile(0.5).expect("a sampled round");
+    let ticked = ticking.percentile(0.5).expect("a sampled round");
+
+    // Non-vacuity: both arms drew a screen, or this compares two numbers neither
+    // of which is a frame.
+    let drawn = app
+        .view(&mut frame, &mut highlighter, &history, screen)
+        .expect("view");
+    assert!(
+        drawn.rows.len() >= screen.diff,
+        "the fixture drew {} of {} body rows, so neither arm is a frame",
+        drawn.rows.len(),
+        screen.diff
+    );
+
+    assert!(
+        aged < ticked,
+        "an ageing wake cost {aged:?} against a tick's {ticked:?}, so the path \
+         that skips the status walk is no longer cheaper than the one that does \
+         it, which is the whole reason I1 could be amended for this clock"
+    );
+    // And it is a *fraction*, not merely smaller. Stated loosely on purpose: the
+    // reference machine measures roughly a fifth, and a gate pinned near that
+    // would be a gate about the runner rather than about the path.
+    assert!(
+        aged * 2 < ticked,
+        "an ageing wake cost {aged:?} against a tick's {ticked:?}, less than half \
+         a saving where the reference machine measures 90µs against 458µs"
+    );
+}

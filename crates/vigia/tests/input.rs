@@ -20,6 +20,7 @@ use vigia::{
     STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
     patience, scroll_mark,
 };
+use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -1789,41 +1790,106 @@ fn a_direction_mark_expires_where_a_held_button_does_not() {
 
 #[test]
 fn nothing_armed_means_no_deadline_at_all() {
-    // **The invariant both clocks share, and the one a source gate cannot see.**
-    // `Held::wait` already answers for the repeat; this answers for the repeat
-    // *and* the direction mark together, because two deadlines asked separately
-    // are two chances to leave one armed on an idle monitor. `None` here is what
-    // makes the loop's receive untimed, which is I1's *0 wakeups while idle* as
-    // a structural fact rather than as care taken at two call sites.
+    // **The invariant every clock shares, and the one a source gate cannot see.**
+    // `Held::wait` already answers for the repeat; this answers for the repeat,
+    // the direction mark and the ageing window together, because deadlines asked
+    // separately are that many chances to leave one armed on an idle monitor.
+    // `None` here is what makes the loop's receive untimed, which is I1's
+    // *0 wakeups while idle* as a structural fact rather than as care taken at
+    // three call sites.
     let now = Instant::now();
 
     assert_eq!(
-        patience(None, None, now),
+        patience(None, None, None, now),
         None,
-        "with nothing held and nothing lingering the loop was handed a deadline, \
-         which is a timer on an idle monitor"
+        "with nothing held, nothing lingering and nothing in the window the loop \
+         was handed a deadline, which is a timer on an idle monitor"
     );
 
-    // Either one alone arms it, and neither is allowed to hide the other.
+    // Any one alone arms it, and none is allowed to hide the others.
     let hold = Held::new(Action::Scroll(1), (79, 5), now);
-    assert_eq!(patience(Some(hold), None, now), Some(STEP_DELAY));
+    assert_eq!(patience(Some(hold), None, None, now), Some(STEP_DELAY));
     assert_eq!(
-        patience(None, Some(now + SCROLL_LINGER), now),
+        patience(None, Some(now + SCROLL_LINGER), None, now),
         Some(SCROLL_LINGER)
     );
-
-    // **The nearer of the two**, whichever it is, because the loop has to wake
-    // for the first thing due. Taking the wrong one lets the other run late.
     assert_eq!(
-        patience(Some(hold), Some(now + SCROLL_LINGER), now),
+        patience(None, None, Some(HISTORY_SAMPLE), now),
+        Some(HISTORY_SAMPLE),
+        "a window with something in it did not ask the loop to wake, so the graph \
+         freezes where it is"
+    );
+
+    // **The nearest of them**, whichever it is, because the loop has to wake for
+    // the first thing due. Taking the wrong one lets the others run late.
+    assert_eq!(
+        patience(Some(hold), Some(now + SCROLL_LINGER), None, now),
         Some(SCROLL_LINGER),
         "the linger is due first and the loop was told to sleep past it"
     );
     let soon = Held::new(Action::Scroll(1), (79, 5), now - STEP_DELAY + STEP_REPEAT);
     assert_eq!(
-        patience(Some(soon), Some(now + SCROLL_LINGER), now),
+        patience(Some(soon), Some(now + SCROLL_LINGER), None, now),
         Some(STEP_REPEAT),
         "the step is due first and the loop was told to sleep past it"
+    );
+
+    // **And the ageing clock takes its turn in the same order**, in both
+    // directions, because it is the slowest of the three by orders of magnitude
+    // and a `min` written the wrong way round would be invisible against the
+    // other two: they would simply always win.
+    assert_eq!(
+        patience(None, Some(now + SCROLL_LINGER), Some(HISTORY_SAMPLE), now),
+        Some(SCROLL_LINGER),
+        "the linger is due long before the next sample and the loop was told to \
+         sleep past it"
+    );
+    assert_eq!(
+        patience(
+            None,
+            Some(now + HISTORY_SAMPLE * 2),
+            Some(HISTORY_SAMPLE),
+            now
+        ),
+        Some(HISTORY_SAMPLE),
+        "the next sample is due first and the loop was told to sleep past it, so \
+         the window ages a beat late"
+    );
+}
+
+#[test]
+fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
+    // **[#243](https://github.com/breferrari/vigia/issues/243)'s half of I1's
+    // budget, written the way `nothing_held_means_no_timer_at_all` is: the value
+    // the loop is handed, not a behaviour observed around it.** The ageing clock
+    // is admissible only because it stops, and what stops it is
+    // `History::ages_in` returning `None` for a window holding nothing. A version
+    // that returned a sample period regardless would look entirely reasonable,
+    // pass every gate about ageing, and put an idle monitor on a one-second poll
+    // loop for as long as it is left open.
+    let mut history = History::new();
+    let start = Instant::now();
+
+    assert_eq!(
+        history.ages_in(start),
+        None,
+        "a window with nothing recorded in it asked the loop to wake"
+    );
+
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+    assert!(
+        history.ages_in(start).is_some(),
+        "a window holding a write did not ask to age, so the graph freezes"
+    );
+
+    // And once the whole window has turned over it stops again, which is the
+    // bound: at most `HISTORY_SAMPLES` wakes follow any burst.
+    history.record_sized([], start + HISTORY_WINDOW);
+    assert_eq!(
+        history.ages_in(start + HISTORY_WINDOW),
+        None,
+        "a drained window is still asking the loop to wake, so the clock outlives \
+         everything it had to show and I1's budget is gone"
     );
 }
 

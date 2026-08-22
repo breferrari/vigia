@@ -607,7 +607,21 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // below is the whole of the frame. Either a step fell due, which the
             // block above has already applied, or a scroll burst went quiet and
             // the arrows stop claiming a direction.
-            shell.settle_scroll(Instant::now());
+            let now = Instant::now();
+            shell.settle_scroll(now);
+            // **The window ages here, and this is the whole of
+            // [#243](https://github.com/breferrari/vigia/issues/243)'s
+            // mechanism.** An empty burst rolls the window and leaves the pulse
+            // where it is, which is the same call a tick with nothing in it
+            // already makes; what is new is that a timeout reaches it. Before the
+            // draw, or the frame paints the picture it woke up to change and the
+            // next wake corrects it a second late.
+            //
+            // **No `Frame::advance` on this path**, deliberately: an ageing wake
+            // is not a filesystem event, nothing on disk changed, and walking
+            // status anyway is the difference between 90µs and 458µs measured on
+            // the reference fixture. `SPEC.md` §11.1 carries both numbers.
+            shell.history.record_sized([], now);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree)?;
             shell.request_warm(&worktree, &tx);
@@ -1192,7 +1206,16 @@ impl Shell {
     /// Where both are armed it is the nearer of the two, because the loop has to
     /// wake for whichever comes first.
     fn patience(&self, now: Instant) -> Option<std::time::Duration> {
-        input::patience(self.held, self.scrolling_until, now)
+        // The history's own deadline joins the two gesture clocks here rather
+        // than at the receive, so `patience` stays the one place that decides
+        // whether this program owns a timer at all
+        // ([#243](https://github.com/breferrari/vigia/issues/243)).
+        input::patience(
+            self.held,
+            self.scrolling_until,
+            self.history.ages_in(now),
+            now,
+        )
     }
 
     /// Note which way an action is moving the viewport, so the bar can say so.
@@ -1795,6 +1818,32 @@ mod tests {
              resolved against and nothing repaints to correct it"
         );
 
+        // **A timeout rolls the window before it draws, which is
+        // [#243](https://github.com/breferrari/vigia/issues/243)'s whole
+        // mechanism.** The ageing clock only ever produces a timeout, so if this
+        // arm paints without rolling first, the loop wakes on the right schedule
+        // and redraws the same frozen picture: every gate over `History::ages_in`
+        // and over `patience` stays green while the graph never moves. Position
+        // is the whole of it, which is why it is read here rather than asserted
+        // about behaviour.
+        let timeout_arm = code
+            .find("let Some(wake) = wake else {")
+            .expect("the loop no longer has a timeout arm");
+        let rolled = code[timeout_arm..]
+            .find("shell.history.record_sized([], ")
+            .map(|at| at + timeout_arm)
+            .expect("the timeout arm no longer rolls the window, so an ageing wake redraws a frozen graph");
+        let drawn = code[timeout_arm..]
+            .find("shell.draw(&mut frame, &worktree)")
+            .map(|at| at + timeout_arm)
+            .expect("the timeout arm no longer draws");
+        assert!(
+            rolled < drawn,
+            "the timeout arm draws before it rolls the window, so an ageing wake \
+             paints the picture it woke up to change and the next one corrects it \
+             a second late"
+        );
+
         // **The idle receive is untimed, and that is I1's budget as a structure
         // rather than as an observation.** `Held::wait` returning `None` is gated
         // in `tests/input.rs`, and it buys nothing unless this loop actually
@@ -1816,14 +1865,23 @@ mod tests {
             "the loop reaches `recv_timeout` before it has decided whether \
              anything is held, so an idle monitor is being given a deadline"
         );
-        // **Two clocks now, and one function that answers for both.** A second
-        // deadline asked separately would be a second chance to leave one armed
-        // on an idle monitor, and the gate above can only see the branch, not
-        // what fed it.
-        assert!(
-            code.contains("input::patience(self.held, self.scrolling_until, now)"),
-            "`Shell::patience` is gone, so the two clocks are being asked              separately and nothing decides *is there a timer at all* in one place"
+        // **Three clocks now, and one function that answers for all of them.** A
+        // deadline asked separately would be another chance to leave one armed on
+        // an idle monitor, and the gate above can only see the branch, not what
+        // fed it. Matched on the arguments rather than on the whole call, because
+        // the call spans lines and a formatter deciding otherwise is not a defect
+        // this should report.
+        let asked = code.find("input::patience(").expect(
+            "`Shell::patience` is gone, so nothing decides *is there a timer at all* in one place",
         );
+        let sources = &code[asked..asked + 200.min(code.len() - asked)];
+        for clock in ["self.held", "self.scrolling_until", "ages_in"] {
+            assert!(
+                sources.contains(clock),
+                "`{clock}` is no longer among the deadlines `patience` is given, so \
+                 that clock is either armed somewhere else or has stopped: {sources}"
+            );
+        }
         assert!(
             code.contains("match shell.patience(Instant::now())"),
             "the loop no longer decides how long to wait through `Held::wait`, so \

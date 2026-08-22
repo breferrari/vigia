@@ -23,8 +23,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
-    History, Recency, scale_of,
+    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
+    HISTORY_WINDOW, History, Recency, scale_of,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -866,4 +866,75 @@ fn a_burst_at_the_newest_sample_reads_full_height() {
         "the same burst draws {a} at the window's edge against {b} in its middle, \
          so the newest write is being dimmed by the kernel running off the end"
     );
+}
+
+#[test]
+fn an_empty_window_is_never_due() {
+    // **The half of [#243](https://github.com/breferrari/vigia/issues/243) that
+    // keeps I1.** The clock the shell runs to age this window is admissible only
+    // because it stops, and what stops it is this answering `None`. Asserted on
+    // the value rather than on anything downstream, because the loop's receive
+    // branches on exactly this and a plausible-looking duration here is a poll
+    // loop on an idle monitor.
+    let mut history = History::new();
+    let start = Instant::now();
+
+    assert_eq!(
+        history.ages_in(start),
+        None,
+        "a store with nothing recorded asked to be woken"
+    );
+
+    // A write arms it, and the deadline is inside one sample: the boundary it
+    // names is the next grid line, not a whole period from now.
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+    let due = history.ages_in(start).expect("a live window asks to age");
+    assert!(
+        due > Duration::ZERO && due <= HISTORY_SAMPLE,
+        "a live window asked to wait {due:?}, which is not inside one sample of \
+         the grid it rolls on"
+    );
+
+    // **Overdue asks for zero rather than panicking**, which is the ordinary
+    // case on the first wake after the process was busy elsewhere: the roll is
+    // already late and the answer is to do it now.
+    assert_eq!(
+        history.ages_in(start + HISTORY_SAMPLE * 3),
+        Some(Duration::ZERO),
+        "a window three samples overdue did not ask to roll immediately"
+    );
+}
+
+#[test]
+fn a_drained_window_stops_asking_to_age() {
+    // **The bound, and the reason the amendment to I1 is one sentence rather
+    // than a licence to run a timer.** A burst arms the clock; the window empties
+    // `HISTORY_WINDOW` after it, and the clock has to stop with it or the budget
+    // is *some wakeups forever* rather than *at most `HISTORY_SAMPLES` after a
+    // burst*.
+    let mut history = History::new();
+    let start = Instant::now();
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+
+    // One sample short of the window it is still live, which is what makes the
+    // assertion below a boundary rather than an eventual truth.
+    history.record_sized([], start + HISTORY_WINDOW - HISTORY_SAMPLE);
+    assert!(
+        history
+            .ages_in(start + HISTORY_WINDOW - HISTORY_SAMPLE)
+            .is_some(),
+        "the window went quiet a sample early, so the graph stops moving before \
+         it has finished draining"
+    );
+
+    history.record_sized([], start + HISTORY_WINDOW);
+    assert_eq!(
+        history.ages_in(start + HISTORY_WINDOW),
+        None,
+        "a drained window is still asking to be woken, so the clock outlives \
+         everything it had to show"
+    );
+
+    // And it stays stopped, rather than stopping for one wake and resuming.
+    assert_eq!(history.ages_in(start + HISTORY_WINDOW * 2), None);
 }
