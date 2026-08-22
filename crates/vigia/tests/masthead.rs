@@ -923,71 +923,69 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
         // Sweeping panes here would double the renders and assert that gate's
         // claim a second time, which is where it belongs and not here.
         let pane = Glyphs::Block;
-        {
-            for width in [40u16, 60, 80, 109, 124] {
-                let heights = column_heights(width, series, pane);
-                let ceiling = GRAPH_ROWS * RAMP.len();
+        for width in [40u16, 60, 80, 109, 124] {
+            let heights = column_heights(width, series, pane);
+            let ceiling = GRAPH_ROWS * RAMP.len();
 
-                // **Non-vacuity first, and it is two claims.** The trace has to carry
-                // a genuinely loud event, or there is no yardstick to be dragged; and
-                // it has to carry ordinary writes after it, or there is nothing the
-                // dragging could have flattened. Both are read off the drawn band
-                // rather than off the fixture, so a projection that dropped the tail
-                // fails here rather than passing quietly.
-                assert!(
-                    heights.contains(&ceiling),
-                    "{name}, {pane:?} at {width}: nothing in the trace saturated, so \
-                     there is no loud write and this gate is about a fixture \
-                     that cannot show the defect"
-                );
-                let ordinary = heights.len() * 2 / 3;
-                assert!(
-                    heights[ordinary..].iter().any(|height| *height > 0),
-                    "{name}, {pane:?} at {width}: the newest third of the band is \
-                     empty, so the ordinary writes never reached the drawn series"
-                );
+            // **Non-vacuity first, and it is two claims.** The trace has to carry
+            // a genuinely loud event, or there is no yardstick to be dragged; and
+            // it has to carry ordinary writes after it, or there is nothing the
+            // dragging could have flattened. Both are read off the drawn band
+            // rather than off the fixture, so a projection that dropped the tail
+            // fails here rather than passing quietly.
+            assert!(
+                heights.contains(&ceiling),
+                "{name}, {pane:?} at {width}: nothing in the trace saturated, so \
+                 there is no loud write and this gate is about a fixture \
+                 that cannot show the defect"
+            );
+            let ordinary = heights.len() * 2 / 3;
+            assert!(
+                heights[ordinary..].iter().any(|height| *height > 0),
+                "{name}, {pane:?} at {width}: the newest third of the band is \
+                 empty, so the ordinary writes never reached the drawn series"
+            );
 
-                // The defect itself: nothing that was written may sit on the lowest
-                // level the band has.
-                let floored = heights.iter().filter(|height| **height == 1).count();
-                assert_eq!(
-                    floored,
-                    0,
-                    "{name}, {pane:?} at {width}: {floored} of {} columns are pinned \
-                     on the band's lowest level, which is the floor the burst \
-                     pressed them onto:\n{}",
-                    heights.len(),
-                    band_at(width, series, pane).join("\n")
-                );
+            // The defect itself: nothing that was written may sit on the lowest
+            // level the band has.
+            let floored = heights.iter().filter(|height| **height == 1).count();
+            assert_eq!(
+                floored,
+                0,
+                "{name}, {pane:?} at {width}: {floored} of {} columns are pinned \
+                 on the band's lowest level, which is the floor the burst \
+                 pressed them onto:\n{}",
+                heights.len(),
+                band_at(width, series, pane).join("\n")
+            );
 
-                // **And the shape is back, not merely off the floor**, which is a
-                // separate claim: a band lifted off the axis and drawn flat would
-                // satisfy the assertion above and still say nothing. A flat band
-                // is one or two distinct heights. Measured on the shipped rule,
-                // the reported trace draws 11 to 14 across these widths and the
-                // long burst draws 7 at the narrowest, so four is below every one
-                // of them with room and is not a number tuned to pass.
-                //
-                // Not compared against the reported picture's seven, which was
-                // measured at eighty columns: a forty-column pane has fewer
-                // sub-columns to be distinct in, so that comparison crosses
-                // widths and is not one claim.
-                //
-                // Counted off the vector already in hand rather than through
-                // `distinct_heights`, which would render the same band again.
-                let drawn = {
-                    let mut seen = heights.clone();
-                    seen.sort_unstable();
-                    seen.dedup();
-                    seen.len()
-                };
+            // **And the shape is back, not merely off the floor**, which is a
+            // separate claim: a band lifted off the axis and drawn flat would
+            // satisfy the assertion above and still say nothing. A flat band
+            // is one or two distinct heights. Measured on the shipped rule,
+            // the reported trace draws 11 to 14 across these widths and the
+            // long burst draws 7 at the narrowest, so four is below every one
+            // of them with room and is not a number tuned to pass.
+            //
+            // Not compared against the reported picture's seven, which was
+            // measured at eighty columns: a forty-column pane has fewer
+            // sub-columns to be distinct in, so that comparison crosses
+            // widths and is not one claim.
+            //
+            // Counted off the vector already in hand rather than through
+            // `distinct_heights`, which would render the same band again.
+            let drawn = {
+                let mut seen = heights.clone();
+                seen.sort_unstable();
+                seen.dedup();
+                seen.len()
+            };
 
-                assert!(
-                    drawn > 4,
-                    "{name}, {pane:?} at {width}: the band drew {drawn} distinct \
-                     heights, so it is off the floor and flat instead of on it"
-                );
-            }
+            assert!(
+                drawn > 4,
+                "{name}, {pane:?} at {width}: the band drew {drawn} distinct \
+                 heights, so it is off the floor and flat instead of on it"
+            );
         }
     }
 }
