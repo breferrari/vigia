@@ -447,7 +447,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | An agent's write is how the grammar compile arrives, and the warmer only ever ran at launch | [#129](https://github.com/breferrari/vigia/issues/129) |
 | ✅ | Follow jumps to the changed file's heading, so a change low in a long file lands off screen | [#257](https://github.com/breferrari/vigia/issues/257) |
 | ✅ | Under a level, the braille rung draws a coarser graph than the block rung | [#244](https://github.com/breferrari/vigia/issues/244) |
-| ✅ | decision: the graph does not age, and I1 forbids the clock that would age it | [#243](https://github.com/breferrari/vigia/issues/243) |
+| ✅ | decision: may the graph age, or does I1 forbid the clock that would age it. **Ruled: it ages**, on a clock that stops when the window empties | [#243](https://github.com/breferrari/vigia/issues/243) |
 | ⬜ | Build: the window ages on a clock that stops when it empties | [#277](https://github.com/breferrari/vigia/issues/277) |
 | ⬜ | One loud burst sets the band's yardstick, so a sparse window draws as spikes on a floor | [#256](https://github.com/breferrari/vigia/issues/256) |
 | ✅ | Three paint marks name a region by its first row, which a rail makes ambiguous | [#254](https://github.com/breferrari/vigia/issues/254) |
