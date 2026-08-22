@@ -534,10 +534,15 @@ impl App {
             // reason the line above does. A tick and a keystroke coalesce into
             // one batch, so a request armed by the follow can still be
             // unresolved when this runs, and resolving it afterwards draws over
-            // the row the reader just asked for. Above the match rather than in
-            // `Self::scroll`, because `n` and `p` are manual scrolls that do not
-            // go through it and at either end of the changed set they reach no
-            // jump either: they disengaged follow and kept its debt.
+            // the row the reader just asked for.
+            //
+            // **This predicate is the whole rule**, rather than a clear at each
+            // site that moves the view. `n` and `p` do not go through
+            // `Self::scroll`, and at either end of the changed set they reach no
+            // jump either; a digit and a drag on the diff's bar do go through
+            // `Self::jump_to`, and `Action::is_manual_scroll` already calls both
+            // of those a manual scroll. Every gesture that moves the viewport by
+            // a reader's intent is one of these.
             self.landing = false;
             // **And the map is handed back.** Every action that reaches here
             // moves the diff, and a reader who moves the diff is asking to see
@@ -683,10 +688,6 @@ impl App {
             // walk below reads nothing that this frame has not read already.
             Action::DiffTo(at) => {
                 self.anchored = false;
-                // The third of the three, for [`Self::scroll`]'s reason: this
-                // arm writes a position of its own, so an owed landing would
-                // draw somewhere the pointer did not put it.
-                self.landing = false;
                 let total = crate::view::diff_rows(frame)?;
                 let target = scaled(at, total.saturating_sub(height));
                 let mut seen = 0;
@@ -763,19 +764,21 @@ impl App {
     /// wrong: a viewport free to back up and fill a short tail moves the file the
     /// jump was *for* off the top row.
     ///
-    /// **[`App::landing`] is cleared for the same reason, and that is what binds
-    /// the debt to the jump that owed it.** A request outliving its jump would be
-    /// inherited by the next one: a `G` or a digit landing mid-file, which
-    /// `SPEC.md` §11.1 rules against by name for exactly those keys. Only
-    /// [`App::jump_to_newest`] re-arms it, immediately after calling this, which
-    /// is what makes follow the one jump on this map that can owe a row at all.
+    /// **[`App::landing`] is not cleared here, and a draft of this cleared it.**
+    /// The debt has to be settled by every gesture that moves the viewport, or a
+    /// `G` or a digit inherits it and lands mid-file, which `SPEC.md` §11.1 rules
+    /// against by name for exactly those keys. That is one predicate rather than
+    /// a list of sites, and `Action::is_manual_scroll` is it: every caller of
+    /// this but [`App::jump_to_newest`] is one, `ListRow` and `DiffTo` included,
+    /// so a clear here would be a second statement of a rule already made and
+    /// could never fire. Mutation testing is what said so, by leaving the whole
+    /// suite green without it.
     ///
     /// The caller picks the index, and that is the whole of what the arms differ
     /// by. Nothing here bounds it: an arm that cannot say which file it means has
     /// nothing to jump to and does not call this.
     fn jump_to(&mut self, file: usize) {
         self.anchored = false;
-        self.landing = false;
         self.position = Position { file, row: 0 };
     }
 

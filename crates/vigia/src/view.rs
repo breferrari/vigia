@@ -2115,11 +2115,21 @@ mod tests {
         // A conflict, a type change and a binary file draw a heading and one
         // line saying why. There is nowhere to land and `span_of` gives them two
         // rows, so a landing computed from hunks would point past the block.
+        //
+        // **At a height where the same diff would land**, which height one is
+        // not: there the rule's second clause returns zero for every file, so
+        // the early return was doing nothing the test could see and deleting it
+        // left the suite green. `three_hunks` lands on row 10 from an eight-row
+        // region.
+        assert_eq!(landing_of(&ChangeKind::Modified, &three_hunks(), 8), 10);
+
+        assert_eq!(landing_of(&ChangeKind::Conflict, &three_hunks(), 8), 0);
+        // A real binary diff carries no hunks either, so it reaches the same
+        // answer by the ordinary route. Pinned so that stays true.
         let mut binary = three_hunks();
         binary.binary = true;
-
-        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 1), 0);
-        assert_eq!(landing_of(&ChangeKind::Conflict, &three_hunks(), 1), 0);
+        binary.hunks.clear();
+        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 8), 0);
     }
 
     #[test]
