@@ -1593,10 +1593,16 @@ impl History {
                     // time: the total would then be smaller at a coarse rung than
                     // at a fine one, the shared sum in the proof above would stop
                     // being shared, and the ordering would fail in the exact
-                    // direction this row exists to fix. Constructible rather than
-                    // hypothetical, since a levelled bucket is a `u32` of bytes.
-                    // The accumulator was already `u64`; the widening was one
-                    // line too late.
+                    // direction this row exists to fix. The accumulator was
+                    // already `u64`; the widening was one line too late.
+                    //
+                    // **No gate reaches it and that is stated rather than
+                    // implied.** It needs four kept buckets summing past
+                    // `u32::MAX` while the mean of the chunks stays under a third
+                    // of it, which is a worktree moving gigabytes every five
+                    // seconds; reverting this line leaves the whole suite green.
+                    // It is a hazard removed rather than a defect fixed, and the
+                    // proof above is what it protects.
                     let total: u64 = chunk
                         .iter()
                         .map(|bucket| u64::from(*bucket))

@@ -992,6 +992,71 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
     }
 }
 
+/// The band divides by the store's own figure, and by nothing else.
+///
+/// **The gate that stops the yardstick's wiring drifting from its rule.** Every
+/// other band gate here reads shape: heights, floors, spans, distinct counts. All
+/// of them are satisfied by a band dividing by *some* plausible number, and a
+/// mutation proved it, walking straight through the whole file with
+/// `Painter::band` pointed back at `scale_of` over its own projection, which is
+/// the exact defect [#256](https://github.com/breferrari/vigia/issues/256)'s
+/// second half removed.
+///
+/// So this reproduces the drawer's arithmetic from `Churn::scale_at` and compares
+/// cell for cell. `Painter::band` draws `ceil(value * levels / scale)` clamped
+/// into `1..=levels` and stacks a whole ramp per row, which is three lines here;
+/// the alternative, reading the figure back out of the drawn heights, was tried
+/// and is not exact enough to assert against, since a column only bounds the
+/// scale rather than naming it.
+#[test]
+fn the_band_divides_by_the_stores_own_figure() {
+    let ceiling = GRAPH_ROWS * RAMP.len();
+    let mut compared = 0usize;
+    for series in [
+        BURST_THEN_ORDINARY,
+        LONG_BURST_THEN_ORDINARY,
+        QUARTERED,
+        wave(),
+    ] {
+        for width in [40u16, 60, 80, 109, 124] {
+            // `column_heights` is sized to the pane and carries the margin's
+            // cells as zeroes, so the band's own span is read off the axis row,
+            // which is solid since #232, and the heights are sliced to it.
+            let rows = band_at(width, series, Glyphs::Block);
+            let axis = rows.last().expect("a band row");
+            let inset = drawn_inset(axis) * Glyphs::BAND.density();
+            let slots = drawn_ink(axis) * Glyphs::BAND.density();
+            let drawn = column_heights(width, series, Glyphs::Block)[inset..inset + slots].to_vec();
+            let scale = Churn(series).scale_at(slots);
+            let values = Churn(series).levels(slots);
+            let expected: Vec<usize> = values
+                .iter()
+                .map(|value| {
+                    if scale == 0 || *value == 0 {
+                        return 0;
+                    }
+                    ((u64::from(*value) * ceiling as u64).div_ceil(u64::from(scale)) as usize)
+                        .clamp(1, ceiling)
+                })
+                .collect();
+            assert_eq!(
+                drawn, expected,
+                "at {width} columns the band drew heights that {scale} does not \
+                 produce, so it is dividing by something else"
+            );
+            // Non-vacuity: a band of all zeroes or all ceilings would match any
+            // scale of the same shape, so the fixture has to exercise the ramp.
+            assert!(
+                expected.iter().any(|level| *level > 0 && *level < ceiling),
+                "at {width} columns nothing landed mid-ramp, so this compared \
+                 nothing that could tell two yardsticks apart"
+            );
+            compared += 1;
+        }
+    }
+    assert!(compared > 0, "this gate compared nothing");
+}
+
 /// The band's yardstick does not lurch when the pane is resized by a column.
 ///
 /// **The defect this catches was introduced by
@@ -1078,6 +1143,9 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
             );
 
             let drawn = Churn(series).levels(slots);
+            // **The rule's own figure, exactly.** That the *drawer* uses it is
+            // `the_band_divides_by_the_stores_own_figure`'s claim, made cell for
+            // cell, and keeping the two apart is what lets this one be exact.
             let shipped = Churn(series).scale_at(slots);
             let unmoved = plain(&drawn);
             // What the withdrawn shape would have answered: the cut taken over
@@ -1176,8 +1244,12 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
                  nothing"
             );
             let levelled = Churn(series).levels(slots);
+            // **`Churn::scale_at`, which is what the band calls**, and not
+            // `scale_of` over the same series. The two are the whole subject of
+            // #256's second half: one cuts the samples and projects what is left,
+            // the other cuts the projection, and only the first is a no-op here.
             assert_eq!(
-                vigia_core::scale_of(levelled.iter().copied()),
+                Churn(series).scale_at(slots),
                 plain(&levelled),
                 "the outlier cut fired on a window with nothing outlying in it, \
                  at {width} columns"
