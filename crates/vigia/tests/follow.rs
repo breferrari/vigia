@@ -133,6 +133,14 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
         target,
         "the view did not move to the file that changed"
     );
+    // **And this is the other half of #257's rule**, on the fixture that has
+    // it: every block here is five rows against a fifteen-row region, so the
+    // busiest hunk is already drawn from the heading and the heading stays. A
+    // landing that fired unconditionally would cost the path, the counts, the
+    // sigil and the heat strip to show the reader rows they could already see,
+    // and it would turn this assertion red. Both sides of the edge it turns on
+    // are gated exactly in `view.rs`'s
+    // `a_busiest_hunk_already_on_screen_keeps_the_heading`.
     assert_eq!(
         app.position().row,
         0,
@@ -485,7 +493,14 @@ fn tall(name: &str) -> Scratch {
     scratch.write(TALL, support::numbered_lines(TALL_LINES));
     scratch.commit_all("baseline");
 
-    let mut lines: Vec<String> = (1..=TALL_LINES).map(|i| format!("line {i}")).collect();
+    // Split from the same helper the baseline was written with, rather than
+    // re-spelled. Two definitions of one format sitting a line apart is one
+    // change to `numbered_lines` away from making this a whole-file rewrite,
+    // which would still be a diff and would no longer be this fixture.
+    let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
+        .lines()
+        .map(str::to_owned)
+        .collect();
     for at in TWEAKS {
         lines[at] = format!("line {} rewritten", at + 1);
     }
@@ -590,34 +605,6 @@ fn following_a_tall_file_lands_on_its_busiest_change() {
 }
 
 #[test]
-fn following_a_file_that_fits_keeps_its_heading() {
-    // The other half of the rule, and the half that keeps every gate above
-    // honest: a block the pane can hold draws its change already, so moving the
-    // heading off the top row would cost the path, the counts, the sigil and the
-    // heat strip to show the reader rows they could already see.
-    let scratch = fixture("shell-follow-fits");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    frame.advance().expect("advance");
-    let mut app = App::new();
-    let mut highlighter = Highlighter::eager();
-    let history = History::new();
-
-    let target = path_at(&frame, TARGET);
-    assert!(app.follow(&target, &frame), "the view did not move at all");
-
-    assert_eq!(
-        top_file(&mut app, &mut frame, &mut highlighter, &history),
-        target
-    );
-    assert_eq!(
-        app.position().row,
-        0,
-        "a file that fits was scrolled anyway, so its heading is off screen"
-    );
-}
-
-#[test]
 fn a_landing_resolves_once_and_the_next_frame_does_not_move_it() {
     // The defect class `SPEC.md` §11.1 keeps ruling against is a row moving
     // under a reader. A landing is resolved by the frame that draws it, so the
@@ -712,4 +699,50 @@ fn landing_on_a_change_costs_no_extra_diff() {
         landing.read, plain.read,
         "the landing asked the frame for more files than the screen draws"
     );
+}
+
+#[test]
+fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
+    // **A tick and a keystroke coalesce into one batch**, so a landing armed by
+    // the follow can still be unresolved when a reader's own gesture runs. The
+    // request is settled by every gesture that writes a position, or the frame
+    // after it draws over the row the reader just asked for, and a request that
+    // outlived its jump would be inherited by the next one: `SPEC.md` §11.1
+    // rules that `G`, the digits and `n`/`p` land on a heading, and a debt left
+    // armed makes them land mid-file instead.
+    //
+    // Driven with no view between the follow and the gesture, which is the state
+    // the drain produces and the only one where the debt is still outstanding.
+    let scratch = tall("shell-follow-settled");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let layout = tall_layout(&App::new());
+
+    for (name, action, expected) in [
+        // A jump: `g` is one of the keys §11.1 gives the heading.
+        ("g", Action::Top, 0),
+        // A scroll: the reader asked for exactly one row.
+        ("a scroll", Action::Scroll(1), 1),
+    ] {
+        let mut app = App::new();
+        assert!(app.follow(TALL, &frame), "the follow did not arm anything");
+        app.apply(action, &mut frame, layout.diff).expect("apply");
+
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, layout)
+            .expect("view");
+
+        assert!(
+            !view.landed,
+            "{name} left the landing owed, so the frame after it resolves one"
+        );
+        assert_eq!(
+            app.position().row,
+            expected,
+            "{name} was overridden by a landing the follow before it armed"
+        );
+    }
 }

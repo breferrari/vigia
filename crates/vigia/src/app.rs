@@ -647,6 +647,10 @@ impl App {
             // walk below reads nothing that this frame has not read already.
             Action::DiffTo(at) => {
                 self.anchored = false;
+                // The third of the three, for [`Self::scroll`]'s reason: this
+                // arm writes a position of its own, so an owed landing would
+                // draw somewhere the pointer did not put it.
+                self.landing = false;
                 let total = crate::view::diff_rows(frame)?;
                 let target = scaled(at, total.saturating_sub(height));
                 let mut seen = 0;
@@ -720,11 +724,19 @@ impl App {
     /// wrong: a viewport free to back up and fill a short tail moves the file the
     /// jump was *for* off the top row.
     ///
+    /// **[`App::landing`] is cleared for the same reason, and that is what binds
+    /// the debt to the jump that owed it.** A request outliving its jump would be
+    /// inherited by the next one: a `G` or a digit landing mid-file, which
+    /// `SPEC.md` §11.1 rules against by name for exactly those keys. Only
+    /// [`App::jump_to_newest`] re-arms it, immediately after calling this, which
+    /// is what makes follow the one jump on this map that can owe a row at all.
+    ///
     /// The caller picks the index, and that is the whole of what the arms differ
     /// by. Nothing here bounds it: an arm that cannot say which file it means has
     /// nothing to jump to and does not call this.
     fn jump_to(&mut self, file: usize) {
         self.anchored = false;
+        self.landing = false;
         self.position = Position { file, row: 0 };
     }
 
@@ -785,6 +797,13 @@ impl App {
     /// callers set it.
     fn scroll(&mut self, rows: isize, frame: &mut Frame) -> Result<()> {
         self.anchored = true;
+        // **A reader's own scroll settles an owed landing**, the way a jump does
+        // in [`Self::jump_to`]. A tick and a keystroke can coalesce into one
+        // batch, so a request armed by the follow above can still be unresolved
+        // when this runs, and a frame that then resolved it would draw over the
+        // row the reader had just asked for. Beside `anchored` because these are
+        // the three places a viewport is moved by anything but a resolution.
+        self.landing = false;
         match rows.cmp(&0) {
             std::cmp::Ordering::Equal => Ok(()),
             std::cmp::Ordering::Greater => {

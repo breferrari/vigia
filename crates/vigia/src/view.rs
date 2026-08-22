@@ -27,8 +27,8 @@
 //! assembled by hand is the only version of one a snapshot test can reach.
 
 use vigia_core::{
-    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, LineKind, Pass, Recency,
-    Result, SPARK_GROUPS, Span,
+    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Pass,
+    Recency, Result, SPARK_GROUPS, Span,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -657,11 +657,20 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
     if note_for(kind, diff).is_some() {
         return 2;
     }
-    1 + diff
-        .hunks
-        .iter()
-        .map(|hunk| 1 + hunk.lines.len())
-        .sum::<usize>()
+    1 + diff.hunks.iter().map(hunk_span).sum::<usize>()
+}
+
+/// Rows one hunk occupies: its `@@` header and then its lines.
+///
+/// **Named because three places count it**, and [`gap_rows`] one function down
+/// records what happens when a quantity is spelled at each site instead: it
+/// drifted from the doc naming the sites, twice, on this branch. [`span_of`]
+/// sums it, [`View::take_file`] steps over a hunk above the window with it, and
+/// [`landing_of`] walks to a hunk's header row with it. All three want the same
+/// number by the same route, unlike [`span_of`] and [`rows_of`], which are twins
+/// precisely because their routes differ.
+fn hunk_span(hunk: &Hunk) -> usize {
+    1 + hunk.lines.len()
 }
 
 /// The blank row closing the block of the file at `index`, as a count.
@@ -764,7 +773,7 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize) -> usize {
             busiest = changed;
             landing = row;
         }
-        row += 1 + hunk.lines.len();
+        row += hunk_span(hunk);
     }
 
     // Already drawn from the heading, so the jump would cost the heading and
@@ -1061,10 +1070,16 @@ impl View {
                 // written in the last two seconds by design, and the file being
                 // followed is always inside that margin.
                 //
-                // Once, on the file the request was made against. `landed` is
+                // Once, and on the file the request was made against without
+                // having to test for it: a landing is only ever asked for by
+                // [`crate::App::jump_to_newest`], which goes through
+                // `App::jump_to` and so always asks with **row zero**. A walk
+                // that starts on row zero cannot skip a file whole before it
+                // places, since `block_of` is never less than one, so the first
+                // iteration is the requested file by construction. `landed` is
                 // what stops the restart below resolving it a second time, and
                 // what tells the caller it may forget the request.
-                if landing && !view.landed && index == view.top.file {
+                if landing && !view.landed {
                     skip = landing_of(&change.kind, diff, height);
                     view.landed = true;
                 }
@@ -1501,14 +1516,26 @@ impl View {
         // rather than asking twice"* is the rule, and it was true only while the
         // heading happened to be drawn.
         //
-        // It costs one [`entry_of`] — two hash probes and a clone, no read and
-        // no `stat` — for at most one file per frame, because `skip` is zeroed
-        // after the first file the walk places.
+        // **What it costs, stated at its real size.** [`entry_of`] is two
+        // history probes and a clone *plus* [`heat_of`], which walks every line
+        // of every hunk in the file, so this is an O(diff) walk rather than a
+        // hash lookup. It is still the right trade and the two halves are not
+        // the same size: what it replaces is a `Frame::diff`, which inside the
+        // settle margin re-reads the file from disk and allocates a `String` per
+        // line, and outside it is a `stat` and a cache hit. So the margin, which
+        // is where the followed file always is, saves a read; a settled tree
+        // pays a walk over lines already in memory instead of a syscall.
+        //
+        // **Exactly one extra per walk**, because `skip` is zeroed after the
+        // first file this places: every earlier file was skipped whole without
+        // reaching here, and every later one draws its heading.
         let entry = entry_of(kind, diff, history);
-        drawn.push((index, entry.clone()));
         if n >= skip {
-            self.rows.push(Row::file(entry));
+            self.rows.push(Row::file(entry.clone()));
         }
+        // Moved rather than cloned, so the file whose heading is above the
+        // window pays no allocation for a row it does not draw.
+        drawn.push((index, entry));
         n += 1;
 
         // **A labelled block so the block's closing gap has one push site.**
@@ -1537,7 +1564,7 @@ impl View {
                 // A hunk entirely above the window costs one addition. The
                 // line numbers restart from the next hunk's header, so nothing
                 // has to be carried across the ones that are skipped.
-                let span = 1 + hunk.lines.len();
+                let span = hunk_span(hunk);
                 if n + span <= skip {
                     n += span;
                     continue;
@@ -1629,7 +1656,7 @@ mod tests {
     //! outside its crate anyway, so a `FileDiff` built by hand is the only
     //! version of one these can reach. `SPEC.md` §7 names this shape.
 
-    use vigia_core::{Hunk, Line};
+    use vigia_core::Line;
 
     use super::*;
 
