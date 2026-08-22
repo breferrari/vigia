@@ -631,6 +631,10 @@ impl Churn {
     ///
     /// **The cut never reaches a bar.** This decides the denominator; the
     /// numerator is [`Self::levels`], which keeps every sample it was given.
+    ///
+    /// Zero at width zero, which is the one way a non-empty window answers with
+    /// no scale: there are no columns to take a mean over. Every caller already
+    /// reads zero as "no scale yet".
     pub fn scale_at(&self, width: usize) -> u32 {
         let levelled = levelled(&self.0);
         let mut busy: Vec<u32> = levelled.iter().copied().filter(|v| *v > 0).collect();
@@ -675,20 +679,26 @@ impl Churn {
 /// the outlier this rule exists to let saturate was setting the denominator from
 /// inside it.
 ///
-/// **Shared by both glance elements, which is why it lives here.** The churn band
-/// and the per-file sparkline divide by different quantities, worktree-wide and
-/// per-file, and that asymmetry is `SPEC.md` §11.1's ruling. What they must not
-/// disagree about is the *rule*, and it existed in the renderer for one of them
-/// before this: the band was fixed where the symptom was reported and the
-/// sparkline kept dividing by a maximum over the same byte samples.
+/// **The rule is shared by both glance elements, which is why it lives in this
+/// crate.** The churn band and the per-file sparkline divide by different
+/// quantities, worktree-wide and per-file, and what they may not disagree about
+/// is the rule. It existed in the renderer for one of them before
+/// [#232](https://github.com/breferrari/vigia/issues/232): the band was fixed
+/// where the symptom was reported and the sparkline kept dividing by a maximum
+/// over the same byte samples.
+///
+/// **Neither of them reaches it through *this function* any more**, and that is
+/// worth saying where a reader will edit it. Both aggregate before they draw, so
+/// both take the cut before they aggregate: the band through [`Churn::scale_at`]
+/// and the sparkline through [`History::repeak`], each reaching `outlier_cut` and
+/// `scale_from` directly. What is left here is the rule over a single population,
+/// which is what the suite exercises and what a caller with no projection wants.
 ///
 /// **This entry point materialises the non-empty values, and it used to be
 /// written so it need not.** A median cannot be taken from a running pair, so the
 /// iterator is collected here. The caller that sentence was written for is
 /// [`History::repeak`], which walks every bucket of every tracked path on the
-/// frame path; it no longer comes through here at all, but through
-/// [`scale_of_busy`] over a scratch it keeps between ticks. What is left on this
-/// path is one drawn series, which the band already holds as a `Vec` anyway.
+/// frame path and keeps a scratch between ticks instead.
 ///
 /// Zero when nothing is in the window at all, which every caller reads as "no
 /// scale yet".
@@ -706,8 +716,8 @@ pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
 /// the burst, and every ordinary edit lands on the lowest of the band's sixteen
 /// levels, which at the baseline row is `▁` and is not distinguishable from the
 /// axis at a glance. Measured at 80 columns on a trace shaped like the report:
-/// **36 of 76 columns pinned there, 7 distinct heights**, against 0 and 13 with
-/// this cut.
+/// **36 of 76 columns pinned there, 7 distinct heights**, against none pinned and
+/// 11 to 14 with this cut, across the widths the suite measures.
 ///
 /// **A fixed window is what makes a robust statistic necessary rather than
 /// optional.** An estimator that follows the present can let a burst age out of
@@ -718,18 +728,22 @@ pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
 ///
 /// **Ten, and the interval it sits in the middle of was measured** rather than
 /// chosen. Sweeping this constant from 2 to 40 at five pane widths over ten
-/// fixtures gives a safe band of `[8, 12]`, and both ends bind on a named
+/// fixtures gives a safe band of `[8, 17]`, and both ends bind on a named
 /// fixture:
 ///
 /// - Below **8**, a window with a legitimate dynamic range stops drawing what it
 ///   drew before. `masthead.rs`'s `QUARTERED`, a deliberate 4:1 series, is the
 ///   binding one and moves at 7 at 60 and 109 columns.
-/// - Above **12**, the floor comes back on a burst filling a third of the window.
+/// - Above **17**, the floor comes back on a burst filling a third of the window.
 ///   A burst of forty samples over ordinary edits is the binding one and the
-///   floor returns at 13 at 40 and 80 columns.
+///   floor returns at 18.
 ///
-/// So ten has two of margin either side, and the endpoints are here so the next
-/// reader can re-derive them rather than trust them.
+/// So ten has two of margin below and seven above, and the endpoints are here so
+/// the next reader can re-derive them rather than trust them. **The band widened
+/// between two shapes of this row**: cutting the projection measured `[8, 12]`,
+/// of which ten is the midpoint, and taking the cut before the projection raised
+/// the ceiling without moving the floor. Ten is kept where the tighter
+/// measurement put it, which is the conservative end of the band it has now.
 ///
 /// **A cut against the median rather than against the mean, and that is the load
 /// bearing half.** The mean is itself corrupted by the tail, so a multiple of it
@@ -741,12 +755,13 @@ const SCALE_OUTLIER: u64 = 10;
 
 /// [`scale_of`] over a scratch of the **non-empty** values, which it reorders.
 ///
-/// **The whole rule in one place, for a caller that has its population in
-/// hand.** [`History::repeak`] is not such a caller and does not come through
-/// here: it takes the cut once over every tracked path and then spends it three
-/// times, once per [`SPARK_GROUPS`] entry, so it reaches `outlier_cut` and
-/// `scale_from` separately. This is the band's route and the public
-/// [`scale_of`]'s.
+/// **The whole rule in one place, for a caller that has its population in hand
+/// and no projection to disagree about.** Neither drawn element is such a caller.
+/// [`History::repeak`] takes the cut once over every tracked path and spends it
+/// three times, once per [`SPARK_GROUPS`] entry; [`Churn::scale_at`] takes it
+/// over the window and spends it on whatever the pane draws. Both reach
+/// `outlier_cut` and `scale_from` directly, so this is the public [`scale_of`]'s
+/// route and nothing else's.
 fn scale_of_busy(busy: &mut [u32]) -> u32 {
     let Some(cut) = outlier_cut(busy) else {
         return 0;
@@ -799,10 +814,11 @@ fn outlier_cut(busy: &mut [u32]) -> Option<u64> {
 /// not carry a second copy of the factor.
 fn scale_from(sum: u64, kept: u64) -> u32 {
     if kept == 0 {
-        // An empty population, which is the only route here with nothing kept:
-        // `outlier_cut` answers `None` for one and every non-empty population
-        // keeps its own median. Zero is what every caller reads as "no scale
-        // yet", so this is the contract rather than a guard against the cut.
+        // Nothing to average. The cut never causes it, because `outlier_cut`
+        // answers `None` for an empty population and every non-empty one keeps
+        // its own median; what does is a caller with no columns to measure, which
+        // is [`Churn::scale_at`] at width zero. Zero is what every caller reads
+        // as "no scale yet".
         return 0;
     }
     // Thirteen tenths: above the mean, so an ordinary write does not sit at the
