@@ -114,4 +114,28 @@ impl Samples {
             .iter()
             .fold(Duration::ZERO, |sum, each| sum.saturating_add(*each))
     }
+
+    /// How much of this round sat **above** `budget`, summed over the samples
+    /// that exceeded it.
+    ///
+    /// The companion to [`Self::total`], and it exists because attributing a
+    /// breach to the host needs both sides of the comparison in the same units.
+    /// A round's off-CPU time is a sum over every sample; the thing it has to
+    /// explain is therefore also a sum, not one sample's excess. Comparing the
+    /// sum against a single percentile's overshoot drifts toward acquittal as
+    /// the sample count rises, because ordinary per-frame scheduling noise
+    /// accumulates while the per-frame overshoot does not
+    /// ([#269](https://github.com/breferrari/vigia/issues/269)).
+    ///
+    /// Samples at or under `budget` contribute nothing, so a round that is
+    /// entirely inside budget returns zero and a single slow frame contributes
+    /// exactly its own excess. Saturating for the same reason [`Self::total`]
+    /// is.
+    pub fn excess_over(&self, budget: Duration) -> Duration {
+        self.values[..self.len()]
+            .iter()
+            .fold(Duration::ZERO, |sum, each| {
+                sum.saturating_add(each.saturating_sub(budget))
+            })
+    }
 }

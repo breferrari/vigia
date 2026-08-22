@@ -42,9 +42,9 @@ use vigia_core::{
 };
 
 use support::{
-    PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta,
-    exclusively_timed, generated, highlight_delta, holds_p99, holds_p99_rounds, prose_generated,
-    settle, settle_spans, time, time_cpu, timed_cpu,
+    PROSE_EXT, PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget,
+    delta, exclusively_timed, generated, highlight_delta, holds_p99, holds_p99_rounds,
+    prose_generated, settle, settle_spans, time, time_cpu, timed_cpu,
 };
 
 /// I9: steady-state frame time.
@@ -1842,7 +1842,7 @@ const PROSE_LINES: usize = 200;
 /// about a gate that goes red without saying what moved.
 #[test]
 fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
-    let Some(parsed) = prose_frame(WIDE_EXT) else {
+    let Some(parsed) = prose_frame(PROSE_EXT) else {
         return;
     };
     let Some(plain) = prose_frame(WIDE_UNPARSED_EXT) else {
@@ -1872,7 +1872,7 @@ fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
         parsed.lines,
     );
 
-    holds_p99(
+    holds_p99_rounds(
         &format!("I9: a frame over Markdown prose carrying {PROSE_SPANS} code spans a line"),
         budget(I9_FRAME),
         &parsed.samples,
@@ -1882,20 +1882,33 @@ fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
                 parsed.parsed, parsed.lines,
             )
         },
-        // Re-measured on a breach the way every gate here is, so one scheduling
-        // artefact on a shared runner does not fail the build.
-        || prose_frame(WIDE_EXT).map(|r| r.last).unwrap_or_default(),
+        // **A whole run rather than a frame, and the difference is not
+        // cosmetic.** `holds_p99` calls its closure once per sample, which is
+        // right when a sample is one frame of an already-built fixture. Here a
+        // sample cannot be produced alone: `prose_frame` builds a git fixture,
+        // settles it and runs 50 warmup frames before the first sampled one.
+        // Wired through `holds_p99` this gate re-measured by running that whole
+        // sequence 250 times, which is 250 fixtures and over 20 minutes to
+        // produce 250 frames that were each the *first* sampled frame of a cold
+        // run. Observed, not reasoned about: a breaching round hung for 23
+        // minutes before it was killed. `hold_the_scroll_budget` uses this
+        // variant for the identical reason.
+        || {
+            let again = prose_frame(PROSE_EXT)
+                .expect("the re-measure skipped the absolute tier the first round ran");
+            (again.samples, Some(again.cpu))
+        },
     );
 }
 
 /// One prose arm: what a frame costs over `ext`, and what the highlighter did.
 struct ProseRun {
     samples: Samples,
+    /// The same frames in thread CPU time, for the reason [`Scrolled`] carries
+    /// one: contention inflates a wall clock and cannot inflate this.
+    cpu: Samples,
     parsed: u64,
     lines: u64,
-    /// Wall and CPU, because `holds_p99`'s re-measure closure takes the pair
-    /// that `time_cpu` returns rather than the wall clock alone.
-    last: (Duration, Duration),
 }
 
 /// Drive I9's own shape over the prose fixture and measure it.
@@ -1959,10 +1972,11 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
 
     let before = highlighter.stats();
     let mut samples = Samples::new(SAMPLED_FRAMES);
-    let mut last = (Duration::default(), Duration::default());
+    let mut cpu = Samples::new(SAMPLED_FRAMES);
     for _ in 0..SAMPLED_FRAMES {
-        last = next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
-        samples.push(last.0);
+        let (wall, thread) = next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
+        samples.push(wall);
+        cpu.push(thread);
     }
     let cost = highlight_delta(before, highlighter.stats());
 
@@ -1979,8 +1993,8 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
 
     Some(ProseRun {
         samples,
+        cpu,
         parsed: cost.parsed,
         lines: cost.lines,
-        last,
     })
 }

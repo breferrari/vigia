@@ -212,13 +212,6 @@ fn the_prose_fixture_is_the_shape_it_says_it_is() {
         "a prose line contains a pipe: {line:?}. The whole fixture is lines that \
          can never be a table row, so a pipe here makes it ordinary content"
     );
-
-    // And it must actually resolve as Markdown, or the parse under test never
-    // happens and the gate measures an unhighlighted file.
-    assert_eq!(
-        WIDE_EXT, "md",
-        "the prose fixture is written with WIDE_EXT, which is no longer Markdown"
-    );
 }
 
 #[test]

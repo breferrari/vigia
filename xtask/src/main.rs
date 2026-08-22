@@ -156,6 +156,9 @@ fn main() {
 /// **Both, not one.** Alternation binds loosest, so a single guard after the
 /// group opening covers only the first branch and buys nothing: tried, and
 /// measured at 13.56ms against 12.995ms, which is no change at all.
+const GUARD: &str = r"(?=[^|\n]*\|)";
+
+/// The two alternatives, each paired with itself-plus-[`GUARD`].
 const TABLE_ANCHORS: [(&str, &str); 2] = [
     (
         "|    (?x:\n    (?:(?x:",
@@ -208,6 +211,26 @@ fn guard_markdown_tables(
                         let guarded = TABLE_ANCHORS
                             .iter()
                             .fold(regex.to_string(), |acc, (from, to)| acc.replace(from, to));
+                        // **The rewrite must be a pure insertion, and this is
+                        // the only place that can prove it.** Each entry of
+                        // TABLE_ANCHORS restates the whole anchor alongside the
+                        // guard, so a mistranscribed replacement would alter the
+                        // pattern in some further way and nothing downstream
+                        // would notice: `coverage.rs` builds its control arm by
+                        // deleting the guard from the *shipped* dump, so any
+                        // other change the replacement made is present in both
+                        // of its arms and compares equal. That gate proves the
+                        // guard is inert against itself; this assertion is what
+                        // makes it inert against `two-face`, by pinning the
+                        // guarded form to the upstream string it came from while
+                        // that string is still in hand.
+                        assert_eq!(
+                            guarded.replace(GUARD, ""),
+                            regex,
+                            "the table rewrite changed the pattern by more than \
+                             inserting the guard, so it is not the performance-only \
+                             edit SPEC.md section 6 rules it to be"
+                        );
                         m.regex = Regex::new(guarded);
                         rewritten += 1;
                     }

@@ -1139,34 +1139,8 @@ fn exactly_one_pattern_carries_the_table_guard_twice() {
 /// mismatch rather than as a uniform absence.
 #[test]
 fn the_guarded_grammar_highlights_identically() {
-    use syntect::parsing::{ParseState, ScopeStack};
-
     let guarded = embedded();
-
-    // The same set with the guard removed: what shipped before this rewrite.
-    let mut unguarded = syntect::parsing::SyntaxSetBuilder::new();
-    let mut stripped = 0;
-    for syntax in guarded.clone().into_builder().syntaxes() {
-        let mut syntax = syntax.clone();
-        for context in syntax.contexts.values_mut() {
-            for pattern in context.patterns.iter_mut() {
-                if let Pattern::Match(m) = pattern {
-                    let regex = m.regex.regex_str();
-                    if regex.contains(TABLE_GUARD) {
-                        stripped += regex.matches(TABLE_GUARD).count();
-                        m.regex = Regex::new(regex.replace(TABLE_GUARD, ""));
-                    }
-                }
-            }
-        }
-        unguarded.add(syntax);
-    }
-    let unguarded = unguarded.build();
-    assert_eq!(
-        stripped, 2,
-        "the control arm removed {stripped} guards, so it is not the unguarded \
-         grammar and this comparison is between two identical sets",
-    );
+    let unguarded = unguarded();
 
     let corpus: &[(&str, &str, &str)] = &[
         (
@@ -1214,30 +1188,10 @@ fn the_guarded_grammar_highlights_identically() {
         ),
     ];
 
-    let stream = |set: &SyntaxSet, ext: &str, body: &str| -> Vec<String> {
-        let syntax = set
-            .find_syntax_by_extension(ext)
-            .expect("the corpus names an extension the dump carries");
-        let mut state = ParseState::new(syntax);
-        let mut stack = ScopeStack::new();
-        let mut ops = Vec::new();
-        for line in body.lines() {
-            for (offset, op) in state
-                .parse_line(line, set)
-                .expect("the corpus parses under the shipped engine")
-            {
-                ops.push(format!("{offset}:{op:?}"));
-                stack.apply(&op).expect("the op stream is well formed");
-            }
-            ops.push(format!("|{}", stack.scopes.len()));
-        }
-        ops
-    };
-
     let mut failures = Vec::new();
     for (name, ext, body) in corpus {
-        let before = stream(&unguarded, ext, body);
-        let after = stream(&guarded, ext, body);
+        let before = op_stream(&unguarded, ext, body);
+        let after = op_stream(&guarded, ext, body);
         if before != after {
             let at = before.iter().zip(&after).position(|(a, b)| a != b);
             failures.push(format!(
@@ -1264,69 +1218,24 @@ fn the_guarded_grammar_highlights_identically() {
 /// from.
 ///
 /// **Capped at [`FIDELITY_LINES`] lines per file, and the cap is not free
-/// coverage.** The control arm is the *unguarded* grammar, which is the slow
-/// one by construction, so this gate pays the full pre-fix cost twice over in
-/// an unoptimised test binary: uncapped it ran 82s, which is the kind of number
-/// that gets a suite reached for less often. What the cap drops is the tail of
-/// each file, so a pathological shape written below the cap line is not
-/// covered here. The hand-written corpus above is what covers shapes by kind;
-/// this one covers them by volume.
+/// coverage.** The control arm is the *unguarded* grammar, which is the slow one
+/// by construction, so this gate pays the full pre-fix cost twice over in an
+/// unoptimised test binary: uncapped it ran 82s, which is the kind of number
+/// that gets a suite reached for less often. At 250 it compares 1,156 lines of
+/// the 2,977 these files hold, so **the tail of every file over 250 lines is not
+/// covered here** and a pathological shape written below that line would be
+/// missed. The hand-written corpus covers shapes by kind; this one covers them
+/// by volume, and neither covers the other's blind spot.
 #[test]
 fn the_repositorys_own_markdown_parses_identically_under_the_guard() {
-    use syntect::parsing::{ParseState, ScopeStack};
-
     if !in_repository() {
         return;
     }
 
     let guarded = embedded();
-    let mut unguarded = syntect::parsing::SyntaxSetBuilder::new();
-    let mut stripped = 0;
-    for syntax in guarded.clone().into_builder().syntaxes() {
-        let mut syntax = syntax.clone();
-        for context in syntax.contexts.values_mut() {
-            for pattern in context.patterns.iter_mut() {
-                if let Pattern::Match(m) = pattern {
-                    let regex = m.regex.regex_str();
-                    if regex.contains(TABLE_GUARD) {
-                        stripped += regex.matches(TABLE_GUARD).count();
-                        m.regex = Regex::new(regex.replace(TABLE_GUARD, ""));
-                    }
-                }
-            }
-        }
-        unguarded.add(syntax);
-    }
-    let unguarded = unguarded.build();
-
-    // **Without this the gate passes on a dump that was never rewritten**, and
-    // it did: against the pre-fix dump the control arm strips nothing, both
-    // arms are the same set, and every file compares equal. A fidelity check
-    // that cannot tell "identical because the guard is sound" from "identical
-    // because there is no guard" is measuring its own reconstruction.
-    assert_eq!(
-        stripped, 2,
-        "the control arm removed {stripped} guards, so it is not the unguarded \
-         grammar and this comparison is between two identical sets",
-    );
+    let unguarded = unguarded();
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let stream = |set: &SyntaxSet, body: &str| -> Vec<String> {
-        let syntax = set
-            .find_syntax_by_extension("md")
-            .expect("Markdown is in the dump");
-        let mut state = ParseState::new(syntax);
-        let mut stack = ScopeStack::new();
-        let mut ops = Vec::new();
-        for line in body.lines() {
-            for (offset, op) in state.parse_line(line, set).expect("the file parses") {
-                ops.push(format!("{offset}:{op:?}"));
-                stack.apply(&op).expect("the op stream is well formed");
-            }
-        }
-        ops
-    };
-
     let mut failures = Vec::new();
     let mut total = 0;
     for name in [
@@ -1344,8 +1253,8 @@ fn the_repositorys_own_markdown_parses_identically_under_the_guard() {
             .take(FIDELITY_LINES)
             .collect::<Vec<_>>()
             .join("\n");
-        let before = stream(&unguarded, &body);
-        let after = stream(&guarded, &body);
+        let before = op_stream(&unguarded, "md", &body);
+        let after = op_stream(&guarded, "md", &body);
         total += after.len();
         if before != after {
             let at = before.iter().zip(&after).position(|(a, b)| a != b);
@@ -1363,4 +1272,85 @@ fn the_repositorys_own_markdown_parses_identically_under_the_guard() {
         "only {total} ops compared, so the corpus is not loaded and this gate \
          is passing on nothing",
     );
+}
+
+/// The shipped dump with [`TABLE_GUARD`] deleted: what shipped before the
+/// rewrite, reconstructed from what ships now.
+///
+/// **Reconstructed rather than recorded, and that is a deliberate trade with a
+/// known limit.** A recorded hash of the expected op stream would pin today's
+/// `two-face` and go red on every upgrade whether or not the guard was still
+/// sound, and a gate that cries on unrelated changes is one somebody eventually
+/// re-records without reading.
+///
+/// The limit is that this control is derived from the same artefact it checks,
+/// so it can only prove the guard is inert **relative to the guarded dump**. Any
+/// further change the rewrite made would sit in both arms and compare equal.
+/// What closes that hole is upstream, in `xtask`, which asserts that deleting
+/// the guard from its rewritten pattern yields the `two-face` string byte for
+/// byte before it writes the dump at all. The two together are what make this
+/// non-circular; neither is sufficient alone.
+///
+/// # Panics
+///
+/// Unless exactly two guards were removed. Without this the gate passes on a
+/// dump that was never rewritten, and it did: against the pre-fix dump the
+/// control strips nothing, both arms are the same set, and every corpus
+/// compares equal. A fidelity check that cannot tell "identical because the
+/// guard is sound" from "identical because there is no guard" is measuring its
+/// own reconstruction.
+fn unguarded() -> SyntaxSet {
+    let mut builder = syntect::parsing::SyntaxSetBuilder::new();
+    let mut stripped = 0;
+    for syntax in embedded().into_builder().syntaxes() {
+        let mut syntax = syntax.clone();
+        for context in syntax.contexts.values_mut() {
+            for pattern in context.patterns.iter_mut() {
+                if let Pattern::Match(m) = pattern {
+                    let regex = m.regex.regex_str();
+                    if regex.contains(TABLE_GUARD) {
+                        stripped += regex.matches(TABLE_GUARD).count();
+                        m.regex = Regex::new(regex.replace(TABLE_GUARD, ""));
+                    }
+                }
+            }
+        }
+        builder.add(syntax);
+    }
+    assert_eq!(
+        stripped, 2,
+        "the control arm removed {stripped} guards, so it is not the unguarded \
+         grammar and every comparison against it is between two identical sets",
+    );
+    builder.build()
+}
+
+/// Every `(offset, ScopeStackOp)` `set` produces for `body`, plus the scope
+/// depth after each line.
+///
+/// The depth marker is why this is one function rather than two closures. It
+/// was dropped from the second of the two copies this replaced, so the gate
+/// over this repository's own Markdown was comparing strictly fewer signals
+/// than the one over the hand-written corpus — weaker by accident rather than
+/// by decision, and invisible because both were green.
+fn op_stream(set: &SyntaxSet, ext: &str, body: &str) -> Vec<String> {
+    use syntect::parsing::{ParseState, ScopeStack};
+
+    let syntax = set
+        .find_syntax_by_extension(ext)
+        .expect("the corpus names an extension the dump carries");
+    let mut state = ParseState::new(syntax);
+    let mut stack = ScopeStack::new();
+    let mut ops = Vec::new();
+    for line in body.lines() {
+        for (offset, op) in state
+            .parse_line(line, set)
+            .expect("the corpus parses under the shipped engine")
+        {
+            ops.push(format!("{offset}:{op:?}"));
+            stack.apply(&op).expect("the op stream is well formed");
+        }
+        ops.push(format!("|{}", stack.scopes.len()));
+    }
+    ops
 }

@@ -264,12 +264,35 @@ pub fn holds_p99_rounds(
     // samples that made the tail.
     if let Some(cpu) = cpu.as_ref() {
         let deficit = again.total().saturating_sub(cpu.total());
+        // What the deficit has to explain: the round's own excess, in the same
+        // units as the deficit. The p99 overshoot is still reported alongside it,
+        // because it is the number the budget is written in and the one a reader
+        // is looking for, but it is no longer what decides.
+        let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
-        if deficit >= overshoot {
+        // **Both sides are sums over the round, and that is the whole
+        // correction.** This compared `deficit`, a whole round's off-CPU time,
+        // against a single frame's excess over budget. Over a long round the
+        // ordinary per-frame scheduling noise sums to more than one frame's
+        // overshoot, so the test drifted toward "the host did it" as the sample
+        // count rose, independent of what the code was doing. Caught by #261's
+        // prose gate, which could not fail on the defect it exists to catch: a
+        // real 109.09ms p99 against a 16ms budget, with a 104.51ms p50 and a
+        // grammarless control arm at 0.44ms proving the parse, was excused by
+        // 107.92ms of deficit summed over 250 frames.
+        //
+        // Asking it of the *round's* excess keeps every shape the old form got
+        // right and fixes the one it did not. A sustained stall still acquits,
+        // because 500ms of wall against 1ms of work on every sample leaves a
+        // deficit that covers the excess it produced. A single stalled frame
+        // still acquits, because it contributes only its own excess. Work does
+        // not, at any sample count, because work leaves no deficit to spend.
+        if deficit >= excess {
             eprintln!(
                 "note: {claim} was over the {budget:?} budget on wall clock twice \
                  ({one} then {two}) and the round spent {deficit:?} **off-CPU**, \
-                 which covers the {overshoot:?} it went over by, so the overshoot is \
+                 which covers the {excess:?} the round spent over budget in total \
+                 (p99 alone was {overshoot:?} over), so the overshoot is \
                  time this process was not running rather than work it did. Reported \
                  and not failed, and that is the whole of #178's weakening. {}",
                 detail()
@@ -278,8 +301,9 @@ pub fn holds_p99_rounds(
         }
         panic!(
             "{claim} was over the {budget:?} budget twice on wall clock ({one} then \
-             {two}) and the round spent only {deficit:?} off-CPU against a \
-             {overshoot:?} overshoot, so the time went into **work done** and this is \
+             {two}) and the round spent only {deficit:?} off-CPU against {excess:?} \
+             spent over budget across the round (p99 alone was {overshoot:?} over), \
+             so the time went into **work done** and this is \
              the frame path rather than the host: contention cannot inflate a CPU \
              clock. {}",
             detail()
@@ -1329,6 +1353,19 @@ impl Drop for Scratch {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
+
+/// The extension the prose fixture is written with.
+///
+/// Its own constant rather than [`WIDE_EXT`], which happens to hold the same
+/// string. Borrowing that one coupled two unrelated fixtures through a value:
+/// the prose gates needed Markdown resolution and the wide fixture's constant
+/// only happened to provide it, so a test in a third file had to pin
+/// `WIDE_EXT == "md"` to keep the coupling honest. That assertion compared a
+/// constant against a literal and proved nothing about either fixture.
+///
+/// What actually proves the fixture resolves to a real grammar is the budget
+/// gate's own `parsed.lines > 0`, which fails if nothing was highlighted.
+pub const PROSE_EXT: &str = "md";
 
 /// Inline code spans per line of a [`prose_generated`] line.
 ///
