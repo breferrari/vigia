@@ -2096,8 +2096,8 @@ mod tests {
                  so the landing costs the heading and buys nothing"
             );
         }
-        // And one row further up it is worth it again: seven context lines and
-        // the header fit in eight, so the eighth row is the first removal.
+        // And one row further up it is worth it again: the header and its six
+        // context lines fit in seven, so the eighth row is the first removal.
         assert_eq!(landing_of(&ChangeKind::Modified, &file, 8), 10);
     }
 
@@ -2110,11 +2110,12 @@ mod tests {
         added.extend(std::iter::repeat_n(LineKind::Added, 9));
         let file = diff(400, vec![hunk(10, &kinds(6, 2)), hunk(200, &added)]);
 
-        // **At the heights that tell the two rules apart.** The busiest hunk's
-        // header is row 10 over three context lines, so its first addition is
-        // row 14: a fourteen-row region stops one short of it and a fifteen-row
-        // one draws it. Mutating `!= Context` to `== Removed` moves that row to
-        // 11, which is on screen at both, so a single height passes either way.
+        // **At the heights that tell the busiest hunk from the heading.** The
+        // busiest hunk's header is row 10 over three context lines, so its first
+        // addition is row 14: a fourteen-row region stops one short of it and a
+        // fifteen-row one draws it. Two heights rather than one because the pair
+        // pins the edge itself rather than a point to one side of it, which is
+        // what every other case in this battery does.
         assert_eq!(
             landing_of(&ChangeKind::Modified, &file, 14),
             10,

@@ -537,12 +537,14 @@ impl App {
             // the row the reader just asked for.
             //
             // **This predicate is the whole rule**, rather than a clear at each
-            // site that moves the view. `n` and `p` do not go through
+            // site that moves the view, and the three routes below are why no
+            // smaller site covers it. `n` and `p` do not go through
             // `Self::scroll`, and at either end of the changed set they reach no
-            // jump either; a digit and a drag on the diff's bar do go through
-            // `Self::jump_to`, and `Action::is_manual_scroll` already calls both
-            // of those a manual scroll. Every gesture that moves the viewport by
-            // a reader's intent is one of these.
+            // jump either. A digit goes through `Self::jump_to`. A drag on the
+            // diff's bar goes through neither and writes a position of its own.
+            // `Action::is_manual_scroll` calls all of them a manual scroll, so
+            // every gesture that moves the viewport by a reader's intent is one
+            // of these.
             self.landing = false;
             // **And the map is handed back.** Every action that reaches here
             // moves the diff, and a reader who moves the diff is asking to see
@@ -769,10 +771,11 @@ impl App {
     /// `G` or a digit inherits it and lands mid-file, which `SPEC.md` §11.1 rules
     /// against by name for exactly those keys. That is one predicate rather than
     /// a list of sites, and `Action::is_manual_scroll` is it: every caller of
-    /// this but [`App::jump_to_newest`] is one, `ListRow` and `DiffTo` included,
-    /// so a clear here would be a second statement of a rule already made and
-    /// could never fire. Mutation testing is what said so, by leaving the whole
-    /// suite green without it.
+    /// this but [`App::jump_to_newest`] is one, so a clear here would be a second
+    /// statement of a rule already made and could never fire. Mutation testing is
+    /// what said so, by leaving the whole suite green without it. (A drag on the
+    /// diff's bar is a manual scroll too and settles the debt the same way, but
+    /// it does not come through here: it writes a position of its own.)
     ///
     /// The caller picks the index, and that is the whole of what the arms differ
     /// by. Nothing here bounds it: an arm that cannot say which file it means has
@@ -898,6 +901,14 @@ impl App {
         history: &History,
         body: Body,
     ) -> Result<View> {
+        // **Refused is settled, not deferred**, and taking it out of the clear
+        // below is what makes that true. A debt the guard refuses is a debt for a
+        // file the viewport is no longer on, and the guard is re-read every
+        // frame: kept, it fires the moment an index happens to name that path
+        // again, on a frame no tick armed. Reachable by opening the sheet, which
+        // moves no viewport and whose own ruling says a reader who opens it and
+        // closes it sees the screen they left.
+        let owed = self.landing && self.still_the_followed_file(frame);
         let view = View::collect(
             frame,
             highlighter,
@@ -922,8 +933,8 @@ impl App {
                 // branch switched. Ticks coalesce and only the paint is shared,
                 // so an advance can happen between the follow that armed this
                 // and the frame that would resolve it, including on a tick that
-                // names no path at all and so never reaches [`Self::follow`] —
-                // a `.git/index` write is exactly that. Resolved against the
+                // names no path at all and so never reaches [`Self::follow`].
+                // A `.git/index` write is exactly that. Resolved against the
                 // renumbered index, the viewport lands deep inside whichever
                 // file inherited the number, which is worse than the heading it
                 // replaced.
@@ -932,7 +943,7 @@ impl App {
                 // `follow` immediately before it, so this is a string compare
                 // against a list the frame already holds: no read, no `stat`,
                 // no diff, exactly as `follow` itself is.
-                landing: self.landing && self.still_the_followed_file(frame),
+                landing: owed,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].
@@ -955,7 +966,7 @@ impl App {
         // **Cleared only once it was served.** A pane with no diff region
         // resolves nothing, and forgetting the request there would leave a
         // reader on the heading for good: the tick that armed it is spent.
-        self.landing &= !view.landed;
+        self.landing = owed && !view.landed;
         self.list_rows = body.list;
         // Stored back for the reason the position is: resolution happens once,
         // in the code that knows where the diff landed, and a caller that kept

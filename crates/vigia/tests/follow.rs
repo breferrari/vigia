@@ -147,6 +147,33 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
         "the view moved to the right file but not to the top of it, so the \
          heading of what just changed is scrolled off"
     );
+
+    // **A request answered with "keep the heading" is still answered**, and
+    // saying otherwise is not harmless: the caller clears the debt on this, so a
+    // frame that resolved to row zero and reported nothing leaves a request
+    // armed to fire on the next resize. Every other gate here lands on a row
+    // above zero, so this is the only place the distinction is visible.
+    //
+    // Re-armed, because the assertion above went through `top_file`, which draws
+    // a frame and so has already served the first request.
+    app.follow(&target, &frame);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    assert!(
+        view.landed,
+        "the frame kept the heading and reported no landing, so the request \
+         outlives the frame that served it"
+    );
+    // And the entry it drew was built, which is the counter's other side: the
+    // `a_pane_with_no_list` gate asserts only that none is built where none can
+    // be drawn, and a counter that never counts satisfies that vacuously.
+    assert!(
+        view.entries > 0,
+        "a frame drawing {} headings and {} list rows built no entry",
+        view.rows.len(),
+        view.list.len()
+    );
 }
 
 #[test]
@@ -705,11 +732,13 @@ fn landing_on_a_change_costs_no_extra_diff() {
 fn a_gesture_in_the_same_batch_settles_an_owed_landing() {
     // **A tick and a keystroke coalesce into one batch**, so a landing armed by
     // the follow can still be unresolved when a reader's own gesture runs. The
-    // request is settled by every gesture that writes a position, or the frame
-    // after it draws over the row the reader just asked for, and a request that
-    // outlived its jump would be inherited by the next one: `SPEC.md` §11.1
-    // rules that `G`, the digits and `n`/`p` land on a heading, and a debt left
-    // armed makes them land mid-file instead.
+    // request is settled by every gesture `Action::is_manual_scroll` calls one,
+    // or the frame after it draws over the row the reader just asked for, and a
+    // request that outlived its jump would be inherited by the next one:
+    // `SPEC.md` §11.1 rules that `G`, the digits and `n`/`p` land on a heading,
+    // and a debt left armed makes them land mid-file instead. `n` at an end
+    // writes no position at all and still settles it, which is why the predicate
+    // is the rule rather than the write.
     //
     // Driven with no view between the follow and the gesture, which is the state
     // the drain produces and the only one where the debt is still outstanding.
@@ -866,8 +895,8 @@ fn a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed() {
 ///
 /// Deliberately not [`tall`], which cannot show this: there the busiest hunk is
 /// a 76-line deletion, so landing on it fills any pane from its own rows and no
-/// tail is left over. This one is four one-line tweaks and then a two-line
-/// rewrite low down, so the busiest hunk is eleven rows against an eighteen-row
+/// tail is left over. This one is four one-line tweaks and then a four-line
+/// rewrite low down, so the busiest hunk is fifteen rows against an eighteen-row
 /// region and the rows under it run out. A block ends at its last hunk, so what
 /// is left below a landing is that hunk and nothing else, however long the file
 /// is.
@@ -919,7 +948,7 @@ fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
     assert!(view.landed, "this measured a frame that landed nowhere");
     assert!(
         app.position().row > 0,
-        "the landing did not fire, so the clamp under test never ran"
+        "the landing did not fire, so the back-up under test never ran"
     );
     assert_eq!(
         view.rows.len(),
@@ -936,8 +965,8 @@ fn a_landing_in_the_last_file_rests_its_tail_on_the_bottom_row() {
         view.total_rows,
         "the pane is full but the diff's last row is not on it"
     );
-    // And the change is still on screen, which is what the clamp must not cost:
-    // resting the tail moves the busiest hunk down the pane, never off it.
+    // And the change is still on screen, which is what the back-up must not
+    // cost: resting the tail moves the busiest hunk down the pane, never off it.
     assert!(
         view.rows.iter().any(|row| matches!(
             row,
@@ -960,11 +989,17 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
     // an index, so resolving it puts the viewport deep inside whichever file
     // inherited the number.
     //
+    // **The renumbered index has to still name a file**, which is the whole
+    // subject of the guard: a first draft of this committed everything, so the
+    // list was empty, `View::collect` returned at its own `files == 0` branch,
+    // and the gate passed with the guard deleted. Here `src/aaa.rs` is committed
+    // and the third file slides into its place.
+    //
     // Driven the way the loop drives it, with no `follow` call for the second
-    // tick, because that is the state the defect needs and a test that called
-    // `follow` would be testing a different rule.
+    // tick, because that is the state the defect needs.
     let scratch = Scratch::new("shell-follow-renumbered");
     scratch.write("src/aaa.rs", "fn a() {}\n");
+    scratch.write("src/mmm.rs", support::numbered_lines(TALL_LINES));
     scratch.write(TALL, support::numbered_lines(TALL_LINES));
     scratch.commit_all("baseline");
 
@@ -977,7 +1012,9 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
         lines[at] = format!("line {} rewritten", at + 1);
     }
     lines.drain(CUT_AT..CUT_AT + CUT_LINES);
-    scratch.write(TALL, format!("{}\n", lines.join("\n")));
+    let cut = format!("{}\n", lines.join("\n"));
+    scratch.write("src/mmm.rs", &cut);
+    scratch.write(TALL, &cut);
 
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -986,19 +1023,25 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
     let history = History::new();
 
     frame.advance().expect("advance");
-    assert_eq!(
-        frame.files().len(),
-        2,
-        "the fixture is not two changed files"
-    );
+    // Status reports lexicographically: aaa, deep, mmm.
+    assert_eq!(frame.files().len(), 3, "the fixture is not three files");
     assert!(app.follow(TALL, &frame), "the tick armed nothing");
-    let armed = app.position().file;
+    assert_eq!(
+        app.position().file,
+        1,
+        "the fixture did not arm on index one"
+    );
 
-    // The agent commits the file that sorts first, which is the tick that
-    // carries no path. Only the advance runs.
-    scratch.commit_all("the agent in the other pane stages and commits");
+    // The agent commits the file that sorts first. No path reaches the shell,
+    // and `src/mmm.rs` slides into index one behind the followed file's back.
+    scratch.git(&["add", "src/aaa.rs"]);
+    scratch.git(&["commit", "-m", "the agent in the other pane commits"]);
     frame.advance().expect("advance");
-    assert_eq!(frame.files().len(), 0, "the commit left changes behind");
+    assert_eq!(
+        frame.files()[1].path,
+        "src/mmm.rs",
+        "the commit did not renumber the list under the position"
+    );
 
     let layout = body_layout(
         Rect::new(0, 0, 80, 24),
@@ -1007,14 +1050,34 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
     );
     let view = app
         .view(&mut frame, &mut highlighter, &history, layout)
-        .expect("a renumbered list must not land anywhere");
+        .expect("view");
 
-    assert_eq!(armed, 1, "the fixture did not arm on the second file");
     assert!(
         !view.landed,
-        "a landing armed before the advance was resolved after it, against an \
-         index the advance renumbered"
+        "a landing armed for {TALL} was resolved against src/mmm.rs, which \
+         inherited its index when the advance renumbered the list"
     );
+    assert_eq!(
+        app.position().row,
+        0,
+        "the viewport landed inside a file no tick ever named"
+    );
+
+    // **And the refusal settles the debt rather than deferring it.** The guard
+    // is re-read every frame, so a debt kept here fires the moment an index
+    // names that path again, on a frame no tick armed. Opening the sheet moves
+    // no viewport at all and is where a reader would meet it.
+    app.apply(Action::ToggleSheet, &mut frame, layout.diff)
+        .expect("apply");
+    let after = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    assert!(
+        !after.landed,
+        "the refused landing was kept and resolved on a later frame, so opening \
+         the sheet moved the viewport"
+    );
+    assert_eq!(app.position().row, 0, "the sheet moved the diff");
 }
 
 #[test]
