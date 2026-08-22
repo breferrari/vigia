@@ -1215,16 +1215,21 @@ impl Shell {
 
     /// How long the loop may block before something here has to act.
     ///
-    /// **`None` is the whole invariant, and it is why both clocks are asked
-    /// through one function.** With nothing held and nothing lingering this
-    /// returns `None`, the receive below is untimed, and I1's *0 wakeups while
-    /// idle* is a fact about the structure rather than about care taken
-    /// elsewhere. Two clocks asked separately is two chances to leave a deadline
-    /// armed on an idle monitor; asked together there is one place to be wrong
-    /// and one place to gate.
+    /// **`None` is the whole invariant, and it is why every clock is asked
+    /// through one function.** With nothing held, nothing lingering and nothing
+    /// left in the history window this returns `None`, the receive below is
+    /// untimed, and I1's *0 wakeups while idle* is a fact about the structure
+    /// rather than about care taken elsewhere. Clocks asked separately is that
+    /// many chances to leave a deadline armed on an idle monitor; asked together
+    /// there is one place to be wrong and one place to gate.
     ///
-    /// Where both are armed it is the nearer of the two, because the loop has to
-    /// wake for whichever comes first.
+    /// Where several are armed it is the nearest, because the loop has to wake
+    /// for whichever comes first.
+    ///
+    /// **There were two of these until
+    /// [#243](https://github.com/breferrari/vigia/issues/243) and this docblock
+    /// said so through the commit that added the third**, which is what a comment
+    /// counting the things below it costs. It is written without a number now.
     fn patience(&self, now: Instant) -> Option<std::time::Duration> {
         // The history's own deadline joins the two gesture clocks here rather
         // than at the receive, so `patience` stays the one place that decides
@@ -1254,15 +1259,18 @@ impl Shell {
 
     /// Clear the direction mark once its burst has stopped.
     ///
-    /// Returns whether anything changed, so the caller repaints only on the frame
-    /// that actually turns it off.
-    fn settle_scroll(&mut self, now: Instant) -> bool {
+    /// **Returns nothing, and used to return whether anything changed** "so the
+    /// caller repaints only on the frame that actually turns it off". The one
+    /// caller never read it: the timeout arm this sits on draws unconditionally,
+    /// because it is also where a held step and an ageing wake land. So the
+    /// sentence described a caller that has never existed, and the value was free
+    /// to be wrong. Reverting the body to clear the mark and return `false`
+    /// passed the entire suite.
+    fn settle_scroll(&mut self, now: Instant) {
         if self.scrolling_until.is_some_and(|until| now >= until) {
             self.scrolling = None;
             self.scrolling_until = None;
-            return true;
         }
-        false
     }
 
     /// The drawable area of the terminal right now.
@@ -1881,11 +1889,18 @@ mod tests {
         // arm first and was exactly that second bug, because `recv_timeout`
         // returns `Ok` whenever anything is queued and a stream of pointer
         // motion never reaches that arm.
-        // Anchored on the newline and the indentation, so this finds the
-        // *definition* rather than any of the mentions of it in this module,
-        // including the ones in the string literals a few lines down. Without
-        // that, deleting `Shell::draw` outright would make this test match its
-        // own source and report something other than what happened.
+        // Anchored on the newline and the indentation rather than on the
+        // argument list, because the argument list is the thing this row
+        // changed: the previous anchor spelled the whole signature out and went
+        // red the moment `now: Instant` pushed it onto five lines, reporting
+        // "`Shell::draw` is gone" about a function three lines above it. An
+        // anchor that has to be edited whenever the thing it guards is edited is
+        // an anchor that gets edited to whatever makes the test pass.
+        //
+        // It cannot match this test's own strings, but that is not why it is
+        // written this way and the first version of this comment claimed it was:
+        // `code` is `shipped` above, which is everything before `#[cfg(test)]`,
+        // so no literal in this module was ever reachable from here.
         let drawer = &code[code.find("\n    fn draw(").expect("`Shell::draw` is gone")..];
         let signature = &drawer[..drawer
             .find("-> Result<(), Failure>")
@@ -1894,6 +1909,40 @@ mod tests {
             signature.contains("now: Instant"),
             "`Shell::draw` no longer takes the turn's instant, so it is back to \
              rolling on a clock of its own"
+        );
+
+        // **And every caller inside the loop hands it the turn's own instant,
+        // which the two checks above cannot see.** They gate the callee: that the
+        // parameter exists and that the roll reads it. A caller passing
+        // `Instant::now()` satisfies both and puts the defect straight back, one
+        // token wide, compiling clean and green across the whole suite. That
+        // mutation was found by review rather than by this file, which is the
+        // reason it is written down here.
+        //
+        // The binding matters as much as the value. `began` is taken once at the
+        // top of the turn, before the drain, so a tick's record and the paint
+        // that draws it agree about when *now* is even though `Frame::advance`
+        // runs between them. Two fresh clocks a status walk apart is exactly the
+        // gap a sample boundary falls into.
+        let turns = &code[code.find("'awake: loop {").expect("the loop is gone")..];
+        assert!(
+            !turns.contains("shell.draw(&mut frame, &worktree, Instant::now())"),
+            "a draw inside the loop reads a clock of its own rather than the \
+             turn's, so a sample boundary landing between a tick and its paint \
+             erases the pulse of the burst that caused the frame"
+        );
+        assert_eq!(
+            turns
+                .matches("shell.draw(&mut frame, &worktree, began)")
+                .count(),
+            2,
+            "the loop's two paints no longer both draw on the turn's instant"
+        );
+        assert!(
+            turns.contains(".record_sized(sized(worktree.workdir(), &paths), began)"),
+            "a tick timestamps its burst on a clock of its own, so it and the \
+             paint that draws it can straddle a sample boundary and the burst \
+             loses its pulse on the one frame it caused"
         );
         let rolled = drawer.find("self.history.record_sized([], ").expect(
             "`Shell::draw` no longer rolls the window, so a frame can draw one that stopped moving",
@@ -1945,20 +1994,28 @@ mod tests {
         // `recv_timeout(0)`: a spin, at full CPU, on an idle worktree, which is
         // the precise failure I1 exists to forbid and which every gate over
         // `ages_in` and `patience` would sit through green.
-        assert!(
-            arm.contains("shell.draw("),
+        let drew = arm.find("shell.draw(").expect(
             "the timeout arm no longer draws, so the ageing deadline never \
-             advances and the loop spins on a zero timeout"
+             advances and the loop spins on a zero timeout",
         );
 
         // And the frame it draws is one the bar counts. Round 1 added this and
         // nothing held it: deleting the call left the whole suite green, because
         // a frame time nobody asserts on is invisible to every test in the repo.
-        assert!(
-            arm.contains("record_frame("),
+        let timed = arm.find("record_frame(").expect(
             "a timeout frame is not recorded, so the readout `SPEC.md` §5.1 \
              defines as the whole turn of the loop silently omits what is now the \
-             most common frame on a quiet tree"
+             most common frame on a quiet tree",
+        );
+        // **Position, not presence.** Containment alone let the call move *above*
+        // the paint and stay green, which reports a frame time excluding the
+        // paint: the most common frame on a quiet tree would then be measured on
+        // everything except the work it does.
+        assert!(
+            drew < timed,
+            "the timeout arm records its frame time before it paints, so the \
+             number the bar draws for the most common frame on a quiet tree \
+             excludes the paint that frame exists to do"
         );
 
         // **The idle receive is untimed, and that is I1's budget as a structure

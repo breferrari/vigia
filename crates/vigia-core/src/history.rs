@@ -47,7 +47,10 @@
 //! burst from ninety seconds ago draws as *just now*. The window ages on a clock
 //! now, and I1's licence is what permits it rather than what forbids it, because
 //! the clock stops: [`History::ages_in`] answers `None` once no track is left,
-//! which is `HISTORY_WINDOW` after the last write.
+//! which is at most `HISTORY_WINDOW` after the last write. At most, because the
+//! samples sit on a fixed grid anchored on the window's origin rather than on
+//! the write, so a track can drain up to one `HISTORY_SAMPLE` sooner. That is
+//! the safe direction: it stops the clock earlier, never later.
 //!
 //! The top rung of the ladder is still **not** a duration, and it gained the
 //! half that makes it age. [`Recency::Pulse`] means *named by the most recent
@@ -295,12 +298,23 @@ pub const HISTORY_PATHS: usize = 256;
 /// the screen does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Recency {
-    /// Named by the most recent tick. Drawn brightest, and the only rung that
-    /// carries the `●` mark.
+    /// Named by the most recent tick **and** holding ink in the newest sample.
+    /// Drawn brightest, and the only rung that carries the `●` mark.
     ///
-    /// Not a duration. See the module docs: a rung measured in seconds would
-    /// have to age while the event loop is blocked, and being able to see that
-    /// happen needs a redraw I1 forbids scheduling.
+    /// Both halves, since [#243](https://github.com/breferrari/vigia/issues/243).
+    /// The ordinal alone only advances when a burst names something, so on a
+    /// quiet worktree it left the mark lit: a file written two minutes ago drew
+    /// at full brightness beside a band that had almost drained.
+    ///
+    /// Still not a duration, and the reason is no longer the one recorded here.
+    /// This said a rung measured in seconds "would have to age while the event
+    /// loop is blocked, and being able to see that happen needs a redraw I1
+    /// forbids scheduling", which #243 reversed: I1's licence does reach that
+    /// redraw, and the window ages on its own. What is left is the coherence
+    /// argument. This rung means *there is ink in the newest sample*, so it is
+    /// bounded by that sample and expires on the grid the elements beside it are
+    /// drawn on. A duration of its own would be a second clock disagreeing with
+    /// them about how long ago now was.
     Pulse,
     /// Changed inside [`HISTORY_WINDOW`], but not in the newest tick.
     Live,
@@ -1188,7 +1202,13 @@ impl History {
     /// safe to stop: [`Self::repeak`] rebuilds the worktree series from the
     /// tracks, so an empty map is an all-zero series, and [`Self::roll`] clears
     /// the map once the whole window has turned over. That bounds the clock at
-    /// [`HISTORY_SAMPLES`] wakes after any burst, and it is why I1's *0 wakeups
+    /// [`HISTORY_SAMPLES`] wakes after any burst, and it is an **upper** bound
+    /// rather than an exact one: samples fall on a fixed grid anchored on
+    /// `opened`, not on the write, so a track can drain up to one
+    /// [`HISTORY_SAMPLE`] sooner than `HISTORY_WINDOW` after the last write.
+    /// Draining early only stops the clock early, which is the safe direction for
+    /// this invariant, and every gate here happens to write exactly on a boundary
+    /// so none of them can see the difference. and it is why I1's *0 wakeups
     /// while idle* survives the amendment: the state a monitor left open
     /// overnight is in is an empty window.
     ///

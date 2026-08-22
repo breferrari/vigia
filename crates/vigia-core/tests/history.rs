@@ -876,8 +876,14 @@ fn an_empty_window_is_never_due() {
     // the value rather than on anything downstream, because the loop's receive
     // branches on exactly this and a plausible-looking duration here is a poll
     // loop on an idle monitor.
-    let mut history = History::new();
-    let start = Instant::now();
+    // `starting_at`, not `new`: `new` opens the window at its own
+    // `Instant::now()`, so a second sample taken on the next line leaves
+    // `opened < start` and every offset below is measured against a boundary
+    // that already moved. `a_tick_that_moves_nothing_does_no_work` asks about
+    // `start + HISTORY_SAMPLE / 2`, which is 500ms of wall clock between two
+    // statements before it inverts and claims the guard is broken.
+    let start = base();
+    let mut history = History::starting_at(start);
 
     assert_eq!(
         history.ages_in(start),
@@ -912,8 +918,14 @@ fn a_drained_window_stops_asking_to_age() {
     // `HISTORY_WINDOW` after it, and the clock has to stop with it or the budget
     // is *some wakeups forever* rather than *at most `HISTORY_SAMPLES` after a
     // burst*.
-    let mut history = History::new();
-    let start = Instant::now();
+    // `starting_at`, not `new`: `new` opens the window at its own
+    // `Instant::now()`, so a second sample taken on the next line leaves
+    // `opened < start` and every offset below is measured against a boundary
+    // that already moved. `a_tick_that_moves_nothing_does_no_work` asks about
+    // `start + HISTORY_SAMPLE / 2`, which is 500ms of wall clock between two
+    // statements before it inverts and claims the guard is broken.
+    let start = base();
+    let mut history = History::starting_at(start);
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
 
     // One sample short of the window it is still live, which is what makes the
@@ -957,8 +969,14 @@ fn a_tick_that_moves_nothing_does_no_work() {
     // unconditional call left every assertion green, which made this a gate that
     // the skip is *safe* and never that it *happens*. The counter is the only
     // observable that separates the two.
-    let mut history = History::new();
-    let start = Instant::now();
+    // `starting_at`, not `new`: `new` opens the window at its own
+    // `Instant::now()`, so a second sample taken on the next line leaves
+    // `opened < start` and every offset below is measured against a boundary
+    // that already moved. `a_tick_that_moves_nothing_does_no_work` asks about
+    // `start + HISTORY_SAMPLE / 2`, which is 500ms of wall clock between two
+    // statements before it inverts and claims the guard is broken.
+    let start = base();
+    let mut history = History::starting_at(start);
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
 
     let scales = history.scales();
@@ -973,6 +991,22 @@ fn a_tick_that_moves_nothing_does_no_work() {
         walked,
         "a timeout inside one sample walked every track, which is the 144µs a \
          held scrollbar button would pay for it nineteen times a second"
+    );
+    // **Read through `recency`, which is sample-granular, rather than through
+    // `scales` and `worktree_churn`, which `repeak` caches.** The cached pair
+    // cannot move while the counter above says no walk happened, so comparing
+    // them here was a line that could not fail while its predecessor passed.
+    //
+    // `churn` was the first replacement and it is not enough either:
+    // [`HISTORY_SAMPLES`] over [`HISTORY_BUCKETS`] is five samples to a bucket,
+    // so a window that shifted by one and reported no steps stays inside the same
+    // bucket four times in five and the projection does not move. `recency`
+    // reads the newest sample itself, which is the cell such a shift zeroes.
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Pulse,
+        "a timeout inside one sample moved the window anyway, so a path lost the \
+         mark it had just earned and the skipped walk was hiding a real roll"
     );
     assert_eq!(
         (history.scales(), history.worktree_churn()),
@@ -1006,6 +1040,44 @@ fn a_tick_that_moves_nothing_does_no_work() {
         rolled,
         "a timeout that crossed a sample boundary left the window where it was, \
          which is the freeze #243 exists to fix"
+    );
+}
+
+#[test]
+fn a_burst_lands_in_the_sample_the_roll_opened() {
+    // **Order inside `record_sized`: the window rolls, and *then* the burst is
+    // written.** Swap those and the write lands in the sample the roll is about
+    // to shift out of, so it moves one cell left the instant it arrives and the
+    // newest sample is zero: the path is `Live` on the frame it was written on,
+    // and every drawn cell is one sample stale forever after.
+    //
+    // Gated here because nothing else reaches it. Reversing the two is caught
+    // today by exactly one assertion, in
+    // `a_path_that_ages_out_is_dropped_rather_than_kept_empty`, and only because
+    // that fixture jumps a whole `HISTORY_WINDOW` and takes `roll`'s *clear*
+    // branch, which wipes the just-written track. Its failure message then talks
+    // about a path occupying a slot, which is not what happened. The ordinary
+    // shift path is the production case and had no gate at all: the fixtures near
+    // it assert totals, and a total is exactly what moving a sample sideways
+    // preserves.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record(["src/a.rs"], start);
+
+    // One boundary, so `roll` takes the shift branch rather than the clear.
+    history.record(["src/a.rs"], start + HISTORY_SAMPLE);
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Pulse,
+        "the write landed in the sample the roll then shifted out of, so a file \
+         does not pulse on the frame it was written on"
+    );
+
+    let buckets = history.churn("src/a.rs").expect("the path is tracked");
+    assert!(
+        buckets[HISTORY_BUCKETS - 1] > 0,
+        "the newest bucket is empty on the tick that wrote it, so the burst was \
+         recorded into the window as it stood before the roll"
     );
 }
 
