@@ -4526,19 +4526,17 @@ impl Painter<'_> {
         // I10, so the projection does the same job from
         // the other side: it aggregates when the pane holds fewer sub-columns
         // than the window holds samples, and repeats when it holds more.
-        // **The block rung, whatever the pane detects**
-        // ([#244](https://github.com/breferrari/vigia/issues/244)). Bound once
+        // **The rung the pane detected**, which is where the band was until
+        // [#244](https://github.com/breferrari/vigia/issues/244) took it off the
+        // ladder and where it is again since that row was reopened. Bound once
         // and read three times below, so this function cannot half-follow the
-        // ruling: a density from one rung and a level count from another would
-        // draw a band nothing could decode. [`Glyphs::BAND`] carries the reason
-        // and its measurements.
+        // rung: a density from one and a level count from another would draw a
+        // band nothing could decode.
         //
-        // **Named `rung` rather than `glyphs`**, which is `Painter`'s own field
-        // for the rung the *pane* detected. Fifty lines below, a `glyphs.levels()`
-        // would read as that field and a reader would have to come back up here
-        // to learn it is not: the shadowing name is the half-following this
-        // comment is about, reintroduced one identifier down.
-        let rung = Glyphs::BAND;
+        // **Kept as `rung` rather than read as `self.glyphs` three times**, so
+        // the binding is one line to change and the three readers below cannot
+        // drift apart.
+        let rung = self.glyphs;
         let density = rung.density();
         // **The pane can ask for more sub-columns than the window holds samples,
         // and then values repeat rather than run out.** A graph whose buffer is
