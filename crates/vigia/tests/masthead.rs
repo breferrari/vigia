@@ -946,9 +946,9 @@ fn a_quiet_window_slides_left_rather_than_freezing() {
     // The defect was never that the store cannot age, it is that on a quiet
     // worktree nothing wakes to ask it to, and that half is the shell's loop,
     // which owns a terminal and three threads. `lib.rs`'s own source gate holds
-    // it, by reading that the timeout arm rolls the window before it draws, and
-    // that gate is the one that was red before this change. This one would pass
-    // without it.
+    // it, by reading that `Shell::draw` rolls the window before it paints and on
+    // the turn's own clock, and that gate is the one that was red before this
+    // change. This one would pass without it.
     let now = Instant::now();
     let mut history = burst_at(now);
 

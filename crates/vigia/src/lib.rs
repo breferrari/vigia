@@ -524,7 +524,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // the reader watched the whole 74-362ms grammar compile happen on a blank
     // one. Measured over the hundred-file fixture: 105.03ms to first paint
     // before, 13.26ms now.
-    shell.draw(&mut frame, &worktree)?;
+    shell.draw(&mut frame, &worktree, Instant::now())?;
 
     // Armed only now. Everything above read `.git/index` and the gitignore
     // files, and a watch armed before those reads observes them: inotify and
@@ -623,7 +623,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             let began = Instant::now();
             shell.settle_scroll(began);
             shell.app.sample_memory();
-            shell.draw(&mut frame, &worktree)?;
+            shell.draw(&mut frame, &worktree, began)?;
             shell.request_warm(&worktree, &tx);
             // **A timeout is a frame and belongs in the frame time the bar
             // reports**, which `SPEC.md` §5.1 defines as the whole turn of this
@@ -632,6 +632,18 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // this the most common frame on a quiet tree: a p99 that could not
             // see it would be reporting on the frames a reader is *not* looking
             // at.
+            //
+            // **And recording them cannot flatter the number I9 rests on**,
+            // which is the obvious objection and it does not hold. A burst is
+            // followed by up to `HISTORY_SAMPLES` cheap ageing wakes, and
+            // `FRAME_SAMPLES` is 128, so on a quiet tree they do come to own most
+            // of the ring. But I9 claims a *p99*, and p99 of 128 samples is the
+            // worst or second worst of them: one expensive frame among a hundred
+            // and twenty cheap ones still sets it. What moves is the p50, and it
+            // moves to the truth, because on a tree that nothing is writing to
+            // these genuinely are the frames. Dropping them to keep the median
+            // describing something else would be curating the sample to protect
+            // the claim, which is the failure `SPEC.md` §7 is about.
             shell.app.record_frame(began.elapsed());
             continue;
         };
@@ -821,7 +833,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // thing that was written.
                     shell
                         .history
-                        .record_sized(sized(worktree.workdir(), &paths), Instant::now());
+                        .record_sized(sized(worktree.workdir(), &paths), began);
                     // The core leaves the frame exactly as it was on failure, so the
                     // previous diff is still valid to draw. Saying so on the footer
                     // beats blanking a pane for a reason the reader cannot see.
@@ -866,7 +878,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // **Once per batch, not once per wake.** That is the whole of the
         // coalescing: every wake above was handled, in arrival order, and only
         // the paint is shared. See `drain`.
-        shell.draw(&mut frame, &worktree)?;
+        shell.draw(&mut frame, &worktree, began)?;
 
         // **After the paint, because the paint is what raises the demand.**
         // `Highlighter::wanted` describes the frame that just drew, so asking
@@ -1366,7 +1378,12 @@ impl Shell {
     /// next wake, where the reader is looking at the plain frame rather than at
     /// nothing. That is the same "report and keep the previous screen" rule the
     /// rest of the frame path already follows.
-    fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+    fn draw(
+        &mut self,
+        frame: &mut vigia_core::Frame,
+        worktree: &Worktree,
+        now: Instant,
+    ) -> Result<(), Failure> {
         // **The window is rolled here because this is where every frame passes**
         // ([#243](https://github.com/breferrari/vigia/issues/243)). It sat on the
         // loop's timeout arm first, which is where the ageing clock's own wake
@@ -1385,7 +1402,18 @@ impl Shell {
         //
         // Before the paint, not after, or the frame draws the picture it was
         // woken to change and the next one corrects it a beat late.
-        self.history.record_sized([], Instant::now());
+        //
+        // **`now` is the caller's, not this function's, and the two are not
+        // interchangeable.** A tick records its burst at the top of the turn and
+        // reaches here only after `Frame::advance` has walked status, so with a
+        // fresh `Instant::now()` a sample boundary landing inside that gap rolled
+        // away the very sample the burst had just written. `Track::shift` zeroes
+        // the newest sample, so `recency` fell to `Live` and the batch drew with
+        // no pulse on the one frame it caused, which is `SPEC.md` §11.2's B2 mark
+        // failing exactly when it has something to say. One instant per turn of
+        // the loop makes the roll and the tick agree about when *now* is, and the
+        // gap closes by construction rather than by being small.
+        self.history.record_sized([], now);
         self.paint(frame, worktree)?;
         if self.app.owes_repaint() {
             self.paint(frame, worktree)?;
@@ -1845,14 +1873,6 @@ mod tests {
              resolved against and nothing repaints to correct it"
         );
 
-        // **A timeout rolls the window before it draws, which is
-        // [#243](https://github.com/breferrari/vigia/issues/243)'s whole
-        // mechanism.** The ageing clock only ever produces a timeout, so if this
-        // arm paints without rolling first, the loop wakes on the right schedule
-        // and redraws the same frozen picture: every gate over `History::ages_in`
-        // and over `patience` stays green while the graph never moves. Position
-        // is the whole of it, which is why it is read here rather than asserted
-        // about behaviour.
         // **Every frame rolls the window before it paints, and `Shell::draw` is
         // where every frame passes** ([#243](https://github.com/breferrari/vigia/issues/243)).
         // Position is the whole of it: a roll after the paint draws the picture
@@ -1861,9 +1881,20 @@ mod tests {
         // arm first and was exactly that second bug, because `recv_timeout`
         // returns `Ok` whenever anything is queued and a stream of pointer
         // motion never reaches that arm.
-        let drawer = &code[code
-            .find("fn draw(&mut self, frame: &mut vigia_core::Frame")
-            .expect("`Shell::draw` is gone")..];
+        // Anchored on the newline and the indentation, so this finds the
+        // *definition* rather than any of the mentions of it in this module,
+        // including the ones in the string literals a few lines down. Without
+        // that, deleting `Shell::draw` outright would make this test match its
+        // own source and report something other than what happened.
+        let drawer = &code[code.find("\n    fn draw(").expect("`Shell::draw` is gone")..];
+        let signature = &drawer[..drawer
+            .find("-> Result<(), Failure>")
+            .expect("`Shell::draw` no longer returns a `Result`")];
+        assert!(
+            signature.contains("now: Instant"),
+            "`Shell::draw` no longer takes the turn's instant, so it is back to \
+             rolling on a clock of its own"
+        );
         let rolled = drawer.find("self.history.record_sized([], ").expect(
             "`Shell::draw` no longer rolls the window, so a frame can draw one that stopped moving",
         );
@@ -1875,6 +1906,22 @@ mod tests {
             "the draw paints before it rolls the window, so a frame shows the \
              picture it was woken to change and the next one corrects it a beat \
              late"
+        );
+
+        // **And it rolls on the caller's clock, not its own.** This is the
+        // clock-discipline half of the same mechanism and nothing else in the
+        // repo can see it: a tick records its burst at the top of the turn and
+        // reaches the draw only after the status walk, so a `Instant::now()`
+        // taken here rolls away the sample that burst just wrote whenever a
+        // boundary falls in the gap. The store cannot catch it (both calls are
+        // well formed and it has no view of the turn) and no rendering test can
+        // (it needs a boundary inside one frame's cost), so the parameter is the
+        // gate.
+        assert!(
+            drawer[..painted].contains("self.history.record_sized([], now)"),
+            "`Shell::draw` rolls on a clock of its own rather than the turn's, so \
+             a sample boundary falling between a tick and its paint erases the \
+             pulse of the burst that caused the frame"
         );
 
         // And the ageing wake stays a paint rather than a tick: a status walk on
@@ -1889,6 +1936,29 @@ mod tests {
             !arm.contains("frame.advance("),
             "the timeout arm walks status, so an ageing wake now costs a tick and \
              the measurement I1's amendment was granted on no longer holds"
+        );
+
+        // **The arm draws, and that is a liveness gate rather than a tidiness
+        // one.** `Shell::draw` is now the only thing that advances `opened`, so
+        // an arm that woke on the ageing deadline and returned without drawing
+        // would leave `ages_in` pinned at zero and put the loop on
+        // `recv_timeout(0)`: a spin, at full CPU, on an idle worktree, which is
+        // the precise failure I1 exists to forbid and which every gate over
+        // `ages_in` and `patience` would sit through green.
+        assert!(
+            arm.contains("shell.draw("),
+            "the timeout arm no longer draws, so the ageing deadline never \
+             advances and the loop spins on a zero timeout"
+        );
+
+        // And the frame it draws is one the bar counts. Round 1 added this and
+        // nothing held it: deleting the call left the whole suite green, because
+        // a frame time nobody asserts on is invisible to every test in the repo.
+        assert!(
+            arm.contains("record_frame("),
+            "a timeout frame is not recorded, so the readout `SPEC.md` §5.1 \
+             defines as the whole turn of the loop silently omits what is now the \
+             most common frame on a quiet tree"
         );
 
         // **The idle receive is untimed, and that is I1's budget as a structure

@@ -1010,6 +1010,53 @@ fn a_tick_that_moves_nothing_does_no_work() {
 }
 
 #[test]
+fn a_write_after_the_whole_window_turned_over_still_accumulates() {
+    // **The overnight case, and the branch that serves it is the one branch that
+    // re-bases the window's origin.** `roll` clears every track when the whole
+    // window has turned over rather than shifting each one past its own length,
+    // and it has to move `opened` to `now` on the way out. Leave that line off
+    // and the store still *looks* right for one call: the clear happens, the
+    // window reads empty, and the next write lands. It is the call after that
+    // one which never recovers, because `opened` is still pointing at whenever
+    // the session began, so every later roll measures the same overnight gap and
+    // clears the store again. The graph can then never hold more than the burst
+    // being written at that instant, forever, on a monitor whose whole job is to
+    // be left open for days.
+    //
+    // Nothing else here reaches it: every other gate over the drain asserts what
+    // the window looks like *after* the turnover and stops, and the defect only
+    // shows on the second roll past it.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record(["src/a.rs"], start);
+
+    // Left open overnight. The window has turned over many times and holds
+    // nothing, which is the state the branch exists for.
+    let woke = start + HISTORY_WINDOW * 3;
+    history.record_sized([], woke);
+    assert_eq!(history.recency("src/a.rs"), Recency::Cold);
+    assert_eq!(history.tracked(), 0, "the drained window kept a track");
+
+    // A write after that turnover is an ordinary write and has to behave like
+    // one.
+    history.record(["src/b.rs"], woke);
+    assert_eq!(history.recency("src/b.rs"), Recency::Pulse);
+
+    // And it has to still be there one sample later. This is the assertion the
+    // missing re-base fails: with `opened` left behind, this roll measures the
+    // overnight gap a second time and clears the write above.
+    history.record_sized([], woke + HISTORY_SAMPLE);
+    assert_eq!(
+        history.recency("src/b.rs"),
+        Recency::Live,
+        "a write made after the window drained was cleared by the next roll, so \
+         the window re-measures the same overnight gap forever and can never \
+         hold more than the instant being written"
+    );
+    assert!(history.churn("src/b.rs").is_some());
+}
+
+#[test]
 fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
     // **[#243](https://github.com/breferrari/vigia/issues/243) one field over.**
     // The mark was the burst ordinal alone, which only advances when a burst
@@ -1033,11 +1080,14 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
     );
 
     // And it is still tracked, which is what makes the rung above meaningful:
-    // `Cold` is a path with nothing left in the window at all.
-    assert_eq!(
-        history.recency("src/a.rs"),
-        Recency::Live,
-        "the path went cold rather than live, so this measured an eviction"
+    // `Cold` is a path with nothing left in the window at all, and a `Live` that
+    // came from an eviction would read identically at the assertion above. This
+    // asked `recency` a second time and compared it to the same rung, which is a
+    // line that cannot fail while the one before it passes.
+    assert!(
+        history.churn("src/a.rs").is_some(),
+        "the path left the store rather than losing its mark, so the rung above \
+         measured an eviction and not the pulse expiring"
     );
     history.record_sized([], start + HISTORY_WINDOW * 2);
     assert_eq!(history.recency("src/a.rs"), Recency::Cold);

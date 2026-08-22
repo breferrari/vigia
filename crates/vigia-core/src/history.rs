@@ -865,16 +865,20 @@ impl History {
     ///
     /// That is also **why there is no separate `expire`**, which the plan for
     /// [#38](https://github.com/breferrari/vigia/issues/38) named as a second
-    /// public method. Aging the window is not a thing a caller ever wants on its
-    /// own: it happens on a tick or it does not happen, because a tick is the
-    /// only clock this type has (see the module docs on I1). A public `expire`
-    /// would have been exactly `record` with no paths, and two entry points into
-    /// one rule are two things a caller can get out of step. `vigia::run` calls
-    /// this once per wake and nothing else, which is the whole contract.
+    /// public method. A public `expire` would have been exactly `record` with no
+    /// paths, and two entry points into one rule are two things a caller can get
+    /// out of step. Ageing with no paths is therefore spelled `record_sized([])`
+    /// and goes through the same door as everything else.
     ///
-    /// Called once per tick and never on a timer. See the module docs: the
-    /// window is real time and the sampling is event-driven, which is what keeps
-    /// I1 intact.
+    /// **Called on a tick *and* on the ageing wake, which was not true before
+    /// [#243](https://github.com/breferrari/vigia/issues/243).** This said "once
+    /// per tick and never on a timer", and that was the whole of the freeze: with
+    /// a tick as the only clock, a worktree that went quiet stopped ageing and
+    /// the window kept a ninety-second-old burst pinned at the right edge,
+    /// drawing it as *just now*. The window is still real time and the store
+    /// still owns no clock of its own; what changed is that the shell now has a
+    /// deadline to call this on, bounded by [`History::ages_in`] returning `None`
+    /// once the window empties. I1's amended row carries why that is licensed.
     ///
     /// # Cost
     ///
