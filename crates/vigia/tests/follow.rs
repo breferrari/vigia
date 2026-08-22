@@ -1312,3 +1312,67 @@ fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
         view.recorded
     );
 }
+
+#[test]
+fn the_landing_turns_on_the_diff_regions_own_height() {
+    // **What the unit battery cannot see.** `landing_of`'s own tests pin both
+    // edges of the rule as a function of the `height` they hand it, and never go
+    // through `View::collect`, so they say nothing about *which* number the walk
+    // passes. Every other gate here sits far from both edges, so the call site
+    // could add or subtract a row and the whole suite would stay green while a
+    // reader on a pane one row either side of an edge got the wrong screen.
+    //
+    // The `tall` fixture puts the busiest hunk's header at row 28 and its first
+    // removal at row 32, so the two edges are four rows apart at the bottom and
+    // at 32 at the top, and driving the region to each side of both is what pins
+    // the argument.
+    let scratch = tall("shell-follow-heights");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for (diff, expected, why) in [
+        // Below the floor: the change is four rows under the landing, so a
+        // four-row region draws the `@@` and none of it. Keep the heading.
+        (
+            4usize,
+            0usize,
+            "a region too short to draw the change from the landing",
+        ),
+        (
+            5,
+            28,
+            "one row taller, and the landing is worth the heading",
+        ),
+        // Below the ceiling: the change is at row 32 of the block, so a 32-row
+        // region stops one short of it and the landing is still needed.
+        (
+            32,
+            28,
+            "a region one row short of drawing the change from the heading",
+        ),
+        (
+            33,
+            0,
+            "one row taller, and the change is drawn without moving at all",
+        ),
+    ] {
+        let mut app = App::new();
+        assert!(app.follow(TALL, &frame), "the follow did not arm anything");
+        let body = Body {
+            diff,
+            ..tall_layout(&app)
+        };
+        app.view(&mut frame, &mut highlighter, &history, body)
+            .expect("view");
+
+        assert_eq!(
+            app.position().row,
+            expected,
+            "a {diff}-row diff region landed on row {}, and it is {why}",
+            app.position().row
+        );
+    }
+}

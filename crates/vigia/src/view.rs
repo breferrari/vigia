@@ -564,11 +564,14 @@ pub struct View {
     /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
     ///
     /// **What lets a caller clear the request only once it was served.**
-    /// [`View::collect`] returns before the walk in two states, a pane with no
-    /// diff region and a worktree with no changed files, and a request dropped
-    /// in either would leave a reader on the heading for good: the tick that
-    /// would have re-armed it has already been spent. False whenever nothing was
-    /// asked for, so a caller reading it needs no separate test for that.
+    /// [`View::collect`] returns before the walk when the pane has no diff
+    /// region, and a request dropped there would leave a reader on the heading
+    /// for good: the tick that would have re-armed it has already been spent.
+    /// That one state, and not the other early return: a worktree with no
+    /// changed files has no heading to be stranded on, and
+    /// [`crate::App`]'s own staleness test drops the request there anyway. False
+    /// whenever nothing was asked for, so a caller reading it needs no separate
+    /// test for that.
     pub landed: bool,
     /// Files this viewport asked the frame for, drawn or merely crossed.
     ///
@@ -590,6 +593,11 @@ pub struct View {
     /// whatever the pane is. A counter over both would be satisfied by either,
     /// so deleting the increment that matters left it green: this counts the
     /// site the guard is about and nothing else.
+    ///
+    /// A frame that backs up counts the file it crossed twice, because the walk
+    /// runs again and the record is deliberately kept across the restart. That
+    /// is the same doubling [`Self::read`] has, and it is accurate rather than
+    /// wrong: two entries really are built.
     pub recorded: usize,
     /// The busiest bucket any tracked file holds, which every sparkline on this
     /// screen is drawn against.
