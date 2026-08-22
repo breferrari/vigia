@@ -375,17 +375,29 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
             };
             compared += 1;
 
-            // **Compared in cells, and the density cancels rather than being
-            // omitted.** The claim is sub-columns against buckets, and a dense
-            // glyph packs two of each into one cell, so the same factor stands on
-            // both sides. Writing it out would be arithmetic that reads as a
-            // conversion and converts nothing.
+            // **Each side times its own element's density, which stopped
+            // cancelling on 2026-08-22.** The claim is sub-columns against
+            // buckets. While both elements followed one ladder a dense glyph
+            // packed two of each into one cell and the factor stood on both
+            // sides, so it was left out;
+            // [#244](https://github.com/breferrari/vigia/issues/244) took the
+            // band off the ladder and the sparkline kept it, so on a dense pane
+            // the densities are now 1 and 2 and the bare comparison claims
+            // something twice as weak as the sentence above it.
+            //
+            // **It changes no outcome today and is a truth fix rather than a
+            // strength one**, which is worth saying so nobody reads it as a
+            // tightened gate: measured across this sweep the slackest pair is a
+            // braille pane at 41 columns, 39 sub-columns against 6 samples, so
+            // the margin is 6.5x where the correction is 2x. Deleting the two
+            // density terms leaves the suite green.
+            let (columns, samples) = (cells * Glyphs::BAND.density(), buckets * glyphs.density());
             assert!(
-                cells >= buckets,
-                "{glyphs:?} at {width} columns: the band carries {cells} cells \
-                 where the sparkline draws {buckets}, so the worktree graph is \
-                 coarser than a per-file bucket and one burst can split in one \
-                 element while merging in the other"
+                columns >= samples,
+                "{glyphs:?} at {width} columns: the band carries {columns} \
+                 sub-columns where the sparkline draws {samples}, so the \
+                 worktree graph is coarser than a per-file bucket and one burst \
+                 can split in one element while merging in the other"
             );
         }
     }
@@ -430,16 +442,30 @@ fn a_wider_pane_buys_finer_time() {
     struct Drawn {
         width: u16,
         ink: usize,
-        heights: usize,
+        glyphs: usize,
     }
 
     let mut widths = Vec::new();
     for width in [60u16, 80, 120, 160, 200] {
         let rows = band_strip(width, BURSTY);
         let ink: usize = rows.iter().map(|row| drawn_ink(row)).sum();
-        // Distinct glyphs across the whole band, which is how much of the ramp
-        // the shape actually uses. A wider pane divides the same window into
-        // more values, so it can only ever show at least as much of it.
+        // **Distinct glyphs, and this field is named for that now.** It was
+        // called `heights`, which is the conflation
+        // [#244](https://github.com/breferrari/vigia/issues/244) corrects in
+        // `SPEC.md` §5.1: a glyph is one cell of one row, so counting glyphs is
+        // not counting column heights, and at a dense rung it is not even
+        // counting one column. What it does measure is how much of the ramp the
+        // shape uses, which is what the assertion below wants.
+        //
+        // **Not switched to `distinct_heights`, and the attempt is worth
+        // recording.** Counted as column heights this fixture draws three at
+        // sixty columns and two at two hundred, so the assertion would fail for a
+        // true reason: on an impulse series a wider pane divides the window past
+        // what the level kernel varies over, and amplitude resolution genuinely
+        // stops growing. What this gate claims is about *time* resolution and
+        // ink. Column heights are
+        // `the_bands_heights_are_the_block_rungs_and_not_a_dense_cells`, on a
+        // wave, which is the series that has amplitude to resolve.
         let mut seen: Vec<char> = Vec::new();
         for glyph in rows.iter().flat_map(|row| row.chars()) {
             if !glyph.is_whitespace() && !seen.contains(&glyph) {
@@ -449,7 +475,7 @@ fn a_wider_pane_buys_finer_time() {
         widths.push(Drawn {
             width,
             ink,
-            heights: seen.len(),
+            glyphs: seen.len(),
         });
     }
 
@@ -469,9 +495,9 @@ fn a_wider_pane_buys_finer_time() {
         "the sweep never grew, so this gate compared nothing: {widths:?}"
     );
     assert!(
-        wide.heights >= narrow.heights,
-        "the widest pane drew fewer distinct heights than the narrowest, so \
-         widening cost resolution: {widths:?}"
+        wide.glyphs >= narrow.glyphs,
+        "the widest pane used less of the ramp than the narrowest, so widening \
+         cost resolution: {widths:?}"
     );
 }
 
@@ -688,86 +714,12 @@ fn the_band_scales_against_the_ordinary_write_rather_than_the_largest() {
 }
 
 #[test]
-fn a_dense_cell_carries_two_samples() {
-    // **The braille rung's whole purpose, and nothing else here drives it**
-    // ([#232](https://github.com/breferrari/vigia/issues/232)). A 2x4 cell holds
-    // two sub-columns, older on the left, which is how `btop` fits two values
-    // into one character and the reason its graphs read as a line rather than as
-    // bars. Drawing one sample into both halves would look almost right and
-    // halve the resolution silently.
-    //
-    // **A narrow pane on purpose.** The window holds 120 samples, so a pane
-    // asking for more sub-columns than that gets neighbouring halves fed from one
-    // sample, and the two are then equal by arithmetic rather than by defect.
-    // **A rising ramp rather than an every-sample alternation**, since
-    // [#242](https://github.com/breferrari/vigia/issues/242) made these elements
-    // draw a level. The old fixture was zero on even samples and busy on odd
-    // ones, which a six-second kernel erases completely and by design: a
-    // one-second alternation is noise at that scale and smoothing it away is the
-    // point. The claim is unchanged and is what this still tests, because a
-    // monotone rise makes the older half lower on **every** cell: the two halves
-    // carry two values, and the older one is on the left.
-    let mut rising = [0u32; HISTORY_SAMPLES];
-    for (at, sample) in rising.iter_mut().enumerate() {
-        // A step, the sharpest edge a level can carry: its gradient is bounded by
-        // its own kernel, so nothing steeper survives smoothing.
-        *sample = if at >= HISTORY_SAMPLES / 2 { 400 } else { 0 };
-    }
-
-    // **This asserted a specific glyph until #242 and now compares the two rungs
-    // against each other.** It wanted a cell whose halves differ by three levels,
-    // which an every-sample alternation produced and a level cannot: the two
-    // halves of one cell are a fraction of a kernel apart, so they differ by at
-    // most about one rung and usually round together. The claim was never about
-    // that glyph. It is that a dense cell carries **two** values where a block
-    // cell carries one, and what that buys is resolution: across the same
-    // transition, at the same width, on the same series, the dense rung must draw
-    // more distinct heights than the block rung. That is the whole of #232's
-    // "one value per sub-column" stated as something a level can still show.
-    let distinct = |glyphs: Glyphs| {
-        let rows = band_at(WIDE, rising, glyphs);
-        let drawn = rows.last().expect("a band row").clone();
-        let mut seen: Vec<char> = drawn.chars().filter(|c| !c.is_whitespace()).collect();
-        seen.sort_unstable();
-        seen.dedup();
-        (seen.len(), drawn)
-    };
-
-    let (dense, dense_row) = distinct(Glyphs::Braille);
-    let (block, block_row) = distinct(Glyphs::Block);
-
-    assert!(
-        block > 1 && dense > 1,
-        "a rung drew one height across a step, so the fixture does not exercise          a transition at all:\ndense: {dense_row}block: {block_row}"
-    );
-
-    // **What this does not assert, and the finding it stands on.** The obvious
-    // claim is that the dense rung draws *more* distinct heights than the block
-    // one, since that is what a second sub-column is for. Measured on this very
-    // fixture it draws **fewer**, 4 against 6, and that is not a defect in the
-    // drawer: `Glyphs::levels` gives the block ramp eight levels a row and a 2x4
-    // cell three, so density is bought with more than half the vertical
-    // resolution. That trade paid while the band drew discrete events, which
-    // change completely between samples. #242 made it draw a level, which is
-    // smooth by construction, so the horizontal half now carries almost nothing
-    // and the vertical half it was traded for is what a wave needs.
-    //
-    // The ladder therefore inverts for this element and that is
-    // [#244](https://github.com/breferrari/vigia/issues/244), not something to
-    // pin here: a gate asserting the inversion would fix it in place, and a gate
-    // asserting the opposite would fail for a true reason. So this holds the part
-    // that is still true and unarguable, that both rungs draw the transition, and
-    // points at the ruling for the rest.
-}
-
-#[test]
 fn the_band_draws_the_newest_writes_on_the_right() {
-    // **Nothing gated time order, and a mirrored graph is a silent lie.**
-    // `a_dense_cell_carries_two_samples` proves a cell carries *two* values and
-    // cannot prove which is which: its fixture alternates, so swapping the halves
-    // draws the same two glyphs and the gate passes. A band drawn backwards would
-    // put a burst that just landed at the far left, where a reader reads history,
-    // and nothing on screen would say so.
+    // **Nothing gated time order, and a mirrored graph is a silent lie.** A band
+    // drawn backwards would put a burst that just landed at the far left, where a
+    // reader reads history, and nothing on screen would say so. Every other gate
+    // here reads presence, ink, axis, span, stacking or resolution, and a
+    // mirrored band has all six.
     //
     // Busy only in the newest quarter of the window, so the ink has one honest
     // place to be. `Churn::projected` is oldest-first and `Glyphs::glyph` takes
@@ -777,6 +729,11 @@ fn the_band_draws_the_newest_writes_on_the_right() {
         *sample = 50;
     }
 
+    // Both rungs, which draw the same band since
+    // [#244](https://github.com/breferrari/vigia/issues/244) and are kept here as
+    // the cheapest possible statement of that: if the ruling is ever undone in
+    // the drawer, this asserts time order on whatever replaces it rather than on
+    // one rung only.
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         let rows = band_at(WIDE, newest, glyphs);
         let baseline = rows.last().expect("a band row");
@@ -801,5 +758,144 @@ fn the_band_draws_the_newest_writes_on_the_right() {
              mirrored in time:\n{}",
             rows.join("\n")
         );
+    }
+}
+
+/// A wave, which is the shape the picture specifies and
+/// [#242](https://github.com/breferrari/vigia/issues/242) made these elements
+/// draw: monotone up then monotone down, with every sample non-zero so the
+/// series exercises the ramp rather than the axis.
+///
+/// **Not the step [`the_band_stacks_its_rows_from_the_bottom`] uses.** A step is
+/// two heights and a transition, which is the right fixture for a stacking rule
+/// and the wrong one for a resolution claim: it cannot ask for more heights than
+/// it has. This asks for a whole ramp's worth.
+fn wave() -> [u32; HISTORY_SAMPLES] {
+    let mut series = [0u32; HISTORY_SAMPLES];
+    for (at, sample) in series.iter_mut().enumerate() {
+        let turn = at as f64 / HISTORY_SAMPLES as f64 * std::f64::consts::TAU;
+        // Floored at one, because a level divides by its kernel's weight and a
+        // zero sample is the axis rather than the ramp's bottom rung.
+        *sample = (((turn.sin() + 1.0) * 200.0) as u32).max(1);
+    }
+    series
+}
+
+/// Every drawn sub-column's height, summed across the band's rows.
+///
+/// **Inverts [`Glyphs::glyph`] rather than decoding dot bits**, so this reads the
+/// shipped drawer's own answer and cannot drift from it: a table built by asking
+/// that function for every level pair is exact at every rung, where a decoder
+/// would have to know braille's dot numbering and the eighth-block ramp
+/// separately and could be wrong about either.
+///
+/// **`pane` is what the terminal detected and [`Glyphs::BAND`] is what the band
+/// drew with, and since [#244](https://github.com/breferrari/vigia/issues/244)
+/// those are two different things.** Decoding with `pane` would have been right
+/// while the band followed the ladder and is wrong now: on a braille terminal it
+/// would meet block glyphs it has no entry for and panic. Passing the pane rung
+/// through anyway is what lets a caller ask what a *braille* reader sees, which
+/// is the question this element was reported on.
+fn column_heights(width: u16, series: [u32; HISTORY_SAMPLES], pane: Glyphs) -> Vec<usize> {
+    let glyphs = Glyphs::BAND;
+    let mut inverse = std::collections::HashMap::new();
+    for left in 0..=glyphs.levels() {
+        for right in 0..=glyphs.levels() {
+            inverse.insert(glyphs.glyph(left, right), (left, right));
+        }
+    }
+
+    let rows = band_at(width, series, pane);
+    let cells = rows[0].chars().count();
+    let mut heights = vec![0usize; cells * glyphs.density()];
+    for row in &rows {
+        for (cell, drawn) in row.chars().enumerate() {
+            // Sky above a bar is left unwritten, which is the drawer's own rule
+            // and is a height of zero rather than a glyph to look up.
+            let (left, right) = if drawn.is_whitespace() {
+                (0, 0)
+            } else {
+                *inverse.get(&drawn).unwrap_or_else(|| {
+                    panic!(
+                        "the band drew {drawn:?} on a {pane:?} pane, which \
+                         {glyphs:?} cannot spell, so it is following the ladder \
+                         again and #244 has been undone"
+                    )
+                })
+            };
+            for (sub, level) in [left, right][..glyphs.density()].iter().enumerate() {
+                heights[cell * glyphs.density() + sub] += level;
+            }
+        }
+    }
+    heights
+}
+
+/// Distinct heights in a drawn band, which is the resolution a reader sees.
+fn distinct_heights(width: u16, series: [u32; HISTORY_SAMPLES], pane: Glyphs) -> usize {
+    let mut heights = column_heights(width, series, pane);
+    heights.sort_unstable();
+    heights.dedup();
+    heights.len()
+}
+
+#[test]
+fn the_band_draws_at_the_block_rung_whatever_the_pane_detects() {
+    // **[#244](https://github.com/breferrari/vigia/issues/244).** The glyph
+    // ladder is sold as higher resolution and delivered a coarser graph here: a
+    // 2x4 cell buys a second sub-column and pays more than half the vertical
+    // resolution for it. That trade was right while the band drew discrete write
+    // events, which change completely between samples, and
+    // [#242](https://github.com/breferrari/vigia/issues/242) made it draw a
+    // **level**, which is smooth by construction.
+    //
+    // So the band left the ladder and the sparkline kept it, which is
+    // `SPEC.md` §11.1. This is the mechanical half of that ruling: the band is
+    // the same band at every rung, so a reader on Windows Terminal and a reader
+    // on the legacy console see one graph.
+    let series = wave();
+    for width in [40u16, 60, 80, 109, 124] {
+        let blocks = band_at(width, series, Glyphs::Block);
+        for dense in [Glyphs::Braille, Glyphs::Octant] {
+            assert_eq!(
+                band_at(width, series, dense),
+                blocks,
+                "at {width} columns the band drew differently at {dense:?} than \
+                 at the block rung, so the pane's detected glyphs still reach it"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_bands_heights_are_the_block_rungs_and_not_a_dense_cells() {
+    // **The half that says *which* rung**, and the reason the other half is
+    // right. Drawing identically at every rung would also be true of a band that
+    // drew braille everywhere, and that is the defect rather than the fix.
+    //
+    // A dense cell has four dot rows and spends the bottom one on the axis
+    // ([#78](https://github.com/breferrari/vigia/issues/78)), so it offers three
+    // levels a row and seven heights over the band's two rows. The block ramp
+    // offers eight a row and seventeen. Measured across widths 40 to 124 on this
+    // wave, blocks draw sixteen of their seventeen and a dense rung drew seven of
+    // its seven: saturated, because seven is all it has.
+    let series = wave();
+    // Heights a 2x4 cell could have carried over the band's rows, the axis
+    // included: three levels a row and zero.
+    let dense_heights = Glyphs::Braille.levels() * GRAPH_ROWS + 1;
+
+    // **Every pane rung, not just the block one.** The question this element was
+    // reported on is what a *braille* reader sees, and since the band left the
+    // ladder the answer must be the block rung's resolution on their pane too.
+    for pane in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
+        for width in [40u16, 60, 80, 109, 124] {
+            let drawn = distinct_heights(width, series, pane);
+            assert!(
+                drawn > dense_heights,
+                "on a {pane:?} pane at {width} columns the band drew {drawn} \
+                 distinct heights, which a dense cell's {dense_heights} could \
+                 have carried, so this reader is still getting the coarser graph"
+            );
+        }
     }
 }
