@@ -905,15 +905,18 @@ fn the_bands_heights_are_the_block_rungs_and_not_a_dense_cells() {
     }
 }
 
-/// A store holding one burst, recorded `ago` before `now`.
+/// A store holding one six-second burst that ends at `now`.
 ///
 /// Built through `History` rather than by writing a `Churn` array directly,
 /// because what [#243](https://github.com/breferrari/vigia/issues/243) is about
 /// is the *store* moving: a hand-built series is already whatever shape the test
 /// wanted and cannot show that anything aged.
-fn burst_at(now: Instant, ago: Duration) -> History {
+///
+/// The burst's span was a parameter and both callers passed the same six
+/// seconds, which is also the span itself, so it is a constant here instead.
+fn burst_at(now: Instant) -> History {
     let mut history = History::new();
-    let began = now - ago;
+    let began = now - HISTORY_SAMPLE * 6;
     for second in 0..6u32 {
         history.record_sized(
             [("src/a.rs", Some(6_000u64))],
@@ -941,7 +944,7 @@ fn a_quiet_window_slides_left_rather_than_freezing() {
     // that gate is the one that was red before this change. This one would pass
     // without it.
     let now = Instant::now();
-    let mut history = burst_at(now, Duration::from_secs(6));
+    let mut history = burst_at(now);
 
     let fresh = band_at(WIDE, history.worktree_churn().0, Glyphs::default());
     let ink_at = |rows: &[String]| -> Vec<usize> {
@@ -989,7 +992,7 @@ fn the_band_and_the_sparklines_age_together() {
     // moved one and not the other would leave the pane saying two different
     // things about what time it is.
     let now = Instant::now();
-    let mut history = burst_at(now, Duration::from_secs(6));
+    let mut history = burst_at(now);
 
     let band = |h: &History| h.worktree_churn().0;
     let spark = |h: &History| h.level("src/a.rs");

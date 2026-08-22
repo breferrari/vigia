@@ -564,11 +564,19 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // loop needs is the one buffer it keeps.
     let mut batch = Vec::with_capacity(DRAIN_CAP);
 
-    // **The only clock this program owns, and it exists only between a press on
-    // a step button and its release.** `SPEC.md` §11.1 carries the ruling and
-    // `Held::wait` is the seam that keeps it honest: with `None` here the receive
-    // below is untimed, which is I1's *0 wakeups while idle* unchanged and
-    // unmeasurable-away. Nothing arms this but a press on a bar's end.
+    // **Three clocks now, and `Shell::patience` is the seam that keeps every one
+    // of them honest.** With `None` from it the receive below is untimed, which
+    // is I1's *0 wakeups while idle* unchanged and unmeasurable-away; the
+    // invariant is that nothing can arm a clock without going through that
+    // function. `SPEC.md` §11.1 carries all three rulings.
+    //
+    // A press on a bar's end arms the repeat and it dies with the release. A
+    // scroll arms the direction mark and it dies `SCROLL_LINGER` later. And a
+    // write arms the ageing roll, which dies when the history window empties
+    // `HISTORY_WINDOW` after the last one
+    // ([#243](https://github.com/breferrari/vigia/issues/243)). **This comment
+    // said "the only clock" through two of those three**, which is what a header
+    // describing a mechanism costs when the mechanism grows underneath it.
     'awake: loop {
         // Untimed with nothing held, which is the whole invariant. With something
         // held the wait is only as long as the next step is away, so the loop
@@ -1826,16 +1834,14 @@ mod tests {
         // and over `patience` stays green while the graph never moves. Position
         // is the whole of it, which is why it is read here rather than asserted
         // about behaviour.
-        let timeout_arm = code
+        let arm = &code[code
             .find("let Some(wake) = wake else {")
-            .expect("the loop no longer has a timeout arm");
-        let rolled = code[timeout_arm..]
-            .find("shell.history.record_sized([], ")
-            .map(|at| at + timeout_arm)
-            .expect("the timeout arm no longer rolls the window, so an ageing wake redraws a frozen graph");
-        let drawn = code[timeout_arm..]
+            .expect("the loop no longer has a timeout arm")..];
+        let rolled = arm.find("shell.history.record_sized([], ").expect(
+            "the timeout arm no longer rolls the window, so an ageing wake redraws a frozen graph",
+        );
+        let drawn = arm
             .find("shell.draw(&mut frame, &worktree)")
-            .map(|at| at + timeout_arm)
             .expect("the timeout arm no longer draws");
         assert!(
             rolled < drawn,

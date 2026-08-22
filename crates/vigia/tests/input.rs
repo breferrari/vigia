@@ -1869,39 +1869,49 @@ fn nothing_armed_means_no_deadline_at_all() {
 #[test]
 fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
     // **[#243](https://github.com/breferrari/vigia/issues/243)'s half of I1's
-    // budget, written the way `nothing_held_means_no_timer_at_all` is: the value
-    // the loop is handed, not a behaviour observed around it.** The ageing clock
-    // is admissible only because it stops, and what stops it is
-    // `History::ages_in` returning `None` for a window holding nothing. A version
-    // that returned a sample period regardless would look entirely reasonable,
-    // pass every gate about ageing, and put an idle monitor on a one-second poll
-    // loop for as long as it is left open.
+    // budget, and it gates the *wiring* rather than the store.** What
+    // `History::ages_in` answers is gated in `vigia-core`, which owns the type;
+    // what matters here is that its answer reaches the one function deciding
+    // whether this program owns a timer, and that an empty window therefore
+    // leaves the loop's receive untimed.
+    //
+    // A first draft of this asserted `ages_in` three times and never called
+    // `patience`, so despite its name it gated nothing about the input layer and
+    // duplicated the core's own gates. The composition is the whole point: both
+    // halves can be right while nothing joins them.
     let mut history = History::new();
-    let start = Instant::now();
+    let now = Instant::now();
 
     assert_eq!(
-        history.ages_in(start),
+        patience(None, None, history.ages_in(now), now),
         None,
-        "a window with nothing recorded in it asked the loop to wake"
+        "an empty window and nothing held handed the loop a deadline, which is a \
+         timer on an idle monitor"
     );
 
-    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+    history.record_sized([("src/a.rs", Some(4_000u64))], now);
+    let armed = patience(None, None, history.ages_in(now), now)
+        .expect("a window holding a write did not arm the loop, so the graph freezes");
     assert!(
-        history.ages_in(start).is_some(),
-        "a window holding a write did not ask to age, so the graph freezes"
+        armed <= HISTORY_SAMPLE,
+        "a live window asked the loop to sleep {armed:?}, past the sample it is \
+         waiting for"
     );
 
-    // And once the whole window has turned over it stops again, which is the
-    // bound: at most `HISTORY_SAMPLES` wakes follow any burst.
-    history.record_sized([], start + HISTORY_WINDOW);
+    // And it stops again, which is the bound the amendment rests on.
+    history.record_sized([], now + HISTORY_WINDOW);
     assert_eq!(
-        history.ages_in(start + HISTORY_WINDOW),
+        patience(
+            None,
+            None,
+            history.ages_in(now + HISTORY_WINDOW),
+            now + HISTORY_WINDOW
+        ),
         None,
-        "a drained window is still asking the loop to wake, so the clock outlives \
-         everything it had to show and I1's budget is gone"
+        "a drained window still had the loop on a clock, so it outlives \
+         everything it had to show"
     );
 }
-
 #[test]
 fn each_bar_answers_only_the_keys_that_move_it() {
     // **The routing behind the arrows, and the half a render gate cannot see.**

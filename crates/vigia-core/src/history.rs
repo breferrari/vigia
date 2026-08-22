@@ -227,10 +227,17 @@ pub const HISTORY_SAMPLES: usize = 120;
 ///
 /// **Public since [#243](https://github.com/breferrari/vigia/issues/243)**,
 /// because it stopped being an internal grid and became a term in I1's budget:
-/// the ageing clock wakes at most once per sample, and a rate nobody outside
-/// this module can name is a rate no gate can assert. It is also the *derivation*
+/// the ageing clock wakes at most once per sample, and it is the *derivation*
 /// that ruling rests on, since a sample is the finest interval at which any drawn
 /// cell can change.
+///
+/// **The reason is one home for that derivation rather than reach**, and the
+/// first draft of this docblock claimed the wrong one. It said a rate nobody
+/// outside this module can name is a rate no gate can assert, which is false:
+/// `HISTORY_WINDOW / HISTORY_SAMPLES` is literally this definition and both have
+/// been public all along. What the export buys is that the three gates asserting
+/// the budget name the same term the budget is written in, instead of restating
+/// its arithmetic three times.
 pub const HISTORY_SAMPLE: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
 
@@ -892,7 +899,7 @@ impl History {
         paths: impl IntoIterator<Item = (&'p str, Option<u64>)>,
         now: Instant,
     ) {
-        self.roll(now);
+        let rolled = self.roll(now);
 
         let mut named = false;
         for (path, bytes) in paths {
@@ -921,7 +928,22 @@ impl History {
             self.tracks.insert(path.to_owned(), track);
         }
 
-        self.repeak();
+        // **Skipped when nothing moved and nothing was written**, which is new
+        // with [#277](https://github.com/breferrari/vigia/issues/277) and is not
+        // an optimisation looking for a problem: that row put this call on the
+        // shell loop's *timeout* arm, which also fires every `STEP_REPEAT` while
+        // a scrollbar button is held. At 50ms a held button drives twenty
+        // timeouts a second and nineteen of them cross no sample boundary, so
+        // without this guard each one pays the walk priced at **144µs mean and
+        // 191µs worst** in [`Self::repeak`]'s own docblock, for an answer that
+        // cannot have changed.
+        //
+        // Both terms are load bearing. A tick that named a path inside the
+        // current sample changed a track without moving the window, and a roll
+        // that moved the window changed every track's shape without naming one.
+        if rolled > 0 || named {
+            self.repeak();
+        }
     }
 
     /// This path's buckets, oldest first, or `None` when nothing is tracked.
@@ -1027,14 +1049,17 @@ impl History {
     }
 
     /// Advance the window to `now`, dropping whatever fell out of it.
-    fn roll(&mut self, now: Instant) {
+    /// Returns how many whole samples the window moved, which is what lets
+    /// [`Self::record_sized`] skip [`Self::repeak`] over state that did not
+    /// change ([#277](https://github.com/breferrari/vigia/issues/277)).
+    fn roll(&mut self, now: Instant) -> usize {
         let elapsed = now.saturating_duration_since(self.opened);
         // Saturating into `usize` before the comparison below, so an instant far
         // in the future cannot overflow the multiplication that moves `opened`.
         let steps = usize::try_from(elapsed.as_nanos() / HISTORY_SAMPLE.as_nanos())
             .unwrap_or(HISTORY_SAMPLES);
         if steps == 0 {
-            return;
+            return 0;
         }
 
         if steps >= HISTORY_SAMPLES {
@@ -1046,7 +1071,7 @@ impl History {
             self.tracks.clear();
             self.opened = now;
             self.scales = [0; SPARK_GROUPS.len()];
-            return;
+            return steps;
         }
 
         // Advanced by whole samples rather than set to `now`, so the boundaries
@@ -1065,6 +1090,7 @@ impl History {
         // projection of every track would be pure duplicate work. That was
         // survivable while a track held eight samples and is a quarter of the
         // tick's cost now that it holds a hundred and twenty.
+        steps
     }
 
     /// Drop the least recently changed path to make room for a new one.

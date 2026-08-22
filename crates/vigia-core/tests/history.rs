@@ -938,3 +938,63 @@ fn a_drained_window_stops_asking_to_age() {
     // And it stays stopped, rather than stopping for one wake and resuming.
     assert_eq!(history.ages_in(start + HISTORY_WINDOW * 2), None);
 }
+
+#[test]
+fn a_tick_that_moves_nothing_does_no_work() {
+    // **The guard [#277](https://github.com/breferrari/vigia/issues/277) needed
+    // once it put `record_sized` on the shell loop's timeout arm.** That arm also
+    // fires every `STEP_REPEAT` while a scrollbar button is held, twenty times a
+    // second, and nineteen of those cross no sample boundary. Without the guard
+    // each one paid `repeak`, priced in its own docblock at 144µs mean and 191µs
+    // worst at the path cap, to recompute an answer that cannot have changed.
+    // Measured at the cap after it: a same-sample timeout is **20ns** against
+    // **137µs** for one that crosses a boundary.
+    //
+    // Asserted on the store's own counters rather than on a clock, because a
+    // timing assertion at this size is a measurement of the runner. `repeak`
+    // rebuilds `scales` and the worktree series, so the observable is that
+    // neither moved and no eviction was counted.
+    let mut history = History::new();
+    let start = Instant::now();
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+
+    let scales = history.scales();
+    let churn = history.worktree_churn();
+    let stats = history.stats();
+
+    // Inside the same sample, naming nothing: the wake a held button produces.
+    history.record_sized([], start + HISTORY_SAMPLE / 2);
+    assert_eq!(
+        (history.scales(), history.worktree_churn()),
+        (scales, churn),
+        "a timeout inside one sample changed the projection, so it walked every \
+         track to arrive back where it started"
+    );
+    assert_eq!(
+        history.stats().evicted_by_window,
+        stats.evicted_by_window,
+        "a timeout inside one sample evicted something, so the window moved when \
+         it should not have"
+    );
+
+    // **Both halves of the guard, or it is half a guard.** A tick that names a
+    // path inside the same sample changed a track without moving the window, and
+    // skipping the walk there would freeze the projection against live data.
+    history.record_sized([("src/a.rs", Some(9_000u64))], start + HISTORY_SAMPLE / 2);
+    assert_ne!(
+        history.worktree_churn(),
+        churn,
+        "a write inside the current sample did not reach the projection, so the \
+         guard skipped a walk that had work to do"
+    );
+
+    // And crossing a boundary with nothing named still rolls.
+    let rolled = history.worktree_churn();
+    history.record_sized([], start + HISTORY_SAMPLE * 2);
+    assert_ne!(
+        history.worktree_churn(),
+        rolled,
+        "a timeout that crossed a sample boundary left the window where it was, \
+         which is the freeze #243 exists to fix"
+    );
+}

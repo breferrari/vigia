@@ -190,15 +190,36 @@ fn shell_frame(
 ) {
     let began = Instant::now();
     frame.advance().expect("advance");
-    app.sample_memory();
-    let chrome = app.chrome("fixture", None, None, None, None, None);
-    let view = app.view(frame, highlighter, history, screen).expect("view");
-    render(buf, area(), &view, theme, Glyphs::default(), &chrome);
+    frame_body(frame, app, highlighter, history, buf, theme, screen);
     // Recorded from an inner clock rather than handed the caller's, because
     // every caller times this differently: some wrap it in `time`, some in
     // `timed`, and the scroll gates wrap a whole motion. What the ring needs is
     // one frame's cost, and this is the only place that knows where one starts.
     app.record_frame(began.elapsed());
+}
+
+/// Everything a frame does except walk status, which is the half an ageing wake
+/// pays and a tick pays on top of.
+///
+/// **Split out of [`shell_frame`] rather than copied into the one gate that
+/// wants it** ([#277](https://github.com/breferrari/vigia/issues/277)). That gate
+/// compares a wake that skips `Frame::advance` against one that does not, and a
+/// hand-rolled second copy of these four lines is exactly the drift `shell_frame`
+/// exists to prevent: the two arms would stop being the same frame the moment
+/// either grew a step.
+fn frame_body(
+    frame: &mut Frame,
+    app: &mut App,
+    highlighter: &mut Highlighter,
+    history: &History,
+    buf: &mut Buffer,
+    theme: &Theme,
+    screen: Body,
+) {
+    app.sample_memory();
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let view = app.view(frame, highlighter, history, screen).expect("view");
+    render(buf, area(), &view, theme, Glyphs::default(), &chrome);
 }
 
 /// The screen has to have been full, or a frame that drew two rows is a cheap
@@ -2043,9 +2064,7 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
 
     // A window with something in it, which is the only state the clock runs in.
     let paths: Vec<String> = frame.files().iter().map(|c| c.path.clone()).collect();
-    let start = Instant::now();
     sample_all(&mut history, scratch.root(), &paths);
-    let _ = start;
 
     let (mut ageing, mut ticking) = (Samples::new(SAMPLED_AGEINGS), Samples::new(SAMPLED_AGEINGS));
     for round in 1..=SAMPLED_AGEINGS {
@@ -2058,12 +2077,15 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
                     frame.advance().expect("advance");
                 }
                 history.record_sized([], Instant::now());
-                app.sample_memory();
-                let chrome = app.chrome("fixture", None, None, None, None, None);
-                let view = app
-                    .view(&mut frame, &mut highlighter, &history, screen)
-                    .expect("view");
-                render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
+                frame_body(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
             });
             if round > SAMPLED_AGEINGS / 4 {
                 if walks {
@@ -2078,16 +2100,16 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let aged = ageing.percentile(0.5).expect("a sampled round");
     let ticked = ticking.percentile(0.5).expect("a sampled round");
 
-    // Non-vacuity: both arms drew a screen, or this compares two numbers neither
-    // of which is a frame.
-    let drawn = app
-        .view(&mut frame, &mut highlighter, &history, screen)
-        .expect("view");
-    assert!(
-        drawn.rows.len() >= screen.diff,
-        "the fixture drew {} of {} body rows, so neither arm is a frame",
-        drawn.rows.len(),
-        screen.diff
+    // Non-vacuity through the shared helper rather than a copy of it, which is
+    // what its own docblock asks for: a `height` term drifting out of step is
+    // invisible in a second spelling.
+    drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
+        screen.diff,
     );
 
     assert!(
