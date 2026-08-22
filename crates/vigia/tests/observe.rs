@@ -1053,8 +1053,17 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
         // where `vigia::run` begins before the drain, so the two are not the
         // same boundary and merging them would move every number this reports.
         // That divergence is older than this row and is left alone here.
+        //
+        // **After the receive, not before it.** The first version of this hoist
+        // read the clock above `recv_timeout`, which blocks for up to a sampling
+        // step: on a quiet tree that is two `HISTORY_SAMPLE`s, so every burst
+        // was stamped into a sample that had already closed and the store
+        // trailed the wall clock by however long the wait had been. `vigia::run`
+        // reads `began` after the wake on both of its arms, which is the whole
+        // point of copying it.
+        let received = rx.recv_timeout(deadline - now);
         let turn = Instant::now();
-        let tick_paths = match rx.recv_timeout(deadline - now) {
+        let tick_paths = match received {
             Err(RecvTimeoutError::Timeout) => {
                 idle_waits += 1;
                 continue;
