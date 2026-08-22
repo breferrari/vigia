@@ -615,24 +615,24 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // below is the whole of the frame. Either a step fell due, which the
             // block above has already applied, or a scroll burst went quiet and
             // the arrows stop claiming a direction.
-            let now = Instant::now();
-            shell.settle_scroll(now);
-            // **The window ages here, and this is the whole of
-            // [#243](https://github.com/breferrari/vigia/issues/243)'s
-            // mechanism.** An empty burst rolls the window and leaves the pulse
-            // where it is, which is the same call a tick with nothing in it
-            // already makes; what is new is that a timeout reaches it. Before the
-            // draw, or the frame paints the picture it woke up to change and the
-            // next wake corrects it a second late.
-            //
             // **No `Frame::advance` on this path**, deliberately: an ageing wake
             // is not a filesystem event, nothing on disk changed, and walking
-            // status anyway is the difference between 90µs and 458µs measured on
-            // the reference fixture. `SPEC.md` §11.1 carries both numbers.
-            shell.history.record_sized([], now);
+            // status anyway is the difference between an ageing wake and a tick,
+            // which `SPEC.md` §11.1 prices. The window is rolled by `Shell::draw`
+            // rather than here, for the reason that function's own comment gives.
+            let began = Instant::now();
+            shell.settle_scroll(began);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree)?;
             shell.request_warm(&worktree, &tx);
+            // **A timeout is a frame and belongs in the frame time the bar
+            // reports**, which `SPEC.md` §5.1 defines as the whole turn of this
+            // loop. It was absent while the only timeouts were a held step's,
+            // and [#243](https://github.com/breferrari/vigia/issues/243) makes
+            // this the most common frame on a quiet tree: a p99 that could not
+            // see it would be reporting on the frames a reader is *not* looking
+            // at.
+            shell.app.record_frame(began.elapsed());
             continue;
         };
         // Started before the drain, not after it, because the drain is part of
@@ -1367,6 +1367,25 @@ impl Shell {
     /// nothing. That is the same "report and keep the previous screen" rule the
     /// rest of the frame path already follows.
     fn draw(&mut self, frame: &mut vigia_core::Frame, worktree: &Worktree) -> Result<(), Failure> {
+        // **The window is rolled here because this is where every frame passes**
+        // ([#243](https://github.com/breferrari/vigia/issues/243)). It sat on the
+        // loop's timeout arm first, which is where the ageing clock's own wake
+        // lands, and that was wrong in a way only an audit found: `recv_timeout`
+        // returns `Ok` whenever anything is queued, so a stream of wakes that are
+        // not ticks never reaches that arm at all. Pointer motion is exactly such
+        // a stream, and the takeover asks for it, so moving the mouse over a
+        // quiet pane redrew a window that never rolled: the freeze this row
+        // exists to fix, for as long as the motion continued.
+        //
+        // Rolling *here* makes "the drawn window is current" true by
+        // construction rather than by remembering it at each of the paths that
+        // draw. It costs nothing on the frames that do not need it:
+        // `History::record_sized` skips its projection when no sample boundary
+        // was crossed and nothing was named, which is 20ns at the path cap.
+        //
+        // Before the paint, not after, or the frame draws the picture it was
+        // woken to change and the next one corrects it a beat late.
+        self.history.record_sized([], Instant::now());
         self.paint(frame, worktree)?;
         if self.app.owes_repaint() {
             self.paint(frame, worktree)?;
@@ -1834,20 +1853,42 @@ mod tests {
         // and over `patience` stays green while the graph never moves. Position
         // is the whole of it, which is why it is read here rather than asserted
         // about behaviour.
+        // **Every frame rolls the window before it paints, and `Shell::draw` is
+        // where every frame passes** ([#243](https://github.com/breferrari/vigia/issues/243)).
+        // Position is the whole of it: a roll after the paint draws the picture
+        // it was woken to change, and a roll on only one of the loop's paths
+        // leaves the other redrawing a frozen window. This lived on the timeout
+        // arm first and was exactly that second bug, because `recv_timeout`
+        // returns `Ok` whenever anything is queued and a stream of pointer
+        // motion never reaches that arm.
+        let drawer = &code[code
+            .find("fn draw(&mut self, frame: &mut vigia_core::Frame")
+            .expect("`Shell::draw` is gone")..];
+        let rolled = drawer.find("self.history.record_sized([], ").expect(
+            "`Shell::draw` no longer rolls the window, so a frame can draw one that stopped moving",
+        );
+        let painted = drawer
+            .find("self.paint(frame, worktree)")
+            .expect("`Shell::draw` no longer paints");
+        assert!(
+            rolled < painted,
+            "the draw paints before it rolls the window, so a frame shows the \
+             picture it was woken to change and the next one corrects it a beat \
+             late"
+        );
+
+        // And the ageing wake stays a paint rather than a tick: a status walk on
+        // that path is the difference `SPEC.md` §11.1 prices the amendment on.
         let arm = &code[code
             .find("let Some(wake) = wake else {")
             .expect("the loop no longer has a timeout arm")..];
-        let rolled = arm.find("shell.history.record_sized([], ").expect(
-            "the timeout arm no longer rolls the window, so an ageing wake redraws a frozen graph",
-        );
-        let drawn = arm
-            .find("shell.draw(&mut frame, &worktree)")
-            .expect("the timeout arm no longer draws");
+        let arm = &arm[..arm
+            .find("continue;")
+            .expect("the timeout arm no longer continues")];
         assert!(
-            rolled < drawn,
-            "the timeout arm draws before it rolls the window, so an ageing wake \
-             paints the picture it woke up to change and the next one corrects it \
-             a second late"
+            !arm.contains("frame.advance("),
+            "the timeout arm walks status, so an ageing wake now costs a tick and \
+             the measurement I1's amendment was granted on no longer holds"
         );
 
         // **The idle receive is untimed, and that is I1's budget as a structure

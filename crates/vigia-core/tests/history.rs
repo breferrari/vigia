@@ -950,37 +950,47 @@ fn a_tick_that_moves_nothing_does_no_work() {
     // Measured at the cap after it: a same-sample timeout is **20ns** against
     // **137µs** for one that crosses a boundary.
     //
-    // Asserted on the store's own counters rather than on a clock, because a
-    // timing assertion at this size is a measurement of the runner. `repeak`
-    // rebuilds `scales` and the worktree series, so the observable is that
-    // neither moved and no eviction was counted.
+    // **Asserted on `repeaks` rather than on the projection**, and the first
+    // draft of this test got that wrong in the way that matters: `repeak` is
+    // idempotent over unchanged tracks, so `scales` and the worktree series are
+    // identical whether the walk ran or not. Reverting the guard to an
+    // unconditional call left every assertion green, which made this a gate that
+    // the skip is *safe* and never that it *happens*. The counter is the only
+    // observable that separates the two.
     let mut history = History::new();
     let start = Instant::now();
     history.record_sized([("src/a.rs", Some(4_000u64))], start);
 
     let scales = history.scales();
     let churn = history.worktree_churn();
-    let stats = history.stats();
+    let walked = history.stats().repeaks;
 
-    // Inside the same sample, naming nothing: the wake a held button produces.
+    // Inside the same sample, naming nothing: the wake a held button produces
+    // twenty times a second.
     history.record_sized([], start + HISTORY_SAMPLE / 2);
+    assert_eq!(
+        history.stats().repeaks,
+        walked,
+        "a timeout inside one sample walked every track, which is the 144µs a \
+         held scrollbar button would pay for it nineteen times a second"
+    );
     assert_eq!(
         (history.scales(), history.worktree_churn()),
         (scales, churn),
-        "a timeout inside one sample changed the projection, so it walked every \
-         track to arrive back where it started"
-    );
-    assert_eq!(
-        history.stats().evicted_by_window,
-        stats.evicted_by_window,
-        "a timeout inside one sample evicted something, so the window moved when \
-         it should not have"
+        "a timeout inside one sample changed the projection, so the skip was not \
+         safe after all"
     );
 
     // **Both halves of the guard, or it is half a guard.** A tick that names a
     // path inside the same sample changed a track without moving the window, and
     // skipping the walk there would freeze the projection against live data.
     history.record_sized([("src/a.rs", Some(9_000u64))], start + HISTORY_SAMPLE / 2);
+    assert_eq!(
+        history.stats().repeaks,
+        walked + 1,
+        "a write inside the current sample skipped the walk, so the projection is \
+         frozen against live data"
+    );
     assert_ne!(
         history.worktree_churn(),
         churn,
@@ -997,4 +1007,38 @@ fn a_tick_that_moves_nothing_does_no_work() {
         "a timeout that crossed a sample boundary left the window where it was, \
          which is the freeze #243 exists to fix"
     );
+}
+
+#[test]
+fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
+    // **[#243](https://github.com/breferrari/vigia/issues/243) one field over.**
+    // The mark was the burst ordinal alone, which only advances when a burst
+    // names something, so an empty roll left it lit: a file written a hundred and
+    // nineteen seconds ago drew at full brightness beside a band that had almost
+    // drained, and then lost the mark all at once when its track was evicted.
+    // Once the window ages on its own that is visible every second.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record(["src/a.rs"], start);
+    assert_eq!(history.recency("src/a.rs"), Recency::Pulse);
+
+    // One boundary is all it takes: `Track::shift` zeroes the newest sample, so
+    // the mark expires by construction rather than by anything retiring it.
+    history.record_sized([], start + HISTORY_SAMPLE);
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Live,
+        "the pulse survived a roll, so a file that went quiet keeps claiming it \
+         just wrote"
+    );
+
+    // And it is still tracked, which is what makes the rung above meaningful:
+    // `Cold` is a path with nothing left in the window at all.
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Live,
+        "the path went cold rather than live, so this measured an eviction"
+    );
+    history.record_sized([], start + HISTORY_WINDOW * 2);
+    assert_eq!(history.recency("src/a.rs"), Recency::Cold);
 }

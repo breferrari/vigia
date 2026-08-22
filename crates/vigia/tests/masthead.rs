@@ -914,9 +914,15 @@ fn the_bands_heights_are_the_block_rungs_and_not_a_dense_cells() {
 ///
 /// The burst's span was a parameter and both callers passed the same six
 /// seconds, which is also the span itself, so it is a constant here instead.
+///
+/// **`starting_at` rather than `new`, and the difference is the whole fixture.**
+/// `History::new` opens its window at `Instant::now()`, which is *after* the
+/// instants below, so `roll` saturated to zero on every one of them and the
+/// six-second burst was a single sample: `0..1` would have satisfied both gates.
+/// Opening the window before the first write is what makes the six samples six.
 fn burst_at(now: Instant) -> History {
-    let mut history = History::new();
     let began = now - HISTORY_SAMPLE * 6;
+    let mut history = History::starting_at(began);
     for second in 0..6u32 {
         history.record_sized(
             [("src/a.rs", Some(6_000u64))],

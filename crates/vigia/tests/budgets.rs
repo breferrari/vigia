@@ -38,7 +38,8 @@ use vigia::{
     Action, App, Body, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
 };
 use vigia_core::{
-    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, Highlighter, History, LineKind, Samples,
+    CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
+    Samples,
 };
 
 use support::{
@@ -2029,7 +2030,13 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
 }
 
 /// Rounds the ageing comparison samples, warmed the way every gate here warms.
-const SAMPLED_AGEINGS: usize = 60;
+///
+/// **Fifty rather than sixty, and the ceiling is the window.** Each round steps
+/// the store by two samples, one per arm, so sixty would reach
+/// [`HISTORY_SAMPLES`] exactly and drain the fixture's tracks on the last round:
+/// the walk being priced is per *track*, so an emptied store makes the final
+/// rounds cheap for a reason that is not the code.
+const SAMPLED_AGEINGS: usize = 50;
 
 #[test]
 fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
@@ -2062,21 +2069,41 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
-    // A window with something in it, which is the only state the clock runs in.
-    let paths: Vec<String> = frame.files().iter().map(|c| c.path.clone()).collect();
-    sample_all(&mut history, scratch.root(), &paths);
+    // **A window at the path cap, driven on a clock that actually crosses a
+    // sample boundary**, and both halves of that were wrong in the first draft.
+    // It held twenty paths where `repeak` is priced at the 256-path cap, and it
+    // stamped every record with `Instant::now()`, so a hundred rounds of a
+    // sub-millisecond frame all landed inside one second: `rolled` was zero every
+    // time and the #277 guard skipped the walk in *both* arms. The gate behind
+    // the measurement that licensed I1's amendment was timing `Frame::advance`
+    // on and off and never once timed an ageing wake.
+    let paths: Vec<String> = (0..HISTORY_PATHS).map(|n| format!("src/f{n}.rs")).collect();
+    let stamped = Instant::now();
+    history.record_sized(
+        paths.iter().map(|path| (path.as_str(), Some(4_000u64))),
+        stamped,
+    );
 
     let (mut ageing, mut ticking) = (Samples::new(SAMPLED_AGEINGS), Samples::new(SAMPLED_AGEINGS));
     for round in 1..=SAMPLED_AGEINGS {
         for walks in [false, true] {
+            // **One sample per arm, not per round.** Both arms sharing a round's
+            // instant meant only the first crossed a boundary: the ageing arm
+            // paid the projection and the arm it is compared against skipped it,
+            // which is the comparison backwards. The store takes the instant as
+            // an argument, which is what makes a synthetic clock possible here at
+            // all; the frame is still timed against the real one.
+            let step = u32::try_from(round * 2 + usize::from(walks)).expect("a round");
+            let at = stamped + HISTORY_SAMPLE * step;
             let (wall, _) = time_cpu(|| {
-                // The ageing arm is exactly what the loop's timeout does: roll
-                // the window, then draw. The ticking arm adds the status walk a
-                // filesystem event brings with it, and nothing else.
+                // The ageing arm is exactly what `Shell::draw` does on a wake
+                // that changed nothing on disk: roll the window, then draw. The
+                // ticking arm adds the status walk a filesystem event brings with
+                // it, and nothing else.
                 if walks {
                     frame.advance().expect("advance");
                 }
-                history.record_sized([], Instant::now());
+                history.record_sized([], at);
                 frame_body(
                     &mut frame,
                     &mut app,
@@ -2100,6 +2127,22 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
     let aged = ageing.percentile(0.5).expect("a sampled round");
     let ticked = ticking.percentile(0.5).expect("a sampled round");
 
+    // **Non-vacuity on the thing the first draft got wrong**: every round has to
+    // have crossed a boundary and walked the projection, or neither arm timed an
+    // ageing wake and the comparison is about `Frame::advance` alone.
+    let walked = history.stats().repeaks;
+    assert!(
+        walked >= (SAMPLED_AGEINGS * 2) as u64,
+        "the fixture walked the projection {walked} times over {} arms, so they \
+         are not crossing sample boundaries and neither is an ageing wake",
+        SAMPLED_AGEINGS * 2
+    );
+    assert!(
+        history.tracked() > 0,
+        "the fixture's window drained before the rounds ended, so the later ones \
+         priced a walk over nothing"
+    );
+
     // Non-vacuity through the shared helper rather than a copy of it, which is
     // what its own docblock asks for: a `height` term drifting out of step is
     // invisible in a second spelling.
@@ -2119,11 +2162,11 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
          it, which is the whole reason I1 could be amended for this clock"
     );
     // And it is a *fraction*, not merely smaller. Stated loosely on purpose: the
-    // reference machine measures roughly a fifth, and a gate pinned near that
+    // reference machine measures roughly a third, and a gate pinned near that
     // would be a gate about the runner rather than about the path.
     assert!(
         aged * 2 < ticked,
         "an ageing wake cost {aged:?} against a tick's {ticked:?}, less than half \
-         a saving where the reference machine measures 90µs against 458µs"
+         a saving where the reference machine measures 165µs against 529µs"
     );
 }
