@@ -86,6 +86,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// header, then context, added, removed.
 fn three_kinds() -> View {
     View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -673,6 +674,7 @@ fn graded_heat() -> View {
         removed: 0,
     };
     View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -800,6 +802,7 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
 /// zero: a zero peak is the empty-store path and draws nothing but track.
 fn climbing() -> View {
     View {
+        landed: false,
         rows: vec![Row::file(FileEntry {
             path: "src/a.rs".to_owned(),
             from: None,

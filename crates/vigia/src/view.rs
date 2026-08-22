@@ -413,6 +413,21 @@ pub struct Viewport {
     /// paying for it by default. `SPEC.md` §3's I4 is written around that
     /// distinction.
     pub measured: bool,
+    /// Whether [`Self::position`] was placed by follow and still wants its row.
+    ///
+    /// **A request, not an answer**, and that is what makes it affordable.
+    /// [`crate::App::follow`] takes `&Frame` so that following cannot diff,
+    /// cannot read and cannot `stat` (I4), which leaves it nothing to compute a
+    /// row from: the loop advances, follows, and only then draws, so the frame
+    /// holds the *previous* tick's diff for the one file that just changed.
+    /// Carrying the request here defers the arithmetic to the walk below, which
+    /// has a fresh diff for that file in hand and pays nothing for it.
+    ///
+    /// A flag rather than something [`View::collect`] could work out, for the
+    /// reason [`Self::anchored`] gives: a position on row zero looks identical
+    /// whether follow placed it or a reader pressed `g`, and those want opposite
+    /// answers. [`View::landed`] reports back whether it was served.
+    pub landing: bool,
     /// Whether this frame may parse for colour.
     ///
     /// **False on the first frame of a process, and true forever after.** A
@@ -444,7 +459,8 @@ impl Default for Viewport {
     ///
     /// [`Self::highlight`] defaults to **true**, which `derive` cannot give and
     /// which is the whole reason this impl exists. Every other field's derived
-    /// answer is the honest one: row zero, not anchored, no rows, no total.
+    /// answer is the honest one: row zero, not anchored, no rows, no total, and
+    /// no landing owed.
     /// `false` there means *this frame skips work*, and a caller who forgot the
     /// field gets a cheaper frame that looks the same.
     ///
@@ -467,6 +483,7 @@ impl Default for Viewport {
             list_rows: 0,
             list_follows: false,
             measured: false,
+            landing: false,
             highlight: true,
         }
     }
@@ -544,6 +561,15 @@ pub struct View {
     /// keeps a frame's cost at one file: an unresolved position walks the files
     /// it scrolls over, a resolved one starts on the file it draws.
     pub top: Position,
+    /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
+    ///
+    /// **What lets a caller clear the request only once it was served.**
+    /// [`View::collect`] returns before the walk when the pane has no diff
+    /// region at all, and a request dropped there would leave a reader on the
+    /// heading for good: the tick that would have re-armed it has already been
+    /// spent. False whenever nothing was asked for, so a caller can clear
+    /// unconditionally on it.
+    pub landed: bool,
     /// Files this viewport asked the frame for, drawn or merely crossed.
     ///
     /// Reported so a test can hold the *shell* to I4, not just the core. One,
@@ -676,6 +702,76 @@ fn gap_rows(index: usize, files: usize) -> usize {
 /// what stops the term being forgotten.
 fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> usize {
     span_of(kind, diff) + gap_rows(index, files)
+}
+
+/// Rows into a file's block where follow should put the top of the viewport.
+///
+/// I5 is *the viewport goes to what just changed*, and until
+/// [#257](https://github.com/breferrari/vigia/issues/257) that was read as the
+/// file. On a file whose diff is one screenful the two are the same place and
+/// the promise is kept by accident of size; on a Swift test file carrying a
+/// 76-line deletion under three one-line tweaks they are twenty-odd rows apart,
+/// and the element built to show a reader what an agent just did showed them a
+/// filename. Reported from a live pane.
+///
+/// **The heading whenever it is free, and the busiest hunk when it is not.**
+/// Zero means the heading stays on the top row, which is what every other jump
+/// on this map resolves to and what the reader wants when the change is already
+/// drawn: the heading carries the path, the counts, the sigil and the heat
+/// strip, so moving it off screen for a file that fits is a loss with no gain.
+///
+/// **The busiest hunk rather than the first.** A block is a heading and then a
+/// header plus lines per hunk ([`span_of`]), so the first hunk's header is
+/// always row **1** and landing on it moves the pane by one row: it cannot
+/// reach the case this exists for. What a reader asks of a monitor is *what did
+/// it just do*, and the largest concentration of changed lines is the closest
+/// the diff alone comes to answering it.
+///
+/// **A hunk rather than a heat bucket.** #257 proposes [`heat_of`]'s busiest
+/// slice, which is the same intent in the wrong unit: a bucket names a
+/// **working-tree line**, and a viewport needs a **row**. The thing a row falls
+/// inside is a hunk, so going through the projection would mean a second rule to
+/// keep in step with `heat_of` for an answer the hunks already give exactly.
+///
+/// **What this is not is the *newest* hunk**, which is what the reader is really
+/// after and which the diff cannot say: it is a comparison against the previous
+/// tick's, and that is a design with staleness rules of its own. Busiest is
+/// never worse than the heading it replaces and is right in the reported shape.
+/// `SPEC.md` §11.1 records it as the case to reopen on.
+///
+/// Ties keep the earlier hunk, because a reader scrolls forward more readily
+/// than back. A note block ([`note_for`]) and a file with no hunks have nothing
+/// to land on and stay on their heading.
+fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize) -> usize {
+    if note_for(kind, diff).is_some() {
+        return 0;
+    }
+
+    // Row zero is the heading, so the first header sits at one. Walked rather
+    // than indexed because a hunk's height is its own line count, which is
+    // exactly the sum `span_of` takes.
+    let mut row = 1;
+    let mut busiest = 0;
+    let mut landing = 0;
+    for hunk in &diff.hunks {
+        let changed = hunk
+            .lines
+            .iter()
+            .filter(|line| line.kind != LineKind::Context)
+            .count();
+        // Strictly greater, which is what keeps the earlier of two equal hunks.
+        if changed > busiest {
+            busiest = changed;
+            landing = row;
+        }
+        row += 1 + hunk.lines.len();
+    }
+
+    // Already drawn from the heading, so the jump would cost the heading and
+    // buy nothing. `height` is the diff region's, so this is the one place the
+    // landing depends on the pane, and it is why a reader who makes the pane
+    // taller stops being moved off the heading at all.
+    if landing < height { 0 } else { landing }
 }
 
 /// The same block, counted from the span cache rather than from a diff.
@@ -871,6 +967,7 @@ impl View {
             list_rows,
             list_follows,
             measured,
+            landing,
             highlight,
         } = viewport;
         // One pass, dropped at every exit including the `?`s below, which is
@@ -905,6 +1002,7 @@ impl View {
                 file: position.file.min(files.saturating_sub(1)),
                 row: position.row,
             },
+            landed: false,
             read: 0,
             scale: Scale(history.scales()),
             worktree_churn: history.worktree_churn(),
@@ -926,7 +1024,8 @@ impl View {
         }
 
         // Entries the body built, so the list can reuse rather than re-diff.
-        // Bounded by the viewport: one per heading that fits on screen.
+        // Bounded by the viewport: one per file the walk reaches, which is one
+        // per heading that fits plus the file the viewport is sitting inside.
         let mut drawn: Vec<(usize, FileEntry)> = Vec::new();
 
         let mut index = view.top.file;
@@ -952,6 +1051,23 @@ impl View {
                 // frame, so the kind needs no clone to be read alongside the
                 // diff.
                 let span = block_of(&change.kind, diff, index, files);
+
+                // **Here, and not in [`crate::App::follow`], because this is
+                // where a fresh diff exists.** The file follow named is the one
+                // the walk starts on, so the `frame.diff` above has already
+                // fetched it and the landing costs the arithmetic and nothing
+                // else. Asking for it a second call earlier would be a second
+                // whole-file *read*: `vigia_core::Frame::diff` re-reads a file
+                // written in the last two seconds by design, and the file being
+                // followed is always inside that margin.
+                //
+                // Once, on the file the request was made against. `landed` is
+                // what stops the restart below resolving it a second time, and
+                // what tells the caller it may forget the request.
+                if landing && !view.landed && index == view.top.file {
+                    skip = landing_of(&change.kind, diff, height);
+                    view.landed = true;
+                }
 
                 if !placed {
                     if skip >= span {
@@ -1372,16 +1488,25 @@ impl View {
         } = file;
         let mut n = 0usize;
 
+        // **Built whether or not the heading fits, and recorded either way.**
+        // The record is what lets [`View::take_list`] draw the same file without
+        // asking the frame for it a second time, and a `Frame::diff` for a file
+        // written in the last two seconds is a second whole-file *read* rather
+        // than a cache hit. That is precisely the file this branch misses: a
+        // viewport sitting inside a file has that file's heading above the
+        // window, and since
+        // [#257](https://github.com/breferrari/vigia/issues/257) follow puts it
+        // there deliberately, on the one file the settle margin is certain to
+        // cover. `SPEC.md` §11.1's *"the two regions hand entries to each other
+        // rather than asking twice"* is the rule, and it was true only while the
+        // heading happened to be drawn.
+        //
+        // It costs one [`entry_of`] — two hash probes and a clone, no read and
+        // no `stat` — for at most one file per frame, because `skip` is zeroed
+        // after the first file the walk places.
+        let entry = entry_of(kind, diff, history);
+        drawn.push((index, entry.clone()));
         if n >= skip {
-            // Asked for only on a row actually pushed, the same rule the
-            // highlighter follows below. A heading scrolled past above the
-            // window costs two hash lookups it would never have drawn.
-            //
-            // Recorded as well as pushed, so [`View::take_list`] can draw the
-            // same file without asking the frame for it a second time. Bounded
-            // by the viewport, because this only runs for a heading that fits.
-            let entry = entry_of(kind, diff, history);
-            drawn.push((index, entry.clone()));
             self.rows.push(Row::file(entry));
         }
         n += 1;
@@ -1494,7 +1619,8 @@ impl View {
 
 #[cfg(test)]
 mod tests {
-    //! The heat projection, tested as the arithmetic it is.
+    //! The heat projection and the follow landing, tested as the arithmetic
+    //! they are.
     //!
     //! Every case here is a boundary: the first line of a file, the last, a
     //! removal past the end, a file shorter than the bucket count. Reaching any
@@ -1711,6 +1837,106 @@ mod tests {
             vec![HEAT_BUCKETS / 12],
             "the addition is on line 11, which is a twelfth of the way into a \
              120-line file"
+        );
+    }
+
+    /// Line kinds for a hunk of `context` unchanged lines around `changed`
+    /// changed ones, which is the shape every hunk a diff produces has.
+    fn kinds(context: usize, changed: usize) -> Vec<LineKind> {
+        let mut lines = vec![LineKind::Context; context];
+        lines.extend(std::iter::repeat_n(LineKind::Removed, changed));
+        lines
+    }
+
+    /// A file of three hunks whose middle one is by far the busiest.
+    ///
+    /// Rows, because every expectation below is one of them: the heading is 0,
+    /// the first header is 1 over eight lines, so the second header is **10**
+    /// over sixteen, and the third is **27**.
+    fn three_hunks() -> FileDiff {
+        diff(
+            400,
+            vec![
+                hunk(10, &kinds(6, 2)),
+                hunk(100, &kinds(6, 10)),
+                hunk(300, &kinds(6, 2)),
+            ],
+        )
+    }
+
+    #[test]
+    fn the_busiest_hunk_is_where_a_tall_file_lands() {
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8),
+            10,
+            "the landing is not the second hunk's header row"
+        );
+    }
+
+    #[test]
+    fn a_hunk_is_measured_by_what_changed_rather_than_by_how_tall_it_is() {
+        // A hunk is mostly context, so a rule that counted rows would land on
+        // whichever hunk was longest and call a wall of unchanged lines the
+        // busiest thing in the file. Here the first hunk is the tallest by far
+        // and the second is the only one with more than a line of change in it.
+        let tall_and_quiet = diff(400, vec![hunk(10, &kinds(40, 1)), hunk(200, &kinds(6, 9))]);
+
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &tall_and_quiet, 8),
+            43,
+            "the landing followed the tallest hunk rather than the busiest"
+        );
+    }
+
+    #[test]
+    fn a_tie_lands_on_the_earlier_hunk() {
+        // A reader scrolls forward more readily than back, and an arbitrary
+        // winner would move the pane between two frames of one unchanged file.
+        //
+        // The tied pair is the second and third hunk rather than the first and
+        // second, so the answer is a row the heading branch cannot also produce:
+        // the first header is row 1 and any pane at all draws it.
+        let even = diff(
+            400,
+            vec![
+                hunk(10, &kinds(6, 1)),
+                hunk(100, &kinds(6, 4)),
+                hunk(300, &kinds(6, 4)),
+            ],
+        );
+
+        assert_eq!(landing_of(&ChangeKind::Modified, &even, 8), 9);
+    }
+
+    #[test]
+    fn a_busiest_hunk_already_on_screen_keeps_the_heading() {
+        // Both sides of the edge, because "already drawn" is what decides
+        // whether the heading is worth spending and an off-by-one here is a
+        // heading lost for nothing. Row 10 is drawn by an eleven-row region and
+        // not by a ten-row one.
+        let file = three_hunks();
+
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 11), 0);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 10), 10);
+    }
+
+    #[test]
+    fn a_note_block_has_no_hunk_to_land_on() {
+        // A conflict, a type change and a binary file draw a heading and one
+        // line saying why. There is nowhere to land and `span_of` gives them two
+        // rows, so a landing computed from hunks would point past the block.
+        let mut binary = three_hunks();
+        binary.binary = true;
+
+        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 1), 0);
+        assert_eq!(landing_of(&ChangeKind::Conflict, &three_hunks(), 1), 0);
+    }
+
+    #[test]
+    fn a_file_with_no_hunks_has_nowhere_to_land() {
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &diff(400, Vec::new()), 1),
+            0
         );
     }
 }

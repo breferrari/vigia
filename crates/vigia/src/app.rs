@@ -117,6 +117,22 @@ pub struct App {
     /// `SPEC.md` §11.1 rules. One path, replaced per tick: bounded by one
     /// string rather than by the session, so I3 never sees it.
     newest: Option<String>,
+    /// Whether the next frame owes the position its row, because follow placed
+    /// it.
+    ///
+    /// **A debt, the way [`Self::paint`] is one**, and for the same reason:
+    /// [`Self::follow`] takes `&Frame` so that following cannot diff, cannot
+    /// read and cannot `stat` (I4), which leaves it able to name the file and
+    /// nothing else. Where in that file the change sits is a question only a
+    /// diff answers, and the frame's diff for the one file that just changed is
+    /// the *previous* tick's until the draw re-reads it. So the jump names the
+    /// file here and [`View::collect`] resolves the row while it has the fresh
+    /// diff in hand, for nothing.
+    ///
+    /// Set by [`Self::jump_to_newest`] alone. The digits, a list click and
+    /// `n`/`p` all go through [`Self::jump_to`] and keep the heading, which is
+    /// `SPEC.md` §11.1's ruling for them and is unchanged.
+    landing: bool,
     /// First file the pinned list shows.
     ///
     /// A second window onto one file list, and deliberately **not** derived from
@@ -226,6 +242,9 @@ impl Default for App {
             list_follows: true,
             list_rows: 0,
             newest: None,
+            // Genuinely the derived answer: nothing has been followed, so
+            // nothing is owed a row.
+            landing: false,
             mode: Mode::default(),
             // Genuinely the derived answer, unlike `following`: a shell that
             // has drawn nothing has drawn nothing.
@@ -458,6 +477,15 @@ impl App {
             return false;
         };
         self.jump_to(file);
+        // **And the row is owed.** `jump_to` puts the top of the block on the
+        // top row, which is the whole of every other jump on this map and was
+        // the whole of this one until
+        // [#257](https://github.com/breferrari/vigia/issues/257): on a file
+        // whose diff runs to several screens the heading and the change are not
+        // the same place, and I5 promises the change. Nothing here can find that
+        // row (see [`Self::landing`]), so the request is carried to the frame
+        // that can.
+        self.landing = true;
         // A jump moves the diff, so the map goes back to following it. Follow
         // mode dragging the view to a file the pinned list was not showing is
         // exactly when a reader most needs the two to agree.
@@ -831,6 +859,7 @@ impl App {
                 // `body_layout` already decided by giving the diff more than one
                 // row. A pane too short for a bar pays nothing.
                 measured: body.diff > 1,
+                landing: self.landing,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].
@@ -850,6 +879,10 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
+        // **Cleared only once it was served.** A pane with no diff region
+        // resolves nothing, and forgetting the request there would leave a
+        // reader on the heading for good: the tick that armed it is spent.
+        self.landing &= !view.landed;
         self.list_rows = body.list;
         // Stored back for the reason the position is: resolution happens once,
         // in the code that knows where the diff landed, and a caller that kept

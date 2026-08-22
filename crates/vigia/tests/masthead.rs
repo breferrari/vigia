@@ -240,6 +240,7 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     View {
+        landed: false,
         list: vec![entry.clone()],
         rows: vec![Row::file(entry)],
         files: 1,

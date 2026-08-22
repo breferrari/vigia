@@ -626,6 +626,7 @@ fn with_notice() -> Chrome {
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
     View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -686,6 +687,7 @@ fn every_row_kind() -> View {
 /// longer than any pane.
 fn awkward() -> View {
     View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -714,6 +716,7 @@ fn awkward() -> View {
 
 fn empty() -> View {
     View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -751,6 +754,7 @@ fn empty() -> View {
 /// records twice.
 fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
+        landed: false,
         list: (0..listed)
             .map(|i| entry(&format!("src/f{i}.rs")))
             .collect(),
@@ -822,6 +826,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     // shape. A matrix of single-digit counts exercises one column-width class
     // and reads as though it covered them all.
     let many = View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -842,6 +847,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     // or changing a path's length would have left the gates that read the other
     // copy measuring a shape this file's own sweeps no longer use.
     let pinned = View {
+        landed: false,
         top: Position { file: 1, row: 0 },
         ..pinned_and_streamed()
     };
@@ -938,6 +944,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         (
             "readouts at a hundred files",
             View {
+                landed: false,
                 list: Vec::new(),
                 list_top: 0,
                 files: 100,
@@ -1000,6 +1007,7 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// colour its first bucket and would leave its last one cool.
 fn glancing() -> View {
     View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -1257,6 +1265,7 @@ fn the_header_ladder_keeps_the_mode_word_last() {
     for (word, chrome) in [("watching", chrome()), ("not watching", lost())] {
         for files in [3usize, 100, 12_345] {
             let view = View {
+                landed: false,
                 files,
                 ..every_row_kind()
             };
@@ -2759,6 +2768,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
     let view = View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2899,6 +2909,7 @@ fn a_clipped_content_line_says_it_continues() {
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
+        landed: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -3818,6 +3829,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // Ten files with three rows shown, so a bar is drawn; and three with three
     // shown, so one is not.
     let with_bar = View {
+        landed: false,
         list: entries.clone(),
         list_top: 0,
         top: Position { file: 1, row: 0 },
@@ -3825,6 +3837,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         ..every_row_kind()
     };
     let without_bar = View {
+        landed: false,
         list: entries,
         list_top: 0,
         top: Position { file: 1, row: 0 },
@@ -4160,6 +4173,7 @@ fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
     // margin as the only thing holding the row back from the pane's edge.
     let long = "        for change in self.changes() { ".repeat(8);
     let view = View {
+        landed: false,
         // No total reported, so `scrollable` is false and no bar is drawn at any
         // width. That is the whole point of the fixture. Zero means "no total"
         // rather than "a short diff", and the screen is the same either way; a
@@ -4363,6 +4377,7 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 /// one does. A short diff would leave the sweep looking at the case that works.
 fn overlong(rows: usize) -> View {
     View {
+        landed: false,
         list: vec![entry("src/f.rs")],
         list_top: 0,
         current_span: rows,
@@ -4475,6 +4490,7 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
 /// representative screen.
 fn pinned_and_streamed() -> View {
     View {
+        landed: false,
         list: vec![
             entry("crates/vigia-core/src/frame.rs"),
             entry("src/engine/watch.rs"),
@@ -4981,6 +4997,7 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
 /// the band's two edges can be read against a row that has neither.
 fn three_kinds_of_line() -> View {
     View {
+        landed: false,
         rows: vec![
             Row::file(entry("src/engine/watch.rs")),
             line(LineKind::Context, 38, "    fn coalesce(&mut self) {"),
@@ -5241,6 +5258,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
 /// *different* bucket pattern and the pattern is the whole input under test.
 fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
     View {
+        landed: false,
         rows: vec![Row::file(FileEntry {
             path: "a.rs".to_owned(),
             from: None,
@@ -5428,6 +5446,7 @@ fn the_sparkline_reprojects_rather_than_dropping_buckets() {
         spark[at] = 9;
     }
     let view = View {
+        landed: false,
         scale: Scale::flat(9),
         ..sparked(spark)
     };
@@ -5631,6 +5650,7 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
 
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         let view = View {
+            landed: false,
             scale: Scale::flat(0),
             ..sparked([
                 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 11, 11, 12, 12,

@@ -150,6 +150,7 @@ fn each_region_reports_its_own_bar_column() {
     // bar at all, so the two assertions above are about a drawn bar rather than
     // about a field that is always `Some`.
     let bare = View {
+        landed: false,
         total_rows: 1,
         ..View::default()
     };
@@ -847,6 +848,11 @@ fn collect_resolves_every_degenerate_viewport() {
                                 list_rows,
                                 list_follows,
                                 measured: true,
+                                // No landing owed: this sweep drives `collect`
+                                // directly rather than through follow, and the
+                                // rows a landing would move are what it is
+                                // measuring.
+                                landing: false,
                                 // This sweep is about where the two regions
                                 // land, which is decided before anything is
                                 // coloured. Highlighting on keeps it the same

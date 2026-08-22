@@ -467,3 +467,249 @@ fn a_position_survives_the_file_it_points_at_being_committed() {
         "the position was left pointing past the end of an empty list"
     );
 }
+
+/// A file whose diff is several screens tall, with its largest change low down.
+///
+/// The shape [#257](https://github.com/breferrari/vigia/issues/257) was reported
+/// against: a Swift test file carrying a 76-line deletion that the reader could
+/// not see, because follow put the heading on the top row and the deletion was
+/// below the bottom one. Three small edits above it are what push it there; a
+/// two-hunk file puts its second header nine rows down, which fits on any pane
+/// and would make this gate pass against the old behaviour.
+///
+/// Written out rather than built from [`Scratch::sparse_edits`] because the
+/// hunks here are deliberately **unequal**: that fixture edits every `every`th
+/// line, so every hunk holds exactly one change and no hunk is the busiest.
+fn tall(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(TALL, support::numbered_lines(TALL_LINES));
+    scratch.commit_all("baseline");
+
+    let mut lines: Vec<String> = (1..=TALL_LINES).map(|i| format!("line {i}")).collect();
+    for at in TWEAKS {
+        lines[at] = format!("line {} rewritten", at + 1);
+    }
+    lines.drain(CUT_AT..CUT_AT + CUT_LINES);
+    scratch.write(TALL, format!("{}\n", lines.join("\n")));
+    scratch
+}
+
+/// The one file in the [`tall`] fixture.
+const TALL: &str = "src/deep.rs";
+
+/// How long it is, which only has to be longer than everything cut out of it.
+const TALL_LINES: usize = 400;
+
+/// Zero-based lines rewritten above the deletion, more than `2 * CONTEXT + 1`
+/// apart so each is a hunk of its own rather than all three sharing one.
+const TWEAKS: [usize; 3] = [10, 40, 70];
+
+/// Zero-based first line of the deletion.
+const CUT_AT: usize = 200;
+
+/// How many lines it removes. The reported number.
+const CUT_LINES: usize = 76;
+
+/// Where the deletion's hunk header sits on the index side.
+///
+/// One-based, and three lines of context above the first line removed:
+/// `CUT_AT` is zero-based, so the first line gone is 201 and the hunk opens at
+/// 198.
+const CUT_HUNK_START: u32 = CUT_AT as u32 + 1 - vigia_core::CONTEXT;
+
+/// How many index-side lines that hunk covers: what was removed, plus three
+/// lines of context on each side.
+const CUT_HUNK_LINES: u32 = CUT_LINES as u32 + vigia_core::CONTEXT * 2;
+
+fn tall_layout(app: &App) -> Body {
+    body_layout(
+        Rect::new(0, 0, 80, 24),
+        &app.chrome("fixture", None, None, None, None, None),
+        1,
+    )
+}
+
+#[test]
+fn following_a_tall_file_lands_on_its_busiest_change() {
+    // I5 says the viewport goes to what just changed. On a file whose diff is
+    // one screenful the heading and the change are the same place and the
+    // promise is kept by accident of size; on this one they are twenty-odd rows
+    // apart, and landing on the heading shows the reader a filename and three
+    // one-line tweaks instead of the 76 lines that just went.
+    let scratch = tall("shell-follow-tall");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    assert!(app.follow(TALL, &frame), "the view did not move at all");
+
+    let layout = tall_layout(&app);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    // Non-vacuity, and it is this gate's whole premise: the landing row has to
+    // be past the bottom of the pane, or a frame that resolved nothing would
+    // draw the same rows and pass.
+    assert!(
+        app.position().row >= layout.diff,
+        "the busiest change is at row {} of a {}-row region, so it was already \
+         on screen from the heading and this fixture proves nothing",
+        app.position().row,
+        layout.diff
+    );
+
+    match view.rows.first() {
+        Some(Row::Hunk {
+            old_start,
+            old_lines,
+            ..
+        }) => {
+            assert_eq!(
+                (*old_start, *old_lines),
+                (CUT_HUNK_START, CUT_HUNK_LINES),
+                "the top row is a hunk header, but not the deletion's"
+            );
+        }
+        other => panic!("the top row is {other:?}, not the deletion's hunk header"),
+    }
+
+    assert!(
+        view.rows.iter().any(|row| matches!(
+            row,
+            Row::Line {
+                kind: vigia_core::LineKind::Removed,
+                ..
+            }
+        )),
+        "the view landed on the hunk header and drew none of what it removed"
+    );
+}
+
+#[test]
+fn following_a_file_that_fits_keeps_its_heading() {
+    // The other half of the rule, and the half that keeps every gate above
+    // honest: a block the pane can hold draws its change already, so moving the
+    // heading off the top row would cost the path, the counts, the sigil and the
+    // heat strip to show the reader rows they could already see.
+    let scratch = fixture("shell-follow-fits");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let target = path_at(&frame, TARGET);
+    assert!(app.follow(&target, &frame), "the view did not move at all");
+
+    assert_eq!(
+        top_file(&mut app, &mut frame, &mut highlighter, &history),
+        target
+    );
+    assert_eq!(
+        app.position().row,
+        0,
+        "a file that fits was scrolled anyway, so its heading is off screen"
+    );
+}
+
+#[test]
+fn a_landing_resolves_once_and_the_next_frame_does_not_move_it() {
+    // The defect class `SPEC.md` §11.1 keeps ruling against is a row moving
+    // under a reader. A landing is resolved by the frame that draws it, so the
+    // second frame has nothing left to resolve and must draw the same screen: a
+    // rule that re-derived the row every frame would walk the viewport down a
+    // file as an agent's hunks grew.
+    let scratch = tall("shell-follow-once");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // Past the opening plain frame, so the two frames compared below differ in
+    // the landing alone: I7's first frame draws without colour and the next one
+    // parses, which would show up here as two different screens for a reason
+    // that has nothing to do with follow.
+    let mut app = App::past_first_paint();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    app.follow(TALL, &frame);
+    let layout = tall_layout(&app);
+
+    let first = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    let landed = app.position();
+    assert!(first.landed, "the frame drew without resolving the landing");
+    assert!(landed.row > 0, "this fixture did not land anywhere");
+
+    let second = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    assert!(
+        !second.landed,
+        "the landing was resolved a second time, so the request outlived being served"
+    );
+    assert_eq!(
+        app.position(),
+        landed,
+        "an untouched second frame moved the viewport"
+    );
+    assert_eq!(
+        second.rows, first.rows,
+        "the second frame drew a different screen with no input at all"
+    );
+}
+
+#[test]
+fn landing_on_a_change_costs_no_extra_diff() {
+    // I4 over the *resolution*, where `following_a_file_costs_no_diff_and_no_read`
+    // is I4 over the jump. The landing is arithmetic on a diff the walk has
+    // already fetched, so a frame that lands must cost exactly what the same
+    // frame costs without one. The version that is wrong here is the readable
+    // one: asking `Frame::diff` for the file a second call earlier, which
+    // re-reads any file written in the last two seconds and so would put a
+    // second whole-file read on the one file that is always inside that margin.
+    let scratch = tall("shell-follow-landing-cost");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let layout = tall_layout(&app);
+
+    // Settled first, so both frames below are reuse and the comparison is
+    // between two warm frames rather than between a cold one and a warm one.
+    support::settle(&mut frame);
+    app.view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+
+    let before = frame.stats();
+    let plain = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    let without = delta(before, frame.stats());
+    assert!(!plain.landed, "the settling frame left a landing owed");
+
+    app.follow(TALL, &frame);
+    let before = frame.stats();
+    let landing = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    let with = delta(before, frame.stats());
+
+    assert!(landing.landed, "this measured a frame that landed nowhere");
+    assert_eq!(
+        with, without,
+        "a landing frame cost {with:?} against {without:?} without one"
+    );
+    assert_eq!(
+        landing.read, plain.read,
+        "the landing asked the frame for more files than the screen draws"
+    );
+}
