@@ -4558,7 +4558,7 @@ impl Painter<'_> {
         // are showing because there is one kernel and one constant.
         let series = view.worktree_churn.levels(slots);
 
-        // **`vigia_core::scale_of`, the same rule the sparkline divides by.** It
+        // **`Churn::scale_at`, the same rule the sparkline divides by.** It
         // lived here while the band was the only element that had it, which is
         // exactly how the sparkline was left dividing by a maximum over the same
         // byte samples. The two denominators stay different quantities, one

@@ -867,8 +867,8 @@ const BURST_THEN_ORDINARY: [u32; HISTORY_SAMPLES] = {
 /// A burst filling a third of the window, with ordinary edits after it.
 ///
 /// **The fixture that binds the *upper* end of the outlier multiple.** Sweeping
-/// that constant, this shape puts the floor back at thirteen times the median at
-/// forty and eighty columns, where [`BURST_THEN_ORDINARY`] tolerates far more. A
+/// that constant, this shape puts the floor back at eighteen times the median,
+/// where [`BURST_THEN_ORDINARY`] tolerates far more. A
 /// gate written only against the reported shape would leave the interval the
 /// constant sits in the middle of unasserted, and a number defended only by a
 /// docblock is a number that drifts.
@@ -1172,22 +1172,28 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
         }
 
         assert!(compared > 100, "{name}: only {compared} widths compared");
-        assert!(
-            worst <= worst_on_projection / 2.0 || worst == worst_on_projection,
-            "{name}: the shipped yardstick moves {worst:.1}% on one column of \
-             resize where cutting the projection moves {worst_on_projection:.1}%, \
-             so taking the cut before the projection has stopped buying the \
-             stability it exists for"
-        );
-        // Non-vacuity: on a window that is genuinely heavy tailed the withdrawn
-        // shape has to be visibly worse, or the comparison above is between two
-        // identical numbers and says nothing.
+        // **Only where the two shapes differ, and with no equality to hide
+        // behind.** This carried `|| worst == worst_on_projection` so that the
+        // fixtures where nothing is outlying, and all three rules agree, would
+        // pass. That disjunct made the gate blind to the defect it is named for:
+        // rewrite `Churn::scale_at` as the withdrawn shape and the two numbers
+        // become the same float, the equality fires, and the mutation walks
+        // through. Where nothing is outlying the exact `shipped == unmoved`
+        // assertion above already pins every width, so this arm is not needed
+        // there and is scoped away instead of excused.
         if outlying {
             assert!(
                 worst_on_projection > 20.0,
                 "{name}: cutting the projection moved only \
                  {worst_on_projection:.1}%, so this fixture cannot tell the two \
-                 shapes apart"
+                 shapes apart and the comparison below says nothing"
+            );
+            assert!(
+                worst <= worst_on_projection / 2.0,
+                "{name}: the shipped yardstick moves {worst:.1}% on one column \
+                 of resize where cutting the projection moves \
+                 {worst_on_projection:.1}%, so taking the cut before the \
+                 projection has stopped buying the stability it exists for"
             );
         }
     }

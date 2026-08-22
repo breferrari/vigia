@@ -728,12 +728,26 @@ fn the_cut_is_ten_times_the_median() {
 fn the_cut_keeps_the_bulk_and_drops_the_outlier() {
     // Three values, median 1, cut 10. The million is dropped, so the figure is
     // thirteen tenths of the mean of the two ones, which floors to one. Leave the
-    // cut out and it is 433_333, so this cannot pass against a rule that does not
+    // cut out and it is 433_334, so this cannot pass against a rule that does not
     // cut.
     assert_eq!(
         scale_of([1u32, 1, 1_000_000].into_iter()),
         1,
         "the outlier set the yardstick for the two values beside it"
+    );
+
+    // **And one whose answer is mid-range, because the assertion above lands on
+    // the arithmetic floor.** Any rule that keeps a small enough set answers one
+    // there, so it kills "no cut" and not much else. Here the pivot is the whole
+    // question: the median is 40 and drops the 2_000; a mean pivot is 236 and
+    // keeps everything; a minimum pivot is 1 and keeps only the 1. Three
+    // different figures, so this fixture tells them apart where the first cannot.
+    let bulk = [1u32, 40, 40, 40, 40, 40, 40, 40, 2_000];
+    assert_eq!(
+        scale_of(bulk.into_iter()),
+        45,
+        "the cut is not taken at the median: a mean pivot answers 306 here and a \
+         minimum pivot answers 1"
     );
 
     // **A population of two never cuts, and that is the median's rounding rather
