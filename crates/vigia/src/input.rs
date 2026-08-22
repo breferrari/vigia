@@ -704,6 +704,22 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
     (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
 }
 
+/// Whether a scroll's direction mark has outlived its burst.
+///
+/// **A free function for `patience`'s reason, one paragraph down: the shell owns
+/// a terminal and three threads, so a decision left inside it has no gate.** It
+/// had none. `Shell::settle_scroll` carried this comparison and a bool that its
+/// only caller discarded, and inverting the comparison to `now < until` left the
+/// whole suite green while the arrows never claimed a direction at all: the mark
+/// cleared on the next wake instead of `SCROLL_LINGER` later.
+///
+/// `>=` rather than `>`, so a mark whose deadline is exactly now is spent. The
+/// loop is woken *by* that deadline, so the boundary case is the ordinary one
+/// here rather than a corner.
+pub fn settled(linger: Option<Instant>, now: Instant) -> bool {
+    linger.is_some_and(|until| now >= until)
+}
+
 /// How long the loop may block before some clock here has to act.
 ///
 /// **`None` is the whole invariant, and it is why every clock is asked through

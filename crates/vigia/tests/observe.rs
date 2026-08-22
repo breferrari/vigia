@@ -860,7 +860,19 @@ impl Pane<'_> {
     /// frame a reader is waiting for (§6, §3's I7 row). A harness that painted
     /// once would time the plain half of a frame the reader sees painted twice,
     /// and would report the cheaper half as the frame.
-    fn draw(&mut self, worktree: &Worktree) {
+    fn draw(&mut self, worktree: &Worktree, now: Instant) {
+        // **The roll, because `Shell::draw` does it and this file's whole claim
+        // is that it does what the shell does**
+        // ([#277](https://github.com/breferrari/vigia/issues/277)). Without it
+        // this harness models a window that never ages, so `tracked_history`
+        // reports a store that only ever grows and the sampled readout draws a
+        // burst pinned where it was: the freeze that row removed, preserved in
+        // the instrument that is supposed to notice it.
+        //
+        // `now` is the turn's instant, shared with the tick's own record, for
+        // the reason `Shell::draw` gives: two clocks a status walk apart let a
+        // sample boundary fall between a write and the paint that draws it.
+        self.history.record_sized([], now);
         self.paint(worktree);
         if self.app.owes_repaint() {
             self.paint(worktree);
@@ -1035,6 +1047,13 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
             continue;
         }
 
+        // One instant for the turn, read by the tick's record and by the roll
+        // inside `Pane::draw`. Distinct from `began` below, which starts the
+        // timed region: this harness has always begun timing after the walk
+        // where `vigia::run` begins before the drain, so the two are not the
+        // same boundary and merging them would move every number this reports.
+        // That divergence is older than this row and is left alone here.
+        let turn = Instant::now();
         let tick_paths = match rx.recv_timeout(deadline - now) {
             Err(RecvTimeoutError::Timeout) => {
                 idle_waits += 1;
@@ -1051,9 +1070,11 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
             Ok(paths) => {
                 ticks += 1;
                 // Sampled on the wake, before the walk, exactly where
-                // `vigia::run` samples it.
-                pane.history
-                    .record(paths.iter().map(String::as_str), Instant::now());
+                // `vigia::run` samples it, and on `turn` rather than on a fresh
+                // clock for the reason `Shell::draw` gives: the roll below reads
+                // the same instant, so the status walk between them cannot put a
+                // sample boundary between a write and the paint that draws it.
+                pane.history.record(paths.iter().map(String::as_str), turn);
                 // Advance first, follow second: the path is looked up in the
                 // file list, and before the walk that list is the previous
                 // frame's.
@@ -1078,7 +1099,7 @@ fn drive(tree: &Path, window: Duration, rx: &mpsc::Receiver<Vec<String>>) -> Rep
         // `vigia::run` puts it: a readout measured outside the thing it reports
         // is the omission §7 names.
         pane.app.sample_memory();
-        pane.draw(&worktree);
+        pane.draw(&worktree, turn);
         let cost = began.elapsed();
         pane.app.record_frame(cost);
         hist.record(cost);
@@ -1316,7 +1337,7 @@ mod wiring {
             "nothing is owed before the first collect"
         );
 
-        pane.draw(&worktree);
+        pane.draw(&worktree, Instant::now());
 
         assert_eq!(pane.failed, 0, "the draw failed: {:?}", pane.last_error);
         assert!(
@@ -1371,7 +1392,7 @@ mod wiring {
                 "{name} is not in the state this case is about"
             );
 
-            pane.draw(&worktree);
+            pane.draw(&worktree, Instant::now());
 
             assert_eq!(
                 pane.failed, 0,

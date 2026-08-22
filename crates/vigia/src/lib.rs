@@ -100,6 +100,7 @@ pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
     WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
+    settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -1264,10 +1265,14 @@ impl Shell {
     /// caller never read it: the timeout arm this sits on draws unconditionally,
     /// because it is also where a held step and an ageing wake land. So the
     /// sentence described a caller that has never existed, and the value was free
-    /// to be wrong. Reverting the body to clear the mark and return `false`
-    /// passed the entire suite.
+    /// to be wrong.
+    ///
+    /// The comparison lives in [`input::settled`] for the reason that module's
+    /// `patience` gives: what stays here owns a terminal and three threads and
+    /// cannot be driven by a test. It was here, and inverting it passed the whole
+    /// suite while the arrows never claimed a direction.
     fn settle_scroll(&mut self, now: Instant) {
-        if self.scrolling_until.is_some_and(|until| now >= until) {
+        if input::settled(self.scrolling_until, now) {
             self.scrolling = None;
             self.scrolling_until = None;
         }
@@ -1924,22 +1929,38 @@ mod tests {
         // that draws it agree about when *now* is even though `Frame::advance`
         // runs between them. Two fresh clocks a status walk apart is exactly the
         // gap a sample boundary falls into.
+        //
+        // Matched on the *argument* rather than on the whole call, because a
+        // literal spelling out the argument list is a gate that reddens against
+        // correct code the next time a parameter is added: `rustfmt` explodes the
+        // call across five lines and the string stops matching, reporting a lost
+        // instant about a reflow. That is how the anchor above broke, one row ago.
         let turns = &code[code.find("'awake: loop {").expect("the loop is gone")..];
+        let calls: Vec<&str> = turns
+            .match_indices("shell.draw(")
+            .map(|(at, _)| {
+                let rest = &turns[at..];
+                &rest[..rest.find(')').map_or(rest.len(), |end| end + 1)]
+            })
+            .collect();
+        assert_eq!(calls.len(), 2, "the loop no longer has its two paints");
+        for call in calls {
+            assert!(
+                call.contains("began") && !call.contains("Instant::now()"),
+                "a draw inside the loop reads a clock of its own rather than the \
+                 turn's, so a sample boundary landing between a tick and its \
+                 paint erases the pulse of the burst that caused the frame"
+            );
+        }
+
+        let recorded = &turns[turns
+            .find(".record_sized(sized(")
+            .expect("the tick no longer records its burst")..];
+        let recorded = &recorded[..recorded
+            .find(';')
+            .expect("the tick's record is not a statement")];
         assert!(
-            !turns.contains("shell.draw(&mut frame, &worktree, Instant::now())"),
-            "a draw inside the loop reads a clock of its own rather than the \
-             turn's, so a sample boundary landing between a tick and its paint \
-             erases the pulse of the burst that caused the frame"
-        );
-        assert_eq!(
-            turns
-                .matches("shell.draw(&mut frame, &worktree, began)")
-                .count(),
-            2,
-            "the loop's two paints no longer both draw on the turn's instant"
-        );
-        assert!(
-            turns.contains(".record_sized(sized(worktree.workdir(), &paths), began)"),
+            recorded.contains("began") && !recorded.contains("Instant::now()"),
             "a tick timestamps its burst on a clock of its own, so it and the \
              paint that draws it can straddle a sample boundary and the burst \
              loses its pulse on the one frame it caused"

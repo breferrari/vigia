@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use vigia::{
     Action, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER, STEP_DELAY,
     STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
-    patience, scroll_mark,
+    patience, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -1065,6 +1065,41 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
             "a press on the diff's bar at row {row} produced {action:?}"
         );
     }
+}
+
+#[test]
+fn the_direction_mark_outlives_its_burst_by_exactly_the_linger() {
+    // **The comparison this asserts had no gate at all until it was moved out of
+    // the shell.** It lived in `Shell::settle_scroll`, which owns a terminal and
+    // three threads, so nothing could drive it: inverting it to `now < until`
+    // compiled, passed clippy, and left all 824 tests green while the arrows
+    // cleared on the next wake instead of `SCROLL_LINGER` later, which is to say
+    // never claimed a direction at all.
+    let now = Instant::now();
+    let until = now + SCROLL_LINGER;
+
+    assert!(
+        !settled(Some(until), now),
+        "the mark is spent the instant it is armed, so a scroll never draws its \
+         direction"
+    );
+    assert!(
+        !settled(Some(until), until - Duration::from_millis(1)),
+        "the mark is spent a millisecond early"
+    );
+
+    // The boundary is the ordinary case rather than a corner: the loop is woken
+    // *by* this deadline, so `patience` hands back exactly zero and the wake
+    // lands on `until` itself.
+    assert!(
+        settled(Some(until), until),
+        "a mark whose deadline is exactly now survives, so the wake that came to \
+         retire it retires nothing and the arrows outlive their burst"
+    );
+    assert!(settled(Some(until), until + SCROLL_LINGER));
+
+    // Nothing armed is nothing to settle, which is the case every idle frame is.
+    assert!(!settled(None, now));
 }
 
 #[test]

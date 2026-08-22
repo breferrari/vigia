@@ -905,7 +905,12 @@ fn the_bands_heights_are_the_block_rungs_and_not_a_dense_cells() {
     }
 }
 
-/// A store holding one six-second burst that ends at `now`.
+/// A store holding one six-second burst, the last write one sample before `now`.
+///
+/// Not "ending at `now`", which is what this said: the window opens at
+/// `now - HISTORY_SAMPLE * 6` and the six writes land on `0..6` samples from
+/// there, so the last one is at `now - HISTORY_SAMPLE`. The difference is one
+/// sample and it is exactly the quantum every gate below measures in.
 ///
 /// Built through `History` rather than by writing a `Churn` array directly,
 /// because what [#243](https://github.com/breferrari/vigia/issues/243) is about

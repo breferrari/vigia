@@ -1208,9 +1208,10 @@ impl History {
     /// [`HISTORY_SAMPLE`] sooner than `HISTORY_WINDOW` after the last write.
     /// Draining early only stops the clock early, which is the safe direction for
     /// this invariant, and every gate here happens to write exactly on a boundary
-    /// so none of them can see the difference. and it is why I1's *0 wakeups
-    /// while idle* survives the amendment: the state a monitor left open
-    /// overnight is in is an empty window.
+    /// so none of them can see the difference.
+    ///
+    /// That bound is why I1's *0 wakeups while idle* survives the amendment: the
+    /// state a monitor left open overnight is in is an empty window.
     ///
     /// Saturating, so a boundary already passed asks for zero rather than
     /// panicking. That happens whenever the process was not woken for longer
