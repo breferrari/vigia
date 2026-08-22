@@ -191,8 +191,8 @@ impl Glyphs {
     /// 2. **`TERM=dumb`**, a terminal saying it cannot do this.
     /// 3. **`TERM=linux`**, the Linux virtual console, whose font is a 256 or
     ///    512 glyph bitmap that has never held braille. This is the one rung
-    ///    with no colour analogue, and it is why `btop` carries a `tty` mode
-    ///    beside its `braille` and `block` ones.
+    ///    with no colour analogue, and it is why a monitor of this class carries
+    ///    a console mode beside its braille and block ones.
     /// 4. **`TERM_PROGRAM`**, a terminal naming itself. See [`program_glyphs`].
     /// 5. **Windows with `WT_SESSION`**, which is Windows Terminal identifying
     ///    itself, and it ships Cascadia. Measured: see the module docs.
@@ -203,9 +203,9 @@ impl Glyphs {
     /// 8. **[`Glyphs::Braille`] otherwise**, which is the broad claim on this
     ///    ladder and the one worth stating a reason for. Braille has been in
     ///    every mainstream Unix monospace face for twenty years, the one Unix
-    ///    terminal that cannot draw it is caught at rung 3, and `btop` defaults
-    ///    to braille on every platform with no detection at all and puts the
-    ///    font in its README prerequisites. A reader whose font is the exception
+    ///    terminal that cannot draw it is caught at rung 3, and the reference
+    ///    class defaults to braille on every platform with no detection at all
+    ///    and names the font a prerequisite. A reader whose font is the exception
     ///    says so with [`GLYPHS_VAR`], which is the same escape the Windows rung
     ///    of [`Depth`](crate::Depth) leans on.
     pub fn from_env(
@@ -257,47 +257,6 @@ impl Glyphs {
     pub fn detect() -> Result<Self, GlyphsError> {
         Self::from_env(cfg!(windows), |key| std::env::var(key).ok())
     }
-
-    /// The rung the **churn band** draws at, whatever the pane detects.
-    ///
-    /// **The one element the ladder does not reach, ruled by
-    /// [#244](https://github.com/breferrari/vigia/issues/244) and recorded in
-    /// `SPEC.md` §11.1.** A dense rung buys a second horizontal sub-column and
-    /// pays more than half the vertical resolution for it. That was the right
-    /// trade while the band drew discrete write events, which change completely
-    /// between samples; [#242](https://github.com/breferrari/vigia/issues/242)
-    /// made it draw a **level**, which is smooth by construction, and the trade
-    /// inverted. The ladder sold as higher resolution was drawing a coarser
-    /// graph, reported from a live pane as *"the masthead read as scattered
-    /// dots"*.
-    ///
-    /// Three measurements, because a ruling that reverses a ruling should carry
-    /// them. Across widths 40 to 124 on a wave, blocks draw **16 of a possible
-    /// 17** distinct column heights and a dense rung draws **7 of its 7**,
-    /// saturated because seven is all a 2x4 cell has over two rows. What the
-    /// second sub-column buys in exchange is nothing a reader can see: **98% of
-    /// dense cells draw two identical halves** at 80 and 109 columns, because
-    /// the band asks for `width * density` slots against a 120-sample window and
-    /// so *repeats* above width 60.
-    ///
-    /// **The sparkline keeps the ladder**, and the difference is which currency
-    /// density is spent in. Its rung is capped at the window's own 24 buckets,
-    /// five seconds apart against a six-second kernel, so a dense cell there
-    /// carries two genuinely different values: measured at **0 of 12 pairs
-    /// identical**, where the band's sub-columns at 109 columns are 0.55s apart.
-    /// `SPEC.md` words that gain as *"width rather than height"*, and it is
-    /// untouched by any of this.
-    ///
-    /// **Spending the cell's fourth dot row instead is closed by arithmetic**
-    /// rather than declined by taste: four levels over two rows is eight against
-    /// the block ramp's sixteen, so it does not close the gap, and the row it
-    /// would take is the axis [#78](https://github.com/breferrari/vigia/issues/78)
-    /// requires.
-    ///
-    /// An associated const rather than a method, because the answer does not
-    /// depend on what was detected and a `self` parameter that is ignored reads
-    /// as though it might not be.
-    pub const BAND: Self = Self::Block;
 
     /// Buckets one drawn cell carries.
     pub const fn density(self) -> usize {

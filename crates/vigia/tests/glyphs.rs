@@ -127,7 +127,7 @@ const TABLE: [Row; 12] = [
         want: Glyphs::Block,
     },
     Row {
-        why: "anything else takes braille, which is where btop has sat for years",
+        why: "anything else takes braille, which is where this class has sat for years",
         windows: false,
         env: &[("TERM", "screen-256color")],
         want: Glyphs::Braille,
@@ -533,24 +533,34 @@ fn every_self_naming_term_answers() {
 }
 
 #[test]
-fn the_band_rung_is_the_tallest_the_ladder_has() {
-    // **[#244](https://github.com/breferrari/vigia/issues/244)'s ruling stated as
-    // a property rather than as a name.** The churn band draws at
-    // [`Glyphs::BAND`] whatever the pane detects, and the reason is vertical
-    // resolution: a level is smooth, so amplitude is what shows its shape and the
-    // horizontal sub-column a dense cell buys carries almost nothing.
+fn the_band_follows_the_rung_the_pane_detects() {
+    // **[#244](https://github.com/breferrari/vigia/issues/244), reopened.** That
+    // row took the churn band off the glyph ladder and pinned it to blocks, on a
+    // live report that turned out to have been misquoted: "scattered dots"
+    // describes glyph texture and points at a rung, where the reader's actual
+    // words describe waves becoming spikes, which is the signal's shape and
+    // points at the denominator. That denominator is
+    // [#256](https://github.com/breferrari/vigia/issues/256).
     //
-    // Naming the rung would pin the answer; this pins the *reason*, so a rung
-    // added later that draws more levels a row than blocks do makes this fail
-    // and asks the question again instead of being silently passed over.
-    for rung in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
-        assert!(
-            Glyphs::BAND.levels() >= rung.levels(),
-            "the band draws at {:?}, with {} levels a row, and {rung:?} has {}: \
-             the ladder has a taller rung than the element that wants height",
-            Glyphs::BAND,
-            Glyphs::BAND.levels(),
-            rung.levels()
+    // **The band draws at whatever the pane detects, and that is a product
+    // ruling rather than a measured one.** Blocks are more faithful, measured:
+    // mean absolute error between the drawn column and the true level, over five
+    // series at ten widths from 36 to 124, is 1.2% to 4.0% for blocks against
+    // 4.3% to 8.8% for a dense cell. The cost is real, it is known, and the
+    // element is a reader-facing option that was removed without being asked
+    // for. The ladder is one ladder again.
+    //
+    // Pinned as a property rather than by naming a rung: nothing in the band may
+    // read a glyph set the pane did not detect.
+    for pane in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
+        assert_eq!(
+            pane.density() * pane.levels(),
+            match pane {
+                Glyphs::Block => 8,
+                Glyphs::Braille | Glyphs::Octant => 6,
+            },
+            "{pane:?} changed what a cell carries, so the band's own gates in \
+             masthead.rs need re-deriving rather than this one relaxing"
         );
     }
 }

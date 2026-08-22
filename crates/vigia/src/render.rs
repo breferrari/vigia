@@ -36,7 +36,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span, scale_of};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span};
 
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Sheet};
@@ -4505,47 +4505,43 @@ impl Painter<'_> {
         let width = usize::from(planning_width(area.width, 0));
 
         // **One value per sub-column, and a zero draws the baseline**, which is
-        // `btop`'s own answer to this exact signal
-        // ([#232](https://github.com/breferrari/vigia/issues/232)). Its network
-        // graph is the closest analogue in that tool: bursty, zero most of the
-        // time, and it is built with `no_zero = true`, which forces one dot on
-        // the bottom row so an idle interface draws an axis rather than nothing.
-        // Read from `src/btop_draw.cpp`, `Graph::_create`, rather than recalled.
+        // the settled answer to this exact signal
+        // ([#232](https://github.com/breferrari/vigia/issues/232)). A graph of a
+        // bursty signal that is zero most of the time forces one mark on the
+        // bottom row, so an idle stretch draws an axis rather than nothing.
         //
         // **That supersedes [#223](https://github.com/breferrari/vigia/issues/223)'s
         // coarsening, and the correction is worth stating rather than
         // absorbing.** That row diagnosed the right defect, a save drawing a
         // one-column hairline between blanks, and reached for a wider column to
-        // fix it. `btop` fixes the same defect by drawing the floor, and once the
-        // floor is drawn a narrow column is a spike on an axis instead of a mark
+        // fix it. The floor is what fixes the same defect, and once the floor is
+        // drawn a narrow column is a spike on an axis instead of a mark
         // in a void. Coarsening then costs resolution and buys nothing, and it
         // was what made the band read as separated blocks
         // ([#232](https://github.com/breferrari/vigia/issues/232), reported from
         // a live pane).
         //
-        // `btop` sizes its buffer to the pane for the same reason, keeping
-        // `width * 2` samples so no value is ever stretched across cells. Here
-        // the window is fixed by I10, so the projection does the same job from
+        // A scrolling graph sizes its buffer to the pane for the same reason, so
+        // no value is ever stretched across cells. Here the window is fixed by
+        // I10, so the projection does the same job from
         // the other side: it aggregates when the pane holds fewer sub-columns
         // than the window holds samples, and repeats when it holds more.
-        // **The block rung, whatever the pane detects**
-        // ([#244](https://github.com/breferrari/vigia/issues/244)). Bound once
+        // **The rung the pane detected**, which is where the band was until
+        // [#244](https://github.com/breferrari/vigia/issues/244) took it off the
+        // ladder and where it is again since that row was reopened. Bound once
         // and read three times below, so this function cannot half-follow the
-        // ruling: a density from one rung and a level count from another would
-        // draw a band nothing could decode. [`Glyphs::BAND`] carries the reason
-        // and its measurements.
+        // rung: a density from one and a level count from another would draw a
+        // band nothing could decode.
         //
-        // **Named `rung` rather than `glyphs`**, which is `Painter`'s own field
-        // for the rung the *pane* detected. Fifty lines below, a `glyphs.levels()`
-        // would read as that field and a reader would have to come back up here
-        // to learn it is not: the shadowing name is the half-following this
-        // comment is about, reintroduced one identifier down.
-        let rung = Glyphs::BAND;
+        // **Kept as `rung` rather than read as `self.glyphs` three times**, so
+        // the binding is one line to change and the three readers below cannot
+        // drift apart.
+        let rung = self.glyphs;
         let density = rung.density();
         // **The pane can ask for more sub-columns than the window holds samples,
-        // and then values repeat rather than run out.** `btop` never meets this
-        // because its buffer is sized to the pane, keeping `width * 2` samples;
-        // I10 fixes this window at two minutes instead, so past 120 sub-columns
+        // and then values repeat rather than run out.** A graph whose buffer is
+        // sized to the pane never meets this; I10 fixes this window at two
+        // minutes instead, so past 120 sub-columns
         // the projection has nothing further to divide and each value covers more
         // than one. Asking `projected` for the wider number silently returned a
         // short series, which drew a graph that stopped partway across the pane
@@ -4559,22 +4555,35 @@ impl Painter<'_> {
         // met by construction: the two elements cannot disagree about what they
         // are showing because there is one kernel and one constant.
         let series = view.worktree_churn.levels(slots);
-        // **`vigia_core::scale_of`, the same rule the sparkline divides by.** It
+
+        // **`Churn::scale_at`, the same rule the sparkline divides by.** It
         // lived here while the band was the only element that had it, which is
         // exactly how the sparkline was left dividing by a maximum over the same
         // byte samples. The two denominators stay different quantities, one
         // worktree-wide and one per file, which is `SPEC.md` §11.1's ruling; what
         // they may not disagree about is the rule.
-        let scale = scale_of(series.iter().copied());
+        //
+        // **The rule excludes outliers as well as empties**, since
+        // [#256](https://github.com/breferrari/vigia/issues/256): a mean is not
+        // robust, and one loud write was pressing every ordinary edit in this
+        // window onto the lowest level the band has. `SCALE_OUTLIER`'s docblock
+        // carries the measurement and the interval it was chosen from.
+        //
+        // **The cut is taken before the projection, which is why this is one
+        // call and not `scale_of` over `series`.** A cut taken on the drawn
+        // series changes membership every time the pane resizes;
+        // `Churn::scale_at` carries both wrong orders and their measurements.
+        let scale = view.worktree_churn.scale_at(slots);
         // **No data, no axis**, which is what keeps
         // [#158](https://github.com/breferrari/vigia/issues/158)'s reported
         // defect fixed while the axis exists at all. That ruling came from a
         // first real run: a window holding nothing drew a hundred columns of `_`,
         // "a dashed rule the pane did not ask for", and every session opens in
         // exactly that state because a worktree already dirty when `vigia`
-        // started has no tick behind it yet. `btop` draws its floor for an idle
-        // interface and would draw one here too; the distinction it does not have
-        // to make is between *quiet* and *not started*, and this is that line. An
+        // started has no tick behind it yet. A monitor of this class draws its
+        // floor for an idle interface and would draw one here too; the
+        // distinction it does not have to make is between *quiet* and *not
+        // started*, and this is that line. An
         // empty column inside a live window is quiet and stands on the floor; an
         // empty window has no graph to put a floor under. The rows stay reserved
         // either way, so the first write does not jog the list.
