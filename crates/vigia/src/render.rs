@@ -36,7 +36,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span, scale_of};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span};
 
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Sheet};
@@ -4557,6 +4557,7 @@ impl Painter<'_> {
         // met by construction: the two elements cannot disagree about what they
         // are showing because there is one kernel and one constant.
         let series = view.worktree_churn.levels(slots);
+
         // **`vigia_core::scale_of`, the same rule the sparkline divides by.** It
         // lived here while the band was the only element that had it, which is
         // exactly how the sparkline was left dividing by a maximum over the same
@@ -4569,16 +4570,22 @@ impl Painter<'_> {
         // robust, and one loud write was pressing every ordinary edit in this
         // window onto the lowest level the band has. `SCALE_OUTLIER`'s docblock
         // carries the measurement and the interval it was chosen from.
-        let scale = scale_of(series.iter().copied());
+        //
+        // **The cut is taken before the projection, which is why this is one
+        // call and not `scale_of` over `series`.** A cut taken on the drawn
+        // series changes membership every time the pane resizes;
+        // `Churn::scale_at` carries both wrong orders and their measurements.
+        let scale = view.worktree_churn.scale_at(slots);
         // **No data, no axis**, which is what keeps
         // [#158](https://github.com/breferrari/vigia/issues/158)'s reported
         // defect fixed while the axis exists at all. That ruling came from a
         // first real run: a window holding nothing drew a hundred columns of `_`,
         // "a dashed rule the pane did not ask for", and every session opens in
         // exactly that state because a worktree already dirty when `vigia`
-        // started has no tick behind it yet. `btop` draws its floor for an idle
-        // interface and would draw one here too; the distinction it does not have
-        // to make is between *quiet* and *not started*, and this is that line. An
+        // started has no tick behind it yet. A monitor of this class draws its
+        // floor for an idle interface and would draw one here too; the
+        // distinction it does not have to make is between *quiet* and *not
+        // started*, and this is that line. An
         // empty column inside a live window is quiet and stands on the floor; an
         // empty window has no graph to put a floor under. The rows stay reserved
         // either way, so the first write does not jog the list.

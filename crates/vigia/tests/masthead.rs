@@ -960,9 +960,20 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                     band_at(width, series, pane).join("\n")
                 );
 
-                // And the shape is back, not merely off the floor. Seven is what the
-                // reported picture drew, so more than that is the claim. Counted
-                // off the vector already in hand rather than through
+                // **And the shape is back, not merely off the floor**, which is a
+                // separate claim: a band lifted off the axis and drawn flat would
+                // satisfy the assertion above and still say nothing. A flat band
+                // is one or two distinct heights. Measured on the shipped rule,
+                // the reported trace draws 11 to 14 across these widths and the
+                // long burst draws 7 at the narrowest, so four is below every one
+                // of them with room and is not a number tuned to pass.
+                //
+                // Not compared against the reported picture's seven, which was
+                // measured at eighty columns: a forty-column pane has fewer
+                // sub-columns to be distinct in, so that comparison crosses
+                // widths and is not one claim.
+                //
+                // Counted off the vector already in hand rather than through
                 // `distinct_heights`, which would render the same band again.
                 let drawn = {
                     let mut seen = heights.clone();
@@ -970,13 +981,146 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                     seen.dedup();
                     seen.len()
                 };
+
                 assert!(
-                    drawn > 7,
+                    drawn > 4,
                     "{name}, {pane:?} at {width}: the band drew {drawn} distinct \
-                     heights, which is no more shape than the reported picture \
-                     had"
+                     heights, so it is off the floor and flat instead of on it"
                 );
             }
+        }
+    }
+}
+
+/// The band's yardstick does not lurch when the pane is resized by a column.
+///
+/// **The defect this catches was introduced by
+/// [#256](https://github.com/breferrari/vigia/issues/256) and found by measuring
+/// rather than by a gate.** The cut needs a population, and the band's first
+/// shape took it over the series it draws. That series is a *projection*:
+/// `Churn::projected` sums where the pane holds fewer columns than the window
+/// holds samples, so which values were outlying changed with the pane. A second
+/// shape cut the projection against a threshold taken at source, which is a units
+/// mismatch, since a drawn column is a sum of several samples and can pass a
+/// threshold none of its parts would.
+///
+/// `Churn::scale_at` cuts the samples and projects what is left, which is the
+/// order `History::repeak` takes one element over. Measured, worst single-column
+/// step over widths 36 to 200:
+///
+/// | fixture | shipped | plain mean | cut on the projection |
+/// |---|---|---|---|
+/// | burst then ordinary | **6.5%** | 2.9% | 41.3% |
+/// | long burst | **7.3%** | 2.9% | 91.4% |
+/// | quartered | **14.3%** | 14.3% | 14.3% |
+/// | wave | **2.9%** | 2.9% | 2.9% |
+///
+/// So the gate is two claims and neither needs a tuned number. Where nothing is
+/// outlying the figure is the plain mean's **exactly**, at every width. Where
+/// something is, the step is at most half what cutting the projection would have
+/// cost, and the measurement above says the real margin is six times that.
+///
+/// Some movement is the projection's own and predates this row entirely: a
+/// narrower column sums more samples and must be measured against more, which is
+/// the whole 14.3% on `QUARTERED`.
+#[test]
+fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
+    /// Thirteen tenths of the mean of the non-empty values, with no cut in it.
+    fn plain(values: &[u32]) -> u32 {
+        let busy: Vec<u64> = values
+            .iter()
+            .map(|value| u64::from(*value))
+            .filter(|value| *value > 0)
+            .collect();
+        if busy.is_empty() {
+            return 0;
+        }
+        u32::try_from(busy.iter().sum::<u64>() * 13 / (busy.len() as u64 * 10)).expect("a scale")
+    }
+    /// The most one column of resize moves a figure, as a percentage.
+    fn step(before: u32, after: u32) -> f64 {
+        let (low, high) = (
+            f64::from(before.min(after)).max(1.0),
+            f64::from(before.max(after)),
+        );
+        (high / low - 1.0) * 100.0
+    }
+
+    for (name, series, outlying) in [
+        ("burst then ordinary", BURST_THEN_ORDINARY, true),
+        ("long burst", LONG_BURST_THEN_ORDINARY, true),
+        ("quartered", QUARTERED, false),
+        ("wave", wave(), false),
+    ] {
+        let shown = Chrome {
+            masthead: true,
+            ..chrome(&App::new())
+        };
+        let (mut worst, mut worst_on_projection) = (0.0f64, 0.0f64);
+        let mut previous: Option<(u32, u32)> = None;
+        let mut compared = 0usize;
+        for width in 36u16..=200 {
+            let area = Rect::new(0, 0, width, TALL);
+            if body_layout(area, &shown, 1).graph == 0 {
+                continue;
+            }
+            // The band's own span, read off the axis row, which is solid since
+            // #232. Planning it from `width` would divide a projection no pane
+            // produces.
+            let axis = band_at(width, series, Glyphs::Block)
+                .last()
+                .expect("a band row")
+                .clone();
+            let slots = drawn_ink(&axis) * Glyphs::BAND.density();
+            assert!(
+                slots > 0,
+                "{name}: the band drew no axis at {width} columns"
+            );
+
+            let drawn = Churn(series).levels(slots);
+            let shipped = Churn(series).scale_at(slots);
+            let unmoved = plain(&drawn);
+            // What the withdrawn shape would have answered: the cut taken over
+            // the drawn series rather than over the window.
+            let on_projection = vigia_core::scale_of(drawn.iter().copied());
+
+            // **Where nothing is outlying, exactly the figure the plain rule
+            // sets**, at every width rather than at the worst of them.
+            if !outlying {
+                assert_eq!(
+                    shipped, unmoved,
+                    "{name}: at {width} columns the cut fired on a window with \
+                     nothing outlying in it"
+                );
+            }
+
+            if let Some((was, was_on_projection)) = previous {
+                worst = worst.max(step(was, shipped));
+                worst_on_projection =
+                    worst_on_projection.max(step(was_on_projection, on_projection));
+                compared += 1;
+            }
+            previous = Some((shipped, on_projection));
+        }
+
+        assert!(compared > 100, "{name}: only {compared} widths compared");
+        assert!(
+            worst <= worst_on_projection / 2.0 || worst == worst_on_projection,
+            "{name}: the shipped yardstick moves {worst:.1}% on one column of \
+             resize where cutting the projection moves {worst_on_projection:.1}%, \
+             so taking the cut before the projection has stopped buying the \
+             stability it exists for"
+        );
+        // Non-vacuity: on a window that is genuinely heavy tailed the withdrawn
+        // shape has to be visibly worse, or the comparison above is between two
+        // identical numbers and says nothing.
+        if outlying {
+            assert!(
+                worst_on_projection > 20.0,
+                "{name}: cutting the projection moved only \
+                 {worst_on_projection:.1}%, so this fixture cannot tell the two \
+                 shapes apart"
+            );
         }
     }
 }
@@ -1022,6 +1166,15 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
                 .expect("a band row")
                 .clone();
             let slots = drawn_ink(&axis) * Glyphs::BAND.density();
+            // **Non-vacuity, and it is the whole gate.** A band that drew nothing
+            // makes `slots` zero, `levels(0)` empty, and the comparison below
+            // `0 == 0`, so twenty series-and-width pairs would agree about
+            // nothing at all.
+            assert!(
+                slots > 0,
+                "the band drew no axis at {width} columns, so this compared \
+                 nothing"
+            );
             let levelled = Churn(series).levels(slots);
             assert_eq!(
                 vigia_core::scale_of(levelled.iter().copied()),

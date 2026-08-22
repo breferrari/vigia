@@ -502,7 +502,8 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// `______________▁▁▁▁▃▆████`; at the rung eighty columns affords it does not
     /// move, and the snapshot below is unchanged.
     ///
-    /// **The set is non-decreasing and nothing asserts that it is.** A coarser
+    /// **The set is non-decreasing, and `vigia-core`'s
+    /// `a_coarser_rung_is_never_measured_against_less` is what asserts it.** A coarser
     /// rung sums more source buckets into each drawn one, so its figure cannot be
     /// smaller, and `History::repeak` gets that from arithmetic rather than from a
     /// clamp: what is outlying is decided once at the source resolution, so every
