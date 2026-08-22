@@ -117,6 +117,26 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 ---
 
+## I1 — the window ages, and the clock that ages it stops when the window empties
+
+**Ruled 2026-08-22 for [#243](https://github.com/breferrari/vigia/issues/243), which parked itself as an I1 amendment and is one.** Asked for from use: *the graph should age*. `History::roll` has a single caller, the tick path, so a quiet worktree left the window frozen.
+
+**The framing that carries it is not staleness.** The window's axis is time. A frozen window keeps its newest sample at the right edge, so a burst from ninety seconds ago draws as *just now*, and `Recency` freezes with it so a file that went quiet keeps its pulse. A monitor advertised as *correct with zero interaction* was incorrect with zero interaction. That is I5, and this is a case where two product-class claims pull against each other rather than a case where one of them is being spent for a convenience.
+
+**Why it is the licence's own purpose rather than a widening of it.** The entry above records the distinction the first clock was admitted on: *every other timer this spec refuses would run while nothing is happening*. This one cannot. It runs while a burst is still decaying through the window, and the window empties `HISTORY_WINDOW` after the last write, so the state a monitor left open overnight is in is an empty window and an untimed wait. Measured rather than assumed: at `t+119s` the window holds one live sample and the path is tracked; at `t+120s` it holds none and the path is gone, because `roll` clears every track once the whole window has turned over.
+
+**The second condition is restated, not dropped.** It read *"it may not outlive the gesture that armed it"*. `SCROLL_LINGER` is `now + 220ms`, so the direction arrows' clock has always outlived the gesture that armed it and nobody called that an amendment: the condition has meant a *bounded* outliving since the day it was written. What #243 changes is that the thing which arms a clock may be a change in the worktree as well as a reader's gesture, and the bound is the window rather than a release.
+
+**Three measurements, because a ruling that touches I1 should carry them.** An ageing wake, in release, on a twenty-file fixture at 109 columns: **89.9µs p50, 149.6µs p99**, against I9's 16ms, which is 0.6% of one frame budget. An ordinary tick on the same fixture is **458µs**, and the difference is the status walk, which an ageing wake does not do because it is not a filesystem event. And the drain is bounded at `HISTORY_SAMPLES`, so ageing one burst to nothing costs about **10.8ms of CPU spread over two minutes**.
+
+**What was declined, and on which number.** A period derived from the drawn cell rather than from the store's sample: a band cell at 109 columns covers 1.1 seconds and a sparkline bucket covers five, so a coarser tick would skip wakes that change no pixel. It is refused because it would cap a cost measured at 89.9µs, and `CLAUDE.md` holds a cap to a refusal's bar. The period is `HISTORY_SAMPLE`, which is the finest interval at which any drawn cell can change.
+
+**And what was declined on a reason rather than a number.** #243 proposed running the clock while the masthead is up, on the ground that `m` is a gesture. The sparklines and the pulse are drawn whether or not the masthead is and are on the same window, so a clock gated on the band would leave the two elements disagreeing about what time it is, which is the thing [#234](https://github.com/breferrari/vigia/issues/234) exists to forbid. One store, one roll, and coherence by construction.
+
+**What holds it** is `an_empty_window_and_nothing_held_means_no_timer_at_all`, written the way `nothing_held_means_no_timer_at_all` is: it asserts the *value* the loop's wait is given rather than a behaviour observed around it. A version that returned a large timeout for an empty window would look harmless and put an idle monitor on a poll loop.
+
+---
+
 ## I4 — narrowed 2026-08-01: counting a height is not summing content
 
 > [!NOTE]
