@@ -23,11 +23,16 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::time::{Duration, Instant};
 use vigia::{
     Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Row, Theme, View,
     body_layout, render,
 };
-use vigia_core::{Churn, HISTORY_BUCKETS, HISTORY_SAMPLES, Highlighter, History, Recency};
+
+use vigia_core::{
+    Churn, HISTORY_BUCKETS, HISTORY_SAMPLE, HISTORY_SAMPLES, HISTORY_WINDOW, Highlighter, History,
+    Recency,
+};
 
 use support::{Scratch, materialise};
 
@@ -898,4 +903,128 @@ fn the_bands_heights_are_the_block_rungs_and_not_a_dense_cells() {
             );
         }
     }
+}
+
+/// A store holding one six-second burst, the last write one sample before `now`.
+///
+/// Not "ending at `now`", which is what this said: the window opens at
+/// `now - HISTORY_SAMPLE * 6` and the six writes land on `0..6` samples from
+/// there, so the last one is at `now - HISTORY_SAMPLE`. The difference is one
+/// sample and it is exactly the quantum every gate below measures in.
+///
+/// Built through `History` rather than by writing a `Churn` array directly,
+/// because what [#243](https://github.com/breferrari/vigia/issues/243) is about
+/// is the *store* moving: a hand-built series is already whatever shape the test
+/// wanted and cannot show that anything aged.
+///
+/// The burst's span was a parameter and both callers passed the same six
+/// seconds, which is also the span itself, so it is a constant here instead.
+///
+/// **`starting_at` rather than `new`, and the difference is the whole fixture.**
+/// `History::new` opens its window at `Instant::now()`, which is *after* the
+/// instants below, so `roll` saturated to zero on every one of them and the
+/// six-second burst was a single sample: `0..1` would have satisfied both gates.
+/// Opening the window before the first write is what makes the six samples six.
+fn burst_at(now: Instant) -> History {
+    let began = now - HISTORY_SAMPLE * 6;
+    let mut history = History::starting_at(began);
+    for second in 0..6u32 {
+        history.record_sized(
+            [("src/a.rs", Some(6_000u64))],
+            began + HISTORY_SAMPLE * second,
+        );
+    }
+    history
+}
+
+#[test]
+fn a_quiet_window_slides_left_rather_than_freezing() {
+    // **The defect [#243](https://github.com/breferrari/vigia/issues/243) was
+    // reported for.** The window's axis is time, so a burst that has not moved is
+    // a burst still claiming to be happening now. Rolling it thirty seconds with
+    // nothing written has to move the ink left, and the gate reads the drawn
+    // band rather than the store, because a store that rolls while the paint
+    // reads a snapshot taken earlier would pass a store-level assertion and still
+    // freeze the screen.
+    //
+    // **What this does not gate, said out loud: that anything ever rolls it.**
+    // The defect was never that the store cannot age, it is that on a quiet
+    // worktree nothing wakes to ask it to, and that half is the shell's loop,
+    // which owns a terminal and three threads. `lib.rs`'s own source gate holds
+    // it, by reading that `Shell::draw` rolls the window before it paints and on
+    // the turn's own clock, and that gate is the one that was red before this
+    // change. This one would pass without it.
+    let now = Instant::now();
+    let mut history = burst_at(now);
+
+    let fresh = band_at(WIDE, history.worktree_churn().0, Glyphs::default());
+    let ink_at = |rows: &[String]| -> Vec<usize> {
+        rows.iter()
+            .flat_map(|row| row.char_indices())
+            .filter(|(_, glyph)| !glyph.is_whitespace() && *glyph != '_')
+            .map(|(at, _)| at)
+            .collect()
+    };
+    let before = ink_at(&fresh);
+    assert!(
+        !before.is_empty(),
+        "the fixture drew no ink, so nothing here could move"
+    );
+
+    // Thirty seconds of nothing at all, which is the wake the ageing clock now
+    // produces and the tick path never would.
+    history.record_sized([], now + Duration::from_secs(30));
+    let aged = band_at(WIDE, history.worktree_churn().0, Glyphs::default());
+    let after = ink_at(&aged);
+
+    assert_ne!(
+        aged, fresh,
+        "thirty seconds passed with no writes and the band drew the identical \
+         picture, so the graph is frozen rather than quiet"
+    );
+    assert!(
+        !after.is_empty(),
+        "the burst left the window entirely in thirty seconds of a two-minute \
+         window, so this measured a drain rather than a slide"
+    );
+    assert!(
+        after.iter().max() < before.iter().max(),
+        "the newest ink did not move left, so the window is redrawing rather \
+         than ageing:\nbefore {before:?}\nafter  {after:?}"
+    );
+}
+
+#[test]
+fn the_band_and_the_sparklines_age_together() {
+    // **[#234](https://github.com/breferrari/vigia/issues/234)'s coherence
+    // requirement, stated as a gate rather than left as a mechanism.** One store
+    // and one roll is *why* they agree; this is what fails if the band ever gets
+    // a clock of its own. Both elements read the same window, so a roll that
+    // moved one and not the other would leave the pane saying two different
+    // things about what time it is.
+    let now = Instant::now();
+    let mut history = burst_at(now);
+
+    let band = |h: &History| h.worktree_churn().0;
+    let spark = |h: &History| h.level("src/a.rs");
+
+    let (band_before, spark_before) = (band(&history), spark(&history));
+    assert!(
+        spark_before.is_some_and(|buckets| buckets.iter().any(|bucket| *bucket > 0)),
+        "the fixture's file has no sparkline, so this compares one element"
+    );
+
+    history.record_sized([], now + HISTORY_WINDOW / 2);
+
+    assert_ne!(
+        band(&history),
+        band_before,
+        "sixty seconds of quiet left the band where it was"
+    );
+    assert_ne!(
+        spark(&history),
+        spark_before,
+        "sixty seconds of quiet moved the band and left the sparkline where it \
+         was, so the two elements disagree about what time it is"
+    );
 }

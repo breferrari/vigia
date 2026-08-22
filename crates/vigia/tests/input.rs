@@ -18,8 +18,9 @@ use std::time::{Duration, Instant};
 use vigia::{
     Action, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER, STEP_DELAY,
     STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
-    patience, scroll_mark,
+    patience, scroll_mark, settled,
 };
+use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
 /// A key press with no modifiers, which is what a terminal sends for a letter.
 fn press(code: KeyCode) -> Event {
@@ -1067,6 +1068,41 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
 }
 
 #[test]
+fn the_direction_mark_outlives_its_burst_by_exactly_the_linger() {
+    // **The comparison this asserts had no gate at all until it was moved out of
+    // the shell.** It lived in `Shell::settle_scroll`, which owns a terminal and
+    // three threads, so nothing could drive it: inverting it to `now < until`
+    // compiled, passed clippy, and left all 824 tests green while the arrows
+    // cleared on the next wake instead of `SCROLL_LINGER` later, which is to say
+    // never claimed a direction at all.
+    let now = Instant::now();
+    let until = now + SCROLL_LINGER;
+
+    assert!(
+        !settled(Some(until), now),
+        "the mark is spent the instant it is armed, so a scroll never draws its \
+         direction"
+    );
+    assert!(
+        !settled(Some(until), until - Duration::from_millis(1)),
+        "the mark is spent a millisecond early"
+    );
+
+    // The boundary is the ordinary case rather than a corner: the loop is woken
+    // *by* this deadline, so `patience` hands back exactly zero and the wake
+    // lands on `until` itself.
+    assert!(
+        settled(Some(until), until),
+        "a mark whose deadline is exactly now survives, so the wake that came to \
+         retire it retires nothing and the arrows outlive their burst"
+    );
+    assert!(settled(Some(until), until + SCROLL_LINGER));
+
+    // Nothing armed is nothing to settle, which is the case every idle frame is.
+    assert!(!settled(None, now));
+}
+
+#[test]
 fn nothing_held_means_no_timer_at_all() {
     // **The invariant the whole clock is allowed under.** I1's budget is zero
     // wakeups while idle, and what keeps that true is not care taken elsewhere:
@@ -1789,44 +1825,128 @@ fn a_direction_mark_expires_where_a_held_button_does_not() {
 
 #[test]
 fn nothing_armed_means_no_deadline_at_all() {
-    // **The invariant both clocks share, and the one a source gate cannot see.**
-    // `Held::wait` already answers for the repeat; this answers for the repeat
-    // *and* the direction mark together, because two deadlines asked separately
-    // are two chances to leave one armed on an idle monitor. `None` here is what
-    // makes the loop's receive untimed, which is I1's *0 wakeups while idle* as
-    // a structural fact rather than as care taken at two call sites.
+    // **The invariant every clock shares, and the one a source gate cannot see.**
+    // `Held::wait` already answers for the repeat; this answers for the repeat,
+    // the direction mark and the ageing window together, because deadlines asked
+    // separately are that many chances to leave one armed on an idle monitor.
+    // `None` here is what makes the loop's receive untimed, which is I1's
+    // *0 wakeups while idle* as a structural fact rather than as care taken at
+    // three call sites.
     let now = Instant::now();
 
     assert_eq!(
-        patience(None, None, now),
+        patience(None, None, None, now),
         None,
-        "with nothing held and nothing lingering the loop was handed a deadline, \
-         which is a timer on an idle monitor"
+        "with nothing held, nothing lingering and nothing in the window the loop \
+         was handed a deadline, which is a timer on an idle monitor"
     );
 
-    // Either one alone arms it, and neither is allowed to hide the other.
+    // Any one alone arms it, and none is allowed to hide the others.
     let hold = Held::new(Action::Scroll(1), (79, 5), now);
-    assert_eq!(patience(Some(hold), None, now), Some(STEP_DELAY));
+    assert_eq!(patience(Some(hold), None, None, now), Some(STEP_DELAY));
     assert_eq!(
-        patience(None, Some(now + SCROLL_LINGER), now),
+        patience(None, Some(now + SCROLL_LINGER), None, now),
         Some(SCROLL_LINGER)
     );
-
-    // **The nearer of the two**, whichever it is, because the loop has to wake
-    // for the first thing due. Taking the wrong one lets the other run late.
     assert_eq!(
-        patience(Some(hold), Some(now + SCROLL_LINGER), now),
+        patience(None, None, Some(HISTORY_SAMPLE), now),
+        Some(HISTORY_SAMPLE),
+        "a window with something in it did not ask the loop to wake, so the graph \
+         freezes where it is"
+    );
+
+    // **The nearest of them**, whichever it is, because the loop has to wake for
+    // the first thing due. Taking the wrong one lets the others run late.
+    assert_eq!(
+        patience(Some(hold), Some(now + SCROLL_LINGER), None, now),
         Some(SCROLL_LINGER),
         "the linger is due first and the loop was told to sleep past it"
     );
     let soon = Held::new(Action::Scroll(1), (79, 5), now - STEP_DELAY + STEP_REPEAT);
     assert_eq!(
-        patience(Some(soon), Some(now + SCROLL_LINGER), now),
+        patience(Some(soon), Some(now + SCROLL_LINGER), None, now),
         Some(STEP_REPEAT),
         "the step is due first and the loop was told to sleep past it"
     );
+
+    // **And the ageing clock takes its turn in the same order**, in both
+    // directions, because it is the slowest of the three by orders of magnitude
+    // and a `min` written the wrong way round would be invisible against the
+    // other two: they would simply always win.
+    //
+    // **Here rather than in a gate of its own**, which is what
+    // [#277](https://github.com/breferrari/vigia/issues/277)'s plan named. The
+    // property is *the nearest deadline wins*, this test is where that property
+    // already lives for the other two clocks, and a second gate would have
+    // rebuilt the same fixture to assert the same rule about a third. Recorded
+    // rather than done silently, because a promise kept somewhere other than
+    // where it was promised is indistinguishable from one dropped unless
+    // somebody says so.
+    assert_eq!(
+        patience(None, Some(now + SCROLL_LINGER), Some(HISTORY_SAMPLE), now),
+        Some(SCROLL_LINGER),
+        "the linger is due long before the next sample and the loop was told to \
+         sleep past it"
+    );
+    assert_eq!(
+        patience(
+            None,
+            Some(now + HISTORY_SAMPLE * 2),
+            Some(HISTORY_SAMPLE),
+            now
+        ),
+        Some(HISTORY_SAMPLE),
+        "the next sample is due first and the loop was told to sleep past it, so \
+         the window ages a beat late"
+    );
 }
 
+#[test]
+fn an_empty_window_and_nothing_held_means_no_timer_at_all() {
+    // **[#243](https://github.com/breferrari/vigia/issues/243)'s half of I1's
+    // budget, and it gates the *wiring* rather than the store.** What
+    // `History::ages_in` answers is gated in `vigia-core`, which owns the type;
+    // what matters here is that its answer reaches the one function deciding
+    // whether this program owns a timer, and that an empty window therefore
+    // leaves the loop's receive untimed.
+    //
+    // A first draft of this asserted `ages_in` three times and never called
+    // `patience`, so despite its name it gated nothing about the input layer and
+    // duplicated the core's own gates. The composition is the whole point: both
+    // halves can be right while nothing joins them.
+    let mut history = History::new();
+    let now = Instant::now();
+
+    assert_eq!(
+        patience(None, None, history.ages_in(now), now),
+        None,
+        "an empty window and nothing held handed the loop a deadline, which is a \
+         timer on an idle monitor"
+    );
+
+    history.record_sized([("src/a.rs", Some(4_000u64))], now);
+    let armed = patience(None, None, history.ages_in(now), now)
+        .expect("a window holding a write did not arm the loop, so the graph freezes");
+    assert!(
+        armed <= HISTORY_SAMPLE,
+        "a live window asked the loop to sleep {armed:?}, past the sample it is \
+         waiting for"
+    );
+
+    // And it stops again, which is the bound the amendment rests on.
+    history.record_sized([], now + HISTORY_WINDOW);
+    assert_eq!(
+        patience(
+            None,
+            None,
+            history.ages_in(now + HISTORY_WINDOW),
+            now + HISTORY_WINDOW
+        ),
+        None,
+        "a drained window still had the loop on a clock, so it outlives \
+         everything it had to show"
+    );
+}
 #[test]
 fn each_bar_answers_only_the_keys_that_move_it() {
     // **The routing behind the arrows, and the half a render gate cannot see.**

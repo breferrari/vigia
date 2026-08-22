@@ -23,8 +23,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vigia_core::{
-    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLES, HISTORY_WINDOW,
-    History, Recency, scale_of,
+    Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
+    HISTORY_WINDOW, History, Recency, scale_of,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -866,4 +866,293 @@ fn a_burst_at_the_newest_sample_reads_full_height() {
         "the same burst draws {a} at the window's edge against {b} in its middle, \
          so the newest write is being dimmed by the kernel running off the end"
     );
+}
+
+#[test]
+fn an_empty_window_is_never_due() {
+    // **The half of [#243](https://github.com/breferrari/vigia/issues/243) that
+    // keeps I1.** The clock the shell runs to age this window is admissible only
+    // because it stops, and what stops it is this answering `None`. Asserted on
+    // the value rather than on anything downstream, because the loop's receive
+    // branches on exactly this and a plausible-looking duration here is a poll
+    // loop on an idle monitor.
+    // `starting_at`, not `new`: `new` opens the window at its own
+    // `Instant::now()`, so a second sample taken on the next line leaves
+    // `opened < start` and every offset below is measured against a boundary
+    // that has already moved.
+    let start = base();
+    let mut history = History::starting_at(start);
+
+    assert_eq!(
+        history.ages_in(start),
+        None,
+        "a store with nothing recorded asked to be woken"
+    );
+
+    // A write arms it, and the deadline is inside one sample: the boundary it
+    // names is the next grid line, not a whole period from now.
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+    let due = history.ages_in(start).expect("a live window asks to age");
+    assert!(
+        due > Duration::ZERO && due <= HISTORY_SAMPLE,
+        "a live window asked to wait {due:?}, which is not inside one sample of \
+         the grid it rolls on"
+    );
+
+    // **Overdue asks for zero rather than panicking**, which is the ordinary
+    // case on the first wake after the process was busy elsewhere: the roll is
+    // already late and the answer is to do it now.
+    assert_eq!(
+        history.ages_in(start + HISTORY_SAMPLE * 3),
+        Some(Duration::ZERO),
+        "a window three samples overdue did not ask to roll immediately"
+    );
+}
+
+#[test]
+fn a_drained_window_stops_asking_to_age() {
+    // **The bound, and the reason the amendment to I1 is one sentence rather
+    // than a licence to run a timer.** A burst arms the clock; the window empties
+    // `HISTORY_WINDOW` after it, and the clock has to stop with it or the budget
+    // is *some wakeups forever* rather than *at most `HISTORY_SAMPLES` after a
+    // burst*.
+    // `starting_at`, not `new`: `new` opens the window at its own
+    // `Instant::now()`, so a second sample taken on the next line leaves
+    // `opened < start` and every offset below is measured against a boundary
+    // that has already moved.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+
+    // One sample short of the window it is still live, which is what makes the
+    // assertion below a boundary rather than an eventual truth.
+    history.record_sized([], start + HISTORY_WINDOW - HISTORY_SAMPLE);
+    assert!(
+        history
+            .ages_in(start + HISTORY_WINDOW - HISTORY_SAMPLE)
+            .is_some(),
+        "the window went quiet a sample early, so the graph stops moving before \
+         it has finished draining"
+    );
+
+    history.record_sized([], start + HISTORY_WINDOW);
+    assert_eq!(
+        history.ages_in(start + HISTORY_WINDOW),
+        None,
+        "a drained window is still asking to be woken, so the clock outlives \
+         everything it had to show"
+    );
+
+    // **And it stays stopped across an ageing wake, which is the property this
+    // was written for.** Asking `ages_in` a second time does not test it:
+    // the method takes `&self`, so with nothing mutating between the two calls
+    // the answer cannot differ and the line could not fail. What can re-arm the
+    // clock is a roll, so the roll has to happen first.
+    history.record_sized([], start + HISTORY_WINDOW * 2);
+    assert_eq!(
+        history.ages_in(start + HISTORY_WINDOW * 2),
+        None,
+        "an ageing wake on a drained window armed the clock again, so a burst \
+         two minutes gone still costs a wake every second, forever"
+    );
+}
+
+#[test]
+fn a_tick_that_moves_nothing_does_no_work() {
+    // **The guard [#277](https://github.com/breferrari/vigia/issues/277) needed
+    // once it put `record_sized` on the shell loop's timeout arm.** That arm also
+    // fires every `STEP_REPEAT` while a scrollbar button is held, twenty times a
+    // second, and nineteen of those cross no sample boundary. Without the guard
+    // each one paid `repeak`, priced in its own docblock at 144µs mean and 191µs
+    // worst at the path cap, to recompute an answer that cannot have changed.
+    // Measured at the cap after it: a same-sample timeout is **20ns** against
+    // **137µs** for one that crosses a boundary.
+    //
+    // **Asserted on `repeaks` rather than on the projection**, and the first
+    // draft of this test got that wrong in the way that matters: `repeak` is
+    // idempotent over unchanged tracks, so `scales` and the worktree series are
+    // identical whether the walk ran or not. Reverting the guard to an
+    // unconditional call left every assertion green, which made this a gate that
+    // the skip is *safe* and never that it *happens*. The counter is the only
+    // observable that separates the two.
+    // `starting_at`, not `new`: `new` opens the window at its own
+    // `Instant::now()`, so a second sample taken on the next line leaves
+    // `opened < start` and every offset below is measured against a boundary
+    // that has already moved. This test had the smallest margin of the three:
+    // it asks about `start + HISTORY_SAMPLE / 2`, so 500ms of wall clock between
+    // two statements was enough to cross a boundary and redden it.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record_sized([("src/a.rs", Some(4_000u64))], start);
+
+    // Kept for the `assert_ne!` further down, which is the live half of this
+    // pair: the deleted `assert_eq!` above it could not fail, and proving the
+    // walk *does* happen when it should is a different claim from proving it
+    // does not when it should not.
+    let churn = history.worktree_churn();
+    let walked = history.stats().repeaks;
+
+    // Inside the same sample, naming nothing: the wake a held button produces
+    // twenty times a second.
+    history.record_sized([], start + HISTORY_SAMPLE / 2);
+    assert_eq!(
+        history.stats().repeaks,
+        walked,
+        "a timeout inside one sample walked every track, which is the 144µs a \
+         held scrollbar button would pay for it nineteen times a second"
+    );
+    // **Read through `recency`, which is sample-granular, rather than through
+    // `scales` and `worktree_churn`, which `repeak` caches.** The cached pair
+    // cannot move while the counter above says no walk happened, so comparing
+    // them here was a line that could not fail while its predecessor passed.
+    //
+    // `churn` was the first replacement and it is not enough either:
+    // [`HISTORY_SAMPLES`] over [`HISTORY_BUCKETS`] is five samples to a bucket,
+    // so a window that shifted by one and reported no steps stays inside the same
+    // bucket four times in five and the projection does not move. `recency`
+    // reads the newest sample itself, which is the cell such a shift zeroes.
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Pulse,
+        "a timeout inside one sample moved the window anyway, so a path lost the \
+         mark it had just earned and the skipped walk was hiding a real roll"
+    );
+
+    // **Both halves of the guard, or it is half a guard.** A tick that names a
+    // path inside the same sample changed a track without moving the window, and
+    // skipping the walk there would freeze the projection against live data.
+    history.record_sized([("src/a.rs", Some(9_000u64))], start + HISTORY_SAMPLE / 2);
+    assert_eq!(
+        history.stats().repeaks,
+        walked + 1,
+        "a write inside the current sample skipped the walk, so the projection is \
+         frozen against live data"
+    );
+    assert_ne!(
+        history.worktree_churn(),
+        churn,
+        "a write inside the current sample did not reach the projection, so the \
+         guard skipped a walk that had work to do"
+    );
+
+    // And crossing a boundary with nothing named still rolls.
+    let rolled = history.worktree_churn();
+    history.record_sized([], start + HISTORY_SAMPLE * 2);
+    assert_ne!(
+        history.worktree_churn(),
+        rolled,
+        "a timeout that crossed a sample boundary left the window where it was, \
+         which is the freeze #243 exists to fix"
+    );
+}
+
+#[test]
+fn a_burst_lands_in_the_sample_the_roll_opened() {
+    // **Order inside `record_sized`: the window rolls, and *then* the burst is
+    // written.** Swap those and the write lands in the sample the roll is about
+    // to shift out of, so it moves one cell left the instant it arrives and the
+    // newest sample is zero: the path is `Live` on the frame it was written on,
+    // and every drawn cell is one sample stale forever after.
+    //
+    // Gated here because nothing else reaches it. Reversing the two is caught
+    // today by exactly one assertion, in
+    // `a_path_that_ages_out_is_dropped_rather_than_kept_empty`, and only because
+    // that fixture jumps a whole `HISTORY_WINDOW` and takes `roll`'s *clear*
+    // branch, which wipes the just-written track. Its failure message then talks
+    // about a path occupying a slot, which is not what happened. The ordinary
+    // shift path is the production case and had no gate at all: the fixtures near
+    // it assert totals, and a total is exactly what moving a sample sideways
+    // preserves.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record(["src/a.rs"], start);
+
+    // One boundary, so `roll` takes the shift branch rather than the clear.
+    history.record(["src/a.rs"], start + HISTORY_SAMPLE);
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Pulse,
+        "the write landed in the sample the roll then shifted out of, so a file \
+         does not pulse on the frame it was written on"
+    );
+}
+
+#[test]
+fn a_write_after_the_whole_window_turned_over_still_accumulates() {
+    // **The overnight case, and the branch that serves it is the one branch that
+    // re-bases the window's origin.** `roll` clears every track when the whole
+    // window has turned over rather than shifting each one past its own length,
+    // and it has to move `opened` to `now` on the way out. Leave that line off
+    // and the store still *looks* right for one call: the clear happens, the
+    // window reads empty, and the next write lands. It is the call after that
+    // one which never recovers, because `opened` is still pointing at whenever
+    // the session began, so every later roll measures the same overnight gap and
+    // clears the store again. The graph can then never hold more than the burst
+    // being written at that instant, forever, on a monitor whose whole job is to
+    // be left open for days.
+    //
+    // Nothing else here reaches it: every other gate over the drain asserts what
+    // the window looks like *after* the turnover and stops, and the defect only
+    // shows on the second roll past it.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record(["src/a.rs"], start);
+
+    // Left open overnight. The window has turned over many times and holds
+    // nothing, which is the state the branch exists for.
+    let woke = start + HISTORY_WINDOW * 3;
+    history.record_sized([], woke);
+    assert_eq!(history.recency("src/a.rs"), Recency::Cold);
+    assert_eq!(history.tracked(), 0, "the drained window kept a track");
+
+    // A write after that turnover is an ordinary write and has to behave like
+    // one.
+    history.record(["src/b.rs"], woke);
+    assert_eq!(history.recency("src/b.rs"), Recency::Pulse);
+
+    // And it has to still be there one sample later. This is the assertion the
+    // missing re-base fails: with `opened` left behind, this roll measures the
+    // overnight gap a second time and clears the write above.
+    history.record_sized([], woke + HISTORY_SAMPLE);
+    assert_eq!(
+        history.recency("src/b.rs"),
+        Recency::Live,
+        "a write made after the window drained was cleared by the next roll, so \
+         the window re-measures the same overnight gap forever and can never \
+         hold more than the instant being written"
+    );
+}
+
+#[test]
+fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
+    // **[#243](https://github.com/breferrari/vigia/issues/243) one field over.**
+    // The mark was the burst ordinal alone, which only advances when a burst
+    // names something, so an empty roll left it lit: a file written a hundred and
+    // nineteen seconds ago drew at full brightness beside a band that had almost
+    // drained, and then lost the mark all at once when its track was evicted.
+    // Once the window ages on its own that is visible every second.
+    let start = base();
+    let mut history = History::starting_at(start);
+    history.record(["src/a.rs"], start);
+    assert_eq!(history.recency("src/a.rs"), Recency::Pulse);
+
+    // One boundary is all it takes: `Track::shift` zeroes the newest sample, so
+    // the mark expires by construction rather than by anything retiring it.
+    history.record_sized([], start + HISTORY_SAMPLE);
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Live,
+        "the pulse survived a roll, so a file that went quiet keeps claiming it \
+         just wrote"
+    );
+
+    // **The rung above already carries "still tracked", so nothing asserts it
+    // separately.** Two attempts did. The first asked `recency` again and
+    // compared it to the same rung. The second asked `churn(..).is_some()`, on
+    // the stated ground that "a `Live` that came from an eviction would read
+    // identically", which is not true of this enum: `recency` returns `Cold` for
+    // a path it cannot find and `Live` only for one it can, so `Live` is the
+    // evidence and a second line restating it is a line that cannot fail.
+    history.record_sized([], start + HISTORY_WINDOW * 2);
+    assert_eq!(history.recency("src/a.rs"), Recency::Cold);
 }

@@ -704,30 +704,57 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
     (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
 }
 
+/// Whether a scroll's direction mark has outlived its burst.
+///
+/// **A free function for `patience`'s reason, one paragraph down: the shell owns
+/// a terminal and three threads, so a decision left inside it has no gate.** It
+/// had none. `Shell::settle_scroll` carried this comparison and a bool that its
+/// only caller discarded, and inverting the comparison to `now < until` left the
+/// whole suite green while the arrows never claimed a direction at all: the mark
+/// cleared on the next wake instead of `SCROLL_LINGER` later.
+///
+/// `>=` rather than `>`, so a mark whose deadline is exactly now is spent. The
+/// loop is woken *by* that deadline, so the boundary case is the ordinary one
+/// here rather than a corner.
+pub fn settled(linger: Option<Instant>, now: Instant) -> bool {
+    linger.is_some_and(|until| now >= until)
+}
+
 /// How long the loop may block before some clock here has to act.
 ///
-/// **`None` is the whole invariant, and it is why both clocks are asked through
-/// one function.** With nothing held and nothing lingering this returns `None`,
-/// the loop's receive is untimed, and I1's *0 wakeups while idle* is a fact
-/// about the structure rather than about care taken at two call sites. Two
-/// deadlines asked separately would be two chances to leave one armed on an idle
-/// monitor, and the loop's own source gate can see which branch is taken but not
-/// what fed it.
+/// **`None` is the whole invariant, and it is why every clock is asked through
+/// one function.** With nothing held, nothing lingering and nothing left in the
+/// history window this returns `None`, the loop's receive is untimed, and I1's
+/// *0 wakeups while idle* is a fact about the structure rather than about care
+/// taken at three call sites. Deadlines asked separately would be that many
+/// chances to leave one armed on an idle monitor, and the loop's own source gate
+/// can see which branch is taken but not what fed it.
 ///
 /// A free function rather than a method on the shell so it can be driven by a
 /// test: the shell owns a terminal and three threads, and an invariant that can
 /// only be exercised by starting the program is an invariant with no gate.
 ///
-/// Where both are armed it is the nearer, because the loop wakes for whichever
-/// comes first. Saturating, so a deadline already past asks for zero rather than
-/// panicking.
-pub fn patience(held: Option<Held>, linger: Option<Instant>, now: Instant) -> Option<Duration> {
+/// Where several are armed it is the nearest, because the loop wakes for
+/// whichever comes first. Saturating, so a deadline already past asks for zero
+/// rather than panicking.
+///
+/// `ageing` is [`vigia_core::History::ages_in`], which is `None` for a window
+/// holding nothing and so cannot arm this on an idle tree
+/// ([#243](https://github.com/breferrari/vigia/issues/243)). It is passed as a
+/// duration rather than as a `History` so this stays a free function over three
+/// values, which is what lets a test drive every combination of them.
+pub fn patience(
+    held: Option<Held>,
+    linger: Option<Instant>,
+    ageing: Option<Duration>,
+    now: Instant,
+) -> Option<Duration> {
     let step = Held::wait(held, now);
     let mark = linger.map(|until| until.saturating_duration_since(now));
-    match (step, mark) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (one, other) => one.or(other),
-    }
+    // Folded rather than matched pairwise: a `match` over three options is eight
+    // arms, and the arm that returns `None` where one of them was `Some` is the
+    // one that quietly stops a clock nobody notices has stopped.
+    [step, mark, ageing].into_iter().flatten().min()
 }
 
 /// What a held mouse button is repeating, and when its next step is due.

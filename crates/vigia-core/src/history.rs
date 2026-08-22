@@ -30,24 +30,35 @@
 //!   not grow this past the cap, which is the case the gate in
 //!   `tests/history.rs` actually drives rather than approximating.
 //!
-//! ## The clock is a tick, never a timer
+//! ## The clock runs while the window holds something, and stops when it does not
 //!
 //! `SPEC.md` §5.1 asks the pulse to persist and decay, and the dimmed row to
-//! fade as its last change ages. Taken literally against a wall clock, both need
-//! a redraw to be *seen*, and **I1 forbids inventing a timer to get one**. That
-//! is the same trap §10 already records for the highlight tail.
+//! fade as its last change ages. Both need a redraw to be *seen*, and this
+//! module was built on the reading that **I1 forbids inventing a timer to get
+//! one**, so the window was real time while the *sampling* was not:
+//! [`History::record`] ran once per coalesced tick and nothing on screen changed
+//! without an event.
 //!
-//! So the window is real time and the *sampling* is not: [`History::record`] is
-//! called once per coalesced tick, from the wake that was already going to
-//! redraw. Nothing on screen changes without an event. A tree that has gone
-//! quiet holds its last picture, which is what a monitor is supposed to do.
+//! **[#243](https://github.com/breferrari/vigia/issues/243) reversed that on
+//! 2026-08-22, and the paragraph it replaced is worth keeping in view because
+//! its conclusion was the defect.** *A tree that has gone quiet holds its last
+//! picture* is not what a monitor is supposed to do when the picture's own axis
+//! is time: a frozen window keeps its newest sample at the right edge, so a
+//! burst from ninety seconds ago draws as *just now*. The window ages on a clock
+//! now, and I1's licence is what permits it rather than what forbids it, because
+//! the clock stops: [`History::ages_in`] answers `None` once no track is left,
+//! which is at most `HISTORY_WINDOW` after the last write. At most, because the
+//! samples sit on a fixed grid anchored on the window's origin rather than on
+//! the write, so a track can drain up to one `HISTORY_SAMPLE` sooner. That is
+//! the safe direction: it stops the clock earlier, never later.
 //!
-//! The top rung of the ladder is deliberately **not** a duration for the same
-//! reason. [`Recency::Pulse`] means *named by the most recent tick*, so it
-//! cannot age into a lie while the loop is asleep, and it marks **every** path
-//! in that tick rather than one. That is `SPEC.md` §11.2 B2's ruling arriving
-//! from the other side: follow moves to the write that landed last, and the
-//! pulse is what says the others moved too.
+//! The top rung of the ladder is still **not** a duration, and it gained the
+//! half that makes it age. [`Recency::Pulse`] means *named by the most recent
+//! tick, and not yet rolled past*: the ordinal marks **every** path in that
+//! tick rather than one, which is `SPEC.md` §11.2 B2's ruling arriving from the
+//! other side, and the newest sample being non-zero is what retires it. The
+//! ordinal alone could not, because it only advances when a burst names
+//! something, so a quiet window left every pulse lit.
 //!
 //! ## One mechanism, not three
 //!
@@ -224,7 +235,19 @@ pub const HISTORY_BUCKET: Duration =
 pub const HISTORY_SAMPLES: usize = 120;
 
 /// How much time one **sample** covers, which is the grid the window rolls on.
-const HISTORY_SAMPLE: Duration =
+///
+/// **Public since [#243](https://github.com/breferrari/vigia/issues/243)**,
+/// because it stopped being an internal grid and became a term in I1's budget:
+/// the ageing clock wakes at most once per sample, and it is the *derivation*
+/// that ruling rests on, since a sample is the finest interval at which any drawn
+/// cell can change.
+///
+/// **The reason is one home for that derivation rather than reach.**
+/// `HISTORY_WINDOW / HISTORY_SAMPLES` is literally this definition and both have
+/// been public all along, so the export buys no new ability to name the rate;
+/// what it buys is that the gates asserting the budget name the same term the
+/// budget is written in, instead of restating its arithmetic.
+pub const HISTORY_SAMPLE: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
 
 /// How many samples one source bucket is the sum of.
@@ -275,12 +298,23 @@ pub const HISTORY_PATHS: usize = 256;
 /// the screen does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Recency {
-    /// Named by the most recent tick. Drawn brightest, and the only rung that
-    /// carries the `●` mark.
+    /// Named by the most recent tick **and** holding ink in the newest sample.
+    /// Drawn brightest, and the only rung that carries the `●` mark.
     ///
-    /// Not a duration. See the module docs: a rung measured in seconds would
-    /// have to age while the event loop is blocked, and being able to see that
-    /// happen needs a redraw I1 forbids scheduling.
+    /// Both halves, since [#243](https://github.com/breferrari/vigia/issues/243).
+    /// The ordinal alone only advances when a burst names something, so on a
+    /// quiet worktree it left the mark lit: a file written two minutes ago drew
+    /// at full brightness beside a band that had almost drained.
+    ///
+    /// Still not a duration, and the reason is no longer the one recorded here.
+    /// This said a rung measured in seconds "would have to age while the event
+    /// loop is blocked, and being able to see that happen needs a redraw I1
+    /// forbids scheduling", which #243 reversed: I1's licence does reach that
+    /// redraw, and the window ages on its own. What is left is the coherence
+    /// argument. This rung means *there is ink in the newest sample*, so it is
+    /// bounded by that sample and expires on the grid the elements beside it are
+    /// drawn on. A duration of its own would be a second clock disagreeing with
+    /// them about how long ago now was.
     Pulse,
     /// Changed inside [`HISTORY_WINDOW`], but not in the newest tick.
     Live,
@@ -307,6 +341,18 @@ pub struct HistoryStats {
     pub evicted_by_cap: u64,
     /// Paths dropped because nothing was left inside [`HISTORY_WINDOW`].
     pub evicted_by_window: u64,
+    /// Projections walked, which is the work
+    /// [#243](https://github.com/breferrari/vigia/issues/243)'s clock made worth
+    /// counting.
+    ///
+    /// **A counter because the saving is otherwise unobservable**, which is the
+    /// same reason `evicted_by_cap` two fields up exists. `History::repeak` is
+    /// idempotent over unchanged tracks, so skipping it and running it leave the
+    /// store byte-identical: a gate over the *state* passes whether the guard is
+    /// there or not, and the guard is what keeps a held scrollbar button from
+    /// paying that walk twenty times a second. This is the only thing that can
+    /// tell the two apart.
+    pub repeaks: u64,
 }
 
 /// Every tracked path's churn added together, oldest sample first.
@@ -833,16 +879,20 @@ impl History {
     ///
     /// That is also **why there is no separate `expire`**, which the plan for
     /// [#38](https://github.com/breferrari/vigia/issues/38) named as a second
-    /// public method. Aging the window is not a thing a caller ever wants on its
-    /// own: it happens on a tick or it does not happen, because a tick is the
-    /// only clock this type has (see the module docs on I1). A public `expire`
-    /// would have been exactly `record` with no paths, and two entry points into
-    /// one rule are two things a caller can get out of step. `vigia::run` calls
-    /// this once per wake and nothing else, which is the whole contract.
+    /// public method. A public `expire` would have been exactly `record` with no
+    /// paths, and two entry points into one rule are two things a caller can get
+    /// out of step. Ageing with no paths is therefore spelled `record_sized([])`
+    /// and goes through the same door as everything else.
     ///
-    /// Called once per tick and never on a timer. See the module docs: the
-    /// window is real time and the sampling is event-driven, which is what keeps
-    /// I1 intact.
+    /// **Called on a tick *and* on the ageing wake, which was not true before
+    /// [#243](https://github.com/breferrari/vigia/issues/243).** This said "once
+    /// per tick and never on a timer", and that was the whole of the freeze: with
+    /// a tick as the only clock, a worktree that went quiet stopped ageing and
+    /// the window kept a ninety-second-old burst pinned at the right edge,
+    /// drawing it as *just now*. The window is still real time and the store
+    /// still owns no clock of its own; what changed is that the shell now has a
+    /// deadline to call this on, bounded by [`History::ages_in`] returning `None`
+    /// once the window empties. I1's amended row carries why that is licensed.
     ///
     /// # Cost
     ///
@@ -885,7 +935,7 @@ impl History {
         paths: impl IntoIterator<Item = (&'p str, Option<u64>)>,
         now: Instant,
     ) {
-        self.roll(now);
+        let rolled = self.roll(now);
 
         let mut named = false;
         for (path, bytes) in paths {
@@ -914,7 +964,23 @@ impl History {
             self.tracks.insert(path.to_owned(), track);
         }
 
-        self.repeak();
+        // **Skipped when nothing moved and nothing was written**, which is new
+        // with [#277](https://github.com/breferrari/vigia/issues/277) and is not
+        // an optimisation looking for a problem: that row put this call on the
+        // shell loop's *timeout* arm, which also fires every `STEP_REPEAT` while
+        // a scrollbar button is held. At 50ms a held button drives twenty
+        // timeouts a second and nineteen of them cross no sample boundary, so
+        // without this guard each one pays the walk priced at **144µs mean and
+        // 191µs worst** in [`Self::repeak`]'s own docblock, for an answer that
+        // cannot have changed.
+        //
+        // Both terms are load bearing. A tick that named a path inside the
+        // current sample changed a track without moving the window, and a roll
+        // that moved the window changed every track's shape without naming one.
+        if rolled > 0 || named {
+            self.stats.repeaks += 1;
+            self.repeak();
+        }
     }
 
     /// This path's buckets, oldest first, or `None` when nothing is tracked.
@@ -946,12 +1012,36 @@ impl History {
     }
 
     /// Which rung of the recency ladder this path is on.
+    ///
+    /// **The newest burst, and only until the window rolls past it**
+    /// ([#243](https://github.com/breferrari/vigia/issues/243)). Both halves are
+    /// load bearing and the first was here alone.
+    ///
+    /// `track.tick == self.tick` is the newest *burst*, which is what
+    /// distinguishes two saves a second apart: §11.2 B2 has follow move to the
+    /// write that landed last, and the pulse is what says the rest of that batch
+    /// moved with it. The ordinal only advances when a burst names something, so
+    /// on its own it never expired: an empty roll left every pulse where it was,
+    /// and a file written a hundred and nineteen seconds ago kept its mark at
+    /// full brightness while the band beside it drained, then lost it all at once
+    /// when the track was evicted. That is this row's own freeze, one field over,
+    /// and it became visible the moment the window started moving on its own.
+    ///
+    /// The newest sample is what expires it. [`Track::shift`] zeroes that sample
+    /// on the first roll that crosses a boundary, so the mark ages by
+    /// construction rather than by anything remembering to retire it. Dropping
+    /// the ordinal for it alone is wrong and a gate says so: two separate saves
+    /// inside one second are one sample and two bursts, and only the later one
+    /// pulses.
     pub fn recency(&self, path: &str) -> Recency {
         match self.tracks.get(path) {
-            // `self.tick` is zero until something is recorded, and no track can
+            // `self.tick` is zero until something is recorded and no track can
             // exist before then, so this never reads a pulse out of an empty
-            // store.
-            Some(track) if track.tick == self.tick => Recency::Pulse,
+            // store. `Track::bump` floors a write at one, so a non-zero newest
+            // sample is exactly "written since the last boundary".
+            Some(track) if track.tick == self.tick && track.samples[HISTORY_SAMPLES - 1] > 0 => {
+                Recency::Pulse
+            }
             Some(_) => Recency::Live,
             None => Recency::Cold,
         }
@@ -1020,14 +1110,17 @@ impl History {
     }
 
     /// Advance the window to `now`, dropping whatever fell out of it.
-    fn roll(&mut self, now: Instant) {
+    /// Returns how many whole samples the window moved, which is what lets
+    /// [`Self::record_sized`] skip [`Self::repeak`] over state that did not
+    /// change ([#277](https://github.com/breferrari/vigia/issues/277)).
+    fn roll(&mut self, now: Instant) -> usize {
         let elapsed = now.saturating_duration_since(self.opened);
         // Saturating into `usize` before the comparison below, so an instant far
         // in the future cannot overflow the multiplication that moves `opened`.
         let steps = usize::try_from(elapsed.as_nanos() / HISTORY_SAMPLE.as_nanos())
             .unwrap_or(HISTORY_SAMPLES);
         if steps == 0 {
-            return;
+            return 0;
         }
 
         if steps >= HISTORY_SAMPLES {
@@ -1038,8 +1131,15 @@ impl History {
             self.stats.evicted_by_window += self.tracks.len() as u64;
             self.tracks.clear();
             self.opened = now;
-            self.scales = [0; SPARK_GROUPS.len()];
-            return;
+            // **`repeak` owns both derived fields, so neither is zeroed here.**
+            // This zeroed `scales` and left `worktree` alone, which was harmless
+            // only because the caller repeaked unconditionally. Since
+            // [#277](https://github.com/breferrari/vigia/issues/277) it does not,
+            // and a branch that clears one of two derived fields is one edit from
+            // a window that reads as full ink forever while `ages_in` says there
+            // is nothing left to age. The caller repeaks whenever this returns
+            // non-zero, and this branch always does.
+            return steps;
         }
 
         // Advanced by whole samples rather than set to `now`, so the boundaries
@@ -1053,11 +1153,15 @@ impl History {
             !track.empty()
         });
         self.stats.evicted_by_window += (before - self.tracks.len()) as u64;
-        // **No repeak here**, deliberately: `record` is this function's only
-        // caller and repeaks unconditionally after it returns, so a second full
-        // projection of every track would be pure duplicate work. That was
-        // survivable while a track held eight samples and is a quarter of the
-        // tick's cost now that it holds a hundred and twenty.
+        // **No repeak here**, deliberately: `record_sized` is this function's
+        // only caller and repeaks after it returns whenever this reported a
+        // non-zero step, so a second full projection of every track would be pure
+        // duplicate work. That was survivable while a track held eight samples
+        // and is a quarter of the tick's cost now that it holds a hundred and
+        // twenty. (It repeaked *unconditionally* until
+        // [#277](https://github.com/breferrari/vigia/issues/277) gave the caller
+        // this function's step count to skip on.)
+        steps
     }
 
     /// Drop the least recently changed path to make room for a new one.
@@ -1081,6 +1185,43 @@ impl History {
             self.tracks.remove(&path);
             self.stats.evicted_by_cap += 1;
         }
+    }
+
+    /// How long until the window's next sample boundary, or `None` when it holds
+    /// nothing to age.
+    ///
+    /// **The whole of [#243](https://github.com/breferrari/vigia/issues/243)'s
+    /// budget, and `None` is the load-bearing half.** The shell's loop waits
+    /// untimed when every deadline it can see is `None`, so returning a duration
+    /// here for an empty window would put an idle monitor on a poll loop while
+    /// looking entirely reasonable. That is the same shape `Held::wait` is
+    /// written in, and for the same reason: the answer is a value a test can
+    /// read rather than a behaviour it has to observe.
+    ///
+    /// **A window with no tracks holds nothing**, which is exactly when it is
+    /// safe to stop: [`Self::repeak`] rebuilds the worktree series from the
+    /// tracks, so an empty map is an all-zero series, and [`Self::roll`] clears
+    /// the map once the whole window has turned over. That bounds the clock at
+    /// [`HISTORY_SAMPLES`] wakes after any burst, and it is an **upper** bound
+    /// rather than an exact one: samples fall on a fixed grid anchored on
+    /// `opened`, not on the write, so a track can drain up to one
+    /// [`HISTORY_SAMPLE`] sooner than `HISTORY_WINDOW` after the last write.
+    /// Draining early only stops the clock early, which is the safe direction for
+    /// this invariant, and every gate here happens to write exactly on a boundary
+    /// so none of them can see the difference.
+    ///
+    /// That bound is why I1's *0 wakeups while idle* survives the amendment: the
+    /// state a monitor left open overnight is in is an empty window.
+    ///
+    /// Saturating, so a boundary already passed asks for zero rather than
+    /// panicking. That happens whenever the process was not woken for longer
+    /// than a sample, which is the ordinary case on the first ageing wake after
+    /// a quiet stretch, and asking for zero is right: the roll is overdue.
+    pub fn ages_in(&self, now: Instant) -> Option<Duration> {
+        if self.tracks.is_empty() {
+            return None;
+        }
+        Some((self.opened + HISTORY_SAMPLE).saturating_duration_since(now))
     }
 
     /// Every tracked path's churn added together, oldest sample first.
