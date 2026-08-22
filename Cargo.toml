@@ -152,7 +152,31 @@ signal-hook = { version = "0.3", default-features = false, features = [
 [profile.release]
 # I7 (startup < 50ms) and I9 (p99 frame < 16ms) are measured against release.
 lto = "thin"
-codegen-units = 1
+# **Two, not one, and the reason is a Windows codegen cliff rather than a
+# preference.** At `codegen-units = 1` the MSVC target compiles `fancy-regex`
+# roughly 6x slower, and because `syntect` compiles every pattern lazily on
+# first use, that cost lands on frames a reader is waiting for. Measured on
+# Windows (#261): a 24-line `sh` fenced block cost 286.91ms of parse at 1 and
+# 22.39ms at 2, and the cold parse behind I7's second frame went 107.88ms to
+# 17.59ms. It is a cliff at 1, not a gradient: 2, 4, 8 and 16 are
+# indistinguishable from each other.
+#
+# **It is a cliff on Windows only, which is why the number is here and the
+# claim is not universal.** Re-measured on Linux (rustc 1.98.0) interleaved over
+# three rounds against three separately built binaries, 1, 2 and 16 sit within
+# 3% on every fixture, so nothing here buys Linux anything. macOS has never been
+# measured; CI is the only instrument for it. Recording the platform matters
+# because the first write-up of this treated the penalty as a property of the
+# profile, and a profile is shared by four targets (SPEC.md section 9).
+#
+# Two rather than sixteen because the win saturates immediately and the cost
+# does not: 2 is +3.5% binary on Windows and +3.2% on Linux, while 16 is +9.6%
+# and +16.7% and pushes the bulk-rewrite p99 from 16.25ms to 18.01ms, over I9.
+#
+# Nothing gates this. Putting it back to 1 goes unnoticed on Linux and macOS by
+# construction, since neither moves, and the Windows gates that would notice run
+# on a shared runner with slack. Stated rather than papered over.
+codegen-units = 2
 panic = "abort"
 
 # Benchmarks and the soak test need symbols without giving up optimisation.

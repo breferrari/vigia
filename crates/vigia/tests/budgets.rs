@@ -42,9 +42,9 @@ use vigia_core::{
 };
 
 use support::{
-    Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget, delta, exclusively_timed,
-    generated, highlight_delta, holds_p99, holds_p99_rounds, settle, settle_spans, time, time_cpu,
-    timed_cpu,
+    PROSE_EXT, PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget,
+    delta, exclusively_timed, generated, highlight_delta, holds_p99, holds_p99_rounds,
+    prose_generated, settle, settle_spans, time, time_cpu, timed_cpu,
 };
 
 /// I9: steady-state frame time.
@@ -1807,4 +1807,202 @@ fn hold_the_scroll_budget(run: &Scrolled, what: &str, again: impl FnOnce() -> Op
             (again.warm, Some(again.warm_cpu))
         },
     );
+}
+
+/// Files in the prose fixture, and lines each.
+///
+/// Smaller than [`FILES`] x [`LINES`] on purpose. This gate's axis is the cost
+/// of *one screenful of prose*, which is bounded by the pane, so a hundred files
+/// would add revalidation cost that `ticking_over_an_undrawn_worktree_...`
+/// already owns and bury the term being measured under it.
+const PROSE_FILES: usize = 10;
+const PROSE_LINES: usize = 200;
+
+/// A screenful of ordinary Markdown prose holds the frame budget.
+///
+/// **The gate [#261](https://github.com/breferrari/vigia/issues/261) was missing,
+/// and the defect it would have caught shipped for months.** Every I9 gate in
+/// this file drew Rust or wide CJK text. Nothing drew the shape a reader
+/// watching a documentation change actually has on screen: sentences with
+/// identifiers in backticks. Measured on that content before the fix, a worst
+/// 24-line screenful of this repository's own `ROADMAP.md` cost **229.48ms of
+/// parse against this 16ms budget** on Linux, fully warm, on every frame
+/// that redrew it.
+///
+/// The cause was Markdown's block-start lookahead exploring the inline-content
+/// alternation exponentially before concluding that a line with no `|` could not
+/// be a table row. `xtask` now guards that pattern; see
+/// `crates/vigia-core/tests/coverage.rs` for the gates that hold the rewrite
+/// itself sound and present.
+///
+/// **The grammarless twin is what makes this a measurement rather than an
+/// assertion.** Two runs over byte-identical content, one resolving Markdown and
+/// one under an extension `syntect` has no grammar for, so what separates them is
+/// the parse and nothing else. Without it a breach here reads as "a frame is
+/// slow" and points at no layer in particular, which is `SPEC.md` §7's complaint
+/// about a gate that goes red without saying what moved.
+#[test]
+fn a_frame_over_prose_with_code_spans_holds_the_frame_budget() {
+    let Some(parsed) = prose_frame(PROSE_EXT) else {
+        return;
+    };
+    let Some(plain) = prose_frame(WIDE_UNPARSED_EXT) else {
+        return;
+    };
+
+    // The premise, because it is the half that can rot: the control really
+    // parses nothing, and the gated arm really parses.
+    assert_eq!(
+        plain.lines, 0,
+        "the grammarless run highlighted {} lines, so `.{WIDE_UNPARSED_EXT}` is \
+         no longer grammarless and this subtraction is between two parses",
+        plain.lines
+    );
+    // At least one parsed line **per frame**, not one across the whole sample.
+    // `> 0` is satisfied by a single line in two hundred and fifty frames, so if
+    // hunk reuse ever started hitting here the gate would keep passing while
+    // measuring a frame path with the parser idle, and still call itself a parse
+    // measurement. The steady state this gate claims is one re-parse a frame.
+    assert!(
+        parsed.lines >= SAMPLED_FRAMES as u64,
+        "{} lines were highlighted across {SAMPLED_FRAMES} frames, under the one \
+         a frame this gate's steady state claims, so the parser is idle for most \
+         of the sample and this is not the measurement it reports",
+        parsed.lines
+    );
+
+    let with = parsed.samples.percentile(0.99).unwrap_or_default();
+    let without = plain.samples.percentile(0.99).unwrap_or_default();
+    eprintln!(
+        "prose with {PROSE_SPANS} code spans a line: p99 {with:?} with a grammar, \
+         {without:?} grammarless, so the parse is {:?} of the frame over {} lines",
+        with.saturating_sub(without),
+        parsed.lines,
+    );
+
+    holds_p99_rounds(
+        &format!("I9: a frame over Markdown prose carrying {PROSE_SPANS} code spans a line"),
+        budget(I9_FRAME),
+        &parsed.samples,
+        || {
+            format!(
+                "({} hunks parsed, {} lines; grammarless control p99 {without:?})",
+                parsed.parsed, parsed.lines,
+            )
+        },
+        // **A whole run rather than a frame, and the difference is not
+        // cosmetic.** `holds_p99` calls its closure once per sample, which is
+        // right when a sample is one frame of an already-built fixture. Here a
+        // sample cannot be produced alone: `prose_frame` builds a git fixture,
+        // settles it and runs 50 warmup frames before the first sampled one.
+        // Wired through `holds_p99` this gate re-measured by running that whole
+        // sequence 250 times, which is 250 fixtures and over 20 minutes to
+        // produce 250 frames that were each the *first* sampled frame of a cold
+        // run. Observed, not reasoned about: a breaching round hung for 23
+        // minutes before it was killed. `hold_the_scroll_budget` uses this
+        // variant for the identical reason.
+        || {
+            let again = prose_frame(PROSE_EXT)
+                .expect("the re-measure skipped the absolute tier the first round ran");
+            (again.samples, Some(again.cpu))
+        },
+    );
+}
+
+/// One prose arm: what a frame costs over `ext`, and what the highlighter did.
+struct ProseRun {
+    samples: Samples,
+    /// The same frames in thread CPU time, for the reason [`Scrolled`] carries
+    /// one: contention inflates a wall clock and cannot inflate this.
+    cpu: Samples,
+    parsed: u64,
+    lines: u64,
+}
+
+/// Drive I9's own shape over the prose fixture and measure it.
+///
+/// One function taking the extension rather than two near-copies, for the reason
+/// [`frame_budget_at_depth`] gives: two runs only mean anything against each
+/// other while every other term agrees, and here they agree by construction,
+/// because the bytes are identical and only the resolved grammar differs.
+///
+/// Returns `None` when the absolute tier does not apply, after the structural
+/// setup has run.
+fn prose_frame(ext: &str) -> Option<ProseRun> {
+    let scratch = Scratch::prose_lines_as(&format!("prose-{ext}"), PROSE_FILES, PROSE_LINES, ext);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    assert_eq!(
+        frame.files().len(),
+        PROSE_FILES,
+        "fixture is not {PROSE_FILES} files"
+    );
+
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return None;
+    }
+
+    let _timed = exclusively_timed();
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let mut history = History::new();
+    let height = body(&app, PROSE_FILES);
+    let screen = layout(&app, PROSE_FILES);
+
+    let edited = format!("docs/prose_0.{ext}");
+
+    let mut edits = 0usize;
+    let marker = RefCell::new(String::new());
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+    let mut next_frame =
+        |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
+            // The edit is prose of the same shape, so the rewritten line costs
+            // what every other line on screen costs. An edit writing plain text
+            // would make the one line the reader is watching the cheapest on the
+            // pane, which is the opposite of the case being measured.
+            *marker.borrow_mut() = prose_generated(1, &format!("edit{edits}"))
+                .trim_end()
+                .to_string();
+            scratch.edit_line(&edited, 0, &marker.borrow());
+            edits += 1;
+            time_cpu(|| {
+                sample(history, scratch.root(), &edited);
+                shell_frame(frame, app, highlighter, history, &mut buf, &theme, screen);
+            })
+        };
+
+    for _ in 0..WARMUP_FRAMES {
+        next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
+    }
+
+    let before = highlighter.stats();
+    let mut samples = Samples::new(SAMPLED_FRAMES);
+    let mut cpu = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        let (wall, thread) = next_frame(&mut frame, &mut app, &mut highlighter, &mut history);
+        samples.push(wall);
+        cpu.push(thread);
+    }
+    let cost = highlight_delta(before, highlighter.stats());
+
+    // The screen has to have been full, or a frame that drew two rows is cheap
+    // for a reason that is not the code.
+    drew_a_full_screen(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        screen,
+        height,
+    );
+
+    Some(ProseRun {
+        samples,
+        cpu,
+        parsed: cost.parsed,
+        lines: cost.lines,
+    })
 }

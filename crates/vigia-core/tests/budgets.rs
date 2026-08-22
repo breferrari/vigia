@@ -1064,3 +1064,107 @@ fn the_cpu_clock_tells_waiting_from_working() {
          cannot tell waiting from working and the whole attribution is unsound"
     );
 }
+
+/// `n` samples of `ms` each, with no spike at all.
+///
+/// The shape the three gates above never build: they vary *what* a sample costs
+/// and hold the count at ten. The defect [#269](https://github.com/breferrari/vigia/issues/269)
+/// records rides on the **count**, so a fixture that cannot vary it cannot see it.
+fn flat(n: usize, ms: u64) -> Samples {
+    let mut samples = Samples::new(n);
+    for _ in 0..n {
+        samples.push(Duration::from_millis(ms));
+    }
+    samples
+}
+
+#[test]
+#[should_panic(expected = "work done")]
+fn a_long_round_slightly_over_budget_on_work_is_not_excused_by_accumulated_noise() {
+    // **The gate this instrument was missing, and the defect it now catches was
+    // live.** The acquittal compares the round's off-CPU deficit against what the
+    // round spent over budget. Both are sums, so both grow with the sample count
+    // and the comparison is stable. It used to compare that sum against a *single*
+    // frame's overshoot, which does not grow, so ordinary per-frame scheduling
+    // noise out-accumulated the thing it had to explain and every long round
+    // drifted toward acquittal regardless of what the code did.
+    //
+    // Here: 250 samples of 12ms wall against a 10ms budget, each carrying 0.1ms of
+    // perfectly ordinary off-CPU time. The deficit sums to 25ms, which is more than
+    // the 2ms a single sample went over by, and **nothing here is a stall** — the
+    // process was running for 11.9ms of every 12ms. Under the old comparison this
+    // acquitted. It is the exact shape #261's prose gate hit at 250 samples, where
+    // a 108ms deficit excused 21.76s of genuine parse.
+    holds_p99_rounds(
+        "a long round that is simply slow",
+        Duration::from_millis(10),
+        &flat(250, 12),
+        String::new,
+        || {
+            let mut cpu = Samples::new(250);
+            for _ in 0..250 {
+                cpu.push(Duration::from_micros(11_900));
+            }
+            (flat(250, 12), Some(cpu))
+        },
+    );
+}
+
+#[test]
+fn a_long_round_that_is_genuinely_stalled_is_still_excused() {
+    // The other side of the same fixture, and the reason the fix is a unit
+    // correction rather than a shape rule. A first attempt required the p50 to sit
+    // inside budget before the host could be blamed, on the reasoning that a stall
+    // moves the tail rather than the median. **That is false**, and this is the
+    // counter-example: a runner that takes the CPU away for a whole round produces
+    // a breach that is uniform, not tail-shaped, with a median fifty times the
+    // budget. `a_wall_clock_breach_the_cpu_clock_acquits_is_reported_and_not_failed`
+    // is the same claim at ten samples; this is it at two hundred and fifty, so the
+    // count cannot quietly become the thing that decides.
+    holds_p99_rounds(
+        "a long round on a runner that took the CPU away",
+        Duration::from_millis(10),
+        &flat(250, 500),
+        String::new,
+        || {
+            let mut cpu = Samples::new(250);
+            for _ in 0..250 {
+                cpu.push(Duration::from_millis(1));
+            }
+            (flat(250, 500), Some(cpu))
+        },
+    );
+}
+
+#[test]
+fn the_excess_a_round_spends_over_budget_counts_only_the_samples_that_exceeded_it() {
+    // `Samples::excess_over` is what makes the two sides of that comparison the
+    // same kind of number, so its own arithmetic is asserted rather than inferred
+    // from the gates that consume it.
+    let budget = Duration::from_millis(10);
+
+    assert_eq!(
+        flat(100, 5).excess_over(budget),
+        Duration::ZERO,
+        "a round entirely inside budget spent nothing over it"
+    );
+    assert_eq!(
+        flat(100, 10).excess_over(budget),
+        Duration::ZERO,
+        "a sample exactly at budget has not exceeded it"
+    );
+    assert_eq!(
+        flat(100, 12).excess_over(budget),
+        Duration::from_millis(200),
+        "a hundred samples 2ms over is 200ms over"
+    );
+
+    // The single-spike case, which is what the totals form was protecting and
+    // which this must not break: one slow sample contributes its own excess and
+    // the ninety-nine fast ones contribute nothing.
+    assert_eq!(
+        spiked(100, 1).excess_over(budget),
+        Duration::from_millis(490),
+        "one 500ms sample against a 10ms budget is 490ms, and the rest are under"
+    );
+}

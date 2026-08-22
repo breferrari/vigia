@@ -72,7 +72,10 @@ fn main() {
         }
     }
 
-    let mut builder = base.into_builder();
+    // The base is rewritten **before** the extras go in, so the collision
+    // refusal above still sees exactly the set it was written against and the
+    // rewrite can never touch a vendored file.
+    let mut builder = guard_markdown_tables(base.into_builder());
     for def in extras {
         builder.add(def);
     }
@@ -131,6 +134,135 @@ fn main() {
     for name in names {
         println!("  {name}");
     }
+}
+
+/// The two alternatives of Markdown's block-start lookahead that test for a
+/// table row, and the guard inserted before each.
+///
+/// Both alternatives require a literal `|`, so a line without one can never
+/// match either. The engine does not know that: it explores every parse of the
+/// embedded inline-content alternation first, which embeds the code-span
+/// pattern about twelve times, and only then concludes "no match". Cost is
+/// roughly 4x per code span on the line, until `fancy-regex`'s 1,000,000
+/// backtrack limit cuts the search off and the curve plateaus (measured on
+/// Linux against the fixture in `crates/vigia-core/tests/support/mod.rs`:
+/// 0.803ms at 4 spans, 3.040ms at 5, 12.006ms at 6, then 16.884ms and
+/// 16.686ms at 7 and 8, which is the plateau). Measured against this
+/// repository's own prose, a worst 24-line screenful of `ROADMAP.md` cost
+/// **229.48ms against I9's 16ms budget** on Linux, fully warm, on every frame that
+/// redrew it.
+///
+/// The guard is a zero-width lookahead for a pipe anywhere on the line, which
+/// makes the impossible case fail in constant time and leaves every possible
+/// case to the pattern that always handled it.
+///
+/// **Both, not one.** Alternation binds loosest, so a single guard after the
+/// group opening covers only the first branch and buys nothing: tried, and
+/// measured at 13.56ms against 12.995ms, which is no change at all.
+const GUARD: &str = r"(?=[^|\n]*\|)";
+
+/// The two alternatives, each paired with itself-plus-[`GUARD`].
+const TABLE_ANCHORS: [(&str, &str); 2] = [
+    (
+        "|    (?x:\n    (?:(?x:",
+        "|    (?x:\n    (?=[^|\\n]*\\|)(?:(?x:",
+    ),
+    (r"|   (?!\s+\|)(?x:", r"|   (?=[^|\n]*\|)(?!\s+\|)(?x:"),
+];
+
+/// Insert a pipe-presence guard into Markdown's table-detection lookahead.
+///
+/// `SPEC.md` §6 rules that the dump is `two-face`'s set plus local extras. This
+/// is the one place that ruling is *not* a pure merge, so it is named there
+/// too: a reader diffing our dump against `two-face`'s finds one pattern that
+/// differs, and this is the explanation.
+///
+/// **It is a performance rewrite and not a semantic one.** Nothing here may
+/// change what the grammar matches, only how fast it declines to match.
+/// **Two checks hold that line and neither is sufficient alone.**
+/// `crates/vigia-core/tests/coverage.rs::the_guarded_grammar_highlights_identically`
+/// reconstructs the unguarded pattern from the shipped dump and asserts the full
+/// `(offset, ScopeStackOp)` stream is identical across a corpus, which proves the
+/// guard inert **relative to the dump that ships**. Because its control is
+/// derived from that same artefact, any further change this function made would
+/// sit in both of its arms and compare equal. The insertion-only assertion below
+/// is what closes that: it pins the guarded pattern to the upstream string while
+/// that string is still in hand, which is only possible here.
+///
+/// # Panics
+///
+/// If the number of patterns rewritten is not exactly one. A `two-face` bump
+/// that renames the grammar, reflows the pattern or splits the alternation
+/// would otherwise leave this silently doing nothing, and the only symptom
+/// would be a budget gate going red a phase later with no clue attached. The
+/// count is the whole gate here: it fails on the upgrade rather than on the
+/// reader.
+fn guard_markdown_tables(
+    old: syntect::parsing::SyntaxSetBuilder,
+) -> syntect::parsing::SyntaxSetBuilder {
+    let mut rewritten = 0;
+    let mut fresh = syntect::parsing::SyntaxSetBuilder::new();
+    for def in old.syntaxes() {
+        // `syntaxes()` hands back a slice rather than ownership, so the walk
+        // is over clones and the result goes into a fresh builder. There is no
+        // in-place spelling for this in syntect 5.3.
+        let mut def = def.clone();
+        for context in def.contexts.values_mut() {
+            for pattern in context.patterns.iter_mut() {
+                if let Pattern::Match(m) = pattern {
+                    let regex = m.regex.regex_str();
+                    // Both anchors, not either: the `table` context carries a
+                    // pattern holding only the second one, and rewriting that
+                    // would be a second, unmeasured change riding along with
+                    // this one.
+                    //
+                    // **And leaving it costs nothing, which is measured rather
+                    // than assumed.** That copy is only reachable from inside a
+                    // table, so it cannot fire for the pipe-free prose #261 is
+                    // about. Twelve one-line paragraphs cost 0.682ms alone and
+                    // 0.718ms placed directly after a table, and a 24-row table
+                    // carrying inline code and bold costs 0.526ms: the context
+                    // does not leak into the lines that follow it, and a
+                    // table-heavy screenful is nowhere near the 16ms budget.
+                    if TABLE_ANCHORS.iter().all(|(from, _)| regex.contains(from)) {
+                        let guarded = TABLE_ANCHORS
+                            .iter()
+                            .fold(regex.to_string(), |acc, (from, to)| acc.replace(from, to));
+                        // **The rewrite must be a pure insertion, and this is
+                        // the only place that can prove it.** Each entry of
+                        // TABLE_ANCHORS restates the whole anchor alongside the
+                        // guard, so a mistranscribed replacement would alter the
+                        // pattern in some further way and nothing downstream
+                        // would notice: `coverage.rs` builds its control arm by
+                        // deleting the guard from the *shipped* dump, so any
+                        // other change the replacement made is present in both
+                        // of its arms and compares equal. That gate proves the
+                        // guard is inert against itself; this assertion is what
+                        // makes it inert against `two-face`, by pinning the
+                        // guarded form to the upstream string it came from while
+                        // that string is still in hand.
+                        assert_eq!(
+                            guarded.replace(GUARD, ""),
+                            regex,
+                            "the table rewrite changed the pattern by more than \
+                             inserting the guard, so it is not the performance-only \
+                             edit SPEC.md section 6 rules it to be"
+                        );
+                        m.regex = Regex::new(guarded);
+                        rewritten += 1;
+                    }
+                }
+            }
+        }
+        fresh.add(def);
+    }
+    assert_eq!(
+        rewritten, 1,
+        "expected exactly one Markdown table lookahead to guard, rewrote {rewritten}; \
+         a two-face upgrade has moved the pattern this rewrite anchors on, so the \
+         anchors in TABLE_ANCHORS need re-deriving against the new grammar"
+    );
+    fresh
 }
 
 /// Load every `.sublime-syntax` under `dir`, refusing any whose patterns do
@@ -295,14 +427,32 @@ fn write_notice(dir: &Path, sources: &Path, extra_names: &[String]) {
             md.push('\n');
         }
 
-        // **What we changed, which both licences ask to be stated.** Only
-        // PowerShell is modified today; the patch is named beside the pattern
-        // it replaced in the vendored file.
+        // **What we changed, which both licences ask to be stated.** Two
+        // grammars are modified, and this list is the shipped statement of it:
+        // `NOTICE.md` travels in every release archive (SPEC.md section 6),
+        // where `SPEC.md` itself does not, so a modification recorded only in
+        // the spec is a modification the recipient never sees.
+        //
+        // **The Markdown row is a modification of a `two-face`/`bat` grammar
+        // rather than of a file in this repository**, which is why it is easy
+        // to forget: nothing under `assets/syntaxes/` changed for it, so the
+        // per-file hash table below cannot mention it and the vendored-source
+        // walk never reaches it.
         md.push_str(
             "### Modifications\n\n- `PowerShell.sublime-syntax`: one match \
              pattern rewritten, replacing a regex subroutine call the shipped \
              engine cannot compile with the class it referenced. The change is \
-             marked in place, beside the pattern.\n\n",
+             marked in place, beside the pattern.\n- `Markdown.sublime-syntax` \
+             (from the base set, not vendored here): one match pattern \
+             rewritten. A zero-width guard, `(?=[^|\\n]*\\|)`, is inserted \
+             before each of the two alternatives of the block-start \
+             lookahead's table-row test. Both alternatives already require a \
+             literal `|`, so the guard changes no match and only lets a line \
+             without one fail in constant time instead of exploring the inline \
+             alternation first. The rewrite is applied by `xtask`, which \
+             asserts it is a pure insertion against the upstream string, and \
+             the emitted scope stream is asserted identical in \
+             `crates/vigia-core/tests/coverage.rs`.\n\n",
         );
         md.push_str(
             "## Sources\n\nFNV-1a 64 of each vendored source as compiled into \

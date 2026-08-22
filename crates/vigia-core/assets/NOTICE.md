@@ -260,6 +260,7 @@ SOFTWARE.
 ### Modifications
 
 - `PowerShell.sublime-syntax`: one match pattern rewritten, replacing a regex subroutine call the shipped engine cannot compile with the class it referenced. The change is marked in place, beside the pattern.
+- `Markdown.sublime-syntax` (from the base set, not vendored here): one match pattern rewritten. A zero-width guard, `(?=[^|\n]*\|)`, is inserted before each of the two alternatives of the block-start lookahead's table-row test. Both alternatives already require a literal `|`, so the guard changes no match and only lets a line without one fail in constant time instead of exploring the inline alternation first. The rewrite is applied by `xtask`, which asserts it is a pure insertion against the upstream string, and the emitted scope stream is asserted identical in `crates/vigia-core/tests/coverage.rs`.
 
 ## Sources
 

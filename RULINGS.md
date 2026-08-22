@@ -74,7 +74,7 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 
 **And what "leads with" counts is a grammar, which the index cannot see.** A tally of `.git/index` can only key on the extension, because §6 keeps `syntect` out of `worktree.rs`, and that proxy is sound for one path and unsound for the *selection*: a repository whose YAML is split evenly across `.yml` and `.yaml` has each spelling counted separately at the one moment the counts decide which three grammars are compiled, so it loses to a smaller single-extension language. The first implementation ranked and truncated in `worktree.rs` on the many-to-one-proxy argument, and the altitude review found it with no failing test behind it. The tally now comes back complete and unranked, the merge happens in `highlight.rs` where a `Scope` is available, and `a_language_spelled_two_ways_is_counted_once` is the gate, watched failing against the per-extension ranking.
 
-**One finding turned up beside this one and is not it.** A 16.8KB Markdown screenful costs **117.00ms with every pattern already compiled**, which is the opposite shape to the cliff above: it tracks bytes on screen instead of being flat in them, and it survives every warm. That is a long-line parse cost, it is I2b and I4 territory rather than I7's, and it is [#261](https://github.com/breferrari/vigia/issues/261).
+**One finding turned up beside this one and is not it.** A 16.8KB Markdown screenful costs **117.00ms with every pattern already compiled**, which is the opposite shape to the cliff above: it tracks bytes on screen instead of being flat in them, and it survives every warm. That is a long-line parse cost, it is I2b and I4 territory rather than I7's, and it is [#261](https://github.com/breferrari/vigia/issues/261). **Closed 2026-08-22, and the shape recorded here is falsified.** Cost does *not* track bytes on screen: 24 empty lines inside a fence cost 25.3ms for 28 bytes of content, and the same 10,288 bytes reflowed from 24 long lines to 138 short ones cost 5.47ms against 5.85ms. What tracked was the number of **block starts**, because Markdown's block-start lookahead ran an exponential table-row test on lines that could never be table rows. See the I9 entries below, which are this finding's actual answer and supersede the mechanism guessed at here.
 
 ---
 
@@ -235,3 +235,37 @@ The middle column **is** the floor. The compile is fully paid by one real siblin
 The `ansi` row is the one to read twice. Sixteen names hold nothing between colour 8 and `Gray`, so a quiet mark on that palette is the cold rung's colour exactly, and a reader hovering an already-cold file sees only the underline change. That is a real narrowing and it is accepted rather than hidden: it is the case §5.3 nominates the underline for, and the alternative is the loud form that ranked the pointer above the worktree.
 
 **The lesson is the same one B10 has now taught three times**, and it is worth the third telling because the shape changed: the first two were a *reason* that expired, and this is two reasons that never agreed. A section can be internally inconsistent and every test still pass, because tests assert against the implementation and the implementation can only follow one of the sentences. **Where a document rules twice on one thing, the second ruling is not a restatement and should be read as a claim.**
+
+## I9 — #261's stated cause was wrong in every part, and what it cost to find out
+
+Recorded 2026-08-22, closing [#261](https://github.com/breferrari/vigia/issues/261). It is here rather than only in the issue because the wrong explanations are plausible, they were each believed for a while, and the next reader who meets a slow Markdown frame will reach for them in roughly this order.
+
+**What was claimed.** A screenful of this repository's prose cost 117ms fully warm. The issue was filed undiagnosed on purpose, with a guess attached: the prose here is one line per paragraph, Markdown parses at roughly 7ms/KB against Rust's 2ms/KB, and a 24-line screenful of `SPEC.md` is therefore 16.8KB of genuine work. The suggested remedy was a bound on what a frame parses.
+
+**What was true.** Bytes do not predict the cost at all. Twenty-four *empty* lines inside a fence cost 25.3ms for 28 bytes of content; the same 10,288 bytes of `SPEC.md` reflowed from 24 long lines to 138 short ones cost 5.47ms against 5.85ms, so a display-line bound would not have helped either; and per-byte cost across this repository's own Markdown varies 100x line to line. "7ms/KB" is not a rate. The real mechanism is Markdown's block-start lookahead, whose last alternative tests for a table row: both of its branches require a literal `|`, so a line without one can never match, and the engine established that by exploring the embedded inline-content alternation first, at roughly 4x per code span until `fancy-regex`'s backtrack limit truncated it.
+
+**The one thing the title got right for the wrong reason.** One-line-paragraph prose really is the shape that hurts, and not because of line length: Markdown runs the block-start lookahead only on a block's **first** line, so a continuous paragraph pays once and a screenful of one-line paragraphs pays every row. This was measured while building the gate, and it is why the gate's fixture separates its lines with blank lines. Eleven rows of one continuous paragraph measured **cheaper in the frame (15.30ms) than a single row of the same content parsed alone (16.88ms)**, which is the tell that ten of them never reached the pattern. A fixture written the obvious way would have been green against the very defect it was built for, and was, twice.
+
+**Four mechanisms that were proposed and are refuted.** Re-running them is pure cost.
+
+| proposed | refuted by |
+|---|---|
+| Bound the parse per frame, leave the tail for the next | Never converges under editing: at roughly 8ms a fenced line it takes about 24 self-driven frames to colour one screenful, repainting continuously. `Shell::draw`'s docblock records the `while` that spun at 100% CPU |
+| Rewrite the code-span sub-pattern, which appears about twelve times in the alternation | Ablated: 13.00ms against 12.83ms. Not the blowup |
+| Use Sublime's `branch_point` / `branch` / `fail` to cut the search | `syntect` implements none of it and ignores the keys silently |
+| Switch to `syntect`'s default syntax set, which looks 8x faster | It does not highlight embedded code at all: 0 shell scopes inside a ```` ```sh ```` fence against 26 for ours |
+
+**And one instrument trap worth more than the fix.** The first three hours went into a scratch crate that did not match this workspace's `[profile.release]`. Identical code, identical dump and identical content measured **13x apart** from the real thing. §7 already says an absolute gate on a shared machine is a weak instrument; this is the same lesson one level lower down, where the *build* rather than the machine is what makes a number meaningless.
+
+## I9 — a profile is shared by four targets, and this one was tuned by accident
+
+Same pass. `codegen-units = 1` had been in `[profile.release]` since the budgets were first written, on the ordinary reasoning that fewer codegen units optimise harder.
+
+**On Windows it was making `fancy-regex` compilation roughly 6x slower**, and because `syntect` compiles patterns lazily on first use, that landed on frames a reader was waiting for: a 24-line `sh` fenced block cost 286.91ms of parse at 1 and 22.39ms at 2. It is a cliff at 1, not a gradient, and `lto` is irrelevant either way.
+
+**On Linux it does nothing at all**, which is the part worth recording. Re-measured 2026-08-22 interleaved over three rounds against three separately built binaries, `codegen-units` 1, 2 and 16 sit within 3% on every fixture, and the cold parse (which is where a compile would show) is 11.999ms at 1 against 12.113ms at 2, within 1%. The toggle was applying: the binary went 3,493,720 to 3,604,896 to 4,077,632 bytes. macOS has never been measured by anyone.
+
+Two lessons, and the second is the general one:
+
+- **A number measured on one target is a claim about that target.** The whole of the original write-up was going to be entered as a property of the profile, and it would have been wrong on two of the three tier-1 targets. `SPEC.md` §9 ships four; a `[profile.release]` key is shared by all of them and a measurement is not.
+- **A gate calibrated against a platform-specific artefact encodes that artefact as a requirement.** `warm.rs` asserted a 10x cold-to-warm ratio, sized against a Windows cold parse that was mostly the codegen penalty. The first time the suite ran on Linux it failed, at 5.70x, and it failed identically at `codegen-units` 1 and 2, so it had never been this platform's number: nothing had ever run it here. Lowering the constant would have kept the shape and moved the edge. It now asserts what `warm` actually claims, in absolute terms that no codegen setting can re-invalidate: the warmed parse fits inside a frame, and warming removed a frame's worth of work from the one behind it.

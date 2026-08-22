@@ -21,6 +21,22 @@
 //! content size, which is what says it is a compile rather than a parse: a
 //! 594-byte screenful costs 631.46ms cold and 0.97ms warm.
 //!
+//! **Every cold figure above was measured on Windows under
+//! `codegen-units = 1`, and it overstates what ships.**
+//! [#261](https://github.com/breferrari/vigia/issues/261) found that setting
+//! inflates `fancy-regex` compilation on the MSVC target by roughly 6x; the
+//! profile now sets 2, where this file's own cold parse (the `warm-cost`
+//! fixture in the gate below, which is a different measurement from the
+//! screenful figures above and the one taken at both settings) is 17.59ms
+//! rather than 107.88ms. The figures are left with their provenance rather than retyped,
+//! because re-measuring them honestly needs the platform they came from.
+//!
+//! **And the cliff is a Windows one.** On Linux (rustc 1.98.0) the cold parse
+//! is 11.999ms at `codegen-units = 1` and 12.113ms at 2, within 1%, so nothing
+//! here is a property of the engine or the profile. macOS is unmeasured. The
+//! ratio gate below encoded the Windows number as a requirement and failed the
+//! first time this suite ran on Linux; see it for what replaced it.
+//!
 //! So the frame path declines to parse under a grammar the warmer has not run
 //! over, draws it plain, and says what it wants. The gates below cover both
 //! halves, the way out when the file it asked for has gone, and the population
@@ -239,14 +255,46 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
 
     eprintln!("note: a first parse is {cold_parse:?}, the same parse warmed is {after:?}");
 
-    // An order of magnitude, not a ratio tuned to this machine. The measured
-    // gap is ~93ms against ~0.5ms, so ten times is loose enough to survive a
-    // slow runner and tight enough that a `warm` which quietly stopped
-    // compiling anything would fail it.
+    // **An absolute saving, not a ratio, and the ratio it replaces is a
+    // cautionary tale rather than a tightening.**
+    //
+    // This asserted `after * 10 < cold_parse` against a measured "~93ms against
+    // ~0.5ms". Both of those numbers came from Windows under
+    // `codegen-units = 1`, a setting [#261](https://github.com/breferrari/vigia/issues/261)
+    // later found inflates `fancy-regex` compilation on that target by roughly
+    // 6x. So the ratio was calibrated against a cold side that was mostly a
+    // codegen artefact, and it encoded that artefact as a requirement.
+    //
+    // The first time this suite was run on Linux (2026-08-22) the gate failed,
+    // at **11.999ms cold against 2.105ms warmed, a 5.70x**, and it failed
+    // identically at `codegen-units` 1 and 2 (12.113ms at 2, within 1%). It was
+    // never this platform's number: nothing had run it here. A gate that passes
+    // on one target because that target is slow in a way nobody intended is
+    // `SPEC.md` §7's shape again, and lowering the constant to 3 would keep the
+    // shape and only move the edge.
+    //
+    // What `warm` actually claims is that the compile moves **off** the parse
+    // that follows it, so the claim is stated as work removed and work left:
+    // the warmed parse fits comfortably inside a frame, and warming took a
+    // frame's worth of work out of the one behind it. Both hold on every
+    // target measured (Linux 12.11 to 2.13, Windows 17.59 to 2.79), and
+    // neither can be re-invalidated by a codegen setting, because neither is a
+    // proportion of a number that setting moves.
+    const WARMED_CEILING: Duration = Duration::from_millis(8);
+    const LEAST_SAVING: Duration = Duration::from_millis(5);
     assert!(
-        after * 10 < cold_parse,
-        "a warmed parse took {after:?} against {cold_parse:?} cold, so warming \
-         is not moving the grammar compile anywhere"
+        after < WARMED_CEILING,
+        "a warmed parse took {after:?}, over the {WARMED_CEILING:?} a warmed \
+         parse has to fit in for the frame behind it to be affordable, so \
+         warming is not leaving the patterns compiled"
+    );
+    assert!(
+        cold_parse >= after + LEAST_SAVING,
+        "warming saved {:?} ({cold_parse:?} cold against {after:?} warmed), \
+         under the {LEAST_SAVING:?} that says a compile was moved at all, so \
+         `warm` is not compiling anything the parse behind it would have paid \
+         for",
+        cold_parse.saturating_sub(after)
     );
 }
 

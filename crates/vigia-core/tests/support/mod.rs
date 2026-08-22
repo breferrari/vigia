@@ -264,12 +264,54 @@ pub fn holds_p99_rounds(
     // samples that made the tail.
     if let Some(cpu) = cpu.as_ref() {
         let deficit = again.total().saturating_sub(cpu.total());
+        // What the deficit has to explain: the round's own excess, in the same
+        // units as the deficit. The p99 overshoot is still reported alongside it,
+        // because it is the number the budget is written in and the one a reader
+        // is looking for, but it is no longer what decides.
+        let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
-        if deficit >= overshoot {
+        // **Both sides are sums over the round, and that is the whole
+        // correction, in two parts.** This compared `deficit`, a whole round's
+        // off-CPU time,
+        // against a single frame's excess over budget. Over a long round the
+        // ordinary per-frame scheduling noise sums to more than one frame's
+        // overshoot, so the test drifted toward "the host did it" as the sample
+        // count rose, independent of what the code was doing. Caught by #261's
+        // prose gate, which could not fail on the defect it exists to catch: a
+        // real 109.09ms p99 against a 16ms budget, with a 104.51ms p50 and a
+        // grammarless control arm at 0.44ms proving the parse, was excused by
+        // 107.92ms of deficit summed over 250 frames.
+        //
+        // The second part is that they are sums over the **whole** round rather
+        // than over the samples that breached, and that alternative was tried
+        // and reverted. Restricting each to the samples that actually
+        // breached is more precise about credit: summed over everything, the
+        // off-CPU noise of frames comfortably inside budget can pay for the
+        // excess of a few slow ones (247 frames at 5ms wall against 4.9ms CPU
+        // bank 24.7ms, enough to acquit three 18ms frames that used 18ms of CPU
+        // and were pure work).
+        //
+        // It cannot be had with this clock. `GetThreadTimes` is quantized to the
+        // scheduler tick, about 15.6ms, which is the same order as the 16ms
+        // budget these gates are written against. Over a whole round that
+        // quantisation averages to a couple of percent, which is the only reason
+        // any of this is measurable; over the three samples of a tail breach it
+        // is larger than the thing being measured, and three 20ms frames of
+        // genuine work read as 15.625ms of CPU each and acquit themselves. So
+        // the precise form trades a credit-transfer error for a quantisation
+        // error, on a shipped tier, in the same direction: a small tail breach of
+        // real work gets excused either way.
+        //
+        // The round sum is the one that survives the instrument, so it is what
+        // ships. [#270](https://github.com/breferrari/vigia/issues/270) carries
+        // the resolution-aware form, which needs a floor below which the clock
+        // is refused rather than trusted.
+        if deficit >= excess {
             eprintln!(
                 "note: {claim} was over the {budget:?} budget on wall clock twice \
                  ({one} then {two}) and the round spent {deficit:?} **off-CPU**, \
-                 which covers the {overshoot:?} it went over by, so the overshoot is \
+                 which covers the {excess:?} the round spent over budget in total \
+                 (p99 alone was {overshoot:?} over), so the overshoot is \
                  time this process was not running rather than work it did. Reported \
                  and not failed, and that is the whole of #178's weakening. {}",
                 detail()
@@ -278,8 +320,9 @@ pub fn holds_p99_rounds(
         }
         panic!(
             "{claim} was over the {budget:?} budget twice on wall clock ({one} then \
-             {two}) and the round spent only {deficit:?} off-CPU against a \
-             {overshoot:?} overshoot, so the time went into **work done** and this is \
+             {two}) and the round spent only {deficit:?} off-CPU against {excess:?} \
+             spent over budget across the round (p99 alone was {overshoot:?} over), \
+             so the time went into **work done** and this is \
              the frame path rather than the host: contention cannot inflate a CPU \
              clock. {}",
             detail()
@@ -1327,5 +1370,144 @@ impl Drop for Scratch {
         // Best effort. I3 says zero retained temp files, and a test suite that
         // litters would be the first thing to break that claim.
         let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// The extension the prose fixture is written with.
+///
+/// Its own constant rather than [`WIDE_EXT`], which happens to hold the same
+/// string. Borrowing that one coupled two unrelated fixtures through a value:
+/// the prose gates needed Markdown resolution and the wide fixture's constant
+/// only happened to provide it, so a test in a third file had to pin
+/// `WIDE_EXT == "md"` to keep the coupling honest. That assertion compared a
+/// constant against a literal and proved nothing about either fixture.
+///
+/// What actually proves the fixture resolves to a real grammar is the budget
+/// gate's own `parsed.lines >= SAMPLED_FRAMES`, which fails unless the
+/// highlighter parsed at least a line for every frame it sampled.
+pub const PROSE_EXT: &str = "md";
+
+/// Inline code spans per line of a [`prose_generated`] line.
+///
+/// **The load-bearing parameter of the fixture, and the reason it is a named
+/// constant rather than a literal in a loop.** The cost this fixture exists to
+/// measure is exponential in this number, not linear. Measured against the
+/// unguarded grammar, one line of exactly this shape parsed on its own:
+///
+/// | spans | 4 | 5 | **6** | 7 | 8 |
+/// |---|---|---|---|---|---|
+/// | ms | 0.803 | 3.040 | **12.006** | 16.884 | 16.686 |
+///
+/// So an edit that drifts this from 6 to 4 does not weaken the gate by a third,
+/// it weakens it by **fifteen times**, and every assertion downstream still
+/// passes.
+///
+/// Six rather than seven or eight because seven is already the plateau, where
+/// `fancy-regex`'s 1,000,000 backtrack limit rather than the pattern is what
+/// bounds the number: 7 and 8 differ by less than 1.2%, so a change that made
+/// the pattern twice as expensive would not move them. Six is the largest value
+/// still on the steep part of the curve. It is not chosen for strength, which
+/// both would have: in the frame, six spans breach at **102.39ms p99 against
+/// the 16ms budget** and seven at 103.36ms, and the guard takes six to 1.11ms.
+pub const PROSE_SPANS: usize = 6;
+
+/// **The floor, checked at compile time rather than by a test.**
+///
+/// Cost is exponential in [`PROSE_SPANS`], so a drift from 6 to 4 does not
+/// weaken the gates built on it by a third, it weakens them by fifteen times
+/// (12.006ms a line against 0.803ms, measured against the unguarded grammar),
+/// and every assertion downstream still passes: the fixture-shape gate is
+/// self-consistent at any count, and a budget gate that stops breaching when
+/// the guard is removed simply goes quiet.
+///
+/// A `const` assertion rather than a runtime one because the subject is a
+/// constant: this fails the **build**, where a test would have to be run and
+/// clippy rightly rejects an assertion whose value is known at compile time.
+const _: () = assert!(
+    PROSE_SPANS >= 6,
+    "PROSE_SPANS is below the 6 the fixture was calibrated at. The curve, \
+     measured against the unguarded grammar on one line of this exact shape: \
+     4 spans 0.803ms, 5 spans 3.040ms, 6 spans 12.006ms. Below 6 the unguarded \
+     frame stops breaching the 16ms budget, and the gate that depends on it \
+     passes whether or not the guard is present."
+);
+
+/// Markdown prose carrying [`PROSE_SPANS`] inline code spans per line and **no
+/// pipe character**, newline terminated.
+///
+/// This is the shape of this repository's own documentation, and of every
+/// README a reader is likely to have open in the other pane: ordinary sentences
+/// with identifiers marked up in backticks. It is also the shape that made
+/// [#261](https://github.com/breferrari/vigia/issues/261) a 229.48ms frame, so
+/// the fixture is the defect stated as content.
+///
+/// **The absent pipe is the fixture, not an incidental.** Markdown's block-start
+/// lookahead ends in a table-row test whose every alternative requires a literal
+/// `|`. A line containing one reaches that test and matches or fails on its
+/// merits; a line without one can never match, and before #261 the engine
+/// discovered that by exploring every parse of the inline-content alternation
+/// first. Put a pipe on these lines and the guard being gated lets them through,
+/// so the fixture stops testing the thing it was built for while still looking
+/// like prose.
+pub fn prose_generated(lines: usize, tag: &str) -> String {
+    // **One line per paragraph, and the blank line between them is the
+    // fixture.** Markdown runs its block-start lookahead, which is where the
+    // table-row test lives, only on the *first* line of a block: continuation
+    // lines of a paragraph take a much cheaper inline path. So a screenful of
+    // one continuous paragraph pays the cost once and a screenful of one-line
+    // paragraphs pays it every row.
+    //
+    // Measured, because this is the difference between a gate and a wish: as
+    // one paragraph, eleven drawn lines cost 15.30ms p99 in the frame, under
+    // the 16ms budget, while a *single* line of the same content costs 16.88ms
+    // parsed on its own. Eleven lines cheaper than one is the tell that ten of
+    // them never reached the pattern.
+    //
+    // #261's title claimed one-line-paragraph prose was the shape that hurt,
+    // and its stated reason (line length, roughly 7ms/KB) was wrong while the
+    // shape was right, for this reason rather than that one.
+    (0..lines)
+        .map(|at| format!("{}\n\n", prose_line(at, tag)))
+        .collect()
+}
+
+/// The one line [`prose_generated`] writes at `at`, with no line ending.
+///
+/// Held to plain ASCII sentence text so that nothing here overlaps the wide
+/// fixture's concern: this one is about pattern backtracking, and a line that
+/// was also 531 columns of mixed script would confound the two.
+fn prose_line(at: usize, tag: &str) -> String {
+    // **It may not begin `N. `, and that is the whole reason this is spelled
+    // out rather than reusing [`generated_line`]'s prefix.** A leading ordinal
+    // and a period is an *ordered list marker* in Markdown, so a fixture
+    // written that way is a list and takes the block-start path a list takes,
+    // not the one ordinary prose takes. Measured both ways against the
+    // unguarded grammar: as a list the frame sat at 15.17ms p99, under the 16ms
+    // budget and therefore green against the very defect the gate exists for.
+    // The ordinal still varies the content, it just may not lead.
+    let mut line = format!("Line {at} of the {tag} frame path calls ");
+    for span in 0..PROSE_SPANS {
+        line.push_str(&format!("`sym_{at}_{span}` and "));
+    }
+    line.push_str("then reports what it drew to the pane.");
+    line
+}
+
+impl Scratch {
+    /// A repository of Markdown prose files, every line carrying
+    /// [`PROSE_SPANS`] code spans.
+    ///
+    /// `ext` is a parameter for the same reason [`Scratch::wide_lines_as`] takes
+    /// one: [`WIDE_UNPARSED_EXT`] gives a byte-identical twin that `syntect`
+    /// resolves no grammar for, which is what lets a gate attribute the parse by
+    /// subtraction instead of asserting it.
+    pub fn prose_lines_as(name: &str, files: usize, lines: usize, ext: &str) -> Self {
+        let scratch = Self::new(name);
+        scratch.fill_pairs(
+            files,
+            |f| format!("docs/prose_{f}.{ext}"),
+            |tag| prose_generated(lines, tag),
+        );
+        scratch
     }
 }
