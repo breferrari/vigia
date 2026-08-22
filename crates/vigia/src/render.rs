@@ -681,7 +681,7 @@ const GRAPH_FLOOR: usize = 8;
 /// presence depended on whether a seventh file had appeared would move the list
 /// under a reader for something that is not about the list.
 const fn band_fits(pane: u16) -> bool {
-    planning_width(pane, 0) as usize >= GRAPH_FLOOR
+    planning_width(pane, pane, 0) as usize >= GRAPH_FLOOR
 }
 
 /// The smallest body a second footer line may leave behind.
@@ -859,8 +859,19 @@ const fn caret_gutter(pane: u16) -> usize {
 /// The floor it works out to is **seventeen** columns, one narrower than the
 /// eighteen the constant named, because the caret now bills the row for one column
 /// rather than two. Both are far below the forty I6 is named for.
-const fn affords_caret(pane: u16) -> bool {
-    planning_width(pane, caret_gutter(pane) as u16) as usize >= ROW_FLOOR
+///
+/// **Asked of the region's width and not the pane's since
+/// [#252](https://github.com/breferrari/vigia/issues/252)**, which is the third
+/// of that row's three rulings. The question this predicate asks is whether *the
+/// row* still names its file after the marker has taken its column, and a
+/// two-hundred column pane says nothing about a sixty-eight column rail. The
+/// `pane` argument stays, because the *gutter* the caret costs is what
+/// [`inset_of`] could not lend it and that ladder is the screen's: the caret
+/// stands on the pane's own leading edge, which in this layout is the rail's.
+///
+/// On every stacked layout `available` is the pane and the answer is unchanged.
+const fn affords_caret(available: u16, pane: u16) -> bool {
+    planning_width(available, pane, caret_gutter(pane) as u16) as usize >= ROW_FLOOR
 }
 
 /// Columns a scrollbar costs the region it is drawn beside.
@@ -1013,6 +1024,160 @@ const fn margins_of(pane: u16) -> (u16, u16) {
 const fn inset_of(pane: u16) -> u16 {
     margins_of(pane).0
 }
+
+/// The pane width at which the pinned list stops being a strip above the diff
+/// and becomes a **left rail** beside it
+/// ([#252](https://github.com/breferrari/vigia/issues/252)).
+///
+/// **Derived rather than chosen, and the derivation is the whole ruling.** On a
+/// wide pane a path ends near column 40 and its glance cluster is pinned to the
+/// right edge, up to 150 cells away, so the *columnar* association [#77](https://github.com/breferrari/vigia/issues/77)
+/// bought is kept while the *per-row* one is destroyed by the void between them.
+/// Placing the regions side by side is what closes it. Splitting the pane costs
+/// each region width, though, and [`Columns::plan`] is a ladder in that width, so
+/// the question is where the split can be made without a rung being taken away.
+///
+/// **There is exactly one such place below three hundred columns.** Both regions
+/// read the same ladder, so a split costs no rung only where both halves *and*
+/// the undivided pane below the split sit on one plateau. [`SETTLED`]'s plateau
+/// runs from 52 to 129 planning columns, which is a pane of 133; the only other
+/// plateau is the top rung, which needs 160 planning columns in each half and
+/// therefore a 328-column pane. So the rail arrives at **134**, the first width
+/// at which the stacked list would have left the settled ladder and spent its new
+/// columns on a twenty-four slice heat strip. Spending them on adjacency instead
+/// is the swap, and one column later no rail narrower than 134 columns could
+/// match the wider strip.
+///
+/// `the_rail_arrives_where_the_stacked_list_would_have_climbed` re-derives this
+/// number from [`Columns::plan`] rather than restating it, so moving the glance
+/// ladder reddens it here.
+///
+/// **What the split costs is the diff's content column**, from about 129
+/// planning columns at 133 to about 62 at 134. That is the feature rather than a
+/// defect: a rail at *any* width narrows the diff, because there is nowhere else
+/// for its columns to come from. `SPEC.md` §11.1 carries the number so it is met
+/// in this file rather than on a pane.
+const RAIL_FROM: u16 = 134;
+
+/// Path columns the rail keeps beside a settled glance cluster.
+///
+/// **Twice [`MIN_PATH_WIDTH`], and the doubling is the point.** The floor is what
+/// a row needs to name a file at all, and at exactly twelve columns a path elides
+/// to its bare tail: `…render.rs`. A rail exists so a reader can join a path to
+/// its own numbers, so a path that has lost the directory it is in has given up
+/// half of what the rail was built to show. Twice the floor is `vigia/src/render.rs`.
+const RAIL_PATH: usize = MIN_PATH_WIDTH * 2;
+
+/// The narrowest rail worth drawing.
+///
+/// Composed from what it is a floor *of*, the same shape [`BAR_FLOOR`] and
+/// [`GRAPH_FLOOR`] already use: the scrollbar's own reserve, the leading inset
+/// the pane keeps at every width a rail exists at, the kind letter every file row
+/// opens with, a path that names its directory, and the glance cluster
+/// `assets/preview.svg` draws.
+///
+/// **[`KIND_WIDTH`] is in the sum and was left out of the first draft**, which is
+/// the exact hazard that constant's own docblock names: two floors here already
+/// had to be told that a row's opening cell is not part of its path. Left out, a
+/// rail at this floor drew twenty-two columns of path where [`RAIL_PATH`]
+/// promises twenty-four, and the gate written for that promise could not see it
+/// because it was measuring the wrong span.
+///
+/// [`inset_of`] is asked at [`RAIL_FROM`] rather than written as a `2`, because
+/// that is the number it *is* at every width from seventy-nine up and the margin
+/// ladder is entitled to move without this floor quietly meaning something else.
+const RAIL_FLOOR: u16 =
+    (BAR_WIDTH + inset_of(RAIL_FROM) as usize + KIND_WIDTH + RAIL_PATH + SETTLED_CELLS) as u16;
+
+/// The share of a wide pane the rail takes, above [`RAIL_FLOOR`].
+///
+/// **One in three, and the floor is what binds until 204 columns.** Below that
+/// the rail is [`RAIL_FLOOR`] and the diff takes everything else, which is the
+/// arrangement the rail is *for*: the glance cluster sits against its path and
+/// every column the pane gains goes to the code. Above it the rail earns width
+/// with the pane, which is `SPEC.md` §5.3's "richness is the reward of space"
+/// applied to a region rather than to an element.
+///
+/// Both halves are monotone in the pane by construction, which is the property
+/// the margin ladder is written out as a table to keep: a share that stepped by
+/// two for one column of pane would hand a widening pane a narrower diff.
+const RAIL_NUMER: u16 = 1;
+/// The denominator of [`RAIL_NUMER`]'s share.
+const RAIL_DENOM: u16 = 3;
+
+/// Whether a pane this wide draws the list as a rail beside the diff.
+const fn affords_rail(pane: u16) -> bool {
+    pane >= RAIL_FROM
+}
+
+/// Columns the rail takes on a pane it is drawn on.
+///
+/// Undefined below [`RAIL_FROM`] in the sense that nothing asks: [`Body::split`]
+/// and [`Body::areas`] both gate on [`affords_rail`] first. The `max` is what
+/// keeps a rail that cannot hold its own contents from being drawn at all, and
+/// the floor is reached rather than clamped to, because [`RAIL_FROM`] is above
+/// the width where the share overtakes it only from 204 up.
+const fn rail_of(pane: u16) -> u16 {
+    let share = pane / RAIL_DENOM * RAIL_NUMER;
+    if share > RAIL_FLOOR {
+        share
+    } else {
+        RAIL_FLOOR
+    }
+}
+
+// **What the rail's floor promises, asserted where nothing that runs can reach
+// it.** A `const` block is the instrument this file already reaches for when a
+// case is unreachable at run time and a claim no gate can fail is a wish
+// ([`spark_cells`] one region over says so in its own words).
+//
+// Three of these four are exactly that. The rail is never narrower than
+// [`RAIL_FLOOR`], so no width in the shipped ladder can put a path under its
+// budget, take the caret away, or leave the diff without a column: the gates in
+// `tests/rail.rs` assert what a reader *sees*, and these assert the arithmetic
+// that makes it impossible to see otherwise. They start failing the build the day
+// a constant moves, which is the only time they could ever have anything to say.
+const _: () = {
+    assert!(
+        planning_width(RAIL_FLOOR, RAIL_FROM, 0) as usize == KIND_WIDTH + RAIL_PATH + SETTLED_CELLS,
+        "the narrowest rail is exactly a kind letter, a path and the settled \
+         glance cluster, which is the sum RAIL_FLOOR is written as"
+    );
+    assert!(
+        rail_of(RAIL_FROM) == RAIL_FLOOR,
+        "the share overtakes the floor at the width the rail arrives at, so the \
+         floor is not what the first rail is"
+    );
+    // **The diff keeps the settled cluster on its own headings at the narrowest
+    // pane a rail is drawn on**, which is the other half of what makes the
+    // arrival width cost no rung. The rail's half is the assertion above; this is
+    // the remainder's, and a remainder is the term a ledger written about the
+    // thing being added does not name.
+    //
+    // The two columns are within two of each other here (68 against 66) and the
+    // diff is the wider from 137 up, which is the closest they ever come.
+    assert!(
+        planning_width(RAIL_FROM - RAIL_FLOOR, RAIL_FROM, 0) as usize
+            >= SETTLED_CELLS + MIN_PATH_WIDTH,
+        "the first rail leaves the diff too little for the glance cluster its \
+         headings drew one column of pane ago"
+    );
+    // **The caret's affordance reads the region and not the pane**
+    // ([#252](https://github.com/breferrari/vigia/issues/252)). Unreachable
+    // through the layout, because [`RAIL_FLOOR`] is far above the seventeen
+    // columns the caret needs, and worth pinning anyway: reverting
+    // [`affords_caret`]'s first argument to the pane is a one-word mutation that
+    // every gate in the suite survives, and this is what fails on it.
+    assert!(
+        !affords_caret(16, 200),
+        "a region too narrow for a row still licensed the caret because the pane \
+         it sits on is wide"
+    );
+    assert!(
+        affords_caret(200, 200),
+        "a pane that is its own region stopped affording the caret"
+    );
+};
 
 /// Columns the frame time's number gets, whatever it says.
 ///
@@ -1900,8 +2065,19 @@ fn bar_for(wide: bool, rows: u16, span: u64, of: u64) -> Bar {
 /// the same defect the round before had just fixed **in the test**, restated one
 /// layer up in the prose that explains it. It is falsifiable and was falsified:
 /// a top rung of `(80, 5)` gives a left half of three and the gate stays green.
-const fn planning_width(pane: u16, caret: u16) -> u16 {
-    pane.saturating_sub(BAR_WIDTH as u16)
+///
+/// **Two widths since [#252](https://github.com/breferrari/vigia/issues/252), and
+/// they were one number until a region stopped spanning the pane.** `available`
+/// is the region's own full width, before any scrollbar narrowed it; `pane` is
+/// still what the *ladder* is resolved from, so [`inset_of`] is decided from the
+/// screen and never from a region, which is the ruling [`margin_of`] already
+/// makes and this signature keeps rather than reopens. On every stacked layout
+/// the two arguments are the same number and every boundary is exactly where it
+/// was; beside a rail they differ, and passing the pane for both would plan a
+/// sixty-eight column rail against a two-hundred column row.
+const fn planning_width(available: u16, pane: u16, caret: u16) -> u16 {
+    available
+        .saturating_sub(BAR_WIDTH as u16)
         .saturating_sub(inset_of(pane))
         .saturating_sub(caret)
 }
@@ -2045,6 +2221,24 @@ const ROW_LAYOUTS: [Columns; 9] = [
 /// Written out here and referenced from [`ROW_LAYOUTS`], the two cannot disagree
 /// however the table is edited.
 const SETTLED: Columns = Columns::new(COUNT_CELL, PULSE_RUNGS[0], HEAT_RUNGS[1], SPARK_RUNGS[1]);
+
+/// [`SETTLED`]'s own width, at the glyph rung where it is widest.
+///
+/// **Written out because [`Columns::width`] cannot be `const`**: the pulse's
+/// width comes from [`width_of`], and a display width is a table lookup rather
+/// than arithmetic. [`RAIL_FLOOR`] needs the number at compile time, so the sum
+/// is spelled here at [`Glyphs::Block`], where a bucket costs a whole cell and
+/// the cluster is therefore at its widest and the floor safe at every rung.
+///
+/// **Two derivations, held together by a gate rather than by care.**
+/// `the_rails_floor_is_the_settled_cluster_and_a_path` asserts this equals
+/// `SETTLED.width(Glyphs::Block)`, which is the same instrument [`SPARK_RUNGS`]
+/// uses one element over: where a number cannot be *computed* from its source, it
+/// is checked against it, and never merely remembered beside it.
+const SETTLED_CELLS: usize = reserved(counts_width(COUNT_CELL))
+    + reserved(1)
+    + reserved(HEAT_RUNGS[1])
+    + reserved(spark_cells(SPARK_RUNGS[1], Glyphs::Block));
 
 /// The share of a row the glance elements may take, above the settled ladder.
 ///
@@ -3048,6 +3242,21 @@ pub struct Body {
     pub rule: bool,
     /// Rows left for the diff, which is what [`View::collect`] is asked for.
     pub diff: usize,
+    /// Whether the list is a **left rail** beside the diff rather than a strip
+    /// above it ([#252](https://github.com/breferrari/vigia/issues/252)).
+    ///
+    /// **A shape rather than a size, which is why it is a field and not a
+    /// width.** [`Body::areas`] recomputes the rail's columns from the pane it is
+    /// handed through [`rail_of`], so this type stays what its name says: how
+    /// many rows each region has. What the flag changes is what those counts
+    /// *mean*, and there are exactly three consumers: [`Body::rows`] must stop
+    /// adding two regions that share their rows, [`Body::clamped_to`] must stop
+    /// handing the list's spare rows to a region that is not below it, and
+    /// [`Body::areas`] must place the two side by side.
+    ///
+    /// In this shape [`Body::rule`] is always false and [`Body::list`] and
+    /// [`Body::diff`] are the same rows read in two columns.
+    pub rail: bool,
 }
 
 impl Body {
@@ -3071,6 +3280,13 @@ impl Body {
             list: 0,
             rule: false,
             diff: rows,
+            // **Not a rail, whatever the pane is wide enough for.** A rail is two
+            // regions, and this shape has one. Saying so here rather than leaving
+            // it to `rail && list > 0` at every reader is the same closure
+            // `Bar::region` makes over its own pairing: a `Body` claiming a shape
+            // it does not have is a bug with no symptom until something divides by
+            // it.
+            rail: false,
         }
     }
 
@@ -3105,6 +3321,22 @@ impl Body {
     /// instead of underflowing.
     pub fn split(area: Rect, footer_rows: u16, files: usize, masthead: bool) -> Self {
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
+
+        // **The rail is decided before the row clamps, because it removes two of
+        // them** ([#252](https://github.com/breferrari/vigia/issues/252)). Beside
+        // the diff the list costs the diff no rows at all, so neither
+        // [`list_cap`] nor the `affordable` floor below has anything to protect:
+        // the map is not squeezing the thing it maps. What is left is the pane's
+        // own floor, one lead blank and [`MIN_BODY`], and a body under that draws
+        // the same all-diff screen a narrow one does.
+        //
+        // Gated on `files` for `diff_only`'s reason one method up rather than as a
+        // second rule: B3's empty state replaces the region with a sentence, and a
+        // rail beside a sentence is a blank column claiming a region that has
+        // nothing in it.
+        if affords_rail(area.width) && files > 0 {
+            return Self::rail(body, area.width, files, masthead);
+        }
 
         // The rule costs a row and [`LEAD_ROWS`] costs another, so the diff needs
         // `LEAD_ROWS + MIN_BODY + 1` before the list may have its first. No
@@ -3168,6 +3400,70 @@ impl Body {
             list,
             rule: true,
             diff: after - graph - air,
+            rail: false,
+        }
+    }
+
+    /// The same body, laid out as a rail beside the diff rather than a strip
+    /// above it ([#252](https://github.com/breferrari/vigia/issues/252)).
+    ///
+    /// **Split out of [`Body::split`] rather than branched inside it**, because
+    /// the two shapes share only the band: everything else in that function is
+    /// the clamp order this layout does not have. Reading them as one body with
+    /// four `if`s in it was tried and it made the *stacked* arithmetic harder to
+    /// check, which is the arithmetic every screen that ships today draws from.
+    ///
+    /// **The band stays full-bleed above both regions.** It is a fact about the
+    /// worktree, like the header, where the list is a map of the diff and the diff
+    /// is the diff; §11.1's own classes put it over the pane rather than inside
+    /// either column. It is also paid for last here exactly as it is one method
+    /// up, out of what the regions leave rather than out of either of them.
+    ///
+    /// **Both regions then take every remaining row.** That is the whole
+    /// difference a rail makes to the row arithmetic: the list is beside the
+    /// diff, so its rows are not the diff's to lose, and [`list_cap`] has nothing
+    /// to cap. A pane fifty rows tall draws fifty files where the stacked layout
+    /// draws twelve, which is what a rail is for and is monotone in the pane
+    /// height for free.
+    fn rail(body: usize, width: u16, files: usize, masthead: bool) -> Self {
+        // A lead blank and [`MIN_BODY`] before there are two regions at all, which
+        // is the stacked floor with the list's row and the rule's taken out of it:
+        // neither exists here.
+        if body < LEAD_ROWS + usize::from(MIN_BODY) {
+            return Self::diff_only(body);
+        }
+        let after = body - LEAD_ROWS;
+
+        // Verbatim from [`Body::split`], including `GRAPH_KEEP` and
+        // [`band_fits`]: the band's fit is a question about the rows left under it
+        // and the columns the pane has, and the rail changes how those rows are
+        // *shared* rather than how many there are. `band_fits` is true at every
+        // width a rail exists at and is asked anyway, because a condition that
+        // holds by implication is a condition nothing rechecks when the ladder it
+        // implies from moves.
+        let framed = GRAPH_ROWS + GRAPH_AIR;
+        let graph = if masthead && band_fits(width) && after >= framed + GRAPH_KEEP {
+            GRAPH_ROWS
+        } else {
+            0
+        };
+        let air = if graph > 0 { GRAPH_AIR } else { 0 };
+        let rows = after - graph - air;
+        Self {
+            lead: LEAD_ROWS,
+            graph,
+            air,
+            list: files.min(rows),
+            // **No rule, and it is dissolved rather than declined.**
+            // [#124](https://github.com/breferrari/vigia/issues/124) ruled the rule
+            // between the regions stays bare, and `Body::split`'s `rule: list > 0`
+            // makes the rule and the list coextensive. Here the list is beside the
+            // diff and there is no boundary for a horizontal rule to be drawn on.
+            // §11.2 B11 says so in its own body; #125 and #252 both name this rung
+            // as where it happens.
+            rule: false,
+            diff: rows,
+            rail: true,
         }
     }
 
@@ -3202,7 +3498,16 @@ impl Body {
     ///
     /// What a caller checking that the pane tiles wants, and what two test files
     /// had each written out for themselves.
+    ///
+    /// **Beside a rail the two regions share their rows rather than following
+    /// each other** ([#252](https://github.com/breferrari/vigia/issues/252)), so
+    /// the sum is over the band and one of them. The diff is the taller of the
+    /// two whenever they differ, because [`Body::clamped_to`] only ever shortens
+    /// the list, so it is the one the body's height is read from.
     pub fn rows(&self) -> usize {
+        if self.rail {
+            return self.above_list() + self.diff;
+        }
         self.above_list() + self.list + usize::from(self.rule) + self.diff
     }
 
@@ -3223,6 +3528,28 @@ impl Body {
     /// still sum to the body and no row is left unpainted between the rule and
     /// the diff.
     pub fn clamped_to(self, have: usize) -> Self {
+        // **Beside a rail there is nothing to give back**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). The rows the
+        // list does not use are in the rail's own column, and the diff is not
+        // below them: handing them over would draw the diff twice, once in each
+        // region. So the list simply ends where its entries do and the rest of the
+        // rail is the pane's background, which is what a shortened list looks like
+        // in a column.
+        //
+        // An empty one still collapses to the whole-body diff, for the reason the
+        // stacked path does it: a rail with no entries in it is a blank column
+        // claiming a region, and B3's sentence belongs in a region that spans the
+        // pane. `rows()` is the body it hands over, which beside a rail is the
+        // band plus one region rather than both.
+        if self.rail {
+            if have == 0 {
+                return Self::diff_only(self.rows());
+            }
+            return Self {
+                list: self.list.min(have),
+                ..self
+            };
+        }
         let list = self.list.min(have);
         // **The band and the lead blank go with the list**, for `Body::split`'s
         // own reason: the three are one region saying what the worktree is doing,
@@ -3248,6 +3575,7 @@ impl Body {
             list,
             rule,
             diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
+            rail: false,
         }
     }
 }
@@ -3313,8 +3641,52 @@ impl Body {
             height: self.graph as u16,
             ..area
         };
+        let under_band = top.saturating_add(self.above_list() as u16);
+
+        // **The rail, where the two regions share a `y` range and differ in `x`**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). This is the
+        // arrangement [`Areas`] was retyped from row offsets to `Rect`s to be able
+        // to say at all, and saying it is the whole of the change: everything that
+        // reads these rects, the painter and the pointer alike, was made
+        // column-aware by [#251](https://github.com/breferrari/vigia/issues/251)
+        // and needs nothing further.
+        //
+        // The band still spans the pane above both, and the rule is empty rather
+        // than absent, for [`Areas`]'s own stated reason: every consumer's question
+        // is how many rows to paint here, and zero already answers it.
+        if self.rail {
+            let columns = rail_of(area.width);
+            let list = Rect {
+                y: under_band,
+                height: self.list as u16,
+                width: columns.min(area.width),
+                ..area
+            };
+            let diff = Rect {
+                x: area.x.saturating_add(list.width),
+                y: under_band,
+                width: area.width.saturating_sub(list.width),
+                height: self.diff as u16,
+            };
+            return Areas {
+                band,
+                list,
+                // Zero height *and* zero width, so a consumer that asks either
+                // question gets the same answer. A rule of full width and no rows
+                // would tile correctly and read, to anything measuring columns,
+                // as a region on the pane.
+                rule: Rect {
+                    x: area.x,
+                    y: under_band,
+                    width: 0,
+                    height: 0,
+                },
+                diff,
+            };
+        }
+
         let list = Rect {
-            y: top.saturating_add(self.above_list() as u16),
+            y: under_band,
             height: self.list as u16,
             ..area
         };
@@ -3432,8 +3804,6 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let footer = Footer::plan(area, chrome, view.files);
     let body =
         Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
-    let wide = affords_bar(area.width);
-
     // **The same geometry the painter draws into**, asked for by name rather than
     // rebuilt here ([#251](https://github.com/breferrari/vigia/issues/251)). This
     // was two offsets computed from `Body` a second time, which kept the pointer
@@ -3447,9 +3817,21 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // position: a one-row track is full at every window, so it says nothing and
     // would still swallow a click. The same call also says where each track is,
     // which is the part a pointer cannot derive for itself.
-    let list_bar = bar_for(wide, areas.list.height, body.list as u64, view.files as u64);
+    //
+    // **`affords_bar` is asked of each region rather than once of the pane**
+    // ([#252](https://github.com/breferrari/vigia/issues/252)). It was one rule
+    // for the whole screen so a reader never sees half a pair, and that argument
+    // held while both regions spanned the pane and were therefore the same width.
+    // Beside a rail they are not, and a rail narrow enough to fail the floor while
+    // the diff clears it would have drawn a bar on a region that cannot hold one.
+    let list_bar = bar_for(
+        affords_bar(areas.list.width),
+        areas.list.height,
+        body.list as u64,
+        view.files as u64,
+    );
     let diff_bar = bar_for(
-        wide,
+        affords_bar(areas.diff.width),
         areas.diff.height,
         body.diff as u64,
         view.total_rows as u64,
@@ -3535,11 +3917,6 @@ pub fn render(
         painter.footer(area, view, chrome, &footer);
     }
 
-    // Wide enough for a bar at all. Each region then decides separately whether
-    // it has anywhere to scroll, because a list of three files and a diff of
-    // thirty thousand rows are different questions.
-    let bars = affords_bar(area.width);
-
     // **The geometry, once, from the same method the pointer reads**
     // ([#251](https://github.com/breferrari/vigia/issues/251)). This used to be a
     // running `y` cursor walked down the body here and rebuilt from the same
@@ -3562,7 +3939,16 @@ pub fn render(
         let region = areas.list;
         // Counted in **files**, which is exactly what this region shows.
         let full = region;
-        let (region, bar) = painter.with_bar(region, bars, body.list as u64, view.files as u64);
+        // **Wide enough for a bar is asked of this region and not of the pane**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)); `regions`
+        // carries the argument, and the two have to ask the same question or the
+        // pointer seeks a bar the screen did not draw.
+        let (region, bar) = painter.with_bar(
+            region,
+            affords_bar(full.width),
+            body.list as u64,
+            view.files as u64,
+        );
         // **Before the content here, and it does not matter which**, because a list
         // row carries no wash: the bar's cell and the row's cells never overlap. The
         // diff region below is the one where the order is load-bearing, and it draws
@@ -3577,7 +3963,7 @@ pub fn render(
                 view.files as u64,
             );
         }
-        painter.list(region, view, area.width);
+        painter.list(region, full.width, view, area);
     }
 
     if areas.rule.height > 0 {
@@ -3623,7 +4009,7 @@ pub fn render(
         let full = region;
         let (region, bar) = painter.with_bar(
             region,
-            bars,
+            affords_bar(full.width),
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
@@ -3661,20 +4047,16 @@ pub fn render(
         // full-block thumb never reads as part of a `-6`, and a blank cell whose
         // background matches the band is still a blank cell.
         //
-        // **This equals `area.width`, the `pane` argument below, and the two are
-        // deliberately not merged.** `region` is built `..area`, so today the wash's
-        // width and the pane's width are the same number arriving twice, which is
-        // fair to read as derivable state. They mean different things: this is *the
-        // region's* extent, which is what furniture spans, and `pane` is the
-        // screen's, which is what glyph placement is planned against. The
-        // coincidence is that the diff region currently spans the whole pane.
-        // [#162](https://github.com/breferrari/vigia/issues/162) ends that on
-        // purpose, giving the diff *"the remaining width as its own region"* beside
-        // a left rail, and on that layout the wash must follow the region and not
-        // the screen. Collapsing them now would be correct and would plant a defect
-        // for that row to land on, so the seam stays and this paragraph is why.
+        // **The wash follows the region and not the screen, and beside a rail
+        // that is finally a distinction rather than a seam**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). This paragraph
+        // used to argue for keeping `washed` separate from the pane's width while
+        // the two were the same number, so that #162's rung would have somewhere
+        // to land instead of a defect to fix. That rung is this one, the diff no
+        // longer spans the pane, and the ruling is in `SPEC.md` §5.3 now rather
+        // than only here: furniture spans the region that drew it.
         let washed = full.width;
-        painter.body(region, washed, view, area.width);
+        painter.body(region, washed, view, area, full.width);
         if bar.drawn() {
             painter.scrollbar(
                 full,
@@ -4026,7 +4408,19 @@ impl Painter<'_> {
     /// `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge` asserts
     /// the *barred* screen against its own heading rather than asserting that
     /// nothing ever moves.
-    fn region_text(&self, area: Rect, pane: u16) -> Rect {
+    ///
+    /// **It takes the pane as a `Rect` since
+    /// [#252](https://github.com/breferrari/vigia/issues/252)**, because the two
+    /// edges it is choosing between are *columns* and only one of them used to be.
+    /// The region's own right edge is `area.x + area.width`; the pane's is its own
+    /// right edge less the trailing margin. While every region started at the
+    /// pane's leading column a width could stand in for both, and beside a rail it
+    /// cannot: the diff begins two thirds of the way across, so a stop measured as
+    /// a width from the region's origin would run it off the screen.
+    ///
+    /// The expression reduces to the old one whenever `area.x` is the pane's, so
+    /// no stacked layout moves a column.
+    fn region_text(&self, area: Rect, pane: Rect) -> Rect {
         // **The two derivations of the margin have to be the same one.**
         // `self.trailing` was resolved in [`render`] from the pane it was handed,
         // and [`planning_width`] resolves [`inset_of`] from the `pane` a caller
@@ -4037,15 +4431,20 @@ impl Painter<'_> {
         // three signatures that predate this issue, and a check that runs in every
         // debug test is what actually catches the drift.
         debug_assert_eq!(
-            margins_of(pane),
+            margins_of(pane.width),
             (self.inset, self.trailing),
             "a region is being drawn against a different pane than the painter was \
              built for, so its margin and the chrome's have come apart"
         );
-        let stop = area.width.min(pane.saturating_sub(self.trailing));
+        let left = area.x.saturating_add(self.inset);
+        let stop = area.x.saturating_add(area.width).min(
+            pane.x
+                .saturating_add(pane.width)
+                .saturating_sub(self.trailing),
+        );
         Rect {
-            x: area.x.saturating_add(self.inset),
-            width: stop.saturating_sub(self.inset),
+            x: left,
+            width: stop.saturating_sub(left),
             ..area
         }
     }
@@ -4502,7 +4901,7 @@ impl Painter<'_> {
             return;
         }
         let left_edge = area.x.saturating_add(self.inset);
-        let width = usize::from(planning_width(area.width, 0));
+        let width = usize::from(planning_width(area.width, area.width, 0));
 
         // **One value per sub-column, and a zero draws the baseline**, which is
         // the settled answer to this exact signal
@@ -4666,14 +5065,26 @@ impl Painter<'_> {
     /// shortened, or be backed up to rest the diff's last row on the bottom, and
     /// marking from it would name a file the diff is not in on exactly the frames
     /// that moved. `View::collect` resolves `top` before this ever runs.
-    fn list(&mut self, area: Rect, view: &View, pane: u16) {
-        // Against the **pane**, not the region: `area` has already lost the bar's
-        // columns when one is drawn, and deciding from it would make the caret's
-        // presence depend on whether the list happens to be scrollable. See
-        // [`affords_caret`], which is now that comparison written once and read
-        // by the width below as well, rather than a constant kept beside it.
-        let caret = affords_caret(pane);
-        let gutter = if caret { caret_gutter(pane) as u16 } else { 0 };
+    ///
+    /// **`available` is this region's own full width and `pane` is the screen**
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)). They are the same
+    /// number on every stacked layout and they are not beside a rail, where this
+    /// region is sixty-eight columns of a two-hundred column pane. The ladder rung
+    /// comes from the pane, as [`margin_of`] rules; what the row has to spend
+    /// comes from the region.
+    fn list(&mut self, area: Rect, available: u16, view: &View, pane: Rect) {
+        // Against this region's **full** width rather than the rect it was handed:
+        // `area` has already lost the bar's columns when one is drawn, and deciding
+        // from it would make the caret's presence depend on whether the list happens
+        // to be scrollable. See [`affords_caret`], which is now that comparison
+        // written once and read by the width below as well, rather than a constant
+        // kept beside it.
+        let caret = affords_caret(available, pane.width);
+        let gutter = if caret {
+            caret_gutter(pane.width) as u16
+        } else {
+            0
+        };
 
         // **The caret sits on the pane's own leading column, and the row starts
         // after whatever margin is left over.** `assets/preview.svg` puts the
@@ -4726,10 +5137,10 @@ impl Painter<'_> {
         // that it is one, and the one column is the residual `caret_gutter`
         // documents.
         let shown = usize::from(area.height);
-        let inner = planning_width(pane, gutter);
+        let inner = planning_width(available, pane.width, gutter);
         let columns = Columns::plan(inner, self.glyphs);
         // Hoisted beside the width it goes with, because it is a property of the
-        // pane and not of any row. Saturating for the reason `left` above is:
+        // region and not of any row. Saturating for the reason `left` above is:
         // `render` contracts that any area is legal, and an origin near the top
         // of the range is the one part of that contract nothing on screen would
         // ever exercise.
@@ -5212,7 +5623,7 @@ impl Painter<'_> {
         self.put(right, y, "│", 1, self.theme.chrome_dim);
     }
 
-    fn body(&mut self, area: Rect, washed: u16, view: &View, pane: u16) {
+    fn body(&mut self, area: Rect, washed: u16, view: &View, pane: Rect, available: u16) {
         // **Two rects, because this region draws both roles.** A heading is placed
         // against the pane through [`planning_width`]; everything else here keeps
         // the region's own right edge and only stands back from it, through
@@ -5243,7 +5654,7 @@ impl Painter<'_> {
         // bar appears when the diff outgrows the pane, so planning from `area`
         // let the diff's own height decide the layout of every heading in it.
         let shown = usize::from(area.height);
-        let inner = planning_width(pane, 0);
+        let inner = planning_width(available, pane.width, 0);
         let columns = Columns::plan(inner, self.glyphs);
 
         // **The gutter comes from the same width, and that is

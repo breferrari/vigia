@@ -152,8 +152,17 @@ fn area() -> Rect {
 }
 
 fn layout(app: &App, files: usize) -> Body {
+    layout_of(app, area(), files)
+}
+
+/// The same, on a pane that is not the ordinary terminal.
+///
+/// Split out for the rail's budget gate
+/// ([#252](https://github.com/breferrari/vigia/issues/252)), which is the first
+/// one here measured on a pane [`area`] does not describe.
+fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
     body_layout(
-        area(),
+        pane,
         &app.chrome("fixture", None, None, None, None, None),
         files,
     )
@@ -220,7 +229,14 @@ fn frame_body(
     app.sample_memory();
     let chrome = app.chrome("fixture", None, None, None, None, None);
     let view = app.view(frame, highlighter, history, screen).expect("view");
-    render(buf, area(), &view, theme, Glyphs::default(), &chrome);
+    // **The pane comes from the buffer being painted rather than from
+    // [`area`]** ([#252](https://github.com/breferrari/vigia/issues/252)). The two
+    // were the same rect arriving twice and had to agree; a caller timing a frame
+    // on a *rail* pane would otherwise have had to remember to change both, and
+    // the failure mode is the one this file's own doc warns about, since what gets
+    // rendered against the wrong rect gets cheaper rather than louder.
+    let pane = buf.area;
+    render(buf, pane, &view, theme, Glyphs::default(), &chrome);
 }
 
 /// The screen has to have been full, or a frame that drew two rows is a cheap
@@ -282,6 +298,52 @@ fn the_edits_still_land(frame: &mut Frame, path: &str, marker: &str) {
 #[test]
 fn a_real_frame_with_highlighting_holds_the_frame_budget() {
     frame_budget_at_depth("shell-i9", 0);
+}
+
+/// The pane the rail is measured on.
+///
+/// **Wide enough to draw one and tall enough for it to matter.** The point of the
+/// gate is not that the pane is wide, it is that the pinned list is no longer
+/// capped: beside the diff its rows cost the diff nothing, so a forty-row pane
+/// draws every row it has where an eighty-column one draws the settled six. Every
+/// one of them is a `Frame::diff`.
+const RAIL_PANE: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 40,
+};
+
+/// I9 beside a rail, where the pinned list draws several times the rows it does
+/// on the pane every other gate here measures
+/// ([#252](https://github.com/breferrari/vigia/issues/252)).
+///
+/// **The one thing about this layout only a clock can answer.** That a visible
+/// list row costs one `Frame::diff` and no more is structural and
+/// `tests/reads.rs` owns it; that the region's height is its own bound is
+/// structural too. What neither says is whether a region four times as deep still
+/// fits inside sixteen milliseconds, and `SPEC.md` §7's rule is that a budget is a
+/// test rather than an aspiration.
+///
+/// Non-vacuity is asserted rather than assumed: the gate reddens if the pane it
+/// names stops drawing a rail, or draws one no deeper than the stacked cap, both
+/// of which would leave it measuring the gate above under a different name.
+#[test]
+fn a_frame_beside_a_rail_holds_the_frame_budget() {
+    let app = App::new();
+    let rail = layout_of(&app, RAIL_PANE, FILES);
+    assert!(
+        rail.rail,
+        "the {}x{} pane this gate is named for does not draw a rail",
+        RAIL_PANE.width, RAIL_PANE.height
+    );
+    assert!(
+        rail.list > layout(&app, FILES).list * 3,
+        "the rail draws {} pinned rows against the stacked layout's {}, which is          not the deeper region this gate exists to time",
+        rail.list,
+        layout(&app, FILES).list
+    );
+    frame_budget_on("shell-i9-rail", 0, RAIL_PANE);
 }
 
 #[test]
@@ -555,6 +617,18 @@ fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
 /// depths have to agree about every other term for the comparison to mean
 /// anything.
 fn frame_budget_at_depth(name: &str, depth: usize) {
+    frame_budget_on(name, depth, area());
+}
+
+/// The same, on a named pane.
+///
+/// **Parameterised for the rail** ([#252](https://github.com/breferrari/vigia/issues/252)):
+/// beside one the pinned list is not capped by [`vigia::LIST_SETTLED`]'s share of
+/// the pane, because its rows cost the diff nothing, so a tall pane draws every
+/// changed file it has. Each visible list row costs one `Frame::diff`, which
+/// `tests/reads.rs` bounds structurally; what only a clock can answer is whether
+/// four times as many of them still fit inside I9.
+fn frame_budget_on(name: &str, depth: usize, pane: Rect) {
     let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -564,8 +638,8 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let mut history = History::new();
-    let height = body(&app, FILES);
-    let screen = layout(&app, FILES);
+    let screen = layout_of(&app, pane, FILES);
+    let height = screen.diff;
 
     if depth > 0 {
         // A manual scroll, which disengages follow exactly as a reader's would
@@ -608,7 +682,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     // compile. Sharing it through a `RefCell` keeps both borrows short.
     let marker = RefCell::new(String::new());
     let theme = Theme::default();
-    let mut buf = Buffer::empty(area());
+    let mut buf = Buffer::empty(pane);
     let mut next_frame =
         |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter, history: &mut History| {
             *marker.borrow_mut() = format!("fn edited_{edits}() {{ let value = {edits}; }}");
@@ -693,7 +767,10 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
     );
 
     holds_p99(
-        &format!("I9: a real frame with highlighting over {FILES} files"),
+        &format!(
+            "I9: a real frame with highlighting over {FILES} files on a {}x{} pane              drawing {} pinned rows",
+            pane.width, pane.height, screen.list
+        ),
         budget(I9_FRAME),
         &frames,
         || {

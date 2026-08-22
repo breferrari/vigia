@@ -413,6 +413,36 @@ fn cells_coloured(
         .collect()
 }
 
+/// The column ranges row `y` is measured in, one per region that holds it.
+///
+/// **Two regions can share a row since
+/// [#252](https://github.com/breferrari/vigia/issues/252)**, and the ranges come
+/// from `regions` rather than being derived here, so a gate reading a slot is
+/// reading the same geometry the painter drew into. Falls back to the whole row
+/// where neither region holds it, which is the band, the rule and the blank rows
+/// under a short diff: none of them draws a sparkline, so the count is zero
+/// either way and the fallback keeps the sweep covering every row rather than
+/// quietly skipping some.
+fn slots_on(
+    width: u16,
+    height: u16,
+    view: &View,
+    chrome: &Chrome,
+    y: u16,
+) -> Vec<std::ops::Range<u16>> {
+    let area = Rect::new(0, 0, width, height);
+    let told = regions(area, chrome, view);
+    let mut held: Vec<std::ops::Range<u16>> = [told.list, told.diff]
+        .into_iter()
+        .filter(|region| region.rows > 0 && y >= region.top && y < region.top + region.rows)
+        .map(|region| region.left..region.left + region.width)
+        .collect();
+    if held.is_empty() {
+        held.push(0..width);
+    }
+    held
+}
+
 /// How many columns of row `y` the sparkline slot occupies, bars and track
 /// together.
 ///
@@ -427,6 +457,31 @@ fn cells_coloured(
 /// colour, or a block in the track's. Neither is ever drawn, and a helper that
 /// would count them is the loose selector this file's own doc warns about.
 fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> usize {
+    let width = backend.buffer().area.width;
+    spark_slot_in(backend, y, theme, glyphs, 0..width)
+}
+
+/// The same, counted inside one region's columns.
+///
+/// **A row can hold two regions since
+/// [#252](https://github.com/breferrari/vigia/issues/252)**, and a slot counted
+/// across the whole row adds one region's rung to the other's. That does not
+/// merely inflate the number, it lands on a *legal* one: twelve buckets beside
+/// twelve is twenty-four, which is the widest rung, so the whole-row count passes
+/// both of `the_sparkline_draws_whole_rungs_and_never_a_count_between_two`'s
+/// assertions on a renderer that had lost the ladder entirely. Every gate that
+/// reads a rung on a fixture carrying a pinned list therefore reads it inside a
+/// region.
+///
+/// [`spark_slot`] stays as the whole-pane spelling, which is what the listless
+/// fixtures want and what keeps the gates that sweep them unchanged.
+fn spark_slot_in(
+    backend: &TestBackend,
+    y: u16,
+    theme: &Theme,
+    glyphs: Glyphs,
+    columns: std::ops::Range<u16>,
+) -> usize {
     let bars = spark_colours(theme);
     let track = theme.spark_track.fg.expect("the track has a colour");
     // **The rung decides which alphabet to count**, and the two halves stay
@@ -434,8 +489,11 @@ fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> u
     // accept the cross products, a track glyph in a bar's colour or the reverse,
     // neither of which is ever drawn.
     let (ramp, empty) = alphabet(glyphs);
-    cells_coloured(backend, y, &bars, &ramp).len()
-        + cells_coloured(backend, y, &[track], &[empty]).len()
+    columns_of(backend, y, &bars, &ramp)
+        .into_iter()
+        .chain(columns_of(backend, y, &[track], &[empty]))
+        .filter(|x| columns.contains(x))
+        .count()
 }
 
 /// Every stop of the sparkline's ramp, for a caller matching cells by colour.
@@ -1597,8 +1655,15 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     let chrome = chrome();
     let mut saw_band = false;
     let mut saw_rule = false;
+    let mut saw_rail = false;
 
-    for width in [1u16, 20, 40, 80, 120] {
+    // **Two widths past the rail's arrival**
+    // ([#252](https://github.com/breferrari/vigia/issues/252)), which is what
+    // turns the partition this gate was written as into a partition it is
+    // actually asked about. Until the rail landed every rect here shared an `x`
+    // and a `width`, so the overlap rule reduced to a row comparison and the
+    // pointer check could not tell the two regions apart.
+    for width in [1u16, 20, 40, 80, 120, 140, 200] {
         for height in 1..=40u16 {
             let area = Rect::new(0, 0, width, height);
             // **Clamped, because both real consumers clamp.** `render` and
@@ -1621,6 +1686,7 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
             .collect();
             saw_band |= areas.band.height > 0;
             saw_rule |= areas.rule.height > 0;
+            saw_rail |= body.rail;
 
             // **Inside the pane, under the header.** Row zero is the header's and
             // no region may reach it, which is the one row `Body` never counts.
@@ -1712,9 +1778,9 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     // Or the sweep never reached a pane with a masthead or a rule on it, and the
     // overlap rule above is being asserted about two rectangles.
     assert!(
-        saw_band && saw_rule,
-        "the sweep drew a band at some size = {saw_band} and a rule = {saw_rule}, \
-         so it did not cover the parts it is about"
+        saw_band && saw_rule && saw_rail,
+        "the sweep drew a band at some size = {saw_band}, a rule = {saw_rule} and \
+         a rail = {saw_rail}, so it did not cover the parts it is about"
     );
 }
 
@@ -2994,21 +3060,29 @@ fn the_sparkline_draws_whole_rungs_and_never_a_count_between_two() {
             let backend = drawn(width, 6, &view, &chrome);
             let rows = rows_at(width, 6, &view, &chrome);
             for y in 0..6u16 {
-                let buckets = spark_slot(&backend, y, &theme, Glyphs::default());
                 let row = &rows[usize::from(y)];
-                assert!(
-                    buckets <= HISTORY_BUCKETS,
-                    "{name}: {buckets} buckets at {width} columns, over the \
-                     {HISTORY_BUCKETS} the window holds: {row:?}"
-                );
-                assert!(
-                    buckets == 0 || HISTORY_BUCKETS % buckets == 0,
-                    "{name}: {buckets} buckets at {width} columns does not divide \
-                     the {HISTORY_BUCKETS} the window holds, so one drawn bucket \
-                     covers less time than the rest: {row:?}"
-                );
-                if buckets > 0 {
-                    seen.insert(buckets);
+                // **One region at a time since
+                // [#252](https://github.com/breferrari/vigia/issues/252)**, and
+                // `spark_slot_in` carries the reason: beside a rail this row holds
+                // two of them, and twelve buckets plus twelve is twenty-four, which
+                // is a legal rung. Counted whole, the assertions below would have
+                // gone on passing over a renderer that had lost the ladder.
+                for columns in slots_on(width, 6, &view, &chrome, y) {
+                    let buckets = spark_slot_in(&backend, y, &theme, Glyphs::default(), columns);
+                    assert!(
+                        buckets <= HISTORY_BUCKETS,
+                        "{name}: {buckets} buckets at {width} columns, over the \
+                         {HISTORY_BUCKETS} the window holds: {row:?}"
+                    );
+                    assert!(
+                        buckets == 0 || HISTORY_BUCKETS % buckets == 0,
+                        "{name}: {buckets} buckets at {width} columns does not \
+                         divide the {HISTORY_BUCKETS} the window holds, so one \
+                         drawn bucket covers less time than the rest: {row:?}"
+                    );
+                    if buckets > 0 {
+                        seen.insert(buckets);
+                    }
                 }
             }
         }
