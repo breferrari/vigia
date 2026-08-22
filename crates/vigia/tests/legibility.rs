@@ -627,7 +627,7 @@ fn with_notice() -> Chrome {
 fn every_row_kind() -> View {
     View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -689,7 +689,7 @@ fn every_row_kind() -> View {
 fn awkward() -> View {
     View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -719,7 +719,7 @@ fn awkward() -> View {
 fn empty() -> View {
     View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -758,7 +758,7 @@ fn empty() -> View {
 fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: (0..listed)
             .map(|i| entry(&format!("src/f{i}.rs")))
             .collect(),
@@ -1009,7 +1009,7 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 fn glancing() -> View {
     View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2770,7 +2770,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header, it is a header naming a different line.
     let view = View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2912,7 +2912,7 @@ fn a_clipped_content_line_says_it_continues() {
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -4378,7 +4378,7 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 fn overlong(rows: usize) -> View {
     View {
         landed: false,
-        entries: 0,
+        recorded: 0,
         list: vec![entry("src/f.rs")],
         list_top: 0,
         current_span: rows,

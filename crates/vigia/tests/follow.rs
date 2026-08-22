@@ -165,15 +165,6 @@ fn a_change_moves_the_view_to_the_changed_file_with_no_input_at_all() {
         "the frame kept the heading and reported no landing, so the request \
          outlives the frame that served it"
     );
-    // And the entry it drew was built, which is the counter's other side: the
-    // `a_pane_with_no_list` gate asserts only that none is built where none can
-    // be drawn, and a counter that never counts satisfies that vacuously.
-    assert!(
-        view.entries > 0,
-        "a frame drawing {} headings and {} list rows built no entry",
-        view.rows.len(),
-        view.list.len()
-    );
 }
 
 #[test]
@@ -628,6 +619,17 @@ fn following_a_tall_file_lands_on_its_busiest_change() {
             }
         )),
         "the view landed on the hunk header and drew none of what it removed"
+    );
+
+    // **And the entry for this file was recorded**, which is the other side of
+    // the counter the listless-pane gate reads: that one asserts none is built
+    // where none can be drawn, and a counter that never counts satisfies it
+    // vacuously. One, because the walk reaches one file and its heading is above
+    // the window.
+    assert_eq!(
+        view.recorded, 1,
+        "the file the viewport is inside was not recorded, so the pinned list \
+         asks the frame for it a second time"
     );
 }
 
@@ -1227,8 +1229,8 @@ fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
          row rather than a record"
     );
     assert_eq!(
-        view.entries, 0,
-        "a pane with no list built {} entries, and nothing on it can draw one",
-        view.entries
+        view.recorded, 0,
+        "a pane with no list recorded {} entries, and nothing on it can read one",
+        view.recorded
     );
 }

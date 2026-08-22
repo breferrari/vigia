@@ -575,7 +575,7 @@ pub struct View {
     /// Reported so a test can hold the *shell* to I4, not just the core. One,
     /// once the position has settled and a single file fills the screen.
     pub read: usize,
-    /// [`FileEntry`] values this frame built, drawn or merely recorded.
+    /// [`FileEntry`] values built for the **record** rather than for a row.
     ///
     /// [`Self::read`]'s sibling and it exists for the same reason: a cost the
     /// core's `FrameStats` cannot see, because building one is a walk over lines
@@ -583,12 +583,14 @@ pub struct View {
     /// the heat projection, which is O(the file's diff), so the difference
     /// between building one and not is real and invisible from outside.
     ///
-    /// What it gates is [`Changed::listed`]: the walk records an entry for the
-    /// file the viewport sits inside so the pinned list need not ask the frame
-    /// for it again, and on a pane with no list there is nothing to serve.
-    /// Nothing else can tell those two apart, and a guard nothing can tell apart
-    /// from its absence is a guard that quietly stops being there.
-    pub entries: usize,
+    /// **Only the recorded ones**, which is narrower than every entry built and
+    /// is the number the one guard here turns on. [`Changed::listed`] stops the
+    /// walk recording an entry for the file the viewport sits inside when the
+    /// pane has no list to serve it to, and an entry drawn as a row is built
+    /// whatever the pane is. A counter over both would be satisfied by either,
+    /// so deleting the increment that matters left it green: this counts the
+    /// site the guard is about and nothing else.
+    pub recorded: usize,
     /// The busiest bucket any tracked file holds, which every sparkline on this
     /// screen is drawn against.
     ///
@@ -1082,7 +1084,7 @@ impl View {
             },
             landed: false,
             read: 0,
-            entries: 0,
+            recorded: 0,
             scale: Scale(history.scales()),
             worktree_churn: history.worktree_churn(),
         };
@@ -1513,7 +1515,6 @@ impl View {
             match drawn.iter().rev().find(|(at, _)| *at == index) {
                 Some((_, entry)) => self.list.push(entry.clone()),
                 None => {
-                    self.entries += 1;
                     let (change, diff) = frame.diff(index)?;
                     let entry = entry_of(&change.kind, diff, history);
                     self.list.push(entry);
@@ -1629,12 +1630,11 @@ impl View {
         // first file this places: every earlier file was skipped whole without
         // reaching here, and every later one draws its heading.
         if n >= skip {
-            self.entries += 1;
             let entry = entry_of(kind, diff, history);
             drawn.push((index, entry.clone()));
             self.rows.push(Row::file(entry));
         } else if listed {
-            self.entries += 1;
+            self.recorded += 1;
             // Moved rather than cloned, because there is no row to draw it in.
             drawn.push((index, entry_of(kind, diff, history)));
         }
