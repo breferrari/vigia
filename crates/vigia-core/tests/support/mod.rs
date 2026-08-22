@@ -1329,3 +1329,107 @@ impl Drop for Scratch {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
+
+/// Inline code spans per line of a [`prose_generated`] line.
+///
+/// **The load-bearing parameter of the fixture, and the reason it is a named
+/// constant rather than a literal in a loop.** The cost this fixture exists to
+/// measure is exponential in this number, not linear. Measured against the
+/// unguarded grammar, one line of exactly this shape parsed on its own:
+///
+/// | spans | 4 | 5 | **6** | 7 | 8 |
+/// |---|---|---|---|---|---|
+/// | ms | 0.803 | 3.040 | **12.006** | 16.884 | 16.686 |
+///
+/// So an edit that drifts this from 6 to 4 does not weaken the gate by a third,
+/// it weakens it by **fifteen times**, and every assertion downstream still
+/// passes.
+///
+/// Six rather than seven or eight because seven is already the plateau, where
+/// `fancy-regex`'s 1,000,000 backtrack limit rather than the pattern is what
+/// bounds the number: 7 and 8 differ by less than 1.2%, so a change that made
+/// the pattern twice as expensive would not move them. Six is the largest value
+/// still on the steep part of the curve. It is not chosen for strength, which
+/// both would have: in the frame, six spans breach at **102.39ms p99 against
+/// the 16ms budget** and seven at 103.36ms, and the guard takes six to 1.12ms.
+pub const PROSE_SPANS: usize = 6;
+
+/// Markdown prose carrying [`PROSE_SPANS`] inline code spans per line and **no
+/// pipe character**, newline terminated.
+///
+/// This is the shape of this repository's own documentation, and of every
+/// README a reader is likely to have open in the other pane: ordinary sentences
+/// with identifiers marked up in backticks. It is also the shape that made
+/// [#261](https://github.com/breferrari/vigia/issues/261) a 229.48ms frame, so
+/// the fixture is the defect stated as content.
+///
+/// **The absent pipe is the fixture, not an incidental.** Markdown's block-start
+/// lookahead ends in a table-row test whose every alternative requires a literal
+/// `|`. A line containing one reaches that test and matches or fails on its
+/// merits; a line without one can never match, and before #261 the engine
+/// discovered that by exploring every parse of the inline-content alternation
+/// first. Put a pipe on these lines and the guard being gated lets them through,
+/// so the fixture stops testing the thing it was built for while still looking
+/// like prose.
+pub fn prose_generated(lines: usize, tag: &str) -> String {
+    // **One line per paragraph, and the blank line between them is the
+    // fixture.** Markdown runs its block-start lookahead, which is where the
+    // table-row test lives, only on the *first* line of a block: continuation
+    // lines of a paragraph take a much cheaper inline path. So a screenful of
+    // one continuous paragraph pays the cost once and a screenful of one-line
+    // paragraphs pays it every row.
+    //
+    // Measured, because this is the difference between a gate and a wish: as
+    // one paragraph, eleven drawn lines cost 15.30ms p99 in the frame, under
+    // the 16ms budget, while a *single* line of the same content costs 16.88ms
+    // parsed on its own. Eleven lines cheaper than one is the tell that ten of
+    // them never reached the pattern.
+    //
+    // #261's title claimed one-line-paragraph prose was the shape that hurt,
+    // and its stated reason (line length, roughly 7ms/KB) was wrong while the
+    // shape was right, for this reason rather than that one.
+    (0..lines)
+        .map(|at| format!("{}\n\n", prose_line(at, tag)))
+        .collect()
+}
+
+/// The one line [`prose_generated`] writes at `at`, with no line ending.
+///
+/// Held to plain ASCII sentence text so that nothing here overlaps the wide
+/// fixture's concern: this one is about pattern backtracking, and a line that
+/// was also 531 columns of mixed script would confound the two.
+fn prose_line(at: usize, tag: &str) -> String {
+    // **It may not begin `N. `, and that is the whole reason this is spelled
+    // out rather than reusing [`generated_line`]'s prefix.** A leading ordinal
+    // and a period is an *ordered list marker* in Markdown, so a fixture
+    // written that way is a list and takes the block-start path a list takes,
+    // not the one ordinary prose takes. Measured both ways against the
+    // unguarded grammar: as a list the frame sat at 15.17ms p99, under the 16ms
+    // budget and therefore green against the very defect the gate exists for.
+    // The ordinal still varies the content, it just may not lead.
+    let mut line = format!("Line {at} of the {tag} frame path calls ");
+    for span in 0..PROSE_SPANS {
+        line.push_str(&format!("`sym_{at}_{span}` and "));
+    }
+    line.push_str("then reports what it drew to the pane.");
+    line
+}
+
+impl Scratch {
+    /// A repository of Markdown prose files, every line carrying
+    /// [`PROSE_SPANS`] code spans.
+    ///
+    /// `ext` is a parameter for the same reason [`Scratch::wide_lines_as`] takes
+    /// one: [`WIDE_UNPARSED_EXT`] gives a byte-identical twin that `syntect`
+    /// resolves no grammar for, which is what lets a gate attribute the parse by
+    /// subtraction instead of asserting it.
+    pub fn prose_lines_as(name: &str, files: usize, lines: usize, ext: &str) -> Self {
+        let scratch = Self::new(name);
+        scratch.fill_pairs(
+            files,
+            |f| format!("docs/prose_{f}.{ext}"),
+            |tag| prose_generated(lines, tag),
+        );
+        scratch
+    }
+}

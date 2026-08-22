@@ -38,8 +38,8 @@ use vigia::{
 use vigia_core::{Highlighter, History};
 
 use support::{
-    Scratch, WIDE_EXT, WIDE_UNIT_CHARS, WIDE_UNIT_COLUMNS, WIDE_UNITS, WIDE_UNPARSED_EXT,
-    wide_generated,
+    PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNIT_CHARS, WIDE_UNIT_COLUMNS, WIDE_UNITS,
+    WIDE_UNPARSED_EXT, prose_generated, wide_generated,
 };
 
 /// Files in the fixtures here. Small: these gates are about one row's cost, and
@@ -165,6 +165,59 @@ fn the_wide_fixture_is_the_shape_it_says_it_is() {
         "a wide line is {columns} columns over {chars} characters, so this \
          fixture is not wide and nothing below can tell a column bound from a \
          character bound"
+    );
+}
+
+/// The prose fixture's own shape, checked rather than trusted, for the reason
+/// the wide one is: every number the #261 gates report is relative to it.
+///
+/// **This one guards a steeper cliff than the wide fixture's.** A wide line that
+/// lost a unit would weaken its gate proportionally. A prose line that loses two
+/// code spans weakens its gate by roughly fifty times, because the cost is
+/// exponential in the span count, and nothing else in the suite would notice: the
+/// content still reads as prose, the file still resolves as Markdown, and every
+/// downstream assertion still passes.
+#[test]
+fn the_prose_fixture_is_the_shape_it_says_it_is() {
+    let text = prose_generated(1, "after");
+    // `prose_generated` emits one line per *paragraph*, so each entry carries a
+    // blank line after it. Trim the lot rather than one newline, and assert the
+    // separation separately below, since it is part of the shape.
+    let line = text.trim_end();
+    assert!(
+        text.ends_with("\n\n"),
+        "a prose entry does not end in a blank line, so the fixture is one \
+         continuous paragraph and only its first row reaches Markdown's \
+         block-start lookahead: eleven such rows measured cheaper in the frame \
+         (15.30ms) than a single one parsed alone (16.88ms)"
+    );
+
+    let spans = line.matches('`').count();
+    assert_eq!(
+        spans,
+        PROSE_SPANS * 2,
+        "a prose line carries {} backticks, so it has {} code spans rather than \
+         the {PROSE_SPANS} it claims, and the cost this fixture exists to \
+         measure is exponential in that number",
+        spans,
+        spans / 2,
+    );
+
+    // The property the #261 gates rest on, and the one an innocent edit removes.
+    // A pipe anywhere on the line reaches Markdown's table-row test on its
+    // merits, so the guard lets it through and the fixture silently stops
+    // exercising the path it was built for.
+    assert!(
+        !line.contains('|'),
+        "a prose line contains a pipe: {line:?}. The whole fixture is lines that \
+         can never be a table row, so a pipe here makes it ordinary content"
+    );
+
+    // And it must actually resolve as Markdown, or the parse under test never
+    // happens and the gate measures an unhighlighted file.
+    assert_eq!(
+        WIDE_EXT, "md",
+        "the prose fixture is written with WIDE_EXT, which is no longer Markdown"
     );
 }
 

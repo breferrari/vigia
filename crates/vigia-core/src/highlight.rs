@@ -1786,6 +1786,16 @@ pub struct WarmReport {
 /// | `.md` | 694.75ms | 89.77ms | 90.65ms |
 /// | `.toml` | 15.26ms | 0.43ms | 0.40ms |
 ///
+/// **Those cold figures are Windows numbers taken under `codegen-units = 1`,
+/// and they overstate what ships.** That setting inflates `fancy-regex`
+/// compilation on the MSVC target by roughly 6x
+/// ([#261](https://github.com/breferrari/vigia/issues/261)); the profile now
+/// sets 2. It is also a Windows cliff alone: on Linux the cold parse moves less
+/// than 1% between the two settings, and macOS is unmeasured. They are left
+/// with their provenance attached rather than retyped, because a number carried
+/// across platforms is worse than one that says where it came from. The
+/// *shape* of the table, which is what it is here to show, is unaffected.
+///
 /// So the sentence above stays true and stops being the whole story: a *warmth*
 /// claim is still unavailable, and a **coldness** claim is exact and is worth
 /// having. [`Highlighter::attempted`] is the record this run keeps, it says only
