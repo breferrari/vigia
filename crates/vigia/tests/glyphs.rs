@@ -531,3 +531,26 @@ fn every_self_naming_term_answers() {
         );
     }
 }
+
+#[test]
+fn the_band_rung_is_the_tallest_the_ladder_has() {
+    // **[#244](https://github.com/breferrari/vigia/issues/244)'s ruling stated as
+    // a property rather than as a name.** The churn band draws at
+    // [`Glyphs::BAND`] whatever the pane detects, and the reason is vertical
+    // resolution: a level is smooth, so amplitude is what shows its shape and the
+    // horizontal sub-column a dense cell buys carries almost nothing.
+    //
+    // Naming the rung would pin the answer; this pins the *reason*, so a rung
+    // added later that draws more levels a row than blocks do makes this fail
+    // and asks the question again instead of being silently passed over.
+    for rung in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
+        assert!(
+            Glyphs::BAND.levels() >= rung.levels(),
+            "the band draws at {:?}, with {} levels a row, and {rung:?} has {}: \
+             the ladder has a taller rung than the element that wants height",
+            Glyphs::BAND,
+            Glyphs::BAND.levels(),
+            rung.levels()
+        );
+    }
+}

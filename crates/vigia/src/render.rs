@@ -4528,7 +4528,14 @@ impl Painter<'_> {
         // the window is fixed by I10, so the projection does the same job from
         // the other side: it aggregates when the pane holds fewer sub-columns
         // than the window holds samples, and repeats when it holds more.
-        let density = self.glyphs.density();
+        // **The block rung, whatever the pane detects**
+        // ([#244](https://github.com/breferrari/vigia/issues/244)). Bound once
+        // and read three times below, so this function cannot half-follow the
+        // ruling: a density from one rung and a level count from another would
+        // draw a band nothing could decode. [`Glyphs::BAND`] carries the reason
+        // and its measurements.
+        let glyphs = Glyphs::BAND;
+        let density = glyphs.density();
         // **The pane can ask for more sub-columns than the window holds samples,
         // and then values repeat rather than run out.** `btop` never meets this
         // because its buffer is sized to the pane, keeping `width * 2` samples;
@@ -4579,7 +4586,7 @@ impl Painter<'_> {
         // Levels one row carries. The block ramp gives eight, a 2x4 cell gives
         // its dot rows less the baseline, and [`Glyphs::glyph`] already spells
         // both, floor included: level zero is the axis rather than nothing.
-        let levels = self.glyphs.levels();
+        let levels = glyphs.levels();
 
         for cell in 0..width {
             // A dense cell carries two sub-columns, left older than right, which
@@ -4608,7 +4615,7 @@ impl Painter<'_> {
                 if row > 0 && low == 0 && high == 0 {
                     continue;
                 }
-                let glyph = self.glyphs.glyph(low, high);
+                let glyph = glyphs.glyph(low, high);
                 let x = left_edge.saturating_add(cell as u16);
                 self.bar_cell(x, y, glyph, self.theme.spark_at(band));
             }
