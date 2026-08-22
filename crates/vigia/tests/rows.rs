@@ -482,13 +482,33 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// measured over twelve buckets, and twelve buckets is what a drawn one holds
     /// at the settled rung, so the value did not move, it acquired an index.
     ///
-    /// **And the set is what the gate is now for.** `2_333` and `7_779` are not
-    /// `4_667` halved and doubled, which is exactly the point: `scale_of`
-    /// averages the non-empty values and grouping merges empties into their
-    /// neighbours, so the coarsest figure is 17% under what multiplying would
-    /// have given. A store that returned one figure three times, or one figure
-    /// scaled by the grouping, fails here.
-    const PINNED: [u32; 3] = [2_333, 4_667, 7_779];
+    /// **And the set is what the gate is now for.** `418` and `837` are not one
+    /// figure and its double, which is exactly the point: `scale_of` averages the
+    /// non-empty values and grouping merges empties into their neighbours, so a
+    /// coarser figure is never the finest one multiplied. A store that returned
+    /// one figure three times, or one figure scaled by the grouping, fails here.
+    ///
+    /// **They were `[2_333, 4_667, 7_779]` until
+    /// [#256](https://github.com/breferrari/vigia/issues/256)**, and they moved
+    /// because the rule acquired an outlier cut. This fixture is one path with
+    /// one write, so its levelled buckets are the kernel's own geometric ramp,
+    /// `[5, 10, 22, 49, 114, 266, 622, 1489, 3785, 11590]`, where every value is
+    /// about two and a half times its neighbour. A ramp has no bulk, so the cut
+    /// reads its top as outlying and takes the two tallest out of the mean.
+    ///
+    /// **What that costs on screen is two cells, and on this pane none at all**,
+    /// which is worth stating because the figure moved by 5.6x. At the finest
+    /// rung the strip goes from `______________▁▁▁▁▁▁▃▆██` to
+    /// `______________▁▁▁▁▃▆████`; at the rung eighty columns affords it does not
+    /// move, and the snapshot below is unchanged.
+    ///
+    /// **The third entry equals the second, and that is the clamp rather than a
+    /// coincidence.** `History::repeak` keeps a coarser rung's figure from
+    /// falling below a finer rung's, and on this fixture the coarsest grouping
+    /// has three buckets to find a bulk in and came out at 302. Delete the clamp
+    /// and this reads `[418, 837, 302]`, which is a coarser rung drawing *taller*
+    /// bars than a finer one.
+    const PINNED: [u32; 3] = [418, 837, 837];
     // **The producer, not the decider.** `spark_of` and the painter are mutation
     // tested from every side in `render.rs`, and every one of those fixtures
     // hands `View` a `peak` by hand. Nothing drove a *recorded* one through

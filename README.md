@@ -192,7 +192,7 @@ Two names for one thing, and both are used: **masthead** is the block at the top
 
 Two rows, stacked, growing upward from a drawn baseline, and the same level the sparklines draw. A quiet stretch is a floor rather than a gap, which is what makes a burst read as a spike on a graph instead of a block floating in the dark. That resolution is the point: it answers a question no file row can, which is *is anything happening at all right now, and was it busier a minute ago.* A tall block that has been collapsing for thirty seconds is an agent that has finished.
 
-It is drawn the way `btop` draws one, read from its source rather than recalled. Three things come from there: one value per sub-column, so where your font carries braille the band resolves twice the detail it does in blocks; the axis, so a lone spike stands on something; and a scale of about 1.3 times a recent mean rather than the window's peak, because one `cargo build` rewriting a lock file is two orders of magnitude above an ordinary save, and against *that* denominator every edit for the next two minutes draws one level high.
+It is drawn the way a system monitor draws one. Three things come with that: one value per sub-column, so where your font carries braille the band resolves twice the detail it does in blocks; the axis, so a lone spike stands on something; and a scale set above the ordinary write rather than at the window's peak, because one `cargo build` rewriting a lock file is two orders of magnitude above an ordinary save, and against *that* denominator every edit for the next two minutes draws one level high.
 
 It starts **hidden**, because it costs three rows of diff and is not wanted on every pane. Press `m` again and the rows go straight back to the diff.
 

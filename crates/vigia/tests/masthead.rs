@@ -430,10 +430,10 @@ const BURSTY: [u32; HISTORY_SAMPLES] = {
 /// **[#223](https://github.com/breferrari/vigia/issues/223) is superseded here
 /// and the correction is stated rather than absorbed.** That row saw a real
 /// defect: at one column a second, a save drew a hairline between two blanks and
-/// the whole band read as scatter. It reached for a wider column. `btop` fixes
-/// the same defect on the same shape of signal, its network graph, by drawing
-/// the **axis**: `no_zero` puts one dot on the bottom row of an empty column, so
-/// a narrow spike stands on a floor rather than floating in a void. With the
+/// the whole band read as scatter. It reached for a wider column. What fixes the
+/// same defect on the same shape of signal is the **axis**: one mark on the
+/// bottom row of an empty column, so a narrow spike stands on a floor rather
+/// than floating in a void. With the
 /// floor drawn, coarsening costs resolution and buys nothing, and it was what
 /// made the band read as separated blocks
 /// ([#232](https://github.com/breferrari/vigia/issues/232), reported from a live
@@ -511,8 +511,8 @@ fn an_empty_column_draws_the_axis() {
     // **The reversal of [#158](https://github.com/breferrari/vigia/issues/158),
     // and it is the whole of why the band reads as a graph.** That ruling gave an
     // empty column nothing, because a full track of `_` "reads as a dashed rule
-    // across the pane". It does, and that is what a graph's axis is: `btop` draws
-    // exactly this for its network graph and calls the flag `no_zero`. Without
+    // across the pane". It does, and that is what a graph's axis is, and what
+    // every graph of a signal that is zero most of the time draws. Without
     // it, the filled columns float with nothing to stand on and the element reads
     // as separated blocks, which is what was reported from a live pane.
     //
@@ -692,10 +692,9 @@ const EXACT_PANE: u16 = 124;
 
 #[test]
 fn the_band_scales_against_the_ordinary_write_rather_than_the_largest() {
-    // **`btop`'s rule, pinned by the two glyphs it produces.** Its network graph
-    // faces this signal and scales against 1.3 times a recent mean rather than
-    // against the window's maximum, so one outlier saturates instead of crushing
-    // every ordinary write beneath it. Read from `src/linux/btop_collect.cpp`.
+    // **The scale rule, pinned by the two glyphs it produces.** The denominator
+    // sits above the ordinary write rather than at the window's maximum, so one
+    // outlier saturates instead of crushing every ordinary write beneath it.
     //
     // A window where every sample is equal is the case that states the factor:
     // the mean **is** that value, so the scale is 1.3 of it and a column reaches
@@ -834,6 +833,189 @@ fn column_heights(width: u16, series: [u32; HISTORY_SAMPLES], pane: Glyphs) -> V
         }
     }
     heights
+}
+
+/// A worktree written in one burst and then edited ordinarily, which is the
+/// shape [#256](https://github.com/breferrari/vigia/issues/256) was reported on.
+///
+/// **Not [`BURSTY`], whose values are all within an order of magnitude of each
+/// other.** That fixture is bursty in *time* and flat in magnitude, which is the
+/// signal the mean-based rule was chosen for and cannot show this defect at all.
+/// The distinction is the whole of #256: agent work is heavy tailed, a test run
+/// rewriting thousands of bytes sits in the same window as the ordinary edits
+/// around it, and it is the **ratio** rather than the spacing that collapses the
+/// graph.
+///
+/// The burst is the older third of the window and the edits follow it, which is
+/// the order the reader described: *"after that first burst wave with the ai
+/// doing plan work, as it became more sparse"*.
+const BURST_THEN_ORDINARY: [u32; HISTORY_SAMPLES] = {
+    let mut s = [0; HISTORY_SAMPLES];
+    let mut at = 4;
+    while at < 28 {
+        s[at] = 2_400;
+        at += 2;
+    }
+    s[58] = 190;
+    s[72] = 240;
+    s[88] = 150;
+    s[104] = 210;
+    s[116] = 170;
+    s
+};
+
+/// A burst filling a third of the window, with ordinary edits after it.
+///
+/// **The fixture that binds the *upper* end of the outlier multiple.** Sweeping
+/// that constant, this shape puts the floor back at thirteen times the median at
+/// forty and eighty columns, where [`BURST_THEN_ORDINARY`] tolerates far more. A
+/// gate written only against the reported shape would leave the interval the
+/// constant sits in the middle of unasserted, and a number defended only by a
+/// docblock is a number that drifts.
+const LONG_BURST_THEN_ORDINARY: [u32; HISTORY_SAMPLES] = {
+    let mut s = [0; HISTORY_SAMPLES];
+    let mut at = 2;
+    while at < 42 {
+        s[at] = 3_000;
+        at += 3;
+    }
+    let mut at = 48;
+    while at < HISTORY_SAMPLES {
+        s[at] = 180;
+        at += 11;
+    }
+    s
+};
+
+/// Levels one band row carries, restated for [`WINDOW_SAMPLES`]'s reason.
+const ROW_LEVELS: usize = 8;
+
+/// One loud burst does not press every ordinary write onto the floor.
+///
+/// **[#256](https://github.com/breferrari/vigia/issues/256), reported from a live
+/// pane**: *"It has a nice wave, but the wave goes missing after"*, then *"Just
+/// spikes"*. The band's yardstick was thirteen tenths of the mean of the window's
+/// non-empty values, and a mean is not robust: one write an order of magnitude
+/// above the rest raised the denominator until every ordinary edit rounded onto
+/// the lowest of the two rows' sixteen levels.
+///
+/// **The floor is level one and not level zero, and the difference is why this
+/// gate counts rather than looks for the axis.** `level_to` clamps a non-zero
+/// count to at least one, so an ordinary write was never drawn *as* the axis: it
+/// was drawn `▁` on the baseline row, one eighth of one row of two, which beside
+/// an axis of `_` is the same picture and is not the same assertion. A gate
+/// written against the axis would pass today and mean nothing.
+///
+/// Measured before the fix at eighty columns: **36 of 76 columns at level one,
+/// seven distinct heights**.
+#[test]
+fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
+    // **Two traces, and the second is not a duplicate.** The reported shape and
+    // a burst three times as long bind opposite ends of the multiple the cut is
+    // taken at: a burst filling a third of the window is what puts the floor back
+    // if the multiple is raised, and the reported shape is what the multiple was
+    // fixed for.
+    for (name, series) in [
+        ("reported", BURST_THEN_ORDINARY),
+        ("long burst", LONG_BURST_THEN_ORDINARY),
+    ] {
+        // Both rungs, because the band draws the same graph at each since #244 and
+        // the reader who reported this was on a pane that detects braille.
+        for pane in [Glyphs::Block, Glyphs::Braille] {
+            for width in [40u16, 60, 80, 109, 124] {
+                let heights = column_heights(width, series, pane);
+                let ceiling = GRAPH_ROWS * ROW_LEVELS;
+
+                // **Non-vacuity first, and it is two claims.** The trace has to carry
+                // a genuinely loud event, or there is no yardstick to be dragged; and
+                // it has to carry ordinary writes after it, or there is nothing the
+                // dragging could have flattened. Both are read off the drawn band
+                // rather than off the fixture, so a projection that dropped the tail
+                // fails here rather than passing quietly.
+                assert!(
+                    heights.contains(&ceiling),
+                    "{name}, {pane:?} at {width}: nothing in the trace saturated, so \
+                     there is no loud write and this gate is about a fixture \
+                     that cannot show the defect"
+                );
+                let ordinary = heights.len() * 2 / 3;
+                assert!(
+                    heights[ordinary..].iter().any(|height| *height > 0),
+                    "{name}, {pane:?} at {width}: the newest third of the band is \
+                     empty, so the ordinary writes never reached the drawn series"
+                );
+
+                // The defect itself: nothing that was written may sit on the lowest
+                // level the band has.
+                let floored = heights.iter().filter(|height| **height == 1).count();
+                assert_eq!(
+                    floored,
+                    0,
+                    "{name}, {pane:?} at {width}: {floored} of {} columns are pinned \
+                     on the band's lowest level, which is the floor the burst \
+                     pressed them onto:\n{}",
+                    heights.len(),
+                    band_at(width, series, pane).join("\n")
+                );
+
+                // And the shape is back, not merely off the floor. Seven is what the
+                // reported picture drew, so more than that is the claim.
+                let drawn = distinct_heights(width, series, pane);
+                assert!(
+                    drawn > 7,
+                    "{name}, {pane:?} at {width}: the band drew {drawn} distinct \
+                     heights, which is no more shape than the reported picture \
+                     had"
+                );
+            }
+        }
+    }
+}
+
+/// A window with a legitimate dynamic range is scaled exactly as it always was.
+///
+/// **The fixture that binds the *lower* end of the outlier multiple**, and the
+/// promise that keeps [#256](https://github.com/breferrari/vigia/issues/256) a
+/// repair rather than a redesign: the cut is a no-op wherever the values are
+/// within an order of magnitude of each other. [`QUARTERED`] is a deliberate
+/// four-to-one series, and below eight times the median it stops drawing what it
+/// drew before, at sixty and a hundred and nine columns.
+///
+/// Asserted against the **plain** rule written out here rather than against a
+/// pinned strip, so it says *the cut did not fire* rather than *the picture
+/// happens to match*.
+#[test]
+fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
+    /// Thirteen tenths of the mean of the non-empty values, with no cut in it.
+    fn plain(values: &[u32]) -> u32 {
+        let busy: Vec<u64> = values
+            .iter()
+            .map(|value| u64::from(*value))
+            .filter(|value| *value > 0)
+            .collect();
+        if busy.is_empty() {
+            return 0;
+        }
+        u32::try_from(busy.iter().sum::<u64>() * 13 / (busy.len() as u64 * 10)).expect("a scale")
+    }
+
+    let mut compared = 0usize;
+    for series in [QUARTERED, BURSTY, wave(), [7; HISTORY_SAMPLES]] {
+        for width in [40u16, 60, 80, 109, 124] {
+            // The drawn series, which is what the band divides: the levelled
+            // projection onto the sub-columns the pane affords, not the samples.
+            let slots = usize::from(width) * Glyphs::BAND.density();
+            let levelled = Churn(series).levels(slots);
+            assert_eq!(
+                vigia_core::scale_of(levelled.iter().copied()),
+                plain(&levelled),
+                "the outlier cut fired on a window with nothing outlying in it, \
+                 at {width} columns"
+            );
+            compared += 1;
+        }
+    }
+    assert!(compared > 0, "this gate compared nothing");
 }
 
 /// Distinct heights in a drawn band, which is the resolution a reader sees.

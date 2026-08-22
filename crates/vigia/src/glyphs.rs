@@ -191,8 +191,8 @@ impl Glyphs {
     /// 2. **`TERM=dumb`**, a terminal saying it cannot do this.
     /// 3. **`TERM=linux`**, the Linux virtual console, whose font is a 256 or
     ///    512 glyph bitmap that has never held braille. This is the one rung
-    ///    with no colour analogue, and it is why `btop` carries a `tty` mode
-    ///    beside its `braille` and `block` ones.
+    ///    with no colour analogue, and it is why a monitor of this class carries
+    ///    a console mode beside its braille and block ones.
     /// 4. **`TERM_PROGRAM`**, a terminal naming itself. See [`program_glyphs`].
     /// 5. **Windows with `WT_SESSION`**, which is Windows Terminal identifying
     ///    itself, and it ships Cascadia. Measured: see the module docs.
@@ -203,9 +203,9 @@ impl Glyphs {
     /// 8. **[`Glyphs::Braille`] otherwise**, which is the broad claim on this
     ///    ladder and the one worth stating a reason for. Braille has been in
     ///    every mainstream Unix monospace face for twenty years, the one Unix
-    ///    terminal that cannot draw it is caught at rung 3, and `btop` defaults
-    ///    to braille on every platform with no detection at all and puts the
-    ///    font in its README prerequisites. A reader whose font is the exception
+    ///    terminal that cannot draw it is caught at rung 3, and the reference
+    ///    class defaults to braille on every platform with no detection at all
+    ///    and names the font a prerequisite. A reader whose font is the exception
     ///    says so with [`GLYPHS_VAR`], which is the same escape the Windows rung
     ///    of [`Depth`](crate::Depth) leans on.
     pub fn from_env(

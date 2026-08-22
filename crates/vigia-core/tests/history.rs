@@ -580,11 +580,225 @@ fn the_scale_rule_holds_at_its_edges() {
     assert_eq!(scale_of([0, 10, 0, 10].into_iter()), 13);
 
     // **Above every input by design**, which is what stops a uniformly busy
-    // worktree drawing as a solid block, and is `btop`'s own behaviour.
+    // worktree drawing as a solid block.
     assert!(scale_of([10, 10].into_iter()) > 10);
 
     // And it saturates rather than wrapping on a window full of ceilings.
     assert_eq!(scale_of([u32::MAX; 8].into_iter()), u32::MAX);
+}
+
+/// The multiple of the median a value may reach before it stops setting the
+/// scale, restated rather than imported.
+///
+/// A gate reading the crate's own constant would agree with it by construction,
+/// which is this suite's standing rule for every tuned number.
+const OUTLIER: u32 = 10;
+
+/// One loud value does not set the yardstick for the ones around it.
+///
+/// **[#256](https://github.com/breferrari/vigia/issues/256), reported from a live
+/// pane**: a test run rewriting thousands of bytes sat in the same window as the
+/// ordinary edits around it, and the mean it dragged up put every one of them on
+/// the band's lowest level, which at the baseline row is not distinguishable from
+/// the axis.
+///
+/// Asserted as an *equality against the window without the outlier in it*, which
+/// is the strongest form available and the one a threshold cannot fake: the
+/// figure is not merely lower, it is the figure the ordinary writes would have
+/// set on their own.
+#[test]
+fn a_lone_outlier_does_not_set_the_yardstick() {
+    let ordinary = [40u32; 12];
+    let quiet = scale_of(ordinary.into_iter());
+
+    let mut loud = ordinary.to_vec();
+    loud.push(40 * 50);
+    assert_eq!(
+        scale_of(loud.iter().copied()),
+        quiet,
+        "one value fifty times the rest moved the yardstick the rest set"
+    );
+
+    // Non-vacuity, and it is the half that would catch a rule that excluded
+    // everything: the loud value is genuinely in the window and genuinely large.
+    assert!(
+        loud.iter().copied().max().expect("a value") > quiet * 10,
+        "the fixture's outlier is not an outlier, so nothing above is a gate"
+    );
+}
+
+/// A window with nothing outlying in it is scaled exactly as it always was.
+///
+/// **The half of [#256](https://github.com/breferrari/vigia/issues/256) that is a
+/// promise rather than a fix.** The cut is a no-op wherever the values are within
+/// an order of magnitude of each other, which is by construction: nothing exceeds
+/// the cut, so the arithmetic is the plain thirteen tenths it has always been.
+/// Stated as a gate anyway, because "by construction" is what every silently
+/// broken invariant was before it broke.
+#[test]
+fn a_window_with_no_outlier_scales_as_it_always_did() {
+    /// The plain rule, written out: thirteen tenths of the mean of the non-empty
+    /// values, with no cut in it at all.
+    fn plain(values: &[u32]) -> u32 {
+        let busy: Vec<u64> = values
+            .iter()
+            .map(|v| u64::from(*v))
+            .filter(|v| *v > 0)
+            .collect();
+        if busy.is_empty() {
+            return 0;
+        }
+        u32::try_from(busy.iter().sum::<u64>() * 13 / (busy.len() as u64 * 10)).expect("a scale")
+    }
+
+    // A four-to-one series, which is a legitimate dynamic range rather than a
+    // tail: `masthead.rs`'s `QUARTERED` is this shape and is what binds the
+    // constant's lower end.
+    let quartered: Vec<u32> = (0..24).map(|at| if at < 12 { 16 } else { 4 }).collect();
+    // A ramp of everything from one to the cut itself.
+    let spread: Vec<u32> = (1..=OUTLIER).map(|step| step * 7).collect();
+
+    for values in [vec![7u32; 30], quartered, spread, vec![3, 0, 9, 0, 5, 11]] {
+        assert_eq!(
+            scale_of(values.iter().copied()),
+            plain(&values),
+            "the cut moved a window with nothing outlying in it: {values:?}"
+        );
+    }
+}
+
+/// The cut is at the multiple itself, and the boundary is inclusive.
+///
+/// Both directions, because a threshold gate that only tests the far side passes
+/// against a rule that never fires and against one that always does.
+#[test]
+fn the_cut_is_ten_times_the_median() {
+    // An odd count so the median is a value rather than a choice between two,
+    // and every other value equal to it so the median is unambiguous.
+    let median = 30u32;
+    let bulk = vec![median; 9];
+
+    let mut at_the_cut = bulk.clone();
+    at_the_cut.push(median * OUTLIER);
+    let mut past_the_cut = bulk.clone();
+    past_the_cut.push(median * OUTLIER + 1);
+
+    assert!(
+        scale_of(at_the_cut.iter().copied()) > scale_of(bulk.iter().copied()),
+        "a value at exactly the cut was excluded, so the boundary is \
+         exclusive where it should include"
+    );
+    assert_eq!(
+        scale_of(past_the_cut.iter().copied()),
+        scale_of(bulk.iter().copied()),
+        "a value one past the cut still set the yardstick"
+    );
+}
+
+/// The kept set is never empty, so the rule never divides by nothing.
+///
+/// **By construction rather than by a guard**: the median is at most ten times
+/// itself, so it survives its own cut, so at least one value always does. The
+/// small counts are where that would break first if the median were ever taken
+/// off the end of the set rather than out of the middle.
+#[test]
+fn the_kept_set_is_never_empty() {
+    for values in [
+        vec![9u32],
+        vec![1, 1_000_000],
+        vec![1, 1, 1_000_000],
+        vec![u32::MAX, 1],
+        vec![0, 0, 7],
+    ] {
+        assert!(
+            scale_of(values.iter().copied()) > 0,
+            "the rule kept nothing and answered zero for {values:?}, which \
+             every caller reads as \"no scale yet\""
+        );
+    }
+}
+
+/// When the loud writes are the majority, they are the ordinary write.
+///
+/// **The case the cut must not fire on**, and the one that says this is a robust
+/// statistic rather than a ceiling. A reader watching an agent mid-burst is
+/// looking at a worktree where the large writes *are* what is happening, and a
+/// rule that excluded them would scale the band against the quiet between them
+/// and draw the whole burst saturated.
+#[test]
+fn a_majority_burst_still_sets_the_yardstick() {
+    let mut window = vec![2_000u32; 14];
+    window.extend([40u32; 6]);
+
+    let loud = scale_of(window.iter().copied());
+    let quiet = scale_of([40u32; 6].into_iter());
+    assert!(
+        loud > quiet * 10,
+        "a window that is mostly loud writes was scaled against the quiet \
+         between them: {loud} against {quiet}"
+    );
+}
+
+/// A coarser rung's yardstick is never below a finer rung's.
+///
+/// **A fact about the quantity, not about the estimator**: a drawn bucket that
+/// sums more source buckets cannot be worth less than one that sums fewer, so the
+/// figures are non-decreasing down [`SPARK_GROUPS`]. `SPEC.md` §11.1 states it as
+/// *a rung is a change of resolution and not of height*, and until
+/// [#256](https://github.com/breferrari/vigia/issues/256) nothing asserted it,
+/// because a plain mean could not violate it.
+///
+/// The cut can, on a population too small to hold a bulk. **One tracked path with
+/// one write is the case**, and it is not exotic: the kernel spreads a lone write
+/// into a geometric ramp, the coarsest grouping has three buckets of it, and
+/// three points of a ramp read as a bulk of two and an outlier. Measured on this
+/// fixture the raw figures are 418, 837 and **302**, so coarsening the rung would
+/// have made every bar taller.
+#[test]
+fn a_coarser_rung_is_never_measured_against_less() {
+    let now = base();
+
+    // One path and one write, which is the small population the clamp is for.
+    let mut lone = History::starting_at(now);
+    lone.record_sized([("src/lib.rs", Some(4_000))], now);
+    lone.record_sized([("src/lib.rs", Some(28_000))], now);
+
+    // And a populated worktree, where the estimator already answers in order and
+    // the clamp changes nothing. Both, so this is not a gate about one fixture.
+    let mut many = History::starting_at(now);
+    for step in 0..8u32 {
+        for file in 0..8u32 {
+            let path = format!("src/f{file}.rs");
+            let size = if file == 0 && step == 4 {
+                90_000
+            } else {
+                4_000 + u64::from(step) * 300
+            };
+            many.record_sized(
+                [(path.as_str(), Some(size))],
+                now + HISTORY_SAMPLE * (step * 12 + file),
+            );
+        }
+    }
+
+    for (name, history) in [("one path", &lone), ("eight paths", &many)] {
+        let scales = history.scales();
+        assert!(
+            scales.iter().max().copied().expect("a figure") > 0,
+            "{name}: the fixture recorded nothing, so this compared nothing"
+        );
+        for pair in scales.windows(2) {
+            assert!(
+                pair[0] <= pair[1],
+                "{name}: a coarser rung is measured against {} where the \
+                 finer one is measured against {}, so widening the pane makes \
+                 every bar shorter and narrowing it makes them taller: \
+                 {scales:?}",
+                pair[1],
+                pair[0]
+            );
+        }
+    }
 }
 
 /// A projection returns exactly the width it was asked for.

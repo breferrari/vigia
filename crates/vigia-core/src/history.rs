@@ -164,6 +164,15 @@ const _: () = {
             "a sparkline grouping does not divide the source resolution, so a \
              drawn bucket would cover less time than its neighbours"
         );
+        // **Ascending, which `History::repeak`'s running maximum reads as an
+        // order.** That step keeps a coarser rung's yardstick from falling below
+        // a finer one's, and it walks this array in order to know which is
+        // coarser. Listed out of order it would clamp the wrong way round and
+        // silently invert the promise it exists to keep.
+        assert!(
+            at == 0 || SPARK_GROUPS[at - 1] < SPARK_GROUPS[at],
+            "the sparkline groupings are not listed finest first"
+        );
         at += 1;
     }
 };
@@ -183,8 +192,8 @@ pub const HISTORY_BUCKET: Duration =
 // band's period at fifteen columns of eight seconds, which
 // [#223](https://github.com/breferrari/vigia/issues/223) tuned over forty seeded
 // series. That row diagnosed the right defect, a save drawing a one-column
-// hairline between two blanks, and reached for the wrong fix: `btop` answers the
-// same defect on the same shape of signal by drawing the **axis**, and with a
+// hairline between two blanks, and reached for the wrong fix: the answer to the
+// same defect on the same shape of signal is the **axis**, and with a
 // floor under it a narrow column is a spike rather than a mark in a void. The
 // band draws one value per sub-column now, so its period is a property of the
 // pane and there is no constant to name.
@@ -580,25 +589,26 @@ impl Churn {
 }
 
 /// What a churn height is measured against: above the ordinary write, not at the
-/// largest one.
+/// largest one, and not dragged up by a burst either.
 ///
-/// **`btop`'s rule, and the reason it is not a maximum.** Its network graph faces
-/// this signal exactly, bursty and zero most of the time with occasional values
-/// orders of magnitude above the rest, and `graph_max` is set to 1.3 times the
-/// mean of recent samples rather than to the largest of them; anything above it
-/// clamps to full height. Read from `src/linux/btop_collect.cpp` rather than
-/// recalled ([#232](https://github.com/breferrari/vigia/issues/232)).
-///
-/// The reason is what a maximum does to everything else. One `cargo build`
-/// rewriting a lock file is two orders of magnitude above an ordinary save, and
-/// against that denominator every edit a reader makes for the next two minutes
-/// draws one level high: a graph that goes blank because something interesting
-/// happened. Scaling against the ordinary case and letting the outlier saturate
-/// keeps the shape a reader is watching for.
+/// **Not a maximum, and the reason is what a maximum does to everything else.**
+/// One `cargo build` rewriting a lock file is two orders of magnitude above an
+/// ordinary save, and against that denominator every edit a reader makes for the
+/// next two minutes draws one level high: a graph that goes blank because
+/// something interesting happened
+/// ([#232](https://github.com/breferrari/vigia/issues/232)). Scaling against the
+/// ordinary case and letting the outlier saturate keeps the shape a reader is
+/// watching for.
 ///
 /// **The mean is over the non-empty values only.** A worktree is idle most of the
 /// time, so counting the zeroes would make the denominator a measure of how long
 /// the reader has been away rather than of how large a write is.
+///
+/// **And it is over the non-outlying values only**, which is
+/// [#256](https://github.com/breferrari/vigia/issues/256) and is what
+/// [`SCALE_OUTLIER`] decides. A mean is not robust, so on a heavy-tailed window
+/// the outlier this rule exists to let saturate was setting the denominator from
+/// inside it.
 ///
 /// **Shared by both glance elements, which is why it lives here.** The churn band
 /// and the per-file sparkline divide by different quantities, worktree-wide and
@@ -607,32 +617,97 @@ impl Churn {
 /// before this: the band was fixed where the symptom was reported and the
 /// sparkline kept dividing by a maximum over the same byte samples.
 ///
+/// **This entry point materialises the non-empty values, and it used to be
+/// written so it need not.** A median cannot be taken from a running pair, so the
+/// iterator is collected here. The caller that sentence was written for is
+/// [`History::repeak`], which walks every bucket of every tracked path on the
+/// frame path; it no longer comes through here at all, but through
+/// [`scale_of_busy`] over a scratch it keeps between ticks. What is left on this
+/// path is one drawn series, which the band already holds as a `Vec` anyway.
+///
 /// Zero when nothing is in the window at all, which every caller reads as "no
 /// scale yet".
 pub fn scale_of(values: impl Iterator<Item = u32>) -> u32 {
-    let (sum, busy) = values
-        .filter(|value| *value > 0)
-        .fold((0u64, 0u64), |(sum, busy), value| {
-            (sum + u64::from(value), busy + 1)
-        });
-    scale_from(sum, busy)
+    let mut busy: Vec<u32> = values.filter(|value| *value > 0).collect();
+    scale_of_busy(&mut busy)
 }
 
-/// [`scale_of`] once the walk is already done, for a caller accumulating several
-/// figures over one pass.
+/// How many times the median a value may be before it stops setting the scale.
+///
+/// **The estimator was not robust, and one loud write was enough**
+/// ([#256](https://github.com/breferrari/vigia/issues/256), reported from a live
+/// pane). A test run rewriting 3,400 bytes sits in the same window as the
+/// 180-byte edits around it; the mean that sets the denominator is dragged up by
+/// the burst, and every ordinary edit lands on the lowest of the band's sixteen
+/// levels, which at the baseline row is `▁` and is not distinguishable from the
+/// axis at a glance. Measured at 80 columns on a trace shaped like the report:
+/// **36 of 76 columns pinned there, 7 distinct heights**, against 0 and 13 with
+/// this cut.
+///
+/// **A fixed window is what makes a robust statistic necessary rather than
+/// optional.** An estimator that follows the present can let a burst age out of
+/// its own reckoning. I10 fixes this window at two minutes and the sparkline's
+/// denominator spans every tracked path so rows stay comparable, so there is no
+/// present here to follow: the whole window is in the estimate at once, and the
+/// only way to keep a minority of loud values out of it is to exclude them.
+///
+/// **Ten, and the interval it sits in the middle of was measured** rather than
+/// chosen. Sweeping this constant from 2 to 40 at five pane widths over ten
+/// fixtures gives a safe band of `[8, 12]`, and both ends bind on a named
+/// fixture:
+///
+/// - Below **8**, a window with a legitimate dynamic range stops drawing what it
+///   drew before. `masthead.rs`'s `QUARTERED`, a deliberate 4:1 series, is the
+///   binding one and moves at 7 at 60 and 109 columns.
+/// - Above **12**, the floor comes back on a burst filling a third of the window.
+///   A burst of forty samples over ordinary edits is the binding one and the
+///   floor returns at 13 at 40 and 80 columns.
+///
+/// So ten has two of margin either side, and the endpoints are here so the next
+/// reader can re-derive them rather than trust them.
+///
+/// **A cut against the median rather than against the mean, and that is the load
+/// bearing half.** The mean is itself corrupted by the tail, so a multiple of it
+/// is a threshold that rises with the thing it is meant to exclude: measured, a
+/// mean-relative cut fixes a burst of a quarter of the window and fails on one of
+/// a third. The median is unmoved by a minority of loud values, which is the
+/// property being bought.
+const SCALE_OUTLIER: u64 = 10;
+
+/// [`scale_of`] over a scratch of the **non-empty** values, which it reorders.
 ///
 /// **Split out rather than written twice**, because [`History::repeak`] computes
-/// one of these per [`SPARK_GROUPS`] entry from a single walk of the levelled
-/// buckets, and a second copy of the thirteen-tenths rule is a rule that can move
-/// in one place and not the other.
-fn scale_from(sum: u64, busy: u64) -> u32 {
-    if busy == 0 {
+/// one of these per [`SPARK_GROUPS`] entry over buckets it has already gathered,
+/// and a second copy of the rule is a rule that can move in one place and not the
+/// other. It took `(sum, busy)` until
+/// [#256](https://github.com/breferrari/vigia/issues/256); a median cannot be
+/// taken from a running pair, so what crosses the boundary is now the values.
+///
+/// `select_nth_unstable` rather than a sort: the median is the only order
+/// statistic wanted and this is `O(n)` where a sort is `O(n log n)`, on a walk
+/// that runs on the frame path.
+///
+/// **The kept set is never empty, by construction rather than by a guard.** The
+/// median is at most [`SCALE_OUTLIER`] times itself for any multiple of one or
+/// more, so it survives its own cut, so at least one value always does. A guard
+/// here would be dead code that reads like a safety net.
+fn scale_of_busy(busy: &mut [u32]) -> u32 {
+    if busy.is_empty() {
         return 0;
     }
-    // Thirteen tenths, which is `btop`'s own factor: above the mean, so an
-    // ordinary write does not sit at the ceiling, and close enough to it that an
-    // ordinary write is still legible as a shape rather than as a stub.
-    u32::try_from(sum * 13 / (busy * 10)).unwrap_or(u32::MAX)
+    let mid = busy.len() / 2;
+    let (_, median, _) = busy.select_nth_unstable(mid);
+    let cut = u64::from(*median) * SCALE_OUTLIER;
+    let (sum, kept) = busy
+        .iter()
+        .map(|value| u64::from(*value))
+        .filter(|value| *value <= cut)
+        .fold((0u64, 0u64), |(sum, kept), value| (sum + value, kept + 1));
+    debug_assert!(kept > 0, "the median survives its own cut");
+    // Thirteen tenths: above the mean, so an ordinary write does not sit at the
+    // ceiling, and close enough to it that an ordinary write is still legible as
+    // a shape rather than as a stub.
+    u32::try_from(sum * 13 / (kept * 10)).unwrap_or(u32::MAX)
 }
 
 /// One path's churn, and when it last moved.
@@ -837,6 +912,22 @@ pub struct History {
     /// What a drawn bucket's height is divided by, one figure per
     /// [`SPARK_GROUPS`] entry. See [`scale_of`].
     scales: [u32; SPARK_GROUPS.len()],
+    /// Every non-empty grouped bucket of every tracked path, one buffer per
+    /// [`SPARK_GROUPS`] entry, held between ticks so [`Self::repeak`] allocates
+    /// nothing.
+    ///
+    /// **A denominator stopped being expressible as a running pair**
+    /// ([#256](https://github.com/breferrari/vigia/issues/256)): the rule takes a
+    /// median before it takes a mean, and a median needs the values. This is
+    /// where they go.
+    ///
+    /// **Reused rather than reallocated, and the capacity is the point.** At the
+    /// [`HISTORY_PATHS`] cap these hold 24 + 12 + 6 `u32` per track, which is
+    /// forty-three kilobytes, allocated once and `clear`ed on every walk. I3
+    /// bounds RSS *drift*, and a fixed buffer of that size is the same trade
+    /// [#161](https://github.com/breferrari/vigia/issues/161) made when the store
+    /// went from 4KiB to 60KiB.
+    scratch: [Vec<u32>; SPARK_GROUPS.len()],
     /// Every tracked path added together, kept current by the walk that finds
     /// the peak. See [`History::worktree_churn`].
     worktree: Churn,
@@ -860,6 +951,7 @@ impl History {
             tick: 0,
             opened: now,
             scales: [0; SPARK_GROUPS.len()],
+            scratch: std::array::from_fn(|_| Vec::new()),
             worktree: Churn::default(),
             stats: HistoryStats::default(),
         }
@@ -1297,29 +1389,61 @@ impl History {
         // [#234](https://github.com/breferrari/vigia/issues/234). The shell's
         // `spark_of` groups these same buckets the same way to get the numerator
         // this is the denominator for, and the two are deliberately not one
-        // function: this one accumulates a sum and a non-empty count without
-        // materialising the groups, that one materialises them so a drawn row
-        // allocates nothing. `tests/rows.rs::a_recorded_tick_reaches_the_drawn_sparkline`
-        // pins the figures this answers with, so a grouping that moved on one side
-        // and not the other reddens. The kernel is
-        // what costs here and it runs once per track either way; what the ladder
-        // adds is two more folds over twenty-four `u32`s that are already in
-        // cache. Scaling a single figure by the grouping instead was measured and
-        // rejected, and that constant's docblock carries the number.
-        let mut parts = [(0u64, 0u64); SPARK_GROUPS.len()];
+        // function: that one materialises the groups so a drawn row allocates
+        // nothing, this one gathers them into a buffer it keeps.
+        // `tests/rows.rs::a_recorded_tick_reaches_the_drawn_sparkline` pins the
+        // figures this answers with, so a grouping that moved on one side and not
+        // the other reddens. The kernel is what costs here and it runs once per
+        // track either way; what the ladder adds is two more folds over
+        // twenty-four `u32`s that are already in cache. Scaling a single figure by
+        // the grouping instead was measured and rejected, and that constant's
+        // docblock carries the number.
+        //
+        // **Gathered rather than accumulated, since
+        // [#256](https://github.com/breferrari/vigia/issues/256).** This kept a
+        // running `(sum, busy)` per grouping while the rule was a plain mean, and
+        // the rule now takes a median first, which no running pair can answer.
+        // [`Self::scratch`] is what keeps that from being an allocation per tick:
+        // the buffers are cleared and refilled, so the cost of the change is the
+        // gather rather than the memory.
+        for gathered in &mut self.scratch {
+            gathered.clear();
+        }
         for track in self.tracks.values() {
             let buckets = track.levelled();
-            for (part, group) in parts.iter_mut().zip(SPARK_GROUPS) {
+            for (gathered, group) in self.scratch.iter_mut().zip(SPARK_GROUPS) {
                 for chunk in buckets.chunks(group) {
                     let total = chunk.iter().copied().fold(0u32, u32::saturating_add);
                     if total > 0 {
-                        part.0 += u64::from(total);
-                        part.1 += 1;
+                        gathered.push(total);
                     }
                 }
             }
         }
-        self.scales = std::array::from_fn(|at| scale_from(parts[at].0, parts[at].1));
+        // **A coarser rung's yardstick is never below a finer rung's, and that
+        // is a fact about the quantity rather than about the estimator.** A drawn
+        // bucket summing more source buckets cannot be worth less than one
+        // summing fewer, so the figures are non-decreasing down
+        // [`SPARK_GROUPS`]. It held by arithmetic while the rule was a plain mean
+        // and stopped holding when the rule acquired an outlier cut
+        // ([#256](https://github.com/breferrari/vigia/issues/256)): a *robust*
+        // statistic needs a bulk to be robust about, and the coarsest grouping of
+        // a worktree with one tracked path has three buckets to find one in. A
+        // lone write decays into a geometric ramp, three points of a ramp read as
+        // a bulk of two and an outlier, and the coarsest figure came out **below
+        // the finest** — 418, 837, 302 on `tests/rows.rs`'s fixture. Coarsening
+        // the rung then made every bar taller, which is exactly what `SPEC.md`
+        // §11.1 promises a rung does not do.
+        //
+        // Clamping here rather than widening the cut, because the cut is right
+        // where it can see a distribution and this is the case where it cannot.
+        // On a worktree with eight tracked paths the figures are already
+        // non-decreasing (151, 282, 566) and this step changes nothing.
+        let mut floor = 0;
+        for (scale, gathered) in self.scales.iter_mut().zip(self.scratch.iter_mut()) {
+            *scale = scale_of_busy(gathered).max(floor);
+            floor = *scale;
+        }
         self.worktree = Churn(worktree);
     }
 }

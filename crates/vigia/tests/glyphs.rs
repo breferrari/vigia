@@ -127,7 +127,7 @@ const TABLE: [Row; 12] = [
         want: Glyphs::Block,
     },
     Row {
-        why: "anything else takes braille, which is where btop has sat for years",
+        why: "anything else takes braille, which is where this class has sat for years",
         windows: false,
         env: &[("TERM", "screen-256color")],
         want: Glyphs::Braille,
