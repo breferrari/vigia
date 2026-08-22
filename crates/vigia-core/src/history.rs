@@ -140,9 +140,12 @@ pub const HISTORY_BUCKETS: usize = 24;
 /// ([#234](https://github.com/breferrari/vigia/issues/234)). A row draws
 /// `HISTORY_BUCKETS / group` buckets, each the sum of `group` source ones, so
 /// `render::SPARK_RUNGS` is **computed from this table** rather than written out
-/// beside it, so the two cannot disagree; what a `const` block over there still
-/// asserts is that this one is strictly ascending, because nothing else reads its
-/// order and a reordering would hand the widest pane the narrowest rung.
+/// beside it, so the two cannot disagree. That its order is strictly ascending is
+/// asserted in **both** crates, at each reliance rather than once: a `const` block
+/// beside `SPARK_RUNGS` says a reordering would hand the widest pane the
+/// narrowest rung, and the block below says the figures [`History::scales`]
+/// answers with are claimed non-decreasing down this table, which is a claim
+/// about its order.
 ///
 /// **It lives here because what it decides is a *scale*, not a width.** A drawn
 /// bucket summing four source buckets has to be measured against what four
@@ -692,18 +695,53 @@ const SCALE_OUTLIER: u64 = 10;
 /// more, so it survives its own cut, so at least one value always does. A guard
 /// here would be dead code that reads like a safety net.
 fn scale_of_busy(busy: &mut [u32]) -> u32 {
-    if busy.is_empty() {
+    let Some(cut) = outlier_cut(busy) else {
         return 0;
-    }
-    let mid = busy.len() / 2;
-    let (_, median, _) = busy.select_nth_unstable(mid);
-    let cut = u64::from(*median) * SCALE_OUTLIER;
+    };
     let (sum, kept) = busy
         .iter()
         .map(|value| u64::from(*value))
         .filter(|value| *value <= cut)
         .fold((0u64, 0u64), |(sum, kept), value| (sum + value, kept + 1));
-    debug_assert!(kept > 0, "the median survives its own cut");
+    scale_from(sum, kept)
+}
+
+/// The value a member of `busy` may not exceed and still set the scale, or
+/// `None` when there is nothing to measure.
+///
+/// **Taken once over the whole population and then applied, rather than
+/// re-derived wherever the values are summed.** That is the difference between
+/// this and the first shape of
+/// [#256](https://github.com/breferrari/vigia/issues/256), and it is what keeps
+/// [`History::repeak`]'s figures in order: see the paragraph there about a
+/// coarser rung. Reorders `busy`.
+///
+/// `select_nth_unstable` rather than a sort: the median is the only order
+/// statistic wanted and this is `O(n)` where a sort is `O(n log n)`, on a walk
+/// that runs on the frame path.
+///
+/// **Every population always keeps at least one member, by construction rather
+/// than by a guard.** The median is at most [`SCALE_OUTLIER`] times itself for
+/// any multiple of one or more, so it survives its own cut. A guard against an
+/// empty kept set would be dead code that reads like a safety net.
+fn outlier_cut(busy: &mut [u32]) -> Option<u64> {
+    if busy.is_empty() {
+        return None;
+    }
+    let mid = busy.len() / 2;
+    let (_, median, _) = busy.select_nth_unstable(mid);
+    Some(u64::from(*median) * SCALE_OUTLIER)
+}
+
+/// Thirteen tenths of the mean of what the cut kept.
+///
+/// **Split out rather than written twice**, because [`History::repeak`] reaches
+/// the same rule over a series it is already walking for another reason and must
+/// not carry a second copy of the factor.
+fn scale_from(sum: u64, kept: u64) -> u32 {
+    if kept == 0 {
+        return 0;
+    }
     // Thirteen tenths: above the mean, so an ordinary write does not sit at the
     // ceiling, and close enough to it that an ordinary write is still legible as
     // a shape rather than as a stub.
@@ -912,22 +950,39 @@ pub struct History {
     /// What a drawn bucket's height is divided by, one figure per
     /// [`SPARK_GROUPS`] entry. See [`scale_of`].
     scales: [u32; SPARK_GROUPS.len()],
-    /// Every non-empty grouped bucket of every tracked path, one buffer per
-    /// [`SPARK_GROUPS`] entry, held between ticks so [`Self::repeak`] allocates
-    /// nothing.
+    /// Every tracked path's levelled **source** buckets, oldest path first, held
+    /// between ticks so [`Self::repeak`] allocates nothing.
     ///
     /// **A denominator stopped being expressible as a running pair**
     /// ([#256](https://github.com/breferrari/vigia/issues/256)): the rule takes a
     /// median before it takes a mean, and a median needs the values. This is
     /// where they go.
     ///
+    /// **Source buckets rather than grouped ones, which is what keeps the
+    /// figures in order.** See the paragraph in [`Self::repeak`] about a coarser
+    /// rung: deciding what is outlying once, at the finest resolution, leaves
+    /// every rung summing one kept series, and that is the whole of why the
+    /// figures come out non-decreasing without anything asserting that they do.
+    ///
     /// **Reused rather than reallocated, and the capacity is the point.** At the
-    /// [`HISTORY_PATHS`] cap these hold 24 + 12 + 6 `u32` per track, which is
-    /// forty-three kilobytes, allocated once and `clear`ed on every walk. I3
-    /// bounds RSS *drift*, and a fixed buffer of that size is the same trade
-    /// [#161](https://github.com/breferrari/vigia/issues/161) made when the store
-    /// went from 4KiB to 60KiB.
-    scratch: [Vec<u32>; SPARK_GROUPS.len()],
+    /// [`HISTORY_PATHS`] cap this holds [`HISTORY_BUCKETS`] `u32` per track,
+    /// which is twenty-four kilobytes, allocated once and `clear`ed on every
+    /// walk. I3 bounds RSS *drift*, and a fixed buffer of that size is the same
+    /// trade [#161](https://github.com/breferrari/vigia/issues/161) made when the
+    /// store went from 4KiB to 60KiB.
+    scratch: Vec<u32>,
+    /// The non-empty members of [`Self::scratch`], which is the population the
+    /// median is taken over.
+    ///
+    /// **Separate because the two want opposite things.** `scratch` must stay in
+    /// path order so it can be walked one track's buckets at a time, and taking a
+    /// median reorders whatever it is given. Copying the non-empty values out is
+    /// what lets both hold: this one is reordered freely and read once.
+    ///
+    /// **The zeroes are left behind for the reason they always were**: a worktree
+    /// is idle most of the time, so a median over them would measure how long the
+    /// reader has been away rather than how large a write is.
+    busy: Vec<u32>,
     /// Every tracked path added together, kept current by the walk that finds
     /// the peak. See [`History::worktree_churn`].
     worktree: Churn,
@@ -951,7 +1006,8 @@ impl History {
             tick: 0,
             opened: now,
             scales: [0; SPARK_GROUPS.len()],
-            scratch: std::array::from_fn(|_| Vec::new()),
+            scratch: Vec::new(),
+            busy: Vec::new(),
             worktree: Churn::default(),
             stats: HistoryStats::default(),
         }
@@ -1370,9 +1426,11 @@ impl History {
                 *total = total.saturating_add(count);
             }
         }
-        // Streamed rather than collected: this used to build a `Vec` of every
-        // drawn bucket of every path on the frame path, per tick, and `scale_of`
-        // takes an iterator precisely so it need not.
+        // **Collected rather than streamed, since
+        // [#256](https://github.com/breferrari/vigia/issues/256).** This walked
+        // the buckets through an iterator so nothing had to hold them, and the
+        // rule now takes a median, which no running pair can answer.
+        // [`Self::scratch`] is what keeps that from costing an allocation a tick.
         // **Measured rather than assumed, since this is the frame path.** At the
         // full 256-path cap over a populated window, the tick that recomputes
         // this costs **144µs mean and 191µs worst**, against I9's 16ms: under one
@@ -1404,46 +1462,64 @@ impl History {
         // running `(sum, busy)` per grouping while the rule was a plain mean, and
         // the rule now takes a median first, which no running pair can answer.
         // [`Self::scratch`] is what keeps that from being an allocation per tick:
-        // the buffers are cleared and refilled, so the cost of the change is the
-        // gather rather than the memory.
-        for gathered in &mut self.scratch {
-            gathered.clear();
-        }
+        // it is cleared and refilled, so the cost of the change is the gather
+        // rather than the memory. The kernel still runs once per track, which is
+        // the term that costs.
+        self.scratch.clear();
+        self.scratch
+            .reserve(self.tracks.len().saturating_mul(HISTORY_BUCKETS));
         for track in self.tracks.values() {
-            let buckets = track.levelled();
-            for (gathered, group) in self.scratch.iter_mut().zip(SPARK_GROUPS) {
+            self.scratch.extend_from_slice(&track.levelled());
+        }
+
+        // **What is outlying is decided once, at the source resolution, and then
+        // every rung sums one kept series.** That ordering is not a detail: it is
+        // what makes a coarser rung's figure provably no smaller than a finer
+        // rung's, which `SPEC.md` §11.1 requires as *a rung is a change of
+        // resolution and not of height*.
+        //
+        // The proof is one line and it is worth stating, because the first shape
+        // of this row broke it and then asserted the conclusion back. Grouping
+        // puts every source bucket in exactly one group, so the kept **sum** is
+        // the same whichever rung is drawn; merging buckets can only reduce the
+        // number of non-empty ones; so `13/10 * sum / busy` is non-decreasing as
+        // the rung coarsens, by arithmetic. Take the cut per grouping instead and
+        // each rung keeps a *different* sum, the shared term is gone and the
+        // ordering goes with it: measured on `tests/rows.rs`'s one-path fixture,
+        // that shape produced 418, 837 and **302**, so coarsening the rung drew
+        // every bar taller. This one produces 418, 837 and 1116.
+        //
+        self.busy.clear();
+        self.busy.reserve(self.scratch.len());
+        self.busy
+            .extend(self.scratch.iter().copied().filter(|bucket| *bucket > 0));
+        let Some(cut) = outlier_cut(&mut self.busy) else {
+            // Nothing tracked, or a window that holds only empties. Every figure
+            // is zero, which every caller reads as "no scale yet".
+            self.scales = [0; SPARK_GROUPS.len()];
+            self.worktree = Churn(worktree);
+            return;
+        };
+        let mut parts = [(0u64, 0u64); SPARK_GROUPS.len()];
+        for buckets in self.scratch.chunks(HISTORY_BUCKETS) {
+            for (part, group) in parts.iter_mut().zip(SPARK_GROUPS) {
                 for chunk in buckets.chunks(group) {
-                    let total = chunk.iter().copied().fold(0u32, u32::saturating_add);
+                    // The kept series, summed at this rung. A source bucket past
+                    // the cut contributes nothing here and still draws at its own
+                    // height: this decides the yardstick, never the bar.
+                    let total = chunk
+                        .iter()
+                        .copied()
+                        .filter(|bucket| u64::from(*bucket) <= cut)
+                        .fold(0u32, u32::saturating_add);
                     if total > 0 {
-                        gathered.push(total);
+                        part.0 += u64::from(total);
+                        part.1 += 1;
                     }
                 }
             }
         }
-        // **A coarser rung's yardstick is never below a finer rung's, and that
-        // is a fact about the quantity rather than about the estimator.** A drawn
-        // bucket summing more source buckets cannot be worth less than one
-        // summing fewer, so the figures are non-decreasing down
-        // [`SPARK_GROUPS`]. It held by arithmetic while the rule was a plain mean
-        // and stopped holding when the rule acquired an outlier cut
-        // ([#256](https://github.com/breferrari/vigia/issues/256)): a *robust*
-        // statistic needs a bulk to be robust about, and the coarsest grouping of
-        // a worktree with one tracked path has three buckets to find one in. A
-        // lone write decays into a geometric ramp, three points of a ramp read as
-        // a bulk of two and an outlier, and the coarsest figure came out **below
-        // the finest** — 418, 837, 302 on `tests/rows.rs`'s fixture. Coarsening
-        // the rung then made every bar taller, which is exactly what `SPEC.md`
-        // §11.1 promises a rung does not do.
-        //
-        // Clamping here rather than widening the cut, because the cut is right
-        // where it can see a distribution and this is the case where it cannot.
-        // On a worktree with eight tracked paths the figures are already
-        // non-decreasing (151, 282, 566) and this step changes nothing.
-        let mut floor = 0;
-        for (scale, gathered) in self.scales.iter_mut().zip(self.scratch.iter_mut()) {
-            *scale = scale_of_busy(gathered).max(floor);
-            floor = *scale;
-        }
+        self.scales = std::array::from_fn(|at| scale_from(parts[at].0, parts[at].1));
         self.worktree = Churn(worktree);
     }
 }

@@ -497,18 +497,20 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     /// reads its top as outlying and takes the two tallest out of the mean.
     ///
     /// **What that costs on screen is two cells, and on this pane none at all**,
-    /// which is worth stating because the figure moved by 5.6x. At the finest
+    /// which is worth stating because the finest figure moved by 5.6x. At that
     /// rung the strip goes from `______________▁▁▁▁▁▁▃▆██` to
     /// `______________▁▁▁▁▃▆████`; at the rung eighty columns affords it does not
     /// move, and the snapshot below is unchanged.
     ///
-    /// **The third entry equals the second, and that is the clamp rather than a
-    /// coincidence.** `History::repeak` keeps a coarser rung's figure from
-    /// falling below a finer rung's, and on this fixture the coarsest grouping
-    /// has three buckets to find a bulk in and came out at 302. Delete the clamp
-    /// and this reads `[418, 837, 302]`, which is a coarser rung drawing *taller*
-    /// bars than a finer one.
-    const PINNED: [u32; 3] = [418, 837, 837];
+    /// **The set is non-decreasing and nothing asserts that it is.** A coarser
+    /// rung sums more source buckets into each drawn one, so its figure cannot be
+    /// smaller, and `History::repeak` gets that from arithmetic rather than from a
+    /// clamp: what is outlying is decided once at the source resolution, so every
+    /// rung sums one kept series and the shared total cancels. Deciding it per
+    /// grouping instead was the first shape of #256 and it read
+    /// `[418, 837, 302]` here, a coarser rung drawing *taller* bars than a finer
+    /// one.
+    const PINNED: [u32; 3] = [418, 837, 1_116];
     // **The producer, not the decider.** `spark_of` and the painter are mutation
     // tested from every side in `render.rs`, and every one of those fixtures
     // hands `View` a `peak` by hand. Nothing drove a *recorded* one through

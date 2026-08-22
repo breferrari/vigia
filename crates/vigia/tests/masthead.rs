@@ -887,9 +887,6 @@ const LONG_BURST_THEN_ORDINARY: [u32; HISTORY_SAMPLES] = {
     s
 };
 
-/// Levels one band row carries, restated for [`WINDOW_SAMPLES`]'s reason.
-const ROW_LEVELS: usize = 8;
-
 /// One loud burst does not press every ordinary write onto the floor.
 ///
 /// **[#256](https://github.com/breferrari/vigia/issues/256), reported from a live
@@ -910,21 +907,26 @@ const ROW_LEVELS: usize = 8;
 /// seven distinct heights**.
 #[test]
 fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
-    // **Two traces, and the second is not a duplicate.** The reported shape and
-    // a burst three times as long bind opposite ends of the multiple the cut is
-    // taken at: a burst filling a third of the window is what puts the floor back
-    // if the multiple is raised, and the reported shape is what the multiple was
-    // fixed for.
+    // **Two traces, and the second is not a duplicate.** They bind opposite ends
+    // of the multiple the cut is taken at: a burst filling a third of the window
+    // is what puts the floor back if the multiple is raised, and the reported
+    // shape, whose burst covers about a fifth, is what the multiple was fixed
+    // for.
     for (name, series) in [
         ("reported", BURST_THEN_ORDINARY),
         ("long burst", LONG_BURST_THEN_ORDINARY),
     ] {
-        // Both rungs, because the band draws the same graph at each since #244 and
-        // the reader who reported this was on a pane that detects braille.
-        for pane in [Glyphs::Block, Glyphs::Braille] {
+        // **One rung, because a second would compute the same vector.**
+        // `column_heights` decodes with [`Glyphs::BAND`] whatever the pane
+        // detects, and `the_band_draws_at_the_block_rung_whatever_the_pane_detects`
+        // pins `band_at` as identical at every rung across exactly these widths.
+        // Sweeping panes here would double the renders and assert that gate's
+        // claim a second time, which is where it belongs and not here.
+        let pane = Glyphs::Block;
+        {
             for width in [40u16, 60, 80, 109, 124] {
                 let heights = column_heights(width, series, pane);
-                let ceiling = GRAPH_ROWS * ROW_LEVELS;
+                let ceiling = GRAPH_ROWS * RAMP.len();
 
                 // **Non-vacuity first, and it is two claims.** The trace has to carry
                 // a genuinely loud event, or there is no yardstick to be dragged; and
@@ -959,8 +961,15 @@ fn a_burst_does_not_press_the_ordinary_writes_onto_the_floor() {
                 );
 
                 // And the shape is back, not merely off the floor. Seven is what the
-                // reported picture drew, so more than that is the claim.
-                let drawn = distinct_heights(width, series, pane);
+                // reported picture drew, so more than that is the claim. Counted
+                // off the vector already in hand rather than through
+                // `distinct_heights`, which would render the same band again.
+                let drawn = {
+                    let mut seen = heights.clone();
+                    seen.sort_unstable();
+                    seen.dedup();
+                    seen.len()
+                };
                 assert!(
                     drawn > 7,
                     "{name}, {pane:?} at {width}: the band drew {drawn} distinct \
@@ -999,12 +1008,20 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
         u32::try_from(busy.iter().sum::<u64>() * 13 / (busy.len() as u64 * 10)).expect("a scale")
     }
 
-    let mut compared = 0usize;
     for series in [QUARTERED, BURSTY, wave(), [7; HISTORY_SAMPLES]] {
         for width in [40u16, 60, 80, 109, 124] {
-            // The drawn series, which is what the band divides: the levelled
-            // projection onto the sub-columns the pane affords, not the samples.
-            let slots = usize::from(width) * Glyphs::BAND.density();
+            // **The drawn series, which is what the band divides**, and the span
+            // is read off the axis row rather than off `width`. The band is
+            // planned inside the pane's margin and the scrollbar's reserve, so
+            // levelling onto the raw width would divide a projection no pane ever
+            // produces: at forty columns the band draws about thirty-seven
+            // sub-columns. The axis is solid since #232, so its ink is exactly
+            // that span.
+            let axis = band_at(width, series, Glyphs::Block)
+                .last()
+                .expect("a band row")
+                .clone();
+            let slots = drawn_ink(&axis) * Glyphs::BAND.density();
             let levelled = Churn(series).levels(slots);
             assert_eq!(
                 vigia_core::scale_of(levelled.iter().copied()),
@@ -1012,10 +1029,8 @@ fn a_window_with_a_wide_range_is_scaled_as_it_always_was() {
                 "the outlier cut fired on a window with nothing outlying in it, \
                  at {width} columns"
             );
-            compared += 1;
         }
     }
-    assert!(compared > 0, "this gate compared nothing");
 }
 
 /// Distinct heights in a drawn band, which is the resolution a reader sees.

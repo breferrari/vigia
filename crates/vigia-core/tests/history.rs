@@ -748,12 +748,22 @@ fn a_majority_burst_still_sets_the_yardstick() {
 /// [#256](https://github.com/breferrari/vigia/issues/256) nothing asserted it,
 /// because a plain mean could not violate it.
 ///
-/// The cut can, on a population too small to hold a bulk. **One tracked path with
-/// one write is the case**, and it is not exotic: the kernel spreads a lone write
-/// into a geometric ramp, the coarsest grouping has three buckets of it, and
-/// three points of a ramp read as a bulk of two and an outlier. Measured on this
-/// fixture the raw figures are 418, 837 and **302**, so coarsening the rung would
-/// have made every bar taller.
+/// **It is arithmetic rather than a clamp, and the difference is what this gate
+/// is really for.** Grouping puts every source bucket in exactly one group, so
+/// the kept sum is the same whichever rung is drawn, and merging buckets can only
+/// reduce the number of non-empty ones; thirteen tenths of sum over count is
+/// therefore non-decreasing as the rung coarsens. That proof needs the outlying
+/// set decided **once**, at the source resolution, so that the sum is shared.
+/// Decide it per grouping and each rung keeps a different sum, the shared term is
+/// gone, and the ordering goes with it: that was the first shape of
+/// [#256](https://github.com/breferrari/vigia/issues/256) and it produced 418,
+/// 837 and **302** on the one-path fixture below, a coarser rung drawing every
+/// bar taller.
+///
+/// **One tracked path with one write is where it breaks first**, and it is not
+/// exotic: the kernel spreads a lone write into a geometric ramp, the coarsest
+/// grouping has three buckets of it, and three points of a ramp read as a bulk of
+/// two and an outlier.
 #[test]
 fn a_coarser_rung_is_never_measured_against_less() {
     let now = base();
@@ -763,8 +773,9 @@ fn a_coarser_rung_is_never_measured_against_less() {
     lone.record_sized([("src/lib.rs", Some(4_000))], now);
     lone.record_sized([("src/lib.rs", Some(28_000))], now);
 
-    // And a populated worktree, where the estimator already answers in order and
-    // the clamp changes nothing. Both, so this is not a gate about one fixture.
+    // And a populated worktree, where the population is large enough that the cut
+    // would answer in order however it were taken. Both, so this is not a gate
+    // about one fixture.
     let mut many = History::starting_at(now);
     for step in 0..8u32 {
         for file in 0..8u32 {
