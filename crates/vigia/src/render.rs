@@ -4534,8 +4534,14 @@ impl Painter<'_> {
         // ruling: a density from one rung and a level count from another would
         // draw a band nothing could decode. [`Glyphs::BAND`] carries the reason
         // and its measurements.
-        let glyphs = Glyphs::BAND;
-        let density = glyphs.density();
+        //
+        // **Named `rung` rather than `glyphs`**, which is `Painter`'s own field
+        // for the rung the *pane* detected. Fifty lines below, a `glyphs.levels()`
+        // would read as that field and a reader would have to come back up here
+        // to learn it is not: the shadowing name is the half-following this
+        // comment is about, reintroduced one identifier down.
+        let rung = Glyphs::BAND;
+        let density = rung.density();
         // **The pane can ask for more sub-columns than the window holds samples,
         // and then values repeat rather than run out.** `btop` never meets this
         // because its buffer is sized to the pane, keeping `width * 2` samples;
@@ -4586,7 +4592,7 @@ impl Painter<'_> {
         // Levels one row carries. The block ramp gives eight, a 2x4 cell gives
         // its dot rows less the baseline, and [`Glyphs::glyph`] already spells
         // both, floor included: level zero is the axis rather than nothing.
-        let levels = glyphs.levels();
+        let levels = rung.levels();
 
         for cell in 0..width {
             // A dense cell carries two sub-columns, left older than right, which
@@ -4615,7 +4621,7 @@ impl Painter<'_> {
                 if row > 0 && low == 0 && high == 0 {
                     continue;
                 }
-                let glyph = glyphs.glyph(low, high);
+                let glyph = rung.glyph(low, high);
                 let x = left_edge.saturating_add(cell as u16);
                 self.bar_cell(x, y, glyph, self.theme.spark_at(band));
             }
