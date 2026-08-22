@@ -939,10 +939,14 @@ impl App {
                 // file inherited the number, which is worse than the heading it
                 // replaced.
                 //
-                // [`Self::newest`] is the path the jump was made for, set by
-                // `follow` immediately before it, so this is a string compare
-                // against a list the frame already holds: no read, no `stat`,
-                // no diff, exactly as `follow` itself is.
+                // [`Self::newest`] is the path the last tick named, which the
+                // jump was made for whenever there was one, so this is a string
+                // compare against a list the frame already holds: no read, no
+                // `stat`, no diff, exactly as `follow` itself is. A tick that
+                // reached no jump has overwritten it, and the debt is dropped on
+                // that alone, which is the conservative direction and what
+                // `a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed`
+                // rules.
                 landing: owed,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See

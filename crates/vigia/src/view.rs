@@ -1608,7 +1608,8 @@ impl View {
         } = file;
         let mut n = 0usize;
 
-        // **Built whether or not the heading fits, and recorded either way.**
+        // **Built for the row when the heading fits, and recorded when it does
+        // not and a list exists to read the record.**
         // The record is what lets [`View::take_list`] draw the same file without
         // asking the frame for it a second time, and a `Frame::diff` for a file
         // written in the last two seconds is a second whole-file *read* rather

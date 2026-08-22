@@ -500,7 +500,7 @@ fn a_position_survives_the_file_it_points_at_being_committed() {
 /// against: a Swift test file carrying a 76-line deletion that the reader could
 /// not see, because follow put the heading on the top row and the deletion was
 /// below the bottom one. Three small edits above it are what push it there; a
-/// two-hunk file puts its second header nine rows down, which fits on any pane
+/// two-hunk file puts its second header ten rows down, which fits on any pane
 /// and would make this gate pass against the old behaviour.
 ///
 /// Written out rather than built from [`Scratch::sparse_edits`] because the
@@ -1064,16 +1064,94 @@ fn an_advance_that_renumbers_the_files_drops_a_landing_armed_before_it() {
         0,
         "the viewport landed inside a file no tick ever named"
     );
+}
 
-    // **And the refusal settles the debt rather than deferring it.** The guard
-    // is re-read every frame, so a debt kept here fires the moment an index
-    // names that path again, on a frame no tick armed. Opening the sheet moves
-    // no viewport at all and is where a reader would meet it.
+#[test]
+fn a_refused_landing_is_settled_rather_than_deferred() {
+    // **The guard is re-read every frame**, so refusing a landing and keeping it
+    // is not the same as dropping it: the debt fires the moment an index names
+    // the followed path again, on a frame no tick armed.
+    //
+    // The fixture is what makes that reachable, and the renumbering gate above
+    // cannot do it: there the followed file keeps an index no later frame points
+    // at, so the guard refuses forever and a kept debt is indistinguishable from
+    // a dropped one. Here the two files *around* the followed one are committed,
+    // so the position is out of range on the frame that refuses, and
+    // `View::collect` then clamps it back onto the followed file. The next frame
+    // is the one that would fire.
+    //
+    // Opening the gestures sheet is where a reader would meet it: `ToggleSheet`
+    // moves no viewport at all, and its own ruling is that a reader who opens it
+    // and closes it is looking at the screen they left.
+    let scratch = Scratch::new("shell-follow-deferred");
+    scratch.write("src/aaa.rs", "fn a() {}\n");
+    scratch.write("src/zzz.rs", "fn z() {}\n");
+    scratch.write(TALL, support::numbered_lines(TALL_LINES));
+    scratch.commit_all("baseline");
+
+    scratch.write("src/aaa.rs", "fn a() { let staged = 1; }\n");
+    scratch.write("src/zzz.rs", "fn z() { let staged = 1; }\n");
+    let mut lines: Vec<String> = support::numbered_lines(TALL_LINES)
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    for at in TWEAKS {
+        lines[at] = format!("line {} rewritten", at + 1);
+    }
+    lines.drain(CUT_AT..CUT_AT + CUT_LINES);
+    scratch.write(TALL, format!("{}\n", lines.join("\n")));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    frame.advance().expect("advance");
+    assert!(app.follow(TALL, &frame), "the tick armed nothing");
+    assert_eq!(
+        app.position().file,
+        1,
+        "the fixture did not arm on index one"
+    );
+
+    scratch.git(&["add", "src/aaa.rs", "src/zzz.rs"]);
+    scratch.git(&["commit", "-m", "the agent commits around the followed file"]);
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        1,
+        "the commit left more than the followed file behind"
+    );
+
+    let layout = body_layout(
+        Rect::new(0, 0, 80, 24),
+        &app.chrome("fixture", None, None, None, None, None),
+        frame.files().len(),
+    );
+    let refused = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    assert!(
+        !refused.landed,
+        "the landing resolved against an index that was out of range"
+    );
+    // The clamp is what sets the trap: the position now names the followed file
+    // again, so a debt kept above would be servable from here.
+    assert_eq!(app.position().file, 0, "the position was not clamped back");
+    assert_eq!(
+        frame.files()[0].path,
+        TALL,
+        "the clamped position does not name the followed file, so a kept debt \
+         would still be refused and this proves nothing"
+    );
+
     app.apply(Action::ToggleSheet, &mut frame, layout.diff)
         .expect("apply");
     let after = app
         .view(&mut frame, &mut highlighter, &history, layout)
         .expect("view");
+
     assert!(
         !after.landed,
         "the refused landing was kept and resolved on a later frame, so opening \
@@ -1202,7 +1280,7 @@ fn a_pane_with_no_list_builds_no_entry_it_cannot_draw() {
     // heat projection over that file's whole diff, every frame.
     //
     // No counter in `FrameStats` moves for it, because building an entry reads
-    // nothing: it walks lines the frame already holds. So `View::entries` is
+    // nothing: it walks lines the frame already holds. So `View::recorded` is
     // what this asserts on, and it exists for this. Mutating the guard to `true`
     // survived every other gate in the suite, which is what asked for it.
     let scratch = tall("shell-follow-listless");
