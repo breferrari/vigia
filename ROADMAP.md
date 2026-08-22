@@ -424,7 +424,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Under a level, the braille rung draws a coarser graph than the block rung | [#244](https://github.com/breferrari/vigia/issues/244) |
+| ⬜ | Braille returns to the band, and the rung stops being a constant | [#244](https://github.com/breferrari/vigia/issues/244) |
 | ✅ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
 | ✅ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |
 | ✅ | File-granular navigation: `n`/`p`, digits jump to a listed file | [#122](https://github.com/breferrari/vigia/issues/122) |
