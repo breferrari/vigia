@@ -568,7 +568,7 @@ pub struct View {
     /// diff region and a worktree with no changed files, and a request dropped
     /// in either would leave a reader on the heading for good: the tick that
     /// would have re-armed it has already been spent. False whenever nothing was
-    /// asked for, so a caller can clear unconditionally on it.
+    /// asked for, so a caller reading it needs no separate test for that.
     pub landed: bool,
     /// Files this viewport asked the frame for, drawn or merely crossed.
     ///
@@ -750,11 +750,16 @@ fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> u
 /// above it**, and the first draft of this tested the header. On a pane one row
 /// shorter than the hunk's lead-in that draws the reader a bare hunk header with
 /// none of its content under it, which is #257's own reported symptom with the
-/// gate reporting it handled; at the floor `Body::split` gives the diff a single
-/// row, so the whole region became one `@@` line where the heading it replaced
-/// carried the path, the counts, the sigil and the strip. So the visibility test
-/// is the busiest hunk's first changed line, and the row landed on is still its
-/// header, because a change arrives with the `@@` that says where it is.
+/// gate reporting it handled. So the visibility test is the busiest hunk's first
+/// changed line, and the row landed on is still its header, because a change
+/// arrives with the `@@` that says where it is.
+///
+/// **Which makes it two tests rather than one**, and the second is the floor:
+/// a landing is worth the heading only if the change is drawn *from the
+/// landing* as well as not drawn from the heading. `Body::split` gives the diff
+/// a single row at its floor, where the first draft put one bare `@@` in the
+/// whole region and the heading it replaced carried the path, the counts, the
+/// sigil and the strip.
 ///
 /// **The busiest hunk rather than the first.** A block is a heading and then a
 /// header plus lines per hunk ([`span_of`]), so the first hunk's header is
