@@ -353,6 +353,8 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     );
 
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -448,6 +450,8 @@ fn file(path: &str, added: u32, removed: u32) -> Row {
 /// A view with the shape a real frame produces: a file, a hunk, mixed lines.
 fn one_file() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -636,6 +640,8 @@ fn a_content_row_stands_its_sigil_off_the_line() {
 /// A worktree with nothing in it, which is the screen the tool sits on most.
 fn nothing_changed() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -895,6 +901,8 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
 fn ragged_counts() -> View {
     let row = |path: &str, added: u32, removed: u32| Row::file(listed(path, added, removed));
     View {
+        landed: false,
+        recorded: 0,
         list: vec![
             listed("src/engine/watch.rs", 139, 131),
             listed("src/render/frame.rs", 42, 7),
@@ -2053,6 +2061,8 @@ fn a_detached_head_names_no_branch_anywhere() {
 #[test]
 fn a_file_with_no_line_diff_says_why() {
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2104,6 +2114,8 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     // nothing. This is the truncated-to-useless shape I6 forbids, and it is the
     // one part of I6 the renderer decides on its own rather than by layout.
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2132,6 +2144,8 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     // file produces a single-line hunk. Found by mutation, which is also why it
     // has a test of its own rather than a comment.
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2414,6 +2428,8 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     // screen rather than one row. Both arrive from ordinary files that nobody
     // wrote for a display.
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2448,6 +2464,8 @@ fn a_double_width_character_is_never_cut_in_half() {
     // failure only happens when a character straddles the exact clip boundary,
     // so a single width tests one alignment out of two.
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2503,6 +2521,8 @@ fn the_gutter_gives_way_before_the_text_does() {
     // than a readable column. Both sides are asserted, because a rule that only
     // ever fires one way is not a rule.
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2588,6 +2608,8 @@ fn hostile_content_never_panics_at_any_pane_size() {
         }; HEAT_BUCKETS],
     };
     let view = View {
+        landed: false,
+        recorded: 0,
         list: vec![saturated.clone(), listed("a.rs", 0, 0)],
         list_top: 0,
         current_span: 400,
@@ -3026,6 +3048,8 @@ fn a_tab_counts_its_columns_from_the_line_rather_than_from_its_span() {
 /// able to fail.
 fn glancing() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -3793,6 +3817,8 @@ fn the_four_heat_kinds_reach_the_cells_and_are_distinct() {
 /// viewport has scrolled, which is what the diff's scrollbar reads.
 fn two_regions_at(current: usize, row: usize) -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: vec![
             entry("src/engine/change.rs", 8, 2),
             entry("src/engine/watch.rs", 42, 7),
@@ -4233,6 +4259,8 @@ fn a_one_row_region_with_somewhere_to_scroll_still_spends_no_column() {
 /// A pinned list of `shown` rows over `files` changed files, scrolled to `top`.
 fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: (0..shown)
             .map(|i| entry(&format!("src/f{i}.rs"), 1, 0))
             .collect(),

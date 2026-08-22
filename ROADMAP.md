@@ -445,7 +445,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The sparkline's bucket ceiling was the band's period, and that period is gone | [#234](https://github.com/breferrari/vigia/issues/234) |
 | ✅ | The region model assumes a vertical stack, so a rail cannot be expressed in it | [#251](https://github.com/breferrari/vigia/issues/251) |
 | ✅ | An agent's write is how the grammar compile arrives, and the warmer only ever ran at launch | [#129](https://github.com/breferrari/vigia/issues/129) |
-| ⬜ | Follow jumps to the changed file's heading, so a change low in a long file lands off screen | [#257](https://github.com/breferrari/vigia/issues/257) |
+| ✅ | Follow jumps to the changed file's heading, so a change low in a long file lands off screen | [#257](https://github.com/breferrari/vigia/issues/257) |
 | ⬜ | Under a level, the braille rung draws a coarser graph than the block rung | [#244](https://github.com/breferrari/vigia/issues/244) |
 | ⬜ | decision: the graph does not age, and I1 forbids the clock that would age it | [#243](https://github.com/breferrari/vigia/issues/243) |
 | ⬜ | One loud burst sets the band's yardstick, so a sparse window draws as spikes on a floor | [#256](https://github.com/breferrari/vigia/issues/256) |

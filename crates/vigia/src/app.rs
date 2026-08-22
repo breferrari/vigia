@@ -117,6 +117,22 @@ pub struct App {
     /// `SPEC.md` §11.1 rules. One path, replaced per tick: bounded by one
     /// string rather than by the session, so I3 never sees it.
     newest: Option<String>,
+    /// Whether the next frame owes the position its row, because follow placed
+    /// it.
+    ///
+    /// **A debt, the way [`Self::paint`] is one**, and for the same reason:
+    /// [`Self::follow`] takes `&Frame` so that following cannot diff, cannot
+    /// read and cannot `stat` (I4), which leaves it able to name the file and
+    /// nothing else. Where in that file the change sits is a question only a
+    /// diff answers, and the frame's diff for the one file that just changed is
+    /// the *previous* tick's until the draw re-reads it. So the jump names the
+    /// file here and [`View::collect`] resolves the row while it has the fresh
+    /// diff in hand, for nothing.
+    ///
+    /// Set by [`Self::jump_to_newest`] alone. The digits, a list click and
+    /// `n`/`p` all go through [`Self::jump_to`] and keep the heading, which is
+    /// `SPEC.md` §11.1's ruling for them and is unchanged.
+    landing: bool,
     /// First file the pinned list shows.
     ///
     /// A second window onto one file list, and deliberately **not** derived from
@@ -226,6 +242,9 @@ impl Default for App {
             list_follows: true,
             list_rows: 0,
             newest: None,
+            // Genuinely the derived answer: nothing has been followed, so
+            // nothing is owed a row.
+            landing: false,
             mode: Mode::default(),
             // Genuinely the derived answer, unlike `following`: a shell that
             // has drawn nothing has drawn nothing.
@@ -439,9 +458,14 @@ impl App {
     /// to the bytes the index already holds. There is no newest *change* then,
     /// so the view stays where it is instead of jumping somewhere arbitrary.
     ///
-    /// Row zero rather than a computed offset. The heading is the top of what
-    /// changed, and finding any other row would mean asking how tall the file
-    /// is, which costs the diff this method exists to avoid.
+    /// **Names the file and owes the row**, which is
+    /// [#257](https://github.com/breferrari/vigia/issues/257) and is the one
+    /// place this map does not resolve a jump to row zero. The heading is the
+    /// top of what changed and not always the change itself, and finding the
+    /// row that is means asking how tall the file is, which costs the diff this
+    /// method exists to avoid. So it is not asked here: [`Self::landing`] is set
+    /// instead, and [`View::collect`] resolves the row from a diff it has
+    /// already fetched. Until #257 this landed on the heading and said so.
     fn jump_to_newest(&mut self, frame: &Frame) -> bool {
         let Some(newest) = self.newest.as_deref() else {
             return false;
@@ -458,11 +482,35 @@ impl App {
             return false;
         };
         self.jump_to(file);
+        // **And the row is owed.** `jump_to` puts the top of the block on the
+        // top row, which is the whole of every other jump on this map and was
+        // the whole of this one until
+        // [#257](https://github.com/breferrari/vigia/issues/257): on a file
+        // whose diff runs to several screens the heading and the change are not
+        // the same place, and I5 promises the change. Nothing here can find that
+        // row (see [`Self::landing`]), so the request is carried to the frame
+        // that can.
+        self.landing = true;
         // A jump moves the diff, so the map goes back to following it. Follow
         // mode dragging the view to a file the pinned list was not showing is
         // exactly when a reader most needs the two to agree.
         self.list_follows = true;
         true
+    }
+
+    /// Whether the viewport still points at the file [`Self::newest`] names.
+    ///
+    /// The guard on an owed landing, and the reason is on the call site in
+    /// [`Self::view`]. False when the changed set has moved under the position,
+    /// which is ordinary rather than exceptional on the pane this tool is for.
+    fn still_the_followed_file(&self, frame: &Frame) -> bool {
+        let Some(newest) = self.newest.as_deref() else {
+            return false;
+        };
+        frame
+            .files()
+            .get(self.position.file)
+            .is_some_and(|change| change.path == newest)
     }
 
     /// Apply one intention.
@@ -482,6 +530,22 @@ impl App {
         // silently: follow mode would simply keep dragging the reader back.
         if action.is_manual_scroll() {
             self.following = false;
+            // **And an owed landing is settled**, which belongs here for the
+            // reason the line above does. A tick and a keystroke coalesce into
+            // one batch, so a request armed by the follow can still be
+            // unresolved when this runs, and resolving it afterwards draws over
+            // the row the reader just asked for.
+            //
+            // **This predicate is the whole rule**, rather than a clear at each
+            // site that moves the view, and the three routes below are why no
+            // smaller site covers it. `n` and `p` do not go through
+            // `Self::scroll`, and at either end of the changed set they reach no
+            // jump either. A digit goes through `Self::jump_to`. A drag on the
+            // diff's bar goes through neither and writes a position of its own.
+            // `Action::is_manual_scroll` calls all of them a manual scroll, so
+            // every gesture that moves the viewport by a reader's intent is one
+            // of these.
+            self.landing = false;
             // **And the map is handed back.** Every action that reaches here
             // moves the diff, and a reader who moves the diff is asking to see
             // where it went; a window left behind from an earlier `J` would be
@@ -502,6 +566,13 @@ impl App {
                 self.following = !self.following;
                 if self.following {
                     self.jump_to_newest(frame);
+                } else {
+                    // **Disengaging settles an owed landing.** A tick and the
+                    // keystroke can arrive in one batch, so `f` can run with a
+                    // request the frame has not resolved yet, and resolving it
+                    // afterwards would move the viewport for a reader who has
+                    // just asked the view to stop moving itself.
+                    self.landing = false;
                 }
             }
             // **No jump, unlike follow.** Re-engaging follow is a move as well
@@ -684,13 +755,27 @@ impl App {
     ///
     /// Row zero because a jump lands on the file's **heading**. Finding any
     /// other row means asking how tall the file is, which costs the diff I4
-    /// forbids, so this is the one resolution every jump on this map shares:
-    /// follow, `g`, `G`, a click on a listed file, a digit, and `n`/`p`.
+    /// forbids, so this is the resolution every jump on this map shares: `g`,
+    /// `G`, a click on a listed file, a digit, and `n`/`p`. **Follow starts
+    /// here too and is then moved off it**, which is [`Self::landing`] and
+    /// #257; every one of the keys named above keeps the heading, because
+    /// `SPEC.md` §11.1 gives them the *file* as their unit.
     ///
     /// `anchored` is cleared because that word means "reached by scrolling", and
     /// a jump is the other thing. See [`App::anchored`] for what it costs to get
     /// wrong: a viewport free to back up and fill a short tail moves the file the
     /// jump was *for* off the top row.
+    ///
+    /// **[`App::landing`] is not cleared here, and a draft of this cleared it.**
+    /// The debt has to be settled by every gesture that moves the viewport, or a
+    /// `G` or a digit inherits it and lands mid-file, which `SPEC.md` §11.1 rules
+    /// against by name for exactly those keys. That is one predicate rather than
+    /// a list of sites, and `Action::is_manual_scroll` is it: every caller of
+    /// this but [`App::jump_to_newest`] is one, so a clear here would be a second
+    /// statement of a rule already made and could never fire. Mutation testing is
+    /// what said so, by leaving the whole suite green without it. (A drag on the
+    /// diff's bar is a manual scroll too and settles the debt the same way, but
+    /// it does not come through here: it writes a position of its own.)
     ///
     /// The caller picks the index, and that is the whole of what the arms differ
     /// by. Nothing here bounds it: an arm that cannot say which file it means has
@@ -816,6 +901,14 @@ impl App {
         history: &History,
         body: Body,
     ) -> Result<View> {
+        // **Refused is settled, not deferred**, and taking it out of the clear
+        // below is what makes that true. A debt the guard refuses is a debt for a
+        // file the viewport is no longer on, and the guard is re-read every
+        // frame: kept, it fires the moment an index happens to name that path
+        // again, on a frame no tick armed. Reachable by opening the sheet, which
+        // moves no viewport and whose own ruling says a reader who opens it and
+        // closes it sees the screen they left.
+        let owed = self.landing && self.still_the_followed_file(frame);
         let view = View::collect(
             frame,
             highlighter,
@@ -831,6 +924,30 @@ impl App {
                 // `body_layout` already decided by giving the diff more than one
                 // row. A pane too short for a bar pays nothing.
                 measured: body.diff > 1,
+                // **Only for the file it was armed for**, which is the whole of
+                // the staleness rule and is one rule rather than a list of the
+                // ways an index can go stale. A landing names a *row inside a
+                // file* and the position holds an index, and
+                // [`vigia_core::Frame::advance`] renumbers every index whenever
+                // the changed set moves: a file committed, an edit reverted, a
+                // branch switched. Ticks coalesce and only the paint is shared,
+                // so an advance can happen between the follow that armed this
+                // and the frame that would resolve it, including on a tick that
+                // names no path at all and so never reaches [`Self::follow`].
+                // A `.git/index` write is exactly that. Resolved against the
+                // renumbered index, the viewport lands deep inside whichever
+                // file inherited the number, which is worse than the heading it
+                // replaced.
+                //
+                // [`Self::newest`] is the path the last tick named, which the
+                // jump was made for whenever there was one, so this is a string
+                // compare against a list the frame already holds: no read, no
+                // `stat`, no diff, exactly as `follow` itself is. A tick that
+                // reached no jump has overwritten it, and the debt is dropped on
+                // that alone, which is the conservative direction and what
+                // `a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed`
+                // rules.
+                landing: owed,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].
@@ -850,6 +967,10 @@ impl App {
             Paint::Plain | Paint::Coloured => Paint::Coloured,
         };
         self.position = view.top;
+        // **Cleared only once it was served.** A pane with no diff region
+        // resolves nothing, and forgetting the request there would leave a
+        // reader on the heading for good: the tick that armed it is spent.
+        self.landing = owed && !view.landed;
         self.list_rows = body.list;
         // Stored back for the reason the position is: resolution happens once,
         // in the code that knows where the diff landed, and a caller that kept

@@ -626,6 +626,8 @@ fn with_notice() -> Chrome {
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -686,6 +688,8 @@ fn every_row_kind() -> View {
 /// longer than any pane.
 fn awkward() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -714,6 +718,8 @@ fn awkward() -> View {
 
 fn empty() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -751,6 +757,8 @@ fn empty() -> View {
 /// records twice.
 fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: (0..listed)
             .map(|i| entry(&format!("src/f{i}.rs")))
             .collect(),
@@ -1000,6 +1008,8 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// colour its first bucket and would leave its last one cool.
 fn glancing() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2759,6 +2769,8 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2899,6 +2911,8 @@ fn a_clipped_content_line_says_it_continues() {
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
     let view = View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -4363,6 +4377,8 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 /// one does. A short diff would leave the sweep looking at the case that works.
 fn overlong(rows: usize) -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: vec![entry("src/f.rs")],
         list_top: 0,
         current_span: rows,

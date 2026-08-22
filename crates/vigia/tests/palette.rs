@@ -86,6 +86,8 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
 /// header, then context, added, removed.
 fn three_kinds() -> View {
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -673,6 +675,8 @@ fn graded_heat() -> View {
         removed: 0,
     };
     View {
+        landed: false,
+        recorded: 0,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
