@@ -1238,10 +1238,9 @@ fn the_guarded_grammar_highlights_identically() {
 /// lines of the roughly 3,000 these files hold (deliberately imprecise: an exact
 /// denominator is wrong the moment anyone edits one of these files, and this
 /// loop's own commits moved it twice), so **the tail of every file over 250
-/// lines is not
-/// covered here** and a pathological shape written below that line would be
-/// missed. The hand-written corpus covers shapes by kind; this one covers them
-/// by volume, and neither covers the other's blind spot.
+/// lines is not covered here** and a pathological shape written below that
+/// line would be missed. The hand-written corpus covers shapes by kind; this
+/// one covers them by volume, and neither covers the other's blind spot.
 #[test]
 fn the_repositorys_own_markdown_parses_identically_under_the_guard() {
     if !in_repository() {

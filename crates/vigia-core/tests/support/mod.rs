@@ -271,7 +271,8 @@ pub fn holds_p99_rounds(
         let excess = again.excess_over(budget);
         let overshoot = two.p99.saturating_sub(budget);
         // **Both sides are sums over the round, and that is the whole
-        // correction, in two parts.** This compared `deficit`, a whole round's off-CPU time,
+        // correction, in two parts.** This compared `deficit`, a whole round's
+        // off-CPU time,
         // against a single frame's excess over budget. Over a long round the
         // ordinary per-frame scheduling noise sums to more than one frame's
         // overshoot, so the test drifted toward "the host did it" as the sample

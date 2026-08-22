@@ -1826,7 +1826,8 @@ const PROSE_LINES: usize = 200;
 /// watching a documentation change actually has on screen: sentences with
 /// identifiers in backticks. Measured on that content before the fix, a worst
 /// 24-line screenful of this repository's own `ROADMAP.md` cost **229.48ms of
-/// parse against this 16ms budget** on Linux, fully warm, on every frame that redrew it.
+/// parse against this 16ms budget** on Linux, fully warm, on every frame
+/// that redrew it.
 ///
 /// The cause was Markdown's block-start lookahead exploring the inline-content
 /// alternation exponentially before concluding that a line with no `|` could not
