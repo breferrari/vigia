@@ -102,16 +102,25 @@ fn split(width: u16, height: u16, files: usize) -> Body {
 ///
 /// **What this proves, and what it does not.** The expected column is restated
 /// from the pane rather than read off the renderer's ladder, so a bar drawn in
-/// the wrong column reddens it. It cannot tell the two regions apart on its own:
-/// on every layout that exists today `Body::areas` spreads `..area` to both, so
-/// their rects share an `x` and a `width` and therefore a bar column, and a
-/// `regions` that handed `Bar::region` the wrong rect would still produce these
-/// two numbers. What catches that is
-/// `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`,
-/// which compares each region's reported rect against the one the painter draws
-/// into, and a mutation swapping the two reddens it along with eleven render
-/// gates. This one owns the narrower claim: the column is a region's own right
-/// edge, and it is `None` where no bar is drawn.
+/// the wrong column reddens it. It cannot tell the two regions apart **on this
+/// screen**: the pane here is eighty columns, which is a stacked layout, and
+/// there `Body::areas` spreads `..area` to both regions, so their rects share an
+/// `x` and a `width` and therefore a bar column. A `regions` that handed
+/// `Bar::region` the wrong rect would still produce these two numbers.
+///
+/// **Two gates catch that and neither is this one.**
+/// `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`
+/// compares each region's reported rect against the one the painter draws into,
+/// and a mutation swapping the two reddens it along with eleven render gates.
+/// `tests/rail.rs::the_two_regions_are_two_regions` is the one this docblock
+/// used to say could not exist: since
+/// [#252](https://github.com/breferrari/vigia/issues/252) a wide pane puts the
+/// two regions in different columns, so the two bars land in different columns
+/// and the distinction is finally drawn rather than argued.
+///
+/// This one owns the narrower claim, and it owns it on the screen a reader is
+/// most often on: the column is a region's own right edge, and it is `None` where
+/// no bar is drawn.
 #[test]
 fn each_region_reports_its_own_bar_column() {
     // Enough files to overflow the list and enough rows to overflow the diff, so
@@ -391,7 +400,10 @@ fn a_notice_does_not_change_the_list_height() {
 
     let mut compared = 0;
     for height in 3..=40u16 {
-        for width in [40u16, WIDE, 120] {
+        // The rail's widths too: a notice changes the footer's height, which
+        // changes the body, and beside a rail the body divides differently
+        // ([#252](https://github.com/breferrari/vigia/issues/252)).
+        for width in [40u16, WIDE, 120, 140, 200] {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);
                 let without = body_layout(area, &quiet, files);
@@ -761,7 +773,13 @@ fn the_two_regions_tile_the_body_exactly() {
     let mut saw_a_clamp = false;
 
     for height in 1..=40u16 {
-        for width in [40u16, WIDE, 120] {
+        // **Two widths past the rail's arrival**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)), so the one
+        // subtraction this gate exists for is exercised in both shapes.
+        // `clamped_to`'s rail arm shortens the list and gives nothing back,
+        // because beside a rail there is no region below it to give to, and that
+        // arm had no direct test until these two widths were added.
+        for width in [40u16, WIDE, 120, 140, 200] {
             for files in [0usize, 1, 3, LIST_SETTLED, LIST_SETTLED + 1, 200] {
                 let area = Rect::new(0, 0, width, height);
                 let chrome = chrome(&App::new());
@@ -788,9 +806,14 @@ fn the_two_regions_tile_the_body_exactly() {
                          entries, {body:?} plus a header and {footer} footer rows \
                          does not tile the pane"
                     );
+                    // **Beside a rail there is no rule at all**, which is
+                    // §11.2 B11 dissolved rather than reopened: the list is beside
+                    // the diff and there is no boundary for a horizontal rule to
+                    // be drawn on. Written as the conjunction rather than as two
+                    // gates, so the stacked claim keeps its exact form.
                     assert_eq!(
                         body.rule,
-                        body.list > 0,
+                        !body.rail && body.list > 0,
                         "a rule and a list disagree about each other: {body:?}"
                     );
                     assert_eq!(

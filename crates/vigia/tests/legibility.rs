@@ -19,6 +19,8 @@
 //! ever fires one way is not a rule, and a gate that only checks the firing
 //! direction passes against code that marks everything unconditionally.
 
+mod support;
+
 use std::time::Duration;
 
 use ratatui::Terminal;
@@ -26,8 +28,8 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position, Row,
-    Scale, Theme, View, body_layout, diff_height, regions, render,
+    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position,
+    Regions, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
 
@@ -391,7 +393,7 @@ const TRACK: char = '_';
 /// strip's own ramp rather than with its track. On `ansi` they are `Green` and
 /// `Red`, the names `heat_added` and `heat_removed` also take; on `dark`
 /// `added` is `heat_added`'s `#3fb950` and `removed` is `heat_removed_warm`'s
-/// `#f85149`, and [`heat_colours`] collects every rung. So a colour-only match
+/// `#f85149`, and [`support::heat_colours`] collects every rung. So a colour-only match
 /// still counts the counters as heat slices, which is what this doc always
 /// claimed and now has the right reason for. The symbol term is what separates
 /// them: a slice is `█` and a counter is digits.
@@ -413,6 +415,28 @@ fn cells_coloured(
         .collect()
 }
 
+/// The column ranges row `y` is measured in, one per region that holds it.
+///
+/// **Two regions can share a row since
+/// [#252](https://github.com/breferrari/vigia/issues/252)**, and the ranges come
+/// from `regions` rather than being derived here, so a gate reading a slot is
+/// reading the same geometry the painter drew into. Falls back to the whole row
+/// where neither region holds it, which is the band, the rule and the blank rows
+/// under a short diff: none of them draws a sparkline, so the count is zero
+/// either way and the fallback keeps the sweep covering every row rather than
+/// quietly skipping some.
+fn slots_on(told: &Regions, width: u16, y: u16) -> Vec<std::ops::Range<u16>> {
+    let mut held: Vec<std::ops::Range<u16>> = [told.list, told.diff]
+        .into_iter()
+        .filter(|region| region.rows > 0 && y >= region.top && y < region.top + region.rows)
+        .map(|region| region.left..region.left + region.width)
+        .collect();
+    if held.is_empty() {
+        held.push(0..width);
+    }
+    held
+}
+
 /// How many columns of row `y` the sparkline slot occupies, bars and track
 /// together.
 ///
@@ -427,30 +451,43 @@ fn cells_coloured(
 /// colour, or a block in the track's. Neither is ever drawn, and a helper that
 /// would count them is the loose selector this file's own doc warns about.
 fn spark_slot(backend: &TestBackend, y: u16, theme: &Theme, glyphs: Glyphs) -> usize {
-    let bars = spark_colours(theme);
+    let width = backend.buffer().area.width;
+    spark_slot_in(backend, y, theme, glyphs, 0..width)
+}
+
+/// The same, counted inside one region's columns.
+///
+/// **A row can hold two regions since
+/// [#252](https://github.com/breferrari/vigia/issues/252)**, and a slot counted
+/// across the whole row adds one region's rung to the other's. That does not
+/// merely inflate the number, it lands on a *legal* one: twelve buckets beside
+/// twelve is twenty-four, which is the widest rung, so the whole-row count passes
+/// both of `the_sparkline_draws_whole_rungs_and_never_a_count_between_two`'s
+/// assertions on a renderer that had lost the ladder entirely. Every gate that
+/// reads a rung on a fixture carrying a pinned list therefore reads it inside a
+/// region.
+///
+/// [`spark_slot`] stays as the whole-pane spelling, which is what the listless
+/// fixtures want and what keeps the gates that sweep them unchanged.
+fn spark_slot_in(
+    backend: &TestBackend,
+    y: u16,
+    theme: &Theme,
+    glyphs: Glyphs,
+    columns: std::ops::Range<u16>,
+) -> usize {
+    let bars = support::spark_colours(theme);
     let track = theme.spark_track.fg.expect("the track has a colour");
     // **The rung decides which alphabet to count**, and the two halves stay
     // separate calls for the reason above: one set with both colours would
     // accept the cross products, a track glyph in a bar's colour or the reverse,
     // neither of which is ever drawn.
     let (ramp, empty) = alphabet(glyphs);
-    cells_coloured(backend, y, &bars, &ramp).len()
-        + cells_coloured(backend, y, &[track], &[empty]).len()
-}
-
-/// Every stop of the sparkline's ramp, for a caller matching cells by colour.
-///
-/// **Three since [#196](https://github.com/breferrari/vigia/issues/196), and it
-/// was one.** A helper reading only the quietest stop counts a busy row as
-/// mostly empty and reads the slot as narrower than it is, which is a gate
-/// under-counting rather than failing. Named for [`heat_colours`]'s reason, one
-/// element over: two callers now want this list and a fourth stop must not have
-/// to be remembered in two places.
-fn spark_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
-    [theme.spark, theme.spark_warm, theme.spark_hot]
+    columns_of(backend, y, &bars, &ramp)
         .into_iter()
-        .filter_map(|style| style.fg)
-        .collect()
+        .chain(columns_of(backend, y, &[track], &[empty]))
+        .filter(|x| columns.contains(x))
+        .count()
 }
 
 /// Every glyph a sparkline can draw at `glyphs`, and the one that means empty.
@@ -492,25 +529,6 @@ fn alphabet(glyphs: Glyphs) -> (Vec<char>, char) {
 /// four rows taller than it is. A region added to `Body` is one edit here now.
 fn body_rows(split: &vigia::Body) -> usize {
     split.rows()
-}
-
-/// Every foreground the heat strip can draw a slice in.
-fn heat_colours(theme: &Theme) -> Vec<ratatui::style::Color> {
-    [
-        theme.heat_track,
-        theme.heat_added,
-        theme.heat_added_warm,
-        theme.heat_added_hot,
-        theme.heat_removed,
-        theme.heat_removed_warm,
-        theme.heat_removed_hot,
-        theme.heat_mixed,
-        theme.heat_mixed_warm,
-        theme.heat_mixed_hot,
-    ]
-    .iter()
-    .filter_map(|style| style.fg)
-    .collect()
 }
 
 fn line(kind: LineKind, number: u32, text: &str) -> Row {
@@ -1597,8 +1615,15 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     let chrome = chrome();
     let mut saw_band = false;
     let mut saw_rule = false;
+    let mut saw_rail = false;
 
-    for width in [1u16, 20, 40, 80, 120] {
+    // **Two widths past the rail's arrival**
+    // ([#252](https://github.com/breferrari/vigia/issues/252)), which is what
+    // turns the partition this gate was written as into a partition it is
+    // actually asked about. Until the rail landed every rect here shared an `x`
+    // and a `width`, so the overlap rule reduced to a row comparison and the
+    // pointer check could not tell the two regions apart.
+    for width in [1u16, 20, 40, 80, 120, 140, 200] {
         for height in 1..=40u16 {
             let area = Rect::new(0, 0, width, height);
             // **Clamped, because both real consumers clamp.** `render` and
@@ -1621,6 +1646,7 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
             .collect();
             saw_band |= areas.band.height > 0;
             saw_rule |= areas.rule.height > 0;
+            saw_rail |= body.rail;
 
             // **Inside the pane, under the header.** Row zero is the header's and
             // no region may reach it, which is the one row `Body` never counts.
@@ -1712,9 +1738,9 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     // Or the sweep never reached a pane with a masthead or a rule on it, and the
     // overlap rule above is being asserted about two rectangles.
     assert!(
-        saw_band && saw_rule,
-        "the sweep drew a band at some size = {saw_band} and a rule = {saw_rule}, \
-         so it did not cover the parts it is about"
+        saw_band && saw_rule && saw_rail,
+        "the sweep drew a band at some size = {saw_band}, a rule = {saw_rule} and \
+         a rail = {saw_rail}, so it did not cover the parts it is about"
     );
 }
 
@@ -1837,7 +1863,7 @@ fn the_glance_columns_collapse_in_one_order() {
         (164, (true, 24, 24)),
     ];
     let theme = theme();
-    let heats = heat_colours(&theme);
+    let heats = support::heat_colours(&theme);
     let view = glancing();
     let (mut saw_all, mut saw_none) = (false, false);
     let mut seen: Vec<(u16, (bool, usize, usize))> = Vec::new();
@@ -2993,22 +3019,34 @@ fn the_sparkline_draws_whole_rungs_and_never_a_count_between_two() {
             // three thousand say the same thing.
             let backend = drawn(width, 6, &view, &chrome);
             let rows = rows_at(width, 6, &view, &chrome);
+            // Hoisted with the two above it, and for their recorded reason: it
+            // does not depend on `y`, and asked inside the row loop it rebuilt
+            // the whole layout six times per width.
+            let told = regions(Rect::new(0, 0, width, 6), &chrome, &view);
             for y in 0..6u16 {
-                let buckets = spark_slot(&backend, y, &theme, Glyphs::default());
                 let row = &rows[usize::from(y)];
-                assert!(
-                    buckets <= HISTORY_BUCKETS,
-                    "{name}: {buckets} buckets at {width} columns, over the \
-                     {HISTORY_BUCKETS} the window holds: {row:?}"
-                );
-                assert!(
-                    buckets == 0 || HISTORY_BUCKETS % buckets == 0,
-                    "{name}: {buckets} buckets at {width} columns does not divide \
-                     the {HISTORY_BUCKETS} the window holds, so one drawn bucket \
-                     covers less time than the rest: {row:?}"
-                );
-                if buckets > 0 {
-                    seen.insert(buckets);
+                // **One region at a time since
+                // [#252](https://github.com/breferrari/vigia/issues/252)**, and
+                // `spark_slot_in` carries the reason: beside a rail this row holds
+                // two of them, and twelve buckets plus twelve is twenty-four, which
+                // is a legal rung. Counted whole, the assertions below would have
+                // gone on passing over a renderer that had lost the ladder.
+                for columns in slots_on(&told, width, y) {
+                    let buckets = spark_slot_in(&backend, y, &theme, Glyphs::default(), columns);
+                    assert!(
+                        buckets <= HISTORY_BUCKETS,
+                        "{name}: {buckets} buckets at {width} columns, over the \
+                         {HISTORY_BUCKETS} the window holds: {row:?}"
+                    );
+                    assert!(
+                        buckets == 0 || HISTORY_BUCKETS % buckets == 0,
+                        "{name}: {buckets} buckets at {width} columns does not \
+                         divide the {HISTORY_BUCKETS} the window holds, so one \
+                         drawn bucket covers less time than the rest: {row:?}"
+                    );
+                    if buckets > 0 {
+                        seen.insert(buckets);
+                    }
                 }
             }
         }
@@ -3434,7 +3472,7 @@ fn the_heat_strip_reprojects_rather_than_dropping_buckets() {
         let backend = drawn(width, 6, &view, &following());
 
         // Row 1 is the first file heading; the header is row 0.
-        let strip = cells_coloured(&backend, 1, &heat_colours(&theme), &[HEAT_SLICE]);
+        let strip = cells_coloured(&backend, 1, &support::heat_colours(&theme), &[HEAT_SLICE]);
 
         if strip.is_empty() {
             continue;
@@ -3505,7 +3543,7 @@ fn the_pictured_width_still_draws_twelve_slices() {
     let slices = cells_coloured(
         &drawn(PICTURED_PANE, 8, &glancing(), &chrome()),
         1,
-        &heat_colours(&theme),
+        &support::heat_colours(&theme),
         &[HEAT_SLICE],
     )
     .len();
@@ -3591,7 +3629,7 @@ fn the_widest_strip_waits_until_the_path_keeps_the_row() {
         let slices = cells_coloured(
             &drawn(pane, 8, &view, &chrome()),
             1,
-            &heat_colours(&theme),
+            &support::heat_colours(&theme),
             &[HEAT_SLICE],
         )
         .len();
@@ -5398,14 +5436,13 @@ fn columns_of(
     symbols: &[char],
 ) -> Vec<u16> {
     let buffer = backend.buffer();
-    (0..buffer.area.width)
-        .filter(|x| {
-            let cell = &buffer[(*x, y)];
-            let symbol = cell.symbol();
-            symbols.iter().any(|glyph| symbol == glyph.to_string())
-                && cell.style().fg.is_some_and(|fg| colours.contains(&fg))
-        })
-        .collect()
+    // **Through `support::columns_in`, which `tests/rail.rs` also reads**
+    // ([#252](https://github.com/breferrari/vigia/issues/252)). The predicate the
+    // docblock above argues for is one predicate, and it was about to be two: the
+    // rail's gates ask the same symbol-and-colour question of the same buffer,
+    // over a column range rather than a whole row. This is that function called
+    // with the whole row, which is what a region spanning the pane is.
+    support::columns_in(buffer, y, 0..buffer.area.width, colours, symbols)
 }
 
 /// A narrower rung shows the whole window at a lower resolution, never its tail.
@@ -5432,7 +5469,7 @@ fn columns_of(
 fn the_sparkline_reprojects_rather_than_dropping_buckets() {
     let theme = theme();
     let track = theme.spark_track.fg.expect("the track has a colour");
-    let bars = spark_colours(&theme);
+    let bars = support::spark_colours(&theme);
     let (ramp, empty) = alphabet(Glyphs::default());
 
     // Written in the oldest two source buckets and the newest two, quiet across
@@ -5541,8 +5578,8 @@ fn the_strip_and_the_sparkline_keep_one_column_between_them_at_every_rung() {
     // because the number is `reserved`'s one column of gap and restating it here
     // would gate this file against itself.
     let theme = theme();
-    let heats = heat_colours(&theme);
-    let bars = spark_colours(&theme);
+    let heats = support::heat_colours(&theme);
+    let bars = support::spark_colours(&theme);
     // Buckets all busy, so every cell of the strip is a bar and the leftmost one
     // is the slot's own left edge rather than a track the bar colours miss.
     let view = sparked([
@@ -5703,7 +5740,7 @@ fn a_dense_strip_draws_its_buckets_at_different_heights() {
         ]);
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, _) = alphabet(glyphs);
-        let bars = spark_colours(&theme());
+        let bars = support::spark_colours(&theme());
         let drawn_cells: Vec<String> = columns_of(&backend, 1, &bars, &ramp)
             .into_iter()
             .map(|x| backend.buffer()[(x, 1)].symbol().to_owned())
@@ -5746,7 +5783,7 @@ fn the_empty_half_of_a_written_pair_stays_on_the_floor() {
     // Removing that guard survived the whole suite, as did clamping the level to
     // a minimum of one.
     let theme = theme();
-    let bars = spark_colours(&theme);
+    let bars = support::spark_colours(&theme);
 
     for glyphs in [Glyphs::Braille, Glyphs::Octant] {
         // Every pair is one empty bucket beside a full one, so every drawn cell

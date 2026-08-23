@@ -101,7 +101,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
    status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
-The list is **pinned**, so the signals stay on screen while you read the diff under them. Every file gets the same row in both regions:
+The list is **pinned**, so the signals stay on screen while you read the diff under them. From 134 columns it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. The pane drawn above is narrower than that, so it shows the stacked layout. Every file gets the same row in both regions:
 
 | | | Answers |
 |---|---|---|
