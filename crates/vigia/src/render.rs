@@ -644,6 +644,16 @@ const GRAPH_AIR: usize = 1;
 /// row this layout spends.
 const LEAD_ROWS: usize = 1;
 
+/// Rows the stacked layout spends before the band can have any: the narrowest
+/// pinned list and the rule under it.
+///
+/// **Named because [`Body::beside`] has to charge the band against the rows
+/// [`Body::split`] would have left it**, and the difference between the two is
+/// exactly this: a rail spends neither. Written as the floor rather than as the
+/// list's own height because the bound has to hold where it is tightest, which is
+/// the one-file worktree.
+const LIST_FLOOR_ROWS: usize = 1 + 1;
+
 /// Diff rows the band may not take the pane below.
 ///
 /// **Derived rather than chosen.** `git diff -U3` at its smallest is a hunk
@@ -3441,8 +3451,11 @@ impl Body {
     /// **Both regions then take every remaining row.** That is the whole
     /// difference a rail makes to the row arithmetic: the list is beside the
     /// diff, so its rows are not the diff's to lose, and [`list_cap`] has nothing
-    /// to cap. A pane fifty rows tall draws forty-three files where the stacked
-    /// layout draws twelve, which is what a rail is for.
+    /// to cap. A pane fifty rows tall draws forty-six files where the stacked layout
+    /// draws twelve, which is what a rail is for. Both at the masthead setting that
+    /// ships, which is off ([#204](https://github.com/breferrari/vigia/issues/204));
+    /// with the band drawn the rail's figure is forty-three and the stacked one is
+    /// unchanged, because a capped list never pays for the band.
     ///
     /// **And the band is paid for by both regions here, where the stacked layout
     /// charges it to the diff alone.** That is an exception to §11.1's clamp
@@ -3474,18 +3487,38 @@ impl Body {
         // Written as the comparison rather than as `affordable > 0` because
         // `affordable` is computed one branch over, out of a `body` this function
         // was handed; sharing the binding would mean sharing the whole clamp order
-        // this layout does not have. `the_diff_never_loses_a_row_to_a_wider_pane`
-        // is the gate, and it sweeps every height rather than the boundary.
+        // this layout does not have. `crossing_into_the_rail_never_costs_the_diff_a_row`
+        // is the gate, and it sweeps every height at the boundary rather than the one
+        // size the defect was found at.
         if body <= LEAD_ROWS + usize::from(MIN_BODY) + 1 {
             return Self::diff_only(body);
         }
         let after = body - LEAD_ROWS;
 
         // **The same question [`Body::split`] asks, asked through the same
-        // function.** The band's fit is about the rows left under it and the
-        // columns the pane has, and the rail changes how those rows are *shared*
-        // rather than how many there are.
-        let (graph, air) = Self::band_rows_of(masthead, width, after);
+        // function and against the rows that layout would have left.** The band's
+        // fit is about the rows under it and the columns the pane has, and the
+        // rail changes how those rows are *shared* rather than how many there are.
+        //
+        // **The `- 2` is the strip the rail replaces, and without it the band
+        // arrives too early.** `Body::split` charges the band against
+        // `body - LEAD_ROWS - list - 1`, which is at least two rows less than the
+        // `after` here: a rail spends neither the list's row nor the rule's. Asked
+        // against the larger number the band crosses `GRAPH_KEEP` sooner, so a pane
+        // widened into the rail could gain a band it did not have and lose three
+        // rows to it while handing back only the two the strip cost. With one
+        // changed file that is a net row off the diff, at 133 to 134 columns on a
+        // seventeen-row pane, which is the most ordinary worktree there is.
+        //
+        // Two rather than `list + 1`, because two is the *least* the strip ever
+        // costs and the bound has to hold at the file count where it is tightest.
+        // Above one file the rail hands back more than the band takes and the
+        // subtraction only makes it band later, never earlier.
+        // `crossing_into_the_rail_never_costs_the_diff_a_row` sweeps both masthead
+        // settings and a file count of one, which is the cell that was missing when
+        // this was written the first time.
+        let (graph, air) =
+            Self::band_rows_of(masthead, width, after.saturating_sub(LIST_FLOOR_ROWS));
         let rows = after - graph - air;
         Self {
             lead: LEAD_ROWS,
@@ -6812,7 +6845,8 @@ mod tests {
     /// **computed** glance cluster rather than against its own expansion.
     ///
     /// **The gate [`SETTLED_CELLS`]'s docblock names, and it did not exist until
-    /// round 2 of #252's audit.** That constant is a hand-written sum standing in
+    /// [#252](https://github.com/breferrari/vigia/issues/252).** That constant is a
+    /// hand-written sum standing in
     /// for `SETTLED.width(Glyphs::Block)`, which cannot be `const` because a
     /// display width is a table lookup; the docblock said this test held the two
     /// together and no such test was in the repo. What was there instead was a

@@ -633,32 +633,61 @@ fn a_hover_in_the_rail_does_not_light_the_diff() {
 /// and `the_rail_is_monotone_in_pane_height` owns it on the axis it belongs to.
 #[test]
 fn crossing_into_the_rail_never_costs_the_diff_a_row() {
+    let arrives = first_rail();
+    let mut heights = 0usize;
+    let mut banded = 0usize;
+
+    // **Both masthead settings and a file count of one**, which is the axis a
+    // first draft of this gate left out and where the defect it was written for
+    // survived. Beside a rail `after` still holds the row the stacked list would
+    // have taken and the rule's, so the band's fit test sees more rows and the
+    // band can arrive *earlier* than it would have on the strip the rail
+    // replaces. With one changed file the strip costs two rows and the band costs
+    // three, so the rail came out a row short.
+    for masthead in [false, true] {
+        let chrome = Chrome {
+            masthead,
+            ..chrome()
+        };
+        for files in [1usize, 2, 40] {
+            for height in 1..=48u16 {
+                let stacked = body_layout(Rect::new(0, 0, arrives - 1, height), &chrome, files);
+                let rail = body_layout(Rect::new(0, 0, arrives, height), &chrome, files);
+                assert!(
+                    !stacked.rail,
+                    "the width below the arrival already draws a rail at {height} rows"
+                );
+                assert!(
+                    rail.diff >= stacked.diff,
+                    "with masthead {masthead} over {files} files at {height} rows, \
+                     widening from {} to {arrives} columns took the diff from {} \
+                     rows to {}",
+                    arrives - 1,
+                    stacked.diff,
+                    rail.diff
+                );
+                if rail.rail {
+                    heights += 1;
+                }
+                if rail.graph > 0 || stacked.graph > 0 {
+                    banded += 1;
+                }
+            }
+        }
+    }
+
+    // Or the sweep never drew a band and the axis this gate was widened for was
+    // never reached.
+    assert!(
+        banded > 20,
+        "a band was drawn at {banded} of the sizes swept, too few for the \
+         masthead axis to be under test"
+    );
+
     let bare = Chrome {
         masthead: false,
         ..chrome()
     };
-    let arrives = first_rail();
-    let mut heights = 0usize;
-
-    for height in 1..=48u16 {
-        let stacked = body_layout(Rect::new(0, 0, arrives - 1, height), &bare, 40);
-        let rail = body_layout(Rect::new(0, 0, arrives, height), &bare, 40);
-        assert!(
-            !stacked.rail,
-            "the width below the arrival already draws a rail at {height} rows"
-        );
-        assert!(
-            rail.diff >= stacked.diff,
-            "at {height} rows, widening from {} to {arrives} columns took the diff \
-             from {} rows to {}",
-            arrives - 1,
-            stacked.diff,
-            rail.diff
-        );
-        if rail.rail {
-            heights += 1;
-        }
-    }
 
     // Or the crossing was never drawn as a rail and every comparison above was
     // between two stacked layouts.
