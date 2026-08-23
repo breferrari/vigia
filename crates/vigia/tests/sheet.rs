@@ -555,7 +555,12 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     );
 
     // A short pane keeps the keyboard group and loses the mouse group, which is
-    // the height axis on its own.
+    // the height axis on its own. **Sixteen rows is still below #220's widening
+    // rung** and the case survived it unchanged: the pane's footer is two rows
+    // here, so the body is thirteen and the two-column rung needs fourteen. One
+    // row taller and the mouse group comes back beside the keyboard group
+    // instead, which is what `the_sheet_spends_width_before_it_spends_gestures`
+    // holds.
     let short_at = Rect::new(0, 0, WIDE, 16);
     let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, short_at);
     let short = text_of(&buf, short_at);
@@ -647,5 +652,178 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
             drawn.contains(gesture),
             "the sheet does not name the mouse gesture {gesture:?}"
         );
+    }
+}
+
+/// Every gesture the sheet can draw, as the token a reader would look for.
+///
+/// One entry per row of `KEYBOARD` and `MOUSE`, restated rather than imported for
+/// the reason [`TITLE`] is: a gate that shared the renderer's tables would agree
+/// with them by construction, and this one exists to count what reaches a screen.
+const GESTURES: [&str; 16] = [
+    "quit",
+    "scroll a row",
+    "page",
+    "half a page",
+    "first / last",
+    "next / prev",
+    "jump to",
+    "scroll the",
+    "follow the newest",
+    "churn band",
+    "this sheet",
+    "wheel",
+    "drag a",
+    "click a track",
+    "click  ▲ ▼",
+    "click a",
+];
+
+/// One materialised fixture, painted at many sizes.
+///
+/// **Through `render`, never through the layout alone.** The sheet's height is
+/// spent against the *body*, and the body is the pane less the header and less a
+/// footer whose own height is a ladder in the width. A sweep that assumed a
+/// one-row footer would be measuring a pane that does not exist, and it did:
+/// #220's first probe put the two-column rung one row lower than it lands.
+///
+/// The repository, the frame and the materialised diffs are built **once** and
+/// the pane is resized around them. Rebuilding per cell cost forty seconds for
+/// the sweep below, which is the shape that gets a gate deleted rather than run.
+macro_rules! sweep {
+    ($name:literal, |$paint:ident| $body:block) => {
+        let scratch = Scratch::large_diff($name, FILES, 40);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        materialise(&mut frame);
+        let mut app = App::new();
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        toggle(&mut app, &mut frame);
+        let mut $paint = |at: Rect| paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        $body
+    };
+}
+
+/// How many of [`GESTURES`] reach a screen this size, and the sheet's own rows.
+fn read_sheet(buf: &Buffer, laid: &Regions, at: Rect) -> (usize, String) {
+    let drawn = text_of(buf, at);
+    let count = if drawn.contains(TITLE) {
+        GESTURES.iter().filter(|g| drawn.contains(*g)).count()
+    } else {
+        0
+    };
+    let sheet = laid.sheet.map_or_else(String::new, |s| {
+        text_of(buf, Rect::new(s.left, s.top, s.width, s.height))
+    });
+    (count, sheet)
+}
+
+#[test]
+fn the_sheet_spends_width_before_it_spends_gestures() {
+    // **#220's whole claim, at the pane that reported it.** A pane too short for
+    // the seventeen-row column but wide enough to put the mouse group beside the
+    // keyboard group draws every gesture, where before this rung it dropped the
+    // whole mouse group and said nothing about it.
+    //
+    // The pane sizes are named rather than derived, because a gate that computed
+    // the boundary from the function under test would verify the function and
+    // never the wiring.
+    sweep!("sheet-width", |paint| {
+        let short_and_wide = Rect::new(0, 0, 120, 21);
+        let (buf, laid) = paint(short_and_wide);
+        let (count, sheet) = read_sheet(&buf, &laid, short_and_wide);
+        assert_eq!(
+            count,
+            GESTURES.len(),
+            "a pane with the columns to draw every gesture drew fewer:\n{sheet}"
+        );
+        assert!(
+            sheet.contains("keyboard"),
+            "the assertion above passed without the two-column rung, so it proves nothing:\n{sheet}"
+        );
+
+        // And a pane tall enough for one column is untouched: the widening rung
+        // sits *below* the full one-column rung, which is what makes #220
+        // additive rather than a relayout.
+        let tall = Rect::new(0, 0, 120, 30);
+        let (buf, laid) = paint(tall);
+        let (count, sheet) = read_sheet(&buf, &laid, tall);
+        assert_eq!(
+            sheet.lines().count(),
+            19,
+            "a tall pane stopped drawing the nineteen-row one-column sheet:\n{sheet}"
+        );
+        assert!(
+            !sheet.contains("keyboard"),
+            "a tall pane took the two-column rung, so the ladder is not additive:\n{sheet}"
+        );
+        assert_eq!(
+            count,
+            GESTURES.len(),
+            "the untouched rung stopped drawing every gesture:\n{sheet}"
+        );
+    });
+}
+
+#[test]
+fn the_widening_ladder_is_monotone_and_never_leaves_the_body() {
+    // **Walks the ladder rather than sampling it**, which is #158's lesson and the
+    // one `the_sheet_degrades_on_both_axes_and_has_a_floor` does not follow: it
+    // asserts three fixed sizes, and a single fixture passes against an unfixed
+    // ladder. #220 inserts a rung in the *middle* of this one, where a removal
+    // from the top would have been free, so both axes are swept rather than
+    // reasoned about.
+    //
+    // Two claims over one grid, because the sweep is what costs and the assertions
+    // are free: growing a pane never takes a gesture away, and the sheet never
+    // reaches the header or the footer at any rung.
+    let widths: Vec<u16> = (40..=144).collect();
+    let heights: Vec<u16> = (6..=32).collect();
+    let mut grid = vec![vec![0usize; heights.len()]; widths.len()];
+
+    sweep!("sheet-ladder-sweep", |paint| {
+        for (i, &w) in widths.iter().enumerate() {
+            for (j, &h) in heights.iter().enumerate() {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                let (count, _) = read_sheet(&buf, &laid, at);
+                grid[i][j] = count;
+
+                // B12's box rule, at every rung rather than at one: the sheet is
+                // centred in the body, so a reader can still see the tool is
+                // alive behind it.
+                if let Some(sheet) = laid.sheet {
+                    assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
+                    assert!(
+                        sheet.top + sheet.height < at.y + at.height,
+                        "the sheet reached the footer at {w}x{h}"
+                    );
+                }
+            }
+        }
+    });
+
+    for (i, &w) in widths.iter().enumerate() {
+        for (j, &h) in heights.iter().enumerate() {
+            if i + 1 < widths.len() {
+                assert!(
+                    grid[i + 1][j] >= grid[i][j],
+                    "widening {w} to {} at height {h} took a gesture away: {} then {}",
+                    widths[i + 1],
+                    grid[i][j],
+                    grid[i + 1][j]
+                );
+            }
+            if j + 1 < heights.len() {
+                assert!(
+                    grid[i][j + 1] >= grid[i][j],
+                    "growing height {h} to {} at width {w} took a gesture away: {} then {}",
+                    heights[j + 1],
+                    grid[i][j],
+                    grid[i][j + 1]
+                );
+            }
+        }
     }
 }

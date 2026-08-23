@@ -4303,6 +4303,16 @@ const SHEET_FRAME: usize = 2;
 /// What the sheet's own title bar spells, corner excluded.
 const SHEET_TITLE: &str = "─ gestures ";
 
+/// What the mouse group's heading spells, spaces included.
+const SHEET_MOUSE_LABEL: &str = " mouse ";
+
+/// What the keyboard group's heading spells, and it is drawn **only** on the
+/// two-column rung.
+///
+/// In one column the keyboard group is the table and needs no label; beside the
+/// mouse group it is one of two and does. [#220](https://github.com/breferrari/vigia/issues/220).
+const SHEET_KEYBOARD_LABEL: &str = " keyboard ";
+
 /// The close control, which is the pane's first.
 ///
 /// **Outside CP437**, exactly as the scrollbar's `▲` and `▼` are, and inheriting
@@ -4310,20 +4320,33 @@ const SHEET_TITLE: &str = "─ gestures ";
 /// frame it sits in, and no ASCII glyph reads as *close* without a legend.
 const SHEET_CLOSE: char = '✕';
 
-/// The three widths a rung of the sheet needs: keys field, verb field, and the
+/// The widest keys cell and the widest verb over a group, at one spelling.
+///
+/// Split out of [`sheet_fields`] by [#220](https://github.com/breferrari/vigia/issues/220),
+/// because the two-column rung measures each group **separately**: a single
+/// maximum over both is what made a two-column sheet look like it needed a
+/// hundred and twelve columns when the group split needs a hundred and four.
+fn fields_of(rows: &[Gesture], level: usize) -> (usize, usize) {
+    let (mut keys, mut verb) = (0, 0);
+    for row in rows {
+        keys = keys.max(width_of(row.keys[level]));
+        verb = verb.max(width_of(row.verb[level]));
+    }
+    (keys, verb)
+}
+
+/// The three widths a one-column rung needs: keys field, verb field, and the
 /// whole sheet.
 ///
 /// The fields are measured over the rows that rung actually draws, which is what
 /// makes dropping the mouse group narrow the sheet as well as shorten it: its
 /// `drag a scrollbar` is the widest keys cell on the whole table.
 fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize) {
-    let drawn = KEYBOARD[from..]
-        .iter()
-        .chain(mouse.then_some(&MOUSE[..]).into_iter().flatten());
-    let (mut keys, mut verb) = (0, 0);
-    for row in drawn {
-        keys = keys.max(width_of(row.keys[level]));
-        verb = verb.max(width_of(row.verb[level]));
+    let (mut keys, mut verb) = fields_of(&KEYBOARD[from..], level);
+    if mouse {
+        let (mk, mv) = fields_of(&MOUSE, level);
+        keys = keys.max(mk);
+        verb = verb.max(mv);
     }
     // Border, space, keys, two of gap, verb, space, border. Floored at the width
     // the title bar needs, so a narrow table cannot draw a truncated heading.
@@ -4331,9 +4354,35 @@ fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize)
     (keys, verb, total)
 }
 
-/// Rows a rung draws, frame excluded.
+/// The five widths the **two-column** rung needs: both fields of each group, and
+/// the whole sheet.
+///
+/// [#220](https://github.com/breferrari/vigia/issues/220). The columns are the
+/// two groups the sheet already names, so the seam the split falls on is the one
+/// the `mouse` heading was already pointing at. Border, space, the keyboard
+/// group's two fields two apart, two of gap, the mouse group's two fields two
+/// apart, space, border.
+fn sheet_beside(level: usize) -> (usize, usize, usize, usize, usize) {
+    let (kb_keys, kb_verb) = fields_of(&KEYBOARD, level);
+    let (ms_keys, ms_verb) = fields_of(&MOUSE, level);
+    let total = (kb_keys + kb_verb + ms_keys + ms_verb + 10).max(width_of(SHEET_TITLE) + 6);
+    (kb_keys, kb_verb, ms_keys, ms_verb, total)
+}
+
+/// Rows a one-column rung draws, frame excluded.
 fn sheet_rows(from: usize, mouse: bool) -> usize {
     (KEYBOARD.len() - from) + if mouse { 1 + MOUSE.len() } else { 0 }
+}
+
+/// Rows the two-column rung draws, frame excluded: the taller column, heading
+/// included.
+///
+/// **Both columns are headed**, which costs a row against heading only the mouse
+/// column. The heading is a *rule* that runs to the frame, so one over half the
+/// sheet with nothing over the other half reads as a rendering fault rather than
+/// as a label.
+fn sheet_beside_rows() -> usize {
+    (1 + KEYBOARD.len()).max(1 + MOUSE.len())
 }
 
 /// Where the gestures sheet goes, or `None` on a pane that cannot hold one.
@@ -4343,6 +4392,18 @@ fn sheet_rows(from: usize, mouse: bool) -> usize {
 /// truncating an item that has no identifying half. Height then drops the mouse
 /// group, and after that keyboard rows from the top down, which leaves the three
 /// [`KEYBOARD`] names its own docblock says survive.
+///
+/// **Between those two lies the widening rung**
+/// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
+/// one-column sheet is too tall for the pane but the pane is wide enough to put
+/// the mouse group *beside* the keyboard group, it does, trading forty-eight
+/// columns for six rows and drawing all sixteen gestures where eleven drew
+/// before. It is tried **after** the full one-column rung and **before** any
+/// dropping rung, which is what makes it additive: a pane on which one column
+/// already fits never sees it, so nothing that draws every row today changes.
+/// Its two spellings are its own rather than the pane-wide `level`, so a pane of
+/// eighty columns reaches the tight two-column rung instead of falling past it
+/// into dropping the mouse group entirely.
 ///
 /// **Centred in the body, never over the header or the footer**, which is B12's
 /// reason for a box rather than a full-pane sheet: a reader reading instructions
@@ -4357,12 +4418,50 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<Sheet
     let room = area.width.saturating_sub(margins.0 + margins.1);
     let level = usize::from(sheet_fields(0, 0, true).2 > usize::from(room));
 
-    // The order is the ruling's: the mouse group before any keyboard row.
-    let rungs = std::iter::once((true, 0))
-        .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(|from| (false, from)));
-    for (mouse, from) in rungs {
-        let (keys, verb, total) = sheet_fields(level, from, mouse);
-        let height = sheet_rows(from, mouse) + SHEET_FRAME;
+    // The order is the ruling's: every row in one column, then the two-column
+    // rung that buys height with width, then the mouse group goes, then keyboard
+    // rows from the top down.
+    let rungs = std::iter::once(Rung::Column {
+        level,
+        from: 0,
+        mouse: true,
+    })
+    .chain([0, 1].map(|level| Rung::Beside { level }))
+    .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(|from| Rung::Column {
+        level,
+        from,
+        mouse: false,
+    }));
+    for rung in rungs {
+        let (level, from, mouse, keys, verb, beside, total, rows) = match rung {
+            Rung::Column { level, from, mouse } => {
+                let (keys, verb, total) = sheet_fields(level, from, mouse);
+                (
+                    level,
+                    from,
+                    mouse,
+                    keys,
+                    verb,
+                    None,
+                    total,
+                    sheet_rows(from, mouse),
+                )
+            }
+            Rung::Beside { level } => {
+                let (keys, verb, ms_keys, ms_verb, total) = sheet_beside(level);
+                (
+                    level,
+                    0,
+                    true,
+                    keys,
+                    verb,
+                    Some((ms_keys, ms_verb)),
+                    total,
+                    sheet_beside_rows(),
+                )
+            }
+        };
+        let height = rows + SHEET_FRAME;
         if total > usize::from(room) || height > usize::from(body) {
             continue;
         }
@@ -4382,11 +4481,33 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<Sheet
             mouse,
             keys,
             verb,
+            beside,
             // Three in from the right edge: `┐`, the space before it, and this.
             close: (left + width - 3, top),
         });
     }
     None
+}
+
+/// One rung of the sheet's ladder, which is two shapes rather than one.
+///
+/// [#220](https://github.com/breferrari/vigia/issues/220) added the second. They
+/// are one enum rather than two loops because the ladder's whole contract is that
+/// it is **ordered**: the first rung that fits wins, and interleaving two
+/// independent searches is how a wider pane ends up with a narrower sheet.
+#[derive(Debug, Clone, Copy)]
+enum Rung {
+    /// One column, at a spelling the pane picked, with the mouse group below the
+    /// keyboard group or dropped, and `from` keyboard rows already gone.
+    Column {
+        level: usize,
+        from: usize,
+        mouse: bool,
+    },
+    /// Two columns, keyboard beside mouse, every row drawn. It picks its own
+    /// spelling rather than the pane's, because the pane's was chosen against a
+    /// one-column sheet.
+    Beside { level: usize },
 }
 
 /// A laid-out gestures sheet: where it goes and which rung it draws.
@@ -4400,10 +4521,18 @@ struct SheetPlan {
     from: usize,
     /// Whether the mouse group is drawn.
     mouse: bool,
-    /// The keys field's width.
+    /// The keys field's width. On the two-column rung this is the **keyboard**
+    /// group's, and the mouse group's is in [`SheetPlan::beside`].
     keys: usize,
-    /// The verb field's width.
+    /// The verb field's width, with [`SheetPlan::keys`]'s caveat.
     verb: usize,
+    /// The mouse group's own fields when it is drawn **beside** the keyboard
+    /// group rather than below it, and `None` on every rung the ladder had
+    /// before [#220](https://github.com/breferrari/vigia/issues/220).
+    ///
+    /// `Some` implies `mouse` and implies `from == 0`: the rung exists to draw
+    /// every row, so it is never reached with any of them already dropped.
+    beside: Option<(usize, usize)>,
     /// The close control's cell.
     close: (u16, u16),
 }
@@ -5686,29 +5815,27 @@ impl Painter<'_> {
             control,
         );
 
-        let mut y = area.y + 1;
-        let rows = KEYBOARD[plan.from..].iter();
-        for row in rows {
-            self.sheet_row(area, y, row, plan);
-            y += 1;
-        }
-
-        if plan.mouse {
-            // The group's own rule, which is the same shape the title bar has and
-            // for the same reason: a heading inside a table is furniture, so it
-            // runs to the frame rather than standing back from it.
-            let mut label = String::with_capacity(width * 3);
-            label.push('│');
-            label.push_str(" mouse ");
-            for _ in 0..width.saturating_sub(width_of(" mouse ") + 3) {
-                label.push(RULE);
-            }
-            label.push_str(" │");
-            self.put(area.x, y, &label, width, frame);
-            y += 1;
-            for row in MOUSE.iter() {
-                self.sheet_row(area, y, row, plan);
+        if let Some((ms_keys, ms_verb)) = plan.beside {
+            self.sheet_beside(plan, ms_keys, ms_verb);
+        } else {
+            let mut y = area.y + 1;
+            for row in KEYBOARD[plan.from..].iter() {
+                self.sheet_pipes(area, y);
+                self.sheet_row(area.x, y, row, plan.level, plan.keys, plan.verb);
                 y += 1;
+            }
+
+            if plan.mouse {
+                // The group's own rule, which is the same shape the title bar has
+                // and for the same reason: a heading inside a table is furniture,
+                // so it runs to the frame rather than standing back from it.
+                self.sheet_heading(area.x, y, width, SHEET_MOUSE_LABEL);
+                y += 1;
+                for row in MOUSE.iter() {
+                    self.sheet_pipes(area, y);
+                    self.sheet_row(area.x, y, row, plan.level, plan.keys, plan.verb);
+                    y += 1;
+                }
             }
         }
 
@@ -5721,31 +5848,97 @@ impl Painter<'_> {
         self.put(area.x, area.y + area.height - 1, &bottom, width, frame);
     }
 
-    /// One row of the sheet: the keys cell lit, the verb dim, the frame at both
-    /// ends.
+    /// The two groups side by side, which is the rung a wide pane buys
+    /// ([#220](https://github.com/breferrari/vigia/issues/220)).
+    ///
+    /// **The split is the seam the sheet already drew.** One column had a `mouse`
+    /// heading between the groups, so putting the second group in a second column
+    /// moves a boundary that was there rather than inventing one, which is the
+    /// answer to §11.1's *"reads as two unrelated tables"*: they were two labelled
+    /// groups before they were two columns.
+    ///
+    /// The columns are different heights (eleven keyboard rows against five mouse
+    /// ones) and both carry the frame down their whole block, so the pipes are
+    /// drawn over the taller of the two rather than per group.
+    fn sheet_beside(&mut self, plan: &SheetPlan, ms_keys: usize, ms_verb: usize) {
+        let area = plan.area;
+        let width = usize::from(area.width);
+        // Border, space, then the keyboard group's two fields two apart, then two
+        // of gap. Every one of these is the width [`sheet_beside`] charged.
+        let right_at = area.x + 2 + plan.keys as u16 + 2 + plan.verb as u16 + 2;
+
+        // **One rule carrying two labels, not two headings butted together.** The
+        // second label is written over the first heading's rule rather than
+        // starting a heading of its own, because a heading's own frame pipe landing
+        // in the middle of the sheet reads as a broken border. Each label sits in
+        // the column its group's keys cells start in, less the space before it.
+        self.sheet_heading(area.x, area.y + 1, width, SHEET_KEYBOARD_LABEL);
+        self.put(
+            right_at - 1,
+            area.y + 1,
+            SHEET_MOUSE_LABEL,
+            width_of(SHEET_MOUSE_LABEL),
+            self.theme.chrome_dim,
+        );
+
+        for y in area.y + 1..area.y + area.height - 1 {
+            self.sheet_pipes(area, y);
+        }
+        for (n, row) in KEYBOARD.iter().enumerate() {
+            let y = area.y + 2 + n as u16;
+            self.sheet_row(area.x, y, row, plan.level, plan.keys, plan.verb);
+        }
+        for (n, row) in MOUSE.iter().enumerate() {
+            let y = area.y + 2 + n as u16;
+            self.sheet_row(right_at - 2, y, row, plan.level, ms_keys, ms_verb);
+        }
+    }
+
+    /// A group's heading: its name, then rule to the frame.
+    ///
+    /// The same shape the title bar has and for the same reason: a heading inside
+    /// a table is furniture, so it runs to the frame rather than standing back
+    /// from it. `width` is the run this heading owns, which is the whole sheet in
+    /// one column and one column's share of it in two.
+    fn sheet_heading(&mut self, x: u16, y: u16, width: usize, label: &str) {
+        let mut heading = String::with_capacity(width * 3);
+        heading.push('│');
+        heading.push_str(label);
+        for _ in 0..width.saturating_sub(width_of(label) + 3) {
+            heading.push(RULE);
+        }
+        heading.push_str(" │");
+        self.put(x, y, &heading, width, self.theme.chrome_dim);
+    }
+
+    /// The frame down both edges of one row.
+    ///
+    /// Split from [`Painter::sheet_row`] by #220: in two columns a single row
+    /// carries two groups' cells and still only two pipes, so the caller owns
+    /// them.
+    fn sheet_pipes(&mut self, area: Rect, y: u16) {
+        self.put(area.x, y, "│", 1, self.theme.chrome_dim);
+        self.put(area.x + area.width - 1, y, "│", 1, self.theme.chrome_dim);
+    }
+
+    /// One row of a group: the keys cell lit, the verb dim.
     ///
     /// **Both cells are clipped to their planned field and never truncated with a
     /// mark**, which is the difference between this table and a line of content:
     /// the plan measured every row it was going to draw, so a cell that did not
     /// fit would mean the plan was wrong rather than that the pane is narrow.
-    fn sheet_row(&mut self, area: Rect, y: u16, row: &Gesture, plan: &SheetPlan) {
-        let right = area.x + area.width - 1;
-        self.put(area.x, y, "│", 1, self.theme.chrome_dim);
+    ///
+    /// `x` is the column the group's frame would sit in, so the cells land two and
+    /// two-plus-the-field in from it exactly as they do in one column.
+    fn sheet_row(&mut self, x: u16, y: u16, row: &Gesture, level: usize, keys: usize, verb: usize) {
+        self.put(x + 2, y, row.keys[level], keys, self.theme.chrome);
         self.put(
-            area.x + 2,
+            x + 2 + keys as u16 + 2,
             y,
-            row.keys[plan.level],
-            plan.keys,
-            self.theme.chrome,
-        );
-        self.put(
-            area.x + 2 + plan.keys as u16 + 2,
-            y,
-            row.verb[plan.level],
-            plan.verb,
+            row.verb[level],
+            verb,
             self.theme.chrome_dim,
         );
-        self.put(right, y, "│", 1, self.theme.chrome_dim);
     }
 
     fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect) {
