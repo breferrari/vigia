@@ -32,9 +32,10 @@
 //! widths nothing draws: `render.rs` carries that in a `const` block, because a
 //! claim about an unreachable case cannot be a test.
 
+mod support;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use vigia::{
     App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Position, Row, Theme, View,
     body_layout, regions, render,
@@ -179,63 +180,6 @@ fn drawn(width: u16, height: u16, view: &View) -> Buffer {
     buf
 }
 
-/// Cells of row `y` between `from` and `to` whose glyph and colour are both one
-/// of `symbols` and `colours`.
-///
-/// **Restricted to a column range, which is the whole reason this exists beside
-/// `tests/legibility.rs`'s copy.** A row can hold two regions in this layout, and
-/// a strip counted across the whole row adds one region's rung to the other's:
-/// twelve slices beside twelve is twenty-four, and twenty-four is a legal rung. A
-/// gate that counted the row would pass on a renderer that had lost the ladder
-/// entirely.
-///
-/// Colour as well as glyph, for that file's own recorded reason: a heat slice and
-/// a full sparkline bucket are the same block, so a glyph-only match counts one
-/// as the other.
-fn cells_in(
-    buf: &Buffer,
-    y: u16,
-    from: u16,
-    to: u16,
-    colours: &[Color],
-    symbols: &[char],
-) -> usize {
-    (from..to)
-        .filter(|x| {
-            let cell = &buf[(*x, y)];
-            symbols
-                .iter()
-                .any(|glyph| cell.symbol() == glyph.to_string())
-                && cell.style().fg.is_some_and(|fg| colours.contains(&fg))
-        })
-        .count()
-}
-
-fn heat_colours(theme: &Theme) -> Vec<Color> {
-    [
-        theme.heat_track,
-        theme.heat_added,
-        theme.heat_added_warm,
-        theme.heat_added_hot,
-        theme.heat_removed,
-        theme.heat_removed_warm,
-        theme.heat_removed_hot,
-        theme.heat_mixed,
-        theme.heat_mixed_warm,
-        theme.heat_mixed_hot,
-    ]
-    .iter()
-    .filter_map(|style| style.fg)
-    .collect()
-}
-
-fn spark_colours(theme: &Theme) -> Vec<Color> {
-    [theme.spark, theme.spark_warm, theme.spark_hot]
-        .into_iter()
-        .filter_map(|style| style.fg)
-        .collect()
-}
-
 /// What one region draws on one row: whether the counts cell is there, how many
 /// heat slices, how many sparkline cells.
 ///
@@ -249,13 +193,25 @@ type Rung = (bool, usize, usize);
 ///
 /// The triple the glance ladder walks, and the thing every monotonicity claim in
 /// this repo is about.
-fn rung(buf: &Buffer, theme: &Theme, y: u16, from: u16, to: u16) -> Rung {
-    let heat = cells_in(buf, y, from, to, &heat_colours(theme), &[HEAT_SLICE]);
-    let bars = cells_in(buf, y, from, to, &spark_colours(theme), &RAMP);
+fn rung(buf: &Buffer, theme: &Theme, y: u16, columns: std::ops::Range<u16>) -> Rung {
+    let within = |colours: &[ratatui::style::Color], symbols: &[char]| {
+        support::columns_in(buf, y, columns.clone(), colours, symbols).len()
+    };
+    let heat = within(&support::heat_colours(theme), &[HEAT_SLICE]);
+    let bars = within(&support::spark_colours(theme), &RAMP);
     let track = theme.spark_track.fg.expect("the track has a colour");
-    let empty = cells_in(buf, y, from, to, &[track], &[TRACK]);
-    let counts = (from..to).any(|x| buf[(x, y)].symbol() == "+");
+    let empty = within(&[track], &[TRACK]);
+    let counts = columns.clone().any(|x| buf[(x, y)].symbol() == "+");
     (counts, heat, bars + empty)
+}
+
+/// The columns one region holds, from the geometry the painter drew into.
+///
+/// Asked of `regions` rather than derived, so a gate reading a rung is reading
+/// the same rect the renderer painted. Four hand-spelled copies of this
+/// expression were what it replaced.
+fn columns_of(region: vigia::Region) -> std::ops::Range<u16> {
+    region.left..region.left + region.width
 }
 
 /// The rung each region draws at this width, read at each region's **own** first
@@ -268,21 +224,8 @@ fn rungs(width: u16, view: &View) -> (Rung, Rung) {
     let theme = Theme::default();
     let buf = drawn(width, TALL, view);
     let told = regions(area, &chrome(), view);
-    let list = rung(
-        &buf,
-        &theme,
-        told.list.top,
-        told.list.left,
-        told.list.left + told.list.width,
-    );
-    let diff = rung(
-        &buf,
-        &theme,
-        told.diff.top,
-        told.diff.left,
-        told.diff.left + told.diff.width,
-    );
-    (list, diff)
+    let read = |region: vigia::Region| rung(&buf, &theme, region.top, columns_of(region));
+    (read(told.list), read(told.diff))
 }
 
 /// The first width at which a pane draws a rail, found rather than restated.
@@ -323,8 +266,7 @@ fn the_rail_arrives_where_the_stacked_list_would_have_climbed() {
         &drawn(PICTURED_PANE, TALL, &listless),
         &theme,
         told.diff.top,
-        told.diff.left,
-        told.diff.left + told.diff.width,
+        columns_of(told.diff),
     );
     assert!(
         pictured.1 > 0 && pictured.2 > 0,
@@ -342,8 +284,7 @@ fn the_rail_arrives_where_the_stacked_list_would_have_climbed() {
                 &drawn(*width, TALL, &listless),
                 &theme,
                 told.diff.top,
-                told.diff.left,
-                told.diff.left + told.diff.width,
+                columns_of(told.diff),
             );
             heat > pictured.1 || spark > pictured.2
         })
@@ -511,7 +452,7 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
         // the budget rather than the string. Where a rail is wide enough to draw it
         // whole the count is the string and is comfortably over the floor, which is
         // the direction that cannot hide a defect.
-        let row: String = (told.list.left..told.list.left + told.list.width)
+        let row: String = columns_of(told.list)
             .map(|x| buf[(x, told.list.top)].symbol().to_owned())
             .collect::<Vec<_>>()
             .join("");
@@ -566,4 +507,79 @@ fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
             );
         }
     }
+}
+
+/// A hover in the rail underlines the rail's own row and nothing in the diff.
+///
+/// **The fourth surface of the same defect, and the one that reaches a reader.**
+/// [#251](https://github.com/breferrari/vigia/issues/251) made every hit-test in
+/// `input.rs` column-aware and [#254](https://github.com/breferrari/vigia/issues/254)
+/// did the paint marks; `Hovered::Row` still carries a bare screen row, and
+/// `Painter::file_row` compares it against the row it is drawing on. That
+/// comparison is written for **both** regions, and the comment over it justified
+/// itself with *"a diff heading's row is never inside"* the list region. True
+/// while the two were stacked. Beside a rail they share every row, so hovering
+/// the third file in the rail underlined the third file heading in the diff.
+///
+/// `SPEC.md` §5.3's B10 adopted hover on the list's rows alone, because the diff
+/// is not clickable and a mark there would imply it is. This gate is that ruling
+/// asserted rather than described.
+#[test]
+fn a_hover_in_the_rail_does_not_light_the_diff() {
+    use ratatui::style::Modifier;
+    use vigia::Hovered;
+
+    let view = beside();
+    let width = first_rail();
+    let area = Rect::new(0, 0, width, TALL);
+    let told = regions(area, &chrome(), &view);
+    // The rail's own first row, which beside a rail is also the diff's.
+    let row = told.list.top;
+    assert_eq!(
+        row, told.diff.top,
+        "the two regions do not share a row, so this gate is about a layout that \
+         does not exist"
+    );
+
+    let hovered = Chrome {
+        hovered: Some(Hovered::Row(row)),
+        ..chrome()
+    };
+    let mut buf = Buffer::empty(area);
+    render(
+        &mut buf,
+        area,
+        &view,
+        &Theme::default(),
+        Glyphs::Block,
+        &hovered,
+    );
+
+    let underlined = |columns: std::ops::Range<u16>| {
+        columns
+            .filter(|x| {
+                buf[(*x, row)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::UNDERLINED)
+            })
+            .count()
+    };
+
+    let rail = underlined(columns_of(told.list));
+    let diff = underlined(columns_of(told.diff));
+
+    // Non-vacuity first: a gate that found no underline anywhere would pass on a
+    // build where hover had been deleted outright.
+    assert!(
+        rail > 0,
+        "the hovered rail row drew no underline at all, so this gate is not \
+         measuring hover"
+    );
+    assert_eq!(
+        diff, 0,
+        "hovering the rail underlined {diff} cells of the diff heading drawn on \
+         the same row, which `SPEC.md` §5.3 B10 rules is a mark on a surface the \
+         pointer cannot act on"
+    );
 }

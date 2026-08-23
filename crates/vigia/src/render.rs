@@ -1091,7 +1091,7 @@ const RAIL_FLOOR: u16 =
 
 /// The share of a wide pane the rail takes, above [`RAIL_FLOOR`].
 ///
-/// **One in three, and the floor is what binds until 204 columns.** Below that
+/// **One in three, and the floor is what binds until 213 columns.** Below that
 /// the rail is [`RAIL_FLOOR`] and the diff takes everything else, which is the
 /// arrangement the rail is *for*: the glance cluster sits against its path and
 /// every column the pane gains goes to the code. Above it the rail earns width
@@ -1101,9 +1101,11 @@ const RAIL_FLOOR: u16 =
 /// Both halves are monotone in the pane by construction, which is the property
 /// the margin ladder is written out as a table to keep: a share that stepped by
 /// two for one column of pane would hand a widening pane a narrower diff.
-const RAIL_NUMER: u16 = 1;
-/// The denominator of [`RAIL_NUMER`]'s share.
-const RAIL_DENOM: u16 = 3;
+/// Written as the divisor alone rather than as a numerator over a denominator,
+/// which is the shape [`GLANCE_NUMER`] needs and this does not: two in five has no
+/// divisor, one in three is `pane / 3`, and a `* 1` is an operator-order question
+/// standing in for an arithmetic one.
+const RAIL_SHARE: u16 = 3;
 
 /// Whether a pane this wide draws the list as a rail beside the diff.
 const fn affords_rail(pane: u16) -> bool {
@@ -1116,9 +1118,9 @@ const fn affords_rail(pane: u16) -> bool {
 /// and [`Body::areas`] both gate on [`affords_rail`] first. The `max` is what
 /// keeps a rail that cannot hold its own contents from being drawn at all, and
 /// the floor is reached rather than clamped to, because [`RAIL_FROM`] is above
-/// the width where the share overtakes it only from 204 up.
+/// the width where the share overtakes it only from 213 up.
 const fn rail_of(pane: u16) -> u16 {
-    let share = pane / RAIL_DENOM * RAIL_NUMER;
+    let share = pane / RAIL_SHARE;
     if share > RAIL_FLOOR {
         share
     } else {
@@ -3386,13 +3388,7 @@ impl Body {
         // picked out before. Worth stating rather than leaving to be re-derived:
         // adding a row to the body is normally how a ladder silently re-rungs, and
         // this one does not.
-        let framed = GRAPH_ROWS + GRAPH_AIR;
-        let graph = if masthead && band_fits(area.width) && after >= framed + GRAPH_KEEP {
-            GRAPH_ROWS
-        } else {
-            0
-        };
-        let air = if graph > 0 { GRAPH_AIR } else { 0 };
+        let (graph, air) = Self::band_rows_of(masthead, area.width, after);
         Self {
             lead: LEAD_ROWS,
             graph,
@@ -3401,6 +3397,29 @@ impl Body {
             rule: true,
             diff: after - graph - air,
             rail: false,
+        }
+    }
+
+    /// The rows the band takes out of `after`, drawn and blank, or zero twice.
+    ///
+    /// **One expression for two layouts**
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)). [`Body::split`]
+    /// and [`Body::rail`] ask the same question of the same three inputs, and the
+    /// second carried the answer as a copy with a comment saying *"verbatim from
+    /// `Body::split`"*. A comment naming a duplication is not a defence against
+    /// it: `GRAPH_KEEP`, `GRAPH_AIR` and [`band_fits`] would each have had two
+    /// edit sites, and the rail's copy is the one where a stale [`band_fits`] is
+    /// silent, because it is true at every width a rail is drawn at anyway.
+    ///
+    /// The paragraphs arguing *why* the band is paid last, and out of what, stay
+    /// on [`Body::split`] where `after` is derived. This function is the
+    /// arithmetic those paragraphs describe.
+    fn band_rows_of(masthead: bool, width: u16, after: usize) -> (usize, usize) {
+        let framed = GRAPH_ROWS + GRAPH_AIR;
+        if masthead && band_fits(width) && after >= framed + GRAPH_KEEP {
+            (GRAPH_ROWS, GRAPH_AIR)
+        } else {
+            (0, 0)
         }
     }
 
@@ -3434,20 +3453,11 @@ impl Body {
         }
         let after = body - LEAD_ROWS;
 
-        // Verbatim from [`Body::split`], including `GRAPH_KEEP` and
-        // [`band_fits`]: the band's fit is a question about the rows left under it
-        // and the columns the pane has, and the rail changes how those rows are
-        // *shared* rather than how many there are. `band_fits` is true at every
-        // width a rail exists at and is asked anyway, because a condition that
-        // holds by implication is a condition nothing rechecks when the ladder it
-        // implies from moves.
-        let framed = GRAPH_ROWS + GRAPH_AIR;
-        let graph = if masthead && band_fits(width) && after >= framed + GRAPH_KEEP {
-            GRAPH_ROWS
-        } else {
-            0
-        };
-        let air = if graph > 0 { GRAPH_AIR } else { 0 };
+        // **The same question [`Body::split`] asks, asked through the same
+        // function.** The band's fit is about the rows left under it and the
+        // columns the pane has, and the rail changes how those rows are *shared*
+        // rather than how many there are.
+        let (graph, air) = Self::band_rows_of(masthead, width, after);
         let rows = after - graph - air;
         Self {
             lead: LEAD_ROWS,
@@ -3617,6 +3627,26 @@ pub struct Areas {
     pub rule: Rect,
     /// Everything left for the diff.
     pub diff: Rect,
+}
+
+impl Areas {
+    /// Whether each region is wide enough for a scrollbar at all.
+    ///
+    /// **One derivation, read by the painter and the pointer**
+    /// ([#252](https://github.com/breferrari/vigia/issues/252)), which is the same
+    /// consolidation [`Body::areas`] itself is. [`affords_bar`] used to be asked
+    /// once of the pane and was true or false for the whole screen; beside a rail
+    /// the two regions are different widths, so it became a question per region,
+    /// and asking it per region in both [`render`] and [`regions`] is four
+    /// expressions where the invariant is that all four agree. They cannot
+    /// disagree now, because there is one.
+    ///
+    /// Each region decides separately whether it has anywhere to *scroll*, which
+    /// is [`bar_for`]'s question and a fact about the contents rather than the
+    /// pane.
+    fn bars(&self) -> (bool, bool) {
+        (affords_bar(self.list.width), affords_bar(self.diff.width))
+    }
 }
 
 impl Body {
@@ -3824,14 +3854,15 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     // held while both regions spanned the pane and were therefore the same width.
     // Beside a rail they are not, and a rail narrow enough to fail the floor while
     // the diff clears it would have drawn a bar on a region that cannot hold one.
+    let (list_bars, diff_bars) = areas.bars();
     let list_bar = bar_for(
-        affords_bar(areas.list.width),
+        list_bars,
         areas.list.height,
         body.list as u64,
         view.files as u64,
     );
     let diff_bar = bar_for(
-        affords_bar(areas.diff.width),
+        diff_bars,
         areas.diff.height,
         body.diff as u64,
         view.total_rows as u64,
@@ -3930,6 +3961,9 @@ pub fn render(
     // row it does not use. Nothing below has to know whether the row is the
     // header's separator or the band's leading air, because it is both.
     let areas = body.areas(area);
+    // The same pair `regions` reads, so the pointer never seeks a bar the screen
+    // declined to draw.
+    let (list_bars, diff_bars) = areas.bars();
 
     if areas.band.height > 0 {
         painter.band(areas.band, view);
@@ -3939,16 +3973,8 @@ pub fn render(
         let region = areas.list;
         // Counted in **files**, which is exactly what this region shows.
         let full = region;
-        // **Wide enough for a bar is asked of this region and not of the pane**
-        // ([#252](https://github.com/breferrari/vigia/issues/252)); `regions`
-        // carries the argument, and the two have to ask the same question or the
-        // pointer seeks a bar the screen did not draw.
-        let (region, bar) = painter.with_bar(
-            region,
-            affords_bar(full.width),
-            body.list as u64,
-            view.files as u64,
-        );
+        let (region, bar) =
+            painter.with_bar(region, list_bars, body.list as u64, view.files as u64);
         // **Before the content here, and it does not matter which**, because a list
         // row carries no wash: the bar's cell and the row's cells never overlap. The
         // diff region below is the one where the order is load-bearing, and it draws
@@ -3963,7 +3989,7 @@ pub fn render(
                 view.files as u64,
             );
         }
-        painter.list(region, full.width, view, area);
+        painter.list(region, full.width, view, area.width);
     }
 
     if areas.rule.height > 0 {
@@ -4009,7 +4035,7 @@ pub fn render(
         let full = region;
         let (region, bar) = painter.with_bar(
             region,
-            affords_bar(full.width),
+            diff_bars,
             u64::from(body.diff as u16),
             view.total_rows as u64,
         );
@@ -4055,8 +4081,7 @@ pub fn render(
         // to land instead of a defect to fix. That rung is this one, the diff no
         // longer spans the pane, and the ruling is in `SPEC.md` §5.3 now rather
         // than only here: furniture spans the region that drew it.
-        let washed = full.width;
-        painter.body(region, washed, view, area, full.width);
+        painter.body(region, full, view, area);
         if bar.drawn() {
             painter.scrollbar(
                 full,
@@ -4437,11 +4462,9 @@ impl Painter<'_> {
              built for, so its margin and the chrome's have come apart"
         );
         let left = area.x.saturating_add(self.inset);
-        let stop = area.x.saturating_add(area.width).min(
-            pane.x
-                .saturating_add(pane.width)
-                .saturating_sub(self.trailing),
-        );
+        // Through `Rect::right`, which `ratatui` defines as exactly this saturating
+        // add and which this file already calls one region over.
+        let stop = area.right().min(pane.right().saturating_sub(self.trailing));
         Rect {
             x: left,
             width: stop.saturating_sub(left),
@@ -5072,19 +5095,15 @@ impl Painter<'_> {
     /// region is sixty-eight columns of a two-hundred column pane. The ladder rung
     /// comes from the pane, as [`margin_of`] rules; what the row has to spend
     /// comes from the region.
-    fn list(&mut self, area: Rect, available: u16, view: &View, pane: Rect) {
+    fn list(&mut self, area: Rect, available: u16, view: &View, pane: u16) {
         // Against this region's **full** width rather than the rect it was handed:
         // `area` has already lost the bar's columns when one is drawn, and deciding
         // from it would make the caret's presence depend on whether the list happens
         // to be scrollable. See [`affords_caret`], which is now that comparison
         // written once and read by the width below as well, rather than a constant
         // kept beside it.
-        let caret = affords_caret(available, pane.width);
-        let gutter = if caret {
-            caret_gutter(pane.width) as u16
-        } else {
-            0
-        };
+        let caret = affords_caret(available, pane);
+        let gutter = if caret { caret_gutter(pane) as u16 } else { 0 };
 
         // **The caret sits on the pane's own leading column, and the row starts
         // after whatever margin is left over.** `assets/preview.svg` puts the
@@ -5137,7 +5156,7 @@ impl Painter<'_> {
         // that it is one, and the one column is the residual `caret_gutter`
         // documents.
         let shown = usize::from(area.height);
-        let inner = planning_width(available, pane.width, gutter);
+        let inner = planning_width(available, pane, gutter);
         let columns = Columns::plan(inner, self.glyphs);
         // Hoisted beside the width it goes with, because it is a property of the
         // region and not of any row. Saturating for the reason `left` above is:
@@ -5165,11 +5184,19 @@ impl Painter<'_> {
                 Rect {
                     y,
                     height: 1,
-                    // `area.x` is the pane's own leading column, not the region's: `render`
-                    // builds this rect with `..area` and `with_bar` narrows the *width* on
-                    // the right without moving the origin. Worth saying, because everything
-                    // else in this function reads `pane` precisely because `area` cannot be
-                    // trusted for a width.
+                    // `area.x` is this **region's** leading column: `with_bar` narrows the
+                    // *width* on the right without moving the origin, so it is the origin
+                    // `render` handed down. Worth saying, because everything else in this
+                    // function reads `pane` precisely because `area` cannot be trusted for a
+                    // width.
+                    //
+                    // **It is the pane's leading column too, and that is a coincidence of
+                    // this layout rather than a rule** ([#252](https://github.com/breferrari/vigia/issues/252)).
+                    // The list is flush left in both shapes the tool draws, stacked and as a
+                    // rail, so the caret standing on the pane's own edge and standing on the
+                    // region's own edge are the same cell. §11.1 licenses the *pane's* edge;
+                    // a region that was not flush left would have to re-ask the question, and
+                    // stating that here is cheaper than re-deriving it then.
                     // **The pane's inset plus whatever the caret could not take
                     // out of it**, which is the stream's own origin exactly
                     // whenever `gutter` is zero.
@@ -5180,6 +5207,12 @@ impl Painter<'_> {
                 view.scale,
                 &columns,
                 current,
+                // **The one region hover answers on**, and a literal for the same
+                // reason `current` is one at the other call site: a mark confined
+                // by a parameter cannot reach a region that was never meant to
+                // carry it, where one confined by geometry is only ever as safe as
+                // the layout that happens to be drawn.
+                true,
             );
         }
     }
@@ -5623,7 +5656,7 @@ impl Painter<'_> {
         self.put(right, y, "│", 1, self.theme.chrome_dim);
     }
 
-    fn body(&mut self, area: Rect, washed: u16, view: &View, pane: Rect, available: u16) {
+    fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect) {
         // **Two rects, because this region draws both roles.** A heading is placed
         // against the pane through [`planning_width`]; everything else here keeps
         // the region's own right edge and only stands back from it, through
@@ -5632,6 +5665,15 @@ impl Painter<'_> {
         //
         // Resolved once rather than per row, since both are properties of the
         // pane and the region rather than of any line.
+        // **One width, named twice inside rather than passed twice from outside**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)). The two meanings
+        // are real and §5.3 rules them both: `washed` is what *furniture* spans,
+        // which is the region, and `available` is what the glance ladder is planned
+        // against, which is the region less what a bar costs. What is not real is
+        // the caller having to hand them over as two `u16`s that must be equal:
+        // `full` is the region before any bar narrowed it, and both fall out of it.
+        let washed = full.width;
+        let available = full.width;
         let glyphs = self.region_text(area, pane);
         if view.files == 0 {
             self.put_marked(
@@ -5689,6 +5731,11 @@ impl Painter<'_> {
                     // contains. Saying so here confines the mark by
                     // construction, where a mark the painter carried would be
                     // confined only by the two regions never sharing a `y`.
+                    false,
+                    // **And the same literal for the hover mark**, which is the
+                    // sentence above coming true: beside a rail the two regions
+                    // *do* share a `y`, and the mark that was confined by geometry
+                    // reached this row ([#252](https://github.com/breferrari/vigia/issues/252)).
                     false,
                 ),
                 Row::Hunk {
@@ -5805,6 +5852,7 @@ impl Painter<'_> {
         scale: Scale,
         columns: &Columns,
         current: bool,
+        hoverable: bool,
     ) {
         let mut right = area;
 
@@ -6063,13 +6111,26 @@ impl Painter<'_> {
         // can go stale outranking every claim about the worktree is the thing
         // §5.3's own B10 rule forbids.
         //
-        // Hover answers on the **list's** rows only. `Hovered::Row` is resolved
-        // from the list region alone, and a diff heading's row is never inside
-        // it, so this comparison cannot light one: the diff is not clickable and
-        // a mark there would imply it is. `current` is confined more strongly
-        // still, being a literal `false` at the stream's call site rather than a
-        // comparison that happens never to match.
-        let ink = if self.hovered == Some(Hovered::Row(area.y)) {
+        // Hover answers on the **list's** rows only: the diff is not clickable and
+        // a mark there would imply it is.
+        //
+        // **Confined by a parameter rather than by geometry, since
+        // [#252](https://github.com/breferrari/vigia/issues/252).** This used to
+        // read `self.hovered == Some(Hovered::Row(area.y))` alone, justified by
+        // *"a diff heading's row is never inside the list region"*, which was true
+        // for exactly as long as the two regions were stacked. Beside a rail they
+        // share every row of the body, and hovering the third file in the rail
+        // underlined the third file heading in the diff: a mark on a surface the
+        // pointer cannot act on, which is what §5.3's B10 refuses.
+        //
+        // `Hovered::Row` still carries a bare row, and it is `input.rs` that
+        // resolves it from the list region's columns. What was missing is the
+        // *painter's* half, and `current` one line down already had it: a literal
+        // at the stream's call site confines the mark by construction, where a
+        // comparison is confined only by two regions never sharing a `y`. That
+        // sentence is in `current`'s own docblock, written one row before this
+        // defect was found.
+        let ink = if hoverable && self.hovered == Some(Hovered::Row(area.y)) {
             self.theme.path_hover
         } else {
             self.theme.recency(heading.recency)

@@ -332,16 +332,17 @@ const RAIL_PANE: Rect = Rect {
 fn a_frame_beside_a_rail_holds_the_frame_budget() {
     let app = App::new();
     let rail = layout_of(&app, RAIL_PANE, FILES);
+    let stacked = layout(&app, FILES).list;
     assert!(
         rail.rail,
         "the {}x{} pane this gate is named for does not draw a rail",
         RAIL_PANE.width, RAIL_PANE.height
     );
     assert!(
-        rail.list > layout(&app, FILES).list * 3,
-        "the rail draws {} pinned rows against the stacked layout's {}, which is          not the deeper region this gate exists to time",
-        rail.list,
-        layout(&app, FILES).list
+        rail.list > stacked * 3,
+        "the rail draws {} pinned rows against the stacked layout's {stacked}, \
+         which is not the deeper region this gate exists to time",
+        rail.list
     );
     frame_budget_on("shell-i9-rail", 0, RAIL_PANE);
 }
@@ -768,7 +769,8 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect) {
 
     holds_p99(
         &format!(
-            "I9: a real frame with highlighting over {FILES} files on a {}x{} pane              drawing {} pinned rows",
+            "I9: a real frame with highlighting over {FILES} files on a {}x{} pane \
+             drawing {} pinned rows",
             pane.width, pane.height, screen.list
         ),
         budget(I9_FRAME),
