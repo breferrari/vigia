@@ -827,3 +827,78 @@ fn the_widening_ladder_is_monotone_and_never_leaves_the_body() {
         }
     }
 }
+
+#[test]
+fn one_column_wins_wherever_one_column_fits() {
+    // **The additivity claim as a gate, not as an argument.** #220's rung is
+    // inserted in the *middle* of a monotone ladder, where removing one from the
+    // top would have been free, so the property that keeps it from being a
+    // relayout is that a pane on which one column already fits never reaches it.
+    //
+    // Stated so a screen can answer it: at each width, find the shortest pane that
+    // draws every gesture in **one** column, and require every two-column pane at
+    // that width to be shorter than it. A pane that could have had the shape it
+    // has today and was given a different one fails here.
+    //
+    // **The first version of this gate could not fail.** It skipped a width whose
+    // one-column pane did not exist, and putting the two-column rung first is
+    // exactly what makes it not exist, so the mutation it was written for passed
+    // straight through it. A width that draws two columns and never falls back to
+    // one is now the failure rather than the exemption.
+    let widths: Vec<u16> = (40..=144).collect();
+    let heights: Vec<u16> = (6..=32).collect();
+    // Per cell: whether the sheet drew two columns, and how many gestures reached
+    // the screen. `None` where no sheet was drawn at all.
+    let mut cells = vec![vec![None; heights.len()]; widths.len()];
+
+    sweep!("sheet-additive", |paint| {
+        for (i, &w) in widths.iter().enumerate() {
+            for (j, &h) in heights.iter().enumerate() {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                let (count, sheet) = read_sheet(&buf, &laid, at);
+                cells[i][j] = laid.sheet.map(|_| (sheet.contains("keyboard"), count));
+            }
+        }
+    });
+
+    let mut seen = 0;
+    for (i, &w) in widths.iter().enumerate() {
+        let two_column: Vec<u16> = heights
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| matches!(cells[i][*j], Some((true, _))))
+            .map(|(_, h)| *h)
+            .collect();
+        if two_column.is_empty() {
+            continue;
+        }
+        seen += two_column.len();
+
+        // The shortest pane at this width that draws every gesture in one column.
+        let full = heights
+            .iter()
+            .enumerate()
+            .find(|(j, _)| cells[i][*j] == Some((false, GESTURES.len())))
+            .map(|(_, h)| *h);
+        let full = full.unwrap_or_else(|| {
+            panic!(
+                "width {w} draws two columns at {two_column:?} and never falls \
+                 back to one, so the two-column rung is being taken ahead of a \
+                 shape that fits"
+            )
+        });
+        for h in two_column {
+            assert!(
+                h < full,
+                "a pane of {w}x{h} took the two-column rung although one column \
+                 draws every gesture from {w}x{full}, so the ladder is a relayout \
+                 rather than additive"
+            );
+        }
+    }
+    assert!(
+        seen > 0,
+        "the sweep found no two-column pane at all, so it proves nothing"
+    );
+}
