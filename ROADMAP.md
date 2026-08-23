@@ -459,7 +459,9 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | decision: the keymap outgrew the hint bar, so does it get an overlay | [#167](https://github.com/breferrari/vigia/issues/167) |
 | ✅ | Build B12: `?` toggles a centred gestures sheet over the pane | [#206](https://github.com/breferrari/vigia/issues/206) |
 | ✅ | The sheet keeps the diff colours it covers, and its close control never brightens | [#211](https://github.com/breferrari/vigia/issues/211) |
-| ⬜ | The sheet is 56 by 19 whatever the pane is, and a short one drops thirteen gestures in silence | [#220](https://github.com/breferrari/vigia/issues/220) |
+| ✅ | The sheet is 56 columns whatever the pane is, so a short one drops the mouse group with the room to draw it sitting unused | [#220](https://github.com/breferrari/vigia/issues/220) |
+| ⬜ | The sheet has no roomy rung: no air, no sections, and a reorder that would invert the keep-set | [#285](https://github.com/breferrari/vigia/issues/285) |
+| ⬜ | At the residual floor the sheet still drops gestures in silence, and reaching them is an input-model ruling | [#286](https://github.com/breferrari/vigia/issues/286) |
 | ✅ | The churn band samples once a second, so a bursty worktree draws scatter | [#223](https://github.com/breferrari/vigia/issues/223) |
 | ✅ | Attribute a wall-clock overshoot with thread CPU time | [#212](https://github.com/breferrari/vigia/issues/212) |
 | ✅ | The status sigil sits two columns apart between the list and the diff's headings | [#173](https://github.com/breferrari/vigia/issues/173) |
