@@ -1256,7 +1256,7 @@ fn the_file_list_reads_only_the_rows_it_draws() {
     // **And once more beside a rail**
     // ([#252](https://github.com/breferrari/vigia/issues/252)), which is the same
     // argument on the other axis and the one `SPEC.md` §11.1 names this file for.
-    // Past 134 columns the list sits beside the diff and its height cap does not
+    // From 134 columns the list sits beside the diff and its height cap does not
     // apply at all, so the region is deeper again: the claim that a visible row
     // costs one `Frame::diff` and no more is what makes that affordable, and until
     // this arm every gate here drew at eighty columns and no rail was ever

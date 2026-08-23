@@ -8,16 +8,22 @@
 //! comparable *down* the list and the void between path and cluster destroys the
 //! association *across* one, which is the thing a reader actually looks for.
 //!
-//! Four claims live here and they fail in different ways.
+//! The claims live here and they fail in different ways.
 //!
 //! **The rail arrives where the stacked ladder would have climbed.** That width
 //! is a derivation rather than a preference, and the gate re-derives it from a
 //! drawn screen rather than restating the constant.
 //!
-//! **Widening into it takes nothing away.** Both regions read one glance ladder,
-//! so splitting a pane costs each of them width; the arrival width is the one
-//! place below three hundred columns where neither loses a rung, and that is the
-//! property worth a sweep.
+//! **Widening into it takes nothing away, at the block rung.** Both regions read
+//! one glance ladder, so splitting a pane costs each of them width; the arrival
+//! width is the one place below three hundred columns where neither loses a rung.
+//! At a dense glyph rung the ladder climbs earlier and the crossing does cost one,
+//! which is [#284](https://github.com/breferrari/vigia/issues/284); what holds
+//! everywhere is the floor the published picture sets, and that has a gate of its
+//! own.
+//!
+//! **Crossing costs no rows either.** Not the diff's, which a rail's lead blank
+//! and its band's arrival can both take, and not the map's.
 //!
 //! **The two regions are two regions.** Separate scrollbars, separate widths,
 //! separate ladders, and a pointer that is told the same geometry the painter
@@ -25,8 +31,15 @@
 //! `tests/legibility.rs::the_body_tiles_the_pane_with_no_gap_and_no_overlap`,
 //! which was written as a partition for this layout before it existed.
 //!
-//! **The rail keeps a path.** A rail whose paths have lost the directory they
-//! are in has given up half of what it was built to show.
+//! **A mark for one region stays in it.** Hover is the list's and the diff is not
+//! clickable, and beside a rail the two share every row.
+//!
+//! **The rail keeps a path**, and grows with the pane without climbing off the
+//! pictured complement before a 402-column pane. A rail whose paths have lost the
+//! directory they are in has given up half of what it was built to show.
+//!
+//! **And it deepens with the pane**, falling only where the band arrives and only
+//! by the band's own rows, which is the one exception to §11.1's clamp order.
 //!
 //! What is deliberately *not* here is the arithmetic that makes those true at
 //! widths nothing draws: `render.rs` carries that in a `const` block, because a
@@ -1134,5 +1147,119 @@ fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
         fell, 4,
         "the crossing cost a rung in {fell} region-rung pairs; blocks should cost \
          none and the two dense rungs one each in both regions"
+    );
+}
+
+/// A pointer at the rail's real geometry routes to the region it is over.
+///
+/// **The seam between what this row changed and what consumes it, which nothing
+/// crossed.** `tests/rail.rs` asserted the *shape* `regions` reports and
+/// `tests/input.rs` asserted routing against hand-built numbers; the rail's own
+/// boundary columns had never been through `action_for`. That is the coverage
+/// shape `SPEC.md` §7 keeps finding: two halves each tested against its own idea
+/// of the other, with production the only place they meet.
+///
+/// [#251](https://github.com/breferrari/vigia/issues/251) made every hit-test
+/// column-aware and could not test it against a layout that did not exist. This
+/// is that test, at the geometry the layout actually produces.
+#[test]
+fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
+    use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use vigia::{Action, action_for};
+
+    let view = beside();
+    let width = first_rail();
+    let area = Rect::new(0, 0, width, TALL);
+    let told = regions(area, &chrome(), &view);
+    assert_eq!(
+        told.list.top, told.diff.top,
+        "the fixture pane is not a rail, so this gate is about a layout that does \
+         not exist"
+    );
+
+    let boundary = told.list.left + told.list.width;
+    assert_eq!(
+        boundary, told.diff.left,
+        "the two regions do not meet, so there is no boundary to probe"
+    );
+    // **And the boundary is interior**, or the columns probed below are off the
+    // pane and every routing assertion is about a cell nobody can point at. Found
+    // by mutation: widening the rail to the whole pane left this gate green while
+    // four of its neighbours reddened.
+    assert!(
+        told.diff.width > 0 && boundary < area.x + area.width,
+        "the diff has no columns of its own at {width}, so the boundary is the \
+         pane's edge rather than a seam between two regions"
+    );
+
+    let event = |column: u16, row: u16| {
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    let row = told.list.top;
+
+    // **The last column of the rail and the first of the diff**, which is the one
+    // pair a row cannot tell apart in this layout and the only pair that could
+    // ever have been got wrong.
+    assert!(
+        matches!(
+            action_for(&event(boundary - 1, row), told),
+            Some(Action::ScrollList(_))
+        ),
+        "a wheel on the rail's last column did not reach the map: {:?}",
+        action_for(&event(boundary - 1, row), told)
+    );
+    assert!(
+        matches!(
+            action_for(&event(boundary, row), told),
+            Some(Action::Scroll(_))
+        ),
+        "a wheel on the diff's first column did not reach the diff: {:?}",
+        action_for(&event(boundary, row), told)
+    );
+
+    // **A click on a listed file, at the rail's own columns.** The pointer has to
+    // land on the file the rail drew there rather than on the row of a region
+    // seventy columns away.
+    let click = |column: u16, row: u16| {
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    };
+    assert_eq!(
+        action_for(&click(2, told.list.top + 1), told),
+        Some(Action::ListRow(1)),
+        "clicking the rail's second row did not jump the diff to its second file"
+    );
+    assert!(
+        matches!(
+            action_for(&click(boundary + 2, told.list.top + 1), told),
+            None | Some(Action::DiffTo(_))
+        ),
+        "clicking inside the diff was routed to the map: {:?}",
+        action_for(&click(boundary + 2, told.list.top + 1), told)
+    );
+
+    // **The rail's column below its last file belongs to neither region**, which
+    // is the shipped common case: three changed files in a body of twenty. It
+    // falls through to the diff exactly as the band's rows do, and saying so here
+    // is what makes it a decision rather than an accident nobody noticed.
+    let empty = told.list.top + told.list.rows;
+    assert!(
+        empty < told.diff.top + told.diff.rows,
+        "the fixture's rail is as tall as its column, so the row below it is not \
+         reachable and this half asserts nothing"
+    );
+    assert!(
+        matches!(action_for(&event(2, empty), told), Some(Action::Scroll(_))),
+        "a wheel below the rail's last file did not fall through to the diff: {:?}",
+        action_for(&event(2, empty), told)
     );
 }

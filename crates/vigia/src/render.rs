@@ -1147,8 +1147,8 @@ const fn affords_rail(pane: u16) -> bool {
 /// Undefined below [`RAIL_FROM`] in the sense that nothing asks: [`Body::split`]
 /// and [`Body::areas`] both gate on [`affords_rail`] first. The `max` is what
 /// keeps a rail that cannot hold its own contents from being drawn at all, and
-/// the floor is reached rather than clamped to, because [`RAIL_FROM`] is above
-/// the width where the share overtakes it only from 213 up.
+/// the floor is what a rail actually is at every ordinary pane, because
+/// [`RAIL_FROM`] is well below 213 and 213 is where the share first overtakes it.
 const fn rail_of(pane: u16) -> u16 {
     let share = pane / RAIL_SHARE;
     if share > RAIL_FLOOR {
@@ -6701,12 +6701,13 @@ mod tests {
     //! What [`Painter::scrollbar`] draws when two regions start on one row.
     //!
     //! **`tests/render.rs` cannot reach this, which is why it is here.** That
-    //! file drives the whole of [`render`], and every layout it can ask for
-    //! stacks the list above the diff, so `list.y < diff.y` on every fixture
-    //! that exists. A drawer that told the two apart by the `y` of the rect it
-    //! was handed was therefore correct on every screen anyone could draw and
-    //! wrong on the one [#252](https://github.com/breferrari/vigia/issues/252)
-    //! draws, and no gate above this level could see the difference.
+    //! file drives the whole of [`render`], and [`Painter::scrollbar`] is
+    //! private, so a bar can only be reached through a screen: every fixture in
+    //! it that draws two bars is a stacked one, where `list.y < diff.y`. A drawer
+    //! that told the two apart by the `y` of the rect it was handed was therefore
+    //! correct on every screen those fixtures draw and wrong on the one
+    //! [#252](https://github.com/breferrari/vigia/issues/252) draws, and no gate
+    //! above this level could see the difference.
     //!
     //! This calls the private drawer with the rail's own shape: same `y`, same
     //! height, different columns. It is the smallest thing that can express the
