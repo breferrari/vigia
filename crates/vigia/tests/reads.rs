@@ -104,8 +104,30 @@ const DEEP: u16 = 50;
 /// keeps finding: an instrument that looks settled and only ever exercises the
 /// case that was already correct.
 fn layout_at(height: u16) -> Body {
+    layout_on(ORDINARY_WIDTH, height)
+}
+
+/// The pane every gate in this file is measured on unless it says otherwise.
+///
+/// Named rather than written as an `80` in [`layout_at`], because it stopped
+/// being an arbitrary fixture width the day the pinned list became a *rail* on a
+/// wide pane: eighty columns is the stacked shape, and a file whose every gate
+/// measured one width was measuring one of two layouts
+/// ([#252](https://github.com/breferrari/vigia/issues/252)). Same argument
+/// [`ORDINARY`] carries one axis over.
+const ORDINARY_WIDTH: u16 = 80;
+
+/// A pane wide enough that the list is a rail beside the diff.
+///
+/// Above the arrival width `SPEC.md` §11.1 derives, and taken from the spec rather
+/// than recomputed here for the reason [`DEEP`] gives: a gate that re-derived the
+/// number would agree with the renderer by construction.
+const RAIL_WIDTH: u16 = 160;
+
+/// [`layout_at`] on a named pane.
+fn layout_on(width: u16, height: u16) -> Body {
     body_layout(
-        Rect::new(0, 0, 80, height),
+        Rect::new(0, 0, width, height),
         &App::new().chrome("fixture", None, None, None, None, None),
         FILES,
     )
@@ -150,6 +172,13 @@ fn one_screen(name: &str, files: usize) -> Screen {
 /// shipped. A second fixture rather than a second draw over the first, because the
 /// measurement wants a **cold** frame and the first draw warms it.
 fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
+    one_screen_on(name, files, ORDINARY_WIDTH, height)
+}
+
+/// [`one_screen_at`] on a named pane, so the read bound can be held beside a rail
+/// as well as under a stacked list
+/// ([#252](https://github.com/breferrari/vigia/issues/252)).
+fn one_screen_on(name: &str, files: usize, width: u16, height: u16) -> Screen {
     let scratch = Scratch::large_diff(name, files, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -165,7 +194,12 @@ fn one_screen_at(name: &str, files: usize, height: u16) -> Screen {
     let history = History::new();
     let before = frame.stats();
     let view = app
-        .view(&mut frame, &mut highlighter, &history, layout_at(height))
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            layout_on(width, height),
+        )
         .expect("view");
 
     Screen {
@@ -1217,6 +1251,36 @@ fn the_file_list_reads_only_the_rows_it_draws() {
         "on a {DEEP}-row pane the screen asked for {} files, which is not one \
          diff file plus {deep_rows} list rows",
         deep.read
+    );
+
+    // **And once more beside a rail**
+    // ([#252](https://github.com/breferrari/vigia/issues/252)), which is the same
+    // argument on the other axis and the one `SPEC.md` §11.1 names this file for.
+    // Past 134 columns the list sits beside the diff and its height cap does not
+    // apply at all, so the region is deeper again: the claim that a visible row
+    // costs one `Frame::diff` and no more is what makes that affordable, and until
+    // this arm every gate here drew at eighty columns and no rail was ever
+    // measured.
+    let beside = one_screen_on("shell-list-rail", 200, RAIL_WIDTH, DEEP);
+    let rail = layout_on(RAIL_WIDTH, DEEP);
+    assert!(
+        rail.rail,
+        "a {RAIL_WIDTH}-column pane did not draw a rail, so this half is the \
+         stacked claim again under another name"
+    );
+    assert!(
+        rail.list > deep_rows,
+        "the rail drew {} list rows against the deep stacked pane's {deep_rows}, \
+         which is not the deeper region this half is about",
+        rail.list
+    );
+    assert_eq!(
+        beside.read,
+        1 + rail.list,
+        "beside a rail the screen asked for {} files, which is not one diff file \
+         plus {} list rows",
+        beside.read,
+        rail.list
     );
 }
 

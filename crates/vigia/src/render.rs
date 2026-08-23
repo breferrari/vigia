@@ -864,7 +864,7 @@ const fn caret_gutter(pane: u16) -> usize {
 /// [#252](https://github.com/breferrari/vigia/issues/252)**, which is the third
 /// of that row's three rulings. The question this predicate asks is whether *the
 /// row* still names its file after the marker has taken its column, and a
-/// two-hundred column pane says nothing about a sixty-eight column rail. The
+/// two-hundred column pane says nothing about a seventy-column rail. The
 /// `pane` argument stays, because the *gutter* the caret costs is what
 /// [`inset_of`] could not lend it and that ladder is the screen's: the caret
 /// stands on the pane's own leading edge, which in this layout is the rail's.
@@ -1053,7 +1053,7 @@ const fn inset_of(pane: u16) -> u16 {
 /// ladder reddens it here.
 ///
 /// **What the split costs is the diff's content column**, from about 129
-/// planning columns at 133 to about 62 at 134. That is the feature rather than a
+/// planning columns at 133 to 60 at 134. That is the feature rather than a
 /// defect: a rail at *any* width narrows the diff, because there is nowhere else
 /// for its columns to come from. `SPEC.md` §11.1 carries the number so it is met
 /// in this file rather than on a pane.
@@ -1156,8 +1156,8 @@ const _: () = {
     // the remainder's, and a remainder is the term a ledger written about the
     // thing being added does not name.
     //
-    // The two columns are within two of each other here (68 against 66) and the
-    // diff is the wider from 137 up, which is the closest they ever come.
+    // The two columns are within six of each other here (70 against 64) and the
+    // diff is the wider from 141 up, which is the closest they ever come.
     assert!(
         planning_width(RAIL_FROM - RAIL_FLOOR, RAIL_FROM, 0) as usize
             >= SETTLED_CELLS + MIN_PATH_WIDTH,
@@ -2076,7 +2076,7 @@ fn bar_for(wide: bool, rows: u16, span: u64, of: u64) -> Bar {
 /// makes and this signature keeps rather than reopens. On every stacked layout
 /// the two arguments are the same number and every boundary is exactly where it
 /// was; beside a rail they differ, and passing the pane for both would plan a
-/// sixty-eight column rail against a two-hundred column row.
+/// seventy-column rail against a two-hundred column row.
 const fn planning_width(available: u16, pane: u16, caret: u16) -> u16 {
     available
         .saturating_sub(BAR_WIDTH as u16)
@@ -3249,7 +3249,7 @@ pub struct Body {
     ///
     /// **A shape rather than a size, which is why it is a field and not a
     /// width.** [`Body::areas`] recomputes the rail's columns from the pane it is
-    /// handed through [`rail_of`], so this type stays what its name says: how
+    /// handed, so this type stays what its name says: how
     /// many rows each region has. What the flag changes is what those counts
     /// *mean*, and there are exactly three consumers: [`Body::rows`] must stop
     /// adding two regions that share their rows, [`Body::clamped_to`] must stop
@@ -3337,7 +3337,7 @@ impl Body {
         // rail beside a sentence is a blank column claiming a region that has
         // nothing in it.
         if affords_rail(area.width) && files > 0 {
-            return Self::rail(body, area.width, files, masthead);
+            return Self::beside(body, area.width, files, masthead);
         }
 
         // The rule costs a row and [`LEAD_ROWS`] costs another, so the diff needs
@@ -3404,7 +3404,7 @@ impl Body {
     ///
     /// **One expression for two layouts**
     /// ([#252](https://github.com/breferrari/vigia/issues/252)). [`Body::split`]
-    /// and [`Body::rail`] ask the same question of the same three inputs, and the
+    /// and [`Body::beside`] ask the same question of the same three inputs, and the
     /// second carried the answer as a copy with a comment saying *"verbatim from
     /// `Body::split`"*. A comment naming a duplication is not a defence against
     /// it: `GRAPH_KEEP`, `GRAPH_AIR` and [`band_fits`] would each have had two
@@ -3441,14 +3441,42 @@ impl Body {
     /// **Both regions then take every remaining row.** That is the whole
     /// difference a rail makes to the row arithmetic: the list is beside the
     /// diff, so its rows are not the diff's to lose, and [`list_cap`] has nothing
-    /// to cap. A pane fifty rows tall draws fifty files where the stacked layout
-    /// draws twelve, which is what a rail is for and is monotone in the pane
-    /// height for free.
-    fn rail(body: usize, width: u16, files: usize, masthead: bool) -> Self {
-        // A lead blank and [`MIN_BODY`] before there are two regions at all, which
-        // is the stacked floor with the list's row and the rule's taken out of it:
-        // neither exists here.
-        if body < LEAD_ROWS + usize::from(MIN_BODY) {
+    /// to cap. A pane fifty rows tall draws forty-three files where the stacked
+    /// layout draws twelve, which is what a rail is for.
+    ///
+    /// **And the band is paid for by both regions here, where the stacked layout
+    /// charges it to the diff alone.** That is an exception to §11.1's clamp
+    /// order and it is geometric rather than chosen: the band spans the pane
+    /// above both columns, so its rows are unavailable to both, where
+    /// [`Body::split`] sizes the list out of `affordable` and never lets the band
+    /// near it. What it costs is one step: at 134 columns the rail draws twelve
+    /// files at sixteen rows of pane and ten at seventeen, because the band
+    /// arrives and takes three. The diff has always taken that step, at that
+    /// moment, for that reason — `GRAPH_KEEP` is what bounds it — and beside a
+    /// rail the map takes it too.
+    ///
+    /// So this layout is **monotone in the pane height with the masthead off**,
+    /// and with it on falls only where the band arrives and only by the band's own
+    /// rows. `the_rail_is_monotone_in_pane_height` asserts both halves, because
+    /// an earlier draft of this paragraph claimed monotonicity outright and was
+    /// wrong.
+    fn beside(body: usize, width: u16, files: usize, masthead: bool) -> Self {
+        // **The rail is drawn only where a list would have been drawn at all**, and
+        // that is [`Body::split`]'s own `affordable` test rather than a floor of
+        // this layout's own. A rail costs [`LEAD_ROWS`] where the stacked layout at
+        // the same height costs nothing, because under `affordable` that layout
+        // returns [`Body::diff_only`] and draws no lead blank; so a rail taken
+        // there hands a *widening* pane a **shorter diff**, which is the
+        // bigger-container-holds-less failure [`MARGIN_RUNGS`] is a table to
+        // refuse. Measured before it was fixed: at 133 columns and six rows the
+        // diff had three rows and at 134 it had two.
+        //
+        // Written as the comparison rather than as `affordable > 0` because
+        // `affordable` is computed one branch over, out of a `body` this function
+        // was handed; sharing the binding would mean sharing the whole clamp order
+        // this layout does not have. `the_diff_never_loses_a_row_to_a_wider_pane`
+        // is the gate, and it sweeps every height rather than the boundary.
+        if body <= LEAD_ROWS + usize::from(MIN_BODY) + 1 {
             return Self::diff_only(body);
         }
         let after = body - LEAD_ROWS;
@@ -3661,6 +3689,16 @@ impl Body {
     /// too short to hold what it was asked for should draw something cramped
     /// rather than underflow.
     pub fn areas(&self, area: Rect) -> Areas {
+        // **The two shapes are exclusive and every field here is `pub`**, so a
+        // caller can build a `Body` claiming both. Nothing downstream reads `rule`
+        // when `rail` is set, which makes the state harmless and unrepresentable
+        // only by convention; this is the convention written down where it is
+        // relied on.
+        debug_assert!(
+            !(self.rail && self.rule),
+            "a body cannot draw a rule between regions that are side by side"
+        );
+
         // The header's row, then the lead blank. `above_list` is the sum of that
         // blank and the whole masthead, and it is what `regions` has always added
         // to `area.y + 1`, so the band's own top is the only offset here that
@@ -4033,12 +4071,8 @@ pub fn render(
         // short for a bar, and `with_bar` draws nothing when told a whole of
         // zero.
         let full = region;
-        let (region, bar) = painter.with_bar(
-            region,
-            diff_bars,
-            u64::from(body.diff as u16),
-            view.total_rows as u64,
-        );
+        let (region, bar) =
+            painter.with_bar(region, diff_bars, body.diff as u64, view.total_rows as u64);
         // **The wash spans the region's whole width, the bar's own column
         // included** ([#239](https://github.com/breferrari/vigia/issues/239)).
         //
@@ -4088,7 +4122,7 @@ pub fn render(
                 Grabbed::Diff,
                 bar,
                 view.rows_above as u64,
-                u64::from(body.diff as u16),
+                body.diff as u64,
                 view.total_rows as u64,
             );
         }
@@ -5092,7 +5126,7 @@ impl Painter<'_> {
     /// **`available` is this region's own full width and `pane` is the screen**
     /// ([#252](https://github.com/breferrari/vigia/issues/252)). They are the same
     /// number on every stacked layout and they are not beside a rail, where this
-    /// region is sixty-eight columns of a two-hundred column pane. The ladder rung
+    /// region is seventy columns of a two-hundred column pane. The ladder rung
     /// comes from the pane, as [`margin_of`] rules; what the row has to spend
     /// comes from the region.
     fn list(&mut self, area: Rect, available: u16, view: &View, pane: u16) {
@@ -5665,15 +5699,14 @@ impl Painter<'_> {
         //
         // Resolved once rather than per row, since both are properties of the
         // pane and the region rather than of any line.
-        // **One width, named twice inside rather than passed twice from outside**
-        // ([#252](https://github.com/breferrari/vigia/issues/252)). The two meanings
-        // are real and §5.3 rules them both: `washed` is what *furniture* spans,
-        // which is the region, and `available` is what the glance ladder is planned
-        // against, which is the region less what a bar costs. What is not real is
-        // the caller having to hand them over as two `u16`s that must be equal:
-        // `full` is the region before any bar narrowed it, and both fall out of it.
+        // **The region before any bar narrowed it**, which is what both roles on
+        // this region are measured from. §5.3 rules that furniture spans the region
+        // that drew it, so the wash takes `full.width`; and the glance ladder is
+        // planned from the region's own width with the bar's columns charged
+        // unconditionally inside [`planning_width`], so it takes `full.width` too.
+        // `area` is what is left for *content* after a bar was actually drawn, and
+        // is deliberately not either of them.
         let washed = full.width;
-        let available = full.width;
         let glyphs = self.region_text(area, pane);
         if view.files == 0 {
             self.put_marked(
@@ -5696,7 +5729,7 @@ impl Painter<'_> {
         // bar appears when the diff outgrows the pane, so planning from `area`
         // let the diff's own height decide the layout of every heading in it.
         let shown = usize::from(area.height);
-        let inner = planning_width(available, pane.width, 0);
+        let inner = planning_width(full.width, pane.width, 0);
         let columns = Columns::plan(inner, self.glyphs);
 
         // **The gutter comes from the same width, and that is
@@ -6772,6 +6805,66 @@ mod tests {
         assert!(
             list.iter().all(|f| *f == weight(theme.bar)),
             "hovering the diff lit the list's thumb, both bars starting on one row"
+        );
+    }
+
+    /// The rail's floor is the sum it is written as, checked against a
+    /// **computed** glance cluster rather than against its own expansion.
+    ///
+    /// **The gate [`SETTLED_CELLS`]'s docblock names, and it did not exist until
+    /// round 2 of #252's audit.** That constant is a hand-written sum standing in
+    /// for `SETTLED.width(Glyphs::Block)`, which cannot be `const` because a
+    /// display width is a table lookup; the docblock said this test held the two
+    /// together and no such test was in the repo. What was there instead was a
+    /// `const` assertion in [`RAIL_FLOOR`]'s own block, and expanding it reduces to
+    /// `X == X` for any value of `SETTLED_CELLS` at all: the exact shape
+    /// `SPEC.md` §7 keeps finding, a gate that proves nothing while looking
+    /// settled.
+    ///
+    /// Here rather than in `tests/` because every name it reads is private, and a
+    /// number that cannot be computed at compile time has to be checked at run
+    /// time or not at all.
+    #[test]
+    fn the_rails_floor_is_the_settled_cluster_and_a_path() {
+        assert_eq!(
+            SETTLED_CELLS,
+            SETTLED.width(Glyphs::Block),
+            "the settled cluster's width is written out as {SETTLED_CELLS} and \
+             computes to {}, so RAIL_FLOOR is a floor for a cluster the ladder no \
+             longer draws",
+            SETTLED.width(Glyphs::Block)
+        );
+
+        // **The block rung is the widest, so a floor safe there is safe at every
+        // rung.** Asserted rather than argued, because it is the half that makes
+        // the sum above the right one to build the floor from.
+        for glyphs in [Glyphs::Block, Glyphs::Braille, Glyphs::Octant] {
+            assert!(
+                SETTLED.width(glyphs) <= SETTLED_CELLS,
+                "{glyphs:?} draws the settled cluster in {} columns, over the \
+                 {SETTLED_CELLS} the rail's floor reserves for it",
+                SETTLED.width(glyphs)
+            );
+        }
+
+        assert_eq!(
+            RAIL_FLOOR as usize,
+            BAR_WIDTH
+                + inset_of(RAIL_FROM) as usize
+                + KIND_WIDTH
+                + RAIL_PATH
+                + SETTLED.width(Glyphs::Block),
+            "the rail's floor is no longer a bar's reserve, the pane's inset, a \
+             kind letter, {RAIL_PATH} columns of path and the settled cluster"
+        );
+
+        // And what the floor is *for*: a rail at it plans a row with room for the
+        // cluster and the path, with the kind letter's own cell on top.
+        assert_eq!(
+            planning_width(RAIL_FLOOR, RAIL_FROM, 0) as usize,
+            KIND_WIDTH + RAIL_PATH + SETTLED.width(Glyphs::Block),
+            "the narrowest rail no longer plans a row of exactly what its floor \
+             was built from"
         );
     }
 }

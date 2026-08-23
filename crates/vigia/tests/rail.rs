@@ -60,6 +60,16 @@ const TRACK: char = '_';
 /// `MIN_PATH_WIDTH`.
 const MIN_PATH_WIDTH: usize = 12;
 
+/// The caret's own column and the kind letter's cell with its gap, restated from
+/// `render.rs`'s private `CARET_WIDTH` and `KIND_WIDTH`.
+///
+/// A rail row opens with these and the path begins after them. Counted rather
+/// than matched, for the reason `KIND_WIDTH`'s own docblock gives: the opening is
+/// an allowance, and a helper that recognised the kind letter by its glyph would
+/// eat the head of any path beginning with one.
+const CARET_WIDTH: usize = 1;
+const KIND_WIDTH: usize = 2;
+
 /// The path columns the rail promises beside a settled glance cluster, restated
 /// from `render.rs`'s private `RAIL_PATH`.
 ///
@@ -224,6 +234,15 @@ fn rungs(width: u16, view: &View) -> (Rung, Rung) {
     let theme = Theme::default();
     let buf = drawn(width, TALL, view);
     let told = regions(area, &chrome(), view);
+    // **Both regions have to hold rows**, or a "list" rung read at the diff's own
+    // first row across the whole pane would pass for a rung this layout never
+    // drew. Asserted rather than assumed: it is a property of the fixture, and a
+    // fixture is the thing most likely to change under a gate.
+    assert!(
+        told.list.rows > 0 && told.diff.rows > 0,
+        "at {width} columns a region drew no rows, so its rung is being read off \
+         the other one"
+    );
     let read = |region: vigia::Region| rung(&buf, &theme, region.top, columns_of(region));
     (read(told.list), read(told.diff))
 }
@@ -461,10 +480,13 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
             .find(|(_, glyph)| *glyph == '●')
             .map(|(at, _)| at)
             .expect("the rail's first row draws a pulse");
-        let path = row[..cluster]
-            .trim_start_matches(['▸', ' '])
-            .trim_start_matches('M')
-            .trim();
+        // **The kind letter is skipped by position, never by glyph.** Trimming a
+        // leading `M` would eat the first character of a path that happens to
+        // begin with one, and `KIND_WIDTH`'s own docblock in `render.rs` is about
+        // exactly this: the row's opening cell is a fixed allowance, not something
+        // to be recognised.
+        let opening: String = row.chars().take(CARET_WIDTH + KIND_WIDTH).collect();
+        let path = row[opening.len()..cluster].trim();
         assert!(
             path.chars().count() >= RAIL_PATH,
             "at {width} columns the rail drew {} columns of path where its floor \
@@ -582,4 +604,273 @@ fn a_hover_in_the_rail_does_not_light_the_diff() {
          the same row, which `SPEC.md` §5.3 B10 rules is a mark on a surface the \
          pointer cannot act on"
     );
+}
+
+/// Crossing into the rail never hands the diff fewer rows.
+///
+/// **The bigger-container-holds-less failure, at the one boundary this row
+/// introduces.** The margin ladder is written out as a table to refuse it and
+/// `list_cap`'s step is argued for it; both are about *one* layout, and crossing
+/// between two is a third place it can happen. The first draft of this row did
+/// it: a rail charges `LEAD_ROWS` where the stacked layout at the same height
+/// returns the whole-body diff and charges nothing, so at 133 columns and six
+/// rows the diff had three rows and at 134 it had two.
+///
+/// **The claim is about the crossing and about the rail, and deliberately not
+/// about every width step.** A first draft swept all widths and reddened twice on
+/// the *stacked* layout, at widths no rail can reach: the footer's ladder takes a
+/// second line at eight columns and shortens the whole body, and at forty-five
+/// columns the body gains a row, the pinned list takes its first, and the diff
+/// pays that row plus the rule's. The second is the shipped design of regions
+/// arriving as space appears; the first is a real defect and is filed as
+/// [#283](https://github.com/breferrari/vigia/issues/283), on the shelf with the
+/// evidence and the reason it was not taken here. Asserting them here would have
+/// been asserting something the product does not do, which is how a gate ends up
+/// being weakened until it says nothing.
+///
+/// **Swept with the masthead off**, which is what keeps the assertion strict: the
+/// band's arrival is a genuine step back for the diff, bounded by `GRAPH_KEEP`,
+/// and `the_rail_is_monotone_in_pane_height` owns it on the axis it belongs to.
+#[test]
+fn crossing_into_the_rail_never_costs_the_diff_a_row() {
+    let bare = Chrome {
+        masthead: false,
+        ..chrome()
+    };
+    let arrives = first_rail();
+    let mut heights = 0usize;
+
+    for height in 1..=48u16 {
+        let stacked = body_layout(Rect::new(0, 0, arrives - 1, height), &bare, 40);
+        let rail = body_layout(Rect::new(0, 0, arrives, height), &bare, 40);
+        assert!(
+            !stacked.rail,
+            "the width below the arrival already draws a rail at {height} rows"
+        );
+        assert!(
+            rail.diff >= stacked.diff,
+            "at {height} rows, widening from {} to {arrives} columns took the diff \
+             from {} rows to {}",
+            arrives - 1,
+            stacked.diff,
+            rail.diff
+        );
+        if rail.rail {
+            heights += 1;
+        }
+    }
+
+    // Or the crossing was never drawn as a rail and every comparison above was
+    // between two stacked layouts.
+    assert!(
+        heights > 40,
+        "the arrival width drew a rail at {heights} of the heights swept, which is \
+         too few to be about the boundary"
+    );
+
+    // And inside the rail, widening never takes a row: both regions' rows come out
+    // of one body, and the body does not change with width once the footer has
+    // settled.
+    for height in 1..=48u16 {
+        let mut previous: Option<(u16, usize)> = None;
+        for width in arrives..=WIDEST {
+            let body = body_layout(Rect::new(0, 0, width, height), &bare, 40);
+            if let Some((below, was)) = previous {
+                assert!(
+                    body.diff >= was,
+                    "at {height} rows, widening from {below} to {width} columns \
+                     inside the rail took the diff from {was} rows to {}",
+                    body.diff
+                );
+            }
+            previous = Some((width, body.diff));
+        }
+    }
+}
+
+/// The rail deepens with the pane and falls only where the band arrives.
+///
+/// **Two claims, because the honest property has two halves.** With the masthead
+/// off the rail's rows are the body's less one lead blank, so the map is strictly
+/// monotone in pane height and a taller pane always shows more files. With it on
+/// the band spans the pane above both columns, so its rows are unavailable to the
+/// map as well as to the diff, and the map falls by exactly the band's rows at
+/// the one height the band arrives at.
+///
+/// That second half is an exception to `SPEC.md` §11.1's clamp order and it is
+/// recorded there as one. It is not a defect and it is not free either: an
+/// earlier draft of `Body::beside`'s docblock claimed monotonicity outright, and
+/// this gate is what would have caught the claim.
+#[test]
+fn the_rail_is_monotone_in_pane_height() {
+    let width = first_rail();
+    let bare = Chrome {
+        masthead: false,
+        ..chrome()
+    };
+    let shown = Chrome {
+        masthead: true,
+        ..chrome()
+    };
+    // More files than any height in the sweep can draw, so the pane is always the
+    // thing deciding and never the changed-file count.
+    let files = 500;
+
+    let mut previous = 0usize;
+    for height in 1..=80u16 {
+        let body = body_layout(Rect::new(0, 0, width, height), &bare, files);
+        assert!(
+            body.list >= previous,
+            "with no masthead, a pane grown to {height} rows drew {} files where \
+             the row below drew {previous}",
+            body.list
+        );
+        previous = body.list;
+    }
+    assert!(
+        previous > 60,
+        "the masthead-off sweep topped out at {previous} files, so it never \
+         reached the depths this layout is for"
+    );
+
+    let (mut previous, mut falls) = (0usize, 0usize);
+    let mut band_rows = 0usize;
+    for height in 1..=80u16 {
+        let body = body_layout(Rect::new(0, 0, width, height), &shown, files);
+        if body.list < previous {
+            falls += 1;
+            let took = body.graph + body.air;
+            assert!(
+                took > 0 && previous - body.list <= took,
+                "with the masthead on, a pane grown to {height} rows drew {} files \
+                 where the row below drew {previous}, a fall of {} against the \
+                 band's own {took} rows",
+                body.list,
+                previous - body.list
+            );
+        }
+        band_rows = band_rows.max(body.graph + body.air);
+        previous = body.list;
+    }
+
+    // Exactly one fall, and it is the band's arrival. More than one would mean
+    // the band comes and goes; none would mean the sweep never drew a band and
+    // the loop above asserted nothing.
+    assert_eq!(
+        falls, 1,
+        "the map fell {falls} times across the height sweep; the band arrives once"
+    );
+    assert!(
+        band_rows > 0,
+        "no height in the sweep drew a band, so the fall this gate is about was \
+         never reachable"
+    );
+}
+
+/// Both regions grow with the pane, and the rail draws the pictured complement
+/// at every width it is drawn at.
+///
+/// **The width axis of the two claims above.** `rail_of` is a share floored at a
+/// constant and its docblock says both halves are monotone by construction; that
+/// is an argument, and this is the evidence. What it also pins is the ceiling:
+/// `SPEC.md` §11.1 rules the rail draws twelve slices and twelve buckets, exactly
+/// what `assets/preview.svg` draws, and does not climb past it at any pane anyone
+/// runs. A change to the share that let it climb early would make the picture and
+/// the rail disagree with nothing else noticing.
+#[test]
+fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
+    let view = beside();
+    let theme = Theme::default();
+    let pictured = {
+        let area = Rect::new(0, 0, PICTURED_PANE, TALL);
+        let told = regions(area, &chrome(), &streamed());
+        rung(
+            &drawn(PICTURED_PANE, TALL, &streamed()),
+            &theme,
+            told.diff.top,
+            columns_of(told.diff),
+        )
+    };
+
+    let mut previous: Option<(u16, u16, u16)> = None;
+    for width in first_rail()..=WIDEST {
+        let area = Rect::new(0, 0, width, TALL);
+        let areas = body_layout(area, &chrome(), view.files)
+            .clamped_to(view.list.len())
+            .areas(area);
+        if let Some((below, rail, diff)) = previous {
+            assert!(
+                areas.list.width >= rail && areas.diff.width >= diff,
+                "widening from {below} to {width} columns narrowed a region: rail \
+                 {rail} to {}, diff {diff} to {}",
+                areas.list.width,
+                areas.diff.width
+            );
+        }
+        previous = Some((width, areas.list.width, areas.diff.width));
+
+        let (_, heat, spark) = rungs(width, &view).0;
+        assert_eq!(
+            (heat, spark),
+            (pictured.1, pictured.2),
+            "at {width} columns the rail drew a {heat}-slice strip and a \
+             {spark}-cell sparkline where the published picture draws {} and {}",
+            pictured.1,
+            pictured.2
+        );
+    }
+}
+
+/// A stale view shortens the rail and moves nothing else.
+///
+/// `render` and `regions` both take `Body::split(..).clamped_to(view.list.len())`,
+/// and beside a rail the rows the list does not use are in its own column with
+/// nothing below them: handing them back to the diff would draw the diff twice,
+/// once in each region. The tiling gate in `tests/legibility.rs` only ever sees a
+/// view whose entries match what the pane afforded, which is the shipped path and
+/// not the one this is about.
+#[test]
+fn a_stale_view_shortens_the_rail_and_moves_nothing_else() {
+    let width = first_rail();
+    let area = Rect::new(0, 0, width, TALL);
+    let full = body_layout(area, &chrome(), 500);
+    assert!(full.rail, "the fixture pane does not draw a rail");
+    assert!(
+        full.list > 3,
+        "the rail affords {} rows, too few for a shortened view to differ from it",
+        full.list
+    );
+
+    for have in [0usize, 1, 3, full.list - 1, full.list, full.list + 7] {
+        let body = full.clamped_to(have);
+        let areas = body.areas(area);
+        assert_eq!(
+            usize::from(areas.list.height),
+            have.min(full.list),
+            "a view holding {have} entries drew {} rail rows",
+            areas.list.height
+        );
+        // The diff keeps its own column and its own rows whatever the map holds,
+        // except where an empty map collapses the body to one whole-pane region.
+        if have == 0 {
+            assert_eq!(
+                (areas.diff.x, areas.diff.width),
+                (area.x, area.width),
+                "an empty map left the diff in a column rather than giving it the \
+                 pane"
+            );
+        } else {
+            assert_eq!(
+                usize::from(areas.diff.height),
+                full.diff,
+                "a view holding {have} entries changed the diff's height"
+            );
+        }
+        assert_eq!(
+            usize::from(area.y + 1) + body.rows(),
+            usize::from(areas.diff.y + areas.diff.height),
+            "a view holding {have} entries left `Body::rows` disagreeing with the \
+             rows the diff is drawn into"
+        );
+    }
 }

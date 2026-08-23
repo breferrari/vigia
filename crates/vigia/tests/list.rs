@@ -400,7 +400,10 @@ fn a_notice_does_not_change_the_list_height() {
 
     let mut compared = 0;
     for height in 3..=40u16 {
-        for width in [40u16, WIDE, 120] {
+        // The rail's widths too: a notice changes the footer's height, which
+        // changes the body, and beside a rail the body divides differently
+        // ([#252](https://github.com/breferrari/vigia/issues/252)).
+        for width in [40u16, WIDE, 120, 140, 200] {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);
                 let without = body_layout(area, &quiet, files);
@@ -770,7 +773,13 @@ fn the_two_regions_tile_the_body_exactly() {
     let mut saw_a_clamp = false;
 
     for height in 1..=40u16 {
-        for width in [40u16, WIDE, 120] {
+        // **Two widths past the rail's arrival**
+        // ([#252](https://github.com/breferrari/vigia/issues/252)), so the one
+        // subtraction this gate exists for is exercised in both shapes.
+        // `clamped_to`'s rail arm shortens the list and gives nothing back,
+        // because beside a rail there is no region below it to give to, and that
+        // arm had no direct test until these two widths were added.
+        for width in [40u16, WIDE, 120, 140, 200] {
             for files in [0usize, 1, 3, LIST_SETTLED, LIST_SETTLED + 1, 200] {
                 let area = Rect::new(0, 0, width, height);
                 let chrome = chrome(&App::new());
@@ -797,9 +806,14 @@ fn the_two_regions_tile_the_body_exactly() {
                          entries, {body:?} plus a header and {footer} footer rows \
                          does not tile the pane"
                     );
+                    // **Beside a rail there is no rule at all**, which is
+                    // §11.2 B11 dissolved rather than reopened: the list is beside
+                    // the diff and there is no boundary for a horizontal rule to
+                    // be drawn on. Written as the conjunction rather than as two
+                    // gates, so the stacked claim keeps its exact form.
                     assert_eq!(
                         body.rule,
-                        body.list > 0,
+                        !body.rail && body.list > 0,
                         "a rule and a list disagree about each other: {body:?}"
                     );
                     assert_eq!(
