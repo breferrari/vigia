@@ -637,20 +637,27 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     let mut heights = 0usize;
     let mut banded = 0usize;
 
-    // **Both masthead settings and a file count of one**, which is the axis a
-    // first draft of this gate left out and where the defect it was written for
-    // survived. Beside a rail `after` still holds the row the stacked list would
-    // have taken and the rule's, so the band's fit test sees more rows and the
-    // band can arrive *earlier* than it would have on the strip the rail
-    // replaces. With one changed file the strip costs two rows and the band costs
-    // three, so the rail came out a row short.
+    // **Both masthead settings, every file count that changes the answer, and
+    // every height to two hundred rows.** A first draft swept one file count and
+    // one masthead setting and the defect it was written for survived in the cell
+    // it did not look at: beside a rail `after` still holds the row the stacked
+    // list would have taken and the rule's, so the band's fit test sees more rows
+    // and the band can arrive *earlier* than on the strip the rail replaces. With
+    // one changed file the strip costs two rows and the band costs three, so the
+    // rail came out a row short.
+    //
+    // The sample is written out rather than narrowed to the boundary that failed,
+    // because the bound `Body::beside` rests on is a claim about *every* file
+    // count: the file counts here are the ones where `files`, `list_cap` and
+    // `affordable` each take their turn at deciding the strip's height, and two
+    // hundred rows is well past any pane that could saturate them.
     for masthead in [false, true] {
         let chrome = Chrome {
             masthead,
             ..chrome()
         };
-        for files in [1usize, 2, 40] {
-            for height in 1..=48u16 {
+        for files in [0usize, 1, 2, 3, 5, 6, 7, 12, 40, 200, 5000] {
+            for height in 1..=200u16 {
                 let stacked = body_layout(Rect::new(0, 0, arrives - 1, height), &chrome, files);
                 let rail = body_layout(Rect::new(0, 0, arrives, height), &chrome, files);
                 assert!(
@@ -666,6 +673,35 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
                     stacked.diff,
                     rail.diff
                 );
+
+                // **The map's own crossing**, which nothing asserted until the
+                // exhaustive sweep went looking for it. A rail exists to show more
+                // of the changed set, so a pane widened into one handing back
+                // *fewer* files would be the same failure on the region the layout
+                // is named for.
+                assert!(
+                    rail.list >= stacked.list,
+                    "with masthead {masthead} over {files} files at {height} rows, \
+                     widening from {} to {arrives} columns took the map from {} \
+                     rows to {}",
+                    arrives - 1,
+                    stacked.list,
+                    rail.list
+                );
+
+                // **And the same failure mirrored.** `Body::beside` charges the
+                // band against fewer rows than it has, so it can only ever band
+                // *later* than the stacked layout; if it ever banded so much later
+                // that the stacked layout had one and the rail did not, a reader
+                // narrowing the pane would gain a band. The delay is bounded by
+                // two rows and this is what says so.
+                assert!(
+                    !(stacked.graph > 0 && rail.rail && rail.graph == 0),
+                    "with masthead {masthead} over {files} files at {height} rows, \
+                     the stacked layout draws a band and the rail one column wider \
+                     does not, so narrowing the pane would gain one"
+                );
+
                 if rail.rail {
                     heights += 1;
                 }
@@ -692,8 +728,8 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     // Or the crossing was never drawn as a rail and every comparison above was
     // between two stacked layouts.
     assert!(
-        heights > 40,
-        "the arrival width drew a rail at {heights} of the heights swept, which is \
+        heights > 1000,
+        "the arrival width drew a rail at {heights} of the sizes swept, which is \
          too few to be about the boundary"
     );
 
