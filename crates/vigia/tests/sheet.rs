@@ -660,6 +660,16 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
 /// One entry per row of `KEYBOARD` and `MOUSE`, restated rather than imported for
 /// the reason [`TITLE`] is: a gate that shared the renderer's tables would agree
 /// with them by construction, and this one exists to count what reaches a screen.
+///
+/// **Each entry is the longest prefix both spellings share**, which is why some
+/// are shorter than the phrase the wide rung draws: `drag a` rather than `drag a
+/// scrollbar`, because the tight rung spells it `drag a bar`. A gate that counts
+/// gestures has to count them at every rung, so an entry that named only the wide
+/// spelling would report a tight sheet as having lost the row.
+///
+/// `every_key_the_map_binds_is_named_on_the_sheet` keeps the full phrases and is
+/// deliberately not folded into this: it runs at one pane size, and its job is
+/// that the wide rung spells each gesture out rather than that the row exists.
 const GESTURES: [&str; 16] = [
     "quit",
     "scroll a row",
@@ -679,6 +689,21 @@ const GESTURES: [&str; 16] = [
     "click a",
 ];
 
+/// The extent every ladder gate walks: 40 to 144 columns by 1, 6 to 32 rows by 1.
+///
+/// **One place, because three gates read it.** They assert different things about
+/// the same grid, and bounds that drifted between them would leave a rung
+/// asserted monotone at a width no other gate had looked at.
+///
+/// The floor is at I6's forty columns and the ceiling is above every width the
+/// two-column rung arrives at, so the sweep contains both ends of the ladder
+/// rather than a slice of its middle.
+const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
+
+/// The height half of [`LADDER_WIDTHS`], from below the sheet's floor to above
+/// the height at which one column always fits.
+const LADDER_HEIGHTS: std::ops::RangeInclusive<u16> = 6..=32;
+
 /// One materialised fixture, painted at many sizes.
 ///
 /// **Through `render`, never through the layout alone.** The sheet's height is
@@ -691,7 +716,7 @@ const GESTURES: [&str; 16] = [
 /// the pane is resized around them. Rebuilding per cell cost forty seconds for
 /// the sweep below, which is the shape that gets a gate deleted rather than run.
 macro_rules! sweep {
-    ($name:literal, |$paint:ident| $body:block) => {
+    ($name:expr, |$paint:ident| $body:block) => {
         let scratch = Scratch::large_diff($name, FILES, 40);
         let worktree = scratch.worktree();
         let mut frame = worktree.frame();
@@ -703,6 +728,23 @@ macro_rules! sweep {
         let mut $paint = |at: Rect| paint(&mut app, &mut frame, &mut highlighter, &history, at);
         $body
     };
+}
+
+/// Walk the ladder, handing each cell's painted pane to `each`.
+///
+/// The scaffold three gates below shared by copy until #220's own audit pointed
+/// at it. `name` is the fixture's, so each gate still gets an independent
+/// repository and the three keep running in parallel.
+fn walk_the_ladder(name: &'static str, mut each: impl FnMut(u16, u16, Rect, &Buffer, &Regions)) {
+    sweep!(name, |paint| {
+        for w in LADDER_WIDTHS {
+            for h in LADDER_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                each(w, h, at, &buf, &laid);
+            }
+        }
+    });
 }
 
 /// How many of [`GESTURES`] reach a screen this size, and the sheet's own rows.
@@ -778,29 +820,24 @@ fn the_widening_ladder_is_monotone_and_never_leaves_the_body() {
     // Two claims over one grid, because the sweep is what costs and the assertions
     // are free: growing a pane never takes a gesture away, and the sheet never
     // reaches the header or the footer at any rung.
-    let widths: Vec<u16> = (40..=144).collect();
-    let heights: Vec<u16> = (6..=32).collect();
+    let widths: Vec<u16> = LADDER_WIDTHS.collect();
+    let heights: Vec<u16> = LADDER_HEIGHTS.collect();
     let mut grid = vec![vec![0usize; heights.len()]; widths.len()];
 
-    sweep!("sheet-ladder-sweep", |paint| {
-        for (i, &w) in widths.iter().enumerate() {
-            for (j, &h) in heights.iter().enumerate() {
-                let at = Rect::new(0, 0, w, h);
-                let (buf, laid) = paint(at);
-                let (count, _) = read_sheet(&buf, &laid, at);
-                grid[i][j] = count;
+    walk_the_ladder("sheet-ladder-sweep", |w, h, at, buf, laid| {
+        let (count, _) = read_sheet(buf, laid, at);
+        let i = usize::from(w - widths[0]);
+        let j = usize::from(h - heights[0]);
+        grid[i][j] = count;
 
-                // B12's box rule, at every rung rather than at one: the sheet is
-                // centred in the body, so a reader can still see the tool is
-                // alive behind it.
-                if let Some(sheet) = laid.sheet {
-                    assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
-                    assert!(
-                        sheet.top + sheet.height < at.y + at.height,
-                        "the sheet reached the footer at {w}x{h}"
-                    );
-                }
-            }
+        // B12's box rule, at every rung rather than at one: the sheet is centred
+        // in the body, so a reader can still see the tool is alive behind it.
+        if let Some(sheet) = laid.sheet {
+            assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
+            assert!(
+                sheet.top + sheet.height < at.y + at.height,
+                "the sheet reached the footer at {w}x{h}"
+            );
         }
     });
 
@@ -845,21 +882,17 @@ fn one_column_wins_wherever_one_column_fits() {
     // exactly what makes it not exist, so the mutation it was written for passed
     // straight through it. A width that draws two columns and never falls back to
     // one is now the failure rather than the exemption.
-    let widths: Vec<u16> = (40..=144).collect();
-    let heights: Vec<u16> = (6..=32).collect();
+    let widths: Vec<u16> = LADDER_WIDTHS.collect();
+    let heights: Vec<u16> = LADDER_HEIGHTS.collect();
     // Per cell: whether the sheet drew two columns, and how many gestures reached
     // the screen. `None` where no sheet was drawn at all.
     let mut cells = vec![vec![None; heights.len()]; widths.len()];
 
-    sweep!("sheet-additive", |paint| {
-        for (i, &w) in widths.iter().enumerate() {
-            for (j, &h) in heights.iter().enumerate() {
-                let at = Rect::new(0, 0, w, h);
-                let (buf, laid) = paint(at);
-                let (count, sheet) = read_sheet(&buf, &laid, at);
-                cells[i][j] = laid.sheet.map(|_| (sheet.contains("keyboard"), count));
-            }
-        }
+    walk_the_ladder("sheet-additive", |w, h, at, buf, laid| {
+        let (count, sheet) = read_sheet(buf, laid, at);
+        let i = usize::from(w - widths[0]);
+        let j = usize::from(h - heights[0]);
+        cells[i][j] = laid.sheet.map(|_| (sheet.contains("keyboard"), count));
     });
 
     let mut seen = 0;
@@ -901,4 +934,95 @@ fn one_column_wins_wherever_one_column_fits() {
         seen > 0,
         "the sweep found no two-column pane at all, so it proves nothing"
     );
+}
+
+#[test]
+fn the_sheet_is_a_closed_box_at_every_rung() {
+    // **The gate that was missing, found by the audit that introduced its
+    // defect.** Restructuring the two-column rung so the layout places each group
+    // (rather than the drawer re-deriving where the second one starts) made the
+    // sheet two columns narrower than the row it draws, so a long verb in the
+    // right-hand column overwrote the frame and the box read as open on four rows
+    // of thirteen. **Every other gate stayed green**: they count gestures and look
+    // for tokens, and none of them had ever looked at the border.
+    //
+    // The frame is the one part of this element with no content in it, so it can
+    // be asserted exactly: four corners, a closed rule along the bottom, and a
+    // pipe at both ends of every row between. Swept, because a width that clips is
+    // a width the ladder chose and one screen cannot find it.
+    let mut sheets = 0;
+    let mut two_column = 0;
+
+    walk_the_ladder("sheet-frame", |w, h, _at, buf, laid| {
+        let Some(sheet) = laid.sheet else { return };
+        let rect = Rect::new(sheet.left, sheet.top, sheet.width, sheet.height);
+        let drawn = text_of(buf, rect);
+        let rows: Vec<&str> = drawn.lines().collect();
+        sheets += 1;
+        two_column += usize::from(drawn.contains("keyboard"));
+
+        let (first, last) = (rows[0], rows[rows.len() - 1]);
+        assert!(
+            first.starts_with('┌') && first.ends_with('┐'),
+            "the sheet's top row is not a closed rule at {w}x{h}:\n{drawn}"
+        );
+        assert!(
+            last.starts_with('└') && last.ends_with('┘'),
+            "the sheet's bottom row is not a closed rule at {w}x{h}:\n{drawn}"
+        );
+        let span = last.chars().count() - 2;
+        assert!(
+            last.chars().skip(1).take(span).all(|c| c == '─'),
+            "the sheet's bottom rule has a hole in it at {w}x{h}:\n{drawn}"
+        );
+        for (n, row) in rows[1..rows.len() - 1].iter().enumerate() {
+            assert!(
+                row.starts_with('│') && row.ends_with('│'),
+                "row {n} of the sheet is not closed at both ends at {w}x{h}, so a \
+                 cell has overwritten the frame:\n{drawn}"
+            );
+        }
+    });
+
+    assert!(
+        two_column > 0 && sheets > two_column,
+        "the sweep saw {sheets} sheets of which {two_column} were two-column, so \
+         it did not cover both shapes"
+    );
+}
+
+#[test]
+fn the_two_column_rung_is_the_size_the_ruling_states() {
+    // **`SPEC.md` §11.1 states 104 by 14 wide and 76 by 14 tight, and until this
+    // gate no test could fail on either.** That is the rail's own lesson one
+    // element over: `RAIL_FLOOR` pins its composition in a const block precisely
+    // because a claim no gate can fail is a wish, and #220's ruling shipped two
+    // numbers with nothing holding them.
+    //
+    // It is not a restatement of the layout arithmetic. A mutation that moved the
+    // mouse column one column right survived every other gate in this file: the
+    // frame stayed closed because the sheet grew with it, every gesture still
+    // drew, and the ladder stayed monotone. The only thing that changed was the
+    // gap between the columns, and the only thing that can see it is a number.
+    let wide = Rect::new(0, 0, 120, 21);
+    let tight = Rect::new(0, 0, 80, 17);
+
+    sweep!("sheet-dimensions", |paint| {
+        for (at, want, spelling) in [(wide, (104u16, 14u16), "wide"), (tight, (76, 14), "tight")] {
+            let (buf, laid) = paint(at);
+            let sheet = laid.sheet.expect("the pane draws no sheet at all");
+            let (_, drawn) = read_sheet(&buf, &laid, at);
+            assert!(
+                drawn.contains("keyboard"),
+                "the {spelling} case stopped taking the two-column rung, so the \
+                 size below is not the one being pinned:\n{drawn}"
+            );
+            assert_eq!(
+                (sheet.width, sheet.height),
+                want,
+                "the {spelling} two-column rung is not the size SPEC.md §11.1 \
+                 states:\n{drawn}"
+            );
+        }
+    });
 }
