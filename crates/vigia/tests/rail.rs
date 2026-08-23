@@ -90,6 +90,27 @@ const PICTURED_PANE: u16 = 109;
 /// than the rungs that happen to be reachable.
 const WIDEST: u16 = 240;
 
+/// Past the width at which the rail's own ladder would climb off the settled
+/// rung, which is a pane of about four hundred.
+///
+/// **`SPEC.md` §11.1 claims the rail does not climb past the pictured complement
+/// at any pane anyone runs, and [`WIDEST`] cannot reach the width where that
+/// could be false.** The rail's planning width is `pane / 3 - 4`, so it leaves the
+/// settled plateau's 129 columns at about 402 columns of pane. A sweep that stops
+/// at 240 asserts the claim nowhere it could fail, which is the shape `SPEC.md` §7
+/// keeps finding; this is the width that makes it falsifiable.
+const PAST_THE_CLIMB: u16 = 420;
+
+/// The pane at which the rail's own glance ladder leaves the settled rung.
+///
+/// **Derived, and it is what `SPEC.md` §11.1's ceiling means.** The rail's
+/// planning width is `rail_of(pane) - BAR_WIDTH - inset`, and the rung above the
+/// settled one arrives when the share clamp can spare its 52 columns, which needs
+/// 130 planning columns and therefore a rail of 134: `pane / 3 >= 134` is a pane of
+/// 402. Below it the rail draws exactly what the picture draws; at it the rail is
+/// wide enough to be worth more, and drawing more is what §5.3 rules space earns.
+const THE_CLIMB: u16 = 402;
+
 /// A pane tall enough that neither region is the thing giving way.
 const TALL: u16 = 24;
 
@@ -177,18 +198,29 @@ fn streamed() -> View {
 }
 
 fn drawn(width: u16, height: u16, view: &View) -> Buffer {
+    drawn_at(width, height, view, Glyphs::Block)
+}
+
+/// The same, at a named glyph rung.
+///
+/// **The rung is an input to the glance ladder and every gate here used to pin it
+/// to blocks** ([#252](https://github.com/breferrari/vigia/issues/252)'s fourth
+/// audit round). `Columns::plan` takes `glyphs`, a denser cell draws two buckets
+/// per column, so the same layout table is reached at a *different width* on a
+/// terminal that carries braille or octants. A sweep at one rung is a sweep of one
+/// of three ladders, which is the shape `SPEC.md` §7 keeps finding.
+fn drawn_at(width: u16, height: u16, view: &View, glyphs: Glyphs) -> Buffer {
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    render(
-        &mut buf,
-        area,
-        view,
-        &Theme::default(),
-        Glyphs::Block,
-        &chrome(),
-    );
+    render(&mut buf, area, view, &Theme::default(), glyphs, &chrome());
     buf
 }
+
+/// Every glyph rung the sparkline can be drawn from.
+///
+/// `Glyphs::auto` resolves to one of these from the terminal, so all three are
+/// screens a reader gets rather than options nobody takes.
+const RUNGS: [Glyphs; 3] = [Glyphs::Block, Glyphs::Braille, Glyphs::Octant];
 
 /// What one region draws on one row: whether the counts cell is there, how many
 /// heat slices, how many sparkline cells.
@@ -204,13 +236,44 @@ type Rung = (bool, usize, usize);
 /// The triple the glance ladder walks, and the thing every monotonicity claim in
 /// this repo is about.
 fn rung(buf: &Buffer, theme: &Theme, y: u16, columns: std::ops::Range<u16>) -> Rung {
+    rung_at(buf, theme, y, columns, Glyphs::Block)
+}
+
+/// The same, reading the alphabet a named glyph rung draws from.
+///
+/// The block rung keeps the restated `RAMP` and `TRACK`, which is this suite's
+/// convention and its reason: a test importing the renderer's own table would
+/// agree with it by construction. A dense rung's alphabet is *derived*, because
+/// there is no table to restate: the glyphs are a function of two sub-column
+/// levels and `Glyphs::glyph` is the only thing that knows them.
+fn rung_at(
+    buf: &Buffer,
+    theme: &Theme,
+    y: u16,
+    columns: std::ops::Range<u16>,
+    glyphs: Glyphs,
+) -> Rung {
+    let (ramp, empty_glyph) = if glyphs.density() == 1 {
+        (RAMP.to_vec(), TRACK)
+    } else {
+        let levels = glyphs.levels();
+        let mut ramp = Vec::new();
+        for left in 0..=levels {
+            for right in 0..=levels {
+                if (left, right) != (0, 0) {
+                    ramp.push(glyphs.glyph(left, right));
+                }
+            }
+        }
+        (ramp, glyphs.glyph(0, 0))
+    };
     let within = |colours: &[ratatui::style::Color], symbols: &[char]| {
         support::columns_in(buf, y, columns.clone(), colours, symbols).len()
     };
     let heat = within(&support::heat_colours(theme), &[HEAT_SLICE]);
-    let bars = within(&support::spark_colours(theme), &RAMP);
+    let bars = within(&support::spark_colours(theme), &ramp);
     let track = theme.spark_track.fg.expect("the track has a colour");
-    let empty = within(&[track], &[TRACK]);
+    let empty = within(&[track], &[empty_glyph]);
     let counts = columns.clone().any(|x| buf[(x, y)].symbol() == "+");
     (counts, heat, bars + empty)
 }
@@ -230,9 +293,14 @@ fn columns_of(region: vigia::Region) -> std::ops::Range<u16> {
 /// Beside a rail those are the same row of the pane and in the stacked layout
 /// they are not, which is exactly why the row is asked for rather than assumed.
 fn rungs(width: u16, view: &View) -> (Rung, Rung) {
+    rungs_at(width, view, Glyphs::Block)
+}
+
+/// The same, at a named glyph rung.
+fn rungs_at(width: u16, view: &View, glyphs: Glyphs) -> (Rung, Rung) {
     let area = Rect::new(0, 0, width, TALL);
     let theme = Theme::default();
-    let buf = drawn(width, TALL, view);
+    let buf = drawn_at(width, TALL, view, glyphs);
     let told = regions(area, &chrome(), view);
     // **Both regions have to hold rows**, or a "list" rung read at the diff's own
     // first row across the whole pane would pass for a rung this layout never
@@ -243,7 +311,8 @@ fn rungs(width: u16, view: &View) -> (Rung, Rung) {
         "at {width} columns a region drew no rows, so its rung is being read off \
          the other one"
     );
-    let read = |region: vigia::Region| rung(&buf, &theme, region.top, columns_of(region));
+    let read =
+        |region: vigia::Region| rung_at(&buf, &theme, region.top, columns_of(region), glyphs);
     (read(told.list), read(told.diff))
 }
 
@@ -520,14 +589,31 @@ fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
          describes what the tool draws"
     );
 
-    for width in 1..arrives {
-        for height in [1u16, 6, TALL, 60] {
-            let body = body_layout(Rect::new(0, 0, width, height), &chrome(), 3);
-            assert!(
-                !body.rail,
-                "a {width}x{height} pane drew a rail below the arrival width"
-            );
-        }
+    // **Read off the drawn screen rather than from `Body`**, because
+    // `body_layout(..).rail` and `first_rail()` both reduce to the same predicate
+    // and comparing them is comparing an expression with itself. What a reader
+    // gets below the arrival width is a *rule* between the regions and one column
+    // of content, and that is what this asserts.
+    let view = beside();
+    for width in [40u16, 80, PICTURED_PANE, arrives - 1] {
+        let area = Rect::new(0, 0, width, TALL);
+        let body = body_layout(area, &chrome(), view.files).clamped_to(view.list.len());
+        let areas = body.areas(area);
+        assert!(
+            !body.rail,
+            "a {width}-column pane drew a rail below the arrival width"
+        );
+        assert!(
+            areas.rule.height > 0,
+            "at {width} columns the regions are stacked and no rule was drawn \
+             between them"
+        );
+        assert_eq!(
+            (areas.list.x, areas.list.width),
+            (areas.diff.x, areas.diff.width),
+            "at {width} columns the two regions do not share the pane's columns, \
+             so this pane is not the stacked layout the picture draws"
+        );
     }
 }
 
@@ -842,6 +928,13 @@ fn the_rail_is_monotone_in_pane_height() {
 /// what `assets/preview.svg` draws, and does not climb past it at any pane anyone
 /// runs. A change to the share that let it climb early would make the picture and
 /// the rail disagree with nothing else noticing.
+///
+/// **Swept to [`PAST_THE_CLIMB`] rather than to [`WIDEST`]**, because the rail's
+/// planning width leaves the settled plateau at [`THE_CLIMB`] and a sweep stopping
+/// at 240 asserts the ceiling nowhere it could fail. That is the difference
+/// between a gate and a claim, and this file has already been the place it was got
+/// wrong. Widening the sweep turned *"does not climb at any pane anyone runs"*
+/// into a number, which is what it should always have been.
 #[test]
 fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
     let view = beside();
@@ -857,8 +950,9 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
         )
     };
 
+    let mut climbed = false;
     let mut previous: Option<(u16, u16, u16)> = None;
-    for width in first_rail()..=WIDEST {
+    for width in first_rail()..=PAST_THE_CLIMB {
         let area = Rect::new(0, 0, width, TALL);
         let areas = body_layout(area, &chrome(), view.files)
             .clamped_to(view.list.len())
@@ -875,15 +969,36 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
         previous = Some((width, areas.list.width, areas.diff.width));
 
         let (_, heat, spark) = rungs(width, &view).0;
-        assert_eq!(
-            (heat, spark),
-            (pictured.1, pictured.2),
-            "at {width} columns the rail drew a {heat}-slice strip and a \
-             {spark}-cell sparkline where the published picture draws {} and {}",
-            pictured.1,
-            pictured.2
-        );
+        if width < THE_CLIMB {
+            assert_eq!(
+                (heat, spark),
+                (pictured.1, pictured.2),
+                "at {width} columns the rail drew a {heat}-slice strip and a \
+                 {spark}-cell sparkline where the published picture draws {} and {}",
+                pictured.1,
+                pictured.2
+            );
+        } else {
+            assert!(
+                heat >= pictured.1 && spark >= pictured.2,
+                "at {width} columns the rail drew {heat} and {spark}, under the \
+                 complement it kept one column narrower"
+            );
+            climbed |= heat > pictured.1 || spark > pictured.2;
+        }
     }
+
+    // **The ceiling is a pinned width, not a phrase.** `SPEC.md` §11.1 said the
+    // rail keeps the pictured complement *at any pane anyone runs*, which is a
+    // claim no sweep can fail: the width where it stops being true is simply
+    // outside the sweep. It is 402 columns, the rail's share reaching the 130
+    // planning columns the ladder's next rung asks for, and naming it is what
+    // makes the sentence checkable. If the share moves, this reddens.
+    assert!(
+        climbed,
+        "the rail never left the pictured complement by {PAST_THE_CLIMB} columns, \
+         so THE_CLIMB is not where the ladder actually turns"
+    );
 }
 
 /// A stale view shortens the rail and moves nothing else.
@@ -938,4 +1053,86 @@ fn a_stale_view_shortens_the_rail_and_moves_nothing_else() {
              rows the diff is drawn into"
         );
     }
+}
+
+/// Crossing into the rail never removes a glance element, and never takes either
+/// region below the complement the published picture draws, **at any glyph rung**.
+///
+/// **The claim `widening_into_the_rail_takes_no_glance_element_away` makes is the
+/// block rung's, and this is what is true of the other two.** `Columns::plan`
+/// takes `glyphs`; a braille or octant cell draws two buckets per column, so the
+/// same layout table is reached at different widths and the stacked ladder climbs
+/// at a pane of **119** rather than 134. By 133 a dense terminal is already on the
+/// wider strip, and the rail cannot match it: keeping that rung would need 119
+/// columns of rail out of a 134-column pane. So on those terminals the crossing
+/// **does** cost a rung, from twenty-four heat slices to twelve, in both regions.
+///
+/// That is a real cost and it is recorded rather than hidden: `SPEC.md` §11.1
+/// carries it, and [#284](https://github.com/breferrari/vigia/issues/284) is the
+/// row for an arrival width that knows which rung it is on, which needs the glyph
+/// rung to reach the layout and is a signature this row cannot absorb.
+///
+/// **What holds at every rung is the floor**, and it is the one §5.1 anchors: no
+/// element is taken away, and neither region falls below what
+/// `assets/preview.svg`'s own complement is at that rung. Twelve slices is the
+/// pictured strip, and twelve is where a dense terminal lands.
+#[test]
+fn crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung() {
+    let view = beside();
+    let theme = Theme::default();
+    let arrives = first_rail();
+    let mut fell = 0usize;
+
+    for glyphs in RUNGS {
+        // The floor, read off the published pane at this rung rather than
+        // restated, which is what keeps the number the picture's rather than this
+        // file's.
+        let listless = streamed();
+        let area = Rect::new(0, 0, PICTURED_PANE, TALL);
+        let told = regions(area, &chrome(), &listless);
+        let (_, floor_heat, floor_spark) = rung_at(
+            &drawn_at(PICTURED_PANE, TALL, &listless, glyphs),
+            &theme,
+            told.diff.top,
+            columns_of(told.diff),
+            glyphs,
+        );
+        assert!(
+            floor_heat > 0 && floor_spark > 0,
+            "{glyphs:?}: the pictured pane drew no complement to compare against"
+        );
+
+        let below = rungs_at(arrives - 1, &view, glyphs);
+        let above = rungs_at(arrives, &view, glyphs);
+
+        for (region, was, now) in [("rail", below.0, above.0), ("diff", below.1, above.1)] {
+            assert!(
+                now.0 || !was.0,
+                "{glyphs:?}: crossing into the rail took the counts off the {region}"
+            );
+            assert!(
+                now.1 > 0 && now.2 > 0,
+                "{glyphs:?}: crossing into the rail took an element off the \
+                 {region}: {was:?} became {now:?}"
+            );
+            assert!(
+                now.1 >= floor_heat && now.2 >= floor_spark,
+                "{glyphs:?}: beside a rail the {region} draws {now:?}, under the \
+                 ({floor_heat}, {floor_spark}) the published pane draws at this rung"
+            );
+            if now.1 < was.1 || now.2 < was.2 {
+                fell += 1;
+            }
+        }
+    }
+
+    // **The dense rungs' cost, pinned rather than merely allowed.** Two rungs,
+    // two regions, one fall each: the block rung must not fall and the other two
+    // must, or the ladder has moved and `SPEC.md` §11.1's paragraph about it has
+    // gone stale without anything saying so.
+    assert_eq!(
+        fell, 4,
+        "the crossing cost a rung in {fell} region-rung pairs; blocks should cost \
+         none and the two dense rungs one each in both regions"
+    );
 }

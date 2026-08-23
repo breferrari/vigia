@@ -909,8 +909,13 @@ const BAR_FLOOR: usize = BAR_WIDTH + ROW_FLOOR;
 
 /// Whether a pane of `width` can afford a scrollbar at all.
 ///
-/// **One rule for the whole screen, asked in one place**, so a reader never sees
-/// half a pair. [`render`] and [`regions`] each kept this comparison by hand,
+/// **One rule per region, asked in one place**, so a reader never sees half a
+/// pair. This read *one rule for the whole screen* until
+/// [#252](https://github.com/breferrari/vigia/issues/252), which was the same
+/// sentence while every region spanned the pane and stopped being it beside a
+/// rail: two regions of different widths are two questions, and [`Areas::bars`] is
+/// where they are both asked. [`render`] and [`regions`] each kept this comparison
+/// by hand,
 /// under two different local names, which is the same shape [`Bar`]'s own doc
 /// gives for the predicate beside it: a threshold two expressions agree about
 /// clerically stays correct on the drawn side while the *width at which* it
@@ -1050,7 +1055,7 @@ const fn inset_of(pane: u16) -> u16 {
 /// **There is exactly one such place below three hundred columns.** Both regions
 /// read the same ladder, so a split costs no rung only where both halves *and*
 /// the undivided pane below the split sit on one plateau. [`SETTLED`]'s plateau
-/// runs from 52 to 129 planning columns, which is a pane of 133; the only other
+/// runs from 54 to 129 planning columns, which is a pane of 133; the only other
 /// plateau is the top rung, which needs 160 planning columns in each half and
 /// therefore a 328-column pane. So the rail arrives at **134**, the first width
 /// at which the stacked list would have left the settled ladder and spent its new
@@ -1061,6 +1066,21 @@ const fn inset_of(pane: u16) -> u16 {
 /// `the_rail_arrives_where_the_stacked_list_would_have_climbed` re-derives this
 /// number from [`Columns::plan`] rather than restating it, so moving the glance
 /// ladder reddens it here.
+///
+/// **And it is the *block* rung's derivation, which is a limit rather than a
+/// caveat.** [`Columns::plan`] takes the glyph rung, a dense cell draws two
+/// buckets per column, and the same table is therefore reached at different
+/// widths: on a terminal carrying braille or octants the stacked ladder climbs at
+/// a pane of 119 and is already past the settled rung by 133, so the crossing
+/// costs twenty-four heat slices for twelve, in both regions. No arrival width is
+/// loss-free at every rung: the braille plateau that would allow one is empty, and
+/// the next needs a 268-column pane.
+/// [#284](https://github.com/breferrari/vigia/issues/284) is the row for an
+/// arrival that knows its rung, which needs the glyph rung to reach the layout and
+/// is a signature this constant cannot reach from here.
+/// `crossing_into_the_rail_keeps_the_pictured_complement_at_every_rung` pins what
+/// does hold everywhere: no element is taken away, and neither region falls below
+/// the complement the published picture draws at its own rung.
 ///
 /// **What the split costs is the diff's content column**, from about 129
 /// planning columns at 133 to 60 at 134. That is the feature rather than a
@@ -2005,9 +2025,11 @@ const fn bar_column(rect: Rect) -> u16 {
 
 /// Decide a region's bar from what it holds and what the pane can afford.
 ///
-/// `wide` is whether the **pane** can afford a bar at all, which is one rule for
-/// the whole screen so a reader never sees half a pair. Everything else is about
-/// this region.
+/// `wide` is whether **this region** can afford a bar at all, asked once for both
+/// by [`Areas::bars`] so the painter and the pointer cannot disagree. It was the
+/// *pane's* answer, one rule for the whole screen, until
+/// [#252](https://github.com/breferrari/vigia/issues/252) gave the two regions
+/// different widths. Everything else here was always about this region.
 ///
 /// **A region shorter than [`MIN_TRACK`] gets nothing**, because [`scrollable`]
 /// guarantees `span < of` and therefore `(span * rows) / of < rows`, so the thumb
@@ -3462,8 +3484,8 @@ impl Body {
     /// order and it is geometric rather than chosen: the band spans the pane
     /// above both columns, so its rows are unavailable to both, where
     /// [`Body::split`] sizes the list out of `affordable` and never lets the band
-    /// near it. What it costs is one step: at 134 columns the rail draws twelve
-    /// files at sixteen rows of pane and ten at seventeen, because the band
+    /// near it. What it costs is one step: at 134 columns the rail draws fourteen
+    /// files at eighteen rows of pane and twelve at nineteen, because the band
     /// arrives and takes three. The diff has always taken that step, at that
     /// moment, for that reason — `GRAPH_KEEP` is what bounds it — and beside a
     /// rail the map takes it too.
@@ -5308,8 +5330,11 @@ impl Painter<'_> {
     /// to draw is a blank column taken off every path on screen. Now the question
     /// is asked once and its answer is the return value.
     ///
-    /// `wide` is whether the pane can afford a bar at all, which is one rule for
-    /// the whole screen so a reader never sees half a pair.
+    /// `wide` is whether **this region** can afford a bar at all, from
+    /// [`Areas::bars`], which asks it once for both so the painter and the pointer
+    /// cannot disagree. It was the *pane's* answer until
+    /// [#252](https://github.com/breferrari/vigia/issues/252), when two regions
+    /// stopped being one width.
     ///
     /// **The deciding half now lives in [`bar_for`]**, which is the same
     /// consolidation one layer out: `regions` asks it too, so the pointer and the
@@ -6351,8 +6376,12 @@ impl Painter<'_> {
         // Background only, and gated on the background surviving: a bar whose
         // colour was dropped by the depth ladder would otherwise paint a blank cell
         // in nothing at all, which is a no-op that still costs a write. `area.x` is
-        // the pane's own leading column here, because `render` builds this region
-        // with `..area` and `with_bar` narrows the width without moving the origin.
+        // this **region's** leading column: `with_bar` narrows the width without
+        // moving the origin, so it is the origin `render` handed down. It is also
+        // the pane's for the rail and for every stacked region, and is not for the
+        // diff beside a rail
+        // ([#252](https://github.com/breferrari/vigia/issues/252)), which is why
+        // this says region rather than pane.
         if bar.bg.is_some() && self.inset > 0 {
             if let Some(cell) = self.buf.cell_mut((area.x, area.y)) {
                 cell.set_style(bar);
