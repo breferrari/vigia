@@ -216,7 +216,6 @@ The blank above the band is the row the header keeps between itself and the list
 
 | | |
 |---|---|
-| `q` `Esc` `Ctrl+C` | quit |
 | `j` `k` `↑` `↓` | scroll a row |
 | `Space` `PgDn` `PgUp` | page |
 | `d` `u` | half a page |
@@ -227,6 +226,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `f` | follow the newest change, or stop |
 | `m` | show or hide the masthead |
 | `?` | **all of this, on screen** |
+| `q` `Esc` `Ctrl+C` | quit |
 
 </td><td valign="top" width="50%">
 
