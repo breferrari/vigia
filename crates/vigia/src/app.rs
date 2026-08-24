@@ -954,7 +954,8 @@ impl App {
         let owed = self.landing && self.still_the_followed_file(frame);
         // **Recorded here because this is the one call every frame makes with the
         // pane's own layout in hand.** `?` advancing needs to know which page is
-        // the last, and `Action` carries no pane; see [`App::sheet_pages`]. It is
+        // the last, and `Action` carries no pane; see [`App::sheet_pages`].
+        //
         // **Whenever the layout measured one, which is every frame.**
         // [`crate::body_layout`] answers with the sheet up or down, and its own
         // docblock carries the reason: the shell drains actions in a batch and
@@ -970,8 +971,14 @@ impl App {
             // this, a pane that shrank its page count left `self.sheet` pointing
             // past the end and every `?` after it walked the gap one dead press at
             // a time while the screen showed the same page.
-            if let Some(page) = self.sheet {
-                self.sheet = Some(page.min(pages.saturating_sub(1)));
+            // **Not on a pane with no pages at all**, which is a pane below the
+            // sheet's own floor: there `pages` is zero, a saturating subtraction
+            // makes the clamp read `Some(0)`, and a reader who dragged a pane
+            // narrow and back would find themselves on page one of a sheet they
+            // had left on page four. Nothing was drawn in between, so nothing
+            // asked for the move.
+            if let (true, Some(page)) = (pages > 0, self.sheet) {
+                self.sheet = Some(page.min(pages - 1));
             }
         }
         let view = View::collect(

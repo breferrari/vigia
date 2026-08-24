@@ -5156,7 +5156,18 @@ fn column_fit(level: usize, from: usize, mouse: bool) -> Fit {
 /// `page` is **clamped** rather than trusted. The count a reader's `?` was
 /// measured against is the previous frame's, so a pane that has just been made
 /// shorter can be asked for a page it no longer has; landing on the last one is
-/// the answer that neither panics nor closes a sheet nobody dismissed.
+/// the answer that neither panics nor closes a sheet nobody dismissed. A clamp
+/// rather than a wrap, because a reader who shrank their pane was at the end of
+/// the sheet and a wrap would send them back to the middle of it.
+///
+/// **Two guards here are unreachable from both call sites, and saying which is
+/// which is [`sheet_floor`]'s own rule one function over.** `capacity.max(1)`
+/// cannot fire: [`column_fit`] passes `usize::MAX` and [`sheet_plan`] returns
+/// before it reaches a paged rung unless the capacity clears [`SHEET_KEEP`]. Nor
+/// can `.max(1)` on the page count, since `lines` is at least that same three.
+/// They stay because this function's signature states no precondition and a
+/// division by zero on the frame path is a panic in a monitor somebody left
+/// running, which is a worse trade than two comparisons nothing reaches.
 fn paged_fit(level: usize, from: usize, mouse: bool, page: usize, capacity: usize) -> Fit {
     let (keys, verb, total) = sheet_fields(level, from, mouse);
     let lines = sheet_rows(from, mouse);
@@ -5242,12 +5253,19 @@ enum Shape {
         /// Lines of [`column_lines`] this page starts after.
         ///
         /// **Planned here rather than derived by the painter from a page index
-        /// and a capacity**, which is [`Group`]'s own rule one field over: the
-        /// frame is sized from `take`, so a drawer free to recompute the split is
-        /// a drawer free to disagree with the box it is drawing inside.
+        /// and a capacity**, which is [`Group`]'s own rule one field over: a
+        /// drawer free to recompute the split is a drawer free to draw a different
+        /// page from the one the plan named.
         skip: usize,
-        /// Lines this page draws, which is exactly the rows the frame was sized
-        /// for.
+        /// Lines this page draws, which on the last page is **fewer** than the box
+        /// has rows.
+        ///
+        /// **The box is [`Fit::rows`]' capacity, not this**, and the two came apart
+        /// when the last page stopped being sized from its own remainder: sizing
+        /// the frame from `take` shrank the final box and slid it down half the
+        /// difference, taking the close control with it. So drawing past `take`
+        /// lands in the blank tail rather than over the bottom border, and what it
+        /// costs is a row of the next page shown on this one.
         take: usize,
     },
     /// One column, every row drawn, the sections headed and air around them.
@@ -6641,20 +6659,19 @@ impl Painter<'_> {
         let area = plan.area;
         let width = usize::from(area.width);
 
-        // **The plan's slice, not one recomputed here.** `skip` and `take` are
-        // what the frame was sized from, so drawing anything else is drawing over
-        // the bottom border or leaving a blank row inside it.
         // **The pipes first, over every interior row**, which is the roomy rung's
         // own shape one rung over: the last page draws fewer lines than its box has
-        // rows, and a frame open down its tail is not a box.
+        // rows, and a frame open down its tail is not a box. It also makes the
+        // per-row `sheet_pipes` call this loop used to carry redundant, which was
+        // two `put`s a row rewriting cells it had just written.
         self.sheet_pipes_over(area, area.y + 1);
+        // **The plan's slice, not one recomputed here.** `skip` and `take` name
+        // the page, so drawing anything else is drawing a different page from the
+        // one the reader asked for.
         let lines = column_lines(from, mouse).skip(skip).take(take);
         for (y, line) in (area.y + 1..).zip(lines) {
             match line {
-                Line::Row(row) => {
-                    self.sheet_pipes(area, y);
-                    self.sheet_row(y, row, plan.level, group, area.x);
-                }
+                Line::Row(row) => self.sheet_row(y, row, plan.level, group, area.x),
                 // The group's own rule, which is the same shape the title bar has
                 // and for the same reason: a heading inside a table is furniture,
                 // so it runs to the frame rather than standing back from it.
