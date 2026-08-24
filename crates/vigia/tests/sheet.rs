@@ -3452,3 +3452,50 @@ fn every_page_is_a_closed_box_including_its_blank_tail() {
          it exists for was never on screen"
     );
 }
+
+#[test]
+fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
+    // **A pane too narrow for a sheet has zero pages, and the clamp read that as
+    // "go to page one".** `App::view` clamps the page to what the pane has so the
+    // state and the screen agree, and `pages.saturating_sub(1)` on a pane below the
+    // thirty-column floor is zero, so a reader who dragged their pane narrow and
+    // back found themselves on page one of a sheet they had left on page four.
+    // Nothing was drawn while it was narrow, so nothing asked for the move.
+    //
+    // Found by the audit round that read the previous round's own fixes, which is
+    // the class of defect that round exists for.
+    let scratch = Scratch::large_diff("sheet-below-floor", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let at = Rect::new(0, 0, 50, 8);
+    press_pages(&mut app, &mut frame, &mut highlighter, &history, at, 4);
+    assert_eq!(chrome(&app).sheet, Some(3), "four presses is not page four");
+
+    // Twenty-eight columns: under the floor, so nothing is drawn and the state
+    // stays true, which is §11.1's own ruling and is what `m` does on a pane that
+    // cannot carry the band.
+    let narrow = Rect::new(0, 0, 28, 8);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, narrow);
+    assert!(
+        laid.sheet.is_none() && !text_of(&buf, narrow).contains(TITLE),
+        "a twenty-eight column pane drew a sheet"
+    );
+
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    assert_eq!(
+        chrome(&app).sheet,
+        Some(3),
+        "a pane dragged below the sheet's floor and back moved the reader's page"
+    );
+    let (_, sheet) = read_sheet(&buf, &laid);
+    assert_eq!(
+        counter_of(&sheet).unwrap_or_default().trim(),
+        "10-11 of 16",
+        "the pane came back on a different page:\n{sheet}"
+    );
+}
