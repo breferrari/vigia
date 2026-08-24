@@ -1442,6 +1442,50 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
                 .expect("the dim weight carries a colour"),
             "the {spelling} verb cell is not drawn dim"
         );
+
+        // **The furniture's own weight, which nothing read.** Every frame gate in
+        // this file compares glyphs, `the_sheet_is_opaque` reads backgrounds only,
+        // and `closing_the_sheet_restores_every_cell` looks outside the sheet. So
+        // repainting the whole frame, both headings and the pipes in the lit
+        // weight rather than the dim one changed no character and reddened
+        // nothing. §11.1 draws this element as chrome behind its own content.
+        let dim = theme
+            .chrome_dim
+            .fg
+            .expect("the dim weight carries a colour");
+        let right = sheet.left + sheet.width - 1;
+        let bottom = sheet.top + sheet.height - 1;
+        for (x, y, what) in [
+            (sheet.left, sheet.top, "the top-left corner"),
+            (sheet.left + 1, sheet.top, "the title bar's rule"),
+            (sheet.left, row, "the left pipe"),
+            (right, row, "the right pipe"),
+            (sheet.left, bottom, "the bottom-left corner"),
+            (sheet.left + 1, bottom, "the bottom border"),
+        ] {
+            assert_eq!(
+                buf[(x, y)].fg,
+                dim,
+                "{what} of the {spelling} sheet is not drawn in the chrome's dim \
+                 weight, so the frame competes with the table inside it"
+            );
+        }
+    }
+
+    // The headings are furniture too, and the two-column rung has two of them.
+    let at = Rect::new(0, 0, 120, 21);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let sheet = laid.sheet.expect("a pane that draws no sheet");
+    let dim = theme
+        .chrome_dim
+        .fg
+        .expect("the dim weight carries a colour");
+    for (col, what) in [(2u16, "the keyboard label"), (56, "the mouse label")] {
+        assert_eq!(
+            buf[(sheet.left + col, sheet.top + 1)].fg,
+            dim,
+            "{what} is not drawn in the chrome's dim weight"
+        );
     }
 }
 

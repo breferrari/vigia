@@ -789,6 +789,33 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: bool) {
         },
         || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
+
+    // **And when a sheet was asked for, one has to have been on the frames that
+    // were timed.** Read out of the buffer the timed loop actually wrote to,
+    // rather than off a second `App` built beside it: the non-vacuity check in
+    // `a_frame_under_the_sheet_holds_the_frame_budget` names the rung on its own
+    // `App`, so deleting the toggle above left that gate green while it timed
+    // sheet-free frames. A gate that cannot fail is worse than no gate.
+    if sheet {
+        let drawn = (buf.area.top()..buf.area.bottom())
+            .map(|y| {
+                (buf.area.left()..buf.area.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            drawn.contains("gestures"),
+            "this gate asked for the sheet and timed {SAMPLED_FRAMES} frames \
+             without one on them, so it measured the gate above under another name"
+        );
+        assert!(
+            drawn.contains("keyboard"),
+            "the timed frames carried a sheet but not the two-column rung this \
+             gate is named for"
+        );
+    }
 }
 
 #[test]
