@@ -747,17 +747,23 @@ fn walk_the_ladder(name: &'static str, mut each: impl FnMut(u16, u16, Rect, &Buf
     });
 }
 
-/// How many of [`GESTURES`] reach a screen this size, and the sheet's own rows.
+/// How many of [`GESTURES`] the sheet draws, and the sheet's own rows.
+///
+/// **Counted inside the sheet's rect, never over the pane.** The hint bar spells
+/// `q quit`, so a pane-wide count scores `GESTURES[0]` on every frame whether or
+/// not the sheet drew that row, and every count-based gate here was one gesture
+/// loose in exactly the region they exist to measure: the rungs that drop rows.
+/// Measured at 120 by 8 the pane says four and the sheet draws three.
 fn read_sheet(buf: &Buffer, laid: &Regions, at: Rect) -> (usize, String) {
-    let drawn = text_of(buf, at);
-    let count = if drawn.contains(TITLE) {
-        GESTURES.iter().filter(|g| drawn.contains(*g)).count()
-    } else {
-        0
-    };
+    let _ = at;
     let sheet = laid.sheet.map_or_else(String::new, |s| {
         text_of(buf, Rect::new(s.left, s.top, s.width, s.height))
     });
+    let count = if sheet.contains(TITLE) {
+        GESTURES.iter().filter(|g| sheet.contains(*g)).count()
+    } else {
+        0
+    };
     (count, sheet)
 }
 
@@ -840,6 +846,12 @@ fn the_widening_ladder_is_monotone_and_never_leaves_the_body() {
             );
         }
     });
+
+    assert!(
+        grid.iter().flatten().any(|&c| c == GESTURES.len()),
+        "no pane in the sweep drew a whole sheet, so every assertion below is \
+         vacuous and a `sheet_plan` that returned None unconditionally would pass"
+    );
 
     for (i, &w) in widths.iter().enumerate() {
         for (j, &h) in heights.iter().enumerate() {
@@ -1025,4 +1037,167 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
             );
         }
     });
+}
+
+#[test]
+fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
+    // **78, and the first draft of this ruling said 80.** `margin_of` returns 2 at
+    // 78, 3 at 79 and 4 at 80, so the room a pane leaves is 76 at all three and
+    // the tight two-column rung is exactly 76 wide. The probe that produced the
+    // ruling's before-and-after sampled 60, 70, 80 and stepped over the boundary,
+    // which is the same mistake as a superlative bounded by a sweep that does not
+    // reach its falsifying case.
+    //
+    // Gated by walking the boundary a column at a time, because that is the only
+    // instrument that can find it.
+    let mut arrival = None;
+    sweep!("sheet-arrival", |paint| {
+        for w in 70u16..=84 {
+            let at = Rect::new(0, 0, w, 19);
+            let (buf, laid) = paint(at);
+            let (_, sheet) = read_sheet(&buf, &laid, at);
+            if sheet.contains("keyboard") && arrival.is_none() {
+                arrival = Some(w);
+            }
+            if let Some(first) = arrival {
+                assert!(
+                    sheet.contains("keyboard"),
+                    "the rung arrived at {first} and was gone again at {w}, so it \
+                     is not monotone in width:\n{sheet}"
+                );
+            }
+        }
+    });
+    assert_eq!(
+        arrival,
+        Some(78),
+        "the two-column rung does not arrive where SPEC.md §11.1 says it does"
+    );
+}
+
+#[test]
+fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
+    // **Two claims no gate could fail before.** Bottom-aligning the sheet, or
+    // pinning it to the left margin, left every other gate in this file green: the
+    // frame is still closed, the gestures are all there, the size is right. And
+    // "never leaves the body" was bounded against the pane's **last row** rather
+    // than the footer's first, so it could not fail for footer encroachment at
+    // all. B12's reason for a box is that a reader must still see the tool is
+    // alive behind it, and the footer is half of what they are looking at.
+    //
+    // Clearance is swept, because the footer's own height is a ladder in the width
+    // and one screen cannot find where the two ladders meet. The footer is located
+    // by the `q quit` the hint bar always spells, read off the screen rather than
+    // asked of the layout: a gate that imported the layout's idea of where the
+    // footer starts would agree with it by construction.
+    let mut seen = 0;
+    let mut cleared = 0;
+    sweep!("sheet-centred", |paint| {
+        for w in LADDER_WIDTHS {
+            for h in LADDER_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                let Some(sheet) = laid.sheet else { continue };
+                seen += 1;
+                assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
+                let pane = text_of(&buf, at);
+                if let Some(hint) = pane.lines().position(|r| r.contains("q quit")) {
+                    cleared += 1;
+                    let hint = u16::try_from(hint).expect("a pane taller than u16");
+                    assert!(
+                        hint >= sheet.top + sheet.height,
+                        "the sheet covers the hint bar at {w}x{h}: it ends at row \
+                         {} and the bar is on row {hint}",
+                        sheet.top + sheet.height
+                    );
+                }
+            }
+        }
+    });
+    assert!(
+        seen > 0,
+        "the sweep drew no sheet at all, so it proves nothing"
+    );
+    assert!(
+        cleared > 0,
+        "no pane in the sweep drew a hint bar, so the clearance assertion never ran"
+    );
+
+    // Centring itself is pinned at named panes rather than swept, because the body
+    // it is centred in is the pane less a footer whose height is its own ladder,
+    // and a gate that reconstructed that would be reconstructing the layout. These
+    // four were checked by hand against `margins_of` and the plan's own halving.
+    sweep!("sheet-origin", |paint| {
+        for (w, h, want) in [
+            (120u16, 30u16, (32u16, 5u16, 56u16, 19u16)),
+            (100, 40, (22, 10, 56, 19)),
+            (120, 21, (8, 3, 104, 14)),
+            (80, 17, (2, 1, 76, 14)),
+        ] {
+            let at = Rect::new(0, 0, w, h);
+            let (_, laid) = paint(at);
+            let sheet = laid.sheet.expect("a pane that draws no sheet at all");
+            assert_eq!(
+                (sheet.left, sheet.top, sheet.width, sheet.height),
+                want,
+                "the sheet is not where centring in the body puts it at {w}x{h}"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_two_column_rung_places_its_cells_where_the_plan_says() {
+    // **The gap between a keys cell and its verb is spent in two expressions**,
+    // one summing the sheet's width and one placing the row. Changing only the
+    // second moved every verb column in both shapes and left the width, the frame
+    // and the gesture count exactly as planned, so nothing in this file could see
+    // it. The same is true of the ` mouse ` label's column, which is round 0's
+    // surviving mutant relocated onto the heading row.
+    //
+    // Columns are stated as literals rather than derived, because a gate that
+    // computed them from the layout would agree with it by construction.
+    for (w, h, cols, label, spelling) in [
+        (120u16, 21u16, [2usize, 26, 56, 77], 56usize, "wide"),
+        (80, 17, [2, 15, 35, 50], 35, "tight"),
+    ] {
+        sweep!("sheet-columns", |paint| {
+            let at = Rect::new(0, 0, w, h);
+            let (buf, laid) = paint(at);
+            let (_, sheet) = read_sheet(&buf, &laid, at);
+            assert!(
+                sheet.contains("keyboard"),
+                "the {spelling} case is not the two-column rung:\n{sheet}"
+            );
+            let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
+
+            // The heading row: the label sits one column back from the keys cells
+            // it names, so the space it opens with lands on the rule.
+            let heading: String = rows[1].iter().collect();
+            assert_eq!(
+                heading
+                    .char_indices()
+                    .nth(label)
+                    .map(|(i, _)| &heading[i..])
+                    .map(|t| t.starts_with("mouse ")),
+                Some(true),
+                "the {spelling} mouse label does not start at column {label}:\n{sheet}"
+            );
+
+            // The first gesture row carries all four fields.
+            let first = &rows[2];
+            for at_col in cols {
+                assert!(
+                    first[at_col] != ' ',
+                    "the {spelling} rung has no cell at column {at_col}, so a field \
+                     moved without the sheet's width moving:\n{sheet}"
+                );
+                assert!(
+                    first[at_col - 1] == ' ',
+                    "the {spelling} rung's cell at column {at_col} is not the start \
+                     of its field:\n{sheet}"
+                );
+            }
+        });
+    }
 }

@@ -4362,11 +4362,29 @@ fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize)
 /// docblock is the reason: *a comment naming a duplication is not a defence
 /// against it*.
 const fn sheet_span(keys: usize, verb: usize) -> usize {
-    keys + 2 + verb + 2
+    keys + SHEET_GAP + verb + SHEET_GAP
 }
 
+/// Blank columns between a keys cell and its verb, and between one group's block
+/// and the next.
+///
+/// **One constant because three expressions spend it**, and an audit found that
+/// changing [`Group::verb_at`]'s copy alone moved every verb column in both
+/// shapes while the sheet's width, its frame and its gesture count all stayed
+/// exactly as planned. Nothing could fail, because the width was summed from a
+/// different copy of the same number.
+const SHEET_GAP: usize = 2;
+
 /// The floor every rung's width takes, so a narrow table cannot draw a truncated
-/// heading. Named once because two rungs charge it.
+/// heading. Named once because both rung shapes charge it.
+///
+/// **No shipped rung reaches it, and that is worth writing down rather than
+/// discovering.** The floor is seventeen; the narrowest one-column rung is
+/// twenty-four (`d  u` against `half a page`, at the last rung the height ladder
+/// leaves) and the narrowest two-column rung is seventy-six. So it is a guard
+/// against the tables shrinking, not a rung of the ladder, and if it ever bound
+/// on [`Shape::Beside`] the sheet would be wider than the sum its groups were
+/// placed within and the right pipe would detach from the mouse column.
 fn sheet_floor(total: usize) -> usize {
     total.max(width_of(SHEET_TITLE) + 6)
 }
@@ -4392,8 +4410,14 @@ fn sheet_beside(level: usize) -> (Group, Group, usize) {
         keys: kb_keys,
         verb: kb_verb,
     };
+    // **The heading row is measured too, not only the gesture rows.** Both labels
+    // live on it, so a keyboard block narrower than its own label would put
+    // ` mouse ` inside the word `keyboard`. It holds today by a wide margin (ten
+    // columns against a block of fifty-five, or thirty-four at the tight
+    // spelling), and it holds because of this rather than by luck.
     let mouse = Group {
-        at: keyboard.at + sheet_span(kb_keys, kb_verb),
+        at: (keyboard.at + sheet_span(kb_keys, kb_verb))
+            .max(keyboard.at + width_of(SHEET_KEYBOARD_LABEL)),
         keys: ms_keys,
         verb: ms_verb,
     };
@@ -4428,7 +4452,7 @@ impl Group {
 
     /// The screen column this group's verb cells start in.
     fn verb_at(self, left: u16) -> u16 {
-        self.keys_at(left) + self.keys as u16 + 2
+        self.keys_at(left) + self.keys as u16 + SHEET_GAP as u16
     }
 }
 
@@ -4460,8 +4484,8 @@ fn sheet_beside_rows() -> usize {
 /// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
 /// one-column sheet is too tall for the pane but the pane is wide enough to put
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
-/// columns for six rows and drawing all sixteen gestures where eleven drew
-/// before. It is tried **after** the full one-column rung and **before** any
+/// columns for five rows (nineteen against fourteen) and drawing all sixteen
+/// gestures where eleven drew before. It is tried **after** the full one-column rung and **before** any
 /// dropping rung, which is what makes it additive: a pane on which one column
 /// already fits never sees it, so nothing that draws every row today changes.
 /// Its two spellings are its own rather than the pane-wide `level`, so a pane of
@@ -4491,7 +4515,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<Sheet
     // would end up with a narrower sheet. `once_with` keeps each rung's
     // measurement lazy, so a pane that takes the first never measures the rest.
     let rungs = std::iter::once_with(move || column_fit(level, 0, true))
-        .chain([0, 1].map(|level| move || beside_fit(level)).map(|f| f()))
+        .chain([0, 1].into_iter().map(beside_fit))
         .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(move |from| column_fit(level, from, false)));
     for fit in rungs {
         let height = fit.rows + SHEET_FRAME;
@@ -4574,7 +4598,12 @@ fn beside_fit(level: usize) -> Fit {
 /// docblock saying which combinations were legal; three fields for a two-way
 /// choice is a state a caller can build wrong, and the file's own precedent
 /// (`Body::areas`) writes such a convention down at the point it is relied on
-/// only because it cannot be typed away. Here it can.
+/// only because it cannot be typed away. Here most of it can: `Shape::Beside`
+/// cannot carry a dropped row or a missing mouse group at all, which is the
+/// combination the prose used to police. What the type still permits and the
+/// ladder never builds is `Column { mouse: true, from: n > 0 }`, since the mouse
+/// group is only ever drawn on the rung that drops nothing; the painter renders
+/// it consistently if anyone ever does build it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shape {
     /// One column: `from` keyboard rows already dropped from the top, the mouse
