@@ -397,3 +397,57 @@ failures rather than gaps: one ran against a test binary that did not contain th
 test, and one applied to a file a previous iteration's `git checkout` had already
 reverted. A mutation that never applied and a mutation the suite failed to kill
 report identically, and they call for opposite responses.
+
+## B14 — the rail arrived on its own, and one number is the whole argument
+
+The ruling is `SPEC.md` §11.2 B14 and what the shell does is §11.1. This is the
+trade it rests on, kept here because the reversal is narrow and the part that is
+*not* reversed is the part most likely to be re-argued.
+
+**What was reversed.** Not the width. [#252](https://github.com/breferrari/vigia/issues/252)
+derived 134 rather than choosing it, and that derivation stands: both regions read
+one glance ladder, so splitting a pane costs each half the width the whole had, and
+a split costs no rung only where both halves and the undivided pane one column
+below sit on the same plateau. There are two plateaus and the other needs a
+328-column pane, so 134 is the only answer. What was reversed is that **crossing it
+was automatic**.
+
+**The number that decides it, and §11.1 already stated it.** At 133 the diff plans
+against 129 columns; at 134 against 60. Widening a terminal past a threshold nobody
+chose more than halved the region this tool exists to show. §11.1 called that "the
+feature rather than a defect", and it is, *for a reader who asked*. The same
+sentence describing a reader who did not is the reason this reopened.
+
+**Why an opt-out was rejected rather than an opt-in.** Both need the same discovery
+path: the gestures sheet names the key either way. Given that, the question is only
+which default a reader who never opens the sheet gets, and the answer is the one
+that changes nothing.
+
+**And the picture stopped being an exception.** `assets/preview.svg` is a
+109-column render, so §5.1 could only say the picture and the code "describe the
+same pane" by noting the picture sits below the arrival width. With the rail asked
+for, they describe the same pane at every width.
+
+**What it cost, which is the sheet and not the pane.** A key is a row, so the
+gestures table went from eleven keyboard rows to twelve and every row count in
+§11.1 moved: the one-column rung to eighteen lines, the two-column rung to `104 x
+15` and `71 x 15`, the roomy rung to `68 x 30`. **No width moved**, and that is what
+kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left
+rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28
+wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording
+because the plan made them before the run rather than after.
+
+**The keep-set did not move either, and the reason is specific rather than a
+preference.** `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and
+`?`, and `SHEET_KEEP` keeps three. It is given up at rank eight of `DROP_ORDER`,
+one before `f`, because that order only binds on a pane of 30 to 34 columns and a
+rail needs 134: `r` is the one gesture in the set that **cannot fire on the pane
+that is dropping it**.
+
+**One instrument note, from the pass rather than the ruling.** `cargo test
+--workspace` stops at the first failing binary, so a grep for `FAILED` over its
+output reports only that binary's failures and reads as green once it passes. Two
+counts in this pass were taken that way and both were wrong: the first was a
+*compile* failure with no `FAILED` line at all, and the second hid twenty-nine
+failures in later binaries. `--no-fail-fast` is the flag, and a count that cannot
+see a compile error is not a count.

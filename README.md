@@ -225,6 +225,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `J` `K` | scroll the pinned list |
 | `f` | follow the newest change, or stop |
 | `m` | show or hide the masthead |
+| `r` | list beside the diff, or above it |
 | `?` | **all of this, on screen**, a page at a time where the pane is small |
 | `q` `Esc` `Ctrl+C` | quit |
 
