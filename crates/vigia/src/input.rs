@@ -337,7 +337,43 @@ impl Regions {
     /// about where a button is, which is the defect
     /// [#166](https://github.com/breferrari/vigia/issues/166) found two
     /// expressions of and reduced to one.
+    ///
+    /// **The sheet is not geometry the other two could hold for it, and that is
+    /// what [#298](https://github.com/breferrari/vigia/issues/298) found.**
+    /// `SPEC.md` §11.1 rules that a gesture landing on the sheet does nothing at
+    /// all, and two of the three callers honoured it on their own: [`action_for`]
+    /// returns before it reaches here, and [`Regions::hover_at`] answers the close
+    /// control and nothing else. **The loop's arming site went through neither**,
+    /// so a press on a step button the sheet was covering armed a [`Held`] and the
+    /// repeat then scrolled a region the reader could not see, every
+    /// [`STEP_REPEAT`] until the button came up. Measured over widths 30 to 140
+    /// against heights 8 to 40: **85** covered cells answered a step, at the four
+    /// widths 30, 32, 35 and 38, which are the panes narrow enough for a centred
+    /// sheet to reach a bar's own column.
+    ///
+    /// So the guard is **here** rather than at that site, which is #166's rule
+    /// applied to the same function a second time: three callers reading one
+    /// expression of *where a press acts* cannot come to disagree about it, where
+    /// a fourth copy in `run` is exactly how this one did. [`Regions::hover_at`]'s
+    /// own sheet branch stays, because it answers [`Hovered::Button`] for the close
+    /// control where this answers `None` for every cell of the sheet including
+    /// that one: a mark is not a press, and the control is dismissed through
+    /// [`action_for`] rather than held.
+    ///
+    /// It also settles the ladder one element over. `Chrome::pressed` is
+    /// [`Held::at`], so with nothing on the sheet able to arm a hold, the close
+    /// control's pressed weight is unreachable **by construction** rather than by
+    /// the geometry coincidence the sweep measured, which is what #298 rules it
+    /// down to two rungs on. `crates/vigia/tests/sheet.rs::nothing_can_press_the_close_control`
+    /// is that half.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
+        // **Before the columns, because the sheet is drawn over them.** The order
+        // is [`Regions::hover_at`]'s own and for the same reason: the sheet
+        // swallows what lands on it rather than passing it down, so a cell it
+        // covers is not a button however the bars are laid out underneath.
+        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+            return None;
+        }
         if self.list.bar == Some(column)
             && let Some(rows) = self.list.button(row)
         {

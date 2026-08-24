@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use vigia::{
     Action, Grabbed, Held, Hovered, LIST_SETTLED, Region, Regions, SCROLL_LINGER, STEP_DELAY,
-    STEP_REPEAT, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted,
-    patience, scroll_mark, settled,
+    STEP_REPEAT, Sheet, TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after,
+    hover_repainted, patience, scroll_mark, settled,
 };
 use vigia_core::{HISTORY_SAMPLE, HISTORY_WINDOW, History};
 
@@ -1315,6 +1315,83 @@ fn only_a_step_button_arms_a_hold() {
     assert_eq!(regions.step_at(79, 1), None);
     // And off the bar's column there is nothing to hold.
     assert_eq!(regions.step_at(40, 5), None);
+}
+
+#[test]
+fn a_step_button_the_sheet_covers_arms_nothing() {
+    // **The unit twin of `sheet.rs`'s sweep, and the producer half of a rule this
+    // module already had the decider half of.** `SPEC.md` §11.1 rules that a click
+    // landing on the sheet does nothing at all, *"falling through would let a click
+    // seek a scrollbar the reader cannot see"*, and `action_for` has honoured it
+    // since B12. `Regions::step_at` did not: the loop arms a hold from it directly,
+    // outside `action_for`, so a press on a covered button armed a repeat that
+    // scrolled a region under the sheet.
+    //
+    // Measured before the guard landed, over widths 30 to 140 against heights 8 to
+    // 40: **85 cells** the sheet covered answered a step, at widths 30, 32, 35 and
+    // 38, every one of them a pane at or below I6's own forty columns.
+    // `tests/sheet.rs::a_press_under_the_sheet_arms_no_step` is that sweep; this is
+    // the same claim where the geometry is spelled rather than laid out, so a
+    // failure here names the rule and a failure there names the pane.
+    let bare = two_regions();
+    // The same cells the gate above proves are buttons, so the contrast below is
+    // between two answers for one cell rather than between two cells.
+    assert_eq!(bare.step_at(79, 5), Some(Action::Scroll(-1)));
+    assert_eq!(bare.step_at(79, 19), Some(Action::Scroll(1)));
+
+    // **Covering the top button and not the bottom one**, so the two assertions
+    // below are the same bar at two rows rather than a bar and something else.
+    let covered = Regions {
+        sheet: Some(Sheet {
+            left: 70,
+            top: 2,
+            width: 10,
+            height: 6,
+            // Off the button on purpose: the close control is its own surface and
+            // `hover_at` still answers `Button` for it, where this answers `None`
+            // for every cell of the sheet including that one.
+            close: (78, 2),
+        }),
+        ..bare
+    };
+    assert!(
+        covered.sheet.expect("a sheet").covers(79, 5),
+        "the fixture's sheet does not cover the button, so this proves nothing"
+    );
+    assert_eq!(
+        covered.step_at(79, 5),
+        None,
+        "a press on a step button under the sheet armed a hold, so holding it \
+         repeats a scroll on a region the reader cannot see"
+    );
+
+    // **The close control is not an exception**, and it is asserted rather than
+    // left to the blanket above: it is the one cell of the sheet a click does act
+    // on, so a reader of the guard will ask. It closes through `action_for`, which
+    // is a different path, and it must arm no hold either.
+    assert_eq!(
+        covered.step_at(78, 2),
+        None,
+        "the close control armed a hold, which would repeat a step while the \
+         sheet it belongs to is being dismissed"
+    );
+
+    // **And the bar's other button still answers**, which is what makes the guard
+    // bounded by the sheet rather than switched on by its presence. Without this a
+    // `step_at` that returned `None` whenever any sheet existed would pass every
+    // assertion above while taking the scrollbar away from a reader who has the
+    // sheet open on the other side of the pane.
+    assert!(
+        !covered.sheet.expect("a sheet").covers(79, 19),
+        "the fixture's sheet reaches the lower button, so the case below proves \
+         nothing"
+    );
+    assert_eq!(
+        covered.step_at(79, 19),
+        Some(Action::Scroll(1)),
+        "a step button the sheet does not cover stopped answering, so the guard \
+         is on the sheet existing rather than on the cell it covers"
+    );
 }
 
 #[test]

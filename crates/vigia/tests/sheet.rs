@@ -452,9 +452,17 @@ fn closing_the_sheet_restores_every_cell() {
 
 #[test]
 fn the_close_control_brightens_under_the_pointer() {
-    // **A control that never brightened is a glyph a reader has to guess at**, and
-    // B10's ladder already had the rungs: chrome at rest, `bar_hover` under the
-    // pointer, `bar_active` while pressed. The same three the step buttons use.
+    // **A control that never brightened is a glyph a reader has to guess at**
+    // ([#211](https://github.com/breferrari/vigia/issues/211)), and B10's ladder had
+    // the rungs for it: chrome at rest and `bar_hover` under the pointer.
+    //
+    // **Two rungs and not the step buttons' three, ruled by
+    // [#298](https://github.com/breferrari/vigia/issues/298).** This gate asserted a
+    // pressed rung by building a `Chrome` whose `pressed` is the control's own cell,
+    // and nothing in the shell ever produces one: the control acts on `Down`, so the
+    // sheet is gone before the next paint and no frame can draw it pressed.
+    // `nothing_can_press_the_close_control` is the producer-side gate that replaced
+    // that assertion, and `SPEC.md` §11.1 now states two.
     let scratch = Scratch::large_diff("sheet-hover", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -483,29 +491,14 @@ fn the_close_control_brightens_under_the_pointer() {
     );
 
     let theme = Theme::default();
-    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None, None);
+    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None);
     let hovered = drawn_close(
         &mut app,
         &mut frame,
         &mut highlighter,
         &history,
         Some(Hovered::Button(cx, cy)),
-        None,
     );
-    // **Held, which is the rung nothing reached.** B10's ladder is three weights,
-    // and this gate asserted two: no test in the suite ever built a `Chrome` whose
-    // `pressed` is the control's own cell, so deleting the `bar_active` arm left
-    // everything green. The step buttons' pressed rung is gated one element over
-    // (`tests/render.rs`); the sheet's sibling was not.
-    let held = drawn_close(
-        &mut app,
-        &mut frame,
-        &mut highlighter,
-        &history,
-        Some(Hovered::Button(cx, cy)),
-        Some((cx, cy)),
-    );
-
     assert_ne!(
         at_rest, hovered,
         "the close control draws the same under the pointer as at rest, so nothing \
@@ -520,25 +513,14 @@ fn the_close_control_brightens_under_the_pointer() {
         weight(theme.bar_hover),
         "the hovered control is not on B10's hover rung"
     );
-    assert_eq!(
-        weight(held.1),
-        weight(theme.bar_active),
-        "the held control is not on B10's active rung, so pressing it says nothing"
-    );
-    assert_ne!(
-        weight(held.1),
-        weight(hovered.1),
-        "the control draws the same held as merely hovered, so B10's ladder is two \
-         rungs rather than three"
-    );
-    // **The bottom rung, which is the one of three nothing asserted positively.**
+    // **The bottom rung, which is the one of two nothing asserted positively.**
     // Every other assertion here is a comparison, so the resting weight was pinned
     // only by being *different* from the hover: painting the control permanently
     // `bar_active` keeps `at_rest != hovered`, keeps both `weight` equalities and
     // keeps the glyph, so the control could ship looking pressed on every frame,
     // or drawn in `chrome_dim` and reading as part of the frame that
     // [#166](https://github.com/breferrari/vigia/issues/166) rules it is not part
-    // of. A ladder is three rungs or it is not a ladder.
+    // of.
     assert_eq!(
         weight(at_rest.1),
         weight(theme.chrome),
@@ -548,6 +530,162 @@ fn the_close_control_brightens_under_the_pointer() {
     assert_eq!(
         at_rest.0, SHEET_CLOSE,
         "the control stopped being the glyph this gate is about"
+    );
+}
+
+#[test]
+fn a_press_under_the_sheet_arms_no_step() {
+    // **The producer half of a rule this suite already had the decider half of.**
+    // `SPEC.md` §11.1 rules that a gesture landing on the sheet does nothing at all,
+    // because *"falling through would let a click seek a scrollbar the reader cannot
+    // see and a wheel scroll a diff the sheet is covering, which is the one way
+    // something that moves no content could still move content"*. Three gates hold
+    // that already and all three ask `action_for`.
+    //
+    // **The loop does not go through `action_for` to arm a hold.** It reads
+    // `Regions::step_at` directly, and that had no sheet guard, so a press on a
+    // covered step button armed a `Held`: `Held::fire` then applied `Scroll` every
+    // `STEP_REPEAT` to a region under the sheet, for as long as the button was down.
+    // The first step was *not* applied, because `action_for` correctly refused it,
+    // which also made the arming site's own comment false — it says the hold is
+    // *"armed from the same press that performs the first step"* and here no step
+    // was performed at all.
+    //
+    // **The grid is the one the defect was measured over**, rather than the panes it
+    // happened to land on: 30 to 140 columns against 8 to 40 rows found **85**
+    // covered cells answering a step, all at widths 30, 32, 35 and 38, which are the
+    // panes narrow enough for a centred sheet to reach a bar's own column. Those
+    // four are deliberately **not** hard-coded here. A rung change moves which panes
+    // cover a bar, and a fixed list would then sweep four panes that prove nothing
+    // while reporting green, which is `SPEC.md` §7's own shape. The `guarded`
+    // counter below is what stops that instead.
+    let scratch = Scratch::large_diff("sheet-press-under", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut guarded = 0usize;
+    let mut drew = 0usize;
+    for width in 30u16..=140 {
+        for height in 8u16..=40 {
+            let at = Rect::new(0, 0, width, height);
+            let mut app = App::past_first_paint();
+            toggle_at(&mut app, &mut frame, at);
+            let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+            let Some(sheet) = laid.sheet else { continue };
+            drew += 1;
+
+            // The same regions with the sheet taken out, which is the only way to
+            // ask what a cell would have answered without it.
+            let bare = Regions {
+                sheet: None,
+                ..laid
+            };
+
+            for row in sheet.top..sheet.top.saturating_add(sheet.height) {
+                for column in sheet.left..sheet.left.saturating_add(sheet.width) {
+                    // **Both halves, because the defect is that they disagreed.**
+                    // Asserting only `step_at` would pass on a build where the sheet
+                    // stopped covering a bar at all, and asserting only `action_for`
+                    // is what the three existing gates already do.
+                    assert_eq!(
+                        laid.step_at(column, row),
+                        None,
+                        "on a {width} by {height} pane, ({column},{row}) is under \
+                         the sheet and still arms a hold, so holding it repeats a \
+                         scroll on a region the reader cannot see"
+                    );
+                    assert!(
+                        action_for(&click(column, row), laid).is_none()
+                            || (column, row) == sheet.close,
+                        "on a {width} by {height} pane, a click at ({column},{row}) \
+                         fell through the sheet"
+                    );
+                    guarded += usize::from(bare.step_at(column, row).is_some());
+                }
+            }
+        }
+    }
+
+    assert!(drew > 1000, "only {drew} panes drew a sheet, so this sweep is thin");
+    // **The assertion that makes the loop above mean something.** Every cell in it
+    // passes trivially on a build where no sheet ever reaches a bar, and that is not
+    // a hypothetical: it is what a rung change does. This counts the cells the guard
+    // actually took an answer away from, so a sweep that has stopped covering the
+    // case reddens here rather than going quietly green.
+    //
+    // **A floor rather than the measured 85**, and the difference is deliberate. The
+    // exact count is a fact about the sheet's box, which #297 and #288 both move, so
+    // pinning it would make this gate fail for a reason that has nothing to do with
+    // what it is about. What must not change is that the case is *reached*.
+    assert!(
+        guarded > 0,
+        "no cell under the sheet would have armed a hold without the guard, so \
+         this gate is passing over panes that prove nothing: the sheet no longer \
+         reaches a scrollbar at any size swept, and the 85 cells #298 measured \
+         are gone for some other reason"
+    );
+}
+
+#[test]
+fn nothing_can_press_the_close_control() {
+    // **Defence rather than behaviour, and it is written down as such because it
+    // cannot be made to go red.** `Painter::sheet` drew `Theme::bar_active` when
+    // `Chrome::pressed` was the control's own cell, and
+    // [#298](https://github.com/breferrari/vigia/issues/298) found nothing produces
+    // one. Two independent reasons, and both are asserted here rather than one being
+    // trusted:
+    //
+    // - `Chrome::pressed` is `Held::at`, `Held` is armed from `Regions::step_at`,
+    //   and the same sweep that found 85 covered cells answering a step found the
+    //   close control's own cell among them **zero** times over 30 to 140 columns by
+    //   8 to 40 rows. It is not a bar's column on any pane that draws a sheet.
+    // - Since `a_press_under_the_sheet_arms_no_step`'s guard, no cell of the sheet
+    //   answers at all, so the first reason is now a consequence of the rule rather
+    //   than a fact about geometry. That is the direction that matters: it was true
+    //   by coincidence and is true by construction.
+    //
+    // The drawn ladder is `the_close_control_brightens_under_the_pointer`'s; this is
+    // the half no drawing test can reach, which is the producer-versus-decider split
+    // #298 names.
+    let scratch = Scratch::large_diff("sheet-close-press", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut checked = 0usize;
+    for width in (30u16..=140).step_by(1) {
+        for height in [8u16, 13, 24, 40] {
+            let at = Rect::new(0, 0, width, height);
+            let mut app = App::past_first_paint();
+            toggle_at(&mut app, &mut frame, at);
+            let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+            let Some(sheet) = laid.sheet else { continue };
+
+            assert_eq!(
+                laid.step_at(sheet.close.0, sheet.close.1),
+                None,
+                "on a {width} by {height} pane the close control arms a hold, so \
+                 `Chrome::pressed` can carry its cell and the weight #298 deleted \
+                 was reachable after all"
+            );
+            // And the control still does the one thing it is for, so this gate
+            // cannot pass by the sheet having no control on it.
+            assert_eq!(
+                action_for(&click(sheet.close.0, sheet.close.1), laid),
+                Some(Action::CloseSheet),
+                "on a {width} by {height} pane the close control stopped dismissing"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 100,
+        "only {checked} panes drew a sheet, so this sweep is not covering the ladder"
     );
 }
 
@@ -561,15 +699,19 @@ fn weight(style: ratatui::style::Style) -> (Option<Color>, ratatui::style::Modif
 }
 
 /// The close control's glyph and style, with `hovered` handed to the chrome.
+///
+/// **No `pressed` parameter since [#298](https://github.com/breferrari/vigia/issues/298)**,
+/// which ruled the control down to two rungs: it took one, every caller passed
+/// `None` once the third rung's assertion went, and a parameter only ever given one
+/// value is a knob that reads as a variable.
 fn drawn_close(
     app: &mut App,
     frame: &mut Frame<'_>,
     highlighter: &mut Highlighter,
     history: &History,
     hovered: Option<Hovered>,
-    pressed: Option<(u16, u16)>,
 ) -> (char, ratatui::style::Style) {
-    let chrome = app.chrome("fixture", Some("main"), pressed, None, hovered, None);
+    let chrome = app.chrome("fixture", Some("main"), None, None, hovered, None);
     let body = body_layout(area(), &chrome, FILES);
     let view = app
         .view(frame, highlighter, history, body)
