@@ -1433,6 +1433,39 @@ fn the_arrows_move_the_caret_and_are_inert_at_both_ends() {
         "`←` did not return to the file `→` left"
     );
 
+    // **And the map comes back to the caret, even from a window a reader took
+    // over.** `App::apply` hands the list back on every action that moves the
+    // diff, which is the mirror of a manual scroll taking the diff away from
+    // follow: a window left behind from an earlier `J` would be showing somewhere
+    // else with no caret to say so. Asserted from a **detached** map rather than
+    // the default, because the default follows anyway and would prove nothing.
+    for _ in 0..12 {
+        app.apply(Action::ScrollList(1), &mut frame, height)
+            .expect("browse");
+    }
+    let rows = layout().list;
+    let strayed = app
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    assert!(
+        strayed.top.file < strayed.list_top,
+        "the fixture did not scroll the list away from the caret, so the snap-back \
+         below is asserted against a map that never left"
+    );
+    app.apply(Action::File(1), &mut frame, height)
+        .expect("right");
+    let back = app
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    assert!(
+        back.top.file >= back.list_top && back.top.file < back.list_top + rows,
+        "after `→` the caret at file {} is outside the list's window of {} rows \
+         from {}",
+        back.top.file,
+        rows,
+        back.list_top
+    );
+
     // The far end, walked rather than jumped, so the inertness below is asserted
     // at a position the steps actually reached.
     app.apply(Action::Bottom, &mut frame, height)
