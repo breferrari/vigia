@@ -1375,7 +1375,7 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 
 **And at forty columns**, thirty-five wide and thirteen rows, with an eleven column keys field and eighteen for the verb. Two rungs of the ladder are visible here rather than described: the mouse group is gone, and the alias cells have dropped from the right, so `q  Esc  Ctrl+C  Ctrl+D` is `q  Esc` while the arrows survive on `j  k`, because they are the alias a reader is likeliest to try.
 
-**Both boxes drew `q` on the first row until 2026-08-24 and now draw it on the last**, which is [#285](https://github.com/breferrari/vigia/issues/285)'s reorder reaching a picture that predates it: they are read off the shipped drawer, and the drawer's order is §11.1's. Nothing else in either moved.
+**Both boxes drew `q` on the first row until 2026-08-24 and now draw it at the foot of the keyboard block**, which is [#285](https://github.com/breferrari/vigia/issues/285)'s reorder reaching a picture that predates it: they are read off the shipped drawer, and the drawer's order is §11.1's. Nothing else in either moved.
 
 **The widths are the shipped drawer's, not the ruling's estimate.** This block read thirty-eight wide with a fourteen column keys field when B12 was written, which was a mockup drawn to chosen fields; the fields are derived from the content of the rows a rung actually draws, and dropping the mouse group takes `drag a scrollbar` out of the measurement. Corrected from the drawn output by #206, which is the direction §5.1 rules for a picture and a screen that disagree.
 

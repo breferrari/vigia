@@ -52,10 +52,6 @@ const SHEET_CLOSE: char = '✕';
 /// the way to tell furniture from a row.
 const RULE: char = '─';
 
-/// [`RULE`] as a `str`, because a `Cell`'s symbol is one and comparing the two
-/// spellings of the same glyph in two places is how they drift apart.
-const RULE_STR: &str = "─";
-
 /// Keyboard rows the height ladder may never drop, restated for [`TITLE`]'s
 /// reason. `SPEC.md` §11.1 names the three: `f`, `m` and `?`.
 const KEEP: usize = 3;
@@ -751,10 +747,19 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     // `GESTURES`' sixteen all stay exactly as they were.
     //
     // **The furniture has to go too, and leaving it in is the first thing that
-    // went wrong here.** Column 2 of the title row is `gestures`, and of the
-    // group heading is `mouse`: between them they carry `u`, `m`, `e`, `s` and
-    // `g`, so a keys column that included them was still satisfied by the frame.
-    // Rule glyphs are what tells furniture from a row, and no keys cell holds one.
+    // went wrong here.** The title row carries `gestures` from column 3 and the
+    // group heading carries `mouse` from column 2: between them they hold `u`,
+    // `m`, `e`, `s` and `g`, so a keys column that included them was still
+    // satisfied by the frame. Rule glyphs are what tells furniture from a row, and
+    // no keys cell holds one.
+    //
+    // **And the tokens are matched whole, which is the third thing that went
+    // wrong.** With `contains` over the joined column, a one-character token is
+    // satisfied by any other row that happens to spell it: `g` by `PgDn` and by
+    // `drag a scrollbar`, `d` by `listed`, `n` by `End`, `k` by `click`. So five
+    // of the keys this gate lists could be changed in `KEYBOARD` with the whole
+    // suite green. Every token here is whitespace-delimited in the wide spelling,
+    // and no mouse keys cell yields one, so equality is both available and exact.
     //
     // The keys field of the one-column rung starts at column 2 and is twenty-two
     // wide, which `the_one_column_rung_places_its_cells_where_the_plan_says` pins.
@@ -768,7 +773,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        keys.contains("Ctrl+C"),
+        keys.split_whitespace().any(|cell| cell == "Ctrl+C"),
         "the keys column this gate reads is not where the keys are:\n{keys}"
     );
 
@@ -803,9 +808,9 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
         "?",
     ] {
         assert!(
-            keys.contains(token),
-            "the sheet's keys column does not name {token:?}, so that gesture is \
-             unfindable:\n{drawn}"
+            keys.split_whitespace().any(|cell| cell == token),
+            "the sheet's keys column does not name {token:?} as a cell of its own, \
+             so that gesture is unfindable:\n{drawn}"
         );
     }
 
@@ -841,8 +846,9 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
 /// **The order is the reader's, not the ladder's**, since
 /// [#285](https://github.com/breferrari/vigia/issues/285) separated the two: `q`
 /// is last of the eleven keyboard entries because the sheet draws it last, and
-/// the ladder gives it up first. Two gates walk this against drawn rows, so the
-/// order is load-bearing rather than decorative.
+/// the ladder gives it up first. Several gates walk this against drawn rows, so
+/// the order is load-bearing rather than decorative. The count is not spelled
+/// out, for the reason [`LADDER_WIDTHS`]' own docblock gives.
 const GESTURES: [&str; 16] = [
     "scroll a row",
     "Space  PgDn",
@@ -2216,16 +2222,16 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
         // the reason above: `└` and `─` are as unreadable in the wrong colour as
         // in the wrong place, and a blank cell reports the right colour either way.
         for (x, y, glyph, what) in [
-            (sheet.left, sheet.top, "┌", "the top-left corner"),
-            (sheet.left + 1, sheet.top, RULE_STR, "the title bar's rule"),
-            (sheet.left, row, "│", "the left pipe"),
-            (right, row, "│", "the right pipe"),
-            (sheet.left, bottom, "└", "the bottom-left corner"),
-            (sheet.left + 1, bottom, RULE_STR, "the bottom border"),
+            (sheet.left, sheet.top, '┌', "the top-left corner"),
+            (sheet.left + 1, sheet.top, RULE, "the title bar's rule"),
+            (sheet.left, row, '│', "the left pipe"),
+            (right, row, '│', "the right pipe"),
+            (sheet.left, bottom, '└', "the bottom-left corner"),
+            (sheet.left + 1, bottom, RULE, "the bottom border"),
         ] {
             assert_eq!(
-                buf[(x, y)].symbol(),
-                glyph,
+                buf[(x, y)].symbol().chars().next(),
+                Some(glyph),
                 "{what} of the {spelling} sheet does not hold {glyph:?}, so the \
                  weight read below is some other cell's"
             );

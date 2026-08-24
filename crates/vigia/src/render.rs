@@ -7760,8 +7760,10 @@ mod sheet_tables {
         //
         // **The wide spelling only, and that is the claim rather than a
         // convenience.** At the tight spelling the mouse group wins both fields,
-        // 13 against 11 on keys and 24 against 17 on verbs, so `sheet_fields`'
-        // own chain is load-bearing there and is not slack at all. The roomy rung
+        // 13 against 11 on keys and 24 against 18 on verbs, so `sheet_fields`'
+        // own chain is load-bearing there and is not slack at all. (The keyboard
+        // group's widest tight verb is `jump to a list row`, which is also the
+        // eighteen §11.2 B12's forty-column box states.) The roomy rung
         // never takes that spelling, which is why its chain is the one that can
         // be deleted unseen.
         //
@@ -7823,10 +7825,13 @@ mod sheet_tables {
         // gate searching a *roomy* pane for a bare key would score on a heading,
         // and `every_key_the_map_binds_is_named_on_the_sheet` searches for exactly
         // those bare tokens. It runs at eighty by twenty-four, which draws no
-        // *section* headings, and it must stay on a rung that draws none. That
-        // rung does draw the ` mouse ` rule, so `m`, `u`, `s` and `e` are already
-        // satisfied by furniture there: what the roomy rung would add is `f`, `g`
-        // and `n` from `files`, `moving` and `view`, and `m` a second time.
+        // *section* headings, and it must stay on a rung that draws none.
+        //
+        // The ` mouse ` rule that rung *does* draw is no longer a hazard: that
+        // gate filters every row holding a rule glyph and matches whole cells
+        // rather than substrings. A section heading is neither ruled nor a cell,
+        // so it would still be searched and would still be matched whole, which is
+        // why the requirement is about the rung rather than about the furniture.
         for section in SECTIONS.iter() {
             for row in KEYBOARD.iter().chain(MOUSE.iter()) {
                 for cell in row.keys.iter().chain(row.verb.iter()) {
