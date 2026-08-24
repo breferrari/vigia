@@ -3381,3 +3381,74 @@ fn a_resize_clamps_rather_than_wrapping() {
          disagree about which page is up"
     );
 }
+
+#[test]
+fn every_page_is_a_closed_box_including_its_blank_tail() {
+    // **`the_sheet_is_a_closed_box_at_every_rung` cannot reach this and its own
+    // scaffold is why.** `walk_the_ladder` toggles once and paints, so every cell
+    // of its 3,400-cell sweep reads **page one**, which is full. Only the *last*
+    // page of a pane has a blank tail, because the box is the pane's `capacity` and
+    // the content is a remainder, and the pipes down that tail are drawn by a
+    // separate call. Deleting `sheet_pipes_over` from `Painter::sheet_column`
+    // survives the entire suite otherwise: found by mutation, which is the only
+    // instrument that could see it.
+    //
+    // The panes are chosen for their remainders rather than swept: 50x8 leaves one
+    // blank row, 50x10 leaves three and 40x12 leaves four, so the tail is a row, a
+    // few rows and most of a box.
+    let scratch = Scratch::large_diff("sheet-tail-frame", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut tails = 0;
+    for (w, h) in [(50u16, 8u16), (50, 10), (40, 12)] {
+        let at = Rect::new(0, 0, w, h);
+        let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+        assert!(
+            walked.len() > 1,
+            "a {w}x{h} pane draws one page, so it has no tail to close"
+        );
+        for (n, page) in walked.iter().enumerate() {
+            let rows: Vec<&str> = page.text.lines().collect();
+            let drawn = page
+                .text
+                .lines()
+                .skip(1)
+                .take(rows.len().saturating_sub(2))
+                .filter(|row| row.chars().nth(1) != Some(' ') || row.contains(RULE))
+                .count();
+            if n + 1 == walked.len() && drawn < rows.len() - 2 {
+                tails += 1;
+            }
+            for (r, row) in rows.iter().enumerate().take(rows.len() - 1).skip(1) {
+                assert!(
+                    row.starts_with('│') && row.ends_with('│'),
+                    "row {r} of page {} at {w}x{h} is not closed at both edges, so \
+                     the blank tail runs out of the frame:\n{}",
+                    n + 1,
+                    page.text
+                );
+            }
+            assert!(
+                rows[0].starts_with('┌') && rows[0].ends_with('┐'),
+                "page {} at {w}x{h} has no top rule:\n{}",
+                n + 1,
+                page.text
+            );
+            assert!(
+                rows[rows.len() - 1].starts_with('└') && rows[rows.len() - 1].ends_with('┘'),
+                "page {} at {w}x{h} has no bottom rule:\n{}",
+                n + 1,
+                page.text
+            );
+        }
+    }
+    assert!(
+        tails > 0,
+        "no pane in this gate drew a last page shorter than its box, so the tail \
+         it exists for was never on screen"
+    );
+}
