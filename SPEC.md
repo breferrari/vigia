@@ -821,8 +821,8 @@ Scattered dots are glyph **texture**, and texture points at a rung. Waves becomi
 | `u` | half a page up |
 | `g`, `Home` | first changed file |
 | `G`, `End` | last changed file |
-| `n` | next changed file |
-| `p` | previous changed file |
+| `n`, `→` | next changed file |
+| `p`, `←` | previous changed file |
 | `1`–`6` | put the diff at the Nth listed file |
 | `J`, `Shift-↓` | scroll the file list down one row |
 | `K`, `Shift-↑` | scroll the file list up one row |
@@ -1363,7 +1363,7 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 │ Space  PgDn  PgUp       page                         │
 │ d  u                    half a page                  │
 │ g  Home  /  G  End      first / last changed file    │
-│ n  /  p                 next / previous changed file │
+│ n  →  /  p  ←           next / previous changed file │
 │ 1  to  6                jump to that row of the list │
 │ J  K  Shift+↑  Shift+↓  scroll the pinned file list  │
 │ f                       follow the newest change     │
@@ -1472,6 +1472,6 @@ Against all of that, the benefit cannot be measured from here at all: a `file://
 
 **B15 — whether the left and right arrows move between changed files: yes, as aliases of `n` and `p`. Ruled 2026-08-24. Shipped the same day. See §11.1.** ([#296](https://github.com/breferrari/vigia/issues/296).) The capability already existed and this row is a naming fix: the caret is drawn on the row whose index is the diff's own file, so `Action::File` already moved it, and a reader who reached for an arrow got `Shift+↑`'s list scroll instead. Vertical keys move inside the diff, horizontal keys move between files. One action, one arm, so the two directions cannot drift.
 
-**What it spends, since the arrow pair is scarce.** The one feature that would want these keys back is a horizontal pan, and §11.1 declined that in the same sentence that ruled a long line is clipped rather than wrapped: *"a key and a mode this spec does not name"*. [#272](https://github.com/breferrari/vigia/issues/272) reopens the reading of long lines and asks for **`w`**, a wrap toggle, which needs no arrows, so nothing open is blocked. If a pan is ever ruled in it takes `h` and `l`, or it takes these back; that is a sentence here rather than a reservation nobody can see.
+**What it spends, since the arrow pair is scarce.** The one feature that would want these keys back is a horizontal pan, and §11.1 declined that in the sentence after the one ruling a long line clipped rather than wrapped: *"a key and a mode this spec does not name"*. [#272](https://github.com/breferrari/vigia/issues/272) reopens the reading of long lines and asks for **`w`**, a wrap toggle, which needs no arrows, so nothing open is blocked. If a pan is ever ruled in it takes `h` and `l`, or it takes these back; that is a sentence here rather than a reservation nobody can see.
 
 **The gestures sheet names them at the wide spelling only, and that is arithmetic.** The tight keyboard keys field is eleven columns and the arrowed cell is thirteen, so carrying the arrows there takes the keyboard-only rung from thirty-five columns to thirty-seven and costs panes of 35 and 36 their twelve gestures. Two columns of pane losing gestures to an *alias* is the wrong trade, and dropping aliases at the tight spelling is what `q  Esc  Ctrl+C  Ctrl+D` and `g  Home  /  G  End` already do.

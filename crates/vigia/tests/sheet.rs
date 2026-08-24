@@ -3548,14 +3548,18 @@ fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
+    // **One page, one paint.** The first draft reached for `walk_the_pages`, which
+    // presses `?` through every page and repaints each, and then took `.first()`.
+    // Both panes here draw the cell on their first page.
+    let mut page_one = |frame: &mut Frame<'_>, at: Rect| {
+        let mut app = App::new();
+        toggle_at(&mut app, frame, at);
+        let (buf, laid) = paint(&mut app, frame, &mut highlighter, &history, at);
+        read_sheet(&buf, &laid).1
+    };
+
     // Wide: a pane the whole table fits on in one column at the wide spelling.
-    let wide = walk_the_pages(
-        &mut frame,
-        &mut highlighter,
-        &history,
-        Rect::new(0, 0, 80, 24),
-    );
-    let drawn = &wide.first().expect("no sheet at 80x24").text;
+    let drawn = page_one(&mut frame, Rect::new(0, 0, 80, 24));
     assert!(
         drawn.contains("n  →  /  p  ←"),
         "the wide spelling does not name the arrows beside `n` and `p`:\n{drawn}"
@@ -3563,13 +3567,7 @@ fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
 
     // Tight: the widest pane that still takes the tight spelling, so this is the
     // cell a forty-column reader sees rather than a hypothetical one.
-    let tight = walk_the_pages(
-        &mut frame,
-        &mut highlighter,
-        &history,
-        Rect::new(0, 0, 40, 30),
-    );
-    let drawn = &tight.first().expect("no sheet at 40x30").text;
+    let drawn = page_one(&mut frame, Rect::new(0, 0, 40, 30));
     assert!(
         drawn.contains("n  /  p"),
         "the tight spelling lost the `n / p` row entirely:\n{drawn}"

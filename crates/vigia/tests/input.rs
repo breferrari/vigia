@@ -2091,13 +2091,31 @@ fn shift_r_and_ctrl_r_are_unbound() {
     );
     assert_eq!(
         action_for(
-            &Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            &with(KeyModifiers::CONTROL, KeyCode::Char('r')),
             Regions::default()
         ),
         None,
         "ctrl-r did something, where the control arm binds only `c` and `d`"
     );
 }
+
+// **What covers the arrows beyond the keymap, and why nothing else is written
+// here** ([#296](https://github.com/breferrari/vigia/issues/296)). The gate below
+// proves `→` resolves to the same `Action` as `n`, and `App::apply` has **one** arm
+// for `Action::File`, so what the arrows do to the screen is exactly what the file
+// step does and is owned by the gates that already pin it:
+//
+// - `scroll.rs::n_and_p_step_one_file_and_land_on_its_heading` steps and lands
+// - `scroll.rs::the_file_step_stops_at_both_ends` is the inertness at both ends,
+//   and it covers a case a from-scratch gate omitted
+// - `list.rs::the_window_is_overtaken_when_the_diff_leaves_it` is the map being
+//   handed back to the caret from a window a reader had taken over
+//
+// A 106-line gate driving `Action::File` from a fixture was written first and
+// deleted: it never pressed an arrow, so it could not tell one from `n`, and each
+// of its five claims already had an owner. **Measured rather than argued**: the
+// mutation that stops `App::apply` handing the map back is killed by the `list.rs`
+// gate above with the new one removed.
 
 #[test]
 fn the_arrows_move_between_files() {
@@ -2119,18 +2137,12 @@ fn the_arrows_move_between_files() {
         action_for(&press(KeyCode::Char('p')), Regions::default()),
         "`←` does not do what `p` does"
     );
-    // And the pair is the *file* step rather than something that merely matches:
-    // two keys both bound to `None` would satisfy the two asserts above.
-    assert_eq!(
-        action_for(&press(KeyCode::Right), Regions::default()),
-        Some(Action::File(1)),
-        "`→` is not the forward file step"
-    );
-    assert_eq!(
-        action_for(&press(KeyCode::Left), Regions::default()),
-        Some(Action::File(-1)),
-        "`←` is not the backward file step"
-    );
+    // **No literal pair below, and the first draft had one.** Its stated reason was
+    // that two keys both bound to `None` would satisfy the asserts above, which is
+    // false in this suite: `n_and_p_are_the_file_step` pins `n` and `p` against
+    // `Action::File` literally, so `n` cannot go unbound without that going red.
+    // Adding the literal here would also be the exact thing the comment above
+    // refuses, pinning today's meaning under a new key.
 }
 
 #[test]
@@ -2149,25 +2161,18 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
         (KeyCode::Left, Action::File(-1)),
         (KeyCode::Right, Action::File(1)),
     ] {
-        let shifted = action_for(
-            &Event::Key(KeyEvent::new(code, KeyModifiers::SHIFT)),
-            Regions::default(),
-        );
+        // `Some(plain)` is the whole claim: it is a `File` step, so it is by
+        // construction not a `ScrollList`. The first draft asserted both and the
+        // second could never fire.
         assert_eq!(
-            shifted,
+            action_for(&with(KeyModifiers::SHIFT, code), Regions::default()),
             Some(plain),
-            "a shifted horizontal arrow does not fall through to the plain arm"
-        );
-        assert!(
-            !matches!(shifted, Some(Action::ScrollList(_))),
-            "a shifted horizontal arrow reached the pinned list, which is the \
-             confusion #296 exists to end"
+            "a shifted horizontal arrow does not fall through to the plain arm, so \
+             it may have reached the pinned list, which is the confusion #296 \
+             exists to end"
         );
         assert_eq!(
-            action_for(
-                &Event::Key(KeyEvent::new(code, KeyModifiers::CONTROL)),
-                Regions::default()
-            ),
+            action_for(&with(KeyModifiers::CONTROL, code), Regions::default()),
             None,
             "a control-arrow did something, where the control arm binds only `c` \
              and `d`"

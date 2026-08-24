@@ -1356,11 +1356,10 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // reflex from `:n`/`:p` already. `N` and `P` are unbound for the reason
         // `D`, `U` and `F` are, one row above a pair where `g`/`G` have already
         // taught that case is load bearing here.
-        // **The arrows are the horizontal half of the pair**, `SPEC.md` §11.2 B15:
-        // `↑` and `↓` move inside the diff and `←` and `→` move between files, so
-        // the four read as one set rather than as two unrelated bindings. Aliases
-        // of the same action, in the same arm, which is the shape `Down |
-        // Char('j')` above already has and what stops the two directions drifting.
+        // **Aliases in the letter's own arm**, which is the shape `Down |
+        // Char('j')` above already has and what stops the two directions drifting
+        // apart. Why the arrows and what they spend is `Action::File`'s docblock,
+        // not repeated here.
         KeyCode::Right | KeyCode::Char('n') => Some(Action::File(1)),
         KeyCode::Left | KeyCode::Char('p') => Some(Action::File(-1)),
         // **The digits address the drawn window, and there are six of them

@@ -475,7 +475,9 @@ was filed on 2026-08-24 saying [#272](https://github.com/breferrari/vigia/issues
 *"would want those arrows if horizontal reading ever lands"*, and offering that as
 the thing to rule against. #272 asks for **`w`**, a wrap toggle, and needs no arrows
 at all. The real conflict is with a **horizontal pan**, which §11.1 declined in the
-same sentence that ruled a long line is clipped rather than wrapped. So the arrows
+sentence after the one ruling a long line clipped rather than wrapped. (The first
+draft of this section said "the same sentence"; it is the adjacent one, and being
+precise about that is cheaper than being caught being loose about it.) So the arrows
 were contested by a rejected alternative rather than by an open row, and the ruling
 is cheaper than the issue that asked for it. Recorded because the pattern is now
 familiar here: a premise written into an issue reads as settled the next day, and
