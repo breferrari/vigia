@@ -1559,6 +1559,9 @@ fn the_two_guards_no_rung_reaches_are_still_the_right_size() {
                 }
             }
         }
+        // 24 is a property of the tables, not of this sweep's floor: probed
+        // across every pane from 1x1 to 39x39 as well, the narrowest sheet drawn
+        // anywhere is the same 24, first appearing at a pane exactly that wide.
         assert_eq!(
             narrowest, 24,
             "the narrowest rung the ladder draws is not the 24 columns §11.1 \
