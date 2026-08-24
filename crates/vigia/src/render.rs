@@ -4350,7 +4350,10 @@ fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize)
     }
     // Border, space, keys, two of gap, verb, space, border. Floored at the width
     // the title bar needs, so a narrow table cannot draw a truncated heading.
-    let total = sheet_floor(keys + verb + 6);
+    // Through [`sheet_span`] so the one-column rung's width is tied to the same
+    // constant that places its verb column: the span, less the trailing gap it has
+    // no second group to separate from, plus the border and space at each end.
+    let total = sheet_floor(sheet_span(keys, verb) - SHEET_GAP + 4);
     (keys, verb, total)
 }
 
@@ -4368,7 +4371,7 @@ const fn sheet_span(keys: usize, verb: usize) -> usize {
 /// Blank columns between a keys cell and its verb, and between one group's block
 /// and the next.
 ///
-/// **One constant because three expressions spend it**, and an audit found that
+/// **One constant because every expression that spends it must agree**, and an audit found that
 /// changing [`Group::verb_at`]'s copy alone moved every verb column in both
 /// shapes while the sheet's width, its frame and its gesture count all stayed
 /// exactly as planned. Nothing could fail, because the width was summed from a
@@ -4380,8 +4383,9 @@ const SHEET_GAP: usize = 2;
 ///
 /// **No shipped rung reaches it, and that is worth writing down rather than
 /// discovering.** The floor is seventeen; the narrowest one-column rung is
-/// twenty-four (`d  u` against `half a page`, at the last rung the height ladder
-/// leaves) and the narrowest two-column rung is seventy-six. So it is a guard
+/// twenty-four, which is the last rung the height ladder leaves: at the tight
+/// spelling its widest cells are `?` and `follow the newest`, so one column of
+/// keys and seventeen of verb. The narrowest two-column rung is seventy-six. So it is a guard
 /// against the tables shrinking, not a rung of the ladder, and if it ever bound
 /// on [`Shape::Beside`] the sheet would be wider than the sum its groups were
 /// placed within and the right pipe would detach from the mouse column.
@@ -4412,9 +4416,10 @@ fn sheet_beside(level: usize) -> (Group, Group, usize) {
     };
     // **The heading row is measured too, not only the gesture rows.** Both labels
     // live on it, so a keyboard block narrower than its own label would put
-    // ` mouse ` inside the word `keyboard`. It holds today by a wide margin (ten
-    // columns against a block of fifty-five, or thirty-four at the tight
-    // spelling), and it holds because of this rather than by luck.
+    // ` mouse ` inside the word `keyboard`. It holds today by a wide margin: the
+    // label needs `mouse.at` to be at least eleven, and the keyboard block puts it
+    // at fifty-five, or thirty-four at the tight spelling. It holds because of
+    // this rather than by luck.
     let mouse = Group {
         at: (keyboard.at + sheet_span(kb_keys, kb_verb))
             .max(keyboard.at + width_of(SHEET_KEYBOARD_LABEL)),
@@ -4484,12 +4489,13 @@ fn sheet_beside_rows() -> usize {
 /// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
 /// one-column sheet is too tall for the pane but the pane is wide enough to put
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
-/// columns for five rows (nineteen against fourteen) and drawing all sixteen
-/// gestures where eleven drew before. It is tried **after** the full one-column rung and **before** any
+/// columns for five rows at the wide spelling (104 against 56, nineteen rows
+/// against fourteen), or thirty-three columns for the same five rows at the tight
+/// one (76 against 43), and drawing all sixteen gestures where eleven drew before. It is tried **after** the full one-column rung and **before** any
 /// dropping rung, which is what makes it additive: a pane on which one column
 /// already fits never sees it, so nothing that draws every row today changes.
 /// Its two spellings are its own rather than the pane-wide `level`, so a pane of
-/// eighty columns reaches the tight two-column rung instead of falling past it
+/// seventy-eight columns reaches the tight two-column rung instead of falling past it
 /// into dropping the mouse group entirely.
 ///
 /// **Centred in the body, never over the header or the footer**, which is B12's
@@ -4577,8 +4583,8 @@ fn column_fit(level: usize, from: usize, mouse: bool) -> Fit {
 /// Two columns, keyboard beside mouse, every row drawn.
 ///
 /// It picks its own spelling rather than the pane's, because the pane's was
-/// chosen against a one-column sheet, and that is what lets a pane of eighty take
-/// the tight two-column rung instead of falling past it into dropping the mouse
+/// chosen against a one-column sheet, and that is what lets a pane of seventy-eight
+/// take the tight two-column rung instead of falling past it into dropping the mouse
 /// group entirely.
 fn beside_fit(level: usize) -> Fit {
     let (keyboard, mouse, total) = sheet_beside(level);
@@ -5998,8 +6004,11 @@ impl Painter<'_> {
     ///
     /// The same shape the title bar has and for the same reason: a heading inside
     /// a table is furniture, so it runs to the frame rather than standing back
-    /// from it. `width` is the run this heading owns, which is the whole sheet in
-    /// one column and one column's share of it in two.
+    /// from it. `width` is the **whole sheet at either rung**, one column or two:
+    /// the two-column heading is one rule carrying both labels, and the second is
+    /// written over it afterwards rather than starting a heading of its own,
+    /// because a heading's own frame pipe landing mid-sheet reads as a broken
+    /// border.
     fn sheet_heading(&mut self, x: u16, y: u16, width: usize, label: &str) {
         // Cell by cell through [`Painter::rule`] rather than a built string, which
         // is that method's own measurement reused: writing cells is six times
