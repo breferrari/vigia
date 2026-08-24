@@ -2396,7 +2396,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 15),
+        (104, 16),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -2422,7 +2422,7 @@ const ROOMY_PANE: Rect = Rect {
 ///
 /// **The two-column rung is the widest the sheet draws and this one covers the
 /// most cells**, which are two different superlatives and only the first was
-/// gated: 68 by 30 is 2,040 cells against 104 by 15's 1,560. It is also the rung
+/// gated: 68 by 31 is 2,108 cells against 104 by 16's 1,664. It is also the rung
 /// a full-screen terminal now takes, so it is the shape most readers will
 /// actually have on the pane, where the two-column rung is what a short one falls
 /// to.
@@ -2437,7 +2437,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 30),
+        (68, 31),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,

@@ -4327,7 +4327,7 @@ struct Gesture {
 /// prerequisite: this array ran `q` first and `?` last while `sheet_plan` dropped
 /// *from the top down*, so reordering for sections alone would have kept `q` at
 /// the floor and dropped `f` and `m`, inverting §11.1's own rule.
-const KEYBOARD: [Gesture; 12] = [
+const KEYBOARD: [Gesture; 13] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -4377,6 +4377,15 @@ const KEYBOARD: [Gesture; 12] = [
         keys: ["r", "r"],
         verb: ["show or hide the left rail", "the left rail"],
     },
+    // **Both cells sit inside the field maxima this table already had**, so no
+    // rung's width moves: the wide verb field is 28 on `next / previous changed
+    // file` and the tight one is 19 on the mouse group's `a row, held repeats`,
+    // where these are 26 and 13. B16's row costs height and nothing else, which
+    // is the same trade B14's did.
+    Gesture {
+        keys: ["s", "s"],
+        verb: ["one file, or the whole diff", "one file only"],
+    },
     Gesture {
         keys: ["?", "?"],
         verb: ["this sheet", "this sheet"],
@@ -4405,26 +4414,30 @@ const KEYBOARD: [Gesture; 12] = [
 /// names a region a reader may not know exists, and `?` is this sheet, which is
 /// how everything above it is found at all.
 ///
-/// **`r` is a fourth unguessable gesture and it is given up before those three**
-/// ([#295](https://github.com/breferrari/vigia/issues/295)), which is why it sits
-/// out of the reader's order here at rank eight.
+/// **`r` and `s` are unguessable gestures too, and both are given up before those
+/// three** ([#295](https://github.com/breferrari/vigia/issues/295),
+/// [#297](https://github.com/breferrari/vigia/issues/297)), which is why they sit
+/// out of the reader's order here at ranks eight and nine.
 ///
-/// **The reason first written for that was false, and the correction is worth more
+/// **The reason first written for `r` was false, and the correction is worth more
 /// than the rank.** It said `r` cannot fire on the pane dropping it. No drawable
 /// pane drops it: at 30 to 34 columns the rung is `from = 7` and `r` is *kept*,
 /// which `tests/sheet.rs`'s `NARROW` table asserts by name, and the rank that drops
-/// it needs a width below thirty where no sheet is drawn at all.
+/// it needs a width below thirty where no sheet is drawn at all. `s` inherits that
+/// finding rather than restating it, and the same `NARROW` table is what re-checks
+/// it: the deepest rung a drawable pane reaches is still `from = 7`.
 ///
 /// So this is **defence rather than behaviour**. `sheet_tables` asserts the
 /// keep-set is `f`, `m` and `?`; the untouched order would have dropped `f`
-/// instead, because `r` sits above it in the reader's order. If a rung ever reaches
-/// that depth, `r` is the right one to lose, since it is the only one of the four
-/// that needs 134 columns. Nothing observable turns on it today.
+/// instead, because `r` and `s` both sit above it in the reader's order. If a rung
+/// ever reaches that depth, `r` is the right one to lose first, since it is the
+/// only one of the family that needs 134 columns to do anything at all, and `s`
+/// next. Nothing observable turns on either today.
 ///
 /// A rung that drops `from` rows drops the **set** `DROP_ORDER[..from]`, so what
 /// it draws is no longer a suffix of the table. [`kept_keyboard`] is the one
 /// place that is resolved, and both the measurement and the drawer read it.
-const DROP_ORDER: [usize; KEYBOARD.len()] = [11, 0, 1, 2, 3, 4, 5, 6, 9, 7, 8, 10];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [12, 0, 1, 2, 3, 4, 5, 6, 9, 10, 7, 8, 11];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 ///
@@ -4545,7 +4558,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 10 },
+        rows: Rows::Keyboard { from: 7, to: 11 },
     },
     Section {
         label: "mouse",
@@ -4553,7 +4566,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 10, to: 12 },
+        rows: Rows::Keyboard { from: 11, to: 13 },
     },
 ];
 
@@ -8294,7 +8307,7 @@ mod sheet_tables {
         }
     }
     #[test]
-    fn r_is_given_up_one_rank_before_the_keep_set() {
+    fn the_rows_given_up_before_the_keep_set_are_the_rail_then_the_pin() {
         // **Addressed by the cell it draws, not by its index.** This claim was a
         // `const` block asserting `DROP_ORDER[len - 4] == 9`, and the `9` is `r`'s
         // position in `KEYBOARD`: inserting a gesture above it and re-typing `9`
@@ -8302,22 +8315,36 @@ mod sheet_tables {
         // row. A `const` cannot compare two `&str`, which is the same reason the
         // rest of this module exists.
         //
-        // **Why one rank and not inside the keep-set** ([#295](https://github.com/breferrari/vigia/issues/295)):
-        // `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and
-        // `?`, and `SHEET_KEEP` keeps three, so one of the four has to go first.
+        // **Why outside the keep-set and in this order**
+        // ([#295](https://github.com/breferrari/vigia/issues/295),
+        // [#297](https://github.com/breferrari/vigia/issues/297)): `f`, `m`, `?`,
+        // `r` and `s` are five gestures a reader cannot guess at and `SHEET_KEEP`
+        // keeps three, so two have to go first. `r` goes before `s` because it is
+        // the only one of the five that does nothing at all below 134 columns,
+        // and the rungs that reach this depth are narrow by definition.
         //
         // **This claim is about the tables and not about any pane**, which is the
-        // correction the audit forced. The rank that drops `r` is `from >= 9`, and
-        // that needs a width below thirty where no sheet is drawn: at 30 to 34
-        // columns the rung is `from = 7` and `r` is kept. What the reorder buys is
-        // that the untouched order would have dropped `f`, which `sheet_tables`'
-        // own keep-set assertion forbids.
-        let last_dropped = KEYBOARD[DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 1]].keys[0];
+        // correction the audit forced. The rank that would drop `r` is `from >= 9`
+        // and `s` is `from >= 10`, and both need a width below thirty where no
+        // sheet is drawn: at 30 to 34 columns the rung is `from = 7` and both are
+        // kept. What the reorder buys is that the untouched order would have
+        // dropped `f`, which `sheet_tables`' own keep-set assertion forbids.
+        //
+        // **Both, in order, rather than only the last**, because a single cell
+        // says nothing about the one beside it: the version of this that asserted
+        // `r` alone would have gone green with `s` ranked anywhere above it,
+        // including above `q`.
+        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 2..]
+            .iter()
+            .take(2)
+            .map(|&row| KEYBOARD[row].keys[0])
+            .collect();
         assert_eq!(
-            last_dropped, "r",
-            "the last row given up before the keep-set is {last_dropped:?}, not the \
-             rail, so a pane of 30 to 34 columns is spending its floor on a gesture \
-             that could have fired there"
+            outside,
+            ["r", "s"],
+            "the rows given up before the keep-set are {outside:?} rather than the \
+             rail and then the pin, so a pane at the floor is spending it on a \
+             gesture that could have fired there"
         );
     }
 

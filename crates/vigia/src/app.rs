@@ -99,6 +99,23 @@ pub struct App {
     /// on its own before that, and the reader whose diff went from 129 planning
     /// columns to 60 had not asked for it.
     rail: bool,
+    /// Whether the reader has asked for the diff to show one file at a time.
+    ///
+    /// `SPEC.md` §11.2 **B16**, from `s`
+    /// ([#297](https://github.com/breferrari/vigia/issues/297)). Unlike
+    /// [`Self::rail`] there is no pane that cannot honour it, so this is a
+    /// request and an answer at once and nothing downstream has to distinguish
+    /// them: every pane with a body has a file the viewport is inside, and that
+    /// file is the whole of what the pin names.
+    ///
+    /// **Which file is not stored here**, and that is what keeps this a `bool`.
+    /// The pinned file is [`Self::position`]'s, so `n`, `p`, a digit, a click and
+    /// a follow move the pin by moving the thing that was already moving, and
+    /// there is no second answer to *which file* for the two to disagree over.
+    ///
+    /// Off by default, which is the derived answer and also the ruled one: a
+    /// reader who has pressed nothing gets the diff the tool has always drawn.
+    single: bool,
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
     ///
     /// **Retained here rather than lived for one frame, and that is the whole
@@ -269,6 +286,9 @@ impl Default for App {
             // `following`: a shell nobody has pressed `m` on draws no band.
             masthead: false,
             rail: false,
+            // Derived, and B16's ruling as well: an unpressed shell scrolls the
+            // whole changed set, which is every version of this tool so far.
+            single: false,
             // Derived, and for once trivially so: nobody has pressed `?`.
             sheet: None,
             sheet_pages: 1,
@@ -631,6 +651,29 @@ impl App {
             // back rather than being asked twice. `Chrome::rail` is the request and
             // `Body::rail` is what the pane could give them.
             Action::ToggleRail => self.rail = !self.rail,
+            // **No jump and no clamp here, which is the arm doing the least of
+            // the four and is deliberate.** Every other toggle in this family
+            // leaves the viewport exactly where it was; this one narrows what
+            // the viewport is allowed to reach, and the position it already
+            // holds may be outside that. Resolving it *here* would mean asking
+            // how tall the pinned file is at the moment of the keystroke, which
+            // is a second place that decides where a viewport lands.
+            //
+            // `View::collect` already has both answers and needs neither a new
+            // branch nor a read to give them: a position past the pinned file's
+            // end takes the same clamp the end of the diff takes, and a screen
+            // left short takes the same back-up a short tail takes, both now
+            // bounded at the file. So the screen after `s` is the pinned file's
+            // last screenful with its final row on the bottom, which is what a
+            // pager does and what the reader was already looking at most of.
+            //
+            // The cost is stated rather than hidden: a position that needed
+            // clamping is **rewritten**, so pressing `s` twice from a screen
+            // straddling two files does not restore the straddle. From every
+            // screen already inside one file it is exactly identity, and from
+            // any screen at all the second on-and-off pair is. `SPEC.md` §11.2
+            // B16 says so out loud and `tests/single.rs` holds both halves.
+            Action::ToggleSingle => self.single = !self.single,
             // **No jump and no move at all**, which is one better than the
             // masthead: that toggle resizes the diff's region, and this one draws
             // over rows the diff keeps. Nothing about the viewport changes, so a
@@ -765,28 +808,45 @@ impl App {
             // `Frame::height` is the count the bar already drew itself with, and
             // every span it needs was proved earlier in this same tick, so the
             // walk below reads nothing that this frame has not read already.
+            //
+            // **Under a pin the same arithmetic runs over the pinned file**, and
+            // this is the half of B16 that would have been easy to leave behind.
+            // The thumb is drawn from `View::total_rows`, which under a pin is
+            // the pinned file's own height, so a drag resolved against the whole
+            // diff would be a gesture inverting a readout nobody drew. The two
+            // agree at both ends of the track and nowhere in between, which is
+            // exactly the shape that passes a test asserting the ends.
             Action::DiffTo(at) => {
                 self.anchored = false;
-                let total = crate::view::diff_rows(frame)?;
-                let target = scaled(at, total.saturating_sub(height));
-                let mut seen = 0;
-                let files = frame.files().len();
-                let mut position = Position {
-                    file: files.saturating_sub(1),
-                    row: 0,
-                };
-                for file in 0..files {
-                    let rows = crate::view::block_rows(frame, file)?;
-                    if seen + rows > target {
-                        position = Position {
-                            file,
-                            row: target - seen,
-                        };
-                        break;
+                if self.single {
+                    let file = self.position.file;
+                    let total = crate::view::span_in(frame, file)?;
+                    self.position = Position {
+                        file,
+                        row: scaled(at, total.saturating_sub(height)),
+                    };
+                } else {
+                    let total = crate::view::diff_rows(frame)?;
+                    let target = scaled(at, total.saturating_sub(height));
+                    let mut seen = 0;
+                    let files = frame.files().len();
+                    let mut position = Position {
+                        file: files.saturating_sub(1),
+                        row: 0,
+                    };
+                    for file in 0..files {
+                        let rows = crate::view::block_rows(frame, file)?;
+                        if seen + rows > target {
+                            position = Position {
+                                file,
+                                row: target - seen,
+                            };
+                            break;
+                        }
+                        seen += rows;
                     }
-                    seen += rows;
+                    self.position = position;
                 }
-                self.position = position;
             }
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
@@ -807,14 +867,36 @@ impl App {
             Action::HalfPage(halves) => {
                 self.step_by(halves, height / 2, frame)?;
             }
+            // **The first row of what the reader can reach**, which is the
+            // first changed file unpinned and the pinned file's own heading
+            // under B16. One meaning over two subjects rather than two meanings:
+            // `g` has always been *the top*, and the pin is what decides the top
+            // of what. Jumping to file zero under a pin would change which file
+            // is pinned, which is the one thing this gesture takes away from
+            // everything that is not `n`, `p`, a digit or a click.
             Action::Top => {
-                self.jump_to(0);
+                self.jump_to(if self.single { self.position.file } else { 0 });
             }
             // The last *file*, from its top, rather than the last row of the
             // whole diff. Finding that row would mean diffing every file to add
             // up their heights, which is the read I4 forbids.
+            //
+            // **Under a pin it is the last row, and that is affordable here and
+            // nowhere else.** The subject is one file, that file has been diffed
+            // by definition, and [`crate::view::span_in`] is a `stat` against a
+            // span this tick has already proved. So `G` keeps meaning *the end
+            // of what you can scroll to* while the thing it reaches gets better,
+            // rather than meaning something different. The row asked for is the
+            // file's full height and `View::collect` clamps it to the last
+            // screenful on the way, which is the same path a scroll off the end
+            // takes: one place decides where the bottom is.
             Action::Bottom => {
-                self.jump_to(frame.files().len().saturating_sub(1));
+                if self.single {
+                    self.anchored = false;
+                    self.position.row = crate::view::span_in(frame, self.position.file)?;
+                } else {
+                    self.jump_to(frame.files().len().saturating_sub(1));
+                }
             }
         }
         Ok(true)
@@ -930,6 +1012,20 @@ impl App {
     }
 
     fn up(&mut self, rows: usize, frame: &mut Frame) -> Result<()> {
+        // **The upper clamp B16 needs, and the only one that cannot live in the
+        // walk.** Scrolling *down* overruns into a row number `View::collect`
+        // resolves, so the pin is enforced there by the walk simply not
+        // advancing. Scrolling up is resolved here instead, because stepping off
+        // the top of a file means knowing how tall the one above it is, and
+        // under a pin there is no file above it to step into: the reader asked
+        // for one file and the top of that file is where up stops.
+        //
+        // Above the loop rather than inside it, so the pin costs no `Frame::diff`
+        // at all rather than one that is then discarded.
+        if self.single {
+            self.position.row = self.position.row.saturating_sub(rows);
+            return Ok(());
+        }
         let mut left = rows;
         loop {
             if left <= self.position.row {
@@ -1054,6 +1150,11 @@ impl App {
                 // `a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed`
                 // rules.
                 landing: owed,
+                // Passed through rather than resolved here, for the reason the
+                // arm that sets it gives: the walk is where a position meets the
+                // file it is inside, so the walk is where a pin can be enforced
+                // without asking the frame anything twice.
+                single: self.single,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].

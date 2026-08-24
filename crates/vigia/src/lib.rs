@@ -110,7 +110,7 @@ pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, Scale, View, Viewport, block_rows,
-    diff_rows, rows_in, rows_of,
+    diff_rows, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};

@@ -22,7 +22,9 @@ mod support;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
-use vigia::{App, Body, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout};
+use vigia::{
+    Action, App, Body, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout,
+};
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
 use support::{Scratch, delta, materialise, settle, settle_spans};
@@ -1630,6 +1632,82 @@ fn a_tick_recounts_the_height_and_a_redraw_does_not() {
     assert!(
         grown.total_rows > first,
         "the diff doubled and the height stayed at {first}, so a stale span \n         survived the tick"
+    );
+}
+
+#[test]
+fn a_pinned_frame_counts_no_height_at_all() {
+    // **The one place `SPEC.md` §11.2 B16 makes the frame path cheaper**, and it
+    // is worth a gate rather than a sentence because it is the opposite direction
+    // to every other feature that has been added to this pane.
+    //
+    // I4's one exception is the diff's **height**, counted for every changed file
+    // once per tick, and it is the only thing in the frame path not bounded by the
+    // window. A pinned diff does not need it: what the reader can reach is the
+    // pinned file, whose span the walk has already recorded, so the total is read
+    // off the screen and the walk is skipped outright rather than made smaller.
+    //
+    // **The unpinned half is the whole gate.** `measured == 0` on a pinned frame
+    // proves nothing on its own, since a fixture whose files are all diffed
+    // already counts nothing either way. So the same fixture is measured unpinned
+    // first, and that number has to be non-zero before the pinned one means
+    // anything. Deliberately un-`settle`d for the reason
+    // `a_tick_recounts_the_height_and_a_redraw_does_not` gives one gate up.
+    let scratch = Scratch::large_diff("shell-reads-pinned", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut loose = App::new();
+    let before = frame.stats();
+    let unpinned = loose
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    let walked = delta(before, frame.stats());
+    assert!(
+        walked.measured > 0,
+        "the unpinned frame counted no heights, so this fixture cannot tell a \
+         skipped walk from an absent one"
+    );
+    assert!(
+        unpinned.total_rows > 0,
+        "the unpinned frame drew a bar scaled against nothing"
+    );
+
+    let mut app = App::new();
+    app.apply(Action::ToggleSingle, &mut frame, 1)
+        .expect("apply");
+    let before = frame.stats();
+    let pinned = app
+        .view(&mut frame, &mut highlighter, &history, layout())
+        .expect("view");
+    let cost = delta(before, frame.stats());
+
+    assert_eq!(
+        cost.measured, 0,
+        "a pinned frame counted {} files' heights for a total it can read off the \
+         file it is pinned to",
+        cost.measured
+    );
+    assert!(
+        pinned.total_rows > 0,
+        "the pinned bar is scaled against nothing, so the count was skipped by \
+         losing the answer rather than by already having it"
+    );
+    assert!(
+        pinned.total_rows < unpinned.total_rows,
+        "the pinned total is the whole diff's, so the bar measures what the reader \
+         cannot reach"
+    );
+    assert!(
+        pinned.read <= unpinned.read,
+        "the pinned frame asked the frame for {} files against the unpinned \
+         frame's {}, so pinning bought work rather than saving it",
+        pinned.read,
+        unpinned.read
     );
 }
 
