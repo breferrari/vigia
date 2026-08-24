@@ -93,6 +93,8 @@ Two tools, and picking the wrong one is the common mistake. **The test is whethe
 
 **`record_work`** files what happened **here** into the vault. Use it at the end of a real piece of work. Write it for a session that will not have your context and cannot re-read your diff, so fill every field you can: `summary`, `changes` (one line per file, what and why), `decisions` (especially where you rejected an alternative), `learned` (surprises and near-misses), `open` (unresolved threads nobody should assume are handled), `verification` (tests run and their result, failures stated honestly). `kind: "decision"` files it as a decision record; `informed_by` credits the notes you actually read.
 
+**If it is refused for tool-call markup, do NOT re-send the same shape.** A wide call folds again — the fold tracks field COUNT, not field length, and a payload shrunk to 832 characters has been refused just the same. Send `title` and `summary` alone, let that write land, then add the remaining sections in a follow-up call. Two narrow records that arrive beat one wide record that never does. That recovery is not documented upstream; it was found here, and it is [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244).
+
 Rule of thumb: **a `gix` limitation that would bite any Rust project is a `remember`** — and note that it is `scope: "platform"` with `platforms: ["rust"]`, not `general`, which is exactly the call this section exists to get right. **"Landed the watch engine and here is what it cost" is a `record_work`.** Do both when both are true.
 
 Before finishing work that changed or clarified a decision here, write it down. A finding that stays in this session is a finding the next session pays for again.

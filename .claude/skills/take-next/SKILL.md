@@ -557,6 +557,18 @@ Skipping any of these is how the next session loses time.
    (`search` for it) and confirm the sections landed as markdown; a success
    return is not evidence of a clean write.
 
+   **Then file the recurrence — this fallback has an exit condition.** Try the
+   narrow shape first: `title` and `summary` alone, then the remaining sections
+   in a second call. If it still refuses, comment the date and the received
+   field list on [breferrari/obsidian-mind#244](https://github.com/breferrari/obsidian-mind/issues/244)
+   rather than only noting it in the report. **A documented workaround suppresses
+   the bug report**: once the failure has a prescribed response it reads as a
+   handled step rather than a defect, which is exactly how this one ran ten days
+   across nine consecutive passes while every session followed the procedure
+   correctly. No session can see the rate from inside its own pass — nine here
+   each saw two or three refusals and concluded it was local. A fallback with no
+   exit condition is a permanent bug wearing a procedure.
+
 ## 9. Report
 
 **The first line is what a reader can now do that they could not before.** One sentence, in the tool's own terms — *"`?` opens a sheet of every gesture"* — and if the honest answer is *nothing yet*, that is the first line instead, naming the issue that will change it. Everything below is evidence for that sentence, and a report that buries it has hidden the only fact the reader was waiting for. It is here because no gate can check it: a pass once ended green, complete against its plan, and shipped a release in which nothing on screen had changed.
