@@ -277,7 +277,7 @@ pub struct Regions {
     ///
     /// **The only region here that is *over* the others rather than beside
     /// them**, so it is tested first and it swallows what lands on it. `SPEC.md`
-    /// §11.1's B12 rules that a click on the close control dismisses and a click
+    /// §11.2's B12 rules that a click on the close control dismisses and a click
     /// inside the sheet that is not on the control does nothing; the wheel is
     /// swallowed for the same reason, because scrolling a diff a reader cannot
     /// see is worse than doing nothing.
@@ -698,6 +698,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleFollow
         | Action::ToggleMasthead
         | Action::ToggleSheet
+        | Action::CloseSheet
         | Action::Redraw
         | Action::Quit => return None,
     };
@@ -979,7 +980,7 @@ pub enum Action {
     ToggleMasthead,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///
-    /// `SPEC.md` §11.1's B12 ruling, from `?` or from a click on the sheet's own
+    /// `SPEC.md` §11.2's B12 ruling, from `?` or from a click on the sheet's own
     /// close control. **The one action on this map that moves nothing**: the
     /// sheet composites over cells that are already drawn, so unlike
     /// [`Action::ToggleMasthead`] it does not even resize a region, which is the
@@ -1005,6 +1006,19 @@ pub enum Action {
     /// **scrolled** was declined: `j`, `k`, `Space`, `d` and `u` are all spoken
     /// for, and taking one back is the mode B12 refused.
     ToggleSheet,
+    /// Stop drawing the gestures sheet, whatever page it is on.
+    ///
+    /// **From the close control alone**, which is the difference between it and
+    /// [`Action::ToggleSheet`] and the reason B13 needs two variants where B12
+    /// needed one. `?` means *the sheet*, so on a paged pane it advances; the
+    /// control means *close*, and a control that walked the reader through five
+    /// more pages before letting them out is not a close control. `SPEC.md` §11.1
+    /// says the control dismisses it, and until
+    /// [#286](https://github.com/breferrari/vigia/issues/286)'s audit both the
+    /// spec and this file said so while the click sent `ToggleSheet` and paged.
+    ///
+    /// It is the sheet's only pointer escape, and the pointer has no `?`.
+    CloseSheet,
     /// Put the pinned list's window at this fraction of the changed set.
     ///
     /// From dragging or clicking the list's own scrollbar. A fraction over
@@ -1092,6 +1106,7 @@ impl Action {
             | Self::ToggleFollow
             | Self::ToggleMasthead
             | Self::ToggleSheet
+            | Self::CloseSheet
             | Self::Redraw
             | Self::Quit => self,
         }
@@ -1143,6 +1158,7 @@ impl Action {
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
+            | Self::CloseSheet
             | Self::ScrollList(_) => false,
             // Dragging the **list's** bar moves the map and not the diff, so it
             // is `ScrollList` by another input device. Dragging the **diff's**
@@ -1190,7 +1206,8 @@ impl Action {
             | Self::Redraw
             | Self::ToggleFollow
             | Self::ToggleMasthead
-            | Self::ToggleSheet => false,
+            | Self::ToggleSheet
+            | Self::CloseSheet => false,
         }
     }
 }
@@ -1328,7 +1345,7 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // always needed"*, which is the honest read of an element that costs
         // four rows of the thing the tool exists to show.
         KeyCode::Char('m') => Some(Action::ToggleMasthead),
-        // **`?` and nothing else**, which is `SPEC.md` §11.1's B12: `btop`,
+        // **`?` and nothing else**, which is `SPEC.md` §11.2's B12: `btop`,
         // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
         // is refused because it is a vi motion everywhere else on a pane with no
         // horizontal scroll. `Esc` is refused too, and that one is a fact about
@@ -1358,7 +1375,7 @@ fn row_of(digit: char) -> u16 {
 
 fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
     // **The sheet is checked before everything, because it is drawn over
-    // everything.** `SPEC.md` §11.1's B12: the close control dismisses, and any
+    // everything.** `SPEC.md` §11.2's B12: the close control dismisses, and any
     // other event landing on the sheet does nothing at all. Falling through would
     // let a click seek a scrollbar the reader cannot see and a wheel scroll a
     // diff the sheet is covering, which is the one way an overlay that moves no
@@ -1368,7 +1385,7 @@ fn mouse_action(mouse: &MouseEvent, regions: Regions) -> Option<Action> {
             return matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                 .then_some(())
                 .filter(|()| (mouse.column, mouse.row) == sheet.close)
-                .map(|()| Action::ToggleSheet);
+                .map(|()| Action::CloseSheet);
         }
     }
 

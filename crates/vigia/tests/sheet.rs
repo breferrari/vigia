@@ -1,6 +1,6 @@
 //! The gestures sheet: `?`, the window it opens, and the one thing it must not do.
 //!
-//! `SPEC.md` §11.1's B12 ruled the keymap out of the footer and over the pane,
+//! `SPEC.md` §11.2's B12 ruled the keymap out of the footer and over the pane,
 //! and the ruling's load-bearing claim is not about space. It is that **an
 //! overlay cannot move content**, which is the one property no answer living in
 //! the footer has. So the gate that matters most here is not that the sheet draws
@@ -639,7 +639,7 @@ fn the_close_control_dismisses_and_the_sheet_swallows_the_rest() {
 
     assert_eq!(
         action_for(&click(sheet.close.0, sheet.close.1), laid),
-        Some(Action::ToggleSheet),
+        Some(Action::CloseSheet),
         "a click on the close control did not dismiss the sheet"
     );
 
@@ -1928,12 +1928,13 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
 
 #[test]
 fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
-    // **78, and the first draft of this ruling said 80.** `margin_of` returns 2 at
-    // 78, 3 at 79 and 4 at 80, so the room a pane leaves is 76 at all three and
-    // the tight two-column rung is exactly 76 wide. The probe that produced the
-    // ruling's before-and-after sampled 60, 70, 80 and stepped over the boundary,
-    // which is the same mistake as a superlative bounded by a sweep that does not
-    // reach its falsifying case.
+    // **73 since #286, 78 before it, and the first draft of the ruling said 80.**
+    // `margin_of` returns 2 from 44 to 78, so a pane of 73 leaves 71 columns of room
+    // and the tight two-column rung is exactly 71 wide. It was 76 until #286
+    // shortened two tight mouse verbs, and this rung measures the same cells. The
+    // probe that produced the ruling's original before-and-after sampled 60, 70 and
+    // 80 and stepped over its own boundary, which is the same mistake as a
+    // superlative bounded by a sweep that does not reach its falsifying case.
     //
     // Gated by walking the boundary a column at a time, because that is the only
     // instrument that can find it.
@@ -2570,11 +2571,14 @@ fn the_two_column_rung_swallows_what_lands_on_it() {
         "a wheel inside the two-column rung scrolled a region the sheet is covering"
     );
 
-    // And the close control still dismisses at this rung.
+    // And the close control still dismisses at this rung. `CloseSheet` rather than
+    // `ToggleSheet` since #286: `?` means *the sheet* and advances on a paged pane,
+    // and a control that walked the reader through five more pages before letting
+    // them out is not a close control.
     let close = action_for(&click(sheet.close.0, sheet.close.1), laid);
     assert_eq!(
         close,
-        Some(Action::ToggleSheet),
+        Some(Action::CloseSheet),
         "the close control does not dismiss the two-column rung"
     );
 }
@@ -2646,7 +2650,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     let close = action_for(&click(sheet.close.0, sheet.close.1), laid);
     assert_eq!(
         close,
-        Some(Action::ToggleSheet),
+        Some(Action::CloseSheet),
         "the close control does not dismiss the roomy rung"
     );
 }
@@ -2731,6 +2735,7 @@ fn every_gesture_is_reachable_at_forty_columns_and_up() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
+    let mut panes = 0;
     for w in LADDER_WIDTHS {
         for h in LADDER_HEIGHTS {
             let at = Rect::new(0, 0, w, h);
@@ -2738,6 +2743,7 @@ fn every_gesture_is_reachable_at_forty_columns_and_up() {
             if seen.is_empty() {
                 continue;
             }
+            panes += 1;
             let missing: Vec<_> = GESTURES.iter().filter(|g| !seen.contains(*g)).collect();
             assert!(
                 missing.is_empty(),
@@ -2748,6 +2754,14 @@ fn every_gesture_is_reachable_at_forty_columns_and_up() {
             );
         }
     }
+    // **The floor its two sibling sweeps have and this one did not.** A
+    // `sheet_plan` returning `None` everywhere makes every cell `continue` and the
+    // gate passes having asserted nothing, which is the vacuous-superlative shape
+    // `SPEC.md` §7 keeps finding.
+    assert!(
+        panes > 0,
+        "no pane in the sweep drew a sheet at all, so this proves nothing"
+    );
 }
 
 /// One page of a walk: what it drew and where its box was.
@@ -2756,8 +2770,13 @@ struct Page {
     count: usize,
     /// The sheet's own cells, frame included.
     text: String,
-    /// The sheet's left edge and width, which no page of a pane may move.
-    frame: (u16, u16),
+    /// The sheet's whole box: left, top, width and height.
+    ///
+    /// **All four, and the first version carried two.** The last page's content is
+    /// a remainder, and sizing the frame from it slid the box down half the
+    /// difference while `left` and `width` stayed put, so a gate reading those two
+    /// was green over a control moving out from under the reader's pointer.
+    frame: (u16, u16, u16, u16),
 }
 
 /// Every page `?` reaches on one pane, in order, before it closes.
@@ -2792,7 +2811,7 @@ fn walk_the_pages(
         pages.push(Page {
             count,
             text,
-            frame: (sheet.left, sheet.width),
+            frame: (sheet.left, sheet.top, sheet.width, sheet.height),
         });
         assert!(
             pages.len() < BOUND,
@@ -3036,9 +3055,13 @@ fn the_box_does_not_resize_between_pages() {
     // which `the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_states`
     // is the gate for. Both claims are true and they are different claims.
     //
-    // Left edge and width, not height: the last page is a remainder and is allowed
-    // to be shorter, which is what keeps a two-row tail from drawing three rows of
-    // blank.
+    // **All four edges, and this gate read two of them until #286's own audit.**
+    // The last page's *content* is a remainder, but its box is not: `paged_fit`
+    // sizes every page of a pane to `capacity + SHEET_FRAME` and lets the tail run
+    // blank inside the frame, because `sheet_plan` centres on the height and a
+    // shorter last page slid the box down half the difference. `left` and `width`
+    // were unmoved by that, so the two-field version was green over a close control
+    // walking out from under a resting pointer.
     let scratch = Scratch::large_diff("sheet-box", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -3057,7 +3080,7 @@ fn the_box_does_not_resize_between_pages() {
             .first()
             .unwrap_or_else(|| panic!("a {w}x{h} pane draws no sheet"))
             .frame;
-        let boxes: Vec<(u16, u16)> = walked.iter().map(|page| page.frame).collect();
+        let boxes: Vec<(u16, u16, u16, u16)> = walked.iter().map(|page| page.frame).collect();
         assert!(
             boxes.iter().all(|b| *b == first),
             "the sheet's box moves between pages at {w}x{h}: {boxes:?}"
@@ -3217,5 +3240,144 @@ fn two_presses_in_one_wake_reach_page_two() {
         counter_of(&sheet).unwrap_or_default().trim(),
         "4-6 of 16",
         "the batched second press did not land on page two:\n{sheet}"
+    );
+}
+
+#[test]
+fn the_close_control_closes_from_any_page() {
+    // **The sheet's only pointer escape, and it advanced.** A click on `✕` sent
+    // `Action::ToggleSheet`, the same action `?` sends, so on a six-page pane the
+    // control walked the reader forward a page at a time and took six clicks to let
+    // them out. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both said
+    // it dismissed from any page while it did not.
+    //
+    // The gate that existed asserted the *action's identity* on an eighty by
+    // twenty-four pane, which is one page, and never applied it. Both halves are
+    // why it could not see this: one page has nothing to advance to, and an
+    // identity is not an outcome.
+    let scratch = Scratch::large_diff("sheet-close-any", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let at = Rect::new(0, 0, 50, 8);
+    press_pages(&mut app, &mut frame, &mut highlighter, &history, at, 3);
+    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let sheet = laid.sheet.expect("no sheet published on page three");
+    assert_eq!(
+        chrome(&app).sheet,
+        Some(2),
+        "the fixture is not on page three"
+    );
+
+    let close = action_for(&click(sheet.close.0, sheet.close.1), laid)
+        .expect("the close control published no action");
+    let height = body_layout(at, &chrome(&app), FILES).diff;
+    app.apply(close, &mut frame, height).expect("close");
+    assert_eq!(
+        chrome(&app).sheet,
+        None,
+        "the close control on page three did not close the sheet"
+    );
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    assert!(
+        laid.sheet.is_none() && !text_of(&buf, at).contains(TITLE),
+        "the closed sheet is still drawn"
+    );
+}
+
+#[test]
+fn the_counter_is_right_where_a_page_spans_the_mouse_heading() {
+    // **The one line in `column_lines` that is not a gesture**, and the ordinals
+    // have to step over it. Dropping `filter(is_row)` from `shown_of`'s `before`
+    // term survives the whole suite otherwise, because every page the counter gate
+    // reads sits entirely above the heading.
+    //
+    // Six pages of three at fifty by eight: the heading is line 11, so page four is
+    // the one that carries it and pages five and six are the mouse group.
+    let scratch = Scratch::large_diff("sheet-heading-ordinals", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let at = Rect::new(0, 0, 50, 8);
+    let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+    let spellings: Vec<String> = walked
+        .iter()
+        .map(|page| counter_of(&page.text).unwrap_or_default().trim().to_owned())
+        .collect();
+    assert_eq!(
+        spellings,
+        [
+            "1-3 of 16",
+            "4-6 of 16",
+            "7-9 of 16",
+            // The heading costs this page a row and no ordinal, so it names two
+            // gestures where every page above it names three.
+            "10-11 of 16",
+            "12-14 of 16",
+            "15-16 of 16",
+        ],
+        "the ordinals do not step over the mouse group's heading"
+    );
+    // And the count on each page agrees with what the counter claims, which is what
+    // makes this a claim about the arithmetic rather than about six strings.
+    for (page, spelling) in walked.iter().zip(&spellings) {
+        let run = spelling.split(" of ").next().unwrap_or_default();
+        let (first, last) = run.split_once('-').unwrap_or((run, run));
+        let span = last.parse::<usize>().expect("an ordinal")
+            - first.parse::<usize>().expect("an ordinal")
+            + 1;
+        assert_eq!(
+            span, page.count,
+            "the counter says {spelling} and the page draws {} gestures:\n{}",
+            page.count, page.text
+        );
+    }
+}
+
+#[test]
+fn a_resize_clamps_rather_than_wrapping() {
+    // **`page.min(pages - 1)` and `page % pages` are the same answer for most
+    // pairs**, so the resize gate cannot tell a clamp from a wrap: it goes from six
+    // pages to two at page six, and `5 % 2` and `5.min(1)` are both one.
+    //
+    // Six pages to three at page **five** separates them: `4 % 3` is one and
+    // `4.min(2)` is two. A wrap would send a reader who shrank their pane back to
+    // the middle of the sheet; a clamp leaves them at the end, which is where they
+    // were.
+    let scratch = Scratch::large_diff("sheet-clamp-not-wrap", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let six = Rect::new(0, 0, 50, 8);
+    press_pages(&mut app, &mut frame, &mut highlighter, &history, six, 5);
+    assert_eq!(chrome(&app).sheet, Some(4), "five presses is not page five");
+
+    // Fifty by eleven: a body of eight, a capacity of six, seventeen lines, three
+    // pages. Page five clamps to page three and would wrap to page two.
+    let three = Rect::new(0, 0, 50, 11);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, three);
+    assert!(laid.sheet.is_some(), "the resize closed the sheet");
+    let (_, sheet) = read_sheet(&buf, &laid);
+    assert_eq!(
+        counter_of(&sheet).unwrap_or_default().trim(),
+        "12-16 of 16",
+        "the resize wrapped the page instead of clamping it:\n{sheet}"
+    );
+    assert_eq!(
+        chrome(&app).sheet,
+        Some(2),
+        "the state kept a page the pane no longer has, so the screen and the state \
+         disagree about which page is up"
     );
 }

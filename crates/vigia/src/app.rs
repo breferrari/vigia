@@ -92,7 +92,7 @@ pub struct App {
     /// reason it is a field.** The pane wakes on filesystem events, so an agent's
     /// write redraws the frame underneath the sheet; a sheet that were not carried
     /// between frames would be dismissed at random by somebody else's build,
-    /// which `SPEC.md` §11.1's B12 names as the constraint most likely to be
+    /// which `SPEC.md` §11.2's B12 names as the constraint most likely to be
     /// missed. Off by default for the reason every reader starts with the diff
     /// rather than with instructions about it.
     ///
@@ -623,6 +623,13 @@ impl App {
                     Some(_) => None,
                 };
             }
+            // **The control means close, where `?` means the sheet**, which is why
+            // B13 needs a second variant. Sending `ToggleSheet` from a click on
+            // `✕` made the sheet's only pointer escape *advance*, so a reader on
+            // page one of six needed six clicks to get out, and both `SPEC.md`
+            // §11.1 and `Action::ToggleSheet`'s own docblock claimed otherwise
+            // while it did. Found by #286's adversarial round.
+            Action::CloseSheet => self.sheet = None,
             Action::Scroll(rows) => {
                 self.scroll(rows, frame)?;
             }
@@ -948,12 +955,24 @@ impl App {
         // **Recorded here because this is the one call every frame makes with the
         // pane's own layout in hand.** `?` advancing needs to know which page is
         // the last, and `Action` carries no pane; see [`App::sheet_pages`]. It is
-        // **Only when the layout measured one**, which is only while the sheet is
-        // up. A frame with the sheet down leaves the last measurement standing, and
-        // nothing reads it: the press that opens a sheet takes the `None` arm and
-        // consults no count at all.
+        // **Whenever the layout measured one, which is every frame.**
+        // [`crate::body_layout`] answers with the sheet up or down, and its own
+        // docblock carries the reason: the shell drains actions in a batch and
+        // paints once at the end of it, so a second `?` in the same wake is
+        // measured against the last *draw*. The `Option` is about the three `Body`
+        // constructors that have no pane to measure, not about when it is taken.
         if let Some(pages) = body.sheet_pages {
             self.sheet_pages = pages;
+            // **And the page is clamped to what this pane has**, so the state and
+            // the screen agree about which page is up. `sheet_plan` clamps too, and
+            // has to, because it is the last thing standing between a stale index
+            // and the tables; what it cannot do is write the answer back. Without
+            // this, a pane that shrank its page count left `self.sheet` pointing
+            // past the end and every `?` after it walked the gap one dead press at
+            // a time while the screen showed the same page.
+            if let Some(page) = self.sheet {
+                self.sheet = Some(page.min(pages.saturating_sub(1)));
+            }
         }
         let view = View::collect(
             frame,

@@ -329,8 +329,16 @@ field was the wheel's alone. At 17 and 19 the field is 19, the sheet is
 **After.** Every pane of 38 columns and up reaches all sixteen, at every height
 that draws a sheet at all. 35 to 37 reach eleven, 32 to 34 eight, 30 to 31 four,
 and below 30 nothing is drawn. The narrowest sheet the ladder draws went from 24
-columns to 30, because every rung charges the page counter's widest spelling so a
-centred box cannot resize between pages.
+columns to 30, because every rung charges the page counter's widest spelling so the
+ordinals can never run into the close control.
+
+**And that reason is the second one this ledger has recorded for the same charge.**
+The first was that it keeps a centred box the same size between pages. A mutation
+removing the charge left `the_box_does_not_resize_between_pages` green and reddened
+two width gates, which is the opposite of what the claim predicted: `sheet_fields`
+measures over the whole row set and every page of a pane shares that set, so the
+width was page-independent already. Both claims are about the same line and only
+one of them is true.
 
 **The two-column rung moved with the copy and the plan did not predict it.**
 `sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and

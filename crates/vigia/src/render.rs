@@ -1541,7 +1541,7 @@ pub struct Chrome {
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     ///
     /// **Unlike [`Chrome::masthead`] this is not an input to the body split at
-    /// all**, and that difference is the whole of `SPEC.md` §11.1's B12: the sheet
+    /// all**, and that difference is the whole of `SPEC.md` §11.2's B12: the sheet
     /// composites over cells the regions have already drawn, so no rect moves and
     /// no row is spent. It is read by the painter last and by [`regions`] so a
     /// pointer can be told it is over one.
@@ -4254,7 +4254,7 @@ pub fn render(
 ///
 /// Both fields carry **two spellings, the wide one first**, and the ladder picks
 /// one level for the whole sheet rather than per row: a table whose rows each
-/// chose their own width would not be a table. `SPEC.md` §11.1's B12.
+/// chose their own width would not be a table. `SPEC.md` §11.2's B12.
 struct Gesture {
     /// The keys cell. Aliases live inside it rather than in rows of their own.
     keys: [&'static str; 2],
@@ -4554,6 +4554,15 @@ const ROOMY_GAP: usize = 8;
 
 /// Keyboard rows the ladder may never drop: `f`, `m` and `?`.
 const SHEET_KEEP: usize = 3;
+// **It names two things since [#286](https://github.com/breferrari/vigia/issues/286),
+// and only one of them is a keep-set.** On the width axis it is still the rows
+// [`DROP_ORDER`] never gives up, `f`, `m` and `?`, which is what a pane too narrow
+// for the whole table is left with. On the height axis it is the thinnest page
+// worth drawing: [`sheet_plan`] refuses a sheet whose body cannot hold this many
+// rows, which is the same floor the last dropping rung used to set and is why the
+// heights it draws at are unchanged. The narrow floor reaches **four** gestures
+// rather than three, because the set width leaves is `DROP_ORDER`'s rather than
+// this count.
 
 /// Rows the sheet's frame costs, one border at each end.
 const SHEET_FRAME: usize = 2;
@@ -4610,11 +4619,14 @@ fn fields_of<'a>(rows: impl IntoIterator<Item = &'a Gesture>, level: usize) -> (
 /// `J  K  Shift+↑  Shift+↓` and `q  Esc  Ctrl+C  Ctrl+D` at twenty-two, both of
 /// them the keyboard group's. So at the wide spelling dropping the mouse group
 /// narrows **nothing**: the sheet is fifty-six either way, and only its height
-/// moves. At the tight spelling it narrows forty-three to thirty-five, because
-/// there the mouse group does win both fields, on `click a track` at thirteen
-/// against eleven and `scroll what you point at` at twenty-four against eighteen.
+/// moves. At the tight spelling it narrows **thirty-eight to thirty-five**,
+/// because there the mouse group does win both fields, on `click a track` at
+/// thirteen against eleven and `a row, held repeats` at nineteen against eighteen.
 /// Corrected 2026-08-24 by [#285](https://github.com/breferrari/vigia/issues/285)'s
-/// audit, which re-derived the table rather than reading this.
+/// audit, which re-derived the table rather than reading this, and again the same
+/// day by [#286](https://github.com/breferrari/vigia/issues/286): the verb that won
+/// this field was `scroll what you point at` at twenty-four, and shortening it is
+/// what took the whole table inside I6's forty columns.
 fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize) {
     let (mut keys, mut verb) = fields_of(kept_keyboard(from), level);
     if mouse {
@@ -4660,7 +4672,7 @@ const SHEET_GAP: usize = 2;
 /// seventeen and no rung reached it, because the narrowest one-column rung is
 /// twenty-four: at the tight spelling its widest cells are `?` and `follow the
 /// newest`, so one column of keys and seventeen of verb. Charging
-/// [`sheet_counter_floor`] puts the floor at thirty, so the dropping rungs
+/// [`SHEET_COUNTER_FLOOR`] puts the floor at thirty, so the dropping rungs
 /// between twenty-four and twenty-nine columns are drawn thirty wide and a pane
 /// narrower than thirty draws no sheet at all. That is the trade B13 states: a
 /// sheet that cannot say how much of the table it is hiding is the state the
@@ -4668,7 +4680,7 @@ const SHEET_GAP: usize = 2;
 ///
 /// If it ever bound on [`Shape::Beside`] the sheet would be wider than the sum
 /// its groups were placed within and the right pipe would detach from the mouse
-/// column, so that rung's seventy-six keeps it clear by a wide margin.
+/// column, so that rung's seventy-one keeps it clear by a wide margin.
 fn sheet_floor(total: usize) -> usize {
     total.max(width_of(SHEET_TITLE) + *SHEET_COUNTER_FLOOR + 6)
 }
@@ -4994,12 +5006,14 @@ fn sheet_beside_rows() -> usize {
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
 /// columns for five rows at the wide spelling (104 against 56, nineteen rows
 /// against fourteen), or thirty-three columns for the same five rows at the tight
-/// one (76 against 43), and drawing all sixteen gestures where eleven drew before. It is tried **after** the full one-column rung and **before** any
+/// one (71 against 38 since [#286](https://github.com/breferrari/vigia/issues/286),
+/// and 76 against 43 before it), and drawing all sixteen gestures where eleven drew
+/// before. It is tried **after** the full one-column rung and **before** any
 /// dropping rung, which is what makes it additive: a pane on which one column
 /// already fits never sees it, so nothing that draws every row today changes.
 /// Its two spellings are its own rather than the pane-wide `level`, so a pane of
-/// seventy-eight columns reaches the tight two-column rung instead of falling past it
-/// into dropping the mouse group entirely.
+/// seventy-three columns reaches the tight two-column rung instead of falling past
+/// it into paging the one-column sheet.
 ///
 /// **Centred in the body, never over the header or the footer**, which is B12's
 /// reason for a box rather than a full-pane sheet: a reader reading instructions
@@ -5153,7 +5167,14 @@ fn paged_fit(level: usize, from: usize, mouse: bool, page: usize, capacity: usiz
     Fit {
         level,
         total,
-        rows: take,
+        // **The box is the pane's, not this page's.** `take` is a remainder on the
+        // last page, and sizing the frame from it shrank the final box and slid it
+        // down half the difference, because `sheet_plan` centres on `height`: the
+        // close control moved out from under a pointer that was resting on it, and
+        // the row it left fell through to a scrollbar the reader could not see.
+        // Every page of a pane is now the same box with the last one part empty,
+        // which is what a paged surface looks like and what keeps `✕` still.
+        rows: capacity.min(lines),
         shape: Shape::Column {
             from,
             mouse,
@@ -5173,9 +5194,9 @@ fn paged_fit(level: usize, from: usize, mouse: bool, page: usize, capacity: usiz
 /// Two columns, keyboard beside mouse, every row drawn.
 ///
 /// It picks its own spelling rather than the pane's, because the pane's was
-/// chosen against a one-column sheet, and that is what lets a pane of seventy-eight
-/// take the tight two-column rung instead of falling past it into dropping the mouse
-/// group entirely.
+/// chosen against a one-column sheet, and that is what lets a pane of seventy-three
+/// take the tight two-column rung instead of falling past it into paging the
+/// one-column sheet.
 fn beside_fit(level: usize) -> Fit {
     let (keyboard, mouse, total) = sheet_beside(level);
     Fit {
@@ -6623,6 +6644,10 @@ impl Painter<'_> {
         // **The plan's slice, not one recomputed here.** `skip` and `take` are
         // what the frame was sized from, so drawing anything else is drawing over
         // the bottom border or leaving a blank row inside it.
+        // **The pipes first, over every interior row**, which is the roomy rung's
+        // own shape one rung over: the last page draws fewer lines than its box has
+        // rows, and a frame open down its tail is not a box.
+        self.sheet_pipes_over(area, area.y + 1);
         let lines = column_lines(from, mouse).skip(skip).take(take);
         for (y, line) in (area.y + 1..).zip(lines) {
             match line {
@@ -8076,7 +8101,7 @@ mod sheet_tables {
         //
         // **The wide spelling only, and that is the claim rather than a
         // convenience.** At the tight spelling the mouse group wins both fields,
-        // 13 against 11 on keys and 24 against 18 on verbs, so `sheet_fields`'
+        // 13 against 11 on keys and 19 against 18 on verbs, so `sheet_fields`'
         // own chain is load-bearing there and is not slack at all. (The keyboard
         // group's widest tight verb is `jump to a list row`, which is also the
         // eighteen §11.2 B12's forty-column box states.) The roomy rung
