@@ -4380,6 +4380,20 @@ const KEYBOARD: [Gesture; 12] = [
 /// place that is resolved, and both the measurement and the drawer read it.
 const DROP_ORDER: [usize; KEYBOARD.len()] = [11, 0, 1, 2, 3, 4, 5, 6, 9, 7, 8, 10];
 
+// **`r` goes one rank before the keep-set, and that is a claim rather than an
+// accident of how this array was typed.** `sheet_tables` holds which three rows
+// survive; nothing held which row is the fourth-last, so moving `9` anywhere in
+// the middle of this array keeps every gate above green while changing what a
+// thirty-column pane reaches. See #295: `r` needs 134 columns and this order only
+// binds at 30 to 34, so it is the one gesture here that cannot fire on the pane
+// dropping it.
+const _: () = {
+    assert!(
+        DROP_ORDER[DROP_ORDER.len() - 4] == 9,
+        "`r` is not the last row given up before the keep-set"
+    );
+};
+
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 ///
 /// **One resolution of [`DROP_ORDER`] read by both the planner and the painter**,

@@ -1433,3 +1433,74 @@ fn the_rail_is_not_a_mode() {
         "a key changed meaning while the rail was up, which is the mode B4 refuses"
     );
 }
+
+#[test]
+fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
+    // **`ToggleMasthead`'s own promise one region over**, and the half the gesture
+    // gate above does not reach: a reader asking where the map goes is not asking
+    // to be moved inside the diff. A rail narrows the diff rather than reflowing
+    // it, so a preserved position looks like the same line clipped shorter, and
+    // the narrower row is a **prefix** of the wider one.
+    //
+    // Read after a scroll rather than at the top, because the top is where a lost
+    // position lands: a gate that only ever looked there could not tell a kept
+    // position from a reset one.
+    //
+    // **The leading columns, not the whole row.** The scrollbar is pinned to each
+    // region's right edge, so the wider row ends `…spaces…▲` and the narrower one
+    // ends `…▲` sooner: neither is a prefix of the other and the first spelling of
+    // this gate failed on furniture while the position it is about was preserved.
+    // Thirty columns clears the gutter, the sigil and enough code to identify the
+    // line, and is inside the narrower region at this pane.
+    const LEAD: usize = 30;
+    let scratch = repo::Scratch::large_diff("rail-keeps-the-row", 3, 200);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+    let at = Rect::new(0, 0, 160, TALL);
+    let mut highlighter = vigia_core::Highlighter::eager();
+    let history = vigia_core::History::new();
+
+    let height = body_layout(at, &app.chrome("f", None, None, None, None, None), 3).diff;
+    app.apply(Action::Scroll(30), &mut frame, height)
+        .expect("scroll");
+
+    let mut top_row = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> String {
+        let chrome = app.chrome("f", None, None, None, None, None);
+        let body = body_layout(at, &chrome, 3);
+        let view = app
+            .view(frame, &mut highlighter, &history, body)
+            .expect("view");
+        let mut buf = Buffer::empty(at);
+        render(
+            &mut buf,
+            at,
+            &view,
+            &Theme::default(),
+            Glyphs::default(),
+            &chrome,
+        );
+        let laid = regions(at, &chrome, &view);
+        let diff = laid.diff;
+        (diff.left..diff.left + diff.width)
+            .map(|x| buf[(x, diff.top)].symbol())
+            .collect::<String>()
+            .chars()
+            .take(LEAD)
+            .collect()
+    };
+
+    let stacked = top_row(&mut app, &mut frame);
+    assert!(!stacked.is_empty(), "the fixture drew an empty diff");
+
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    let beside = top_row(&mut app, &mut frame);
+    assert!(!beside.is_empty(), "the railed diff drew nothing");
+
+    assert_eq!(
+        stacked, beside,
+        "asking for the rail moved the diff off the row it was on"
+    );
+}
