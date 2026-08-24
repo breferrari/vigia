@@ -464,3 +464,39 @@ counts in this pass were taken that way and both were wrong: the first was a
 *compile* failure with no `FAILED` line at all, and the second hid twenty-nine
 failures in later binaries. `--no-fail-fast` is the flag, and a count that cannot
 see a compile error is not a count.
+
+## B15 — the arrows were free, and the only thing they cost is a spelling on the sheet
+
+The ruling is `SPEC.md` §11.2 B15 and the behaviour is §11.1. This is the trade,
+and the correction that came with it.
+
+**A claim in the issue's own body was false, and it was mine.** [#296](https://github.com/breferrari/vigia/issues/296)
+was filed on 2026-08-24 saying [#272](https://github.com/breferrari/vigia/issues/272)
+*"would want those arrows if horizontal reading ever lands"*, and offering that as
+the thing to rule against. #272 asks for **`w`**, a wrap toggle, and needs no arrows
+at all. The real conflict is with a **horizontal pan**, which §11.1 declined in the
+sentence after the one ruling a long line clipped rather than wrapped. (The first
+draft of this section said "the same sentence"; it is the adjacent one, and being
+precise about that is cheaper than being caught being loose about it.) So the arrows
+were contested by a rejected alternative rather than by an open row, and the ruling
+is cheaper than the issue that asked for it. Recorded because the pattern is now
+familiar here: a premise written into an issue reads as settled the next day, and
+the issue's author is the least likely person to re-check it.
+
+**The one measured cost is the tight spelling of one keys cell.** The gestures
+sheet's tight keyboard keys field is eleven columns, on `Space  PgDn`. The arrowed
+cell `n  →  /  p  ←` is thirteen. Carrying it at the tight spelling would take the
+keyboard-only rung from **35 columns to 37**, so panes of 35 and 36 would fall to
+the next rung down and lose their twelve gestures. The whole-table rung is unmoved
+either way, because the mouse group's `click a track` is already thirteen.
+
+Two columns of pane losing gestures to an **alias** is the wrong trade, so the
+arrows are named at the wide spelling only. That is also the established
+convention: `q  Esc  Ctrl+C  Ctrl+D` becomes `q  Esc` and `g  Home  /  G  End`
+becomes `g  /  G`. `j  k  ↓  ↑` is the exception and it keeps its arrows because
+there they cost nothing, which is the same test applied and answered differently.
+
+**No row was added, and that is why this diff is small where #295's was large.**
+An alias goes in an existing cell, so `KEYBOARD` is still twelve rows, the counter
+still counts to seventeen, and every rung height and reachability boundary §11.1
+states is untouched. #295 added a row and moved every one of them.

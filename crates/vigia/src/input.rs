@@ -950,6 +950,21 @@ pub enum Action {
     /// [`Action::Page`] and [`Action::HalfPage`] already are: one arm in
     /// `App::apply`, one rule, and no way for the two directions to drift apart.
     ///
+    /// **`←` and `→` are aliases of `p` and `n` since `SPEC.md` §11.2 B15**
+    /// ([#296](https://github.com/breferrari/vigia/issues/296)): vertical keys move
+    /// inside the diff and horizontal keys move between files, so the four arrows
+    /// are one set rather than half of one. A reader reaching for an arrow was
+    /// getting `Shift+↑`'s list scroll, which is `Action::ScrollList` doing exactly
+    /// what §11.1 says and not what was wanted.
+    ///
+    /// **The one thing the arrow pair conflicts with is declined rather than
+    /// deferred.** §11.1 rules a long line clipped rather than wrapped and names a
+    /// horizontal pan as the alternative it did not take, *"a key and a mode this
+    /// spec does not name"*.
+    /// [#272](https://github.com/breferrari/vigia/issues/272) reopens reading long
+    /// lines and asks for `w`, a wrap toggle, which wants no arrows. If a pan is
+    /// ever ruled in it takes `h` and `l`, or it takes these back.
+    ///
     /// **Not [`Action::ListRow`] by another route.** That one names a row of the
     /// *window* and needs the app's `list_top` to mean anything; this names a
     /// file relative to where the diff already is, and works with no region on
@@ -1341,8 +1356,12 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // reflex from `:n`/`:p` already. `N` and `P` are unbound for the reason
         // `D`, `U` and `F` are, one row above a pair where `g`/`G` have already
         // taught that case is load bearing here.
-        KeyCode::Char('n') => Some(Action::File(1)),
-        KeyCode::Char('p') => Some(Action::File(-1)),
+        // **Aliases in the letter's own arm**, which is the shape `Down |
+        // Char('j')` above already has and what stops the two directions drifting
+        // apart. Why the arrows and what they spend is `Action::File`'s docblock,
+        // not repeated here.
+        KeyCode::Right | KeyCode::Char('n') => Some(Action::File(1)),
+        KeyCode::Left | KeyCode::Char('p') => Some(Action::File(-1)),
         // **The digits address the drawn window, and there are six of them
         // because `render::LIST_SETTLED` is six.** The numbered-jump grammar a
         // terminal monitor's reader already has, over a region that draws its

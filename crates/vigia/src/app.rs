@@ -736,6 +736,14 @@ impl App {
             // Both ends are no-ops for the position, so neither key ever moves
             // the view in the direction opposite to itself. Follow is still
             // disengaged above, for the reason `Action::is_manual_scroll` gives.
+            // **The bound is defence, and a mutation survives it.** Relaxing
+            // `<` to `<=` puts `position.file` one past the last file and no gate
+            // over the drawn output reddens, because `View::collect` clamps and
+            // the screen is identical. So this is the same shape as `Body`'s own
+            // unreachable guards: it is carried because nothing downstream should
+            // have to be the only thing standing between a signed step and an
+            // index, not because a test can see it. Measured 2026-08-24 with
+            // [#296](https://github.com/breferrari/vigia/issues/296)'s battery.
             Action::File(step) => {
                 if let Some(file) = self.position.file.checked_add_signed(step)
                     && file < frame.files().len()
