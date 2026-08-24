@@ -4599,7 +4599,12 @@ fn sheet_beside(level: usize) -> (Group, Group, usize) {
 /// verb column serves every section and the sections line up rather than each
 /// shrink-wrapping to its own widest cell.
 fn sheet_roomy() -> (Group, usize) {
-    let (keys, verb) = fields_of(KEYBOARD.iter().chain(MOUSE.iter()), 0);
+    // **Over [`SECTIONS`], not over the two tables.** The painter walks the
+    // sections, so measuring the tables instead would be the width summed from a
+    // different copy of the rows than the one drawn, which is the duplication
+    // [`SHEET_GAP`]'s own docblock records: a sixth section that was not a
+    // keyboard run would draw cells nothing had measured.
+    let (keys, verb) = fields_of(SECTIONS.iter().flat_map(|s| s.rows.rows()), 0);
     let group = Group {
         at: ROOMY_INSET,
         keys,
@@ -4607,12 +4612,25 @@ fn sheet_roomy() -> (Group, usize) {
         gap: ROOMY_GAP,
     };
     // Border, the inset, the keys field, the gap, the verb field, the inset
-    // again, and the border. The trailing inset matches the leading one, as it
-    // does at every other rung: Mock A's own box leaves twelve columns after the
-    // verb field against four before the keys, and §11.1's rule for a mockup and
-    // a drawer that disagree about a width is that the widths are the drawer's.
-    let total = sheet_floor(ROOMY_INSET + keys + ROOMY_GAP + verb + ROOMY_INSET + 2);
-    (group, total)
+    // again, and the border, summed from the group that was just placed rather
+    // than from the constants it was built out of. The trailing inset matches the
+    // leading one, as it does at every other rung: Mock A's own box leaves twelve
+    // columns after the verb field against four before the keys, and §11.1's rule
+    // for a mockup and a drawer that disagree about a width is that the widths are
+    // the drawer's.
+    //
+    // **The heading row is charged too, and `sheet_beside` is why**: it measures
+    // its own label row and its docblock says *"It holds because of this rather
+    // than by luck"*. Here the labels are the shortest thing on the sheet, so the
+    // term is slack by a wide margin (eleven columns against sixty-eight), and
+    // being slack is exactly what makes it invisible when a rename closes it.
+    let rows = group.at + group.keys + group.gap + group.verb + ROOMY_INSET + 2;
+    let headings = SECTIONS
+        .iter()
+        .map(|section| ROOMY_HEADING_INSET + width_of(section.label) + 2)
+        .max()
+        .unwrap_or(0);
+    (group, sheet_floor(rows.max(headings)))
 }
 
 /// Rows the roomy rung draws, frame excluded.
@@ -4621,7 +4639,14 @@ fn sheet_roomy() -> (Group, usize) {
 /// a blank row, the last of which is the air above the bottom border. So the air
 /// costs one row per section plus one, and the headings one row per section.
 fn sheet_roomy_rows() -> usize {
-    1 + 2 * SECTIONS.len() + KEYBOARD.len() + MOUSE.len()
+    // Walked rather than summed as `2 * SECTIONS.len() + KEYBOARD.len() +
+    // MOUSE.len()`, for `sheet_roomy`'s reason one measurement over: the painter
+    // walks the sections, and a formula agreeing with it by arithmetic is a second
+    // copy of the number rather than the same one.
+    1 + SECTIONS
+        .iter()
+        .map(|section| section.rows.rows().len() + 2)
+        .sum::<usize>()
 }
 
 /// One group of gestures, placed: where its block starts inside the sheet, and
@@ -4761,9 +4786,9 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<Sheet
 
 /// What one rung would cost and what it would draw, before it is known to fit.
 ///
-/// The two constructors below are the ladder's only shapes. They return one type
-/// so the loop above tests both with one comparison and never assembles a plan
-/// out of loose locals.
+/// The three constructors below are the ladder's only shapes. They return one
+/// type so the loop above tests all of them with one comparison and never
+/// assembles a plan out of loose locals.
 struct Fit {
     /// Which spelling this rung takes.
     level: usize,
@@ -6160,28 +6185,7 @@ impl Painter<'_> {
 
         match plan.shape {
             Shape::Roomy { group } => self.sheet_roomy(plan, group),
-            Shape::Column { from, mouse, group } => {
-                let mut y = area.y + 1;
-                for row in kept_keyboard(from) {
-                    self.sheet_pipes(area, y);
-                    self.sheet_row(y, row, plan.level, group, area.x);
-                    y += 1;
-                }
-
-                if mouse {
-                    // The group's own rule, which is the same shape the title bar
-                    // has and for the same reason: a heading inside a table is
-                    // furniture, so it runs to the frame rather than standing back
-                    // from it.
-                    self.sheet_heading(area.x, y, width, SHEET_MOUSE_LABEL);
-                    y += 1;
-                    for row in MOUSE.iter() {
-                        self.sheet_pipes(area, y);
-                        self.sheet_row(y, row, plan.level, group, area.x);
-                        y += 1;
-                    }
-                }
-            }
+            Shape::Column { from, mouse, group } => self.sheet_column(plan, from, mouse, group),
             Shape::Beside { keyboard, mouse } => self.sheet_beside(plan, keyboard, mouse),
         }
 
@@ -6192,6 +6196,46 @@ impl Painter<'_> {
         }
         bottom.push('┘');
         self.put(area.x, area.y + area.height - 1, &bottom, width, frame);
+    }
+
+    /// One column: the keyboard rows a rung kept, then the mouse group under its
+    /// own heading or gone.
+    ///
+    /// **Extracted from the match in [`Painter::sheet`]**, which dispatched for
+    /// two of its three arms and carried the third inline. A match that is half
+    /// dispatch and half body is where the fourth rung lands badly.
+    ///
+    /// **The stacking order is the third order this element has, and it is
+    /// deliberately not [`SECTIONS`]'.** Here it is every keyboard row, then the
+    /// mouse group; there the mouse group sits fourth of five. `SPEC.md` §11.1
+    /// carries the reason: a rung with no headings cannot put two unlabelled
+    /// keyboard rows *after* a labelled mouse group without them reading as more
+    /// mouse gestures. It stays control flow rather than a table because a
+    /// dropping rung's [`DROP_ORDER`] set cuts across section bounds and would
+    /// leave empty runs to skip.
+    fn sheet_column(&mut self, plan: &SheetPlan, from: usize, mouse: bool, group: Group) {
+        let area = plan.area;
+        let width = usize::from(area.width);
+
+        let mut y = area.y + 1;
+        for row in kept_keyboard(from) {
+            self.sheet_pipes(area, y);
+            self.sheet_row(y, row, plan.level, group, area.x);
+            y += 1;
+        }
+
+        if mouse {
+            // The group's own rule, which is the same shape the title bar has and
+            // for the same reason: a heading inside a table is furniture, so it
+            // runs to the frame rather than standing back from it.
+            self.sheet_heading(area.x, y, width, SHEET_MOUSE_LABEL);
+            y += 1;
+            for row in MOUSE.iter() {
+                self.sheet_pipes(area, y);
+                self.sheet_row(y, row, plan.level, group, area.x);
+                y += 1;
+            }
+        }
     }
 
     /// Every section headed, with air around it, which is the rung a pane with
@@ -6208,9 +6252,7 @@ impl Painter<'_> {
     fn sheet_roomy(&mut self, plan: &SheetPlan, group: Group) {
         let area = plan.area;
 
-        for y in area.y + 1..area.y + area.height - 1 {
-            self.sheet_pipes(area, y);
-        }
+        self.sheet_pipes_over(area, area.y + 1);
 
         // One blank row under the title bar, then each section: its heading, its
         // rows, and the blank row that separates it from the next. The last of
@@ -6218,11 +6260,17 @@ impl Painter<'_> {
         // is drawn *after* a section rather than before it.
         let mut y = area.y + 2;
         for section in SECTIONS.iter() {
+            // Capped against the frame rather than against the label's own width,
+            // which is `sheet_heading`'s `width - 3` one heading over: a label
+            // written at its own width has nothing to clip it, so a long one would
+            // run through the right pipe instead of being cut. `sheet_roomy` also
+            // charges this row, so the cap is a floor under a width that already
+            // fits rather than the thing keeping the label inside.
             self.put(
                 area.x + ROOMY_HEADING_INSET as u16 + 1,
                 y,
                 section.label,
-                width_of(section.label),
+                usize::from(area.width).saturating_sub(ROOMY_HEADING_INSET + 2),
                 self.theme.chrome_dim,
             );
             y += 1;
@@ -6267,9 +6315,7 @@ impl Painter<'_> {
 
         // From the row below the heading, which drew its own pipes as part of the
         // rule that carries the labels.
-        for y in area.y + 2..area.y + area.height - 1 {
-            self.sheet_pipes(area, y);
-        }
+        self.sheet_pipes_over(area, area.y + 2);
         for (group, rows) in [(keyboard, &KEYBOARD[..]), (mouse, &MOUSE[..])] {
             for (n, row) in rows.iter().enumerate() {
                 self.sheet_row(area.y + 2 + n as u16, row, plan.level, group, area.x);
@@ -6306,6 +6352,17 @@ impl Painter<'_> {
         // places and neither should have to know what painted the cells first.
         self.put(right - 1, y, " ", 1, style);
         self.put(right, y, "│", 1, style);
+    }
+
+    /// The frame down both edges of every interior row from `first` down.
+    ///
+    /// Both whole-block rungs draw one; they differ only in where it starts,
+    /// because `Shape::Beside`'s heading row draws its own pipes as part of the
+    /// rule that carries the labels.
+    fn sheet_pipes_over(&mut self, area: Rect, first: u16) {
+        for y in first..area.y + area.height - 1 {
+            self.sheet_pipes(area, y);
+        }
     }
 
     /// The frame down both edges of one row.
@@ -7663,12 +7720,14 @@ mod sheet_tables {
         // `the_two_guards_no_rung_reaches_are_still_the_right_size` records the
         // other two.
         //
-        // `sheet_roomy` measures its fields over `KEYBOARD.iter().chain(MOUSE)`,
+        // `sheet_roomy` measures its fields over every row `SECTIONS` names,
         // because one verb column has to serve every section or the sections do
-        // not line up. Delete the `chain` and **nothing observable changes**: at
-        // the wide spelling the keyboard group is wider on both fields, so the
-        // maximum is its either way, and no gate over a drawn pane can see the
-        // difference.
+        // not line up. Narrow that to the keyboard rows alone and **nothing
+        // observable changes**: at the wide spelling the keyboard group is wider
+        // on both fields, so the maximum is its either way, and no gate over a
+        // drawn pane can see the difference. The slack is a property of the
+        // tables rather than of how the measurement is spelled, so it survived
+        // the reach moving from a `chain` onto `SECTIONS`.
         //
         // **The wide spelling only, and that is the claim rather than a
         // convenience.** At the tight spelling the mouse group wins both fields,
@@ -7680,9 +7739,9 @@ mod sheet_tables {
         // So what is pinned is the slack, not the reach. The day
         // [#288](https://github.com/breferrari/vigia/issues/288) adds a `MOUSE`
         // row wider than `J  K  Shift+↑  Shift+↓` or than `next / previous
-        // changed file`, this reddens, the `chain` becomes load-bearing, and a
-        // gate over the drawn sheet can be written for it. Until then there is
-        // nothing on a screen to gate.
+        // changed file`, this reddens, the reach becomes load-bearing, and a gate
+        // over the drawn sheet can be written for it. Until then there is nothing
+        // on a screen to gate.
         let (kb_keys, kb_verb) = fields_of(&KEYBOARD, 0);
         let (ms_keys, ms_verb) = fields_of(&MOUSE, 0);
         assert!(
