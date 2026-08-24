@@ -1058,6 +1058,27 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             "the sheet's bottom rule has a hole in it at {w}x{h}:\n{drawn}"
         );
         for (n, row) in rows[1..rows.len() - 1].iter().enumerate() {
+            // **A heading's own fill, which only the title bar's and the bottom
+            // border's were checked.** Deleting the rule run leaves
+            // `│ keyboard        │`, and the reset pass has already written a dim
+            // space into every one of those cells, so both the glyph and the
+            // weight survive: the pipes are `put` explicitly either side, the
+            // label offsets do not move, and no gate compares a heading row
+            // wholesale. A heading is furniture that runs to the frame, or it is
+            // a label floating in a gap.
+            let cells: Vec<char> = row.chars().collect();
+            if row.contains(" keyboard ") || row.contains(" mouse ") {
+                assert_eq!(
+                    cells[cells.len() - 3],
+                    '─',
+                    "a heading of the sheet does not rule to its frame at \
+                     {w}x{h}, so it is a label in a gap:\n{drawn}"
+                );
+                assert!(
+                    cells.iter().filter(|c| **c == '─').count() >= 3,
+                    "a heading of the sheet has almost no rule in it at {w}x{h}:\n{drawn}"
+                );
+            }
             assert!(
                 row.starts_with('│') && row.ends_with('│'),
                 "row {n} of the sheet is not closed at both ends at {w}x{h}, so a \

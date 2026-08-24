@@ -6024,6 +6024,9 @@ impl Painter<'_> {
             width: right.saturating_sub(after).saturating_sub(1),
             height: 1,
         });
+        // The space is written rather than left to the blank pass that ran before
+        // this, so a heading is correct on its own terms: this is called from two
+        // places and neither should have to know what painted the cells first.
         self.put(right - 1, y, " ", 1, style);
         self.put(right, y, "│", 1, style);
     }
