@@ -4987,7 +4987,7 @@ fn column_lines(from: usize, mouse: bool) -> impl Iterator<Item = Line> {
 /// Gestures the whole sheet holds, which is what the page counter counts against.
 ///
 /// **Derived, never a literal.** [#288](https://github.com/breferrari/vigia/issues/288)
-/// adds a sixth mouse row, and a counter reading *of 16* on a table of seventeen
+/// adds a sixth mouse row, and a counter reading *of 17* on a table of eighteen
 /// is a lie no gate over the drawn output would catch: the number is furniture and
 /// every gate here reads the tables.
 const SHEET_TOTAL: usize = KEYBOARD.len() + MOUSE.len();
@@ -4998,7 +4998,7 @@ const SHEET_TOTAL: usize = KEYBOARD.len() + MOUSE.len();
 /// **Ordinals within what this pane can reach, not within [`SHEET_TOTAL`].** A
 /// rung that dropped rows for width draws a set that is not contiguous in display
 /// order, because [`DROP_ORDER`] gives up `q` first and `q` is at the bottom of
-/// the table. So `1-3 of 16` means *three of the sixteen, and this pane reaches
+/// the table. So `1-3 of 18` means *three of the eighteen, and this pane reaches
 /// nine*, and the reader's arithmetic is the say-so. True positions with gaps
 /// would read as a rendering fault rather than as a count.
 fn sheet_counter(shown: (usize, usize)) -> String {
@@ -5087,20 +5087,20 @@ fn sheet_beside_rows() -> usize {
 /// **Above every one of those sits the roomy rung**
 /// ([#285](https://github.com/breferrari/vigia/issues/285)): the same one column
 /// with its sections headed and air around them, at sixty-eight columns by
-/// thirty rows. It is **first** and that is what makes it additive, for the
+/// thirty-one rows. It is **first** and that is what makes it additive, for the
 /// reason the widening rung is additive by being third: it needs strictly more of
 /// both axes than the full one-column rung, so every pane that takes it would
-/// otherwise have drawn all seventeen gestures anyway and every pane that does not
+/// otherwise have drawn every gesture anyway and every pane that does not
 /// take it is untouched.
 ///
 /// **Between those two lies the widening rung**
 /// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
 /// one-column sheet is too tall for the pane but the pane is wide enough to put
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
-/// columns for five rows at the wide spelling (104 against 56, twenty rows
-/// against fifteen), or thirty-three columns for the same five rows at the tight
+/// columns for five rows at the wide spelling (104 against 56, twenty-one rows
+/// against sixteen), or thirty-three columns for the same five rows at the tight
 /// one (71 against 38 since [#286](https://github.com/breferrari/vigia/issues/286),
-/// and 76 against 43 before it), and drawing all seventeen gestures where twelve drew
+/// and 76 against 43 before it), and drawing every gesture where twelve drew
 /// before. It is tried **after** the full one-column rung and **before** any
 /// dropping rung, which is what makes it additive: a pane on which one column
 /// already fits never sees it, so nothing that draws every row today changes.

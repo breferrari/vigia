@@ -1074,20 +1074,6 @@ impl View {
         }
     }
 
-    /// Whether the whole diff is already on screen.
-    ///
-    /// True only when nothing has been scrolled past and the walk ran out of rows
-    /// before it ran out of room, which together mean there is nowhere to go. It
-    /// is what decides that the diff's scrollbar would be a column spent saying
-    /// there is nothing to scroll.
-    ///
-    /// Free, and deliberately not "did I draw every file": a screen can show
-    /// every changed file and still be scrolled, and a screen can show one file
-    /// and be complete.
-    pub fn fits(&self, rows: usize) -> bool {
-        self.top == Position::default() && self.rows.len() < rows
-    }
-
     /// Collect the rows visible from `position`, and no others.
     ///
     /// `height` is the body's height in rows. Zero is legal and gives an empty

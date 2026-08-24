@@ -558,3 +558,67 @@ the **unpinned** frame counted something before it asserts the pinned frame
 counted nothing, because a zero over a fixture that had nothing to count is not
 evidence, and that is the same two-fixture rule §7 states for every other cost
 claim here.
+
+## B16 — the audit: three gates that were green with the feature deleted
+
+The ruling is `SPEC.md` §11.2 B16. This is what its own audit found, and the
+shape is worth more than any single finding: **every serious one was in the
+tests rather than in the code.**
+
+**Three gates passed against a `vigia` with the pin removed**, and each was
+vacuous for its own reason, which is why noticing one would not have found the
+others.
+
+- *The toggle gate discarded the middle draw.* It pressed `s`, wrote
+  `let _ = draw(...)`, pressed `s` again and compared the ends. That asserts only
+  that doing nothing twice does nothing. It observes the pinned screen now.
+- *The follow gate followed the last file.* Nothing comes after the last file, so
+  a screen resting in it draws one file whether or not anything is pinned. It
+  follows a middle file now, and scrolls off its end before it looks.
+- *The file-changing gate never left row zero.* `n`, `p`, a digit and a click all
+  land on a heading, and every file in the fixture is taller than the body, so
+  one file is drawn either way. It scrolls into the new file before it looks.
+
+**And a fourth gap was worse, because nothing covered it at all: `s` was never
+proven bound to a key.** Deleting the `KeyCode::Char('s')` arm left the whole
+workspace green, since every gate constructed `Action::ToggleSingle` directly.
+B16 could have shipped a gesture no keyboard could reach. [#295](https://github.com/breferrari/vigia/issues/295)
+closed exactly that hole for `r` with a gate of its own and the lesson did not
+travel; `r` was also missing from `every_key_the_map_binds_is_named_on_the_sheet`,
+whose hand-written list is [#288](https://github.com/breferrari/vigia/issues/288)'s
+to fix, and both are in it now.
+
+**The one behavioural defect the audit found is an input defect, not a drawing
+one.** The shell drains actions in a batch and paints once at the end of it, so
+`G` and a held `k` arrive together with no frame between them. `G` under a pin
+wrote the pinned file's whole height and let `View::collect` clamp it on the way
+to the screen: the right rows are drawn, and the *position* left behind is one
+nothing can move from, so every `k` in the same batch walked the row down and
+every one of them clamped to the same screen. Nine keystrokes swallowed on a
+22-row file at a 13-row body. Unpinned the case cannot arise, because `G` there
+resolves to row zero. `Action::Bottom` writes the resting row now, and pays for
+it with a staleness correction it used to get from `collect`'s clamp for free:
+a file that grew since the bar was drawn rests slightly short of its true bottom
+for one tick, which is invisible and self-correcting where swallowed keystrokes
+are neither.
+
+**`View::fits` was deleted rather than fixed**, and the reason is the same
+literal the defect above the fold is about. It compared `top == Position::default()`,
+which under a pin can never hold, so it would have claimed every pinned file
+overflows its pane. It was the **third** instance of that bound in this file and
+the only one with no caller anywhere in the workspace: the other two were fixed
+because something depended on them. A dead function that this change makes wrong
+is the clearest case for removal there is, and keeping a public one alive to
+avoid an API break in a library that exists to serve one binary is the worse
+trade. The alternative, giving `View` a `first` field so the function could be
+made correct, is adding surface to justify surface.
+
+**The stale-number sweep found nine more in docblocks the diff never touched.**
+`render.rs` and `tests/sheet.rs` carry the sheet's dimensions in prose beside the
+code that draws it, and the diff re-derived every number it *stated* while
+leaving the ones it merely *passed*. One was a live literal rather than prose:
+`the_floor_is_a_rung_now...` computed the title bar's floor from `" 16-16 of 16 "`,
+which has the same character count as `" 18-18 of 18 "`, so it went on computing
+thirty and going green while describing a table two rows smaller than the one it
+was measuring. That is the same shape as the counter's own reason for being
+`KEYBOARD.len() + MOUSE.len()` rather than a literal, one layer down in the gate.

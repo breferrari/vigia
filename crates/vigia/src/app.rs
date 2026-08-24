@@ -862,9 +862,30 @@ impl App {
             Action::Bottom => {
                 if let Some(file) = self.pinned_file(frame) {
                     self.anchored = false;
+                    // **The resting row rather than the file's height, and the
+                    // difference is a whole batch of keystrokes.** `View::collect`
+                    // clamps an overrun to the last screenful either way, so
+                    // writing the raw span draws the right screen; what it does
+                    // not do is leave a *position* a later action in the same
+                    // wake can move from. The shell drains actions in a batch and
+                    // paints once at the end of it, so `G` and then a held `k`
+                    // arrive together: the `k`s walk `span` down toward
+                    // `span - height`, every one of them still clamps to the same
+                    // row, and the reader presses a key up to `span - height`
+                    // times before the screen moves. Nine on this file at this
+                    // pane. Unpinned the case cannot arise, because `G` there is
+                    // `jump_to`, which resolves to row zero.
+                    //
+                    // Clamping here costs the staleness correction `collect`'s own
+                    // clamp gave for free: `span_in` reads the generation the bar
+                    // was drawn from ([#84](https://github.com/breferrari/vigia/issues/84)),
+                    // so a file that grew since then rests slightly short of its
+                    // true bottom for one tick. That is invisible and
+                    // self-correcting, where swallowed keystrokes are neither.
+                    let span = crate::view::span_in(frame, file)?;
                     self.position = Position {
                         file,
-                        row: crate::view::span_in(frame, file)?,
+                        row: span.saturating_sub(height),
                     };
                 } else {
                     self.jump_to(frame.files().len().saturating_sub(1));

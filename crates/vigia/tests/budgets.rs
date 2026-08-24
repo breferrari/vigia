@@ -2410,7 +2410,7 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
 ///
 /// **Tall and wide**, because that is what the roomy rung needs
 /// ([#285](https://github.com/breferrari/vigia/issues/285)): a room of
-/// sixty-eight columns and a body of thirty rows.
+/// sixty-eight columns and a body of thirty-one rows.
 const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,

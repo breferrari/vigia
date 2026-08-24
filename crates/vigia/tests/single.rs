@@ -22,11 +22,12 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Position, Row, TRACK_SCALE, View, Viewport, action_for, body_layout,
-    diff_height, regions,
+    Action, App, Body, Glyphs, Position, Regions, Row, TRACK_SCALE, Theme, View, Viewport,
+    action_for, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -379,10 +380,19 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
             Position { file: want, row: 0 },
             "{action:?} did not move the pin to file {want}"
         );
+        // **Scrolled off the new file's end before the pin is read**, which is
+        // what makes the second assertion a claim. Every one of these gestures
+        // lands on row zero of a file taller than the body, so a screen drawn
+        // from there shows one file whether or not anything is pinned: #297's
+        // first draft asserted that and was green with the feature deleted.
+        app.apply(Action::Scroll(SPAN as isize), &mut frame, body())
+            .expect("apply");
+        let view = draw(&mut app, &mut frame, &mut highlighter, &history, listed());
         assert_eq!(
             files_on(&view),
             vec![want],
-            "the pin followed the gesture and then drew somebody else's rows"
+            "the pin followed {action:?} to file {want} and then drew somebody \
+             else's rows"
         );
     }
 
@@ -449,21 +459,37 @@ fn follow_still_moves_between_files_while_it_is_pinned() {
          pins loses the mode the pin is most useful beside"
     );
 
-    let target = frame.files()[FILES - 1].path.clone();
+    // **A middle file, not the last**, and that is the whole non-vacuity of the
+    // second assertion. Following the last file draws one file whether or not
+    // anything is pinned, because there is nothing after it to spill into, so
+    // #297's first draft of this gate was green with the feature deleted.
+    const FOLLOWED: usize = 1;
+    // In a `const` block, which is this repo's idiom for a claim about constants:
+    // a bad one is then a build that will not compile rather than a suite that
+    // goes red, and it is what `render.rs` already does for `SECTIONS`' bounds.
+    const _: () = assert!(
+        FOLLOWED + 1 < FILES,
+        "the followed file is the last, so `files_on` proves nothing"
+    );
+    let target = frame.files()[FOLLOWED].path.clone();
     assert!(
         app.follow(&target, &frame),
         "follow did not move the pinned viewport, so `f` is the gesture this \
          ruling took away"
     );
+    // Scrolled to the followed file's end, so an unpinned walk would be showing
+    // the file below it by the time `files_on` is read.
+    app.apply(Action::Scroll(SPAN as isize), &mut frame, body())
+        .expect("apply");
     let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
     assert_eq!(
-        view.top.file,
-        FILES - 1,
-        "a follow under the pin did not reach the file that changed"
+        view.top.file, FOLLOWED,
+        "a follow under the pin did not reach the file that changed, or scrolling \
+         off its end left it"
     );
     assert_eq!(
         files_on(&view),
-        vec![FILES - 1],
+        vec![FOLLOWED],
         "the pin let go when follow moved it"
     );
 }
@@ -497,7 +523,18 @@ fn toggling_the_pin_returns_the_screen_it_started_from() {
     let before = draw(&mut app, &mut frame, &mut highlighter, &history, split());
     app.apply(Action::ToggleSingle, &mut frame, body())
         .expect("apply");
-    let _ = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    // **The middle draw is observed rather than discarded**, and until #297's
+    // audit it was `let _ = draw(...)`. That made the whole gate green with the
+    // feature deleted: it asserted only that doing nothing twice does nothing.
+    // What has to be true is that the pin was *on* in between and drew the pinned
+    // screen, and that the unpin then gave the other files back.
+    let pinned = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        files_on(&pinned),
+        vec![PINNED],
+        "the middle of the toggle pair drew more than the pinned file, so the \
+         identity below is between two unpinned screens"
+    );
     app.apply(Action::ToggleSingle, &mut frame, body())
         .expect("apply");
     let after = draw(&mut app, &mut frame, &mut highlighter, &history, split());
@@ -518,7 +555,20 @@ fn toggling_the_pin_returns_the_screen_it_started_from() {
 
     app.apply(Action::ToggleSingle, &mut frame, body())
         .expect("apply");
-    let _ = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    let clamped = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        files_on(&clamped),
+        vec![PINNED],
+        "the pin did not take the straddle down to one file"
+    );
+    assert_eq!(
+        clamped.top,
+        Position {
+            file: PINNED,
+            row: SPAN - body(),
+        },
+        "the pin did not rest the straddled file's last row on the bottom"
+    );
     app.apply(Action::ToggleSingle, &mut frame, body())
         .expect("apply");
     let settled = draw(&mut app, &mut frame, &mut highlighter, &history, split());
@@ -526,7 +576,13 @@ fn toggling_the_pin_returns_the_screen_it_started_from() {
     for round in 0..3 {
         app.apply(Action::ToggleSingle, &mut frame, body())
             .expect("apply");
-        let _ = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        let between = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert_eq!(
+            files_on(&between),
+            vec![PINNED],
+            "toggle pair {round} did not pin anything, so the identity below is \
+             between two unpinned screens"
+        );
         app.apply(Action::ToggleSingle, &mut frame, body())
             .expect("apply");
         let again = draw(&mut app, &mut frame, &mut highlighter, &history, split());
@@ -731,6 +787,361 @@ fn a_pinned_gesture_survives_the_diff_it_was_made_against() {
         assert!(
             view.rows.is_empty(),
             "a clean worktree drew diff rows after {action:?}"
+        );
+    }
+}
+
+#[test]
+fn s_is_what_asks_for_one_file_and_s_is_what_gives_the_diff_back() {
+    // **The binding itself, through the real key resolution.** Every other gate
+    // in this file constructs `Action::ToggleSingle`, so deleting the
+    // `KeyCode::Char('s')` arm left the entire workspace green: B16 could have
+    // shipped with a gesture nothing could reach from a keyboard. #295 closed
+    // exactly this hole for `r` and it reopened here, which is why the check is
+    // the action's *resolution* rather than its existence.
+    //
+    // `Regions::default()` deliberately: a key is a key, so the hit-test that
+    // resolves a pointer has nothing to say about it.
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+
+    let press = |key: char| Event::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+    assert_eq!(
+        action_for(&press('s'), Regions::default()),
+        Some(Action::ToggleSingle),
+        "`s` resolves to no action, so nothing on a keyboard reaches the pin"
+    );
+
+    // And it toggles rather than latching, read off the screen rather than off
+    // the state, because the state is private and the screen is the promise.
+    let scratch = fixture("shell-single-key");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+
+    app.apply(Action::File(PINNED as isize), &mut frame, body())
+        .expect("apply");
+    app.apply(Action::Scroll(SPAN as isize - 4), &mut frame, body())
+        .expect("apply");
+    let straddle = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert!(
+        files_on(&straddle).len() > 1,
+        "the fixture does not straddle, so the press below cannot be seen to work"
+    );
+
+    // **The total rather than the drawn file count, because the count cannot see
+    // the second press.** The first `s` rests the straddled file's last row on
+    // the bottom, and from there the file has exactly a screenful left, so an
+    // *unpinned* walk from the same position also draws one file. What separates
+    // them is what the bar is scaled against, which is the whole changed set
+    // again the moment the pin comes off.
+    let action = action_for(&press('s'), Regions::default()).expect("an action");
+    app.apply(action, &mut frame, body()).expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        files_on(&view),
+        vec![PINNED],
+        "the first `s` did not pin the diff to one file"
+    );
+    assert_eq!(
+        view.total_rows, SPAN,
+        "the first `s` left the bar scaled against the changed set"
+    );
+
+    let action = action_for(&press('s'), Regions::default()).expect("an action");
+    app.apply(action, &mut frame, body()).expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert!(
+        view.total_rows > SPAN,
+        "the second `s` did not give the rest of the diff back: the bar still \
+         measures {} rows against the pinned file's {SPAN}",
+        view.total_rows
+    );
+}
+
+#[test]
+fn a_pinned_end_key_and_a_scroll_in_one_wake_both_move() {
+    // **The shell drains actions in a batch and paints once at the end of it**,
+    // so `G` and a held `k` arrive together with no frame between them. `G` under
+    // a pin used to write the pinned file's whole height and let `View::collect`
+    // clamp it on the way to the screen, which draws the right rows and leaves a
+    // *position* nothing can move from: every `k` in the same batch walked the
+    // row down from `span` and every one of them still clamped to the same
+    // screen. Nine keystrokes swallowed on this fixture at this pane.
+    //
+    // Unpinned the case cannot arise, because `G` there is `jump_to`, which
+    // resolves to row zero. So this is the pin's own defect and it needs the
+    // pin's own gate.
+    let scratch = fixture("shell-single-batch");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = pinned(&mut frame);
+
+    // One batch: no `App::view` between the two, which is what production does.
+    app.apply(Action::Bottom, &mut frame, body())
+        .expect("apply");
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+
+    assert_eq!(
+        view.top,
+        Position {
+            file: PINNED,
+            row: SPAN - body() - 1,
+        },
+        "a `k` batched with `G` moved nothing, so the reader presses a key up to \
+         {} times before the screen answers",
+        SPAN - body()
+    );
+}
+
+#[test]
+fn the_first_file_pins_like_any_other() {
+    // **Where `first` coincides with the unpinned bound**, so a walk that ignored
+    // the pin entirely would be indistinguishable here on the position alone.
+    // What separates them is the file below: unpinned, a screen scrolled to the
+    // end of file zero spills into file one.
+    let scratch = fixture("shell-single-first");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+
+    app.apply(Action::ToggleSingle, &mut frame, body())
+        .expect("apply");
+    app.apply(Action::Scroll(SPAN as isize * 2), &mut frame, body())
+        .expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+
+    assert_eq!(files_on(&view), vec![0], "the pin on file zero let go");
+    assert_eq!(
+        view.top,
+        Position {
+            file: 0,
+            row: SPAN - body(),
+        },
+        "scrolling past the end of a pinned first file did not clamp to it"
+    );
+}
+
+#[test]
+fn a_pinned_pane_draws_and_its_bar_is_the_files() {
+    // **Nothing in the suite drew a pinned view until #297's audit asked.** Every
+    // other gate here reads a `View`, and a `View` is not a screen: the diff's
+    // scrollbar, the row wash, the caret and the rail are all the painter's, and
+    // a pin that produced a correct `View` and a broken screen would have been
+    // invisible to all of them.
+    let scratch = fixture("shell-single-drawn");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = pinned(&mut frame);
+
+    let at = Rect::new(0, 0, 80, 24);
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let laid = body_layout(at, &chrome, FILES);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, laid)
+        .expect("view");
+    let mut buf = Buffer::empty(at);
+    render(
+        &mut buf,
+        at,
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
+
+    let drawn: String = (0..at.height)
+        .map(|row| {
+            (0..at.width)
+                .map(|col| buf[(col, row)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let pinned_path = frame.files()[PINNED].path.clone();
+    assert!(
+        drawn.contains(&pinned_path),
+        "the pinned file's own path is not on the drawn pane:\n{drawn}"
+    );
+    // Every other changed file is still in the **list**, which is the map the pin
+    // leaves alone, so the drawn pane naming them is not a failure. What must not
+    // be there is another file's *diff heading*, and the view is the oracle for
+    // that.
+    assert_eq!(
+        files_on(&view),
+        vec![PINNED],
+        "the drawn pane's diff reached past the pinned file"
+    );
+    assert!(
+        view.list.len() > 1,
+        "the pinned pane drew no map, so the reader has no way to change file"
+    );
+    assert_eq!(
+        view.total_rows, SPAN,
+        "the drawn bar is scaled against something other than the pinned file"
+    );
+}
+
+#[test]
+fn the_pin_and_the_rail_do_not_fight() {
+    // Two view gestures that both change what the body is made of. `r` moves the
+    // map beside the diff and `s` narrows what the diff may reach, so neither
+    // should touch the other; nothing in the suite had asked.
+    let scratch = fixture("shell-single-rail");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = pinned(&mut frame);
+
+    // A pane wide enough to honour the rail, which is 134 columns since #252.
+    let at = Rect::new(0, 0, 160, 30);
+    app.apply(Action::ToggleRail, &mut frame, body())
+        .expect("apply");
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let laid = body_layout(at, &chrome, FILES);
+    assert!(
+        laid.rail,
+        "the pane did not take the rail, so this gate is vacuous"
+    );
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, laid)
+        .expect("view");
+    assert_eq!(
+        files_on(&view),
+        vec![PINNED],
+        "the rail let the pinned diff reach another file"
+    );
+    assert!(
+        view.list.len() > 1,
+        "the rail drew no map beside the pinned diff"
+    );
+}
+
+#[test]
+fn a_pane_with_no_room_pins_without_panicking() {
+    // Degenerate shapes, which `View::collect` is public for and which
+    // `tests/list.rs`'s own grid sweeps with the pin off. A body of zero rows
+    // resolves nothing and must still answer; a body of one row is the floor
+    // `Body::split` gives the diff, and it is where an off-by-one in the pinned
+    // range would land.
+    let scratch = fixture("shell-single-degenerate");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for diff_rows in [0usize, 1, 2] {
+        for list_rows in [0usize, 1, 4] {
+            let view = View::collect(
+                &mut frame,
+                &mut highlighter,
+                &history,
+                Viewport {
+                    position: Position {
+                        file: PINNED,
+                        row: SPAN * 2,
+                    },
+                    anchored: true,
+                    diff_rows,
+                    list_rows,
+                    measured: true,
+                    single: true,
+                    ..Viewport::default()
+                },
+            )
+            .expect("a degenerate pinned viewport still collects");
+
+            assert!(
+                view.rows.len() <= diff_rows,
+                "a {diff_rows}-row body drew {} rows",
+                view.rows.len()
+            );
+            assert!(
+                view.list.len() <= list_rows,
+                "a {list_rows}-row list drew {} rows",
+                view.list.len()
+            );
+            if diff_rows > 0 {
+                assert_eq!(
+                    view.top.file, PINNED,
+                    "a {diff_rows}-row pinned body resolved onto another file"
+                );
+                assert_eq!(
+                    view.total_rows, SPAN,
+                    "a {diff_rows}-row pinned body measured something other than \
+                     the pinned file"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_page_and_a_half_page_clamp_at_the_pinned_files_ends() {
+    // `Page` and `HalfPage` go through `App::step_by` into `App::scroll`, which
+    // is the path `scrolling_stops_at_both_ends_of_the_pinned_file` already
+    // covers a row at a time. They are gated separately because the step is a
+    // *screen* rather than a row, so a clamp that happened to be right for one
+    // row could still overshoot for a page, and because the two keys are what a
+    // reader actually holds.
+    let scratch = fixture("shell-single-pages");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = pinned(&mut frame);
+
+    for down in [Action::Page(1), Action::HalfPage(1)] {
+        for _ in 0..6 {
+            app.apply(down, &mut frame, body()).expect("apply");
+        }
+        let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert_eq!(
+            view.top,
+            Position {
+                file: PINNED,
+                row: SPAN - body(),
+            },
+            "{down:?} past the end of a pinned file did not clamp to it"
+        );
+        assert_eq!(
+            files_on(&view),
+            vec![PINNED],
+            "{down:?} left the pinned file"
+        );
+    }
+
+    for up in [Action::Page(-1), Action::HalfPage(-1)] {
+        for _ in 0..6 {
+            app.apply(up, &mut frame, body()).expect("apply");
+        }
+        let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert_eq!(
+            view.top,
+            Position {
+                file: PINNED,
+                row: 0
+            },
+            "{up:?} above a pinned file left it"
         );
     }
 }

@@ -843,6 +843,14 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
         "Shift+↓",
         "f",
         "m",
+        // **`r` and `s` were missing until #297**, which is the hole
+        // [#288](https://github.com/breferrari/vigia/issues/288) exists to close
+        // properly: this list is hand written, so a key added to `KEYBOARD` is
+        // covered here only if somebody remembers, and #295 did not. `r` shipped
+        // uncovered for a release. The list is still hand written and that is
+        // #288's to fix; what this change owes is not to add a third.
+        "r",
+        "s",
         "?",
     ] {
         assert!(
@@ -953,7 +961,7 @@ const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
 /// the height at which the tallest rung fits.
 ///
 /// **Raised from 32 by [#285](https://github.com/breferrari/vigia/issues/285)**,
-/// and the old ceiling is why: the roomy rung needs a body of thirty rows,
+/// and the old ceiling is why: the roomy rung needs a body of thirty-one rows,
 /// which this fixture reaches at a pane of thirty-two, so a sweep stopping there
 /// would have covered the new rung at exactly one height, thirty-two, and called
 /// it swept.
@@ -1557,7 +1565,7 @@ fn the_roomy_rung_arrives_at_the_width_the_ruling_states() {
 #[test]
 fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // **The other axis, and the one no gate walked.** `SPEC.md` §11.1 states the
-    // rung needs "a body of thirty rows", and a body is the pane less the
+    // rung needs "a body of thirty-one rows", and a body is the pane less the
     // header and less a footer whose height is its own ladder in the width. So the
     // pane height it arrives at is not thirty and cannot be derived by
     // reading: on this fixture at a hundred columns it is thirty-two, three rows
@@ -1583,7 +1591,7 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
     // **Air is the one thing on this element that a count cannot see.** Every
     // gate above counts gestures or measures the frame, and a roomy rung that
     // drew its sections back to back with the blank rows all at the bottom would
-    // satisfy every one of them: same width, same height, same seventeen gestures,
+    // satisfy every one of them: same width, same height, same eighteen gestures,
     // same closed box. The shape is what this pins, row by row.
     //
     // Columns are literals rather than derived, because a gate that computed them
@@ -1697,8 +1705,8 @@ fn the_roomy_rung_is_additive_and_costs_no_pane_a_gesture() {
     // evidence.
     //
     // Two claims over one sweep, and they are not the same claim. Every pane that
-    // takes the rung draws all seventeen gestures, so no pane can have lost one to
-    // the air. And the shortest pane at each width that draws all seventeen is
+    // takes the rung draws every gesture, so no pane can have lost one to
+    // the air. And the shortest pane at each width that draws every one of them is
     // still a pane that takes no headings, so no pane was made to wait longer for
     // a full sheet than it did before the rung existed. The second is what fails
     // if the rung is ever measured smaller than the one-column sheet it sits
@@ -2241,7 +2249,7 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
     //
     // Pinned at fifty columns, too narrow for the two-column rung, so height is
     // the only axis moving. One row of pane buys one more gesture on page one all
-    // the way up, with the single flat step at seventeen rows where the row it
+    // the way up, with the single flat step at nineteen rows where the row it
     // buys is the mouse group's heading rather than a gesture.
     let expected = [
         (8u16, 3usize, 7usize),
@@ -2669,7 +2677,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
         "this gate is not looking at the roomy rung"
     );
 
-    // A row no other rung reaches: the plain rung is twenty rows tall and the
+    // A row no other rung reaches: the plain rung is twenty-one rows tall and the
     // two-column rung fourteen, so row 25 of this sheet is the roomy rung's alone.
     let deep = sheet.top + 25;
     let inside = sheet.left + 34;
@@ -2723,10 +2731,10 @@ fn the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_sta
     // guard's slack, and they are asserted rather than described.
     //
     // Restated here rather than imported for [`TITLE`]'s reason. The counter's own
-    // widest spelling is ` 16-16 of 16 `, which is the range form at the table's
-    // own size: no page draws it, since a page showing all seventeen draws no
+    // widest spelling is ` 18-18 of 18 `, which is the range form at the table's
+    // own size: no page draws it, since a page showing every gesture draws no
     // counter, and it is the bound the box is sized against.
-    let floor = "─ gestures ".chars().count() + " 16-16 of 16 ".chars().count() + 6;
+    let floor = "─ gestures ".chars().count() + " 18-18 of 18 ".chars().count() + 6;
     assert_eq!(floor, 30, "the title bar's floor is not what §11.1 states");
 
     sweep!("sheet-guards", |paint| {
@@ -2979,7 +2987,7 @@ fn a_single_page_sheet_still_toggles_in_one_press() {
     //
     // **What it does not catch, said rather than implied.** The obvious mutation,
     // putting the paged rungs first in the ladder, leaves this green: a tall pane's
-    // paged rung has capacity for all seventeen lines, so it is one page and closes
+    // paged rung has capacity for all nineteen lines, so it is one page and closes
     // on the second press exactly as before. That mutation reddens nineteen other
     // gates here, every roomy-rung and two-column gate among them, because what it
     // actually destroys is the rungs it steps in front of. Verified by running it.
