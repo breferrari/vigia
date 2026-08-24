@@ -212,33 +212,70 @@ fn the_sheet_moves_no_content() {
     // coloured and reports every syntax span on the pane as having moved. It
     // failed exactly that way, on a `f` that was `Reset` before and `light_red`
     // after, which is I7 working rather than the sheet misbehaving.
+    //
+    // **At two panes since [#285](https://github.com/breferrari/vigia/issues/285),
+    // and the rung each takes is asserted.** This ran only at eighty by
+    // twenty-four, which is the plain one-column rung. The roomy rung covers a
+    // third more cells than any rung that existed when this was written and is
+    // what a full-screen terminal now takes, so the pane most readers have was
+    // the one B12's load-bearing claim had never been checked on.
     let mut app = App::past_first_paint();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
-    toggle(&mut app, &mut frame);
-    let (after, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
-    let sheet = laid
-        .sheet
-        .expect("the sheet was not published to the pointer");
+    for (at, rung) in [(area(), "keyboard row"), (ROOMY_PANE, "moving")] {
+        let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        toggle(&mut app, &mut frame);
+        let (after, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let sheet = laid
+            .sheet
+            .expect("the sheet was not published to the pointer");
 
-    let mut compared = 0;
-    for y in 0..TALL {
-        for x in 0..WIDE {
-            if sheet.covers(x, y) {
-                continue;
+        // Non-vacuity: without this the two passes could draw the same rung and
+        // the second would be a slower copy of the first.
+        let drawn = text_of(
+            &after,
+            Rect::new(sheet.left, sheet.top, sheet.width, sheet.height),
+        );
+        let roomy = drawn.contains("moving");
+        assert_eq!(
+            roomy,
+            rung == "moving",
+            "the {}x{} pane did not draw the rung this case is named for:\n{drawn}",
+            at.width,
+            at.height
+        );
+
+        let mut compared = 0;
+        for y in 0..at.height {
+            for x in 0..at.width {
+                if sheet.covers(x, y) {
+                    continue;
+                }
+                assert_eq!(
+                    (before[(x, y)].symbol(), before[(x, y)].style()),
+                    (after[(x, y)].symbol(), after[(x, y)].style()),
+                    "cell {x},{y} changed under a sheet that is supposed to move \
+                     nothing, on the {}x{} pane",
+                    at.width,
+                    at.height
+                );
+                compared += 1;
             }
-            assert_eq!(
-                (before[(x, y)].symbol(), before[(x, y)].style()),
-                (after[(x, y)].symbol(), after[(x, y)].style()),
-                "cell {x},{y} changed under a sheet that is supposed to move nothing"
-            );
-            compared += 1;
         }
+        assert!(compared > 0, "the sweep compared nothing");
+
+        // Back down, so the next pane starts from the same state this one did.
+        toggle(&mut app, &mut frame);
     }
-    assert!(compared > 0, "the sweep compared nothing");
 }
+
+/// A pane the roomy rung fits on: a room of 68 columns and a body of 29 rows.
+///
+/// Named because three gates run at both rungs now, and a pane size copied into
+/// three places is three places that can disagree about which rung they are
+/// asserting.
+const ROOMY_PANE: Rect = Rect::new(0, 0, 120, 40);
 
 #[test]
 fn the_sheet_is_opaque() {
@@ -266,46 +303,71 @@ fn the_sheet_is_opaque() {
     washed_theme.added_row = washed_theme.added_row.bg(Color::Green);
     washed_theme.removed_row = washed_theme.removed_row.bg(Color::Red);
 
-    // Non-vacuity: the pane has to be drawing washed rows, or a sheet with no wash
-    // under it proves nothing about a sheet that covers one.
-    let (closed, _) = paint_with(
-        &mut app,
-        &mut frame,
-        &mut highlighter,
-        &history,
-        area(),
-        &washed_theme,
-    );
-    let washed = (0..TALL)
-        .flat_map(|y| (0..WIDE).map(move |x| (x, y)))
-        .filter(|&(x, y)| !matches!(closed[(x, y)].style().bg, None | Some(Color::Reset)))
-        .count();
-    assert!(
-        washed > 0,
-        "no cell on the pane carries a background, so this fixture cannot show a \
-         wash through the sheet"
-    );
+    // **At both rungs since [#285](https://github.com/breferrari/vigia/issues/285).**
+    // The roomy rung is the one with air in it: six of its twenty-seven interior
+    // rows are blank, and a blank row is exactly a row the drawer writes nothing
+    // over, so it is the shape most exposed to a background the blank pass failed
+    // to clear. The rung that had this gate is the one with the least air.
+    for at in [area(), ROOMY_PANE] {
+        // Non-vacuity: the pane has to be drawing washed rows, or a sheet with no
+        // wash under it proves nothing about a sheet that covers one.
+        let (closed, _) = paint_with(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            at,
+            &washed_theme,
+        );
+        let washed = (0..at.height)
+            .flat_map(|y| (0..at.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| !matches!(closed[(x, y)].style().bg, None | Some(Color::Reset)))
+            .count();
+        assert!(
+            washed > 0,
+            "no cell on the {}x{} pane carries a background, so this fixture \
+             cannot show a wash through the sheet",
+            at.width,
+            at.height
+        );
 
-    toggle(&mut app, &mut frame);
-    let (open, laid) = paint_with(
-        &mut app,
-        &mut frame,
-        &mut highlighter,
-        &history,
-        area(),
-        &washed_theme,
-    );
-    let sheet = laid.sheet.expect("no sheet published");
+        toggle(&mut app, &mut frame);
+        let (open, laid) = paint_with(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            &history,
+            at,
+            &washed_theme,
+        );
+        let sheet = laid.sheet.expect("no sheet published");
+        let drawn = text_of(
+            &open,
+            Rect::new(sheet.left, sheet.top, sheet.width, sheet.height),
+        );
+        assert_eq!(
+            drawn.contains("moving"),
+            at == ROOMY_PANE,
+            "the {}x{} pane did not draw the rung this case is named for:\n{drawn}",
+            at.width,
+            at.height
+        );
 
-    for y in sheet.top..sheet.top + sheet.height {
-        for x in sheet.left..sheet.left + sheet.width {
-            assert!(
-                matches!(open[(x, y)].style().bg, None | Some(Color::Reset)),
-                "cell {x},{y} inside the sheet kept the background {:?} from what \
-                 it covers, so the sheet is a tint rather than a window",
-                open[(x, y)].style().bg
-            );
+        for y in sheet.top..sheet.top + sheet.height {
+            for x in sheet.left..sheet.left + sheet.width {
+                assert!(
+                    matches!(open[(x, y)].style().bg, None | Some(Color::Reset)),
+                    "cell {x},{y} inside the {}x{} pane's sheet kept the \
+                     background {:?} from what it covers, so the sheet is a tint \
+                     rather than a window",
+                    at.width,
+                    at.height,
+                    open[(x, y)].style().bg
+                );
+            }
         }
+
+        toggle(&mut app, &mut frame);
     }
 }
 
