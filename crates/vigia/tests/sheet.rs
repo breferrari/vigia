@@ -86,9 +86,19 @@ fn wheel(column: u16, row: u16) -> Event {
     })
 }
 
-/// Press `?`, through the app rather than around it.
+/// Press `?` on the default pane, through the app rather than around it.
 fn toggle(app: &mut App, frame: &mut Frame<'_>) {
-    let height = body_layout(area(), &chrome(app), FILES).diff;
+    toggle_at(app, frame, area());
+}
+
+/// [`toggle`] on a pane of the caller's choosing.
+///
+/// **Parameterised rather than open-coded**, which ten of #286's own call sites
+/// were: each spelled `apply(ToggleSheet, ..)` against its own rect and dropped
+/// the assertion below with it, so a `?` that asked the shell to quit would have
+/// been read as a `?` that opened a sheet.
+fn toggle_at(app: &mut App, frame: &mut Frame<'_>, at: Rect) {
+    let height = body_layout(at, &chrome(app), FILES).diff;
     assert!(
         app.apply(Action::ToggleSheet, frame, height)
             .expect("toggle"),
@@ -129,6 +139,26 @@ fn paint_with(
     render(&mut buf, at, &view, theme, Glyphs::default(), &chrome);
     let laid = regions(at, &chrome, &view);
     (buf, laid)
+}
+
+/// The page counter on the sheet's title bar, or `None` when it draws none.
+///
+/// **One parser for three gates**, which read it in two idioms before #286's own
+/// simplify pass: the frame gate sliced characters out of the top border and the
+/// two new ones matched `" of "` against the whole box, which collides with
+/// `jump to that row of the list` and needed a comment saying so. The title's
+/// spelling is restated rather than imported for [`TITLE`]'s reason.
+fn counter_of(sheet: &str) -> Option<String> {
+    let top: Vec<char> = sheet.lines().next()?.chars().collect();
+    let title = "─ gestures ".chars().count();
+    if top.len() < title + 5 {
+        return None;
+    }
+    let counter: String = top[title + 1..top.len() - 4]
+        .iter()
+        .take_while(|c| **c != RULE)
+        .collect();
+    (!counter.is_empty()).then_some(counter)
 }
 
 fn text_of(buf: &Buffer, at: Rect) -> String {
@@ -1280,14 +1310,10 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             "the sheet's title is not where the frame puts it at {w}x{h}:\n{drawn}"
         );
         // **The page counter sits here since #286**, between the title and the
-        // rule, so the run of `─` no longer starts at `title + 1`. Its shape is
-        // restated rather than imported for [`TITLE`]'s reason, and validating it
-        // is what stops "the rule starts wherever the counter ended" from
+        // rule, so the run of `─` no longer starts at `title + 1`. Validating its
+        // shape is what stops "the rule starts wherever the counter ended" from
         // accepting any text at all.
-        let counter: String = top[title + 1..top.len() - 4]
-            .iter()
-            .take_while(|c| **c != '─')
-            .collect();
+        let counter = counter_of(&drawn).unwrap_or_default();
         if !counter.is_empty() {
             let body = counter
                 .strip_prefix(' ')
@@ -1839,7 +1865,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
 
     for (w, want) in NARROW {
         let at = Rect::new(0, 0, w, 40);
-        let (seen, _) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+        let seen = reached(&walk_the_pages(&mut frame, &mut highlighter, &history, at));
         let want: std::collections::BTreeSet<&str> = want.iter().copied().collect();
         assert_eq!(
             seen, want,
@@ -1851,9 +1877,9 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
     // And below the narrowest rung there is no sheet at all, which is what a box
     // that cannot say how much of the table it is hiding costs.
     let at = Rect::new(0, 0, 29, 40);
-    let (seen, presses) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+    let pages = walk_the_pages(&mut frame, &mut highlighter, &history, at);
     assert!(
-        seen.is_empty() && presses == 1,
+        pages.is_empty(),
         "a twenty-nine column pane drew a sheet, which is below the width its own \
          page counter needs"
     );
@@ -2206,30 +2232,21 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
     for (h, first_page, pages) in expected {
         let at = Rect::new(0, 0, 50, h);
 
-        // Page one on its own, through the same `sweep!`-shaped path every other
-        // gate here uses: one `?`, one paint.
-        let mut app = App::new();
-        let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-        let height = body_layout(at, &chrome(&app), FILES).diff;
-        app.apply(Action::ToggleSheet, &mut frame, height)
-            .expect("toggle");
-        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-        let (count, sheet) = read_sheet(&buf, &laid);
+        let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+        let drawn = walked.first().expect("a pane that draws no sheet at all");
         assert_eq!(
-            count, first_page,
-            "the first page of a 50 by {h} pane draws {count} gestures where the \
-             body has room for {first_page}:\n{sheet}"
+            drawn.count, first_page,
+            "the first page of a 50 by {h} pane draws {} gestures where the body \
+             has room for {first_page}:\n{}",
+            drawn.count, drawn.text
         );
-
-        // Then the walk, which is what says the pages are as few as they can be
-        // and that nothing was lost between them.
-        let (seen, presses) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
         assert_eq!(
-            presses - 1,
+            walked.len(),
             pages,
             "a 50 by {h} pane takes {} pages where the body affords {pages}",
-            presses - 1
+            walked.len()
         );
+        let seen = reached(&walked);
         assert_eq!(
             seen.len(),
             GESTURES.len(),
@@ -2717,7 +2734,7 @@ fn every_gesture_is_reachable_at_forty_columns_and_up() {
     for w in LADDER_WIDTHS {
         for h in LADDER_HEIGHTS {
             let at = Rect::new(0, 0, w, h);
-            let (seen, _) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+            let seen = reached(&walk_the_pages(&mut frame, &mut highlighter, &history, at));
             if seen.is_empty() {
                 continue;
             }
@@ -2733,48 +2750,88 @@ fn every_gesture_is_reachable_at_forty_columns_and_up() {
     }
 }
 
-/// The page walk one pane takes: every gesture `?` reaches before it closes, and
-/// how many presses that took.
+/// One page of a walk: what it drew and where its box was.
+struct Page {
+    /// How many of [`GESTURES`] this page carries.
+    count: usize,
+    /// The sheet's own cells, frame included.
+    text: String,
+    /// The sheet's left edge and width, which no page of a pane may move.
+    frame: (u16, u16),
+}
+
+/// Every page `?` reaches on one pane, in order, before it closes.
 ///
 /// **Driven through `App::apply` rather than through a plan**, because what #286
 /// rules is the *input model*: a gate that asked the layout how many pages there
 /// are would agree with the layout by construction and say nothing about what a
-/// reader pressing `?` can reach. The bound is a guard against a `?` that never
-/// closes, which is the one failure this shape could otherwise hang on.
+/// reader pressing `?` can reach.
+///
+/// **It returns the pages rather than a summary of them.** The first version
+/// returned only the union and a press count, so three gates opened a second
+/// `App` and repainted page one to look at it, and one of them re-implemented this
+/// loop with a second copy of the bound.
 fn walk_the_pages(
     frame: &mut Frame<'_>,
     highlighter: &mut Highlighter,
     history: &History,
     at: Rect,
-) -> (std::collections::BTreeSet<&'static str>, usize) {
+) -> Vec<Page> {
     const BOUND: usize = 64;
     // **A fresh shell per pane, and the first version of this was not.** A pane
     // below the sheet's floor draws nothing and leaves the state open, which is
     // §11.1's own ruling and not a defect; carrying that state into the next pane
     // starts its walk on page two and hides page one from every gate here.
     let mut app = App::new();
-    let mut seen = std::collections::BTreeSet::new();
-    let mut presses = 0;
-    // One paint with the sheet down, so the page count `?` is measured against is
-    // this pane's rather than the default.
-    let _ = paint(&mut app, frame, highlighter, history, at);
+    let mut pages = vec![];
     loop {
-        let height = body_layout(at, &chrome(&app), FILES).diff;
-        app.apply(Action::ToggleSheet, frame, height)
-            .expect("toggle");
-        presses += 1;
+        toggle_at(&mut app, frame, at);
         let (buf, laid) = paint(&mut app, frame, highlighter, history, at);
-        let Some(_) = laid.sheet else { break };
-        let (_, sheet) = read_sheet(&buf, &laid);
-        seen.extend(GESTURES.iter().copied().filter(|g| sheet.contains(g)));
+        let Some(sheet) = laid.sheet else { break };
+        let (count, text) = read_sheet(&buf, &laid);
+        pages.push(Page {
+            count,
+            text,
+            frame: (sheet.left, sheet.width),
+        });
         assert!(
-            presses < BOUND,
-            "`?` was pressed {presses} times at {}x{} and the sheet never closed",
+            pages.len() < BOUND,
+            "`?` was pressed {} times at {}x{} and the sheet never closed",
+            pages.len(),
             at.width,
             at.height
         );
     }
-    (seen, presses)
+    pages
+}
+
+/// Press `?` `times` times, painting between presses the way the shell does.
+///
+/// **The paint is not decoration.** `App::sheet_pages` is recorded by `App::view`,
+/// and only on a frame the sheet was up for, so a run of presses with no frame
+/// between them runs against the default count of one and the *second* press
+/// closes. The shell paints between keystrokes on every path; a gate that does not
+/// is testing a sequence no reader can produce.
+fn press_pages(
+    app: &mut App,
+    frame: &mut Frame<'_>,
+    highlighter: &mut Highlighter,
+    history: &History,
+    at: Rect,
+    times: usize,
+) {
+    for _ in 0..times {
+        toggle_at(app, frame, at);
+        let _ = paint(app, frame, highlighter, history, at);
+    }
+}
+
+/// Every gesture the walk reached, across all of its pages.
+fn reached(pages: &[Page]) -> std::collections::BTreeSet<&'static str> {
+    pages
+        .iter()
+        .flat_map(|page| GESTURES.iter().copied().filter(|g| page.text.contains(g)))
+        .collect()
 }
 
 #[test]
@@ -2798,7 +2855,6 @@ fn paging_closes_after_the_last_page_and_never_before() {
     ] {
         let mut app = App::new();
         let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-        let height = body_layout(at, &chrome(&app), FILES).diff;
         assert!(
             chrome(&app).sheet.is_none(),
             "a fresh shell has a sheet up at {}x{}",
@@ -2807,8 +2863,7 @@ fn paging_closes_after_the_last_page_and_never_before() {
         );
 
         for page in 0..pages {
-            app.apply(Action::ToggleSheet, &mut frame, height)
-                .expect("toggle");
+            toggle_at(&mut app, &mut frame, at);
             let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
             assert_eq!(
                 chrome(&app).sheet,
@@ -2827,8 +2882,7 @@ fn paging_closes_after_the_last_page_and_never_before() {
             );
         }
 
-        app.apply(Action::ToggleSheet, &mut frame, height)
-            .expect("toggle");
+        toggle_at(&mut app, &mut frame, at);
         let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
         assert!(
             chrome(&app).sheet.is_none() && laid.sheet.is_none(),
@@ -2849,10 +2903,16 @@ fn paging_closes_after_the_last_page_and_never_before() {
 fn a_single_page_sheet_still_toggles_in_one_press() {
     // **B13's additivity claim, swept rather than sampled.** The ruling's whole
     // defence is that a reader whose pane already showed every gesture presses `?`
-    // twice as before, and a rung ordering that put the paged rungs first would
-    // satisfy every other gate here: the union is still every gesture, the box is
-    // still closed, the ladder is still monotone. What it would change is that a
-    // hundred-row pane takes six presses to close a sheet that fits on one screen.
+    // twice as before.
+    //
+    // **What it does not catch, said rather than implied.** The obvious mutation,
+    // putting the paged rungs first in the ladder, leaves this green: a tall pane's
+    // paged rung has capacity for all seventeen lines, so it is one page and closes
+    // on the second press exactly as before. That mutation reddens nineteen other
+    // gates here, every roomy-rung and two-column gate among them, because what it
+    // actually destroys is the rungs it steps in front of. Verified by running it.
+    // What this gate holds on its own is the counter's absence and the press count
+    // on a pane that draws the whole table, which is the reader-facing half.
     let scratch = Scratch::large_diff("sheet-additive", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -2864,37 +2924,28 @@ fn a_single_page_sheet_still_toggles_in_one_press() {
     for w in LADDER_WIDTHS {
         for h in LADDER_HEIGHTS {
             let at = Rect::new(0, 0, w, h);
-            let (seen, presses) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
-            if seen.len() != GESTURES.len() {
+            let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+            let Some(first) = walked.first() else {
                 continue;
-            }
-            // One page's worth of gestures on the first press means this pane
-            // takes a rung that draws the whole table, and those are exactly the
-            // panes that must still close on the second press.
-            let mut app = App::new();
-            let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-            let height = body_layout(at, &chrome(&app), FILES).diff;
-            app.apply(Action::ToggleSheet, &mut frame, height)
-                .expect("toggle");
-            let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-            let (count, sheet) = read_sheet(&buf, &laid);
-            if count != GESTURES.len() {
+            };
+            if first.count != GESTURES.len() {
                 continue;
             }
             whole += 1;
             assert_eq!(
-                presses, 2,
-                "a {w}x{h} pane draws every gesture on one page and takes \
-                 {presses} presses of `?` to open and close:\n{sheet}"
+                walked.len(),
+                1,
+                "a {w}x{h} pane draws every gesture on its first page and still \
+                 takes {} pages:\n{}",
+                walked.len(),
+                first.text
             );
-            // **The title line, not the sheet.** `jump to that row of the list`
-            // carries ` of ` in its verb, so a search over the whole box scores a
-            // counter on every wide pane that draws that row.
-            let title = sheet.lines().next().unwrap_or_default();
-            assert!(
-                !title.contains(" of "),
+            assert_eq!(
+                counter_of(&first.text),
+                None,
                 "a {w}x{h} pane draws every gesture and still carries a page \
-                 counter:\n{sheet}"
+                 counter:\n{}",
+                first.text
             );
         }
     }
@@ -2906,15 +2957,14 @@ fn a_single_page_sheet_still_toggles_in_one_press() {
 
 #[test]
 fn the_counter_names_what_the_pane_reaches() {
-    // **The say-so half of B13, and the only thing on this element that a reader
-    // on a narrow pane can use to tell that gestures are missing.** Deleting it
-    // reddens nothing else here: every gesture is still reachable wherever it was,
-    // the box is still closed, and `the_sheet_is_a_closed_box_at_every_rung` only
-    // checks the counter's *shape* when one is drawn.
+    // **The say-so half of B13, and the only thing on this element a reader on a
+    // narrow pane can use to tell that gestures are missing.** Deleting it reddens
+    // nothing else here: every gesture is still reachable wherever it was, the box
+    // is still closed, and `the_sheet_is_a_closed_box_at_every_rung` only checks
+    // the counter's *shape* when one is drawn. Verified by mutation.
     //
-    // Read off the title bar rather than asked of the plan, and the ordinals are
-    // checked against the gestures actually on the page, which is what makes this
-    // a claim about the counter's truth rather than about its presence.
+    // The ordinals are checked against the gestures actually on the page, which is
+    // what makes this a claim about the counter's truth rather than its presence.
     let scratch = Scratch::large_diff("sheet-counter", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -2922,7 +2972,7 @@ fn the_counter_names_what_the_pane_reaches() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    // Six pages at fifty columns, and a narrow pane whose ordinals must stop
+    // Six pages at fifty columns, and two narrow panes whose ordinals must stop
     // below the sixteen the tables hold.
     for (at, want) in [
         (
@@ -2932,22 +2982,20 @@ fn the_counter_names_what_the_pane_reaches() {
         (Rect::new(0, 0, 32, 40), vec!["1-8 of 16"]),
         (Rect::new(0, 0, 30, 40), vec!["1-4 of 16"]),
     ] {
-        let mut app = App::new();
-        let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-        let height = body_layout(at, &chrome(&app), FILES).diff;
+        let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
         for (n, spelling) in want.iter().enumerate() {
-            app.apply(Action::ToggleSheet, &mut frame, height)
-                .expect("toggle");
-            let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-            let (count, sheet) = read_sheet(&buf, &laid);
-            let title = sheet.lines().next().unwrap_or_default();
-            assert!(
-                title.contains(spelling),
-                "page {} of a {}x{} pane spells its counter {title:?} rather \
-                 than {spelling:?}:\n{sheet}",
+            let page = walked.get(n).unwrap_or_else(|| {
+                panic!("a {}x{} pane has no page {}", at.width, at.height, n + 1)
+            });
+            let drawn = counter_of(&page.text).unwrap_or_default();
+            assert_eq!(
+                drawn.trim(),
+                *spelling,
+                "page {} of a {}x{} pane spells its counter {drawn:?}:\n{}",
                 n + 1,
                 at.width,
-                at.height
+                at.height,
+                page.text
             );
             // And the counter is not decoration: the run it names is as long as
             // the gestures the page actually drew.
@@ -2958,12 +3006,14 @@ fn the_counter_names_what_the_pane_reaches() {
                 + 1;
             assert_eq!(
                 span,
-                count,
-                "the counter on page {} of a {}x{} pane names {span} gestures \
-                 and the page draws {count}:\n{sheet}",
+                page.count,
+                "the counter on page {} of a {}x{} pane names {span} gestures and \
+                 the page draws {}:\n{}",
                 n + 1,
                 at.width,
-                at.height
+                at.height,
+                page.count,
+                page.text
             );
         }
     }
@@ -2971,11 +3021,22 @@ fn the_counter_names_what_the_pane_reaches() {
 
 #[test]
 fn the_box_does_not_resize_between_pages() {
-    // **What `sheet_floor` charging the counter buys**, and the reason it charges
-    // it on every rung rather than only where one is drawn. The sheet is centred,
-    // so a box that grew by three columns when the ordinals reached double digits
-    // would shift left as the reader pressed `?`. Nothing else here can see it:
-    // every page is a closed box of the right size *for itself*.
+    // **A centred box that changed width as the reader pressed `?` would shift
+    // left under their eye**, and nothing else here can see it: every page is a
+    // closed box of the right size *for itself*.
+    //
+    // **What holds it is not what this gate was first written to check.** The
+    // claim was that `sheet_floor` charging the counter on every rung is what keeps
+    // the width fixed; removing that charge leaves this green and reddens two width
+    // gates instead. `sheet_fields` measures over the whole row set and every page
+    // of a pane shares that set, so the width is page-independent by construction.
+    // What the charge buys is that the counter fits inside the title bar at all,
+    // which `the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_states`
+    // is the gate for. Both claims are true and they are different claims.
+    //
+    // Left edge and width, not height: the last page is a remainder and is allowed
+    // to be shorter, which is what keeps a two-row tail from drawing three rows of
+    // blank.
     let scratch = Scratch::large_diff("sheet-box", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -2986,26 +3047,15 @@ fn the_box_does_not_resize_between_pages() {
     let mut paged = 0;
     for (w, h) in [(50u16, 8u16), (50, 10), (40, 12), (120, 9), (30, 40)] {
         let at = Rect::new(0, 0, w, h);
-        let mut app = App::new();
-        let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-        let height = body_layout(at, &chrome(&app), FILES).diff;
-        let mut boxes = vec![];
-        loop {
-            app.apply(Action::ToggleSheet, &mut frame, height)
-                .expect("toggle");
-            let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-            let Some(sheet) = laid.sheet else { break };
-            boxes.push((sheet.left, sheet.width));
-            assert!(boxes.len() < 64, "`?` never closed the sheet at {w}x{h}");
-        }
-        if boxes.len() > 1 {
+        let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+        if walked.len() > 1 {
             paged += 1;
         }
-        // **Left edge and width, not height.** The last page is a remainder and is
-        // allowed to be shorter, which is what keeps a two-row tail from drawing
-        // three rows of blank; the horizontal box is what the reader's eye is
-        // fixed on and it may not move.
-        let first = boxes.first().copied().expect("a pane that draws no sheet");
+        let first = walked
+            .first()
+            .unwrap_or_else(|| panic!("a {w}x{h} pane draws no sheet"))
+            .frame;
+        let boxes: Vec<(u16, u16)> = walked.iter().map(|page| page.frame).collect();
         assert!(
             boxes.iter().all(|b| *b == first),
             "the sheet's box moves between pages at {w}x{h}: {boxes:?}"
@@ -3035,12 +3085,7 @@ fn a_write_under_a_paged_sheet_does_not_move_the_page() {
     let history = History::new();
 
     let at = Rect::new(0, 0, 50, 8);
-    let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-    let height = body_layout(at, &chrome(&app), FILES).diff;
-    for _ in 0..3 {
-        app.apply(Action::ToggleSheet, &mut frame, height)
-            .expect("toggle");
-    }
+    press_pages(&mut app, &mut frame, &mut highlighter, &history, at, 3);
     let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
     assert_eq!(
         chrome(&app).sheet,
@@ -3069,15 +3114,19 @@ fn a_write_under_a_paged_sheet_does_not_move_the_page() {
 
 #[test]
 fn a_resize_clamps_the_page_rather_than_closing_the_sheet() {
-    // **The one stale read in this design, handled where it lands.** The page
+    // **The one stale read in this design, exercised where it lands.** The page
     // count `?` is measured against is the previous frame's, because `Action`
-    // carries no pane and the count is a fact about one. So a pane made shorter
-    // between the last paint and the next press can be asked for a page it no
-    // longer has, and `sheet_plan` clamps to the last one.
+    // carries no pane and the count is a fact about one. So a pane resized between
+    // the last paint and the next press can be asked for a page it no longer has,
+    // and `paged_fit` clamps to the last one. Without the clamp `lines - skip`
+    // underflows on the frame path, which is a panic in a monitor somebody left
+    // running.
     //
-    // Without the clamp this is an index past the end of the table on the frame
-    // path, which is a panic in a monitor somebody left running, and no gate that
-    // paints at one size can reach it.
+    // **Both panes have to be paged ones, and the first version of this gate used
+    // an eighty by twenty-four target that is not.** Resizing into a rung that
+    // draws the whole table never calls `paged_fit` at all, so deleting the clamp
+    // left the gate green: it was asserting that a one-page sheet is one page.
+    // Found by mutation, which is the only instrument that could see it.
     let scratch = Scratch::large_diff("sheet-resize", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -3086,39 +3135,34 @@ fn a_resize_clamps_the_page_rather_than_closing_the_sheet() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    let tall = Rect::new(0, 0, 50, 8);
-    let _ = paint(&mut app, &mut frame, &mut highlighter, &history, tall);
-    let height = body_layout(tall, &chrome(&app), FILES).diff;
-    for _ in 0..6 {
-        app.apply(Action::ToggleSheet, &mut frame, height)
-            .expect("toggle");
-    }
+    // Six pages of three rows.
+    let small = Rect::new(0, 0, 50, 8);
+    press_pages(&mut app, &mut frame, &mut highlighter, &history, small, 6);
     assert_eq!(chrome(&app).sheet, Some(5), "six presses is not page six");
 
-    // The pane grows, so six pages become one and page six does not exist.
-    let short = Rect::new(0, 0, 80, 24);
-    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, short);
+    // Two pages of nine rows, so page six does not exist and page two is the last.
+    let larger = Rect::new(0, 0, 50, 14);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, larger);
     let sheet = laid
         .sheet
         .expect("a resize past the last page closed a sheet nobody dismissed");
     let (count, drawn) = read_sheet(&buf, &laid);
     assert_eq!(
-        count,
-        GESTURES.len(),
-        "the clamped page is not the pane's only page:\n{drawn}"
+        counter_of(&drawn).unwrap_or_default().trim(),
+        "10-16 of 16",
+        "the clamped page is not the pane's last one:\n{drawn}"
     );
+    assert!(count > 0, "the clamped page draws nothing:\n{drawn}");
     assert!(
         sheet.width > 0 && sheet.height > 0,
         "the clamped page has no box"
     );
 
-    // And the next press closes it, rather than walking five pages that are gone.
-    let height = body_layout(short, &chrome(&app), FILES).diff;
-    app.apply(Action::ToggleSheet, &mut frame, height)
-        .expect("toggle");
-    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, short);
+    // And the next press closes it, rather than walking four pages that are gone.
+    toggle_at(&mut app, &mut frame, larger);
+    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, larger);
     assert!(
         laid.sheet.is_none(),
-        "`?` after a resize did not close a one-page sheet"
+        "`?` on the clamped last page did not close the sheet"
     );
 }

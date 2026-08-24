@@ -948,9 +948,13 @@ impl App {
         // **Recorded here because this is the one call every frame makes with the
         // pane's own layout in hand.** `?` advancing needs to know which page is
         // the last, and `Action` carries no pane; see [`App::sheet_pages`]. It is
-        // page-independent, so a frame drawn with the sheet down still reports the
-        // count the next press will be measured against.
-        self.sheet_pages = body.sheet_pages;
+        // **Only when the layout measured one**, which is only while the sheet is
+        // up. A frame with the sheet down leaves the last measurement standing, and
+        // nothing reads it: the press that opens a sheet takes the `None` arm and
+        // consults no count at all.
+        if let Some(pages) = body.sheet_pages {
+            self.sheet_pages = pages;
+        }
         let view = View::collect(
             frame,
             highlighter,
