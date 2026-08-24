@@ -22,9 +22,11 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use ratatui::crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Position, Row, TRACK_SCALE, View, Viewport, body_layout, diff_height,
+    Action, App, Body, Position, Row, TRACK_SCALE, View, Viewport, action_for, body_layout,
+    diff_height, regions,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -386,6 +388,43 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
             "the pin followed the gesture and then drew somebody else's rows"
         );
     }
+
+    // **And the click through the real hit-test**, which is what `list.rs` does
+    // for the unpinned case and is the half constructing an `Action` cannot
+    // reach: the pin narrows what the *diff* draws, and a hit-test that read the
+    // drawn view could have narrowed the region the click lands in with it.
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, listed());
+    let area = Rect::new(0, 0, 80, 24);
+    let laid = regions(
+        area,
+        &app.chrome("fixture", None, None, None, None, None),
+        &view,
+    );
+    assert!(
+        laid.list.rows > 1,
+        "no list region was published to click on, so the pinned pane lost the map"
+    );
+    let click = Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        // Not the bar's column, which is a drag and is resolved first.
+        column: 2,
+        row: laid.list.top + 1,
+        modifiers: KeyModifiers::NONE,
+    });
+    let action = action_for(&click, laid).expect("a click on a listed row is an action");
+    assert_eq!(action, Action::ListRow(1));
+    app.apply(action, &mut frame, body()).expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, listed());
+    assert_eq!(
+        view.top,
+        Position { file: 1, row: 0 },
+        "a click on a listed file did not move the pinned diff to it"
+    );
+    assert_eq!(
+        files_on(&view),
+        vec![1],
+        "the click moved the pin and then drew somebody else's rows"
+    );
 }
 
 #[test]
