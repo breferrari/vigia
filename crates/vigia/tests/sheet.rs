@@ -694,8 +694,25 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     let history = History::new();
 
     toggle(&mut app, &mut frame);
-    let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
-    let drawn = text_of(&buf, area());
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
+
+    // **Inside the sheet's own rect, and on a rung that draws no headings.**
+    // Both halves are load-bearing and neither was here. Read over the whole
+    // pane, `q`, `f` and `?` score on the hint bar whether or not the sheet drew
+    // them, which is `read_sheet`'s own recorded lesson one gate over. And these
+    // are bare one-character tokens, so on the roomy rung the headings `moving`,
+    // `files` and `view` alone satisfy `m`, `f`, `g` and `n`:
+    // `render.rs`'s `no_section_label_hides_inside_a_cell_or_another_label` says
+    // in prose that this gate must stay on a headingless rung, and prose is not
+    // an instrument. [#286](https://github.com/breferrari/vigia/issues/286) moves
+    // the floor next.
+    let (_, drawn) = read_sheet(&buf, &laid);
+    assert!(
+        !drawn.contains("moving"),
+        "this gate searches for bare one-character keys and the pane drew section \
+         headings, so `m`, `f`, `g` and `n` are satisfied by `moving`, `files` \
+         and `view` rather than by the rows:\n{drawn}"
+    );
 
     for token in [
         "q",
@@ -790,8 +807,12 @@ const GESTURES: [&str; 16] = [
 fn no_gesture_token_hides_inside_another() {
     // **The gate on the gate.** [`GESTURES`] is matched with `contains`, so an
     // entry that is a substring of another scores whenever the longer one draws,
-    // and the height ladder drops from the top, which is exactly where the two
-    // meet: `page` sat inside `half a page` and the row above it is dropped first.
+    // and the height ladder gives rows up in `DROP_ORDER`, which is exactly where
+    // the two meet: `page` sat inside `half a page`, and `Space  PgDn` is given up
+    // one rung before `d  u`. (It read "drops from the top" until
+    // [#285](https://github.com/breferrari/vigia/issues/285) separated the drop
+    // order from the reader's; the hazard is the same and the direction is no
+    // longer a direction through the table.)
     // Measured at 60 by 13 the sheet drew eight gestures and the count said nine.
     //
     // The same shape as the footer leak one line up, and both were invisible for
@@ -809,11 +830,14 @@ fn no_gesture_token_hides_inside_another() {
     }
 }
 
-/// The extent every ladder gate walks: 40 to 144 columns by 1, 6 to 32 rows by 1.
+/// The extent every ladder gate walks: 40 to 144 columns by 1, 6 to 38 rows by 1.
 ///
-/// **One place, because three gates read it.** They assert different things about
-/// the same grid, and bounds that drifted between them would leave a rung
-/// asserted monotone at a width no other gate had looked at.
+/// **One place, because several gates read it.** They assert different things
+/// about the same grid, and bounds that drifted between them would leave a rung
+/// asserted monotone at a width no other gate had looked at. The count is
+/// deliberately not spelled out: it read "three gates" while seven were reading
+/// it, which is what a number in a comment does when the thing it counts is free
+/// to grow.
 ///
 /// The floor is at I6's forty columns and the ceiling is above every width the
 /// two-column rung arrives at, so the sweep contains both ends of the ladder
@@ -1122,6 +1146,7 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
     // a width the ladder chose and one screen cannot find it.
     let mut sheets = 0;
     let mut two_column = 0;
+    let mut roomy_seen = 0;
 
     walk_the_ladder("sheet-frame", |w, h, _at, buf, laid| {
         let Some(sheet) = laid.sheet else { return };
@@ -1171,6 +1196,9 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
         // the five headed labels built once rather than five `format!`s per row
         // over a sweep of 105 widths by 33 heights.
         let roomy = drawn.contains("moving");
+        if roomy {
+            roomy_seen += 1;
+        }
         let headings: Vec<String> = SECTIONS.iter().map(|l| format!("  {l}")).collect();
         for (n, row) in rows[1..rows.len() - 1].iter().enumerate() {
             // **A heading's own fill, which only the title bar's and the bottom
@@ -1218,9 +1246,11 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
     });
 
     assert!(
-        two_column > 0 && sheets > two_column,
-        "the sweep saw {sheets} sheets of which {two_column} were two-column, so \
-         it did not cover both shapes"
+        two_column > 0 && roomy_seen > 0 && sheets > two_column + roomy_seen,
+        "the sweep saw {sheets} sheets, of which {two_column} were two-column and \
+         {roomy_seen} roomy, so it did not cover all three shapes. The roomy arm \
+         above asserts that a section heading carries no rule, and an arm no pane \
+         in the sweep reaches is an arm that cannot fail"
     );
 }
 
@@ -1250,8 +1280,7 @@ enum RoomyRow {
 
 /// The roomy rung's shape, row by row, in the order it is drawn.
 ///
-/// One place, because three gates read it. The sections carry **slices of
-/// [`GESTURES`]** rather than counts, so the mapping from a section to the rows
+/// The sections carry **slices of [`GESTURES`]** rather than counts, so the mapping from a section to the rows
 /// under it is written where it can be read instead of being re-derived by hand
 /// as an offset. `GESTURES` is itself restated rather than imported, so this
 /// cannot agree with the renderer by construction.
@@ -1289,7 +1318,7 @@ fn the_roomy_rung_is_the_size_the_ruling_states() {
     // screen, and keeps the ladder monotone, so the only thing that can see it is
     // a width.
     sweep!("sheet-roomy-size", |paint| {
-        let at = Rect::new(0, 0, 120, 40);
+        let at = ROOMY_PANE;
         let (buf, laid) = paint(at);
         let sheet = laid.sheet.expect("the pane draws no sheet at all");
         let (count, drawn) = read_sheet(&buf, &laid);
@@ -1362,7 +1391,7 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
     // Columns are literals rather than derived, because a gate that computed them
     // from the layout would agree with it by construction.
     sweep!("sheet-roomy-cells", |paint| {
-        let at = Rect::new(0, 0, 120, 40);
+        let at = ROOMY_PANE;
         let (buf, laid) = paint(at);
         let (_, sheet) = read_sheet(&buf, &laid);
         let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
@@ -1890,6 +1919,30 @@ fn the_height_ladder_drops_the_fewest_rows_it_can() {
     // moving, and as literals rather than as a rule derived from the ladder: one
     // row of pane buys exactly one more gesture until the keyboard group is whole
     // at eleven, then nothing until the mouse group fits.
+    // **Which rows, not only how many.** Swapping two ranks in the middle of
+    // `DROP_ORDER` keeps every count below identical, keeps the keep-set, keeps
+    // the permutation and keeps the first row to go: only rungs 6 and 7 change
+    // which gesture they lose, and until this walked the identities no gate read
+    // their contents. That is the mutation the two-orders separation exists to
+    // make visible, surviving the gates written for it.
+    //
+    // Restated as the tokens a reader would look for, first to go, for [`TITLE`]'s
+    // reason. It is a permutation of `GESTURES`' first eleven, so
+    // `no_gesture_token_hides_inside_another` covers it too.
+    const GIVEN_UP: [&str; 11] = [
+        "quit",
+        "scroll a row",
+        "Space  PgDn",
+        "half a page",
+        "first / last",
+        "next / prev",
+        "jump to",
+        "scroll the",
+        "follow the newest",
+        "churn band",
+        "this sheet",
+    ];
+
     let expected = [
         (8u16, 3usize),
         (9, 4),
@@ -1914,6 +1967,29 @@ fn the_height_ladder_drops_the_fewest_rows_it_can() {
                 "a 50 by {h} pane draws {count} gestures where the ladder should \
                  leave {want}:\n{sheet}"
             );
+
+            // The keyboard rows that survive are the **tail** of `GIVEN_UP`, and
+            // the ones above them are absent. Only the rungs that drop nothing
+            // else are read here: once the mouse group is back the count stops
+            // being a keyboard count.
+            if want <= GIVEN_UP.len() {
+                let (kept, gone) = GIVEN_UP.split_at(GIVEN_UP.len() - want);
+                for token in gone {
+                    assert!(
+                        sheet.contains(token),
+                        "a 50 by {h} pane should still draw {token:?} and does \
+                         not, so the ladder is giving rows up in a different \
+                         order than DROP_ORDER states:\n{sheet}"
+                    );
+                }
+                for token in kept {
+                    assert!(
+                        !sheet.contains(token),
+                        "a 50 by {h} pane still draws {token:?}, which the ladder \
+                         should already have given up:\n{sheet}"
+                    );
+                }
+            }
         }
     });
 }
@@ -1937,11 +2013,22 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
     for (w, h, keys_at, verb_at, spelling) in [
         (120u16, 21u16, 2u16, 26u16, "two columns"),
         (120, 30, 2, 26, "one column"),
+        // The roomy rung's own columns, which are its own: keys five in and verbs
+        // thirty-five in, against two and twenty-six at every other rung.
+        (ROOMY_PANE.width, ROOMY_PANE.height, 5, 35, "roomy"),
     ] {
         let at = Rect::new(0, 0, w, h);
         let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
         let sheet = laid.sheet.expect("a pane that draws no sheet");
-        let row = sheet.top + 2;
+        // The roomy rung's first gesture row is one lower: air, then a heading,
+        // then the row. Non-vacuity below asserts the rung this case is named for.
+        let row = sheet.top + if spelling == "roomy" { 3 } else { 2 };
+        let (_, drawn) = read_sheet(&buf, &laid);
+        assert_eq!(
+            drawn.contains("moving"),
+            spelling == "roomy",
+            "the {w}x{h} case is not the {spelling} rung:\n{drawn}"
+        );
         assert_eq!(
             buf[(sheet.left + keys_at, row)].fg,
             theme.chrome.fg.expect("the chrome weight carries a colour"),
@@ -1984,6 +2071,40 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
             );
         }
     }
+
+    // **The roomy rung's five headings, which are plain text rather than rules and
+    // so are the one heading shape no rule-reading gate reaches.** Repainting them
+    // in the lit weight changes no character: `the_roomy_rung_places_its_cells_
+    // where_the_plan_says` reads symbols and nothing else in the suite reads a
+    // style inside this rung.
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, ROOMY_PANE);
+    let sheet = laid.sheet.expect("the roomy pane draws no sheet");
+    let dim = theme
+        .chrome_dim
+        .fg
+        .expect("the dim weight carries a colour");
+    let (_, drawn) = read_sheet(&buf, &laid);
+    let rows: Vec<&str> = drawn.lines().collect();
+    let mut headed = 0;
+    for (n, row) in rows.iter().enumerate() {
+        if !SECTIONS.iter().any(|l| row.contains(&format!("  {l}"))) {
+            continue;
+        }
+        headed += 1;
+        assert_eq!(
+            buf[(sheet.left + 3, sheet.top + n as u16)].fg,
+            dim,
+            "a section heading of the roomy rung is not drawn in the chrome's dim \
+             weight, so a label competes with the rows under it:\n{drawn}"
+        );
+    }
+    assert_eq!(
+        headed,
+        SECTIONS.len(),
+        "the roomy pane drew {headed} of {} section headings, so the assertion \
+         above skipped some:\n{drawn}",
+        SECTIONS.len()
+    );
 
     // The headings are furniture too, and the two-column rung has two of them.
     let at = Rect::new(0, 0, 120, 21);
@@ -2141,6 +2262,77 @@ fn the_two_column_rung_swallows_what_lands_on_it() {
         close,
         Some(Action::ToggleSheet),
         "the close control does not dismiss the two-column rung"
+    );
+}
+
+#[test]
+fn the_roomy_rung_swallows_what_lands_on_it() {
+    // **The same hole one rung up.** #220 wrote the gate below because every
+    // behavioural gate ran at 80 by 24, where the sheet is 56 wide, so the
+    // two-column rung was proven by geometry and by text alone. The roomy rung
+    // arrived the same way: nothing clicks or wheels inside a 68 by 29 sheet, and
+    // narrowing `SheetPlan::target` for `Shape::Roomy` alone would pass every
+    // other gate in this file.
+    //
+    // It is the rung where it matters most now, because it is what a full-screen
+    // pane draws, and it is twenty-nine rows tall against fourteen: the rows a
+    // click can land on that the other rungs never covered are its own.
+    let scratch = Scratch::large_diff("sheet-roomy-input", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let height = body_layout(ROOMY_PANE, &chrome(&app), FILES).diff;
+    assert!(
+        app.apply(Action::ToggleSheet, &mut frame, height)
+            .expect("toggle"),
+        "the sheet's toggle asked the shell to quit"
+    );
+
+    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, ROOMY_PANE);
+    let sheet = laid.sheet.expect("the roomy pane draws no sheet");
+    assert_eq!(
+        (sheet.width, sheet.height),
+        (68, 29),
+        "this gate is not looking at the roomy rung"
+    );
+
+    // A row no other rung reaches: the plain rung is nineteen rows tall and the
+    // two-column rung fourteen, so row 25 of this sheet is the roomy rung's alone.
+    let deep = sheet.top + 25;
+    let inside = sheet.left + 34;
+    assert!(
+        sheet.covers(inside, deep),
+        "{inside},{deep} is not inside the roomy sheet, so the case below proves \
+         nothing"
+    );
+    assert!(
+        action_for(&click(inside, deep), laid).is_none(),
+        "a click inside the roomy rung fell through to whatever is beneath it"
+    );
+    assert!(
+        action_for(&wheel(inside, deep), laid).is_none(),
+        "a wheel inside the roomy rung scrolled a region the sheet is covering"
+    );
+
+    // A blank row is still the sheet's. Air is the one part of this rung that
+    // draws nothing, and a target derived from what is drawn rather than from the
+    // plan would let a click through exactly there.
+    let air = sheet.top + 1;
+    assert!(
+        action_for(&click(inside, air), laid).is_none(),
+        "a click on the roomy rung's air fell through, so the pointer is reading \
+         ink rather than the plan"
+    );
+
+    let close = action_for(&click(sheet.close.0, sheet.close.1), laid);
+    assert_eq!(
+        close,
+        Some(Action::ToggleSheet),
+        "the close control does not dismiss the roomy rung"
     );
 }
 

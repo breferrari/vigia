@@ -2299,22 +2299,6 @@ const SHEET_PANE: Rect = Rect {
     height: 21,
 };
 
-/// I9 with the gestures sheet drawn over the frame.
-///
-/// **A debt `SPEC.md` §11.2 has named since B12 was ruled**, where it says the
-/// frame path sits well inside I9 and *"the sheet **covers** diff rows carrying
-/// highlighted spans with about nineteen rows of plain text, so the expectation
-/// is that it costs less than what it hides"*, followed by *"that is an
-/// expectation and #206 owes the measurement"*. #206 closed without it, and
-/// [#220](https://github.com/breferrari/vigia/issues/220) made the debt larger
-/// rather than smaller: the sheet's widest rung went from 56 columns to 104, and
-/// its drawer moved from bulk string writes to per-cell ones through
-/// [`Painter::rule`] and a pipe pass.
-///
-/// Non-vacuity is asserted rather than assumed, the way the rail's gate does it:
-/// this reddens if the pane it names stops drawing a sheet at all, or stops
-/// drawing the two-column rung, either of which would leave it timing the gate
-/// above under a different name.
 /// The size of the sheet `pane` draws, with the sheet up.
 ///
 /// **Shared because two gates ask it**, which is `walk_the_ladder`'s own lesson
@@ -2343,6 +2327,22 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     (drawn.width, drawn.height)
 }
 
+/// I9 with the gestures sheet drawn over the frame.
+///
+/// **A debt `SPEC.md` §11.2 has named since B12 was ruled**, where it says the
+/// frame path sits well inside I9 and *"the sheet **covers** diff rows carrying
+/// highlighted spans with about nineteen rows of plain text, so the expectation
+/// is that it costs less than what it hides"*, followed by *"that is an
+/// expectation and #206 owes the measurement"*. #206 closed without it, and
+/// [#220](https://github.com/breferrari/vigia/issues/220) made the debt larger
+/// rather than smaller: the sheet's widest rung went from 56 columns to 104, and
+/// its drawer moved from bulk string writes to per-cell ones through
+/// [`Painter::rule`] and a pipe pass.
+///
+/// Non-vacuity is asserted rather than assumed, the way the rail's gate does it:
+/// this reddens if the pane it names stops drawing a sheet at all, or stops
+/// drawing the two-column rung, either of which would leave it timing the gate
+/// above under a different name.
 #[test]
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(

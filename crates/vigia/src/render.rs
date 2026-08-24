@@ -4299,7 +4299,7 @@ const DROP_ORDER: [usize; KEYBOARD.len()] = [10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 /// twice is a measurement that can disagree with itself, and here the two copies
 /// would be a sheet whose width was summed over one set of rows and whose cells
 /// were drawn from another.
-fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> + Clone {
+fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
     KEYBOARD
         .iter()
         .enumerate()
@@ -4307,7 +4307,10 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> + Clone 
         .map(|(_, row)| row)
 }
 
-/// The mouse half, which is the first thing the height ladder drops.
+/// The mouse half, which is the first **gesture** the height ladder drops.
+///
+/// Since [#285](https://github.com/breferrari/vigia/issues/285) the first thing
+/// it drops is the roomy rung's air and headings, which cost no gesture at all.
 ///
 /// It goes before any keyboard row for the reason the hint bar drops `JK files`
 /// first: a mouse gesture announces itself by being tried, where a key does not
@@ -4372,7 +4375,10 @@ impl Rows {
 
 /// One labelled run of the sheet's table, which the roomy rung draws as a section
 /// and every other rung draws unlabelled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// No `PartialEq`: [`Rows`] carries one because `sheet_tables` compares against
+/// `Rows::Mouse`, and nothing compares whole sections.
+#[derive(Debug, Clone, Copy)]
 struct Section {
     /// What the heading spells. Plain text on the roomy rung, standing back from
     /// its own rows rather than ruled to the frame.
@@ -4414,6 +4420,58 @@ const SECTIONS: [Section; 5] = [
         rows: Rows::Keyboard { from: 9, to: 11 },
     },
 ];
+
+// **What [`SECTIONS`] promises, asserted where nothing that runs can reach it.**
+// A `const` block is the instrument this file already reaches for when a claim no
+// gate can fail is a wish ([`RAIL_FLOOR`]'s own block says so in its words), and
+// here it is doing something a test cannot: `Rows::rows` indexes `KEYBOARD` at
+// **run time**, so bounds that overlap the end are an index panic on the frame
+// path rather than a red suite. `roomy_fit` runs for every pane, so the panic
+// would reach a reader on any pane at all, and a monitor that panics is the worst
+// failure this product has.
+//
+// `sheet_tables` holds what a `const` cannot: which rows the ladder keeps, and
+// that the drop order is not the display order. Those need string comparison and
+// a readable failure. These three need only to stop the build.
+const _: () = {
+    let (mut at, mut i, mut mice) = (0usize, 0usize, 0usize);
+    while i < SECTIONS.len() {
+        match SECTIONS[i].rows {
+            Rows::Keyboard { from, to } => {
+                assert!(
+                    from == at,
+                    "the sections leave a gap in KEYBOARD or overlap in it, which \
+                     is a row drawn twice or not at all"
+                );
+                assert!(from < to, "a section names an empty run of KEYBOARD");
+                at = to;
+            }
+            Rows::Mouse => mice += 1,
+        }
+        i += 1;
+    }
+    assert!(
+        at == KEYBOARD.len(),
+        "the sections do not reach the end of KEYBOARD, so the roomy rung draws \
+         fewer gestures than the ladder promises"
+    );
+    assert!(mice == 1, "the mouse group is not named exactly once");
+
+    // [`DROP_ORDER`] is a permutation of the table's rows. A repeated index leaves
+    // one row undroppable and gives another up twice, so a rung's row count and
+    // the rows it draws come apart. `sheet_rows` counts off `kept_keyboard` now,
+    // so the frame would be planned correctly and a row would simply never leave.
+    let mut seen = [false; KEYBOARD.len()];
+    let mut i = 0;
+    while i < DROP_ORDER.len() {
+        assert!(
+            !seen[DROP_ORDER[i]],
+            "DROP_ORDER names a row twice, so another row can never be given up"
+        );
+        seen[DROP_ORDER[i]] = true;
+        i += 1;
+    }
+};
 
 /// Blank columns between the roomy rung's frame and its keys cells.
 ///
@@ -4524,13 +4582,14 @@ const fn sheet_span(keys: usize, verb: usize) -> usize {
 const SHEET_GAP: usize = 2;
 
 /// The floor every rung's width takes, so a narrow table cannot draw a truncated
-/// heading. Named once because both rung shapes charge it.
+/// heading. Named once because all three rung shapes charge it.
 ///
 /// **No shipped rung reaches it, and that is worth writing down rather than
 /// discovering.** The floor is seventeen; the narrowest one-column rung is
 /// twenty-four, which is the last rung the height ladder leaves: at the tight
 /// spelling its widest cells are `?` and `follow the newest`, so one column of
-/// keys and seventeen of verb. The narrowest two-column rung is seventy-six. So it is a guard
+/// keys and seventeen of verb. The narrowest two-column rung is seventy-six, and
+/// the roomy rung is sixty-eight at its only spelling. So it is a guard
 /// against the tables shrinking, not a rung of the ladder, and if it ever bound
 /// on [`Shape::Beside`] the sheet would be wider than the sum its groups were
 /// placed within and the right pipe would detach from the mouse column.
@@ -4595,9 +4654,9 @@ fn sheet_beside(level: usize) -> (Group, Group, usize) {
 /// one room width, and would there trade the spelled-out verbs for air, which is
 /// the wrong way round: width picks the spelling first.
 ///
-/// **Fields are measured over all sixteen rows**, mouse group included, so one
-/// verb column serves every section and the sections line up rather than each
-/// shrink-wrapping to its own widest cell.
+/// **Fields are measured over every row [`SECTIONS`] names**, mouse group
+/// included, so one verb column serves every section and the sections line up
+/// rather than each shrink-wrapping to its own widest cell.
 fn sheet_roomy() -> (Group, usize) {
     // **Over [`SECTIONS`], not over the two tables.** The painter walks the
     // sections, so measuring the tables instead would be the width summed from a
@@ -4624,13 +4683,11 @@ fn sheet_roomy() -> (Group, usize) {
     // than by luck"*. Here the labels are the shortest thing on the sheet, so the
     // term is slack by a wide margin (eleven columns against sixty-eight), and
     // being slack is exactly what makes it invisible when a rename closes it.
-    let rows = group.at + group.keys + group.gap + group.verb + ROOMY_INSET + 2;
-    let headings = SECTIONS
-        .iter()
-        .map(|section| ROOMY_HEADING_INSET + width_of(section.label) + 2)
-        .max()
-        .unwrap_or(0);
-    (group, sheet_floor(rows.max(headings)))
+    let mut total = group.at + group.keys + group.gap + group.verb + ROOMY_INSET + 2;
+    for section in SECTIONS.iter() {
+        total = total.max(ROOMY_HEADING_INSET + width_of(section.label) + 2);
+    }
+    (group, sheet_floor(total))
 }
 
 /// Rows the roomy rung draws, frame excluded.
@@ -4688,8 +4745,18 @@ impl Group {
 }
 
 /// Rows a one-column rung draws, frame excluded.
+///
+/// **Counted off [`kept_keyboard`] rather than as `KEYBOARD.len() - from`**, which
+/// is what it was until [#285](https://github.com/breferrari/vigia/issues/285)
+/// and was correct only while a rung drew a *prefix*. `from` selects a **set**
+/// now, so an arithmetic count is a second derivation of the number the painter
+/// walks, and the two can disagree: a [`DROP_ORDER`] that repeated an index would
+/// leave the painter drawing one row more than the frame was planned for, over
+/// the bottom border. That it cannot repeat one is held by a gate on the table
+/// rather than by construction, and `sheet_roomy_rows` states the same rule one
+/// function away.
 fn sheet_rows(from: usize, mouse: bool) -> usize {
-    (KEYBOARD.len() - from) + if mouse { 1 + MOUSE.len() } else { 0 }
+    kept_keyboard(from).count() + if mouse { 1 + MOUSE.len() } else { 0 }
 }
 
 /// Rows the two-column rung draws, frame excluded: the taller column, heading
@@ -4848,7 +4915,7 @@ fn beside_fit(level: usize) -> Fit {
     }
 }
 
-/// Which of the sheet's two shapes a rung draws.
+/// Which of the sheet's three shapes a rung draws.
 ///
 /// **The exclusivity is in the type rather than in prose.** `SheetPlan` carried
 /// `from`, `mouse` and an `Option` before
@@ -4864,10 +4931,16 @@ fn beside_fit(level: usize) -> Fit {
 /// it consistently if anyone ever does build it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shape {
-    /// One column: `from` keyboard rows already dropped from the top, the mouse
-    /// group below the keyboard group or gone.
+    /// One column: the first `from` entries of [`DROP_ORDER`] already given up,
+    /// the mouse group below the keyboard group or gone.
     Column {
-        /// First keyboard row drawn. Rows above it were dropped for height.
+        /// How many entries of [`DROP_ORDER`] have been given up.
+        ///
+        /// **Not "rows above this one", which is what it meant until
+        /// [#285](https://github.com/breferrari/vigia/issues/285)** and is the
+        /// reading that inverts the keep-set: the rows dropped are the *set*
+        /// `DROP_ORDER[..from]`, which starts with `q` at the bottom of the
+        /// table, so what a rung draws is no longer a suffix of [`KEYBOARD`].
         from: usize,
         /// Whether the mouse group is drawn below the keyboard group.
         mouse: bool,
@@ -4899,7 +4972,7 @@ struct SheetPlan {
     area: Rect,
     /// Which spelling every cell takes: 0 wide, 1 tight.
     level: usize,
-    /// One column or two, with each group's fields and placement.
+    /// Roomy, one column or two, with each group's fields and placement.
     shape: Shape,
     /// The close control's cell.
     close: (u16, u16),
@@ -7604,71 +7677,16 @@ mod sheet_tables {
     //! §11.1's *the unguessable outlives the reflexive*. A drawn sheet is a poor
     //! instrument for that, because the inversion is only visible on the two or
     //! three shortest panes on the ladder.
+    //!
+    //! **The structural claims are not here, and that is deliberate.** That
+    //! [`SECTIONS`] tiles [`KEYBOARD`] exactly once, that the mouse group is named
+    //! once, and that [`DROP_ORDER`] is a permutation all live in a `const` block
+    //! beside those tables. They are the claims whose violation is an index panic
+    //! on the frame path rather than a wrong picture, and a build that will not
+    //! compile beats a suite that goes red. What is left here is what a `const`
+    //! cannot say: which rows the ladder keeps, spelled as strings, and why.
 
     use super::*;
-
-    /// The keyboard runs the sections name, in the order they name them.
-    fn keyboard_runs() -> Vec<(usize, usize)> {
-        SECTIONS
-            .iter()
-            .filter_map(|section| match section.rows {
-                Rows::Keyboard { from, to } => Some((from, to)),
-                Rows::Mouse => None,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_sections_tile_the_keyboard_table_exactly_once() {
-        // **The one thing bounds-into-a-table can get wrong that a table of its
-        // own cannot.** A section holding `&KEYBOARD[a..b]` would be unable to
-        // skip a row or draw one twice; index bounds can do both, and a skipped
-        // row is invisible on a screen unless somebody counts.
-        let runs = keyboard_runs();
-        let mut at = 0;
-        for (from, to) in runs.iter().copied() {
-            assert_eq!(
-                from, at,
-                "the sections leave a gap or overlap at KEYBOARD[{at}]: {runs:?}"
-            );
-            assert!(from < to, "a section names an empty run: {from}..{to}");
-            at = to;
-        }
-        assert_eq!(
-            at,
-            KEYBOARD.len(),
-            "the sections stop at KEYBOARD[{at}] and the table has {} rows, so \
-             the roomy rung draws fewer gestures than the ladder promises",
-            KEYBOARD.len()
-        );
-    }
-
-    #[test]
-    fn exactly_one_section_is_the_mouse_group() {
-        // The mouse group is a whole table rather than a run, so nothing bounds it
-        // and nothing above would notice it being named twice: the roomy rung
-        // would simply draw it twice and every count-based gate would still see
-        // sixteen distinct gestures.
-        let mice = SECTIONS
-            .iter()
-            .filter(|section| section.rows == Rows::Mouse)
-            .count();
-        assert_eq!(mice, 1, "the mouse group is named {mice} times, not once");
-    }
-
-    #[test]
-    fn the_drop_order_is_a_permutation_of_the_display_order() {
-        // A repeated index drops one row twice and leaves another undroppable, so
-        // a rung's row count and the rows it actually draws come apart. The sheet
-        // would then be planned for a height it does not fill.
-        let mut seen = DROP_ORDER.to_vec();
-        seen.sort_unstable();
-        assert_eq!(
-            seen,
-            (0..KEYBOARD.len()).collect::<Vec<_>>(),
-            "DROP_ORDER is not a permutation of KEYBOARD's rows"
-        );
-    }
 
     #[test]
     fn the_last_rows_to_go_are_the_unguessable_three() {
@@ -7751,6 +7769,32 @@ mod sheet_tables {
              rung's reach over both tables is now a rung rather than slack and \
              wants a gate on a drawn pane"
         );
+
+        // **The heading row's own two terms are slack in the same way**, and a
+        // mutation run found both: deleting the heading term from `sheet_roomy`'s
+        // width, and widening the label's clip in the drawer to the whole sheet,
+        // each change nothing a pane can show. The labels are four to seven
+        // columns against a row block of sixty-eight, so the width never binds and
+        // the clip never cuts.
+        //
+        // Same shape, same reason to state it: `sheet_beside` measures its label
+        // row and calls holding *"because of this rather than by luck"*, and this
+        // is what says how much luck is left. A section renamed long enough to
+        // reach the row block reddens here, and both branches become live and
+        // gateable on a drawn pane at once.
+        let (keys, verb) = fields_of(SECTIONS.iter().flat_map(|s| s.rows.rows()), 0);
+        let block = ROOMY_INSET + keys + ROOMY_GAP + verb + ROOMY_INSET + 2;
+        for section in SECTIONS.iter() {
+            let heading = ROOMY_HEADING_INSET + width_of(section.label) + 2;
+            assert!(
+                heading < block,
+                "the section label {:?} needs {heading} columns against the \
+                 table's {block}, so the roomy rung's heading term and its \
+                 label clip have stopped being slack and are now what keeps a \
+                 heading inside the frame",
+                section.label
+            );
+        }
     }
 
     #[test]
