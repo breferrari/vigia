@@ -3710,9 +3710,15 @@ impl Body {
                 // **The page count survives the collapse.** `diff_only` cannot
                 // know it, and a clamp re-divides rows it already has rather than
                 // re-measuring the pane, so losing it here would make `?` open and
-                // close on a body that once had a sheet. Latent today, because
-                // every caller clamps a body from `Body::split`, whose count is
-                // `None` already; carried so it stays true when one does not.
+                // close on a body that once had a sheet.
+                //
+                // **Unreachable today, and that is measured rather than assumed**:
+                // a mutation that drops it back to a bare `diff_only` **survives**
+                // the whole suite, because every caller clamps a body from
+                // `Body::split`, whose count is `None` already. So this is defence
+                // rather than behaviour, in the same sense as `paged_fit`'s two
+                // guards, and it is carried so it stays true the day a caller
+                // clamps a measured body instead.
                 return Self {
                     sheet_pages: self.sheet_pages,
                     ..Self::diff_only(self.rows())
