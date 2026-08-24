@@ -8099,4 +8099,40 @@ mod sheet_tables {
             }
         }
     }
+    #[test]
+    fn the_whole_table_in_one_column_fits_i6s_forty_columns() {
+        // **The arithmetic behind `SPEC.md` §11.2 B13's promise, asserted where a
+        // copy edit will trip over it.** `tests/sheet.rs` can only see what a pane
+        // draws, so the equivalent claim there is a sweep reporting that the
+        // narrowest sheet at forty columns and up is thirty-eight. That is the same
+        // number arrived at the expensive way, and it fails a whole grid later than
+        // this does.
+        //
+        // `margin_of(40)` is zero, so a forty column pane has forty columns of
+        // room and this is the whole of what "reachable at forty columns" means.
+        // Before #286 it was forty-three, the wheel's tight verb was
+        // `scroll what you point at` at twenty-four columns, and the mouse group
+        // was unreachable at every height a forty column pane has.
+        let (keys, verb, total) = sheet_fields(1, 0, true);
+        assert_eq!(
+            (keys, verb),
+            (13, 19),
+            "the tight fields are not what the ruling measured"
+        );
+        assert!(
+            total <= 40,
+            "the whole table in one column is {total} columns at the tight \
+             spelling, and a pane at I6's forty has forty to give, so the mouse \
+             group is unreachable there however tall the pane is"
+        );
+        assert_eq!(
+            total, 38,
+            "the tight one-column sheet is not the 38 §11.1 states"
+        );
+        assert_eq!(
+            margin_of(40),
+            0,
+            "a forty column pane has stopped having forty columns of room"
+        );
+    }
 }

@@ -977,7 +977,7 @@ pub enum Action {
     /// nothing at all on a tall one, and a reader who has decided which is what
     /// this asks.
     ToggleMasthead,
-    /// Draw the gestures sheet, or stop drawing it.
+    /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///
     /// `SPEC.md` §11.1's B12 ruling, from `?` or from a click on the sheet's own
     /// close control. **The one action on this map that moves nothing**: the
@@ -985,8 +985,25 @@ pub enum Action {
     /// [`Action::ToggleMasthead`] it does not even resize a region, which is the
     /// whole reason the keymap went over the pane rather than into the footer.
     ///
-    /// It is not a mode. Every other key keeps its meaning while the sheet is
-    /// up, so nothing here becomes context-dependent and `Esc` still quits.
+    /// **Three outcomes since §11.2 B13**
+    /// ([#286](https://github.com/breferrari/vigia/issues/286)), and which one it
+    /// takes is the receiving state's rather than this variant's: closed opens the
+    /// first page, a page with another after it advances, and the last page
+    /// closes. On every pane whose sheet is one page, which is every pane the
+    /// first three rungs of the ladder serve, that is the toggle it has always
+    /// been. The close control still closes from any page, so a reader who wants
+    /// out of a six-page sheet is never made to walk it.
+    ///
+    /// **The name is kept rather than widened to `AdvanceSheet`.** What a reader
+    /// presses `?` for is *the sheet*, and one variant is what says the key has
+    /// one meaning; splitting it would put the ladder's arithmetic into the
+    /// keymap, which is the layer that has no pane to measure it against.
+    ///
+    /// It is not a mode. **Every *other* key keeps its meaning while the sheet is
+    /// up**, so nothing here becomes context-dependent and `Esc` still quits.
+    /// That is the sentence B13 was ruled against, and it is why a sheet that
+    /// **scrolled** was declined: `j`, `k`, `Space`, `d` and `u` are all spoken
+    /// for, and taking one back is the mode B12 refused.
     ToggleSheet,
     /// Put the pinned list's window at this fraction of the changed set.
     ///
