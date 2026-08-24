@@ -2211,13 +2211,29 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
     let rows: Vec<&str> = drawn.lines().collect();
     let mut headed = 0;
     for (n, row) in rows.iter().enumerate() {
-        if !SECTIONS.iter().any(|l| row.contains(&format!("  {l}"))) {
+        let Some(label) = SECTIONS
+            .iter()
+            .find(|l| row.contains(&format!("  {l}")))
+            .copied()
+        else {
             continue;
-        }
+        };
         headed += 1;
+        let at = (sheet.left + 3, sheet.top + n as u16);
+        // **The cell has to hold the label before its colour means anything.**
+        // The blank pass paints every cell in the sheet's rect `chrome_dim`, so
+        // reading a colour at a fixed column passes on *air*: move
+        // `ROOMY_HEADING_INSET` and this would have gone on asserting the weight
+        // of a space. The placement gate catches the move; this must not report
+        // a pass while looking at nothing.
         assert_eq!(
-            buf[(sheet.left + 3, sheet.top + n as u16)].fg,
-            dim,
+            buf[at].symbol(),
+            label[..1].to_string(),
+            "column 3 of the {label:?} heading row does not hold the label, so \
+             the weight read below is a blank cell's:\n{drawn}"
+        );
+        assert_eq!(
+            buf[at].fg, dim,
             "a section heading of the roomy rung is not drawn in the chrome's dim \
              weight, so a label competes with the rows under it:\n{drawn}"
         );
