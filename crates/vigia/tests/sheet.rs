@@ -47,6 +47,11 @@ const TITLE: &str = "gestures";
 /// The close control's glyph, restated for [`TITLE`]'s reason.
 const SHEET_CLOSE: char = '✕';
 
+/// The glyph the sheet's frame and its group headings are ruled with, restated
+/// for [`TITLE`]'s reason. No keys cell or verb holds one, which is what makes it
+/// the way to tell furniture from a row.
+const RULE: char = '─';
+
 /// Keyboard rows the height ladder may never drop, restated for [`TITLE`]'s
 /// reason. `SPEC.md` §11.1 names the three: `f`, `m` and `?`.
 const KEEP: usize = 3;
@@ -308,8 +313,6 @@ fn the_sheet_is_opaque() {
     // over, so it is the shape most exposed to a background the blank pass failed
     // to clear. The rung that had this gate is the one with the least air.
     for at in [area(), ROOMY_PANE] {
-        // Non-vacuity: the pane has to be drawing washed rows, or a sheet with no
-        // wash under it proves nothing about a sheet that covers one.
         let (closed, _) = paint_with(
             &mut app,
             &mut frame,
@@ -317,17 +320,6 @@ fn the_sheet_is_opaque() {
             &history,
             at,
             &washed_theme,
-        );
-        let washed = (0..at.height)
-            .flat_map(|y| (0..at.width).map(move |x| (x, y)))
-            .filter(|&(x, y)| !matches!(closed[(x, y)].style().bg, None | Some(Color::Reset)))
-            .count();
-        assert!(
-            washed > 0,
-            "no cell on the {}x{} pane carries a background, so this fixture \
-             cannot show a wash through the sheet",
-            at.width,
-            at.height
         );
 
         toggle(&mut app, &mut frame);
@@ -348,6 +340,25 @@ fn the_sheet_is_opaque() {
             drawn.contains("moving"),
             at == ROOMY_PANE,
             "the {}x{} pane did not draw the rung this case is named for:\n{drawn}",
+            at.width,
+            at.height
+        );
+
+        // **Non-vacuity, counted under the sheet's own rect rather than over the
+        // pane.** The claim is about cells the sheet *covers*, so a pane whose
+        // washed rows all sit outside it would satisfy a pane-wide count while
+        // proving nothing, and the sheet is centred in a body that is mostly
+        // context rows. Read off the closed buffer at the rect the open one
+        // published, which is why the toggle happens before this rather than
+        // after it.
+        let washed = (sheet.top..sheet.top + sheet.height)
+            .flat_map(|y| (sheet.left..sheet.left + sheet.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| !matches!(closed[(x, y)].style().bg, None | Some(Color::Reset)))
+            .count();
+        assert!(
+            washed > 0,
+            "no cell the {}x{} pane's sheet covers carried a background before it \
+             opened, so this fixture cannot show a wash through the sheet",
             at.width,
             at.height
         );
@@ -714,6 +725,35 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
          and `view` rather than by the rows:\n{drawn}"
     );
 
+    // **The keys column of the gesture rows alone, because a bare token finds
+    // anything.** Searching the sheet's whole text, `u` is satisfied by `jump to
+    // that row of the list`, so `d  u` could become `d  y` (a key the map does not
+    // bind, taught to the reader as one it does) with every gate in the suite
+    // green: the verb is untouched, so the width, the row count, the frame and
+    // `GESTURES`' sixteen all stay exactly as they were.
+    //
+    // **The furniture has to go too, and leaving it in is the first thing that
+    // went wrong here.** Column 2 of the title row is `gestures`, and of the
+    // group heading is `mouse`: between them they carry `u`, `m`, `e`, `s` and
+    // `g`, so a keys column that included them was still satisfied by the frame.
+    // Rule glyphs are what tells furniture from a row, and no keys cell holds one.
+    //
+    // The keys field of the one-column rung starts at column 2 and is twenty-two
+    // wide, which `the_one_column_rung_places_its_cells_where_the_plan_says` pins.
+    let keys: String = drawn
+        .lines()
+        .filter(|row| !row.contains(RULE))
+        .filter_map(|row| {
+            let cells: Vec<char> = row.chars().collect();
+            (cells.len() > 24).then(|| cells[2..24].iter().collect::<String>())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        keys.contains("Ctrl+C"),
+        "the keys column this gate reads is not where the keys are:\n{keys}"
+    );
+
     for token in [
         "q",
         "Esc",
@@ -745,8 +785,9 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
         "?",
     ] {
         assert!(
-            drawn.contains(token),
-            "the sheet does not name {token:?}, so that gesture is unfindable:\n{drawn}"
+            keys.contains(token),
+            "the sheet's keys column does not name {token:?}, so that gesture is \
+             unfindable:\n{drawn}"
         );
     }
 
@@ -1536,15 +1577,26 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
 
         // The labels themselves, in Mock A's order, which the walk above checks
         // one at a time and cannot check as a sequence.
-        let drawn: Vec<&str> = SECTIONS
-            .iter()
-            .copied()
-            .filter(|label| sheet.contains(*label))
+        //
+        // **Collected from the drawn rows in row order**, not by filtering
+        // `SECTIONS`: filtering yields `SECTIONS`' own order whatever the sheet
+        // did, so the first version of this could fail on a label being *absent*
+        // and never on the labels being in the wrong *order*, which is the half
+        // it was written for.
+        let drawn: Vec<&str> = sheet
+            .lines()
+            .filter_map(|row| {
+                SECTIONS
+                    .iter()
+                    .find(|label| row.starts_with(&format!("│  {label}")))
+                    .copied()
+            })
             .collect();
         assert_eq!(
             drawn,
             SECTIONS.to_vec(),
-            "the roomy rung does not draw all five sections:\n{sheet}"
+            "the roomy rung does not draw all five sections in Mock A's \
+             order:\n{sheet}"
         );
     });
 }
@@ -2042,8 +2094,11 @@ fn the_height_ladder_drops_the_fewest_rows_it_can() {
             // else are read here: once the mouse group is back the count stops
             // being a keyboard count.
             if want <= GIVEN_UP.len() {
-                let (kept, gone) = GIVEN_UP.split_at(GIVEN_UP.len() - want);
-                for token in gone {
+                // `given_up` is the head of the order and `still_drawn` the
+                // tail, which is the way round `split_at` puts them and the
+                // opposite of how they read if the names are guessed at.
+                let (given_up, still_drawn) = GIVEN_UP.split_at(GIVEN_UP.len() - want);
+                for token in still_drawn {
                     assert!(
                         sheet.contains(token),
                         "a 50 by {h} pane should still draw {token:?} and does \
@@ -2051,7 +2106,7 @@ fn the_height_ladder_drops_the_fewest_rows_it_can() {
                          order than DROP_ORDER states:\n{sheet}"
                     );
                 }
-                for token in kept {
+                for token in given_up {
                     assert!(
                         !sheet.contains(token),
                         "a 50 by {h} pane still draws {token:?}, which the ladder \

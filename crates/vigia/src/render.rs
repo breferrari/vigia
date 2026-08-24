@@ -4761,8 +4761,7 @@ impl Group {
 /// called with and no gate could ever tell them apart. What the walk buys is that
 /// the equality stops depending on a claim held somewhere else: delete that block
 /// and this function is still counting what the painter draws. `sheet_roomy_rows`
-/// is the same shape one function away, where the block does *not* reach, since a
-/// sixth section could be a keyboard run of length zero.
+/// is the same shape one function away.
 fn sheet_rows(from: usize, mouse: bool) -> usize {
     kept_keyboard(from).count() + if mouse { 1 + MOUSE.len() } else { 0 }
 }
