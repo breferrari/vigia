@@ -1014,6 +1014,14 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             top[title + 1..top.len() - 4].iter().all(|c| *c == '─'),
             "the sheet's title rule has a hole in it at {w}x{h}:\n{drawn}"
         );
+        // The control's own cell, which the rule assertion above deliberately
+        // stops short of and nothing else pinned: the hover and dismiss gates both
+        // read `sheet.close` out of the plan, so they follow it wherever it goes.
+        assert_eq!(
+            top[top.len() - 3],
+            SHEET_CLOSE,
+            "the close control is not three in from the right edge at {w}x{h}:\n{drawn}"
+        );
         assert!(
             last.starts_with('└') && last.ends_with('┘'),
             "the sheet's bottom row is not a closed rule at {w}x{h}:\n{drawn}"
@@ -1180,6 +1188,13 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // the leading one reproduces every one of them and misses these.
             (81, 25, (12, 2, 56, 19)),
             (43, 25, (4, 5, 35, 13)),
+            // The level probe's own boundary. `margin_of(58)` is 2, so the room is
+            // exactly 56 and the wide one-column sheet is exactly 56: turning the
+            // probe's `>` into `>=` flips this width and no other, dropping
+            // `Ctrl+C`, `PgUp`, `Home`, `End` and the shifted arrows at a width
+            // that fits them. Every count, every frame and every other origin is
+            // identical.
+            (58, 30, (1, 5, 56, 19)),
         ] {
             let at = Rect::new(0, 0, w, h);
             let (_, laid) = paint(at);
@@ -1262,6 +1277,22 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
                 "the {spelling} keyboard label is not against the frame:\n{sheet}"
             );
 
+            // **The last row of each group as well as the first.** Pinning only
+            // the first leaves the rows between them free to permute: swapping the
+            // last two mouse rows changes no count, no column and no frame.
+            let keyboard_last: String = rows[12][cols[0]..].iter().collect();
+            let mouse_last: String = rows[6][cols[2]..].iter().collect();
+            assert!(
+                keyboard_last.starts_with('?'),
+                "the {spelling} left column does not end with the keyboard group's \
+                 last row:\n{sheet}"
+            );
+            assert!(
+                mouse_last.starts_with("click a"),
+                "the {spelling} right column does not end with the mouse group's \
+                 last row:\n{sheet}"
+            );
+
             // The first gesture row carries all four fields.
             let first = &rows[2];
             for at_col in cols {
@@ -1277,5 +1308,89 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
                 );
             }
         });
+    }
+}
+
+#[test]
+fn the_height_ladder_drops_the_fewest_rows_it_can() {
+    // **The worst regression available in this element, and nothing could see
+    // it.** Reversing the dropping rungs makes `from = 8` the first rung tried, so
+    // it fits almost any pane and every short one draws three gestures instead of
+    // the eleven it can afford. Every other gate stayed green: additivity reads a
+    // cell the reversal does not touch, monotonicity is satisfied because three to
+    // sixteen is still non-decreasing, the degrade gate asks only whether the
+    // mouse group is absent, and the origins, the size, the arrival and the frame
+    // are all unchanged.
+    //
+    // What no gate stated is that the ladder drops **as little as it can**. Pinned
+    // at a width too narrow for the two-column rung, so height is the only axis
+    // moving, and as literals rather than as a rule derived from the ladder: one
+    // row of pane buys exactly one more gesture until the keyboard group is whole
+    // at eleven, then nothing until the mouse group fits.
+    let expected = [
+        (8u16, 3usize),
+        (9, 4),
+        (10, 5),
+        (11, 6),
+        (12, 7),
+        (13, 8),
+        (14, 9),
+        (15, 10),
+        (16, 11),
+        (17, 11),
+        (21, 11),
+        (22, GESTURES.len()),
+    ];
+    sweep!("sheet-drop-order", |paint| {
+        for (h, want) in expected {
+            let at = Rect::new(0, 0, 50, h);
+            let (buf, laid) = paint(at);
+            let (count, sheet) = read_sheet(&buf, &laid);
+            assert_eq!(
+                count, want,
+                "a 50 by {h} pane draws {count} gestures where the ladder should \
+                 leave {want}:\n{sheet}"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_keys_cell_is_lit_and_the_verb_is_dim() {
+    // B12 rules the keys cell lit against a dim verb, and swapping the two weights
+    // changes no glyph, so every gate reading `text_of` is blind to it. The close
+    // control has had this treatment since #211; the rows never did. No other test
+    // in the suite reads a foreground inside the sheet's rect.
+    let theme = Theme::default();
+    let scratch = Scratch::large_diff("sheet-weights", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    toggle(&mut app, &mut frame);
+
+    for (w, h, keys_at, verb_at, spelling) in [
+        (120u16, 21u16, 2u16, 26u16, "two columns"),
+        (120, 30, 2, 26, "one column"),
+    ] {
+        let at = Rect::new(0, 0, w, h);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let sheet = laid.sheet.expect("a pane that draws no sheet");
+        let row = sheet.top + 2;
+        assert_eq!(
+            buf[(sheet.left + keys_at, row)].fg,
+            theme.chrome.fg.expect("the chrome weight carries a colour"),
+            "the {spelling} keys cell is not drawn lit"
+        );
+        assert_eq!(
+            buf[(sheet.left + verb_at, row)].fg,
+            theme
+                .chrome_dim
+                .fg
+                .expect("the dim weight carries a colour"),
+            "the {spelling} verb cell is not drawn dim"
+        );
     }
 }
