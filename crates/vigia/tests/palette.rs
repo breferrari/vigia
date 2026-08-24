@@ -65,6 +65,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
+        rail: false,
         sheet: None,
         frame: None,
         memory: None,

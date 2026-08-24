@@ -563,6 +563,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
+        rail: false,
         sheet: None,
         // Absent in the base fixture, so every sweep that inherits it keeps
         // measuring the chrome it measured before the status readouts existed.
@@ -1612,7 +1613,15 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
     // never a rule, and the non-vacuity guard at the end of this gate says so
     // rather than letting the overlap rule pass over two rectangles.
     let view = pinned_and_streamed();
-    let chrome = chrome();
+    // **Railed, because this gate is about tiling and the rail is one of the two
+    // shapes the body tiles in.** The rail is a gesture since `SPEC.md` §11.2 B14
+    // ([#295](https://github.com/breferrari/vigia/issues/295)), so a sweep built on
+    // the default chrome would cover the stacked shape at every width and the
+    // side-by-side one at none, which is exactly what `saw_rail` below refuses.
+    let chrome = Chrome {
+        rail: true,
+        ..chrome()
+    };
     let mut saw_band = false;
     let mut saw_rule = false;
     let mut saw_rail = false;
@@ -4982,6 +4991,7 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
     };
     let without = Chrome {
         masthead: false,
+        rail: false,
         ..chrome()
     };
     let mut banded = 0usize;

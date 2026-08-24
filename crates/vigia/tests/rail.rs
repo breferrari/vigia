@@ -47,12 +47,23 @@
 
 mod support;
 
+/// The repository fixture, under a second name because this file already has a
+/// `support` of its own.
+#[path = "../../vigia-core/tests/support/mod.rs"]
+mod repo;
+
 use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use vigia::{
-    App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Position, Row, Theme, View,
-    body_layout, regions, render,
+    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Position, Regions, Row,
+    Theme, View, action_for, body_layout, regions, render,
 };
+
+/// A key event, spelled once.
+fn press(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
 use vigia_core::Recency;
 
 /// The block one heat slice is drawn as, restated rather than imported.
@@ -127,7 +138,22 @@ const THE_CLIMB: u16 = 402;
 /// A pane tall enough that neither region is the thing giving way.
 const TALL: u16 = 24;
 
+/// A shell that has asked for the rail, which is what every gate below is about.
+///
+/// **The gesture, not the width, since `SPEC.md` §11.2 B14**
+/// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived on
+/// its own until then, so `App::new()` was enough and the width alone decided the
+/// layout. It is a request now, and this file's subject is the rail that a reader
+/// asked for: the width is a precondition and the gesture is the cause. The one
+/// gate about the *default* builds its own chrome and says so.
 fn chrome() -> Chrome {
+    let mut chrome = stacked_chrome();
+    chrome.rail = true;
+    chrome
+}
+
+/// A shell that has not asked, which is what ships.
+fn stacked_chrome() -> Chrome {
     App::new().chrome("fixture", None, None, None, None, None)
 }
 
@@ -1261,5 +1287,149 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         matches!(action_for(&event(2, empty), told), Some(Action::Scroll(_))),
         "a wheel below the rail's last file did not fall through to the diff: {:?}",
         action_for(&event(2, empty), told)
+    );
+}
+
+#[test]
+fn the_rail_is_off_until_the_reader_asks_for_it() {
+    // **`SPEC.md` §11.2 B14's whole claim.** The rail arrives at 134 columns and
+    // until this row it arrived on its own, so a reader who had not asked for a
+    // narrower diff got one: at 133 the diff plans against 129 columns and at 134
+    // against 60. #252's derivation of *where* the split can happen is untouched;
+    // what changes is that crossing it is a gesture.
+    //
+    // Swept across every width the gate can reach rather than sampled at 134,
+    // because a default that held at the arrival width and lapsed at 200 is the
+    // shape a single screen cannot see.
+    let files = 3;
+    for width in 1..=WIDEST {
+        let at = Rect::new(0, 0, width, TALL);
+        assert!(
+            !body_layout(at, &stacked_chrome(), files).rail,
+            "a {width} column pane drew a rail nobody asked for"
+        );
+    }
+}
+
+#[test]
+fn r_asks_for_the_rail_and_r_puts_it_back() {
+    // **The gesture, end to end**: the key resolves to the action, the action moves
+    // the state, and the state reaches the layout. Three links, and the gate above
+    // reads only the last of them, so a key bound to nothing would leave it green.
+    //
+    // Driven through `App::apply` rather than by setting the field, which is what
+    // `chrome()` does above and is right for gates about the *rail*; this one is
+    // about the *toggle*.
+    let scratch = repo::Scratch::large_diff("rail-gesture", 3, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+
+    assert_eq!(
+        action_for(&press(KeyCode::Char('r')), Regions::default()),
+        Some(Action::ToggleRail),
+        "`r` is not bound to the rail"
+    );
+
+    let wide = Rect::new(0, 0, 160, TALL);
+    let railed =
+        |app: &App| body_layout(wide, &app.chrome("f", None, None, None, None, None), 3).rail;
+    assert!(!railed(&app), "a fresh shell drew a rail");
+
+    let height = body_layout(wide, &app.chrome("f", None, None, None, None, None), 3).diff;
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    assert!(railed(&app), "`r` did not put the list beside the diff");
+
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    assert!(
+        !railed(&app),
+        "`r` did not put the list back above the diff"
+    );
+}
+
+#[test]
+fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
+    // **`m`'s own behaviour one region over**: a pane that cannot carry the thing
+    // draws nothing different, and the request is still kept, so a reader who
+    // narrows a railed pane and widens it again gets the rail back rather than the
+    // question.
+    //
+    // Asserted as *the whole body is identical*, not as `!body.rail`, because the
+    // second would pass against a layout that had quietly changed something else.
+    let arrives = first_rail();
+    for width in 1..arrives {
+        let at = Rect::new(0, 0, width, TALL);
+        assert_eq!(
+            body_layout(at, &stacked_chrome(), 3),
+            body_layout(at, &chrome(), 3),
+            "a {width} column pane laid out differently for a rail it cannot draw"
+        );
+    }
+
+    // And the request survives the narrow pane, which is the half that would be
+    // lost by clearing the flag instead of ignoring it.
+    let narrow = Rect::new(0, 0, arrives - 1, TALL);
+    assert!(
+        !body_layout(narrow, &chrome(), 3).rail,
+        "a pane one column short of the arrival drew a rail"
+    );
+    assert!(
+        body_layout(Rect::new(0, 0, arrives, TALL), &chrome(), 3).rail,
+        "widening the pane again lost the reader's request"
+    );
+}
+
+#[test]
+fn the_rail_is_not_a_mode() {
+    // **What keeps B14 out of B4's refusal**, and what B12 had to say for the sheet
+    // one element over: no key means something different while the rail is up. The
+    // list is still not navigable, it is merely somewhere else.
+    let keys = [
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::Char('J'),
+        KeyCode::Char('K'),
+        KeyCode::Char(' '),
+        KeyCode::Char('d'),
+        KeyCode::Char('u'),
+        KeyCode::Char('g'),
+        KeyCode::Char('G'),
+        KeyCode::Char('n'),
+        KeyCode::Char('p'),
+        KeyCode::Char('1'),
+        KeyCode::Char('f'),
+        KeyCode::Char('m'),
+        KeyCode::Char('?'),
+        KeyCode::Char('q'),
+        KeyCode::Esc,
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+    ];
+    let read = || -> Vec<_> {
+        keys.iter()
+            .map(|k| action_for(&press(*k), Regions::default()))
+            .collect()
+    };
+    // The keymap is pure, so this reads it either side of a state change rather
+    // than either side of a paint: what B4 forbids is a key whose *meaning* moves.
+    let before = read();
+    let scratch = repo::Scratch::large_diff("rail-not-a-mode", 3, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+    app.apply(Action::ToggleRail, &mut frame, 10)
+        .expect("toggle");
+    assert_eq!(
+        before,
+        read(),
+        "a key changed meaning while the rail was up, which is the mode B4 refuses"
     );
 }

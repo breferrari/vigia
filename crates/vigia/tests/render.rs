@@ -278,6 +278,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
+        rail: false,
         sheet: None,
         // The first paint's chrome: no frame has completed, so there is no p99
         // to draw. Every snapshot below inherits it, which keeps them comparing
@@ -7084,6 +7085,7 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
         Rect::new(0, 0, width, height),
         &Chrome {
             masthead: false,
+            rail: false,
             ..chrome()
         },
         view.files,

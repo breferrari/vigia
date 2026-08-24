@@ -1146,7 +1146,10 @@ const fn affords_rail(pane: u16) -> bool {
 /// Columns the rail takes on a pane it is drawn on.
 ///
 /// Undefined below [`RAIL_FROM`] in the sense that nothing asks: [`Body::split`]
-/// and [`Body::areas`] both gate on [`affords_rail`] first. The `max` is what
+/// gates on [`affords_rail`] before it is reached, and [`Body::areas`] reads
+/// [`Body::rail`], the answer that gate already produced. **The two are not the
+/// same test since #295**, which is why only one of them names the width: a pane
+/// wide enough for a rail draws one only when the reader has asked. The `max` is what
 /// keeps a rail that cannot hold its own contents from being drawn at all, and
 /// the floor is what a rail actually is at every ordinary pane, because
 /// [`RAIL_FROM`] is well below 213 and 213 is where the share first overtakes it.
@@ -1538,6 +1541,21 @@ pub struct Chrome {
     /// **transient** thing, so that a notice flickering cannot jog the reader's
     /// diff. A keypress is an instruction rather than a flicker.
     pub masthead: bool,
+    /// Whether the reader has asked for the pinned list beside the diff, which `r`
+    /// toggles.
+    ///
+    /// **The request, where [`Body::rail`] is the answer**, and the two are
+    /// deliberately not the same field. This says what was asked for at any pane
+    /// width; that says whether this pane could give it, which needs 134 columns
+    /// and a changed file to put in it. `Chrome::masthead` and [`Body::graph`] are
+    /// the same pairing one region over.
+    ///
+    /// `SPEC.md` §11.2 **B14**
+    /// ([#295](https://github.com/breferrari/vigia/issues/295)). Until then the
+    /// rail arrived on its own at 134, and #252's derivation of that width is kept
+    /// intact: what it decides now is where the gesture can be honoured rather than
+    /// where the layout changes underneath a reader.
+    pub rail: bool,
     /// Whether the gestures sheet is drawn over the pane, which `?` toggles.
     ///
     /// **Unlike [`Chrome::masthead`] this is not an input to the body split at
@@ -3382,7 +3400,8 @@ impl Body {
     ///
     /// Saturating rather than clamped so a one-row terminal asks for nothing
     /// instead of underflowing.
-    pub fn split(area: Rect, footer_rows: u16, files: usize, masthead: bool) -> Self {
+    pub fn split(area: Rect, footer_rows: u16, files: usize, chrome: &Chrome) -> Self {
+        let masthead = chrome.masthead;
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
         // **The rail is decided before the row clamps, because it removes two of
@@ -3397,7 +3416,12 @@ impl Body {
         // second rule: B3's empty state replaces the region with a sentence, and a
         // rail beside a sentence is a blank column claiming a region that has
         // nothing in it.
-        if affords_rail(area.width) && files > 0 {
+        // **Asked for, then afforded**, which is `SPEC.md` §11.2 B14's order and
+        // not merely its conjunction: the width is a precondition and the gesture
+        // is the cause. Reading them the other way round is what shipped, and what
+        // it meant is that a pane crossing 134 narrowed a reader's diff from 129
+        // planning columns to 60 without being asked.
+        if chrome.rail && affords_rail(area.width) && files > 0 {
             return Self::beside(body, area.width, files, masthead);
         }
 
@@ -3882,7 +3906,7 @@ impl Body {
 /// through here. See [`Body::split`] for the ruling the arithmetic encodes.
 pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
     let footer = Footer::plan(area, chrome, files).height();
-    let mut body = Body::split(area, footer, files, chrome.masthead);
+    let mut body = Body::split(area, footer, files, chrome);
     // **Attached rather than split**, which is [`Body::sheet_pages`]' own
     // docblock: the sheet is not a region and takes no row from one, so it has no
     // place in the split that divides the body between them. It is here because
@@ -3980,8 +4004,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         return Regions::default();
     }
     let footer = Footer::plan(area, chrome, view.files);
-    let body =
-        Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
+    let body = Body::split(area, footer.height(), view.files, chrome).clamped_to(view.list.len());
     // **The same geometry the painter draws into**, asked for by name rather than
     // rebuilt here ([#251](https://github.com/breferrari/vigia/issues/251)). This
     // was two offsets computed from `Body` a second time, which kept the pointer
@@ -4059,8 +4082,7 @@ pub fn render(
     // view, and `clamped_to` below is what makes that case draw honestly rather
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
-    let body =
-        Body::split(area, footer.height(), view.files, chrome.masthead).clamped_to(view.list.len());
+    let body = Body::split(area, footer.height(), view.files, chrome).clamped_to(view.list.len());
     let margins = margins_of(area.width);
 
     let mut painter = Painter {
@@ -4276,7 +4298,7 @@ struct Gesture {
 /// prerequisite: this array ran `q` first and `?` last while `sheet_plan` dropped
 /// *from the top down*, so reordering for sections alone would have kept `q` at
 /// the floor and dropped `f` and `m`, inverting §11.1's own rule.
-const KEYBOARD: [Gesture; 11] = [
+const KEYBOARD: [Gesture; 12] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -4314,6 +4336,10 @@ const KEYBOARD: [Gesture; 11] = [
         verb: ["show or hide the churn band", "the churn band"],
     },
     Gesture {
+        keys: ["r", "r"],
+        verb: ["show or hide the left rail", "the left rail"],
+    },
+    Gesture {
         keys: ["?", "?"],
         verb: ["this sheet", "this sheet"],
     },
@@ -4341,10 +4367,18 @@ const KEYBOARD: [Gesture; 11] = [
 /// names a region a reader may not know exists, and `?` is this sheet, which is
 /// how everything above it is found at all.
 ///
+/// **`r` is a fourth unguessable gesture and it is given up before those three**
+/// ([#295](https://github.com/breferrari/vigia/issues/295)), which is why it sits
+/// out of the reader's order here at rank eight. The reason is specific rather
+/// than a preference: this order only binds on a pane of 30 to 34 columns, and a
+/// rail needs 134, so `r` is the one gesture in the set that **cannot fire on the
+/// pane that is dropping it**. A gesture that does nothing there is the right one
+/// to lose first.
+///
 /// A rung that drops `from` rows drops the **set** `DROP_ORDER[..from]`, so what
 /// it draws is no longer a suffix of the table. [`kept_keyboard`] is the one
 /// place that is resolved, and both the measurement and the drawer read it.
-const DROP_ORDER: [usize; KEYBOARD.len()] = [10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [11, 0, 1, 2, 3, 4, 5, 6, 9, 7, 8, 10];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 ///
@@ -4465,7 +4499,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 9 },
+        rows: Rows::Keyboard { from: 7, to: 10 },
     },
     Section {
         label: "mouse",
@@ -4473,7 +4507,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 9, to: 11 },
+        rows: Rows::Keyboard { from: 10, to: 12 },
     },
 ];
 

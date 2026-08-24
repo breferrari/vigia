@@ -35,7 +35,8 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
+    Action, App, Body, Chrome, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout,
+    render,
 };
 use vigia_core::{
     CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
@@ -330,8 +331,14 @@ const RAIL_PANE: Rect = Rect {
 /// of which would leave it measuring the gate above under a different name.
 #[test]
 fn a_frame_beside_a_rail_holds_the_frame_budget() {
+    // The rail is asked for since §11.2 B14, so the pane this gate is named for
+    // draws one only when the chrome says so.
     let app = App::new();
-    let rail = layout_of(&app, RAIL_PANE, FILES);
+    let asked = Chrome {
+        rail: true,
+        ..app.chrome("fixture", None, None, None, None, None)
+    };
+    let rail = body_layout(RAIL_PANE, &asked, FILES);
     let stacked = layout(&app, FILES).list;
     assert!(
         rail.rail,
@@ -344,7 +351,7 @@ fn a_frame_beside_a_rail_holds_the_frame_budget() {
          which is not the deeper region this gate exists to time",
         rail.list
     );
-    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, None);
+    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, None, true);
 }
 
 #[test]
@@ -618,7 +625,7 @@ fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
 /// depths have to agree about every other term for the comparison to mean
 /// anything.
 fn frame_budget_at_depth(name: &str, depth: usize) {
-    frame_budget_on(name, depth, area(), None);
+    frame_budget_on(name, depth, area(), None, false);
 }
 
 /// The same, on a named pane.
@@ -629,7 +636,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 /// changed file it has. Each visible list row costs one `Frame::diff`, which
 /// `tests/reads.rs` bounds structurally; what only a clock can answer is whether
 /// four times as many of them still fit inside I9.
-fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>) {
+fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>, rail: bool) {
     let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -639,6 +646,20 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>) {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let mut history = History::new();
+
+    // **Asked for before the layout is taken, because it changes the layout.**
+    // The rail is a gesture since `SPEC.md` §11.2 B14
+    // ([#295](https://github.com/breferrari/vigia/issues/295)), and unlike the
+    // sheet's toggle below it moves rows: taking the height first would time a
+    // frame planned for the stacked shape. `ToggleRail` reads no height of its
+    // own (`Action::needs_height` is false for it), so the stacked figure is an
+    // honest argument here.
+    if rail {
+        let stacked = layout_of(&app, pane, FILES).diff;
+        app.apply(vigia::Action::ToggleRail, &mut frame, stacked)
+            .expect("toggle the rail");
+    }
+
     let screen = layout_of(&app, pane, FILES);
     let height = screen.diff;
 
@@ -2364,14 +2385,14 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 14),
+        (104, 15),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
         SHEET_PANE.height
     );
 
-    frame_budget_on("shell-i9-sheet", 0, SHEET_PANE, Some("keyboard"));
+    frame_budget_on("shell-i9-sheet", 0, SHEET_PANE, Some("keyboard"), false);
 }
 
 /// The pane the roomy rung's own budget is measured on.
@@ -2405,12 +2426,12 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 29),
+        (68, 30),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
         ROOMY_PANE.height
     );
 
-    frame_budget_on("shell-i9-roomy", 0, ROOMY_PANE, Some("moving"));
+    frame_budget_on("shell-i9-roomy", 0, ROOMY_PANE, Some("moving"), false);
 }

@@ -55,10 +55,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 15;
+const ESCAPING_FILES: usize = 16;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "fifteen";
+const ESCAPING_FILES_SPELLED: &str = "sixteen";
 
 /// The repository root, two levels above this package.
 ///
