@@ -145,6 +145,20 @@ by minting a token scoped to this repository alone and pointing the bump at it.
       shape [#257](https://github.com/breferrari/vigia/issues/257) is visible
       in, and a fixture cannot judge it: the question is whether a reader
       glancing over sees what the agent just did.
+- [ ] Press `?`, then **resize the pane through the sheet's own ladder** and
+      watch it, rather than opening it once on one size. Narrow it until the
+      table takes the tight spellings, shorten it until the mouse group moves
+      *beside* the keyboard group rather than below it (a pane 78 columns or
+      wider and 17 to 21 rows high is the two-column rung), and shorten it
+      further until rows start dropping. Nothing should jump, tear, or straddle
+      the header or the footer, and `?` should still take it away at every size.
+      A gate walks 105 widths by 27 heights and can only read cells; whether the
+      snap between the one-column and two-column shapes *reads* as one element
+      changing shape or as two different boxes is a judgement only an eye makes.
+      ([#220](https://github.com/breferrari/vigia/issues/220) added the rung;
+      [#285](https://github.com/breferrari/vigia/issues/285) and
+      [#286](https://github.com/breferrari/vigia/issues/286) will move it again,
+      so this box outlives them.)
 - [ ] Quit with `q` AND with Ctrl-C: terminal restored both times, no raw-mode
       residue.
 - [ ] Kill it from outside and look at the terminal it was in. Unix:

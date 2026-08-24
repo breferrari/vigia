@@ -369,13 +369,27 @@ fn the_close_control_brightens_under_the_pointer() {
     );
 
     let theme = Theme::default();
-    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None);
+    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None, None);
     let hovered = drawn_close(
         &mut app,
         &mut frame,
         &mut highlighter,
         &history,
         Some(Hovered::Button(cx, cy)),
+        None,
+    );
+    // **Held, which is the rung nothing reached.** B10's ladder is three weights,
+    // and this gate asserted two: no test in the suite ever built a `Chrome` whose
+    // `pressed` is the control's own cell, so deleting the `bar_active` arm left
+    // everything green. The step buttons' pressed rung is gated one element over
+    // (`tests/render.rs`); the sheet's sibling was not.
+    let held = drawn_close(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Some(Hovered::Button(cx, cy)),
+        Some((cx, cy)),
     );
 
     assert_ne!(
@@ -391,6 +405,17 @@ fn the_close_control_brightens_under_the_pointer() {
         weight(hovered.1),
         weight(theme.bar_hover),
         "the hovered control is not on B10's hover rung"
+    );
+    assert_eq!(
+        weight(held.1),
+        weight(theme.bar_active),
+        "the held control is not on B10's active rung, so pressing it says nothing"
+    );
+    assert_ne!(
+        weight(held.1),
+        weight(hovered.1),
+        "the control draws the same held as merely hovered, so B10's ladder is two \
+         rungs rather than three"
     );
     assert_eq!(
         at_rest.0, SHEET_CLOSE,
@@ -414,8 +439,9 @@ fn drawn_close(
     highlighter: &mut Highlighter,
     history: &History,
     hovered: Option<Hovered>,
+    pressed: Option<(u16, u16)>,
 ) -> (char, ratatui::style::Style) {
-    let chrome = app.chrome("fixture", Some("main"), None, None, hovered, None);
+    let chrome = app.chrome("fixture", Some("main"), pressed, None, hovered, None);
     let body = body_layout(area(), &chrome, FILES);
     let view = app
         .view(frame, highlighter, history, body)
@@ -555,7 +581,12 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     );
 
     // A short pane keeps the keyboard group and loses the mouse group, which is
-    // the height axis on its own.
+    // the height axis on its own. **Sixteen rows is still below #220's widening
+    // rung** and the case survived it unchanged: the pane's footer is two rows
+    // here, so the body is thirteen and the two-column rung needs fourteen. One
+    // row taller and the mouse group comes back beside the keyboard group
+    // instead, which is what `the_sheet_spends_width_before_it_spends_gestures`
+    // holds.
     let short_at = Rect::new(0, 0, WIDE, 16);
     let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, short_at);
     let short = text_of(&buf, short_at);
@@ -647,5 +678,1077 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
             drawn.contains(gesture),
             "the sheet does not name the mouse gesture {gesture:?}"
         );
+    }
+}
+
+/// Every gesture the sheet can draw, as the token a reader would look for.
+///
+/// One entry per row of `KEYBOARD` and `MOUSE`, restated rather than imported for
+/// the reason [`TITLE`] is: a gate that shared the renderer's tables would agree
+/// with them by construction, and this one exists to count what reaches a screen.
+///
+/// **Each entry is the longest prefix both spellings share**, which is why some
+/// are shorter than the phrase the wide rung draws: `drag a` rather than `drag a
+/// scrollbar`, because the tight rung spells it `drag a bar`. A gate that counts
+/// gestures has to count them at every rung, so an entry that named only the wide
+/// spelling would report a tight sheet as having lost the row.
+///
+/// `every_key_the_map_binds_is_named_on_the_sheet` keeps the full phrases and is
+/// deliberately not folded into this: it runs at one pane size, and its job is
+/// that the wide rung spells each gesture out rather than that the row exists.
+const GESTURES: [&str; 16] = [
+    "quit",
+    "scroll a row",
+    "Space  PgDn",
+    "half a page",
+    "first / last",
+    "next / prev",
+    "jump to",
+    "scroll the",
+    "follow the newest",
+    "churn band",
+    "this sheet",
+    "wheel",
+    "drag a",
+    "click a track",
+    "click  ▲ ▼",
+    "jump the diff to it",
+];
+
+#[test]
+fn no_gesture_token_hides_inside_another() {
+    // **The gate on the gate.** [`GESTURES`] is matched with `contains`, so an
+    // entry that is a substring of another scores whenever the longer one draws,
+    // and the height ladder drops from the top, which is exactly where the two
+    // meet: `page` sat inside `half a page` and the row above it is dropped first.
+    // Measured at 60 by 13 the sheet drew eight gestures and the count said nine.
+    //
+    // The same shape as the footer leak one line up, and both were invisible for
+    // the same reason: a count that is wrong in the region the ladder degrades is
+    // right everywhere a gate happened to assert an exact number.
+    for (i, a) in GESTURES.iter().enumerate() {
+        for (j, b) in GESTURES.iter().enumerate() {
+            assert!(
+                i == j || !b.contains(a),
+                "GESTURES[{i}] {a:?} hides inside GESTURES[{j}] {b:?}, so every \
+                 rung that draws the second and not the first counts one gesture \
+                 too many"
+            );
+        }
+    }
+}
+
+/// The extent every ladder gate walks: 40 to 144 columns by 1, 6 to 32 rows by 1.
+///
+/// **One place, because three gates read it.** They assert different things about
+/// the same grid, and bounds that drifted between them would leave a rung
+/// asserted monotone at a width no other gate had looked at.
+///
+/// The floor is at I6's forty columns and the ceiling is above every width the
+/// two-column rung arrives at, so the sweep contains both ends of the ladder
+/// rather than a slice of its middle.
+const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
+
+/// The height half of [`LADDER_WIDTHS`], from below the sheet's floor to above
+/// the height at which one column always fits.
+const LADDER_HEIGHTS: std::ops::RangeInclusive<u16> = 6..=32;
+
+/// One materialised fixture, painted at many sizes.
+///
+/// **Through `render`, never through the layout alone.** The sheet's height is
+/// spent against the *body*, and the body is the pane less the header and less a
+/// footer whose own height is a ladder in the width. A sweep that assumed a
+/// one-row footer would be measuring a pane that does not exist, and it did:
+/// #220's first probe put the two-column rung one row lower than it lands.
+///
+/// The repository, the frame and the materialised diffs are built **once** and
+/// the pane is resized around them. Rebuilding per cell cost forty seconds for
+/// the sweep below, which is the shape that gets a gate deleted rather than run.
+macro_rules! sweep {
+    ($name:expr, |$paint:ident| $body:block) => {
+        let scratch = Scratch::large_diff($name, FILES, 40);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        materialise(&mut frame);
+        let mut app = App::new();
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        toggle(&mut app, &mut frame);
+        let mut $paint = |at: Rect| paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        $body
+    };
+}
+
+/// Walk the ladder, handing each cell's painted pane to `each`.
+///
+/// The scaffold three gates below shared by copy until #220's own audit pointed
+/// at it. `name` is the fixture's, so each gate still gets an independent
+/// repository and the three keep running in parallel.
+fn walk_the_ladder(name: &'static str, mut each: impl FnMut(u16, u16, Rect, &Buffer, &Regions)) {
+    sweep!(name, |paint| {
+        for w in LADDER_WIDTHS {
+            for h in LADDER_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                each(w, h, at, &buf, &laid);
+            }
+        }
+    });
+}
+
+/// How many of [`GESTURES`] the sheet draws, and the sheet's own rows.
+///
+/// **Counted inside the sheet's rect, never over the pane.** The hint bar spells
+/// `q quit`, so a pane-wide count scores `GESTURES[0]` on every frame whether or
+/// not the sheet drew that row, and every count-based gate here was one gesture
+/// loose in exactly the region they exist to measure: the rungs that drop rows.
+/// Measured at 120 by 8 the pane says four and the sheet draws three.
+fn read_sheet(buf: &Buffer, laid: &Regions) -> (usize, String) {
+    let sheet = laid.sheet.map_or_else(String::new, |s| {
+        text_of(buf, Rect::new(s.left, s.top, s.width, s.height))
+    });
+    let count = if sheet.contains(TITLE) {
+        GESTURES.iter().filter(|g| sheet.contains(*g)).count()
+    } else {
+        0
+    };
+    (count, sheet)
+}
+
+#[test]
+fn the_sheet_spends_width_before_it_spends_gestures() {
+    // **#220's whole claim, at the pane that reported it.** A pane too short for
+    // the seventeen-row column but wide enough to put the mouse group beside the
+    // keyboard group draws every gesture, where before this rung it dropped the
+    // whole mouse group and said nothing about it.
+    //
+    // The pane sizes are named rather than derived, because a gate that computed
+    // the boundary from the function under test would verify the function and
+    // never the wiring.
+    sweep!("sheet-width", |paint| {
+        let short_and_wide = Rect::new(0, 0, 120, 21);
+        let (buf, laid) = paint(short_and_wide);
+        let (count, sheet) = read_sheet(&buf, &laid);
+        assert_eq!(
+            count,
+            GESTURES.len(),
+            "a pane with the columns to draw every gesture drew fewer:\n{sheet}"
+        );
+        assert!(
+            sheet.contains("keyboard"),
+            "the assertion above passed without the two-column rung, so it proves nothing:\n{sheet}"
+        );
+
+        // And a pane tall enough for one column is untouched: the widening rung
+        // sits *below* the full one-column rung, which is what makes #220
+        // additive rather than a relayout.
+        let tall = Rect::new(0, 0, 120, 30);
+        let (buf, laid) = paint(tall);
+        let (count, sheet) = read_sheet(&buf, &laid);
+        assert_eq!(
+            sheet.lines().count(),
+            19,
+            "a tall pane stopped drawing the nineteen-row one-column sheet:\n{sheet}"
+        );
+        assert!(
+            !sheet.contains("keyboard"),
+            "a tall pane took the two-column rung, so the ladder is not additive:\n{sheet}"
+        );
+        assert_eq!(
+            count,
+            GESTURES.len(),
+            "the untouched rung stopped drawing every gesture:\n{sheet}"
+        );
+    });
+}
+
+#[test]
+fn the_widening_ladder_is_monotone_and_never_leaves_the_body() {
+    // **Walks the ladder rather than sampling it**, which is #158's lesson and the
+    // one `the_sheet_degrades_on_both_axes_and_has_a_floor` does not follow: it
+    // asserts three fixed sizes, and a single fixture passes against an unfixed
+    // ladder. #220 inserts a rung in the *middle* of this one, where a removal
+    // from the top would have been free, so both axes are swept rather than
+    // reasoned about.
+    //
+    // Two claims over one grid, because the sweep is what costs and the assertions
+    // are free: growing a pane never takes a gesture away, and the sheet never
+    // reaches the header or the footer at any rung.
+    let widths: Vec<u16> = LADDER_WIDTHS.collect();
+    let heights: Vec<u16> = LADDER_HEIGHTS.collect();
+    let mut grid = vec![vec![0usize; heights.len()]; widths.len()];
+
+    walk_the_ladder("sheet-ladder-sweep", |w, h, at, buf, laid| {
+        let (count, _) = read_sheet(buf, laid);
+        let i = usize::from(w - widths[0]);
+        let j = usize::from(h - heights[0]);
+        grid[i][j] = count;
+
+        // B12's box rule, at every rung rather than at one: the sheet is centred
+        // in the body, so a reader can still see the tool is alive behind it.
+        if let Some(sheet) = laid.sheet {
+            assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
+            assert!(
+                sheet.top + sheet.height < at.y + at.height,
+                "the sheet reached the footer at {w}x{h}"
+            );
+        }
+    });
+
+    assert!(
+        grid.iter().flatten().any(|&c| c == GESTURES.len()),
+        "no pane in the sweep drew a whole sheet, so every assertion below is \
+         vacuous and a `sheet_plan` that returned None unconditionally would pass"
+    );
+
+    for (i, &w) in widths.iter().enumerate() {
+        for (j, &h) in heights.iter().enumerate() {
+            if i + 1 < widths.len() {
+                assert!(
+                    grid[i + 1][j] >= grid[i][j],
+                    "widening {w} to {} at height {h} took a gesture away: {} then {}",
+                    widths[i + 1],
+                    grid[i][j],
+                    grid[i + 1][j]
+                );
+            }
+            if j + 1 < heights.len() {
+                assert!(
+                    grid[i][j + 1] >= grid[i][j],
+                    "growing height {h} to {} at width {w} took a gesture away: {} then {}",
+                    heights[j + 1],
+                    grid[i][j],
+                    grid[i][j + 1]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn one_column_wins_wherever_one_column_fits() {
+    // **The additivity claim as a gate, not as an argument.** #220's rung is
+    // inserted in the *middle* of a monotone ladder, where removing one from the
+    // top would have been free, so the property that keeps it from being a
+    // relayout is that a pane on which one column already fits never reaches it.
+    //
+    // Stated so a screen can answer it: at each width, find the shortest pane that
+    // draws every gesture in **one** column, and require every two-column pane at
+    // that width to be shorter than it. A pane that could have had the shape it
+    // has today and was given a different one fails here.
+    //
+    // **The first version of this gate could not fail.** It skipped a width whose
+    // one-column pane did not exist, and putting the two-column rung first is
+    // exactly what makes it not exist, so the mutation it was written for passed
+    // straight through it. A width that draws two columns and never falls back to
+    // one is now the failure rather than the exemption.
+    let widths: Vec<u16> = LADDER_WIDTHS.collect();
+    let heights: Vec<u16> = LADDER_HEIGHTS.collect();
+    // Per cell: whether the sheet drew two columns, and how many gestures reached
+    // the screen. `None` where no sheet was drawn at all.
+    let mut cells = vec![vec![None; heights.len()]; widths.len()];
+
+    walk_the_ladder("sheet-additive", |w, h, _at, buf, laid| {
+        let (count, sheet) = read_sheet(buf, laid);
+        let i = usize::from(w - widths[0]);
+        let j = usize::from(h - heights[0]);
+        cells[i][j] = laid.sheet.map(|_| (sheet.contains("keyboard"), count));
+    });
+
+    let mut seen = 0;
+    for (i, &w) in widths.iter().enumerate() {
+        let two_column: Vec<u16> = heights
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| matches!(cells[i][*j], Some((true, _))))
+            .map(|(_, h)| *h)
+            .collect();
+        if two_column.is_empty() {
+            continue;
+        }
+        seen += two_column.len();
+
+        // The shortest pane at this width that draws every gesture in one column.
+        let full = heights
+            .iter()
+            .enumerate()
+            .find(|(j, _)| cells[i][*j] == Some((false, GESTURES.len())))
+            .map(|(_, h)| *h);
+        let full = full.unwrap_or_else(|| {
+            panic!(
+                "width {w} draws two columns at {two_column:?} and never falls \
+                 back to one, so the two-column rung is being taken ahead of a \
+                 shape that fits"
+            )
+        });
+        for h in two_column {
+            assert!(
+                h < full,
+                "a pane of {w}x{h} took the two-column rung although one column \
+                 draws every gesture from {w}x{full}, so the ladder is a relayout \
+                 rather than additive"
+            );
+        }
+    }
+    assert!(
+        seen > 0,
+        "the sweep found no two-column pane at all, so it proves nothing"
+    );
+}
+
+#[test]
+fn the_sheet_is_a_closed_box_at_every_rung() {
+    // **The gate that was missing, found by the audit that introduced its
+    // defect.** Restructuring the two-column rung so the layout places each group
+    // (rather than the drawer re-deriving where the second one starts) made the
+    // sheet two columns narrower than the row it draws, so a long verb in the
+    // right-hand column overwrote the frame and the box read as open on four rows
+    // of thirteen. **Every other gate stayed green**: they count gestures and look
+    // for tokens, and none of them had ever looked at the border.
+    //
+    // The frame is the one part of this element with no content in it, so it can
+    // be asserted exactly: four corners, a closed rule along the bottom, and a
+    // pipe at both ends of every row between. Swept, because a width that clips is
+    // a width the ladder chose and one screen cannot find it.
+    let mut sheets = 0;
+    let mut two_column = 0;
+
+    walk_the_ladder("sheet-frame", |w, h, _at, buf, laid| {
+        let Some(sheet) = laid.sheet else { return };
+        let rect = Rect::new(sheet.left, sheet.top, sheet.width, sheet.height);
+        let drawn = text_of(buf, rect);
+        let rows: Vec<&str> = drawn.lines().collect();
+        sheets += 1;
+        two_column += usize::from(drawn.contains("keyboard"));
+
+        let (first, last) = (rows[0], rows[rows.len() - 1]);
+        assert!(
+            first.starts_with('┌') && first.ends_with('┐'),
+            "the sheet's top row is not a closed rule at {w}x{h}:\n{drawn}"
+        );
+        // The title bar's own rule, which nothing looked at: replacing its fill
+        // with spaces left `┌ gestures      ┐` green everywhere. The run starts
+        // after the title and stops before the three cells the close control sits
+        // in, which is the geometry `Painter::sheet` writes.
+        let title = "─ gestures ".chars().count();
+        let top: Vec<char> = first.chars().collect();
+        assert!(
+            top[1..=title].iter().collect::<String>() == "─ gestures ",
+            "the sheet's title is not where the frame puts it at {w}x{h}:\n{drawn}"
+        );
+        assert!(
+            top[title + 1..top.len() - 4].iter().all(|c| *c == '─'),
+            "the sheet's title rule has a hole in it at {w}x{h}:\n{drawn}"
+        );
+        // The control's own cell, which the rule assertion above deliberately
+        // stops short of and nothing else pinned: the hover and dismiss gates both
+        // read `sheet.close` out of the plan, so they follow it wherever it goes.
+        assert_eq!(
+            top[top.len() - 3],
+            SHEET_CLOSE,
+            "the close control is not three in from the right edge at {w}x{h}:\n{drawn}"
+        );
+        assert!(
+            last.starts_with('└') && last.ends_with('┘'),
+            "the sheet's bottom row is not a closed rule at {w}x{h}:\n{drawn}"
+        );
+        let span = last.chars().count() - 2;
+        assert!(
+            last.chars().skip(1).take(span).all(|c| c == '─'),
+            "the sheet's bottom rule has a hole in it at {w}x{h}:\n{drawn}"
+        );
+        for (n, row) in rows[1..rows.len() - 1].iter().enumerate() {
+            // **A heading's own fill, which only the title bar's and the bottom
+            // border's were checked.** Deleting the rule run leaves
+            // `│ keyboard        │`, and the reset pass has already written a dim
+            // space into every one of those cells, so both the glyph and the
+            // weight survive: the pipes are `put` explicitly either side, the
+            // label offsets do not move, and no gate compares a heading row
+            // wholesale. A heading is furniture that runs to the frame, or it is
+            // a label floating in a gap.
+            let cells: Vec<char> = row.chars().collect();
+            if row.contains(" keyboard ") || row.contains(" mouse ") {
+                assert_eq!(
+                    cells[cells.len() - 3],
+                    '─',
+                    "a heading of the sheet does not rule to its frame at \
+                     {w}x{h}, so it is a label in a gap:\n{drawn}"
+                );
+                assert!(
+                    cells.iter().filter(|c| **c == '─').count() >= 3,
+                    "a heading of the sheet has almost no rule in it at {w}x{h}:\n{drawn}"
+                );
+            }
+            assert!(
+                row.starts_with('│') && row.ends_with('│'),
+                "row {n} of the sheet is not closed at both ends at {w}x{h}, so a \
+                 cell has overwritten the frame:\n{drawn}"
+            );
+        }
+    });
+
+    assert!(
+        two_column > 0 && sheets > two_column,
+        "the sweep saw {sheets} sheets of which {two_column} were two-column, so \
+         it did not cover both shapes"
+    );
+}
+
+#[test]
+fn the_two_column_rung_is_the_size_the_ruling_states() {
+    // **`SPEC.md` §11.1 states 104 by 14 wide and 76 by 14 tight, and until this
+    // gate no test could fail on either.** That is the rail's own lesson one
+    // element over: `RAIL_FLOOR` pins its composition in a const block precisely
+    // because a claim no gate can fail is a wish, and #220's ruling shipped two
+    // numbers with nothing holding them.
+    //
+    // It is not a restatement of the layout arithmetic. A mutation that moved the
+    // mouse column one column right survived every other gate in this file: the
+    // frame stayed closed because the sheet grew with it, every gesture still
+    // drew, and the ladder stayed monotone. The only thing that changed was the
+    // gap between the columns, and the only thing that can see it is a number.
+    let wide = Rect::new(0, 0, 120, 21);
+    let tight = Rect::new(0, 0, 80, 17);
+
+    sweep!("sheet-dimensions", |paint| {
+        for (at, want, spelling) in [(wide, (104u16, 14u16), "wide"), (tight, (76, 14), "tight")] {
+            let (buf, laid) = paint(at);
+            let sheet = laid.sheet.expect("the pane draws no sheet at all");
+            let (_, drawn) = read_sheet(&buf, &laid);
+            assert!(
+                drawn.contains("keyboard"),
+                "the {spelling} case stopped taking the two-column rung, so the \
+                 size below is not the one being pinned:\n{drawn}"
+            );
+            assert_eq!(
+                (sheet.width, sheet.height),
+                want,
+                "the {spelling} two-column rung is not the size SPEC.md §11.1 \
+                 states:\n{drawn}"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
+    // **78, and the first draft of this ruling said 80.** `margin_of` returns 2 at
+    // 78, 3 at 79 and 4 at 80, so the room a pane leaves is 76 at all three and
+    // the tight two-column rung is exactly 76 wide. The probe that produced the
+    // ruling's before-and-after sampled 60, 70, 80 and stepped over the boundary,
+    // which is the same mistake as a superlative bounded by a sweep that does not
+    // reach its falsifying case.
+    //
+    // Gated by walking the boundary a column at a time, because that is the only
+    // instrument that can find it.
+    let mut arrival = None;
+    sweep!("sheet-arrival", |paint| {
+        for w in 70u16..=84 {
+            let at = Rect::new(0, 0, w, 19);
+            let (buf, laid) = paint(at);
+            let (_, sheet) = read_sheet(&buf, &laid);
+            if sheet.contains("keyboard") && arrival.is_none() {
+                arrival = Some(w);
+            }
+            if let Some(first) = arrival {
+                assert!(
+                    sheet.contains("keyboard"),
+                    "the rung arrived at {first} and was gone again at {w}, so it \
+                     is not monotone in width:\n{sheet}"
+                );
+            }
+        }
+    });
+    assert_eq!(
+        arrival,
+        Some(78),
+        "the two-column rung does not arrive where SPEC.md §11.1 says it does"
+    );
+}
+
+#[test]
+fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
+    // **Two claims no gate could fail before.** Bottom-aligning the sheet, or
+    // pinning it to the left margin, left every other gate in this file green: the
+    // frame is still closed, the gestures are all there, the size is right. And
+    // "never leaves the body" was bounded against the pane's **last row** rather
+    // than the footer's first, so it could not fail for footer encroachment at
+    // all. B12's reason for a box is that a reader must still see the tool is
+    // alive behind it, and the footer is half of what they are looking at.
+    //
+    // Clearance is swept, because the footer's own height is a ladder in the width
+    // and one screen cannot find where the two ladders meet. The footer is located
+    // by the `q quit` the hint bar always spells, read off the screen rather than
+    // asked of the layout: a gate that imported the layout's idea of where the
+    // footer starts would agree with it by construction.
+    let mut seen = 0;
+    let mut cleared = 0;
+    sweep!("sheet-centred", |paint| {
+        for w in LADDER_WIDTHS {
+            for h in LADDER_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                let Some(sheet) = laid.sheet else { continue };
+                seen += 1;
+                assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
+
+                // **The three rows `SHEET_KEEP` promises survive.** `KEYBOARD`'s
+                // docblock names them and nothing asserted them: dropping
+                // `SHEET_KEEP` to 2 adds a rung that loses `f`, and it fires only
+                // where the body is four rows, which is one height in this whole
+                // sweep. The unguessable outlives the reflexive, or it does not.
+                let (_, drawn) = read_sheet(&buf, &laid);
+                for kept in ["follow the newest", "churn band", "this sheet"] {
+                    assert!(
+                        drawn.contains(kept),
+                        "a {w}x{h} pane drew a sheet without {kept:?}, which \
+                         `SHEET_KEEP` promises is never dropped:\n{drawn}"
+                    );
+                }
+
+                let pane = text_of(&buf, at);
+                if let Some(hint) = pane.lines().position(|r| r.contains("q quit")) {
+                    cleared += 1;
+                    let hint = u16::try_from(hint).expect("a pane taller than u16");
+                    assert!(
+                        hint >= sheet.top + sheet.height,
+                        "the sheet covers the hint bar at {w}x{h}: it ends at row \
+                         {} and the bar is on row {hint}",
+                        sheet.top + sheet.height
+                    );
+                }
+            }
+        }
+    });
+    assert!(
+        seen > 0,
+        "the sweep drew no sheet at all, so it proves nothing"
+    );
+    assert_eq!(
+        cleared,
+        seen,
+        "the clearance assertion skipped {} of {seen} panes. `HINT_RUNGS` drops \
+         `q quit` at rung 1, so a pane narrow enough to lose it would leave the \
+         narrow half of this gate unchecked while a `cleared > 0` total still \
+         looked healthy. Every pane in this sweep that draws a sheet also draws \
+         rung 0, and that is the fact this asserts rather than assumes",
+        seen - cleared
+    );
+
+    // Centring itself is pinned at named panes rather than swept, because the body
+    // it is centred in is the pane less a footer whose height is its own ladder,
+    // and a gate that reconstructed that would be reconstructing the layout. These
+    // four were checked by hand against `margins_of` and the plan's own halving.
+    sweep!("sheet-origin", |paint| {
+        for (w, h, want) in [
+            (120u16, 30u16, (32u16, 5u16, 56u16, 19u16)),
+            (100, 40, (22, 10, 56, 19)),
+            (120, 21, (8, 3, 104, 14)),
+            (80, 17, (2, 1, 76, 14)),
+            // Odd slack, which all four above lack on both axes: halving the slack
+            // the other way (`div_ceil`) or taking the trailing margin instead of
+            // the leading one reproduces every one of them and misses these.
+            (81, 25, (12, 2, 56, 19)),
+            (43, 25, (4, 5, 35, 13)),
+            // The level probe's own boundary. `margin_of(58)` is 2, so the room is
+            // exactly 56 and the wide one-column sheet is exactly 56: turning the
+            // probe's `>` into `>=` flips this width and no other, dropping
+            // `Ctrl+C`, `PgUp`, `Home`, `End` and the shifted arrows at a width
+            // that fits them. Every count, every frame and every other origin is
+            // identical.
+            (58, 30, (1, 5, 56, 19)),
+        ] {
+            let at = Rect::new(0, 0, w, h);
+            let (_, laid) = paint(at);
+            let sheet = laid.sheet.expect("a pane that draws no sheet at all");
+            assert_eq!(
+                (sheet.left, sheet.top, sheet.width, sheet.height),
+                want,
+                "the sheet is not where centring in the body puts it at {w}x{h}"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_two_column_rung_places_its_cells_where_the_plan_says() {
+    // **The gap between a keys cell and its verb is spent in two expressions**,
+    // one summing the sheet's width and one placing the row. Changing only the
+    // second moved every verb column in both shapes and left the width, the frame
+    // and the gesture count exactly as planned, so nothing in this file could see
+    // it. The same is true of the ` mouse ` label's column, which is round 0's
+    // surviving mutant relocated onto the heading row.
+    //
+    // Columns are stated as literals rather than derived, because a gate that
+    // computed them from the layout would agree with it by construction.
+    for (w, h, cols, label, spelling) in [
+        (120u16, 21u16, [2usize, 26, 56, 77], 56usize, "wide"),
+        (80, 17, [2, 15, 35, 50], 35, "tight"),
+    ] {
+        sweep!("sheet-columns", |paint| {
+            let at = Rect::new(0, 0, w, h);
+            let (buf, laid) = paint(at);
+            let (_, sheet) = read_sheet(&buf, &laid);
+            assert!(
+                sheet.contains("keyboard"),
+                "the {spelling} case is not the two-column rung:\n{sheet}"
+            );
+            let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
+
+            // The heading row: the label sits one column back from the keys cells
+            // it names, so the space it opens with lands on the rule.
+            let heading: String = rows[1].iter().collect();
+            assert_eq!(
+                heading
+                    .char_indices()
+                    .nth(label)
+                    .map(|(i, _)| &heading[i..])
+                    .map(|t| t.starts_with("mouse ")),
+                Some(true),
+                "the {spelling} mouse label does not start at column {label}:\n{sheet}"
+            );
+
+            // **Which group is in which column, and which row is on top.**
+            // Swapping the two groups' contents, or reversing the rows inside
+            // one, left every column assertion below satisfied: the pair pins a
+            // field *boundary*, not *which row*. The keyboard group opens with
+            // `q` and the mouse group with `wheel`, in the tables' own order.
+            let row2: String = rows[2].iter().collect();
+            let keyboard_first: String = rows[2][cols[0]..].iter().collect();
+            let mouse_first: String = rows[2][cols[2]..].iter().collect();
+            assert!(
+                keyboard_first.starts_with('q'),
+                "the {spelling} left column does not open with the keyboard \
+                 group's first row:\n{sheet}"
+            );
+            assert!(
+                mouse_first.starts_with("wheel"),
+                "the {spelling} right column does not open with the mouse group's \
+                 first row:\n{sheet}"
+            );
+            assert!(
+                !row2.is_empty(),
+                "the {spelling} rung drew no first row at all:\n{sheet}"
+            );
+
+            // The keyboard label's own column, which only the mouse label's was
+            // pinned against.
+            let heading_head: String = rows[1][1..].iter().collect();
+            assert!(
+                heading_head.starts_with(" keyboard "),
+                "the {spelling} keyboard label is not against the frame:\n{sheet}"
+            );
+
+            // **Every row of both groups, in order, not merely the ends.**
+            // Pinning the first and the last leaves the rows between them free
+            // to permute: swapping the middle two mouse rows changed no count,
+            // no column and no frame. `KEYBOARD`'s docblock calls its order "the
+            // order a reader meets it" and `MOUSE`'s is the ladder's drop order,
+            // so the sequence is a property rather than an accident.
+            //
+            // Walked against [`GESTURES`], which is already one entry per row in
+            // table order and is restated here rather than imported, so this
+            // cannot agree with the renderer by construction.
+            for (n, token) in GESTURES.iter().enumerate() {
+                let (col, row) = if n < 11 {
+                    (cols[0], 2 + n)
+                } else {
+                    (cols[2], 2 + (n - 11))
+                };
+                let text: String = rows[row][col..].iter().collect();
+                assert!(
+                    text.contains(token),
+                    "the {spelling} rung's row {row} does not carry {token:?}, so \
+                     the two groups' rows are not in the order their tables \
+                     declare:\n{sheet}"
+                );
+            }
+
+            // The first gesture row carries all four fields.
+            let first = &rows[2];
+            for at_col in cols {
+                assert!(
+                    first[at_col] != ' ',
+                    "the {spelling} rung has no cell at column {at_col}, so a field \
+                     moved without the sheet's width moving:\n{sheet}"
+                );
+                assert!(
+                    first[at_col - 1] == ' ',
+                    "the {spelling} rung's cell at column {at_col} is not the start \
+                     of its field:\n{sheet}"
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn the_height_ladder_drops_the_fewest_rows_it_can() {
+    // **The worst regression available in this element, and nothing could see
+    // it.** Reversing the dropping rungs makes `from = 8` the first rung tried, so
+    // it fits almost any pane and every short one draws three gestures instead of
+    // the eleven it can afford. Every other gate stayed green: additivity reads a
+    // cell the reversal does not touch, monotonicity is satisfied because three to
+    // sixteen is still non-decreasing, the degrade gate asks only whether the
+    // mouse group is absent, and the origins, the size, the arrival and the frame
+    // are all unchanged.
+    //
+    // What no gate stated is that the ladder drops **as little as it can**. Pinned
+    // at a width too narrow for the two-column rung, so height is the only axis
+    // moving, and as literals rather than as a rule derived from the ladder: one
+    // row of pane buys exactly one more gesture until the keyboard group is whole
+    // at eleven, then nothing until the mouse group fits.
+    let expected = [
+        (8u16, 3usize),
+        (9, 4),
+        (10, 5),
+        (11, 6),
+        (12, 7),
+        (13, 8),
+        (14, 9),
+        (15, 10),
+        (16, 11),
+        (17, 11),
+        (21, 11),
+        (22, GESTURES.len()),
+    ];
+    sweep!("sheet-drop-order", |paint| {
+        for (h, want) in expected {
+            let at = Rect::new(0, 0, 50, h);
+            let (buf, laid) = paint(at);
+            let (count, sheet) = read_sheet(&buf, &laid);
+            assert_eq!(
+                count, want,
+                "a 50 by {h} pane draws {count} gestures where the ladder should \
+                 leave {want}:\n{sheet}"
+            );
+        }
+    });
+}
+
+#[test]
+fn the_keys_cell_is_lit_and_the_verb_is_dim() {
+    // B12 rules the keys cell lit against a dim verb, and swapping the two weights
+    // changes no glyph, so every gate reading `text_of` is blind to it. The close
+    // control has had this treatment since #211; the rows never did. No other test
+    // in the suite reads a foreground inside the sheet's rect.
+    let theme = Theme::default();
+    let scratch = Scratch::large_diff("sheet-weights", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    toggle(&mut app, &mut frame);
+
+    for (w, h, keys_at, verb_at, spelling) in [
+        (120u16, 21u16, 2u16, 26u16, "two columns"),
+        (120, 30, 2, 26, "one column"),
+    ] {
+        let at = Rect::new(0, 0, w, h);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let sheet = laid.sheet.expect("a pane that draws no sheet");
+        let row = sheet.top + 2;
+        assert_eq!(
+            buf[(sheet.left + keys_at, row)].fg,
+            theme.chrome.fg.expect("the chrome weight carries a colour"),
+            "the {spelling} keys cell is not drawn lit"
+        );
+        assert_eq!(
+            buf[(sheet.left + verb_at, row)].fg,
+            theme
+                .chrome_dim
+                .fg
+                .expect("the dim weight carries a colour"),
+            "the {spelling} verb cell is not drawn dim"
+        );
+
+        // **The furniture's own weight, which nothing read.** Every frame gate in
+        // this file compares glyphs, `the_sheet_is_opaque` reads backgrounds only,
+        // and `closing_the_sheet_restores_every_cell` looks outside the sheet. So
+        // repainting the whole frame, both headings and the pipes in the lit
+        // weight rather than the dim one changed no character and reddened
+        // nothing. §11.1 draws this element as chrome behind its own content.
+        let dim = theme
+            .chrome_dim
+            .fg
+            .expect("the dim weight carries a colour");
+        let right = sheet.left + sheet.width - 1;
+        let bottom = sheet.top + sheet.height - 1;
+        for (x, y, what) in [
+            (sheet.left, sheet.top, "the top-left corner"),
+            (sheet.left + 1, sheet.top, "the title bar's rule"),
+            (sheet.left, row, "the left pipe"),
+            (right, row, "the right pipe"),
+            (sheet.left, bottom, "the bottom-left corner"),
+            (sheet.left + 1, bottom, "the bottom border"),
+        ] {
+            assert_eq!(
+                buf[(x, y)].fg,
+                dim,
+                "{what} of the {spelling} sheet is not drawn in the chrome's dim \
+                 weight, so the frame competes with the table inside it"
+            );
+        }
+    }
+
+    // The headings are furniture too, and the two-column rung has two of them.
+    let at = Rect::new(0, 0, 120, 21);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let sheet = laid.sheet.expect("a pane that draws no sheet");
+    let dim = theme
+        .chrome_dim
+        .fg
+        .expect("the dim weight carries a colour");
+    for (col, what) in [(2u16, "the keyboard label"), (56, "the mouse label")] {
+        assert_eq!(
+            buf[(sheet.left + col, sheet.top + 1)].fg,
+            dim,
+            "{what} is not drawn in the chrome's dim weight"
+        );
+    }
+}
+
+#[test]
+fn the_one_column_rung_places_its_cells_where_the_plan_says() {
+    // **The rung every reader sees, and its columns were never pinned.** The
+    // two-column rung has had absolute columns since #220's round 1; the one that
+    // draws on a default 80 by 24 pane had none, so moving `Group { at: 1 }` to
+    // `at: 0` shifted the whole table against the left pipe and survived every
+    // gate in this file. Width comes from `sheet_fields` rather than from `at`, so
+    // the size and origin gates see nothing; the frame gate sees an under-fill
+    // rather than an overwrite; and the weights gate reads two cells that are
+    // still lit and still dim one column over.
+    for (w, h, keys_at, verb_at, first_key, mouse_from) in [
+        (80u16, 24u16, 2usize, 26usize, 'q', Some(12usize)),
+        (120, 30, 2, 26, 'q', Some(12)),
+        // A dropping rung, so its first row is not the table's first: at nine
+        // gestures the ladder has already dropped `q` and `j k`, and the mouse
+        // group is gone entirely.
+        (50, 14, 2, 15, 'S', None),
+    ] {
+        sweep!("sheet-one-column-cells", |paint| {
+            let at = Rect::new(0, 0, w, h);
+            let (buf, laid) = paint(at);
+            let (_, sheet) = read_sheet(&buf, &laid);
+            assert!(
+                !sheet.contains("keyboard"),
+                "the {w}x{h} case is not the one-column rung:\n{sheet}"
+            );
+            let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
+            let first = &rows[1];
+            assert_eq!(
+                first[keys_at], first_key,
+                "the one-column keys field does not start at column {keys_at} at \
+                 {w}x{h}:\n{sheet}"
+            );
+            assert_eq!(
+                first[keys_at - 1],
+                ' ',
+                "the one-column keys field is not inset from the frame at \
+                 {w}x{h}:\n{sheet}"
+            );
+            assert!(
+                first[verb_at] != ' ' && first[verb_at - 1] == ' ',
+                "the one-column verb field does not start at column {verb_at} at \
+                 {w}x{h}:\n{sheet}"
+            );
+
+            // **The mouse group's rows too, not only the keyboard group's.**
+            // Both are drawn by the same loop with the same `Group`, but from
+            // two call sites, and only one of them was read: sliding the mouse
+            // call's origin one column right moved the whole group on the
+            // default 80 by 24 pane and reddened nothing. Every gate with an
+            // absolute mouse column ran on the two-column rung only, and the
+            // weights gate reads a keyboard row.
+            if let Some(heading) = mouse_from {
+                let rule: String = rows[heading].iter().collect();
+                assert!(
+                    rule.contains("mouse"),
+                    "row {heading} is not the mouse group's heading at {w}x{h}, \
+                     so the rows below it are not what this pins:\n{sheet}"
+                );
+                let mouse_first = &rows[heading + 1];
+                assert_eq!(
+                    mouse_first[keys_at], 'w',
+                    "the one-column mouse group's keys field does not start at \
+                     column {keys_at} at {w}x{h}:\n{sheet}"
+                );
+                assert_eq!(
+                    mouse_first[keys_at - 1],
+                    ' ',
+                    "the one-column mouse group is not inset from the frame at \
+                     {w}x{h}:\n{sheet}"
+                );
+                assert!(
+                    mouse_first[verb_at] != ' ' && mouse_first[verb_at - 1] == ' ',
+                    "the one-column mouse group's verb field does not start at \
+                     column {verb_at} at {w}x{h}:\n{sheet}"
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn the_two_column_rung_swallows_what_lands_on_it() {
+    // **Every behavioural gate on this element runs at 80 by 24, which takes the
+    // one-column rung.** The two-column rung was proven only by geometry and by
+    // what the text says. It matters most here: the sheet went from 56 columns to
+    // 104, so a click at column 90 used to reach a diff row and is now the
+    // sheet's, and nothing resolved a gesture at that shape.
+    //
+    // B12's rule is that the sheet swallows what lands on it rather than letting
+    // it fall through, because a click seeking a scrollbar the reader cannot see
+    // is the one way something that moves no content could still move content.
+    let scratch = Scratch::large_diff("sheet-beside-input", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 120, 21);
+
+    let height = body_layout(at, &chrome(&app), FILES).diff;
+    assert!(
+        app.apply(Action::ToggleSheet, &mut frame, height)
+            .expect("toggle"),
+        "the sheet's toggle asked the shell to quit"
+    );
+
+    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let sheet = laid.sheet.expect("a 120 by 21 pane draws no sheet");
+    assert_eq!(
+        sheet.width, 104,
+        "this gate is not looking at the two-column rung"
+    );
+
+    // A column the one-column sheet never covered, which this rung does.
+    let inside = sheet.left + 90;
+    assert!(
+        sheet.covers(inside, sheet.top + 3),
+        "column {inside} is not inside the two-column sheet, so the case below \
+         proves nothing"
+    );
+    assert!(
+        action_for(&click(inside, sheet.top + 3), laid).is_none(),
+        "a click inside the two-column rung fell through to whatever is beneath it"
+    );
+    assert!(
+        action_for(&wheel(inside, sheet.top + 3), laid).is_none(),
+        "a wheel inside the two-column rung scrolled a region the sheet is covering"
+    );
+
+    // And the close control still dismisses at this rung.
+    let close = action_for(&click(sheet.close.0, sheet.close.1), laid);
+    assert_eq!(
+        close,
+        Some(Action::ToggleSheet),
+        "the close control does not dismiss the two-column rung"
+    );
+}
+
+#[test]
+fn the_two_guards_no_rung_reaches_are_still_the_right_size() {
+    // **Two branches in the layout that nothing can currently make fire**, both
+    // documented as guards rather than rungs, and both one table edit from going
+    // live: #285 shrinks the tables and #288 adds a `MOUSE` row.
+    //
+    // A guard whose slack nobody states is a guard nobody will notice binding, so
+    // the numbers are asserted rather than described. They are restated here
+    // rather than imported for [`TITLE`]'s reason.
+    //
+    // **What this gate cannot do, said plainly rather than implied.** A branch
+    // that never fires has no observable value, so no gate can pin the production
+    // constants themselves: `sheet_floor`'s `+ 6` could become `+ 13` and the
+    // `.max` could be deleted outright, and nothing here would redden, because
+    // neither changes a cell. What is pinned is the *slack* — that the narrowest
+    // rung the ladder draws clears the floor, and that the keyboard block clears
+    // its own label — which is the property that decides whether the guard is
+    // live. The day #285 shrinks the tables or #288 adds a `MOUSE` row, one of
+    // these stops clearing, this gate reddens, and the behaviour behind the guard
+    // becomes reachable and untested. That is the moment to gate the value; until
+    // then there is nothing to gate.
+    //
+    // `sheet_floor` raises any rung to the width its own title bar needs. The
+    // title is `─ gestures ` at eleven columns, plus a border and a space at each
+    // end and the two-of-gap the fields already carry, so the floor is 17.
+    let floor = "─ gestures ".chars().count() + 6;
+    assert_eq!(floor, 17, "the title bar's floor is not what §11.1 states");
+
+    // The narrowest sheet the ladder can actually produce, and the narrowest
+    // two-column one. Both are well clear of the floor, which is why it is a
+    // guard: measured, not assumed.
+    sweep!("sheet-guards", |paint| {
+        let mut narrowest = u16::MAX;
+        let mut narrowest_beside = u16::MAX;
+        for w in LADDER_WIDTHS {
+            for h in LADDER_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                let Some(sheet) = laid.sheet else { continue };
+                let (_, drawn) = read_sheet(&buf, &laid);
+                narrowest = narrowest.min(sheet.width);
+                if drawn.contains("keyboard") {
+                    narrowest_beside = narrowest_beside.min(sheet.width);
+                }
+            }
+        }
+        // 24 is a property of the tables, not of this sweep's floor: probed
+        // across every pane from 1x1 to 39x39 as well, the narrowest sheet drawn
+        // anywhere is the same 24, first appearing at a pane exactly that wide.
+        assert_eq!(
+            narrowest, 24,
+            "the narrowest rung the ladder draws is not the 24 columns §11.1 \
+             names, so `sheet_floor`'s slack is not what it says"
+        );
+        assert_eq!(
+            narrowest_beside, 76,
+            "the narrowest two-column rung is not the 76 columns §11.1 names"
+        );
+        assert!(
+            narrowest > floor as u16,
+            "`sheet_floor` has stopped being a guard and become a rung: the \
+             narrowest sheet is {narrowest} against a floor of {floor}"
+        );
+    });
+
+    // The keyboard block must be wide enough for its own heading label, or
+    // ` mouse ` would land inside the word `keyboard`. The label needs
+    // `mouse.at >= 1 + 10`; the keyboard block puts it at 55 wide and 34 tight.
+    let label = " keyboard ".chars().count();
+    assert_eq!(
+        label, 10,
+        "the keyboard label is not the width the floor assumes"
+    );
+    for (w, h, at) in [(120u16, 21u16, 55usize), (80, 17, 34)] {
+        sweep!("sheet-label-floor", |paint| {
+            let pane = Rect::new(0, 0, w, h);
+            let (buf, laid) = paint(pane);
+            let (_, sheet) = read_sheet(&buf, &laid);
+            let heading = sheet
+                .lines()
+                .nth(1)
+                .expect("a two-column sheet has a heading");
+            // By character rather than by byte: the heading is mostly box-drawing
+            // glyphs, so `str::find` returns an offset three times the column.
+            let cells: Vec<char> = heading.chars().collect();
+            let mouse_at = (0..cells.len())
+                .find(|&i| cells[i..].starts_with(&['m', 'o', 'u', 's', 'e']))
+                .expect("the mouse label is drawn");
+            assert_eq!(
+                mouse_at - 1,
+                at,
+                "the mouse label sits at {mouse_at} rather than {at} at {w}x{h}, \
+                 so the heading floor's stated slack is wrong"
+            );
+            assert!(
+                at > label,
+                "the keyboard block no longer clears its own label, so the floor \
+                 has gone live and its behaviour is untested"
+            );
+        });
     }
 }

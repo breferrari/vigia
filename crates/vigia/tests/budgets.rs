@@ -344,7 +344,7 @@ fn a_frame_beside_a_rail_holds_the_frame_budget() {
          which is not the deeper region this gate exists to time",
         rail.list
     );
-    frame_budget_on("shell-i9-rail", 0, RAIL_PANE);
+    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, false);
 }
 
 #[test]
@@ -618,7 +618,7 @@ fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
 /// depths have to agree about every other term for the comparison to mean
 /// anything.
 fn frame_budget_at_depth(name: &str, depth: usize) {
-    frame_budget_on(name, depth, area());
+    frame_budget_on(name, depth, area(), false);
 }
 
 /// The same, on a named pane.
@@ -629,7 +629,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 /// changed file it has. Each visible list row costs one `Frame::diff`, which
 /// `tests/reads.rs` bounds structurally; what only a clock can answer is whether
 /// four times as many of them still fit inside I9.
-fn frame_budget_on(name: &str, depth: usize, pane: Rect) {
+fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: bool) {
     let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -641,6 +641,12 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect) {
     let mut history = History::new();
     let screen = layout_of(&app, pane, FILES);
     let height = screen.diff;
+
+    if sheet {
+        // Retained state, so one toggle covers every frame the loop below times.
+        app.apply(vigia::Action::ToggleSheet, &mut frame, height)
+            .expect("toggle the sheet");
+    }
 
     if depth > 0 {
         // A manual scroll, which disengages follow exactly as a reader's would
@@ -783,6 +789,33 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect) {
         },
         || next_frame(&mut frame, &mut app, &mut highlighter, &mut history),
     );
+
+    // **And when a sheet was asked for, one has to have been on the frames that
+    // were timed.** Read out of the buffer the timed loop actually wrote to,
+    // rather than off a second `App` built beside it: the non-vacuity check in
+    // `a_frame_under_the_sheet_holds_the_frame_budget` names the rung on its own
+    // `App`, so deleting the toggle above left that gate green while it timed
+    // sheet-free frames. A gate that cannot fail is worse than no gate.
+    if sheet {
+        let drawn = (buf.area.top()..buf.area.bottom())
+            .map(|y| {
+                (buf.area.left()..buf.area.right())
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            drawn.contains("gestures"),
+            "this gate asked for the sheet and timed {SAMPLED_FRAMES} frames \
+             without one on them, so it measured the gate above under another name"
+        );
+        assert!(
+            drawn.contains("keyboard"),
+            "the timed frames carried a sheet but not the two-column rung this \
+             gate is named for"
+        );
+    }
 }
 
 #[test]
@@ -2248,4 +2281,65 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
         "an ageing wake cost {aged:?} against a tick's {ticked:?}, less than half \
          a saving where the reference machine measures 165µs against 529µs"
     );
+}
+
+/// The pane the sheet's own budget is measured on.
+///
+/// **Short and wide on purpose**, because that is the pane the two-column rung
+/// arrives on ([#220](https://github.com/breferrari/vigia/issues/220)) and it is
+/// the widest the sheet ever draws: 104 columns by 14 rows against the
+/// one-column rung's 56 by 19.
+const SHEET_PANE: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 120,
+    height: 21,
+};
+
+/// I9 with the gestures sheet drawn over the frame.
+///
+/// **A debt `SPEC.md` §11.2 has named since B12 was ruled**, where it says the
+/// frame path sits well inside I9 and *"the sheet **covers** diff rows carrying
+/// highlighted spans with about nineteen rows of plain text, so the expectation
+/// is that it costs less than what it hides"*, followed by *"that is an
+/// expectation and #206 owes the measurement"*. #206 closed without it, and
+/// [#220](https://github.com/breferrari/vigia/issues/220) made the debt larger
+/// rather than smaller: the sheet's widest rung went from 56 columns to 104, and
+/// its drawer moved from bulk string writes to per-cell ones through
+/// [`Painter::rule`] and a pipe pass.
+///
+/// Non-vacuity is asserted rather than assumed, the way the rail's gate does it:
+/// this reddens if the pane it names stops drawing a sheet at all, or stops
+/// drawing the two-column rung, either of which would leave it timing the gate
+/// above under a different name.
+#[test]
+fn a_frame_under_the_sheet_holds_the_frame_budget() {
+    let mut app = App::new();
+    let scratch = Scratch::large_diff("shell-i9-sheet-shape", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let screen = layout_of(&app, SHEET_PANE, FILES);
+    app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
+        .expect("toggle the sheet");
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let laid = vigia::regions(SHEET_PANE, &chrome, &{
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        app.view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view")
+    });
+    let drawn = laid
+        .sheet
+        .expect("the pane this gate is named for draws no sheet");
+    assert_eq!(
+        (drawn.width, drawn.height),
+        (104, 14),
+        "the {}x{} pane does not draw the two-column rung, so this gate is not \
+         timing the shape it is named for",
+        SHEET_PANE.width,
+        SHEET_PANE.height
+    );
+
+    frame_budget_on("shell-i9-sheet", 0, SHEET_PANE, true);
 }
