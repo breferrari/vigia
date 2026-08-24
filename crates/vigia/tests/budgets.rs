@@ -344,7 +344,7 @@ fn a_frame_beside_a_rail_holds_the_frame_budget() {
          which is not the deeper region this gate exists to time",
         rail.list
     );
-    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, false);
+    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, None);
 }
 
 #[test]
@@ -618,7 +618,7 @@ fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
 /// depths have to agree about every other term for the comparison to mean
 /// anything.
 fn frame_budget_at_depth(name: &str, depth: usize) {
-    frame_budget_on(name, depth, area(), false);
+    frame_budget_on(name, depth, area(), None);
 }
 
 /// The same, on a named pane.
@@ -629,7 +629,7 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 /// changed file it has. Each visible list row costs one `Frame::diff`, which
 /// `tests/reads.rs` bounds structurally; what only a clock can answer is whether
 /// four times as many of them still fit inside I9.
-fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: bool) {
+fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>) {
     let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -642,7 +642,7 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: bool) {
     let screen = layout_of(&app, pane, FILES);
     let height = screen.diff;
 
-    if sheet {
+    if sheet.is_some() {
         // Retained state, so one toggle covers every frame the loop below times.
         app.apply(vigia::Action::ToggleSheet, &mut frame, height)
             .expect("toggle the sheet");
@@ -795,8 +795,10 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: bool) {
     // rather than off a second `App` built beside it: the non-vacuity check in
     // `a_frame_under_the_sheet_holds_the_frame_budget` names the rung on its own
     // `App`, so deleting the toggle above left that gate green while it timed
-    // sheet-free frames. A gate that cannot fail is worse than no gate.
-    if sheet {
+    // sheet-free frames. A gate that cannot fail is worse than no gate. `sheet`
+    // carries the word that identifies the rung, so two gates share this scaffold
+    // and neither can quietly time the other's shape.
+    if let Some(rung) = sheet {
         let drawn = (buf.area.top()..buf.area.bottom())
             .map(|y| {
                 (buf.area.left()..buf.area.right())
@@ -811,9 +813,9 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: bool) {
              without one on them, so it measured the gate above under another name"
         );
         assert!(
-            drawn.contains("keyboard"),
-            "the timed frames carried a sheet but not the two-column rung this \
-             gate is named for"
+            drawn.contains(rung),
+            "the timed frames carried a sheet but not the {rung:?} rung this gate \
+             is named for"
         );
     }
 }
@@ -2288,7 +2290,8 @@ fn an_ageing_wake_costs_a_fraction_of_the_tick_it_is_not() {
 /// **Short and wide on purpose**, because that is the pane the two-column rung
 /// arrives on ([#220](https://github.com/breferrari/vigia/issues/220)) and it is
 /// the widest the sheet ever draws: 104 columns by 14 rows against the
-/// one-column rung's 56 by 19.
+/// one-column rung's 56 by 19. It is no longer the **largest**, which is a
+/// different superlative and belongs to the roomy rung below.
 const SHEET_PANE: Rect = Rect {
     x: 0,
     y: 0,
@@ -2341,5 +2344,64 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
         SHEET_PANE.height
     );
 
-    frame_budget_on("shell-i9-sheet", 0, SHEET_PANE, true);
+    frame_budget_on("shell-i9-sheet", 0, SHEET_PANE, Some("keyboard"));
+}
+
+/// The pane the roomy rung's own budget is measured on.
+///
+/// **Tall and wide**, because that is what the roomy rung needs
+/// ([#285](https://github.com/breferrari/vigia/issues/285)): a room of
+/// sixty-eight columns and a body of twenty-nine rows.
+const ROOMY_PANE: Rect = Rect {
+    x: 0,
+    y: 0,
+    width: 120,
+    height: 40,
+};
+
+/// I9 with the **roomy** rung drawn over the frame.
+///
+/// **The two-column rung is the widest the sheet draws and this one covers the
+/// most cells**, which are two different superlatives and only the first was
+/// gated: 68 by 29 is 1,972 cells against 104 by 14's 1,456. It is also the rung
+/// a full-screen terminal now takes, so it is the shape most readers will
+/// actually have on the pane, where the two-column rung is what a short one falls
+/// to.
+///
+/// Its drawer is not the other's either: it writes a label per section and pipes
+/// every interior row including the blank ones, where `Shape::Beside` writes one
+/// rule carrying two labels. B12's expectation is that the sheet costs less than
+/// the highlighted rows it hides, and a rung covering a third more cells than the
+/// one that expectation was last checked against is where it would stop being
+/// true.
+#[test]
+fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
+    let mut app = App::new();
+    let scratch = Scratch::large_diff("shell-i9-roomy-shape", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let screen = layout_of(&app, ROOMY_PANE, FILES);
+    app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
+        .expect("toggle the sheet");
+    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let laid = vigia::regions(ROOMY_PANE, &chrome, &{
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        app.view(&mut frame, &mut highlighter, &history, screen)
+            .expect("view")
+    });
+    let drawn = laid
+        .sheet
+        .expect("the pane this gate is named for draws no sheet");
+    assert_eq!(
+        (drawn.width, drawn.height),
+        (68, 29),
+        "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
+         the shape it is named for",
+        ROOMY_PANE.width,
+        ROOMY_PANE.height
+    );
+
+    frame_budget_on("shell-i9-roomy", 0, ROOMY_PANE, Some("moving"));
 }
