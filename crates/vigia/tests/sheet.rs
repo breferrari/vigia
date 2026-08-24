@@ -2807,11 +2807,13 @@ fn walk_the_pages(
 
 /// Press `?` `times` times, painting between presses the way the shell does.
 ///
-/// **The paint is not decoration.** `App::sheet_pages` is recorded by `App::view`,
-/// and only on a frame the sheet was up for, so a run of presses with no frame
-/// between them runs against the default count of one and the *second* press
-/// closes. The shell paints between keystrokes on every path; a gate that does not
-/// is testing a sequence no reader can produce.
+/// **The paint is what a reader's own pace looks like**, and it is one of the two
+/// shapes this element has to be right in. `App::sheet_pages` is recorded by
+/// `App::view`, so a walk with a frame between presses is a reader pressing `?`
+/// and looking at what arrived. The other shape is a batch: the shell drains
+/// several actions and paints once at the end, which is what
+/// `two_presses_in_one_wake_reach_page_two` covers. Neither models the other, and
+/// a suite with only the first cannot see a held key.
 fn press_pages(
     app: &mut App,
     frame: &mut Frame<'_>,
@@ -3164,5 +3166,56 @@ fn a_resize_clamps_the_page_rather_than_closing_the_sheet() {
     assert!(
         laid.sheet.is_none(),
         "`?` on the clamped last page did not close the sheet"
+    );
+}
+
+#[test]
+fn two_presses_in_one_wake_reach_page_two() {
+    // **The shell drains actions in a batch and paints once at the end of it**
+    // (`lib.rs`'s `'awake` loop), so two `?` events that arrive together are
+    // applied with no frame between them. Every other gate here paints between
+    // presses, which is the shape production does *not* have: a held `?` or two
+    // quick taps land in one batch, and `App::sheet_pages` is then whatever the
+    // last *draw* measured rather than what the press before it would have.
+    //
+    // That is `SPEC.md` §7's own rule about a gate measuring the cheapest state,
+    // one layer over: a suite that models one press per frame cannot see a defect
+    // that needs two in one.
+    //
+    // What it costs when it is wrong: the sheet opens and closes inside one wake
+    // and the reader sees nothing at all.
+    let scratch = Scratch::large_diff("sheet-batch", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // A pane of six pages, painted once with the sheet down, which is the frame a
+    // reader is looking at when they reach for `?`.
+    let at = Rect::new(0, 0, 50, 8);
+    let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+
+    // Both presses inside one batch, no paint between them.
+    toggle_at(&mut app, &mut frame, at);
+    toggle_at(&mut app, &mut frame, at);
+    assert_eq!(
+        chrome(&app).sheet,
+        Some(1),
+        "two `?` events in one wake opened the sheet and closed it again, so a \
+         held key or two quick taps show the reader nothing"
+    );
+
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    assert!(
+        laid.sheet.is_some(),
+        "the batched second press lost the sheet"
+    );
+    let (_, sheet) = read_sheet(&buf, &laid);
+    assert_eq!(
+        counter_of(&sheet).unwrap_or_default().trim(),
+        "4-6 of 16",
+        "the batched second press did not land on page two:\n{sheet}"
     );
 }

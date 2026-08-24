@@ -3311,10 +3311,11 @@ pub struct Body {
     /// public field whose truth depended on which constructor the caller reached
     /// for, with nothing in the type saying so.
     ///
-    /// **`None` while the sheet is down**, which is the common frame:
-    /// [`App::apply`](crate::App::apply) reads the count only to advance a sheet
-    /// already up, and opening one never consults it, so measuring on a frame
-    /// nobody could read is a rung walk the reader did not ask for.
+    /// **[`body_layout`] always answers, sheet up or down**, and the reason is the
+    /// shell rather than the sheet: actions are drained in a batch and painted once
+    /// at the end of it, so a second `?` in the same wake is measured against the
+    /// last *draw*. A frame that skipped the measurement because the sheet was down
+    /// made a held `?` open and close inside one wake.
     pub sheet_pages: Option<usize>,
 }
 
@@ -3887,14 +3888,22 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
     // place in the split that divides the body between them. It is here because
     // this is the one function that sees the whole pane on every frame.
     //
-    // **Only while the sheet is up.** The count exists so `?` knows which page is
-    // the last, and that question is only asked of a sheet already up: opening one
-    // is `None => Some(0)` and consults nothing. So the frame that opens the sheet
-    // is the frame that measures it, and the overwhelmingly common frame, with the
-    // sheet down, walks no rungs at all.
-    body.sheet_pages = chrome
-        .sheet
-        .map(|_| sheet_pages_of(area, footer, margins_of(area.width)));
+    // **Measured on every frame, including the common one with the sheet down, and
+    // that is not the waste it looks like.** Gating it on `chrome.sheet.is_some()`
+    // was tried, on the argument that the count is read only to advance a sheet
+    // already up and so a sheet-down frame measures it for nobody. The argument is
+    // wrong about the shell: `lib.rs` drains actions in a **batch** and paints once
+    // at the end of it, so two `?` events arriving together are applied with no
+    // frame between them, and the second one reads what the last *draw* measured.
+    // Gated, a held `?` or two quick taps opened the sheet and closed it inside one
+    // wake and the reader saw nothing.
+    //
+    // Priced whole and interleaved before it was allowed to decide anything: the
+    // count is 0.707us of a 639us frame over the hundred-file fixture at 120 by 40,
+    // which is 0.11% of the frame and 0.004% of I4's sixteen milliseconds. The
+    // property is load-bearing and the cost is not measurable in situ.
+    // `two_presses_in_one_wake_reach_page_two` is the gate.
+    body.sheet_pages = Some(sheet_pages_of(area, footer, margins_of(area.width)));
     body
 }
 
