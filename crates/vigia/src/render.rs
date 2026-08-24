@@ -4752,11 +4752,17 @@ impl Group {
 /// is what it was until [#285](https://github.com/breferrari/vigia/issues/285)
 /// and was correct only while a rung drew a *prefix*. `from` selects a **set**
 /// now, so an arithmetic count is a second derivation of the number the painter
-/// walks, and the two can disagree: a [`DROP_ORDER`] that repeated an index would
-/// leave the painter drawing one row more than the frame was planned for, over
-/// the bottom border. That it cannot repeat one is held by the `const` block
-/// beside [`DROP_ORDER`], so the disagreement is unreachable rather than merely
-/// untested, and `sheet_roomy_rows` states the same rule one function away.
+/// walks: with a [`DROP_ORDER`] that repeated an index the painter would draw one
+/// row more than the frame was planned for, over the bottom border.
+///
+/// **That is defence in depth rather than a live hazard, and saying which it is
+/// matters.** The `const` block beside [`DROP_ORDER`] makes a repeated index a
+/// compile error, so the two forms are provably equal for every input this can be
+/// called with and no gate could ever tell them apart. What the walk buys is that
+/// the equality stops depending on a claim held somewhere else: delete that block
+/// and this function is still counting what the painter draws. `sheet_roomy_rows`
+/// is the same shape one function away, where the block does *not* reach, since a
+/// sixth section could be a keyboard run of length zero.
 fn sheet_rows(from: usize, mouse: bool) -> usize {
     kept_keyboard(from).count() + if mouse { 1 + MOUSE.len() } else { 0 }
 }

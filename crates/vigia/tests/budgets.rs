@@ -799,9 +799,26 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>) {
     // carries the word that identifies the rung, so two gates share this scaffold
     // and neither can quietly time the other's shape.
     if let Some(rung) = sheet {
-        let drawn = (buf.area.top()..buf.area.bottom())
+        // **Inside the sheet's own rect, not over the pane.** `rung` is an
+        // ordinary word (`keyboard`, `moving`), and the fixture's own diff is a
+        // hundred files of generated source: a pane-wide search can be satisfied
+        // by content the sheet is covering, which would let this pass while
+        // timing the wrong rung, or no rung at all. `read_sheet` in
+        // `tests/sheet.rs` records the same lesson from the other direction,
+        // where the hint bar's `q quit` scored on every frame.
+        let laid = vigia::regions(
+            pane,
+            &app.chrome("fixture", None, None, None, None, None),
+            &app.view(&mut frame, &mut highlighter, &history, screen)
+                .expect("view"),
+        );
+        let at = laid
+            .sheet
+            .map(|s| Rect::new(s.left, s.top, s.width, s.height))
+            .expect("this gate asked for a sheet and the pane published none");
+        let drawn = (at.top()..at.bottom())
             .map(|y| {
-                (buf.area.left()..buf.area.right())
+                (at.left()..at.right())
                     .map(|x| buf[(x, y)].symbol())
                     .collect::<String>()
             })

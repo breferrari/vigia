@@ -932,6 +932,39 @@ fn arrival_of(
     arrival
 }
 
+/// The first height in `heights` at which the sheet draws the rung `marker`
+/// names, walked a row at a time and asserted monotone from there on.
+///
+/// **[`arrival_of`] transposed, and it is not decoration.** The width boundary is
+/// walked because #220's ruling shipped 80 for a rung arriving at 78. The height
+/// boundary is the same shape and worse: a rung's height is spent against the
+/// *body*, which is the pane less the header and less a footer whose own height
+/// is a ladder in the **width**, so the pane height a rung arrives at is not the
+/// number the rung is written as and cannot be read off the layout.
+fn arrival_height_of(
+    paint: &mut impl FnMut(Rect) -> (Buffer, Regions),
+    marker: &str,
+    heights: std::ops::RangeInclusive<u16>,
+    width: u16,
+) -> Option<u16> {
+    let mut arrival = None;
+    for h in heights {
+        let (buf, laid) = paint(Rect::new(0, 0, width, h));
+        let (_, sheet) = read_sheet(&buf, &laid);
+        if sheet.contains(marker) && arrival.is_none() {
+            arrival = Some(h);
+        }
+        if let Some(first) = arrival {
+            assert!(
+                sheet.contains(marker),
+                "the rung arrived at {first} rows and was gone again at {h}, so it \
+                 is not monotone in height:\n{sheet}"
+            );
+        }
+    }
+    arrival
+}
+
 /// How many of [`GESTURES`] the sheet draws, and the sheet's own rows.
 ///
 /// **Counted inside the sheet's rect, never over the pane.** The hint bar spells
@@ -1389,6 +1422,30 @@ fn the_roomy_rung_arrives_at_the_width_the_ruling_states() {
         arrival,
         Some(70),
         "the roomy rung does not arrive where SPEC.md §11.1 says it does"
+    );
+}
+
+#[test]
+fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
+    // **The other axis, and the one no gate walked.** `SPEC.md` §11.1 states the
+    // rung needs "a body of twenty-nine rows", and a body is the pane less the
+    // header and less a footer whose height is its own ladder in the width. So the
+    // pane height it arrives at is not twenty-nine and cannot be derived by
+    // reading: on this fixture at a hundred columns it is thirty-two, three rows
+    // above the number the ruling names.
+    //
+    // That gap is exactly what produced #220's wrong arrival width, where the
+    // ruling said 80 for a rung that arrives at 78 because the probe sampled
+    // instead of walking. Same instrument, other axis.
+    let arrival;
+    sweep!("sheet-roomy-height", |paint| {
+        arrival = arrival_height_of(&mut paint, "moving", 24..=40, 100);
+    });
+    assert_eq!(
+        arrival,
+        Some(32),
+        "the roomy rung does not arrive at the pane height a body of twenty-nine \
+         rows implies on this fixture"
     );
 }
 
