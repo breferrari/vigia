@@ -4548,8 +4548,19 @@ fn fields_of<'a>(rows: impl IntoIterator<Item = &'a Gesture>, level: usize) -> (
 /// whole sheet.
 ///
 /// The fields are measured over the rows that rung actually draws, which is what
-/// makes dropping the mouse group narrow the sheet as well as shorten it: its
-/// `drag a scrollbar` is the widest keys cell on the whole table.
+/// lets dropping the mouse group narrow the sheet as well as shorten it.
+///
+/// **At the tight spelling only, and the cell this used to name was the wrong
+/// one.** It read *"its `drag a scrollbar` is the widest keys cell on the whole
+/// table"*, which is false twice: that cell is sixteen columns and the widest are
+/// `J  K  Shift+↑  Shift+↓` and `q  Esc  Ctrl+C  Ctrl+D` at twenty-two, both of
+/// them the keyboard group's. So at the wide spelling dropping the mouse group
+/// narrows **nothing**: the sheet is fifty-six either way, and only its height
+/// moves. At the tight spelling it narrows forty-three to thirty-five, because
+/// there the mouse group does win both fields, on `click a track` at thirteen
+/// against eleven and `scroll what you point at` at twenty-four against eighteen.
+/// Corrected 2026-08-24 by [#285](https://github.com/breferrari/vigia/issues/285)'s
+/// audit, which re-derived the table rather than reading this.
 fn sheet_fields(level: usize, from: usize, mouse: bool) -> (usize, usize, usize) {
     let (mut keys, mut verb) = fields_of(kept_keyboard(from), level);
     if mouse {
