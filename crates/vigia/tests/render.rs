@@ -7085,7 +7085,6 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
         Rect::new(0, 0, width, height),
         &Chrome {
             masthead: false,
-            rail: false,
             ..chrome()
         },
         view.files,

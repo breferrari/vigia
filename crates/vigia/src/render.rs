@@ -3395,8 +3395,16 @@ impl Body {
     /// **Nothing here reads the notice**, deliberately. §11.1 forbids a transient
     /// thing from moving content, and a region that appeared and vanished as
     /// files were named and read would jog the reader's diff exactly the way a
-    /// growing footer would. The inputs are pane height, footer height and
-    /// changed-file count, all of which change only when the diff does.
+    /// growing footer would. The inputs are pane height, footer height,
+    /// changed-file count and the two settings on the chrome that a reader sets
+    /// with a keystroke: none of them changes except when the diff does or when a
+    /// reader asks.
+    ///
+    /// **That invariant used to be enforced by the signature and is now prose**,
+    /// because taking `&Chrome` puts the notice within reach where a `bool` did
+    /// not ([#295](https://github.com/breferrari/vigia/issues/295)). What holds it
+    /// is `crates/vigia/tests/list.rs`'s gate that a notice moves no region, which
+    /// is where a future reader should look before reaching for another field.
     ///
     /// Saturating rather than clamped so a one-row terminal asks for nothing
     /// instead of underflowing.
@@ -4379,20 +4387,6 @@ const KEYBOARD: [Gesture; 12] = [
 /// it draws is no longer a suffix of the table. [`kept_keyboard`] is the one
 /// place that is resolved, and both the measurement and the drawer read it.
 const DROP_ORDER: [usize; KEYBOARD.len()] = [11, 0, 1, 2, 3, 4, 5, 6, 9, 7, 8, 10];
-
-// **`r` goes one rank before the keep-set, and that is a claim rather than an
-// accident of how this array was typed.** `sheet_tables` holds which three rows
-// survive; nothing held which row is the fourth-last, so moving `9` anywhere in
-// the middle of this array keeps every gate above green while changing what a
-// thirty-column pane reaches. See #295: `r` needs 134 columns and this order only
-// binds at 30 to 34, so it is the one gesture here that cannot fire on the pane
-// dropping it.
-const _: () = {
-    assert!(
-        DROP_ORDER[DROP_ORDER.len() - 4] == 9,
-        "`r` is not the last row given up before the keep-set"
-    );
-};
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 ///
@@ -8261,6 +8255,29 @@ mod sheet_tables {
             }
         }
     }
+    #[test]
+    fn r_is_given_up_one_rank_before_the_keep_set() {
+        // **Addressed by the cell it draws, not by its index.** This claim was a
+        // `const` block asserting `DROP_ORDER[len - 4] == 9`, and the `9` is `r`'s
+        // position in `KEYBOARD`: inserting a gesture above it and re-typing `9`
+        // at the same slot keeps that assertion green while it names a different
+        // row. A `const` cannot compare two `&str`, which is the same reason the
+        // rest of this module exists.
+        //
+        // **Why one rank and not inside the keep-set** ([#295](https://github.com/breferrari/vigia/issues/295)):
+        // `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and
+        // `?`, and `SHEET_KEEP` keeps three. This order only binds on a pane of 30
+        // to 34 columns and a rail needs 134, so `r` is the one gesture in the set
+        // that cannot fire on the pane that is dropping it.
+        let last_dropped = KEYBOARD[DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 1]].keys[0];
+        assert_eq!(
+            last_dropped, "r",
+            "the last row given up before the keep-set is {last_dropped:?}, not the \
+             rail, so a pane of 30 to 34 columns is spending its floor on a gesture \
+             that could have fired there"
+        );
+    }
+
     #[test]
     fn the_whole_table_in_one_column_fits_i6s_forty_columns() {
         // **The arithmetic behind `SPEC.md` §11.2 B13's promise, asserted where a

@@ -35,8 +35,7 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Chrome, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout,
-    render,
+    Action, App, Body, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
 };
 use vigia_core::{
     CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
@@ -331,15 +330,27 @@ const RAIL_PANE: Rect = Rect {
 /// of which would leave it measuring the gate above under a different name.
 #[test]
 fn a_frame_beside_a_rail_holds_the_frame_budget() {
-    // The rail is asked for since §11.2 B14, so the pane this gate is named for
-    // draws one only when the chrome says so.
-    let app = App::new();
-    let asked = Chrome {
-        rail: true,
-        ..app.chrome("fixture", None, None, None, None, None)
-    };
-    let rail = body_layout(RAIL_PANE, &asked, FILES);
+    // **The rail is asked for since §11.2 B14, and asked for the same way here as
+    // in the timed loop below.** The first spelling of this built a
+    // `Chrome { rail: true, .. }` by hand while `frame_budget_on` reached the same
+    // state through `App::apply`, so the shape this gate asserts and the shape it
+    // times were produced by two paths that can drift: if `ToggleRail` ever stopped
+    // reaching `chrome.rail`, the assertion stayed green while `shell-i9-rail`
+    // silently timed a stacked pane, which is exactly the substitution this gate's
+    // own docblock says it exists to catch.
+    let scratch = Scratch::large_diff("i9-rail-shape", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
     let stacked = layout(&app, FILES).list;
+    app.apply(
+        Action::ToggleRail,
+        &mut frame,
+        layout_of(&app, RAIL_PANE, FILES).diff,
+    )
+    .expect("ask for the rail");
+    let rail = layout_of(&app, RAIL_PANE, FILES);
     assert!(
         rail.rail,
         "the {}x{} pane this gate is named for does not draw a rail",

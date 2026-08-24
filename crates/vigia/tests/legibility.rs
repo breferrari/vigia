@@ -4991,7 +4991,6 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
     };
     let without = Chrome {
         masthead: false,
-        rail: false,
         ..chrome()
     };
     let mut banded = 0usize;

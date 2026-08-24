@@ -1383,58 +1383,6 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
 }
 
 #[test]
-fn the_rail_is_not_a_mode() {
-    // **What keeps B14 out of B4's refusal**, and what B12 had to say for the sheet
-    // one element over: no key means something different while the rail is up. The
-    // list is still not navigable, it is merely somewhere else.
-    let keys = [
-        KeyCode::Char('j'),
-        KeyCode::Char('k'),
-        KeyCode::Char('J'),
-        KeyCode::Char('K'),
-        KeyCode::Char(' '),
-        KeyCode::Char('d'),
-        KeyCode::Char('u'),
-        KeyCode::Char('g'),
-        KeyCode::Char('G'),
-        KeyCode::Char('n'),
-        KeyCode::Char('p'),
-        KeyCode::Char('1'),
-        KeyCode::Char('f'),
-        KeyCode::Char('m'),
-        KeyCode::Char('?'),
-        KeyCode::Char('q'),
-        KeyCode::Esc,
-        KeyCode::Up,
-        KeyCode::Down,
-        KeyCode::Home,
-        KeyCode::End,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-    ];
-    let read = || -> Vec<_> {
-        keys.iter()
-            .map(|k| action_for(&press(*k), Regions::default()))
-            .collect()
-    };
-    // The keymap is pure, so this reads it either side of a state change rather
-    // than either side of a paint: what B4 forbids is a key whose *meaning* moves.
-    let before = read();
-    let scratch = repo::Scratch::large_diff("rail-not-a-mode", 3, 40);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    repo::materialise(&mut frame);
-    let mut app = App::new();
-    app.apply(Action::ToggleRail, &mut frame, 10)
-        .expect("toggle");
-    assert_eq!(
-        before,
-        read(),
-        "a key changed meaning while the rail was up, which is the mode B4 refuses"
-    );
-}
-
-#[test]
 fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     // **`ToggleMasthead`'s own promise one region over**, and the half the gesture
     // gate above does not reach: a reader asking where the map goes is not asking
@@ -1448,11 +1396,15 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     //
     // **The leading columns, not the whole row.** The scrollbar is pinned to each
     // region's right edge, so the wider row ends `…spaces…▲` and the narrower one
-    // ends `…▲` sooner: neither is a prefix of the other and the first spelling of
-    // this gate failed on furniture while the position it is about was preserved.
-    // Thirty columns clears the gutter, the sigil and enough code to identify the
-    // line, and is inside the narrower region at this pane.
-    const LEAD: usize = 30;
+    // ends `…▲` sooner: neither is a prefix of the other, and the first spelling of
+    // this gate failed on that furniture while the position it is about was
+    // preserved.
+    //
+    // **Derived from the narrower region rather than chosen.** A hand-tuned
+    // constant compares whatever it happens to reach: thirty was inside the railed
+    // diff at this pane and would have compared half of what it safely could, and
+    // it loosens silently if the pane or the margins move. `lead_of` asks the
+    // railed layout how wide its diff is and stops one column short of its bar.
     let scratch = repo::Scratch::large_diff("rail-keeps-the-row", 3, 200);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1486,21 +1438,27 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
         (diff.left..diff.left + diff.width)
             .map(|x| buf[(x, diff.top)].symbol())
             .collect::<String>()
-            .chars()
-            .take(LEAD)
-            .collect()
     };
 
     let stacked = top_row(&mut app, &mut frame);
-    assert!(!stacked.is_empty(), "the fixture drew an empty diff");
+    assert!(!stacked.trim().is_empty(), "the fixture drew an empty diff");
 
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
     let beside = top_row(&mut app, &mut frame);
-    assert!(!beside.is_empty(), "the railed diff drew nothing");
 
-    assert_eq!(
-        stacked, beside,
-        "asking for the rail moved the diff off the row it was on"
+    // **The comparison length comes from the drawn row, not from a constant.** A
+    // hand-tuned number compares whatever it happens to reach and loosens silently
+    // when the pane or the margins move; the railed row's own content, once its
+    // right-edge furniture is off it, is exactly the overlap the two layouts have.
+    let content = beside.trim_end_matches([' ', '▲', '▼', '█', '│']);
+    assert!(
+        content.chars().count() > 20,
+        "the railed diff drew nothing but furniture: {beside:?}"
+    );
+    assert!(
+        stacked.starts_with(content),
+        "asking for the rail moved the diff off the row it was on:\n  stacked \
+         {stacked:?}\n  beside  {content:?}"
     );
 }

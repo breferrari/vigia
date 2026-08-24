@@ -1256,6 +1256,21 @@ pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
     }
 }
 
+/// **It takes the key and nothing else, and that is what makes "not a mode"
+/// structural rather than a claim.** `SPEC.md` §11.2 B4 refuses a navigable list,
+/// B12 reconciles the gestures sheet with it by ruling that no key changes meaning
+/// while the sheet is up, and B14 inherits the same for the left rail. None of
+/// those needs a gate: this function is handed no shell state, so a key whose
+/// meaning depended on one could not be written here without changing the
+/// signature, and that is a compile error rather than a red test.
+///
+/// A gate was written for B14 anyway and it was **tautological**: it compared this
+/// function's answers either side of a state change it cannot see. Deleted 2026-08-24
+/// with [#295](https://github.com/breferrari/vigia/issues/295)'s own simplify pass,
+/// and the claim recorded here instead, where the next person to reach for the
+/// state is standing. What a rail genuinely moves is the **pointer**'s regions, and
+/// `tests/rail.rs::a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over`
+/// is the gate for that.
 fn key_action(key: &KeyEvent) -> Option<Action> {
     // Windows reports press *and* release; Unix terminals report press only.
     // Acting on both would double every keystroke on one platform and not the
