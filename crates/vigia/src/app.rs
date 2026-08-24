@@ -86,16 +86,39 @@ pub struct App {
     /// [#121](https://github.com/breferrari/vigia/issues/121) and
     /// [#147](https://github.com/breferrari/vigia/issues/147) leave where it is.
     masthead: bool,
-    /// Whether the gestures sheet is drawn, which `?` toggles.
+    /// Which page of the gestures sheet is drawn, and `None` when it is not.
     ///
     /// **Retained here rather than lived for one frame, and that is the whole
     /// reason it is a field.** The pane wakes on filesystem events, so an agent's
     /// write redraws the frame underneath the sheet; a sheet that were not carried
     /// between frames would be dismissed at random by somebody else's build,
-    /// which `SPEC.md` §11.1's B12 names as the constraint most likely to be
+    /// which `SPEC.md` §11.2's B12 names as the constraint most likely to be
     /// missed. Off by default for the reason every reader starts with the diff
     /// rather than with instructions about it.
-    sheet: bool,
+    ///
+    /// **A page rather than a flag since `SPEC.md` §11.2 B13**
+    /// ([#286](https://github.com/breferrari/vigia/issues/286)). On every pane
+    /// whose sheet is one page the two are the same type wearing different names,
+    /// which is the point: `?` opens `Some(0)` and closes from it, exactly as the
+    /// flag did.
+    sheet: Option<usize>,
+    /// Pages the sheet has on the pane the last frame was drawn for.
+    ///
+    /// **The one thing `?` cannot answer on its own.** Advancing needs to know
+    /// which page is the last, that is a fact about the pane's layout rather than
+    /// about this state, and [`Action`] carries no pane. So the layout hands it
+    /// over: [`crate::body_layout`] measures it every frame and [`App::view`]
+    /// records it, which is the same frame the reader is looking at when they
+    /// press.
+    ///
+    /// **One frame stale in exactly one case, and that case is handled where it
+    /// lands.** A pane resized between the last paint and the next press can be
+    /// asked for a page it no longer has, and `sheet_plan` clamps to the last one
+    /// rather than panicking or closing a sheet nobody dismissed.
+    ///
+    /// One by default, so an [`App`] nobody has painted yet still opens and closes
+    /// a sheet on two presses.
+    sheet_pages: usize,
     /// Whether the current position was reached by **scrolling** rather than by a
     /// jump, which is what decides whether the viewport may back up to fill the
     /// pane.
@@ -233,7 +256,8 @@ impl Default for App {
             // `following`: a shell nobody has pressed `m` on draws no band.
             masthead: false,
             // Derived, and for once trivially so: nobody has pressed `?`.
-            sheet: false,
+            sheet: None,
+            sheet_pages: 1,
             // The opening position is the top of the diff, which is where a jump
             // would have put it, so nothing is owed a back-up before the reader
             // has moved.
@@ -586,7 +610,26 @@ impl App {
             // over rows the diff keeps. Nothing about the viewport changes, so a
             // reader who opens the sheet and closes it is looking at exactly the
             // screen they left.
-            Action::ToggleSheet => self.sheet = !self.sheet,
+            //
+            // **`?` advances, and the last page is what closes it**, which is
+            // `SPEC.md` §11.2 B13. On a pane whose sheet is one page that is the
+            // toggle it has always been. `?` keeps exactly one meaning, *the
+            // sheet*, and no other key changes meaning while it is up, which is
+            // what keeps B12's reconciliation with B4 intact.
+            Action::ToggleSheet => {
+                self.sheet = match self.sheet {
+                    None => Some(0),
+                    Some(page) if page + 1 < self.sheet_pages => Some(page + 1),
+                    Some(_) => None,
+                };
+            }
+            // **The control means close, where `?` means the sheet**, which is why
+            // B13 needs a second variant. Sending `ToggleSheet` from a click on
+            // `✕` made the sheet's only pointer escape *advance*, so a reader on
+            // page one of six needed six clicks to get out, and both `SPEC.md`
+            // §11.1 and `Action::ToggleSheet`'s own docblock claimed otherwise
+            // while it did. Found by #286's adversarial round.
+            Action::CloseSheet => self.sheet = None,
             Action::Scroll(rows) => {
                 self.scroll(rows, frame)?;
             }
@@ -909,6 +952,35 @@ impl App {
         // moves no viewport and whose own ruling says a reader who opens it and
         // closes it sees the screen they left.
         let owed = self.landing && self.still_the_followed_file(frame);
+        // **Recorded here because this is the one call every frame makes with the
+        // pane's own layout in hand.** `?` advancing needs to know which page is
+        // the last, and `Action` carries no pane; see [`App::sheet_pages`].
+        //
+        // **Whenever the layout measured one, which is every frame.**
+        // [`crate::body_layout`] answers with the sheet up or down, and its own
+        // docblock carries the reason: the shell drains actions in a batch and
+        // paints once at the end of it, so a second `?` in the same wake is
+        // measured against the last *draw*. The `Option` is about the three `Body`
+        // constructors that have no pane to measure, not about when it is taken.
+        if let Some(pages) = body.sheet_pages {
+            self.sheet_pages = pages;
+            // **And the page is clamped to what this pane has**, so the state and
+            // the screen agree about which page is up. `sheet_plan` clamps too, and
+            // has to, because it is the last thing standing between a stale index
+            // and the tables; what it cannot do is write the answer back. Without
+            // this, a pane that shrank its page count left `self.sheet` pointing
+            // past the end and every `?` after it walked the gap one dead press at
+            // a time while the screen showed the same page.
+            // **Not on a pane with no pages at all**, which is a pane below the
+            // sheet's own floor: there `pages` is zero, a saturating subtraction
+            // makes the clamp read `Some(0)`, and a reader who dragged a pane
+            // narrow and back would find themselves on page one of a sheet they
+            // had left on page four. Nothing was drawn in between, so nothing
+            // asked for the move.
+            if let (true, Some(page)) = (pages > 0, self.sheet) {
+                self.sheet = Some(page.min(pages - 1));
+            }
+        }
         let view = View::collect(
             frame,
             highlighter,

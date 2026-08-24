@@ -563,7 +563,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
-        sheet: false,
+        sheet: None,
         // Absent in the base fixture, so every sweep that inherits it keeps
         // measuring the chrome it measured before the status readouts existed.
         // [`diagnostics`] is the fixture that carries them, and it is added to

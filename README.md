@@ -225,7 +225,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `J` `K` | scroll the pinned list |
 | `f` | follow the newest change, or stop |
 | `m` | show or hide the masthead |
-| `?` | **all of this, on screen** |
+| `?` | **all of this, on screen**, a page at a time where the pane is small |
 | `q` `Esc` `Ctrl+C` | quit |
 
 </td><td valign="top" width="50%">
@@ -237,7 +237,7 @@ The blank above the band is the row the header keeps between itself and the list
 | wheel | scroll what you point at |
 | drag a bar | move that region |
 | click a track | send it there |
-| click `▲` `▼` | one row, repeats held |
+| click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
 | just point | it marks itself |
 
@@ -245,7 +245,7 @@ The blank above the band is the row the header keeps between itself and the list
 </table>
 
 > [!TIP]
-> Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every key still means what it meant.
+> Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every other key still means what it meant. On a pane too small to hold the whole table, `?` again turns the page and the last one closes it; the title bar says how many of the sixteen you are looking at.
 
 <details>
 <summary><b>The small print on the keys</b></summary>

@@ -293,3 +293,107 @@ Two lessons, and the second is the general one:
 
 - **A number measured on one target is a claim about that target.** The whole of the original write-up was going to be entered as a property of the profile, and it would have been wrong on two of the three tier-1 targets. `SPEC.md` §9 ships four; a `[profile.release]` key is shared by all of them and a measurement is not.
 - **A gate calibrated against a platform-specific artefact encodes that artefact as a requirement.** `warm.rs` asserted a 10x cold-to-warm ratio, sized against a Windows cold parse that was mostly the codegen penalty. The first time the suite ran on Linux it failed, at 5.70x, and it failed identically at `codegen-units` 1 and 2, so it had never been this platform's number: nothing had ever run it here. Lowering the constant would have kept the shape and moved the edge. It now asserts what `warm` actually claims, in absolute terms that no codegen setting can re-invalidate: the warmed parse fits inside a frame, and warming removed a frame's worth of work from the one behind it.
+
+## B13 — the sheet's height axis dropped gestures in silence, and the width axis still can
+
+The ruling is in `SPEC.md` §11.2 B13 and what the shell does is §11.1. This is the
+measurement it rests on, kept here because a number in a ruling is a claim and a
+number here is a trail.
+
+**Before, on `main` at 0.25.0.** Every width from 20 to 140 swept against every
+height from 3 to 40, counting the gestures actually painted inside the sheet's own
+rect rather than anywhere on the pane:
+
+| pane width | most gestures reachable, at any height |
+|---|---|
+| 24 to 25 | 3 of 16 |
+| 26 to 31 | 4 to 5 of 16 |
+| 32 to 34 | 9 of 16 |
+| 35 to 44 | 11 of 16 |
+| 45 and up | 16 of 16 |
+
+Two things that table says and [#286](https://github.com/breferrari/vigia/issues/286)'s
+own did not. The height floor drew **4** of 16 rather than 3, because `SHEET_KEEP`
+is a keep-count and the floor rung had room for one more than it. And the residual
+was as much **width** as height: at 40 columns, the width I6 is named for, the
+ceiling was 11 at every height, and the five missing were the whole mouse group.
+No pane height reached them, because the tight one-column sheet with the mouse
+group was 43 columns wide and a 40 column pane has 40 to give.
+
+**The one string that made it 43.** `MOUSE`'s tight verbs topped out at
+`scroll what you point at` (24) and `one row, repeats held` (21); the keyboard
+group's topped out at 18, and keys at `click a track` (13). So the table's verb
+field was the wheel's alone. At 17 and 19 the field is 19, the sheet is
+`13 + 2 + 19 + 4 = 38`, and 40 columns of room takes it with two to spare.
+
+**After.** Every pane of 38 columns and up reaches all sixteen, at every height
+that draws a sheet at all. 35 to 37 reach eleven, 32 to 34 eight, 30 to 31 four,
+and below 30 nothing is drawn. The narrowest sheet the ladder draws went from 24
+columns to 30, because every rung charges the page counter's widest spelling so the
+ordinals can never run into the close control.
+
+**And that reason is the second one this ledger has recorded for the same charge.**
+The first was that it keeps a centred box the same size between pages. A mutation
+removing the charge left `the_box_does_not_resize_between_pages` green and reddened
+two width gates, which is the opposite of what the claim predicted: `sheet_fields`
+measures over the whole row set and every page of a pane shares that set, so the
+width was page-independent already. Both claims are about the same line and only
+one of them is true.
+
+**The two-column rung moved with the copy and the plan did not predict it.**
+`sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
+its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew
+eleven gestures and now draws sixteen on one page. Recorded as a deviation rather
+than folded in, because a number that moves without being predicted is the thing
+this ledger exists to catch.
+
+**What the counter cost, found by a gate rather than by reading.** The first
+`sheet_counter_floor` asked the formatter for `(16, 16)` and got the *short*
+spelling, ten columns rather than thirteen, because that pair is the one case the
+range form never draws. Every rung was then three columns narrower than the counter
+it had to fit and the sheet drew at 27 where the ruling says 30. The fix is a
+maximum over the pairs the planner can actually return, taken once per process.
+Deriving the width arithmetically instead would have been the same defect one layer
+over: two expressions agreeing about a sum by hand.
+
+## B13 — what the audit found that the ruling had shipped
+
+Both defects are B13's own, both were introduced by the change that made the
+sheet page, and neither was visible to the suite that shipped it.
+
+**The close control advanced.** A click on `✕` returned `Action::ToggleSheet`,
+which is the action `?` sends, and once `?` meant *advance* the control did too.
+On a six-page pane a reader needed six clicks to leave, and the pointer has no `?`
+to fall back on. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both
+stated the opposite while it did this, which makes it the fourth false claim in
+this element's documentation inside one pass.
+
+The gate that should have caught it is worth recording precisely, because it looks
+adequate. `the_close_control_dismisses_and_the_sheet_swallows_the_rest` asserts
+that `action_for` on the control's cell returns the dismissing action, on an
+eighty by twenty-four pane. Two things make that unable to fail here: the pane is
+**one page**, so there is nothing to advance to and the two actions are
+indistinguishable on it; and the test asserts the action's **identity** and never
+applies it, so what the action does to the state is not in the assertion at all.
+An identity is not an outcome.
+
+**The last page's box moved.** `paged_fit` sized the frame from `take`, which is a
+remainder on the last page, and `sheet_plan` centres the box on its height, so the
+final page shrank by the remainder and slid down half of it. The close control went
+with it, and the row it vacated fell through to a scrollbar the reader could not
+see. The box is `capacity + SHEET_FRAME` on every page now, with the tail blank
+inside the frame.
+
+`the_box_does_not_resize_between_pages` recorded `(left, width)` and those are
+exactly the two edges that did not move. It now records all four, and a second gate
+covers the tail's own frame: `the_sheet_is_a_closed_box_at_every_rung` sweeps 3,400
+panes and reads **page one** on every one of them, because its scaffold toggles
+once and paints, so the blank tail is outside its reach by construction.
+
+**Twenty mutations, twenty killed.** Four of them are the four above and the
+fixes' own gates; the rest cover the ladder, the clamp, the counter, the drop
+order and the drain. Two survived their first run and both were instrument
+failures rather than gaps: one ran against a test binary that did not contain the
+test, and one applied to a file a previous iteration's `git checkout` had already
+reverted. A mutation that never applied and a mutation the suite failed to kill
+report identically, and they call for opposite responses.
