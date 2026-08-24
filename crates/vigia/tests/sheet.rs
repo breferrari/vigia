@@ -1189,6 +1189,27 @@ fn the_roomy_rung_is_the_size_the_ruling_states() {
             GESTURES.len(),
             "the roomy rung drew fewer than every gesture:\n{drawn}"
         );
+
+        // **The wide spelling, which the size alone does not say.** The rung is
+        // measured at spelling 0 and drawn at whatever `Fit::level` carries, and
+        // those are two expressions: setting the level to 1 while the fields stay
+        // wide leaves a sixty-eight column sheet whose cells are the tight
+        // spellings sitting left-aligned in fields sized for the wide ones. The
+        // frame stays closed, every column stays where it was, and `GESTURES` is
+        // written as the prefix both spellings share, so nothing else here can
+        // see it. These three phrases exist only at the wide spelling.
+        for wide in [
+            "q  Esc  Ctrl+C  Ctrl+D",
+            "first / last changed file",
+            "scroll the pinned file list",
+        ] {
+            assert!(
+                drawn.contains(wide),
+                "the roomy rung does not spell {wide:?}, so it is drawing the \
+                 tight spelling on a pane that has the columns for the wide \
+                 one:\n{drawn}"
+            );
+        }
     });
 }
 

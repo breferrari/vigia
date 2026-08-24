@@ -7657,6 +7657,44 @@ mod sheet_tables {
     }
 
     #[test]
+    fn the_roomy_rungs_reach_over_the_mouse_group_is_slack_rather_than_a_rung() {
+        // **A third branch nothing can currently make fire**, found by mutation
+        // rather than by reading, and recorded here for the same reason
+        // `the_two_guards_no_rung_reaches_are_still_the_right_size` records the
+        // other two.
+        //
+        // `sheet_roomy` measures its fields over `KEYBOARD.iter().chain(MOUSE)`,
+        // because one verb column has to serve every section or the sections do
+        // not line up. Delete the `chain` and **nothing observable changes**: at
+        // the wide spelling the keyboard group is wider on both fields, so the
+        // maximum is its either way, and no gate over a drawn pane can see the
+        // difference.
+        //
+        // **The wide spelling only, and that is the claim rather than a
+        // convenience.** At the tight spelling the mouse group wins both fields,
+        // 13 against 11 on keys and 24 against 17 on verbs, so `sheet_fields`'
+        // own chain is load-bearing there and is not slack at all. The roomy rung
+        // never takes that spelling, which is why its chain is the one that can
+        // be deleted unseen.
+        //
+        // So what is pinned is the slack, not the reach. The day
+        // [#288](https://github.com/breferrari/vigia/issues/288) adds a `MOUSE`
+        // row wider than `J  K  Shift+↑  Shift+↓` or than `next / previous
+        // changed file`, this reddens, the `chain` becomes load-bearing, and a
+        // gate over the drawn sheet can be written for it. Until then there is
+        // nothing on a screen to gate.
+        let (kb_keys, kb_verb) = fields_of(&KEYBOARD, 0);
+        let (ms_keys, ms_verb) = fields_of(&MOUSE, 0);
+        assert!(
+            ms_keys < kb_keys && ms_verb < kb_verb,
+            "the mouse group has caught the keyboard group at the wide spelling \
+             ({ms_keys}/{ms_verb} against {kb_keys}/{kb_verb}), so the roomy \
+             rung's reach over both tables is now a rung rather than slack and \
+             wants a gate on a drawn pane"
+        );
+    }
+
+    #[test]
     fn no_section_label_hides_inside_a_cell_or_another_label() {
         // `tests/sheet.rs` decides *which rung a pane took* by looking for a
         // label with `contains`, so a label that is a substring of a cell would
