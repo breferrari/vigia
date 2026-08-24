@@ -369,13 +369,27 @@ fn the_close_control_brightens_under_the_pointer() {
     );
 
     let theme = Theme::default();
-    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None);
+    let at_rest = drawn_close(&mut app, &mut frame, &mut highlighter, &history, None, None);
     let hovered = drawn_close(
         &mut app,
         &mut frame,
         &mut highlighter,
         &history,
         Some(Hovered::Button(cx, cy)),
+        None,
+    );
+    // **Held, which is the rung nothing reached.** B10's ladder is three weights,
+    // and this gate asserted two: no test in the suite ever built a `Chrome` whose
+    // `pressed` is the control's own cell, so deleting the `bar_active` arm left
+    // everything green. The step buttons' pressed rung is gated one element over
+    // (`tests/render.rs`); the sheet's sibling was not.
+    let held = drawn_close(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Some(Hovered::Button(cx, cy)),
+        Some((cx, cy)),
     );
 
     assert_ne!(
@@ -391,6 +405,17 @@ fn the_close_control_brightens_under_the_pointer() {
         weight(hovered.1),
         weight(theme.bar_hover),
         "the hovered control is not on B10's hover rung"
+    );
+    assert_eq!(
+        weight(held.1),
+        weight(theme.bar_active),
+        "the held control is not on B10's active rung, so pressing it says nothing"
+    );
+    assert_ne!(
+        weight(held.1),
+        weight(hovered.1),
+        "the control draws the same held as merely hovered, so B10's ladder is two \
+         rungs rather than three"
     );
     assert_eq!(
         at_rest.0, SHEET_CLOSE,
@@ -414,8 +439,9 @@ fn drawn_close(
     highlighter: &mut Highlighter,
     history: &History,
     hovered: Option<Hovered>,
+    pressed: Option<(u16, u16)>,
 ) -> (char, ratatui::style::Style) {
-    let chrome = app.chrome("fixture", Some("main"), None, None, hovered, None);
+    let chrome = app.chrome("fixture", Some("main"), pressed, None, hovered, None);
     let body = body_layout(area(), &chrome, FILES);
     let view = app
         .view(frame, highlighter, history, body)
