@@ -355,3 +355,45 @@ it had to fit and the sheet drew at 27 where the ruling says 30. The fix is a
 maximum over the pairs the planner can actually return, taken once per process.
 Deriving the width arithmetically instead would have been the same defect one layer
 over: two expressions agreeing about a sum by hand.
+
+## B13 — what the audit found that the ruling had shipped
+
+Both defects are B13's own, both were introduced by the change that made the
+sheet page, and neither was visible to the suite that shipped it.
+
+**The close control advanced.** A click on `✕` returned `Action::ToggleSheet`,
+which is the action `?` sends, and once `?` meant *advance* the control did too.
+On a six-page pane a reader needed six clicks to leave, and the pointer has no `?`
+to fall back on. `SPEC.md` §11.1 and `Action::ToggleSheet`'s own docblock both
+stated the opposite while it did this, which makes it the fourth false claim in
+this element's documentation inside one pass.
+
+The gate that should have caught it is worth recording precisely, because it looks
+adequate. `the_close_control_dismisses_and_the_sheet_swallows_the_rest` asserts
+that `action_for` on the control's cell returns the dismissing action, on an
+eighty by twenty-four pane. Two things make that unable to fail here: the pane is
+**one page**, so there is nothing to advance to and the two actions are
+indistinguishable on it; and the test asserts the action's **identity** and never
+applies it, so what the action does to the state is not in the assertion at all.
+An identity is not an outcome.
+
+**The last page's box moved.** `paged_fit` sized the frame from `take`, which is a
+remainder on the last page, and `sheet_plan` centres the box on its height, so the
+final page shrank by the remainder and slid down half of it. The close control went
+with it, and the row it vacated fell through to a scrollbar the reader could not
+see. The box is `capacity + SHEET_FRAME` on every page now, with the tail blank
+inside the frame.
+
+`the_box_does_not_resize_between_pages` recorded `(left, width)` and those are
+exactly the two edges that did not move. It now records all four, and a second gate
+covers the tail's own frame: `the_sheet_is_a_closed_box_at_every_rung` sweeps 3,400
+panes and reads **page one** on every one of them, because its scaffold toggles
+once and paints, so the blank tail is outside its reach by construction.
+
+**Twenty mutations, twenty killed.** Four of them are the four above and the
+fixes' own gates; the rest cover the ladder, the clamp, the counter, the drop
+order and the drain. Two survived their first run and both were instrument
+failures rather than gaps: one ran against a test binary that did not contain the
+test, and one applied to a file a previous iteration's `git checkout` had already
+reverted. A mutation that never applied and a mutation the suite failed to kill
+report identically, and they call for opposite responses.
