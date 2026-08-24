@@ -102,23 +102,21 @@ fn draw(
     app.view(frame, highlighter, history, at).expect("view")
 }
 
-/// Every file index a screen draws a heading for, plus the file its top is in.
+/// Every file index a screen draws rows of.
 ///
-/// The oracle for *no row of another file is ever drawn*. A heading count alone
-/// would miss a screen resting deep inside the wrong file, which draws no
-/// heading at all.
+/// The oracle for *no row of another file is ever drawn*. Counting headings
+/// alone would miss a screen resting deep inside the wrong file, which draws no
+/// heading at all, so the file the top is in is counted whether or not its
+/// heading is on screen.
+///
+/// **[`View::shown_files`] is that rule and this reads it** rather than counting
+/// headings again here. It is `pub`, exported, and documented for exactly this
+/// question, and until now it had no caller outside `view.rs` and no gate at
+/// all: a second copy of the rule here would have been the one under test while
+/// the shipped one stayed unexercised. The files a screen draws are contiguous
+/// from its top, which is what makes the count an index range.
 fn files_on(view: &View) -> Vec<usize> {
-    let mut seen = vec![view.top.file];
-    let mut at = view.top.file;
-    for row in &view.rows {
-        if matches!(row, Row::File(_)) && !view.rows.first().is_some_and(|r| std::ptr::eq(r, row)) {
-            at += 1;
-            seen.push(at);
-        }
-    }
-    seen.sort_unstable();
-    seen.dedup();
-    seen
+    (view.top.file..view.top.file + view.shown_files()).collect()
 }
 
 #[test]
@@ -325,8 +323,7 @@ fn the_total_is_this_file_and_a_drag_lands_where_the_thumb_says() {
     let history = History::new();
     let mut app = pinned(&mut frame);
 
-    let measured = Body::diff_only(body());
-    let view = draw(&mut app, &mut frame, &mut highlighter, &history, measured);
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
     assert_eq!(
         view.total_rows, SPAN,
         "the pinned bar is scaled against the changed set rather than the file"
@@ -339,7 +336,7 @@ fn the_total_is_this_file_and_a_drag_lands_where_the_thumb_says() {
     // The middle of the track, which is the only place the two mappings differ.
     app.apply(Action::DiffTo(TRACK_SCALE / 2), &mut frame, body())
         .expect("apply");
-    let view = draw(&mut app, &mut frame, &mut highlighter, &history, measured);
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
     assert_eq!(
         view.top,
         Position {
@@ -616,24 +613,34 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
          field asks for a screen it did not mean"
     );
     let plain = View::collect(&mut frame, &mut highlighter, &history, asked).expect("view");
-    let again = View::collect(
+    assert!(
+        plain.total_rows > SPAN,
+        "the unpinned total is one file's, so the pin is on when nobody asked"
+    );
+
+    // **And the same viewport with the flag set differs**, which is what makes
+    // the assertion above a claim rather than a tautology. A first draft
+    // collected `Viewport { single: false, ..asked }` and compared it with
+    // `asked`, which are the same value: it asserted that `collect` is
+    // deterministic and would have stayed green with the flag ignored entirely.
+    let pinned = View::collect(
         &mut frame,
         &mut highlighter,
         &history,
         Viewport {
-            single: false,
+            single: true,
             ..asked
         },
     )
     .expect("view");
     assert_eq!(
-        (plain.top, plain.rows.len(), plain.total_rows),
-        (again.top, again.rows.len(), again.total_rows),
-        "spelling the flag out changed the unpinned frame"
+        pinned.total_rows, SPAN,
+        "the pinned total is not the pinned file's, so the flag reached nothing"
     );
-    assert!(
-        plain.total_rows > SPAN,
-        "the unpinned total is one file's, so the pin is on when nobody asked"
+    assert_ne!(
+        (plain.top, plain.total_rows),
+        (pinned.top, pinned.total_rows),
+        "one viewport collected two ways gave one answer, so the flag is inert"
     );
 }
 

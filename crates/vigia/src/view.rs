@@ -992,19 +992,37 @@ pub fn rows_of(change: &vigia_core::FileChange, span: &vigia_core::FileSpan) -> 
 /// **Both, rather than one with a flag**, because the two are asked for by
 /// different callers for different reasons and a boolean parameter at each site
 /// is the shape [`gap_rows`]' own docblock records drifting: a term spelled at
-/// every site is a term a site eventually forgets. What keeps *these* two in
-/// step is that [`View::measure`] under a pin reports [`View::current_span`],
-/// which the walk built from [`span_of`], and this reads the same function.
+/// every site is a term a site eventually forgets.
 ///
-/// Costs what [`vigia_core::Frame::diff`] costs, which for a file the frame is
-/// already holding is one `stat` and no read.
+/// **The cache route, which is [`block_rows`]'s and not [`rows_in`]'s**, and the
+/// first draft of this took the other one on a reason that was false. It read
+/// *"costs what `Frame::diff` costs, which for a file the frame is already
+/// holding is one `stat` and no read"*, which is `block_rows`' cost quoted under
+/// `rows_in`'s call: [`vigia_core::Frame::diff`] **re-reads a file written in the
+/// last two seconds by design**, and the pinned file is the file an agent is
+/// writing, so that is the one file for which it is never a `stat`. It made two
+/// whole-file diffs of that file per gesture where one would do, the second of
+/// them microseconds later inside [`View::collect`].
+///
+/// **And the cheaper route is also the correct one, which is what settled it.**
+/// A drag has to invert the arithmetic of the bar **already on screen**, and that
+/// bar was drawn on the *previous* paint from the diff the frame held then.
+/// [`vigia_core::Frame::rows_of`] reads exactly that generation; a fresh
+/// `Frame::diff` can return a height newer than anything the reader has seen, so
+/// the gesture would resolve against a bar that was never drawn. It is also the
+/// route the **unpinned** drag already takes through [`block_rows`], so the two
+/// arms of one gesture now read one generation rather than two.
+///
+/// [`span_of`] and [`crate::rows_of`] are the counting twins and agree exactly,
+/// which `tests/scroll.rs::the_counting_twins_agree_with_the_rows_drawn` holds,
+/// so reading the second here is the same number the walk builds from the first.
 ///
 /// # Panics
 ///
-/// If `index` is out of range, the same way [`vigia_core::Frame::diff`] does.
+/// If `index` is out of range, the same way [`vigia_core::Frame::rows_of`] does.
+/// [`crate::App::pinned_file`] is what keeps the pinned callers off that index.
 pub fn span_in(frame: &mut Frame, index: usize) -> Result<usize> {
-    let (change, diff) = frame.diff(index)?;
-    Ok(span_of(&change.kind, diff))
+    frame.rows_of(index, rows_of)
 }
 
 /// How many rows the **block** of the file at `index` would occupy.
@@ -1188,7 +1206,19 @@ impl View {
         // and a pinned frame draws one, so the file's last content row is the
         // last row a reader can reach: the same rule the last file of an
         // unpinned diff already gets, applied to the only file there is.
-        let stop = if single { view.top.file + 1 } else { files };
+        //
+        // **Both ends in one binding, and the pair is why.** The walk's start is
+        // also the floor the short back-up below compares against, and the two
+        // were written as separate `if single` expressions two hundred lines
+        // apart with only prose saying they were the same range. That is the
+        // shape B16's own recorded defect took: a bound that reads as *the
+        // floor* and means *the floor of some other walk*. One binding leaves
+        // nothing for a future edit to move half of.
+        let (first, stop) = if single {
+            (view.top.file, view.top.file + 1)
+        } else {
+            (0, files)
+        };
 
         let mut index = view.top.file;
         let mut skip = position.row;
@@ -1406,13 +1436,17 @@ impl View {
             // `tests/single.rs::a_pinned_file_shorter_than_the_pane_walks_once`
             // is the gate, and it counts walks rather than asserting rows,
             // because every row of the screen is identical either way.
-            let floor = Position {
-                file: if single { view.top.file } else { 0 },
-                row: 0,
-            };
+            //
+            // `first` rather than a second `if single`, for the reason the
+            // binding above gives: this is the same range's other end.
             let landed_inside = view.landed && view.top.row > 0;
-            let short =
-                (anchored || landed_inside) && view.rows.len() < height && view.top != floor;
+            let short = (anchored || landed_inside)
+                && view.rows.len() < height
+                && view.top
+                    != Position {
+                        file: first,
+                        row: 0,
+                    };
             if restarted || !(overshot || short) {
                 break;
             }
@@ -1451,11 +1485,11 @@ impl View {
             highlighter = original.pass();
 
             // **Both ends, because a pin narrows the range this may resolve
-            // into.** Unpinned it is the whole changed set, `0` to the last
-            // file; pinned it is the one file at both ends, so the walk back
-            // stops where the walk forward started and cannot hand back a
-            // position in a file the frame is not showing.
-            view.top = Self::last_screenful(frame, floor.file, stop - 1, height, &mut view.read)?;
+            // into.** Unpinned it is the whole changed set; pinned it is the one
+            // file, so the walk back stops where the walk forward started and
+            // cannot hand back a position in a file the frame is not showing.
+            // The same `(first, stop)` the walk above used, passed whole.
+            view.top = Self::last_screenful(frame, first, stop, height, &mut view.read)?;
             index = view.top.file;
             skip = view.top.row;
             placed = true;
@@ -1496,8 +1530,8 @@ impl View {
     /// [`span_in`], because a readout and the gesture performed on it are one
     /// contract: a bar drawn from one total and dragged against another agrees
     /// only at the two ends, and the middle is where they come apart.
-    /// `crates/vigia/tests/single.rs::a_drag_lands_where_the_thumb_says` is that
-    /// as a gate.
+    /// `crates/vigia/tests/single.rs::the_total_is_this_file_and_a_drag_lands_where_the_thumb_says`
+    /// is that as a gate.
     fn measure(&mut self, frame: &mut Frame, wanted: bool, single: bool) -> Result<()> {
         if !wanted || self.files == 0 {
             return Ok(());
@@ -1663,20 +1697,26 @@ impl View {
 
     /// Where the viewport starts so the diff's **last row rests at the bottom**.
     ///
-    /// Walks back from `last` until it has `height` rows behind it, stopping at
-    /// `first`. That reads only the files the screen is about to draw, so I4 is
+    /// Walks back from the file before `stop` until it has `height` rows behind
+    /// it, stopping at `first`. That reads only the files the screen is about to draw, so I4 is
     /// untouched: it is bounded by the window exactly like everything else here,
     /// and the `frame.diff` calls it makes are the same ones the walk above is
     /// about to make, which under I2a are cache hits rather than reads.
     ///
-    /// **The two ends are the caller's rather than the frame's, and that is
-    /// `SPEC.md` §11.2 B16.** Unpinned they are `0` and the last changed file,
-    /// which is what this walked before the pin existed. Pinned they are the
-    /// same file twice, so *the last row* means the pinned file's and the top it
-    /// falls back to is that file's heading rather than the diff's first. A
-    /// bound taken from `frame.files().len()` here would have been a second
-    /// answer to *what is this frame showing*, disagreeing with the walk above
-    /// on exactly the frames that ran short.
+    /// **The range is the caller's rather than the frame's, and that is
+    /// `SPEC.md` §11.2 B16.** Unpinned it is `0..files`, which is what this
+    /// walked before the pin existed. Pinned it is the one file, so *the last
+    /// row* means the pinned file's and the top it falls back to is that file's
+    /// heading rather than the diff's first. A bound taken from
+    /// `frame.files().len()` here would have been a second answer to *what is
+    /// this frame showing*, disagreeing with the walk above on exactly the
+    /// frames that ran short.
+    ///
+    /// **Half open, matching the walk's own bound**, so the caller passes the
+    /// pair it already holds. An inclusive `last` made the caller write
+    /// `stop - 1` and this body write `last + 1` back, which is a round trip
+    /// through an off-by-one at the one boundary in this file where an
+    /// off-by-one draws a plausible screen.
     ///
     /// **Not what `Action::Bottom` does**, and the difference is the whole
     /// reason this is affordable. `G` goes to the last *file* from its top,
@@ -1700,21 +1740,21 @@ impl View {
     fn last_screenful(
         frame: &mut Frame,
         first: usize,
-        last: usize,
+        stop: usize,
         height: usize,
         read: &mut usize,
     ) -> Result<Position> {
-        let mut index = last;
+        let mut index = stop - 1;
         let mut have = 0usize;
         loop {
             *read += 1;
             let (change, diff) = frame.diff(index)?;
-            // `last + 1` is the walk's own exclusive end, so the blank closing
-            // the final file is not counted here any more than it is drawn
-            // there. Unpinned that is `files` and this is unchanged; pinned it
-            // is the one file, and counting a gap the pin does not draw would
-            // rest the last row one line above the bottom.
-            have += block_of(&change.kind, diff, index, last + 1);
+            // `stop` is the walk's own exclusive end, so the blank closing the
+            // final file is not counted here any more than it is drawn there.
+            // Unpinned that is `files` and this is unchanged; pinned it is the
+            // one file, and counting a gap the pin does not draw would rest the
+            // last row one line above the bottom.
+            have += block_of(&change.kind, diff, index, stop);
             if have >= height {
                 return Ok(Position {
                     file: index,

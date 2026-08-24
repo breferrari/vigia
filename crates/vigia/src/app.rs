@@ -816,37 +816,7 @@ impl App {
             // diff would be a gesture inverting a readout nobody drew. The two
             // agree at both ends of the track and nowhere in between, which is
             // exactly the shape that passes a test asserting the ends.
-            Action::DiffTo(at) => {
-                self.anchored = false;
-                if let Some(file) = self.pinned_file(frame) {
-                    let total = crate::view::span_in(frame, file)?;
-                    self.position = Position {
-                        file,
-                        row: scaled(at, total.saturating_sub(height)),
-                    };
-                } else {
-                    let total = crate::view::diff_rows(frame)?;
-                    let target = scaled(at, total.saturating_sub(height));
-                    let mut seen = 0;
-                    let files = frame.files().len();
-                    let mut position = Position {
-                        file: files.saturating_sub(1),
-                        row: 0,
-                    };
-                    for file in 0..files {
-                        let rows = crate::view::block_rows(frame, file)?;
-                        if seen + rows > target {
-                            position = Position {
-                                file,
-                                row: target - seen,
-                            };
-                            break;
-                        }
-                        seen += rows;
-                    }
-                    self.position = position;
-                }
-            }
+            Action::DiffTo(at) => self.diff_to(at, height, frame)?,
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
@@ -889,16 +859,17 @@ impl App {
             // file's full height and `View::collect` clamps it to the last
             // screenful on the way, which is the same path a scroll off the end
             // takes: one place decides where the bottom is.
-            Action::Bottom => match self.pinned_file(frame) {
-                Some(file) => {
+            Action::Bottom => {
+                if let Some(file) = self.pinned_file(frame) {
                     self.anchored = false;
                     self.position = Position {
                         file,
                         row: crate::view::span_in(frame, file)?,
                     };
+                } else {
+                    self.jump_to(frame.files().len().saturating_sub(1));
                 }
-                None => self.jump_to(frame.files().len().saturating_sub(1)),
-            },
+            }
         }
         Ok(true)
     }
@@ -917,9 +888,10 @@ impl App {
     /// [`vigia_core::Frame::advance`] rebuilds the changed set from scratch, so
     /// the agent in the other pane committing its work, reverting an edit or
     /// switching branch leaves this naming a file that is gone.
-    /// [`vigia_core::Frame::diff`] **panics** on that index by design, and the two
-    /// arms below are the only gestures on this map that reach it *before*
-    /// [`View::collect`] has had a chance to clamp. A clean worktree is the whole
+    /// [`vigia_core::Frame::rows_of`] **panics** on that index by design, the same
+    /// way [`vigia_core::Frame::diff`] does, and the two callers below are the
+    /// only gestures on this map that reach the frame *before* [`View::collect`]
+    /// has had a chance to clamp. A clean worktree is the whole
     /// of the second case and it is not an edge: it is the state a monitor sits in
     /// most of the time, so `s` and then `G` on a pane that has been left open is
     /// a panic in a tool whose job is to be left open.
@@ -1045,6 +1017,54 @@ impl App {
             }
             std::cmp::Ordering::Less => self.up(rows.unsigned_abs(), frame),
         }
+    }
+
+    /// Resolve a drag on the diff's bar into a position.
+    ///
+    /// **A method rather than an arm since the pin gave it a second branch**,
+    /// which is the shape [`Self::up`] below and [`Self::step_by`] above already
+    /// have: the unpinned walk is twenty lines and nesting it inside an `else`
+    /// to add a three-line guard puts the arm's own body at a depth
+    /// [`Self::apply`]'s match has nowhere else.
+    ///
+    /// **The pinned branch is a guard rather than a fork**, and the two read one
+    /// quantity: `View::measure` under a pin reports the pinned file's span and
+    /// [`crate::view::span_in`] reads the same generation of it, where the
+    /// unpinned walk below sums [`crate::view::block_rows`] over the changed set
+    /// against a bar drawn from `diff_rows`. Both arms therefore invert the bar
+    /// the reader is actually looking at, which is the whole contract a drag has;
+    /// see `span_in`'s own docblock for the route that gets it.
+    fn diff_to(&mut self, at: u32, height: usize, frame: &mut Frame) -> Result<()> {
+        self.anchored = false;
+        if let Some(file) = self.pinned_file(frame) {
+            let total = crate::view::span_in(frame, file)?;
+            self.position = Position {
+                file,
+                row: scaled(at, total.saturating_sub(height)),
+            };
+            return Ok(());
+        }
+        let total = crate::view::diff_rows(frame)?;
+        let target = scaled(at, total.saturating_sub(height));
+        let mut seen = 0;
+        let files = frame.files().len();
+        let mut position = Position {
+            file: files.saturating_sub(1),
+            row: 0,
+        };
+        for file in 0..files {
+            let rows = crate::view::block_rows(frame, file)?;
+            if seen + rows > target {
+                position = Position {
+                    file,
+                    row: target - seen,
+                };
+                break;
+            }
+            seen += rows;
+        }
+        self.position = position;
+        Ok(())
     }
 
     fn up(&mut self, rows: usize, frame: &mut Frame) -> Result<()> {
