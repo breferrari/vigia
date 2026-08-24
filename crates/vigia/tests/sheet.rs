@@ -168,7 +168,7 @@ fn the_shell_starts_with_no_sheet_and_question_mark_is_what_opens_one() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    assert!(!chrome(&app).sheet, "a fresh shell drew a sheet");
+    assert!(chrome(&app).sheet.is_none(), "a fresh shell drew a sheet");
     let (closed, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
     assert!(
         !text_of(&closed, area()).contains(TITLE),
@@ -180,7 +180,11 @@ fn the_shell_starts_with_no_sheet_and_question_mark_is_what_opens_one() {
     );
 
     toggle(&mut app, &mut frame);
-    assert!(chrome(&app).sheet, "`?` did not open the sheet");
+    assert_eq!(
+        chrome(&app).sheet,
+        Some(0),
+        "`?` did not open the sheet at its first page"
+    );
     let (open, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
     assert!(
         text_of(&open, area()).contains(TITLE),
@@ -192,7 +196,11 @@ fn the_shell_starts_with_no_sheet_and_question_mark_is_what_opens_one() {
     );
 
     toggle(&mut app, &mut frame);
-    assert!(!chrome(&app).sheet, "`?` did not close the sheet again");
+    assert!(
+        chrome(&app).sheet.is_none(),
+        "`?` did not close the sheet again, so an eighty by twenty-four pane, whose \
+         sheet is one page, has stopped being a toggle"
+    );
     let (shut, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
     assert!(
         !text_of(&shut, area()).contains(TITLE),
@@ -577,7 +585,7 @@ fn a_write_under_the_sheet_does_not_dismiss_it() {
     frame.advance().expect("advance");
     materialise(&mut frame);
 
-    assert!(chrome(&app).sheet, "a write turned the sheet off");
+    assert!(chrome(&app).sheet.is_some(), "a write turned the sheet off");
     let (after, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
     assert!(
         text_of(&after, area()).contains(TITLE),
@@ -694,7 +702,7 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
         "a pane too small for the sheet drew one anyway"
     );
     assert!(
-        chrome(&app).sheet,
+        chrome(&app).sheet.is_some(),
         "the state stopped being true because the pane was small"
     );
     assert!(
@@ -1271,8 +1279,34 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             top[1..=title].iter().collect::<String>() == "─ gestures ",
             "the sheet's title is not where the frame puts it at {w}x{h}:\n{drawn}"
         );
+        // **The page counter sits here since #286**, between the title and the
+        // rule, so the run of `─` no longer starts at `title + 1`. Its shape is
+        // restated rather than imported for [`TITLE`]'s reason, and validating it
+        // is what stops "the rule starts wherever the counter ended" from
+        // accepting any text at all.
+        let counter: String = top[title + 1..top.len() - 4]
+            .iter()
+            .take_while(|c| **c != '─')
+            .collect();
+        if !counter.is_empty() {
+            let body = counter
+                .strip_prefix(' ')
+                .and_then(|c| c.strip_suffix(' '))
+                .unwrap_or_default();
+            let (run, total) = body.split_once(" of ").unwrap_or_default();
+            let ordinals: Vec<&str> = run.split('-').collect();
+            assert!(
+                (1..=2).contains(&ordinals.len())
+                    && ordinals.iter().all(|n| n.parse::<usize>().is_ok())
+                    && total.parse::<usize>().is_ok(),
+                "the sheet's title bar carries {counter:?} at {w}x{h}, which is \
+                 not the ` a of N ` or ` a-b of N ` the page counter spells:\n{drawn}"
+            );
+        }
         assert!(
-            top[title + 1..top.len() - 4].iter().all(|c| *c == '─'),
+            top[title + 1 + counter.chars().count()..top.len() - 4]
+                .iter()
+                .all(|c| *c == '─'),
             "the sheet's title rule has a hole in it at {w}x{h}:\n{drawn}"
         );
         // The control's own cell, which the rule assertion above deliberately
@@ -1713,7 +1747,7 @@ fn the_roomy_rung_is_additive_and_costs_no_pane_a_gesture() {
 }
 
 #[test]
-fn the_display_order_is_the_readers_and_the_floor_keeps_the_unguessable() {
+fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable() {
     // **The two ends of #285's separation, on a screen.** `render.rs`'s
     // `sheet_tables` holds them on the tables; this holds them on what a reader
     // sees, and the two are not the same claim: a drawer free to iterate the
@@ -1737,42 +1771,103 @@ fn the_display_order_is_the_readers_and_the_floor_keeps_the_unguessable() {
                 n + 1
             );
         }
-
-        // The floor: the shortest pane in the sweep that still draws a sheet.
-        let mut floor = None;
-        for h in LADDER_HEIGHTS {
-            let at = Rect::new(0, 0, 44, h);
-            let (buf, laid) = paint(at);
-            let (count, sheet) = read_sheet(&buf, &laid);
-            if laid.sheet.is_some() && floor.is_none() {
-                floor = Some((h, count, sheet));
-            }
-        }
-        let (h, count, sheet) = floor.expect("no pane in the sweep drew a floor sheet");
-        assert_eq!(
-            count, KEEP,
-            "the floor rung at 44x{h} draws {count} gestures, not the {KEEP} the \
-             keep-set names:\n{sheet}"
-        );
-        for kept in ["follow the newest", "churn band", "this sheet"] {
-            assert!(
-                sheet.contains(kept),
-                "the floor rung at 44x{h} dropped {kept:?}:\n{sheet}"
-            );
-        }
-        assert!(
-            !sheet.contains("quit"),
-            "the floor rung at 44x{h} kept `q`, which the hint bar already names \
-             on every frame, so the two orders have been conflated again and the \
-             unguessable is what got dropped:\n{sheet}"
-        );
     });
+
+    // **The ladder's end moved from the height axis to the width one**
+    // ([#286](https://github.com/breferrari/vigia/issues/286)). A paged rung drops
+    // nothing, so `DROP_ORDER` no longer decides what a *short* pane sees; it
+    // decides what a pane too **narrow** for the whole table sees, which is the
+    // one place rows still disappear. Asserted as exact reachable sets rather than
+    // as counts, because a count cannot tell a permutation from a reordering: this
+    // is the mutation #285's two-orders separation exists to make visible.
+    //
+    // The sets are the tables' own, restated for [`TITLE`]'s reason, and the walk
+    // is over every page because a narrow pane pages as well as drops.
+    const NARROW: [(u16, &[&str]); 3] = [
+        // Thirty columns, the narrowest sheet the ladder draws at all: what is
+        // left after `DROP_ORDER` has given up seven, and every one of the three
+        // the keep-set names is in it. `q` is the first to go, which is the whole
+        // of #285's separation: the hint bar spells `q quit` on every frame.
+        (
+            30,
+            &[
+                "scroll the",
+                "follow the newest",
+                "churn band",
+                "this sheet",
+            ],
+        ),
+        (
+            32,
+            &[
+                "half a page",
+                "first / last",
+                "next / prev",
+                "jump to",
+                "scroll the",
+                "follow the newest",
+                "churn band",
+                "this sheet",
+            ],
+        ),
+        // Thirty-five: every keyboard row, `q` back among them, and only the
+        // mouse group short of the whole table.
+        (
+            35,
+            &[
+                "scroll a row",
+                "Space  PgDn",
+                "half a page",
+                "first / last",
+                "next / prev",
+                "jump to",
+                "scroll the",
+                "follow the newest",
+                "churn band",
+                "this sheet",
+                "quit",
+            ],
+        ),
+    ];
+
+    let scratch = Scratch::large_diff("sheet-orders-narrow", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for (w, want) in NARROW {
+        let at = Rect::new(0, 0, w, 40);
+        let (seen, _) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+        let want: std::collections::BTreeSet<&str> = want.iter().copied().collect();
+        assert_eq!(
+            seen, want,
+            "a {w} column pane reaches a different set of gestures than \
+             DROP_ORDER states, so the two orders have been conflated again"
+        );
+    }
+
+    // And below the narrowest rung there is no sheet at all, which is what a box
+    // that cannot say how much of the table it is hiding costs.
+    let at = Rect::new(0, 0, 29, 40);
+    let (seen, presses) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+    assert!(
+        seen.is_empty() && presses == 1,
+        "a twenty-nine column pane drew a sheet, which is below the width its own \
+         page counter needs"
+    );
 }
 
 #[test]
 fn the_two_column_rung_is_the_size_the_ruling_states() {
-    // **`SPEC.md` §11.1 states 104 by 14 wide and 76 by 14 tight, and until this
-    // gate no test could fail on either.** That is the rail's own lesson one
+    // **`SPEC.md` §11.1 states 104 by 14 wide and 71 by 14 tight, and until this
+    // gate no test could fail on either.** The tight number was 76 until #286
+    // shortened two tight mouse verbs so the whole table would fit I6's forty
+    // columns in one column: the two-column rung measures the same cells, so it
+    // narrowed by the same five. That is additive (a narrower rung arrives
+    // earlier and draws every gesture where the pane used to page) and it is a
+    // deviation from #286's plan, which predicted these numbers unmoved. That is the rail's own lesson one
     // element over: `RAIL_FLOOR` pins its composition in a const block precisely
     // because a claim no gate can fail is a wish, and #220's ruling shipped two
     // numbers with nothing holding them.
@@ -1786,7 +1881,7 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
     let tight = Rect::new(0, 0, 80, 17);
 
     sweep!("sheet-dimensions", |paint| {
-        for (at, want, spelling) in [(wide, (104u16, 14u16), "wide"), (tight, (76, 14), "tight")] {
+        for (at, want, spelling) in [(wide, (104u16, 14u16), "wide"), (tight, (71, 14), "tight")] {
             let (buf, laid) = paint(at);
             let sheet = laid.sheet.expect("the pane draws no sheet at all");
             let (_, drawn) = read_sheet(&buf, &laid);
@@ -1822,7 +1917,7 @@ fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
     });
     assert_eq!(
         arrival,
-        Some(78),
+        Some(73),
         "the two-column rung does not arrive where SPEC.md §11.1 says it does"
     );
 }
@@ -1853,19 +1948,21 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
                 seen += 1;
                 assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
 
-                // **The three rows `SHEET_KEEP` promises survive.** `KEYBOARD`'s
-                // docblock names them and nothing asserted them: dropping
-                // `SHEET_KEEP` to 2 adds a rung that loses `f`, and it fires only
-                // where the body is four rows, which is one height in this whole
-                // sweep. The unguessable outlives the reflexive, or it does not.
-                let (_, drawn) = read_sheet(&buf, &laid);
-                for kept in ["follow the newest", "churn band", "this sheet"] {
-                    assert!(
-                        drawn.contains(kept),
-                        "a {w}x{h} pane drew a sheet without {kept:?}, which \
-                         `SHEET_KEEP` promises is never dropped:\n{drawn}"
-                    );
-                }
+                // **`SHEET_KEEP` is the smallest page, not a keep-set, since
+                // #286.** Before B13 it named the three rows the height ladder
+                // never dropped; a paged sheet drops none, so what the constant
+                // decides is the height below which a page is too thin to be
+                // worth drawing at all. Dropping it to 2 adds a rung two rows
+                // tall, and this is where that fires. Every pane in this sweep is
+                // wide enough for the whole table, so page one is always a full
+                // page rather than a remainder.
+                let (count, drawn) = read_sheet(&buf, &laid);
+                assert!(
+                    count >= KEEP,
+                    "a {w}x{h} pane drew a page of {count} gestures, below the \
+                     {KEEP} `SHEET_KEEP` names as the thinnest page worth \
+                     drawing:\n{drawn}"
+                );
 
                 let pane = text_of(&buf, at);
                 if let Some(hint) = pane.lines().position(|r| r.contains("q quit")) {
@@ -1908,12 +2005,21 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // existed, and the row it lost to air it had spare.
             (100, 40, (16, 5, 68, 29)),
             (120, 21, (8, 3, 104, 14)),
-            (80, 17, (2, 1, 76, 14)),
-            // Odd slack, which all four above lack on both axes: halving the slack
-            // the other way (`div_ceil`) or taking the trailing margin instead of
-            // the leading one reproduces every one of them and misses these.
+            // The tight two-column rung, five columns narrower since #286
+            // shortened two tight mouse verbs. The odd column of slack it gained
+            // is what makes this case test the halving as well as the width.
+            (80, 17, (4, 1, 71, 14)),
+            // Odd slack, which the first three above lack on both axes: halving
+            // the slack the other way (`div_ceil`) or taking the trailing margin
+            // instead of the leading one reproduces every one of them and misses
+            // these. Since #286 the odd column is the two-column case above and
+            // the odd row is the one below it.
             (81, 25, (12, 2, 56, 19)),
-            (43, 25, (4, 5, 35, 13)),
+            // Odd vertical slack. The whole table in one column reaches this
+            // width since #286, so where this used to be a dropping rung of
+            // thirteen rows it is the nineteen-row sheet, and the three rows of
+            // slack are what the halving is read against.
+            (43, 25, (3, 2, 38, 19)),
             // The level probe's own boundary. `margin_of(58)` is 2, so the room is
             // exactly 56 and the wide one-column sheet is exactly 56: turning the
             // probe's `>` into `>=` flips this width and no other, dropping
@@ -2049,97 +2155,89 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
 }
 
 #[test]
-fn the_height_ladder_drops_the_fewest_rows_it_can() {
+fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
     // **The worst regression available in this element, and nothing could see
-    // it.** Reversing the dropping rungs makes `from = 8` the first rung tried, so
-    // it fits almost any pane and every short one draws three gestures instead of
-    // the eleven it can afford. Every other gate stayed green: additivity reads a
-    // cell the reversal does not touch, monotonicity is satisfied because three to
-    // sixteen is still non-decreasing, the degrade gate asks only whether the
-    // mouse group is absent, and the origins, the size, the arrival and the frame
-    // are all unchanged.
+    // it.** Before #286 the height axis dropped rows, and reversing the dropping
+    // rungs made `from = 8` the first tried, so every short pane drew three
+    // gestures instead of the eleven it could afford. Every other gate stayed
+    // green: additivity reads a cell the reversal does not touch, monotonicity is
+    // satisfied because three to sixteen is still non-decreasing, the degrade gate
+    // asks only whether the mouse group is absent, and the origins, the size, the
+    // arrival and the frame are all unchanged.
     //
-    // What no gate stated is that the ladder drops **as little as it can**. Pinned
-    // at a width too narrow for the two-column rung, so height is the only axis
-    // moving, and as literals rather than as a rule derived from the ladder: one
-    // row of pane buys exactly one more gesture until the keyboard group is whole
-    // at eleven, then nothing until the mouse group fits.
-    // **Which rows, not only how many.** Swapping two ranks in the middle of
-    // `DROP_ORDER` keeps every count below identical, keeps the keep-set, keeps
-    // the permutation and keeps the first row to go: only rungs 6 and 7 change
-    // which gesture they lose, and until this walked the identities no gate read
-    // their contents. That is the mutation the two-orders separation exists to
-    // make visible, surviving the gates written for it.
+    // The same regression is available under B13 one axis over: a page that took
+    // `SHEET_KEEP` rows rather than the body's own would page a tall pane six
+    // times and every gate above would stay green, because the union is still
+    // every gesture and the sheet is still a closed box. So what is pinned is that
+    // **a page is as full as the pane allows and the pages are as few as they can
+    // be**, as literals rather than as a rule derived from the ladder.
     //
-    // Restated as the tokens a reader would look for, first to go, for [`TITLE`]'s
-    // reason. It is a permutation of `GESTURES`' first eleven, so
-    // `no_gesture_token_hides_inside_another` covers it too.
-    const GIVEN_UP: [&str; 11] = [
-        "quit",
-        "scroll a row",
-        "Space  PgDn",
-        "half a page",
-        "first / last",
-        "next / prev",
-        "jump to",
-        "scroll the",
-        "follow the newest",
-        "churn band",
-        "this sheet",
-    ];
-
+    // Pinned at fifty columns, too narrow for the two-column rung, so height is
+    // the only axis moving. One row of pane buys one more gesture on page one all
+    // the way up, with the single flat step at seventeen rows where the row it
+    // buys is the mouse group's heading rather than a gesture.
     let expected = [
-        (8u16, 3usize),
-        (9, 4),
-        (10, 5),
-        (11, 6),
-        (12, 7),
-        (13, 8),
-        (14, 9),
-        (15, 10),
-        (16, 11),
-        (17, 11),
-        (21, 11),
-        (22, GESTURES.len()),
+        (8u16, 3usize, 6usize),
+        (9, 4, 5),
+        (10, 5, 4),
+        (11, 6, 3),
+        (12, 7, 3),
+        (13, 8, 3),
+        (14, 9, 2),
+        (15, 10, 2),
+        (16, 11, 2),
+        (17, 11, 2),
+        (18, 12, 2),
+        (19, 13, 2),
+        (20, 14, 2),
+        (21, 15, 2),
+        // The whole table in one column, which is the rung above the paged ones
+        // and unchanged by #286: a pane that fits everything pages not at all.
+        (22, GESTURES.len(), 1),
     ];
-    sweep!("sheet-drop-order", |paint| {
-        for (h, want) in expected {
-            let at = Rect::new(0, 0, 50, h);
-            let (buf, laid) = paint(at);
-            let (count, sheet) = read_sheet(&buf, &laid);
-            assert_eq!(
-                count, want,
-                "a 50 by {h} pane draws {count} gestures where the ladder should \
-                 leave {want}:\n{sheet}"
-            );
 
-            // The keyboard rows that survive are the **tail** of `GIVEN_UP`, and
-            // the ones above them are absent. Only the rungs that drop nothing
-            // else are read here: once the mouse group is back the count stops
-            // being a keyboard count.
-            if want <= GIVEN_UP.len() {
-                // `given_up` is the head of the order and `still_drawn` the
-                // tail, which is the way round `split_at` puts them and the
-                // opposite of how they read if the names are guessed at.
-                let (given_up, still_drawn) = GIVEN_UP.split_at(GIVEN_UP.len() - want);
-                for token in still_drawn {
-                    assert!(
-                        sheet.contains(token),
-                        "a 50 by {h} pane should still draw {token:?} and does \
-                         not, so the ladder is giving rows up in a different \
-                         order than DROP_ORDER states:\n{sheet}"
-                    );
-                }
-                for token in given_up {
-                    assert!(
-                        !sheet.contains(token),
-                        "a 50 by {h} pane still draws {token:?}, which the ladder \
-                         should already have given up:\n{sheet}"
-                    );
-                }
-            }
-        }
-    });
+    let scratch = Scratch::large_diff("sheet-paging", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for (h, first_page, pages) in expected {
+        let at = Rect::new(0, 0, 50, h);
+
+        // Page one on its own, through the same `sweep!`-shaped path every other
+        // gate here uses: one `?`, one paint.
+        let mut app = App::new();
+        let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let height = body_layout(at, &chrome(&app), FILES).diff;
+        app.apply(Action::ToggleSheet, &mut frame, height)
+            .expect("toggle");
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let (count, sheet) = read_sheet(&buf, &laid);
+        assert_eq!(
+            count, first_page,
+            "the first page of a 50 by {h} pane draws {count} gestures where the \
+             body has room for {first_page}:\n{sheet}"
+        );
+
+        // Then the walk, which is what says the pages are as few as they can be
+        // and that nothing was lost between them.
+        let (seen, presses) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+        assert_eq!(
+            presses - 1,
+            pages,
+            "a 50 by {h} pane takes {} pages where the body affords {pages}",
+            presses - 1
+        );
+        assert_eq!(
+            seen.len(),
+            GESTURES.len(),
+            "a 50 by {h} pane reaches {} gestures of {} across its {pages} pages",
+            seen.len(),
+            GESTURES.len()
+        );
+    }
 }
 
 #[test]
@@ -2335,10 +2433,12 @@ fn the_one_column_rung_places_its_cells_where_the_plan_says() {
         // and `q` is the row the ladder gives up first, at the bottom of the table.
         (80u16, 24u16, 2usize, 26usize, 'j', Some(12usize)),
         (120, 30, 2, 26, 'j', Some(12)),
-        // A dropping rung, so its first row is not the table's first: at nine
-        // gestures the ladder has already dropped `q` and `j k`, and the mouse
-        // group is gone entirely.
-        (50, 14, 2, 15, 'S', None),
+        // A **paged** rung since #286, so its first row is the table's first
+        // again: the height ladder no longer drops rows, it splits them, and page
+        // one starts where the reader's order does. The fields are the whole
+        // table's, mouse rows included, which is why the verb column sits two
+        // further right than it did when this rung dropped the mouse group.
+        (50, 14, 2, 17, 'j', None),
     ] {
         sweep!("sheet-one-column-cells", |paint| {
             let at = Rect::new(0, 0, w, h);
@@ -2535,116 +2635,144 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
 }
 
 #[test]
-fn the_two_guards_no_rung_reaches_are_still_the_right_size() {
-    // **Two branches in the layout that nothing can currently make fire**, both
-    // documented as guards rather than rungs, and one table edit from going live:
-    // #288 adds a `MOUSE` row.
+fn the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_states() {
+    // **This gate used to hold two branches nothing could make fire.**
+    // `sheet_floor` raised any rung to the width its own title bar needed, and no
+    // rung ever reached it: the floor was seventeen and the narrowest rung
+    // twenty-four. It said so, and said that the day #288 added a `MOUSE` row one
+    // of them would stop clearing and the behaviour behind the guard would become
+    // reachable and untested.
     //
-    // **#285 was named here as the other trigger and it was not one.** The
-    // prediction was that it would *shrink* the tables; what it did was reorder
-    // them and add a rung above them, and a reorder moves no field width at all.
-    // The narrowest rung is still the deepest dropping one, whose kept rows are
-    // still `f`, `m` and `?`, so both numbers below are unmoved. Corrected rather
-    // than deleted, because a prediction that quietly vanished would read as one
-    // still pending.
+    // **#286 is what made it fire, and from the other direction.** The page
+    // counter rides the title bar, so every rung now charges the widest counter
+    // the tables can spell whether or not it draws one, and that is what keeps a
+    // centred box the same size on every page of a pane. The floor is thirty, the
+    // deepest dropping rungs are raised to it, and a pane narrower than thirty
+    // draws no sheet at all. So the numbers below are a rung's rather than a
+    // guard's slack, and they are asserted rather than described.
     //
-    // A guard whose slack nobody states is a guard nobody will notice binding, so
-    // the numbers are asserted rather than described. They are restated here
-    // rather than imported for [`TITLE`]'s reason.
-    //
-    // **What this gate cannot do, said plainly rather than implied.** A branch
-    // that never fires has no observable value, so no gate can pin the production
-    // constants themselves: `sheet_floor`'s `+ 6` could become `+ 13` and the
-    // `.max` could be deleted outright, and nothing here would redden, because
-    // neither changes a cell. What is pinned is the *slack* — that the narrowest
-    // rung the ladder draws clears the floor, and that the keyboard block clears
-    // its own label — which is the property that decides whether the guard is
-    // live. The day #288 adds a `MOUSE` row, one of these stops clearing, this gate reddens, and the behaviour behind the guard
-    // becomes reachable and untested. That is the moment to gate the value; until
-    // then there is nothing to gate.
-    //
-    // The roomy rung is not a candidate either: at sixty-eight columns it is
-    // wider than the narrowest rung and narrower than the two-column one, so it
-    // moves neither of the numbers below. (It is the *largest* rung by cells,
-    // which is a different superlative and the one `budgets.rs` cares about.)
-    //
-    // `sheet_floor` raises any rung to the width its own title bar needs. The
-    // title is `─ gestures ` at eleven columns, plus a border and a space at each
-    // end and the two-of-gap the fields already carry, so the floor is 17.
-    let floor = "─ gestures ".chars().count() + 6;
-    assert_eq!(floor, 17, "the title bar's floor is not what §11.1 states");
+    // Restated here rather than imported for [`TITLE`]'s reason. The counter's own
+    // widest spelling is ` 16-16 of 16 `, which is the range form at the table's
+    // own size: no page draws it, since a page showing all sixteen draws no
+    // counter, and it is the bound the box is sized against.
+    let floor = "─ gestures ".chars().count() + " 16-16 of 16 ".chars().count() + 6;
+    assert_eq!(floor, 30, "the title bar's floor is not what §11.1 states");
 
-    // The narrowest sheet the ladder can actually produce, and the narrowest
-    // two-column one. Both are well clear of the floor, which is why it is a
-    // guard: measured, not assumed.
     sweep!("sheet-guards", |paint| {
         let mut narrowest = u16::MAX;
         let mut narrowest_beside = u16::MAX;
-        for w in LADDER_WIDTHS {
+        let mut narrowest_at_i6 = u16::MAX;
+        // Wider than `LADDER_WIDTHS`' floor at the bottom end, because the rungs
+        // this gate is about are the ones only a pane below I6's forty reaches.
+        for w in 20..=*LADDER_WIDTHS.end() {
             for h in LADDER_HEIGHTS {
                 let at = Rect::new(0, 0, w, h);
                 let (buf, laid) = paint(at);
                 let Some(sheet) = laid.sheet else { continue };
                 let (_, drawn) = read_sheet(&buf, &laid);
                 narrowest = narrowest.min(sheet.width);
+                if w >= *LADDER_WIDTHS.start() {
+                    narrowest_at_i6 = narrowest_at_i6.min(sheet.width);
+                }
                 if drawn.contains("keyboard") {
                     narrowest_beside = narrowest_beside.min(sheet.width);
                 }
             }
         }
-        // 24 is a property of the tables, not of this sweep's floor: probed
-        // across every pane from 1x1 to 39x39 as well, the narrowest sheet drawn
-        // anywhere is the same 24, first appearing at a pane exactly that wide.
         assert_eq!(
-            narrowest, 24,
-            "the narrowest rung the ladder draws is not the 24 columns §11.1 \
-             names, so `sheet_floor`'s slack is not what it says"
+            narrowest, floor as u16,
+            "the narrowest rung the ladder draws is not the {floor} columns \
+             §11.1 names, so `sheet_floor` is not binding where the ruling says"
+        );
+        // The whole table in one column, which is what a pane at I6's forty
+        // columns draws and the number the two shortened tight verbs bought.
+        assert_eq!(
+            narrowest_at_i6, 38,
+            "the narrowest sheet a pane of forty columns and up draws is not the \
+             38 columns §11.1 names for the whole table at the tight spelling"
         );
         assert_eq!(
-            narrowest_beside, 76,
-            "the narrowest two-column rung is not the 76 columns §11.1 names"
-        );
-        assert!(
-            narrowest > floor as u16,
-            "`sheet_floor` has stopped being a guard and become a rung: the \
-             narrowest sheet is {narrowest} against a floor of {floor}"
+            narrowest_beside, 71,
+            "the narrowest two-column rung is not the 71 columns §11.1 names"
         );
     });
+}
 
-    // The keyboard block must be wide enough for its own heading label, or
-    // ` mouse ` would land inside the word `keyboard`. The label needs
-    // `mouse.at >= 1 + 10`; the keyboard block puts it at 55 wide and 34 tight.
-    let label = " keyboard ".chars().count();
-    assert_eq!(
-        label, 10,
-        "the keyboard label is not the width the floor assumes"
-    );
-    for (w, h, at) in [(120u16, 21u16, 55usize), (80, 17, 34)] {
-        sweep!("sheet-label-floor", |paint| {
-            let pane = Rect::new(0, 0, w, h);
-            let (buf, laid) = paint(pane);
-            let (_, sheet) = read_sheet(&buf, &laid);
-            let heading = sheet
-                .lines()
-                .nth(1)
-                .expect("a two-column sheet has a heading");
-            // By character rather than by byte: the heading is mostly box-drawing
-            // glyphs, so `str::find` returns an offset three times the column.
-            let cells: Vec<char> = heading.chars().collect();
-            let mouse_at = (0..cells.len())
-                .find(|&i| cells[i..].starts_with(&['m', 'o', 'u', 's', 'e']))
-                .expect("the mouse label is drawn");
-            assert_eq!(
-                mouse_at - 1,
-                at,
-                "the mouse label sits at {mouse_at} rather than {at} at {w}x{h}, \
-                 so the heading floor's stated slack is wrong"
-            );
+#[test]
+fn every_gesture_is_reachable_at_forty_columns_and_up() {
+    // **#286's gate, and the promise B13 makes.** On any pane that draws a sheet
+    // at all, walking `?` from the first page to the close reaches every gesture
+    // the pane binds. Not *fits on one screen*: reaches.
+    //
+    // Forty is I6's own width and that is why it is the floor here. Below it the
+    // mouse group has no spelling that fits any pane, so the promise is stated
+    // where it can hold rather than everywhere and honoured nowhere.
+    let scratch = Scratch::large_diff("sheet-reachable", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for w in LADDER_WIDTHS {
+        for h in LADDER_HEIGHTS {
+            let at = Rect::new(0, 0, w, h);
+            let (seen, _) = walk_the_pages(&mut frame, &mut highlighter, &history, at);
+            if seen.is_empty() {
+                continue;
+            }
+            let missing: Vec<_> = GESTURES.iter().filter(|g| !seen.contains(*g)).collect();
             assert!(
-                at > label,
-                "the keyboard block no longer clears its own label, so the floor \
-                 has gone live and its behaviour is untested"
+                missing.is_empty(),
+                "a {w}x{h} pane draws a sheet and {} of its {} gestures are \
+                 unreachable however often `?` is pressed: {missing:?}",
+                missing.len(),
+                GESTURES.len()
             );
-        });
+        }
     }
+}
+
+/// The page walk one pane takes: every gesture `?` reaches before it closes, and
+/// how many presses that took.
+///
+/// **Driven through `App::apply` rather than through a plan**, because what #286
+/// rules is the *input model*: a gate that asked the layout how many pages there
+/// are would agree with the layout by construction and say nothing about what a
+/// reader pressing `?` can reach. The bound is a guard against a `?` that never
+/// closes, which is the one failure this shape could otherwise hang on.
+fn walk_the_pages(
+    frame: &mut Frame<'_>,
+    highlighter: &mut Highlighter,
+    history: &History,
+    at: Rect,
+) -> (std::collections::BTreeSet<&'static str>, usize) {
+    const BOUND: usize = 64;
+    // **A fresh shell per pane, and the first version of this was not.** A pane
+    // below the sheet's floor draws nothing and leaves the state open, which is
+    // §11.1's own ruling and not a defect; carrying that state into the next pane
+    // starts its walk on page two and hides page one from every gate here.
+    let mut app = App::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut presses = 0;
+    // One paint with the sheet down, so the page count `?` is measured against is
+    // this pane's rather than the default.
+    let _ = paint(&mut app, frame, highlighter, history, at);
+    loop {
+        let height = body_layout(at, &chrome(&app), FILES).diff;
+        app.apply(Action::ToggleSheet, frame, height)
+            .expect("toggle");
+        presses += 1;
+        let (buf, laid) = paint(&mut app, frame, highlighter, history, at);
+        let Some(_) = laid.sheet else { break };
+        let (_, sheet) = read_sheet(&buf, &laid);
+        seen.extend(GESTURES.iter().copied().filter(|g| sheet.contains(g)));
+        assert!(
+            presses < BOUND,
+            "`?` was pressed {presses} times at {}x{} and the sheet never closed",
+            at.width,
+            at.height
+        );
+    }
+    (seen, presses)
 }

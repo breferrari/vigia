@@ -30,6 +30,7 @@
 //! file path, whose tail names the file, and [`CONTINUES`] on the right for
 //! everything else, content included.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use ratatui::buffer::Buffer;
@@ -1544,7 +1545,7 @@ pub struct Chrome {
     /// composites over cells the regions have already drawn, so no rect moves and
     /// no row is spent. It is read by the painter last and by [`regions`] so a
     /// pointer can be told it is over one.
-    pub sheet: bool,
+    pub sheet: Option<usize>,
     /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
     ///
     /// `None` on the very first paint, when no frame has completed to have a
@@ -3291,6 +3292,17 @@ pub struct Body {
     /// In this shape [`Body::rule`] is always false and [`Body::list`] and
     /// [`Body::diff`] are the same rows read in two columns.
     pub rail: bool,
+    /// Pages the gestures sheet would take on this pane, and zero on a pane too
+    /// small to draw one.
+    ///
+    /// **Not a region, and that is why [`Body::split`] does not set it.** The
+    /// sheet takes no rows from anything here: it is composited over rows the
+    /// regions keep, which is the property B12 chose it for. What it is doing on
+    /// this type is that [`body_layout`] is the one function that sees the whole
+    /// pane every frame, and `?` advancing needs a count that was measured against
+    /// the pane the reader is looking at rather than one the state guessed
+    /// ([#286](https://github.com/breferrari/vigia/issues/286)).
+    pub sheet_pages: usize,
 }
 
 impl Body {
@@ -3321,6 +3333,9 @@ impl Body {
             // it does not have is a bug with no symptom until something divides by
             // it.
             rail: false,
+            // Attached by `body_layout`, which is the only caller that has the
+            // pane. A `Body` built for a diff walk has no sheet to count.
+            sheet_pages: 0,
         }
     }
 
@@ -3429,6 +3444,8 @@ impl Body {
             rule: true,
             diff: after - graph - air,
             rail: false,
+            // Attached by `body_layout`, which is the only caller with the pane.
+            sheet_pages: 0,
         }
     }
 
@@ -3557,6 +3574,8 @@ impl Body {
             rule: false,
             diff: rows,
             rail: true,
+            // Attached by `body_layout`, which is the only caller with the pane.
+            sheet_pages: 0,
         }
     }
 
@@ -3669,6 +3688,10 @@ impl Body {
             rule,
             diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
             rail: false,
+            // **Carried, unlike the two constructors above.** A clamp re-divides
+            // the rows this body already has and does not re-measure the pane, so
+            // the sheet it could draw is the same sheet.
+            sheet_pages: self.sheet_pages,
         }
     }
 }
@@ -3844,12 +3867,14 @@ impl Body {
 /// [`Body::split`] directly with the plan it made anyway; everything else comes
 /// through here. See [`Body::split`] for the ruling the arithmetic encodes.
 pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
-    Body::split(
-        area,
-        Footer::plan(area, chrome, files).height(),
-        files,
-        chrome.masthead,
-    )
+    let footer = Footer::plan(area, chrome, files).height();
+    let mut body = Body::split(area, footer, files, chrome.masthead);
+    // **Attached rather than split**, which is [`Body::sheet_pages`]' own
+    // docblock: the sheet is not a region and takes no row from one, so it has no
+    // place in the split that divides the body between them. It is here because
+    // this is the one function that sees the whole pane on every frame.
+    body.sheet_pages = sheet_pages_of(area, footer, margins_of(area.width));
+    body
 }
 
 /// Rows the **diff** gets, which is what a caller has to ask [`View::collect`]
@@ -3971,8 +3996,7 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         // to draw it, since a target nobody can see must not eat a gesture.
         sheet: chrome
             .sheet
-            .then(|| sheet_plan(area, footer.height(), margins_of(area.width)))
-            .flatten()
+            .and_then(|page| sheet_plan(area, footer.height(), margins_of(area.width), page))
             .map(|plan| plan.target()),
     }
 }
@@ -4187,8 +4211,8 @@ pub fn render(
     // B12: the sheet is the one drawn thing on this pane that takes no row from
     // any region, so it is composited after all of them and the plan above is
     // untouched by whether it is up.
-    if chrome.sheet {
-        if let Some(plan) = sheet_plan(area, footer.height(), margins) {
+    if let Some(page) = chrome.sheet {
+        if let Some(plan) = sheet_plan(area, footer.height(), margins, page) {
             painter.sheet(&plan);
         }
     }
@@ -4318,7 +4342,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 const MOUSE: [Gesture; 5] = [
     Gesture {
         keys: ["wheel", "wheel"],
-        verb: ["scroll what you point at", "scroll what you point at"],
+        verb: ["scroll what you point at", "what you point at"],
     },
     Gesture {
         keys: ["drag a scrollbar", "drag a bar"],
@@ -4330,7 +4354,7 @@ const MOUSE: [Gesture; 5] = [
     },
     Gesture {
         keys: ["click  ▲ ▼", "click  ▲ ▼"],
-        verb: ["one row, and repeats held", "one row, repeats held"],
+        verb: ["one row, and repeats held", "a row, held repeats"],
     },
     Gesture {
         keys: ["click a listed file", "click a file"],
@@ -4601,17 +4625,22 @@ const SHEET_GAP: usize = 2;
 /// The floor every rung's width takes, so a narrow table cannot draw a truncated
 /// heading. Named once because all three rung shapes charge it.
 ///
-/// **No shipped rung reaches it, and that is worth writing down rather than
-/// discovering.** The floor is seventeen; the narrowest one-column rung is
-/// twenty-four, which is the last rung the height ladder leaves: at the tight
-/// spelling its widest cells are `?` and `follow the newest`, so one column of
-/// keys and seventeen of verb. The narrowest two-column rung is seventy-six, and
-/// the roomy rung is sixty-eight at its only spelling. So it is a guard
-/// against the tables shrinking, not a rung of the ladder, and if it ever bound
-/// on [`Shape::Beside`] the sheet would be wider than the sum its groups were
-/// placed within and the right pipe would detach from the mouse column.
+/// **It binds now, which it did not before
+/// [#286](https://github.com/breferrari/vigia/issues/286).** The floor was
+/// seventeen and no rung reached it, because the narrowest one-column rung is
+/// twenty-four: at the tight spelling its widest cells are `?` and `follow the
+/// newest`, so one column of keys and seventeen of verb. Charging
+/// [`sheet_counter_floor`] puts the floor at thirty, so the dropping rungs
+/// between twenty-four and twenty-nine columns are drawn thirty wide and a pane
+/// narrower than thirty draws no sheet at all. That is the trade B13 states: a
+/// sheet that cannot say how much of the table it is hiding is the state the
+/// ruling exists to end, and I6 promises forty.
+///
+/// If it ever bound on [`Shape::Beside`] the sheet would be wider than the sum
+/// its groups were placed within and the right pipe would detach from the mouse
+/// column, so that rung's seventy-six keeps it clear by a wide margin.
 fn sheet_floor(total: usize) -> usize {
-    total.max(width_of(SHEET_TITLE) + 6)
+    total.max(width_of(SHEET_TITLE) + *SHEET_COUNTER_FLOOR + 6)
 }
 
 /// The **two-column** rung's groups and the whole sheet's width.
@@ -4778,7 +4807,107 @@ impl Group {
 /// and this function is still counting what the painter draws. `sheet_roomy_rows`
 /// is the same shape one function away.
 fn sheet_rows(from: usize, mouse: bool) -> usize {
-    kept_keyboard(from).count() + if mouse { 1 + MOUSE.len() } else { 0 }
+    column_lines(from, mouse).count()
+}
+
+/// One drawn line of a one-column rung.
+///
+/// **A type rather than an index, because the rung is now paged**
+/// ([#286](https://github.com/breferrari/vigia/issues/286)). A page is a slice of
+/// this sequence, and the mouse group's heading is a line the slice can land on
+/// like any other: the painter has to know which kind it drew, and an offset into
+/// two tables plus a rule about where the heading falls is the arithmetic that
+/// would go wrong at exactly one page boundary.
+#[derive(Clone, Copy)]
+enum Line {
+    /// A gesture.
+    Row(&'static Gesture),
+    /// The mouse group's heading, which costs a row and is not a gesture.
+    Heading(&'static str),
+}
+
+/// Every line a one-column rung draws, in the order it draws them.
+///
+/// **The one sequence both the measurement and the painter read**, which is
+/// [`kept_keyboard`]'s rule one level up: a page is a `skip` and a `take` into
+/// this, planned once and honoured once, so the rows the frame was sized for and
+/// the rows the painter puts inside it cannot come apart.
+///
+/// **The stacking order is the third order this element has, and it is
+/// deliberately not [`SECTIONS`]'.** Here it is every keyboard row, then the mouse
+/// group; there the mouse group sits fourth of five. `SPEC.md` §11.1 carries the
+/// reason: a rung with no headings cannot put two unlabelled keyboard rows *after*
+/// a labelled mouse group without them reading as more mouse gestures.
+fn column_lines(from: usize, mouse: bool) -> impl Iterator<Item = Line> {
+    kept_keyboard(from).map(Line::Row).chain(
+        mouse
+            .then(|| {
+                std::iter::once(Line::Heading(SHEET_MOUSE_LABEL)).chain(MOUSE.iter().map(Line::Row))
+            })
+            .into_iter()
+            .flatten(),
+    )
+}
+
+/// Gestures the whole sheet holds, which is what the page counter counts against.
+///
+/// **Derived, never a literal.** [#288](https://github.com/breferrari/vigia/issues/288)
+/// adds a sixth mouse row, and a counter reading *of 16* on a table of seventeen
+/// is a lie no gate over the drawn output would catch: the number is furniture and
+/// every gate here reads the tables.
+const SHEET_TOTAL: usize = KEYBOARD.len() + MOUSE.len();
+
+/// The page counter the title bar carries: which gestures this page draws, and how
+/// many the tables hold.
+///
+/// **Ordinals within what this pane can reach, not within [`SHEET_TOTAL`].** A
+/// rung that dropped rows for width draws a set that is not contiguous in display
+/// order, because [`DROP_ORDER`] gives up `q` first and `q` is at the bottom of
+/// the table. So `1-3 of 16` means *three of the sixteen, and this pane reaches
+/// nine*, and the reader's arithmetic is the say-so. True positions with gaps
+/// would read as a rendering fault rather than as a count.
+fn sheet_counter(shown: (usize, usize)) -> String {
+    let (first, last) = shown;
+    if first == last {
+        format!(" {first} of {SHEET_TOTAL} ")
+    } else {
+        format!(" {first}-{last} of {SHEET_TOTAL} ")
+    }
+}
+
+/// The widest [`sheet_counter`] can ever be, which every rung's width charges.
+///
+/// **Charged whether or not this rung draws one**, and that is what keeps the box
+/// the same size on every page of a pane: a floor that moved with the numbers
+/// would resize a centred sheet as the reader pressed `?`. It costs the rungs
+/// below thirty columns, which are the rungs that drew four gestures of sixteen
+/// with nothing saying so.
+///
+/// **The maximum is taken over the pairs [`shown_of`] can return, not guessed at
+/// one of them.** The first version asked [`sheet_counter`] for `(16, 16)` and got
+/// the *short* spelling, ten columns rather than thirteen, because that pair is
+/// the one case the range form never draws. Every rung was then three columns
+/// narrower than the counter it had to fit, and the sheet drew at twenty-seven
+/// where the ruling says thirty. Deriving the width arithmetically instead would be
+/// the same defect one layer over: two expressions agreeing about a sum by hand.
+///
+/// Two hundred and fifty-six formats, once per process rather than once per frame,
+/// which is what the lock is for.
+static SHEET_COUNTER_FLOOR: LazyLock<usize> = LazyLock::new(|| {
+    (1..=SHEET_TOTAL)
+        .flat_map(|first| (first..=SHEET_TOTAL).map(move |last| (first, last)))
+        .map(|shown| width_of(&sheet_counter(shown)))
+        .max()
+        .unwrap_or_default()
+});
+
+/// The ordinals of the gestures a page draws, or `None` when it draws them all.
+fn shown_of(from: usize, mouse: bool, skip: usize, take: usize) -> Option<(usize, usize)> {
+    let gestures =
+        |it: &mut dyn Iterator<Item = Line>| it.filter(|line| matches!(line, Line::Row(_))).count();
+    let before = gestures(&mut column_lines(from, mouse).take(skip));
+    let count = gestures(&mut column_lines(from, mouse).skip(skip).take(take));
+    (count < SHEET_TOTAL).then_some((before + 1, before + count))
 }
 
 /// Rows the two-column rung draws, frame excluded: the taller column, heading
@@ -4830,14 +4959,35 @@ fn sheet_beside_rows() -> usize {
 /// [#158](https://github.com/breferrari/vigia/issues/158)'s correction inherited
 /// rather than re-earned: a floor known only to the drawer lets the layout
 /// promise a region the painter then declines to draw.
-fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<SheetPlan> {
+fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) -> Option<SheetPlan> {
     let body = area.height.saturating_sub(1 + footer_rows);
     let room = area.width.saturating_sub(margins.0 + margins.1);
     let level = usize::from(sheet_fields(0, 0, true).2 > usize::from(room));
 
+    // **Rows the body has for a page, which is the whole of the height axis now.**
+    // A paged rung is measured against this rather than against its own row count,
+    // so it fits every pane that can hold `SHEET_KEEP` rows and a frame, and the
+    // floor is exactly where it was: the last dropping rung needed the same three.
+    let capacity = usize::from(body).saturating_sub(SHEET_FRAME);
+    // The row sets, widest first, so a pane with the columns for the mouse group
+    // pages it rather than dropping it. Empty below the floor, which is what keeps
+    // `?` from opening a sheet nobody can read.
+    let sets = (capacity >= SHEET_KEEP)
+        .then(|| {
+            std::iter::once((0, true))
+                .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(|from| (from, false)))
+        })
+        .into_iter()
+        .flatten();
+
     // The order is the ruling's: the roomy rung where there is room for it, then
     // every row in one column, then the two-column rung that buys height with
-    // width, then the mouse group goes, then keyboard rows in `DROP_ORDER`.
+    // width, then the paged rungs, widest row set first.
+    //
+    // **The paged rungs come last, and that is what keeps them additive**
+    // ([#286](https://github.com/breferrari/vigia/issues/286)): every pane that
+    // draws one of the first three today draws exactly it, with one page, so a
+    // reader whose pane already showed every gesture presses `?` twice as before.
     //
     // **Ordered, and that is the whole contract.** The first rung that fits wins,
     // so the two-column rung sitting after the full one-column rung is what makes
@@ -4847,7 +4997,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<Sheet
     let rungs = std::iter::once_with(roomy_fit)
         .chain(std::iter::once_with(move || column_fit(level, 0, true)))
         .chain([0, 1].into_iter().map(beside_fit))
-        .chain((0..=KEYBOARD.len() - SHEET_KEEP).map(move |from| column_fit(level, from, false)));
+        .chain(sets.map(move |(from, mouse)| paged_fit(level, from, mouse, page, capacity)));
     for fit in rungs {
         let height = fit.rows + SHEET_FRAME;
         if fit.total > usize::from(room) || height > usize::from(body) {
@@ -4868,9 +5018,23 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16)) -> Option<Sheet
             shape: fit.shape,
             // Three in from the right edge: `┐`, the space before it, and this.
             close: (left + width - 3, top),
+            pages: fit.pages,
+            shown: fit.shown,
         });
     }
     None
+}
+
+/// How many pages `?` walks through on this pane before the sheet closes, and
+/// zero on a pane that draws none.
+///
+/// **The number [`crate::App`] needs and the plan already knows.** The advance is a
+/// state change and the count is a layout fact, so the layout hands it over rather
+/// than the state re-deriving a ladder it would then be free to disagree with. It
+/// is page-independent by construction, which is what lets a frame drawn with the
+/// sheet **down** report the count the reader's next `?` will be measured against.
+fn sheet_pages_of(area: Rect, footer_rows: u16, margins: (u16, u16)) -> usize {
+    sheet_plan(area, footer_rows, margins, 0).map_or(0, |plan| plan.pages)
 }
 
 /// What one rung would cost and what it would draw, before it is known to fit.
@@ -4887,6 +5051,14 @@ struct Fit {
     rows: usize,
     /// What the drawer will be told to draw.
     shape: Shape,
+    /// How many pages `?` walks through before it closes.
+    ///
+    /// One on every rung that draws the whole table, which is every rung a pane
+    /// with the room takes, so the common sheet is exactly the toggle it was.
+    pages: usize,
+    /// The ordinals the page counter draws, or `None` when this page draws every
+    /// gesture and there is nothing to say.
+    shown: Option<(usize, usize)>,
 }
 
 /// One column, every row drawn, headed and with air around it.
@@ -4897,17 +5069,40 @@ fn roomy_fit() -> Fit {
         total,
         rows: sheet_roomy_rows(),
         shape: Shape::Roomy { group },
+        pages: 1,
+        shown: None,
     }
 }
 
 /// One column, at a spelling the pane picked, with the mouse group below the
 /// keyboard group or dropped, and `from` keyboard rows already gone.
 fn column_fit(level: usize, from: usize, mouse: bool) -> Fit {
+    paged_fit(level, from, mouse, 0, sheet_rows(from, mouse))
+}
+
+/// One column, `capacity` rows of it at a time, showing page `page`.
+///
+/// **The one constructor both the whole-table rung and the paged rungs use**
+/// ([#286](https://github.com/breferrari/vigia/issues/286)): a rung whose capacity
+/// is its own row count is a single page by arithmetic rather than by a second
+/// code path, so there is no version of "draws everything" that can drift from
+/// "draws a page".
+///
+/// `page` is **clamped** rather than trusted. The count a reader's `?` was
+/// measured against is the previous frame's, so a pane that has just been made
+/// shorter can be asked for a page it no longer has; landing on the last one is
+/// the answer that neither panics nor closes a sheet nobody dismissed.
+fn paged_fit(level: usize, from: usize, mouse: bool, page: usize, capacity: usize) -> Fit {
     let (keys, verb, total) = sheet_fields(level, from, mouse);
+    let lines = sheet_rows(from, mouse);
+    let pages = lines.div_ceil(capacity.max(1)).max(1);
+    let page = page.min(pages - 1);
+    let skip = page * capacity;
+    let take = capacity.min(lines - skip);
     Fit {
         level,
         total,
-        rows: sheet_rows(from, mouse),
+        rows: take,
         shape: Shape::Column {
             from,
             mouse,
@@ -4917,7 +5112,11 @@ fn column_fit(level: usize, from: usize, mouse: bool) -> Fit {
                 verb,
                 gap: SHEET_GAP,
             },
+            skip,
+            take,
         },
+        pages,
+        shown: shown_of(from, mouse, skip, take),
     }
 }
 
@@ -4934,6 +5133,8 @@ fn beside_fit(level: usize) -> Fit {
         total,
         rows: sheet_beside_rows(),
         shape: Shape::Beside { keyboard, mouse },
+        pages: 1,
+        shown: None,
     }
 }
 
@@ -4968,6 +5169,16 @@ enum Shape {
         mouse: bool,
         /// The single column both groups share, so their rows stay a table.
         group: Group,
+        /// Lines of [`column_lines`] this page starts after.
+        ///
+        /// **Planned here rather than derived by the painter from a page index
+        /// and a capacity**, which is [`Group`]'s own rule one field over: the
+        /// frame is sized from `take`, so a drawer free to recompute the split is
+        /// a drawer free to disagree with the box it is drawing inside.
+        skip: usize,
+        /// Lines this page draws, which is exactly the rows the frame was sized
+        /// for.
+        take: usize,
     },
     /// One column, every row drawn, the sections headed and air around them.
     ///
@@ -4998,6 +5209,11 @@ struct SheetPlan {
     shape: Shape,
     /// The close control's cell.
     close: (u16, u16),
+    /// How many pages `?` walks through on this pane before it closes.
+    pages: usize,
+    /// The ordinals the page counter draws, or `None` when this page draws every
+    /// gesture the tables hold.
+    shown: Option<(usize, usize)>,
 }
 
 impl SheetPlan {
@@ -6245,12 +6461,18 @@ impl Painter<'_> {
         // after it in its own weight: a control is not part of the frame it sits
         // in, which is [#166](https://github.com/breferrari/vigia/issues/166)'s
         // rule for the step buttons one element over.
+        // **The counter rides the title bar, so it costs no content row.** That is
+        // the property B12 chose the sheet for and #286 had to keep: a say-so that
+        // took a row would take it from the gestures it is apologising for.
+        let counter = plan.shown.map(sheet_counter).unwrap_or_default();
         let mut top = String::with_capacity(width * 3);
         top.push('┌');
         top.push_str(SHEET_TITLE);
-        // Corner, title, dashes, then the three cells the control sits in and the
-        // closing corner: `width - 16` of rule for an eleven-column title.
-        for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + 5) {
+        top.push_str(&counter);
+        // Corner, title, counter, dashes, then the three cells the control sits in
+        // and the closing corner. The rule cannot go negative because
+        // `sheet_floor` charges `sheet_counter_floor` on every rung.
+        for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + width_of(&counter) + 5) {
             top.push(RULE);
         }
         top.push_str("   ┐");
@@ -6280,7 +6502,13 @@ impl Painter<'_> {
 
         match plan.shape {
             Shape::Roomy { group } => self.sheet_roomy(plan, group),
-            Shape::Column { from, mouse, group } => self.sheet_column(plan, from, mouse, group),
+            Shape::Column {
+                from,
+                mouse,
+                group,
+                skip,
+                take,
+            } => self.sheet_column(plan, from, mouse, group, skip, take),
             Shape::Beside { keyboard, mouse } => self.sheet_beside(plan, keyboard, mouse),
         }
 
@@ -6308,27 +6536,32 @@ impl Painter<'_> {
     /// mouse gestures. It stays control flow rather than a table because a
     /// dropping rung's [`DROP_ORDER`] set cuts across section bounds and would
     /// leave empty runs to skip.
-    fn sheet_column(&mut self, plan: &SheetPlan, from: usize, mouse: bool, group: Group) {
+    fn sheet_column(
+        &mut self,
+        plan: &SheetPlan,
+        from: usize,
+        mouse: bool,
+        group: Group,
+        skip: usize,
+        take: usize,
+    ) {
         let area = plan.area;
         let width = usize::from(area.width);
 
-        let mut y = area.y + 1;
-        for row in kept_keyboard(from) {
-            self.sheet_pipes(area, y);
-            self.sheet_row(y, row, plan.level, group, area.x);
-            y += 1;
-        }
-
-        if mouse {
-            // The group's own rule, which is the same shape the title bar has and
-            // for the same reason: a heading inside a table is furniture, so it
-            // runs to the frame rather than standing back from it.
-            self.sheet_heading(area.x, y, width, SHEET_MOUSE_LABEL);
-            y += 1;
-            for row in MOUSE.iter() {
-                self.sheet_pipes(area, y);
-                self.sheet_row(y, row, plan.level, group, area.x);
-                y += 1;
+        // **The plan's slice, not one recomputed here.** `skip` and `take` are
+        // what the frame was sized from, so drawing anything else is drawing over
+        // the bottom border or leaving a blank row inside it.
+        let lines = column_lines(from, mouse).skip(skip).take(take);
+        for (y, line) in (area.y + 1..).zip(lines) {
+            match line {
+                Line::Row(row) => {
+                    self.sheet_pipes(area, y);
+                    self.sheet_row(y, row, plan.level, group, area.x);
+                }
+                // The group's own rule, which is the same shape the title bar has
+                // and for the same reason: a heading inside a table is furniture,
+                // so it runs to the frame rather than standing back from it.
+                Line::Heading(label) => self.sheet_heading(area.x, y, width, label),
             }
         }
     }
