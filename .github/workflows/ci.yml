@@ -96,8 +96,26 @@ jobs:
 
       # Correctness first, in debug, where the structural budget gates still
       # apply and the absolute ones report that they are skipped.
+      #
+      # **The slack belongs here too, and its absence was a hole.** The claim
+      # above is true of every absolute gate that guards on
+      # `absolute_gates_apply` — those skip in debug and never reach this step.
+      # It is NOT true of `watch.rs`, whose `max_delay` bound is an absolute
+      # wall-clock assertion that runs unconditionally, in debug, right here. It
+      # calls `budget()`, which is the opt-in, and its own comment says it "takes
+      # slack because it is an absolute wall-clock bound on a shared runner" — so
+      # the test was written believing this step supplied it. It did not, and the
+      # bound was held to its raw 500ms on a shared runner. `windows-latest`
+      # measured 773.68ms on a post-merge run of `main` and went red.
+      #
+      # Guarding the bound on `absolute_gates_apply` instead would be worse, and
+      # in a shape this file already records: no step runs `watch.rs` in release,
+      # so the assertion would then run NOWHERE. That is I7's hole below, reached
+      # through the selector rather than the gate — green, and about nothing.
       - name: test
         run: cargo test --workspace
+        env:
+          VIGIA_BUDGET_SLACK: "3"
 
       # Then the budgets, in release, because that is what they were set
       # against. Slack applies to the absolute wall-clock gates only: hosted
