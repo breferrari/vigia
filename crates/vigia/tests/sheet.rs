@@ -223,7 +223,7 @@ fn the_sheet_moves_no_content() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    for (at, rung) in [(area(), "keyboard row"), (ROOMY_PANE, "moving")] {
+    for at in [area(), ROOMY_PANE] {
         let (before, _) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
         toggle(&mut app, &mut frame);
         let (after, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
@@ -237,10 +237,9 @@ fn the_sheet_moves_no_content() {
             &after,
             Rect::new(sheet.left, sheet.top, sheet.width, sheet.height),
         );
-        let roomy = drawn.contains("moving");
         assert_eq!(
-            roomy,
-            rung == "moving",
+            drawn.contains("moving"),
+            at == ROOMY_PANE,
             "the {}x{} pane did not draw the rung this case is named for:\n{drawn}",
             at.width,
             at.height
@@ -874,6 +873,39 @@ fn walk_the_ladder(name: &'static str, mut each: impl FnMut(u16, u16, Rect, &Buf
     });
 }
 
+/// The first width in `widths` at which the sheet draws the rung `marker` names,
+/// walked a column at a time and asserted monotone from there on.
+///
+/// **The instrument two rulings needed and one of them shipped without.** #220's
+/// arrival was recorded as 80 for a rung that arrives at 78, because the probe
+/// that produced it sampled 60, 70 and 80 and stepped over its own boundary. A
+/// boundary is only findable by walking it, and both rungs' arrivals are now
+/// found by the same walk rather than by two copies of it that can drift on what
+/// monotone means.
+fn arrival_of(
+    paint: &mut impl FnMut(Rect) -> (Buffer, Regions),
+    marker: &str,
+    widths: std::ops::RangeInclusive<u16>,
+    height: u16,
+) -> Option<u16> {
+    let mut arrival = None;
+    for w in widths {
+        let (buf, laid) = paint(Rect::new(0, 0, w, height));
+        let (_, sheet) = read_sheet(&buf, &laid);
+        if sheet.contains(marker) && arrival.is_none() {
+            arrival = Some(w);
+        }
+        if let Some(first) = arrival {
+            assert!(
+                sheet.contains(marker),
+                "the rung arrived at {first} and was gone again at {w}, so it is \
+                 not monotone in width:\n{sheet}"
+            );
+        }
+    }
+    arrival
+}
+
 /// How many of [`GESTURES`] the sheet draws, and the sheet's own rows.
 ///
 /// **Counted inside the sheet's rect, never over the pane.** The hint bar spells
@@ -1135,6 +1167,11 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             last.chars().skip(1).take(span).all(|c| c == '─'),
             "the sheet's bottom rule has a hole in it at {w}x{h}:\n{drawn}"
         );
+        // Pane-dependent, not row-dependent: read once rather than per row, and
+        // the five headed labels built once rather than five `format!`s per row
+        // over a sweep of 105 widths by 33 heights.
+        let roomy = drawn.contains("moving");
+        let headings: Vec<String> = SECTIONS.iter().map(|l| format!("  {l}")).collect();
         for (n, row) in rows[1..rows.len() - 1].iter().enumerate() {
             // **A heading's own fill, which only the title bar's and the bottom
             // border's were checked.** Deleting the rule run leaves
@@ -1152,7 +1189,6 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
             // divider rather than as a heading, and ruling one there would be the
             // same defect this block guards against, pointing the other way.
             let cells: Vec<char> = row.chars().collect();
-            let roomy = drawn.contains("moving");
             if !roomy && (row.contains(" keyboard ") || row.contains(" mouse ")) {
                 assert_eq!(
                     cells[cells.len() - 3],
@@ -1165,7 +1201,7 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
                     "a heading of the sheet has almost no rule in it at {w}x{h}:\n{drawn}"
                 );
             }
-            if roomy && SECTIONS.iter().any(|l| row.contains(&format!("  {l}"))) {
+            if roomy && headings.iter().any(|l| row.contains(l)) {
                 assert!(
                     !row.contains('─'),
                     "a section heading of the roomy rung rules to its frame at \
@@ -1196,24 +1232,45 @@ fn the_sheet_is_a_closed_box_at_every_rung() {
 /// `SPEC.md` §11.1 now states.
 const SECTIONS: [&str; 5] = ["moving", "files", "view", "mouse", "leaving"];
 
-/// The roomy rung's shape as rows, in the order they are drawn: `None` for a
-/// blank row, `Some(label)` for a heading, and one entry per gesture row.
+/// One row of the roomy rung, as the gate expects to read it.
 ///
-/// One place, because two gates read it. Written out rather than derived from
-/// [`GESTURES`] and [`SECTIONS`], so a gate that walks it cannot agree with the
-/// renderer's own section table by construction.
-fn roomy_shape() -> Vec<Option<&'static str>> {
-    let mut rows = vec![None];
-    for (label, n) in [
-        ("moving", 3),
-        ("files", 4),
-        ("view", 2),
-        ("mouse", 5),
-        ("leaving", 2),
+/// **Three cases as a type rather than as an `Option<&str>` whose empty string
+/// meant a gesture row.** A heading spelled `""` silently became a gesture row
+/// under that encoding, and the walk needed a running counter and three index
+/// offsets to say which gesture belonged where.
+#[derive(Debug, Clone, Copy)]
+enum RoomyRow {
+    /// A blank row. The one thing on this rung no count can see.
+    Air,
+    /// A section heading, standing back from its own rows.
+    Heading(&'static str),
+    /// A gesture row, carrying the token a reader would look for.
+    Gesture(&'static str),
+}
+
+/// The roomy rung's shape, row by row, in the order it is drawn.
+///
+/// One place, because three gates read it. The sections carry **slices of
+/// [`GESTURES`]** rather than counts, so the mapping from a section to the rows
+/// under it is written where it can be read instead of being re-derived by hand
+/// as an offset. `GESTURES` is itself restated rather than imported, so this
+/// cannot agree with the renderer by construction.
+///
+/// The two keyboard slices either side of the mouse group are what makes the
+/// order Mock A's: `leaving` is the tail of the keyboard table and is drawn last,
+/// after the mouse group rather than before it.
+fn roomy_shape() -> Vec<RoomyRow> {
+    let mut rows = vec![RoomyRow::Air];
+    for (label, tokens) in [
+        ("moving", &GESTURES[0..3]),
+        ("files", &GESTURES[3..7]),
+        ("view", &GESTURES[7..9]),
+        ("mouse", &GESTURES[11..16]),
+        ("leaving", &GESTURES[9..11]),
     ] {
-        rows.push(Some(label));
-        rows.extend(std::iter::repeat_n(Some(""), n));
-        rows.push(None);
+        rows.push(RoomyRow::Heading(label));
+        rows.extend(tokens.iter().map(|t| RoomyRow::Gesture(t)));
+        rows.push(RoomyRow::Air);
     }
     rows
 }
@@ -1283,23 +1340,9 @@ fn the_roomy_rung_arrives_at_the_width_the_ruling_states() {
     // two-column rung's arrival fell into when its ruling shipped 80 for a rung
     // that arrives at 78, and the instrument is the same: walk the boundary a
     // column at a time, because nothing else can find it.
-    let mut arrival = None;
+    let arrival;
     sweep!("sheet-roomy-arrival", |paint| {
-        for w in 64u16..=80 {
-            let at = Rect::new(0, 0, w, 40);
-            let (buf, laid) = paint(at);
-            let (_, sheet) = read_sheet(&buf, &laid);
-            if sheet.contains("moving") && arrival.is_none() {
-                arrival = Some(w);
-            }
-            if let Some(first) = arrival {
-                assert!(
-                    sheet.contains("moving"),
-                    "the rung arrived at {first} and was gone again at {w}, so it \
-                     is not monotone in width:\n{sheet}"
-                );
-            }
-        }
+        arrival = arrival_of(&mut paint, "moving", 64..=80, 40);
     });
     assert_eq!(
         arrival,
@@ -1337,7 +1380,7 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
             "the shape this gate walks is not the height the rung draws"
         );
 
-        let mut gesture = 0;
+        let mut gestures = 0;
         for (n, want) in shape.iter().enumerate() {
             let row = &rows[n + 1];
             let text: String = row.iter().collect();
@@ -1348,11 +1391,11 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
             match want {
                 // A blank row is blank between the pipes. Nothing else in this
                 // file can tell air from a row that happens to draw nothing.
-                None => assert!(
+                RoomyRow::Air => assert!(
                     row[1..row.len() - 1].iter().all(|c| *c == ' '),
                     "row {n} of the roomy rung should be air and reads {text:?}"
                 ),
-                Some(label) if !label.is_empty() => {
+                RoomyRow::Heading(label) => {
                     let head: String = row[1..].iter().collect();
                     assert!(
                         head.starts_with(&format!("  {label}")),
@@ -1360,19 +1403,9 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
                          columns in from the frame, and reads {text:?}"
                     );
                 }
-                // A gesture row: its keys cell starts at column 5 and its verb at
-                // column 35, and it carries the gesture the reader's order puts
-                // here. Walked against `GESTURES`, whose keyboard entries run
-                // moving, files, view, leaving and whose mouse entries follow, so
-                // the section that draws fourth is read from the tail.
-                Some(_) => {
-                    let token = if gesture < 9 {
-                        GESTURES[gesture]
-                    } else if gesture < 14 {
-                        GESTURES[gesture + 2]
-                    } else {
-                        GESTURES[gesture - 5]
-                    };
+                // A gesture row: its keys cell starts at column 5, its verb at
+                // column 35, and it carries the token its own section names.
+                RoomyRow::Gesture(token) => {
                     assert!(
                         row[5] != ' ' && row[4] == ' ',
                         "row {n}'s keys cell does not start at column 5: {text:?}"
@@ -1381,7 +1414,7 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
                         row[35] != ' ' && row[34] == ' ',
                         "row {n}'s verb does not start at column 35: {text:?}"
                     );
-                    // From the keys cell rather than from the verb field:
+                    // Read from the keys cell rather than from the verb field:
                     // `GESTURES` carries whichever half identifies the row, and
                     // `Space  PgDn` is a keys cell because `page` hides inside
                     // `half a page`.
@@ -1392,14 +1425,14 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
                          sections are not in the reader's order or their rows are \
                          not in the table's"
                     );
-                    gesture += 1;
+                    gestures += 1;
                 }
             }
         }
         assert_eq!(
-            gesture,
+            gestures,
             GESTURES.len(),
-            "the roomy rung drew {gesture} gesture rows, not {}",
+            "the roomy rung drew {gestures} gesture rows, not {}",
             GESTURES.len()
         );
 
@@ -1609,23 +1642,9 @@ fn the_two_column_rung_arrives_at_the_width_the_ruling_states() {
     //
     // Gated by walking the boundary a column at a time, because that is the only
     // instrument that can find it.
-    let mut arrival = None;
+    let arrival;
     sweep!("sheet-arrival", |paint| {
-        for w in 70u16..=84 {
-            let at = Rect::new(0, 0, w, 19);
-            let (buf, laid) = paint(at);
-            let (_, sheet) = read_sheet(&buf, &laid);
-            if sheet.contains("keyboard") && arrival.is_none() {
-                arrival = Some(w);
-            }
-            if let Some(first) = arrival {
-                assert!(
-                    sheet.contains("keyboard"),
-                    "the rung arrived at {first} and was gone again at {w}, so it \
-                     is not monotone in width:\n{sheet}"
-                );
-            }
-        }
+        arrival = arrival_of(&mut paint, "keyboard", 70..=84, 19);
     });
     assert_eq!(
         arrival,

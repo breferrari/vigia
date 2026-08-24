@@ -2315,18 +2315,23 @@ const SHEET_PANE: Rect = Rect {
 /// this reddens if the pane it names stops drawing a sheet at all, or stops
 /// drawing the two-column rung, either of which would leave it timing the gate
 /// above under a different name.
-#[test]
-fn a_frame_under_the_sheet_holds_the_frame_budget() {
+/// The size of the sheet `pane` draws, with the sheet up.
+///
+/// **Shared because two gates ask it**, which is `walk_the_ladder`'s own lesson
+/// one file over: that scaffold was copied between three gates until #220's audit
+/// pointed at it. Each caller still builds its own repository, so the two keep
+/// running in parallel.
+fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     let mut app = App::new();
-    let scratch = Scratch::large_diff("shell-i9-sheet-shape", FILES, LINES);
+    let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     settle(&mut frame);
-    let screen = layout_of(&app, SHEET_PANE, FILES);
+    let screen = layout_of(&app, pane, FILES);
     app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
         .expect("toggle the sheet");
     let chrome = app.chrome("fixture", None, None, None, None, None);
-    let laid = vigia::regions(SHEET_PANE, &chrome, &{
+    let laid = vigia::regions(pane, &chrome, &{
         let mut highlighter = Highlighter::eager();
         let history = History::new();
         app.view(&mut frame, &mut highlighter, &history, screen)
@@ -2335,8 +2340,13 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
     let drawn = laid
         .sheet
         .expect("the pane this gate is named for draws no sheet");
+    (drawn.width, drawn.height)
+}
+
+#[test]
+fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
-        (drawn.width, drawn.height),
+        sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
         (104, 14),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
@@ -2376,26 +2386,8 @@ const ROOMY_PANE: Rect = Rect {
 /// true.
 #[test]
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
-    let mut app = App::new();
-    let scratch = Scratch::large_diff("shell-i9-roomy-shape", FILES, LINES);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    settle(&mut frame);
-    let screen = layout_of(&app, ROOMY_PANE, FILES);
-    app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
-        .expect("toggle the sheet");
-    let chrome = app.chrome("fixture", None, None, None, None, None);
-    let laid = vigia::regions(ROOMY_PANE, &chrome, &{
-        let mut highlighter = Highlighter::eager();
-        let history = History::new();
-        app.view(&mut frame, &mut highlighter, &history, screen)
-            .expect("view")
-    });
-    let drawn = laid
-        .sheet
-        .expect("the pane this gate is named for draws no sheet");
     assert_eq!(
-        (drawn.width, drawn.height),
+        sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
         (68, 29),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
