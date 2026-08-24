@@ -1041,9 +1041,14 @@ const fn inset_of(pane: u16) -> u16 {
     margins_of(pane).0
 }
 
-/// The pane width at which the pinned list stops being a strip above the diff
-/// and becomes a **left rail** beside it
+/// The pane width from which the pinned list may stop being a strip above the diff
+/// and become a **left rail** beside it
 /// ([#252](https://github.com/breferrari/vigia/issues/252)).
+///
+/// **May, since `SPEC.md` §11.2 B14** ([#295](https://github.com/breferrari/vigia/issues/295)):
+/// this decides where the gesture can be honoured, and `Chrome::rail` decides
+/// whether it is. The derivation below is untouched by that and is what makes the
+/// width the right one to offer at.
 ///
 /// **Derived rather than chosen, and the derivation is the whole ruling.** On a
 /// wide pane a path ends near column 40 and its glance cluster is pinned to the
@@ -1058,7 +1063,7 @@ const fn inset_of(pane: u16) -> u16 {
 /// the undivided pane below the split sit on one plateau. [`SETTLED`]'s plateau
 /// runs from 54 to 129 planning columns, which is a pane of 133; the only other
 /// plateau is the top rung, which needs 160 planning columns in each half and
-/// therefore a 328-column pane. So the rail arrives at **134**, the first width
+/// therefore a 328-column pane. So the rail is offered from **134**, the first width
 /// at which the stacked list would have left the settled ladder and spent its new
 /// columns on a twenty-four slice heat strip. Spending them on adjacency instead
 /// is the swap, and one column later no rail narrower than 134 columns could
@@ -1546,8 +1551,9 @@ pub struct Chrome {
     ///
     /// **The request, where [`Body::rail`] is the answer**, and the two are
     /// deliberately not the same field. This says what was asked for at any pane
-    /// width; that says whether this pane could give it, which needs 134 columns
-    /// and a changed file to put in it. `Chrome::masthead` and [`Body::graph`] are
+    /// width; that says whether this pane could give it, which needs 134 columns,
+    /// a changed file to put in it, and the rows [`Body::beside`] wants before it
+    /// falls back to [`Body::diff_only`]. `Chrome::masthead` and [`Body::graph`] are
     /// the same pairing one region over.
     ///
     /// `SPEC.md` §11.2 **B14**
@@ -3701,7 +3707,16 @@ impl Body {
         // band plus one region rather than both.
         if self.rail {
             if have == 0 {
-                return Self::diff_only(self.rows());
+                // **The page count survives the collapse.** `diff_only` cannot
+                // know it, and a clamp re-divides rows it already has rather than
+                // re-measuring the pane, so losing it here would make `?` open and
+                // close on a body that once had a sheet. Latent today, because
+                // every caller clamps a body from `Body::split`, whose count is
+                // `None` already; carried so it stays true when one does not.
+                return Self {
+                    sheet_pages: self.sheet_pages,
+                    ..Self::diff_only(self.rows())
+                };
             }
             return Self {
                 list: self.list.min(have),
@@ -4377,11 +4392,19 @@ const KEYBOARD: [Gesture; 12] = [
 ///
 /// **`r` is a fourth unguessable gesture and it is given up before those three**
 /// ([#295](https://github.com/breferrari/vigia/issues/295)), which is why it sits
-/// out of the reader's order here at rank eight. The reason is specific rather
-/// than a preference: this order only binds on a pane of 30 to 34 columns, and a
-/// rail needs 134, so `r` is the one gesture in the set that **cannot fire on the
-/// pane that is dropping it**. A gesture that does nothing there is the right one
-/// to lose first.
+/// out of the reader's order here at rank eight.
+///
+/// **The reason first written for that was false, and the correction is worth more
+/// than the rank.** It said `r` cannot fire on the pane dropping it. No drawable
+/// pane drops it: at 30 to 34 columns the rung is `from = 7` and `r` is *kept*,
+/// which `tests/sheet.rs`'s `NARROW` table asserts by name, and the rank that drops
+/// it needs a width below thirty where no sheet is drawn at all.
+///
+/// So this is **defence rather than behaviour**. `sheet_tables` asserts the
+/// keep-set is `f`, `m` and `?`; the untouched order would have dropped `f`
+/// instead, because `r` sits above it in the reader's order. If a rung ever reaches
+/// that depth, `r` is the right one to lose, since it is the only one of the four
+/// that needs 134 columns. Nothing observable turns on it today.
 ///
 /// A rung that drops `from` rows drops the **set** `DROP_ORDER[..from]`, so what
 /// it draws is no longer a suffix of the table. [`kept_keyboard`] is the one
@@ -4602,7 +4625,7 @@ const SHEET_KEEP: usize = 3;
 // for the whole table is left with. On the height axis it is the thinnest page
 // worth drawing: [`sheet_plan`] refuses a sheet whose body cannot hold this many
 // rows, which is the same floor the last dropping rung used to set and is why the
-// heights it draws at are unchanged. The narrow floor reaches **four** gestures
+// heights it draws at are unchanged. The narrow floor reaches **five** gestures
 // rather than three, because the set width leaves is `DROP_ORDER`'s rather than
 // this count.
 
@@ -4976,7 +4999,7 @@ fn sheet_counter(shown: (usize, usize)) -> String {
 /// gates, which is the opposite of what the claim predicted.
 ///
 /// It costs the rungs below thirty columns, which are the rungs that drew four
-/// gestures of sixteen with nothing saying so.
+/// gestures of seventeen with nothing saying so.
 ///
 /// **The maximum is taken over the pairs [`shown_of`] can return, not guessed at
 /// one of them.** The first version asked [`sheet_counter`] for `(16, 16)` and got
@@ -5036,20 +5059,20 @@ fn sheet_beside_rows() -> usize {
 /// **Above every one of those sits the roomy rung**
 /// ([#285](https://github.com/breferrari/vigia/issues/285)): the same one column
 /// with its sections headed and air around them, at sixty-eight columns by
-/// twenty-nine rows. It is **first** and that is what makes it additive, for the
+/// thirty rows. It is **first** and that is what makes it additive, for the
 /// reason the widening rung is additive by being third: it needs strictly more of
 /// both axes than the full one-column rung, so every pane that takes it would
-/// otherwise have drawn all sixteen gestures anyway and every pane that does not
+/// otherwise have drawn all seventeen gestures anyway and every pane that does not
 /// take it is untouched.
 ///
 /// **Between those two lies the widening rung**
 /// ([#220](https://github.com/breferrari/vigia/issues/220)): where the full
 /// one-column sheet is too tall for the pane but the pane is wide enough to put
 /// the mouse group *beside* the keyboard group, it does, trading forty-eight
-/// columns for five rows at the wide spelling (104 against 56, nineteen rows
-/// against fourteen), or thirty-three columns for the same five rows at the tight
+/// columns for five rows at the wide spelling (104 against 56, twenty rows
+/// against fifteen), or thirty-three columns for the same five rows at the tight
 /// one (71 against 38 since [#286](https://github.com/breferrari/vigia/issues/286),
-/// and 76 against 43 before it), and drawing all sixteen gestures where eleven drew
+/// and 76 against 43 before it), and drawing all seventeen gestures where twelve drew
 /// before. It is tried **after** the full one-column rung and **before** any
 /// dropping rung, which is what makes it additive: a pane on which one column
 /// already fits never sees it, so nothing that draws every row today changes.
@@ -8266,9 +8289,14 @@ mod sheet_tables {
         //
         // **Why one rank and not inside the keep-set** ([#295](https://github.com/breferrari/vigia/issues/295)):
         // `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and
-        // `?`, and `SHEET_KEEP` keeps three. This order only binds on a pane of 30
-        // to 34 columns and a rail needs 134, so `r` is the one gesture in the set
-        // that cannot fire on the pane that is dropping it.
+        // `?`, and `SHEET_KEEP` keeps three, so one of the four has to go first.
+        //
+        // **This claim is about the tables and not about any pane**, which is the
+        // correction the audit forced. The rank that drops `r` is `from >= 9`, and
+        // that needs a width below thirty where no sheet is drawn: at 30 to 34
+        // columns the rung is `from = 7` and `r` is kept. What the reorder buys is
+        // that the untouched order would have dropped `f`, which `sheet_tables`'
+        // own keep-set assertion forbids.
         let last_dropped = KEYBOARD[DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 1]].keys[0];
         assert_eq!(
             last_dropped, "r",

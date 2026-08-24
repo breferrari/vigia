@@ -25,7 +25,7 @@ categories = ["command-line-utilities", "development-tools"]
 # reach fixtures a published crate has no business shipping and the sixteenth
 # reads this repository's own documents.
 #
-# `crates/vigia/tests/package.rs` is what keeps this honest. A sixteenth escape
+# `crates/vigia/tests/package.rs` is what keeps this honest. A seventeenth escape
 # added somewhere this pattern does not cover fails there, rather than at
 # somebody's `cargo install`.
 exclude = ["tests/**"]

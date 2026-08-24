@@ -2410,7 +2410,7 @@ fn a_frame_under_the_sheet_holds_the_frame_budget() {
 ///
 /// **Tall and wide**, because that is what the roomy rung needs
 /// ([#285](https://github.com/breferrari/vigia/issues/285)): a room of
-/// sixty-eight columns and a body of twenty-nine rows.
+/// sixty-eight columns and a body of thirty rows.
 const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
@@ -2422,7 +2422,7 @@ const ROOMY_PANE: Rect = Rect {
 ///
 /// **The two-column rung is the widest the sheet draws and this one covers the
 /// most cells**, which are two different superlatives and only the first was
-/// gated: 68 by 29 is 1,972 cells against 104 by 14's 1,456. It is also the rung
+/// gated: 68 by 30 is 2,040 cells against 104 by 15's 1,560. It is also the rung
 /// a full-screen terminal now takes, so it is the shape most readers will
 /// actually have on the pane, where the two-column rung is what a short one falls
 /// to.

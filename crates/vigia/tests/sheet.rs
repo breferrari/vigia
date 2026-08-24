@@ -952,7 +952,7 @@ const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
 /// the height at which the tallest rung fits.
 ///
 /// **Raised from 32 by [#285](https://github.com/breferrari/vigia/issues/285)**,
-/// and the old ceiling is why: the roomy rung needs a body of twenty-nine rows,
+/// and the old ceiling is why: the roomy rung needs a body of thirty rows,
 /// which this fixture reaches at a pane of thirty-two, so a sweep stopping there
 /// would have covered the new rung at exactly one height, thirty-two, and called
 /// it swept.
@@ -1479,7 +1479,7 @@ fn roomy_shape() -> Vec<RoomyRow> {
 
 #[test]
 fn the_roomy_rung_is_the_size_the_ruling_states() {
-    // **`SPEC.md` §11.1 states 68 by 29, and Mock A drew 76 by 29.** The
+    // **`SPEC.md` §11.1 states 68 by 30, and Mock A drew 76 by 29.** The
     // difference is the twelve blank columns the mock leaves after its verb field
     // against the four before its keys, which is the box the reader drew rather
     // than a table they designed: §11.1's own rule for a mockup and a drawer that
@@ -1556,9 +1556,9 @@ fn the_roomy_rung_arrives_at_the_width_the_ruling_states() {
 #[test]
 fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // **The other axis, and the one no gate walked.** `SPEC.md` §11.1 states the
-    // rung needs "a body of twenty-nine rows", and a body is the pane less the
+    // rung needs "a body of thirty rows", and a body is the pane less the
     // header and less a footer whose height is its own ladder in the width. So the
-    // pane height it arrives at is not twenty-nine and cannot be derived by
+    // pane height it arrives at is not thirty and cannot be derived by
     // reading: on this fixture at a hundred columns it is thirty-two, three rows
     // above the number the ruling names.
     //
@@ -1572,7 +1572,7 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     assert_eq!(
         arrival,
         Some(33),
-        "the roomy rung does not arrive at the pane height a body of twenty-nine \
+        "the roomy rung does not arrive at the pane height a body of thirty \
          rows implies on this fixture"
     );
 }
@@ -1582,7 +1582,7 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
     // **Air is the one thing on this element that a count cannot see.** Every
     // gate above counts gestures or measures the frame, and a roomy rung that
     // drew its sections back to back with the blank rows all at the bottom would
-    // satisfy every one of them: same width, same height, same sixteen gestures,
+    // satisfy every one of them: same width, same height, same seventeen gestures,
     // same closed box. The shape is what this pins, row by row.
     //
     // Columns are literals rather than derived, because a gate that computed them
@@ -1696,8 +1696,8 @@ fn the_roomy_rung_is_additive_and_costs_no_pane_a_gesture() {
     // evidence.
     //
     // Two claims over one sweep, and they are not the same claim. Every pane that
-    // takes the rung draws all sixteen gestures, so no pane can have lost one to
-    // the air. And the shortest pane at each width that draws all sixteen is
+    // takes the rung draws all seventeen gestures, so no pane can have lost one to
+    // the air. And the shortest pane at each width that draws all seventeen is
     // still a pane that takes no headings, so no pane was made to wait longer for
     // a full sheet than it did before the rung existed. The second is what fails
     // if the rung is ever measured smaller than the one-column sheet it sits
@@ -1722,7 +1722,7 @@ fn the_roomy_rung_is_additive_and_costs_no_pane_a_gesture() {
             // that.** Measured at the pane's own `level` instead of at 0 it
             // becomes reachable at exactly one room width, fifty-five, where it
             // would trade the spelled-out verbs for air. Every other assertion
-            // here survives that: it is still sixteen gestures, still additive,
+            // here survives that: it is still seventeen gestures, still additive,
             // still monotone. Its width is the only thing that moves.
             assert_eq!(
                 laid.sheet.map(|s| s.width),
@@ -2055,10 +2055,16 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // these. Since #286 the odd column is the two-column case above and
             // the odd row is the one below it.
             (81, 25, (12, 2, 56, 20)),
-            // Odd vertical slack. The whole table in one column reaches this
-            // width since #286, so where this used to be a dropping rung of
-            // thirteen rows it is the nineteen-row sheet, and the three rows of
-            // slack are what the halving is read against.
+            // The whole table in one column reaches this width since #286, so
+            // where this used to be a dropping rung of thirteen rows it is the
+            // twenty-row sheet.
+            //
+            // **It stopped carrying the odd vertical slack when #295 added a
+            // row**: the body is twenty-two and the sheet is twenty, so the slack
+            // is two rather than three. The cases below it carry the odd rows now
+            // (120x30 and 58x30 each halve an odd number), which is why this list
+            // is read as a set rather than case by case, and why saying so beats
+            // leaving a comment that quietly stopped describing its own line.
             (43, 25, (3, 2, 38, 20)),
             // The level probe's own boundary. `margin_of(58)` is 2, so the room is
             // exactly 56 and the wide one-column sheet is exactly 56: turning the
@@ -2608,7 +2614,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     // **The same hole one rung up.** #220 wrote the gate below because every
     // behavioural gate ran at 80 by 24, where the sheet is 56 wide, so the
     // two-column rung was proven by geometry and by text alone. The roomy rung
-    // arrived the same way: nothing clicks or wheels inside a 68 by 29 sheet, and
+    // arrived the same way: nothing clicks or wheels inside a 68 by 30 sheet, and
     // narrowing `SheetPlan::target` for `Shape::Roomy` alone would pass every
     // other gate in this file.
     //
@@ -2639,7 +2645,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
         "this gate is not looking at the roomy rung"
     );
 
-    // A row no other rung reaches: the plain rung is nineteen rows tall and the
+    // A row no other rung reaches: the plain rung is twenty rows tall and the
     // two-column rung fourteen, so row 25 of this sheet is the roomy rung's alone.
     let deep = sheet.top + 25;
     let inside = sheet.left + 34;
@@ -2694,7 +2700,7 @@ fn the_floor_is_a_rung_now_and_the_narrowest_sheets_are_the_sizes_the_ruling_sta
     //
     // Restated here rather than imported for [`TITLE`]'s reason. The counter's own
     // widest spelling is ` 16-16 of 16 `, which is the range form at the table's
-    // own size: no page draws it, since a page showing all sixteen draws no
+    // own size: no page draws it, since a page showing all seventeen draws no
     // counter, and it is the bound the box is sized against.
     let floor = "─ gestures ".chars().count() + " 16-16 of 16 ".chars().count() + 6;
     assert_eq!(floor, 30, "the title bar's floor is not what §11.1 states");

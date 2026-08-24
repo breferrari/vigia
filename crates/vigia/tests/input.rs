@@ -2075,3 +2075,26 @@ fn a_mark_names_its_region_when_both_share_a_first_row() {
         "a pointer on the diff's own bar marked the rail's"
     );
 }
+
+#[test]
+fn shift_r_and_ctrl_r_are_unbound() {
+    // **The pattern this file already applies to `F`, `D`, `U`, `N` and `P`**, and
+    // `r` arrived with `SPEC.md` §11.2 B14 without it
+    // ([#295](https://github.com/breferrari/vigia/issues/295)). A key map where `g`
+    // and `G` mean different things has to say which capitals are deliberate, and
+    // a rail toggled by a mis-shifted keystroke is the kind of thing a reader
+    // reports as the pane rearranging itself on its own.
+    assert_eq!(
+        action_for(&press(KeyCode::Char('R')), Regions::default()),
+        None,
+        "shift-r did something, next to a key map where `g` and `G` differ"
+    );
+    assert_eq!(
+        action_for(
+            &Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+            Regions::default()
+        ),
+        None,
+        "ctrl-r did something, where the control arm binds only `c` and `d`"
+    );
+}

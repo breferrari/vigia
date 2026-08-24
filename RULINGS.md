@@ -430,19 +430,32 @@ for, they describe the same pane at every width.
 
 **What it cost, which is the sheet and not the pane.** A key is a row, so the
 gestures table went from eleven keyboard rows to twelve and every row count in
-§11.1 moved: the one-column rung to eighteen lines, the two-column rung to `104 x
+§11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x
 15` and `71 x 15`, the roomy rung to `68 x 30`. **No width moved**, and that is what
 kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left
 rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28
 wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording
 because the plan made them before the run rather than after.
 
-**The keep-set did not move either, and the reason is specific rather than a
-preference.** `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and
-`?`, and `SHEET_KEEP` keeps three. It is given up at rank eight of `DROP_ORDER`,
-one before `f`, because that order only binds on a pane of 30 to 34 columns and a
-rail needs 134: `r` is the one gesture in the set that **cannot fire on the pane
-that is dropping it**.
+**The keep-set did not move, and the reason first written for that was false.**
+`r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and
+`SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at
+rank eight of `DROP_ORDER`, one before `f`.
+
+The reason recorded at the time was that the drop order binds at 30 to 34 columns
+and a rail needs 134, so `r` could not fire on the pane dropping it. **That
+describes a pane that does not exist.** At 30 to 34 columns the rung is `from = 7`
+and `r` is *kept*, which this repository's own `NARROW` table asserts by name. The
+rank that drops it is `from >= 9`, which needs a width below thirty, and below
+thirty no sheet is drawn at all.
+
+So the reorder is **unreachable on every pane that draws**, and it is a defensive
+ordering of the tables rather than an observable behaviour: `sheet_tables` asserts
+the keep-set is `f`, `m` and `?`, the untouched order would have dropped `f`
+instead, and if a rung ever reaches that depth `r` is the right one to lose because
+it is the only one of the four that needs 134 columns. Found by the audit, which is
+the fifth false claim this element's documentation has produced in two passes and
+the second where the sentence was checkable against a table in the same repository.
 
 **One instrument note, from the pass rather than the ruling.** `cargo test
 --workspace` stops at the first failing binary, so a grep for `FAILED` over its
