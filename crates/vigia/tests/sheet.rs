@@ -27,7 +27,8 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    Action, App, Chrome, Glyphs, Hovered, Regions, Theme, action_for, body_layout, regions, render,
+    Action, App, Chrome, Glyphs, Hovered, Regions, Sheet, Theme, action_for, body_layout, regions,
+    render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -533,6 +534,57 @@ fn the_close_control_brightens_under_the_pointer() {
     );
 }
 
+/// Walk every pane in `widths` x `heights` that draws a sheet, and hand each one's
+/// published regions and sheet to `check`. Returns how many drew one.
+///
+/// **A helper for three gates rather than the file's usual bespoke loop**, and the
+/// difference is that these three are one claim at three call sites: #298's rule is
+/// that *nothing* the loop asks `Regions` for may answer for a cell the sheet
+/// covers, and it has to be asked of `step_at`, of `grab_at` and of the close
+/// control's own cell. Written inline it was the same eight-line preamble three
+/// times, and the failure that would matter is one of the three quietly sweeping a
+/// different grid from the others.
+///
+/// The rest of this file keeps its inline loops on purpose: `walk_the_pages` and
+/// the paging gates each sweep one axis for one gate, where this is one grid shared
+/// by three.
+fn over_sheets(
+    name: &str,
+    widths: std::ops::RangeInclusive<u16>,
+    heights: &[u16],
+    mut check: impl FnMut(u16, u16, Regions, Sheet),
+) -> usize {
+    let scratch = Scratch::large_diff(name, FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut drew = 0usize;
+    for width in widths {
+        for &height in heights {
+            let at = Rect::new(0, 0, width, height);
+            let mut app = App::past_first_paint();
+            toggle_at(&mut app, &mut frame, at);
+            let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+            // A pane below the sheet's own floor draws none, which is B13's ruling
+            // rather than a gap: `?` still toggles and nothing is drawn.
+            let Some(sheet) = laid.sheet else { continue };
+            drew += 1;
+            check(width, height, laid, sheet);
+        }
+    }
+    drew
+}
+
+/// Every cell the sheet covers, as a flat iterator.
+fn cells_of(sheet: Sheet) -> impl Iterator<Item = (u16, u16)> {
+    (sheet.top..sheet.top.saturating_add(sheet.height)).flat_map(move |row| {
+        (sheet.left..sheet.left.saturating_add(sheet.width)).map(move |column| (column, row))
+    })
+}
+
 #[test]
 fn a_press_under_the_sheet_arms_no_step() {
     // **The producer half of a rule this suite already had the decider half of.**
@@ -559,55 +611,41 @@ fn a_press_under_the_sheet_arms_no_step() {
     // cover a bar, and a fixed list would then sweep four panes that prove nothing
     // while reporting green, which is `SPEC.md` §7's own shape. The `guarded`
     // counter below is what stops that instead.
-    let scratch = Scratch::large_diff("sheet-press-under", FILES, 40);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
-    let mut highlighter = Highlighter::eager();
-    let history = History::new();
-
     let mut guarded = 0usize;
-    let mut drew = 0usize;
-    for width in 30u16..=140 {
-        for height in 8u16..=40 {
-            let at = Rect::new(0, 0, width, height);
-            let mut app = App::past_first_paint();
-            toggle_at(&mut app, &mut frame, at);
-            let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-            let Some(sheet) = laid.sheet else { continue };
-            drew += 1;
-
+    let heights: Vec<u16> = (8..=40).collect();
+    let drew = over_sheets(
+        "sheet-press-under",
+        30..=140,
+        &heights,
+        |width, height, laid, sheet| {
             // The same regions with the sheet taken out, which is the only way to
             // ask what a cell would have answered without it.
             let bare = Regions {
                 sheet: None,
                 ..laid
             };
-
-            for row in sheet.top..sheet.top.saturating_add(sheet.height) {
-                for column in sheet.left..sheet.left.saturating_add(sheet.width) {
-                    // **Both halves, because the defect is that they disagreed.**
-                    // Asserting only `step_at` would pass on a build where the sheet
-                    // stopped covering a bar at all, and asserting only `action_for`
-                    // is what the three existing gates already do.
-                    assert_eq!(
-                        laid.step_at(column, row),
-                        None,
-                        "on a {width} by {height} pane, ({column},{row}) is under \
-                         the sheet and still arms a hold, so holding it repeats a \
-                         scroll on a region the reader cannot see"
-                    );
-                    assert!(
-                        action_for(&click(column, row), laid).is_none()
-                            || (column, row) == sheet.close,
-                        "on a {width} by {height} pane, a click at ({column},{row}) \
-                         fell through the sheet"
-                    );
-                    guarded += usize::from(bare.step_at(column, row).is_some());
-                }
+            for (column, row) in cells_of(sheet) {
+                // **Both halves, because the defect is that they disagreed.**
+                // Asserting only `step_at` would pass on a build where the sheet
+                // stopped covering a bar at all, and asserting only `action_for`
+                // is what the three existing gates already do.
+                assert_eq!(
+                    laid.step_at(column, row),
+                    None,
+                    "on a {width} by {height} pane, ({column},{row}) is under the \
+                     sheet and still arms a hold, so holding it repeats a scroll \
+                     on a region the reader cannot see"
+                );
+                assert!(
+                    action_for(&click(column, row), laid).is_none()
+                        || (column, row) == sheet.close,
+                    "on a {width} by {height} pane, a click at ({column},{row}) \
+                     fell through the sheet"
+                );
+                guarded += usize::from(bare.step_at(column, row).is_some());
             }
-        }
-    }
+        },
+    );
 
     assert!(drew > 1000, "only {drew} panes drew a sheet, so this sweep is thin");
     // **The assertion that makes the loop above mean something.** Every cell in it
@@ -650,22 +688,12 @@ fn nothing_can_press_the_close_control() {
     // The drawn ladder is `the_close_control_brightens_under_the_pointer`'s; this is
     // the half no drawing test can reach, which is the producer-versus-decider split
     // #298 names.
-    let scratch = Scratch::large_diff("sheet-close-press", FILES, 40);
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    materialise(&mut frame);
-    let mut highlighter = Highlighter::eager();
-    let history = History::new();
-
     let mut checked = 0usize;
-    for width in (30u16..=140).step_by(1) {
-        for height in [8u16, 13, 24, 40] {
-            let at = Rect::new(0, 0, width, height);
-            let mut app = App::past_first_paint();
-            toggle_at(&mut app, &mut frame, at);
-            let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-            let Some(sheet) = laid.sheet else { continue };
-
+    let drew = over_sheets(
+        "sheet-close-press",
+        30..=140,
+        &[8, 13, 24, 40],
+        |width, height, laid, sheet| {
             assert_eq!(
                 laid.step_at(sheet.close.0, sheet.close.1),
                 None,
@@ -681,11 +709,73 @@ fn nothing_can_press_the_close_control() {
                 "on a {width} by {height} pane the close control stopped dismissing"
             );
             checked += 1;
-        }
-    }
+        },
+    );
+
+    // **Proportional to the grid rather than a round number.** 111 widths against
+    // four heights is 444 panes, and the ones that draw no sheet are the narrow and
+    // short corner B13 rules out, so the great majority draw one. A floor of 100 was
+    // the first spelling here and it left a silent range wide enough to hide a
+    // regression that cut coverage to a quarter, which is the shape the sibling
+    // sweep's own `guarded` counter exists to refuse. Three quarters is a bound the
+    // ladder has room to move under without tripping.
+    assert_eq!(checked, drew, "the helper and this gate disagree on what drew");
     assert!(
-        checked > 100,
-        "only {checked} panes drew a sheet, so this sweep is not covering the ladder"
+        checked * 4 > 444 * 3,
+        "only {checked} of 444 panes drew a sheet, so this sweep has stopped \
+         covering the ladder rather than proving anything about it"
+    );
+}
+
+#[test]
+fn a_press_on_a_track_under_the_sheet_grabs_nothing() {
+    // **The sibling call site, and the one the first draft of #298 missed.** The
+    // loop reaches into `Regions` for geometry in exactly two places, and guarding
+    // only the first left the second holding the identical shape: `Regions::grab_at`
+    // is asked on every left press, outside `action_for`, and had no sheet in it.
+    //
+    // **It is the worse of the two.** A hold repeats a bounded step every
+    // `STEP_REPEAT`; a grab hands the whole gesture to `drag_action`, which ignores
+    // the column by design so that a reader pulling a one-column bar does not lose
+    // it, and the next motion therefore relocates a region the sheet is covering to
+    // wherever the pointer happens to be. The sheet is centred on both axes, so at
+    // the same narrow widths the step buttons were reachable at it covers the track
+    // rows between them, which are more cells than the two the buttons occupy.
+    //
+    // Found by this pass's own `/simplify` round rather than by the issue, which
+    // reported the drawn weight and not either producer.
+    let mut guarded = 0usize;
+    let heights: Vec<u16> = (8..=40).collect();
+    let drew = over_sheets(
+        "sheet-grab-under",
+        30..=140,
+        &heights,
+        |width, height, laid, sheet| {
+            let bare = Regions {
+                sheet: None,
+                ..laid
+            };
+            for (column, row) in cells_of(sheet) {
+                assert_eq!(
+                    laid.grab_at(column, row),
+                    None,
+                    "on a {width} by {height} pane, ({column},{row}) is under the \
+                     sheet and still takes hold of a bar, so the next drag moves a \
+                     region the reader cannot see"
+                );
+                guarded += usize::from(bare.grab_at(column, row).is_some());
+            }
+        },
+    );
+
+    assert!(drew > 1000, "only {drew} panes drew a sheet, so this sweep is thin");
+    // The same vacuity floor its sibling carries, and for the same reason: without
+    // it a rung change that moved the box clear of every bar would leave this gate
+    // green over panes that prove nothing.
+    assert!(
+        guarded > 0,
+        "no cell under the sheet would have taken hold of a bar without the \
+         guard, so this gate is passing over panes that prove nothing"
     );
 }
 

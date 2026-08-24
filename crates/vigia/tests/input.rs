@@ -1395,6 +1395,59 @@ fn a_step_button_the_sheet_covers_arms_nothing() {
 }
 
 #[test]
+fn a_track_the_sheet_covers_grabs_nothing() {
+    // **The sibling of the gate above, and the call site #298's first draft missed.**
+    // `Regions::step_at` and `Regions::grab_at` are the only geometry `run`'s loop
+    // asks for directly, outside `action_for`. Guarding one and not the other leaves
+    // the class open on the half that costs more: a hold repeats a bounded step,
+    // where a grab hands the gesture to `drag_action`, which ignores the column by
+    // design, so the next motion relocates a region the sheet is covering to
+    // wherever the pointer went.
+    //
+    // The track is also the bigger target. The sheet is centred on both axes, so
+    // wherever it reaches a bar's column it covers the rows *between* the buttons as
+    // well, which outnumber the two the buttons occupy.
+    let bare = two_regions();
+    // The track between the two step buttons, which `only_a_step_button_arms_a_hold`
+    // proves is a seek rather than a step.
+    assert_eq!(bare.grab_at(79, 12), Some(Grabbed::Diff));
+
+    let covered = Regions {
+        sheet: Some(Sheet {
+            left: 70,
+            top: 10,
+            width: 10,
+            height: 4,
+            close: (78, 10),
+        }),
+        ..bare
+    };
+    assert!(
+        covered.sheet.expect("a sheet").covers(79, 12),
+        "the fixture's sheet does not cover the track, so this proves nothing"
+    );
+    assert_eq!(
+        covered.grab_at(79, 12),
+        None,
+        "a press on a track under the sheet took hold of the bar, so the next \
+         drag moves a region the reader cannot see"
+    );
+
+    // And a track row the sheet does not reach still answers, so the guard is
+    // bounded by the sheet rather than switched on by its presence.
+    assert!(
+        !covered.sheet.expect("a sheet").covers(79, 16),
+        "the fixture's sheet reaches row 16, so the case below proves nothing"
+    );
+    assert_eq!(
+        covered.grab_at(79, 16),
+        Some(Grabbed::Diff),
+        "a track row the sheet does not cover stopped answering, so the guard is \
+         on the sheet existing rather than on the cell it covers"
+    );
+}
+
+#[test]
 fn repeating_an_action_that_does_not_accumulate_leaves_it_alone() {
     // `Action::repeated` is the seam that makes holding general rather than
     // scrollbar-shaped, so what each action does when held is a ruling and this
