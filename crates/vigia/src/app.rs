@@ -86,6 +86,19 @@ pub struct App {
     /// [#121](https://github.com/breferrari/vigia/issues/121) and
     /// [#147](https://github.com/breferrari/vigia/issues/147) leave where it is.
     masthead: bool,
+    /// Whether the reader has asked for the pinned list beside the diff.
+    ///
+    /// **A request rather than a layout**, and the distinction is the one
+    /// `Chrome::masthead` and `Body::graph` already draw one region over: this says
+    /// what was asked for and `Body::rail` says what the pane could give. A pane
+    /// under 134 columns has no room for a rail and this stays true through it, so
+    /// narrowing and widening again returns the rail rather than the question.
+    ///
+    /// Off by default since `SPEC.md` §11.2 **B14**
+    /// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived
+    /// on its own before that, and the reader whose diff went from 129 planning
+    /// columns to 60 had not asked for it.
+    rail: bool,
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
     ///
     /// **Retained here rather than lived for one frame, and that is the whole
@@ -255,6 +268,7 @@ impl Default for App {
             // [#204](https://github.com/breferrari/vigia/issues/204), unlike
             // `following`: a shell nobody has pressed `m` on draws no band.
             masthead: false,
+            rail: false,
             // Derived, and for once trivially so: nobody has pressed `?`.
             sheet: None,
             sheet_pages: 1,
@@ -445,6 +459,7 @@ impl App {
             notice: self.notice.clone(),
             following: self.following,
             masthead: self.masthead,
+            rail: self.rail,
             sheet: self.sheet,
             // `None` until a frame has completed, which is the honest first
             // paint: there is no p99 of nothing. The status bar simply has no
@@ -605,6 +620,17 @@ impl App {
             // masthead back: the diff keeps the row it was on, and the region
             // above it grows or goes.
             Action::ToggleMasthead => self.masthead = !self.masthead,
+            // **The same answer one region over.** The rail moves the map to the
+            // side of the pane and takes the diff's columns to do it; the diff
+            // keeps the row it was on, because a reader asking where the map goes
+            // is not asking to be moved inside the diff.
+            //
+            // **Kept even where it cannot be honoured.** A pane under 134 columns
+            // draws no rail whatever this says, and holding the request means a
+            // reader who narrows such a pane and widens it again gets their rail
+            // back rather than being asked twice. `Chrome::rail` is the request and
+            // `Body::rail` is what the pane could give them.
+            Action::ToggleRail => self.rail = !self.rail,
             // **No jump and no move at all**, which is one better than the
             // masthead: that toggle resizes the diff's region, and this one draws
             // over rows the diff keeps. Nothing about the viewport changes, so a

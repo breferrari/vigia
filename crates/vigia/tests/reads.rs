@@ -128,9 +128,21 @@ const RAIL_WIDTH: u16 = 160;
 fn layout_on(width: u16, height: u16) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
-        &App::new().chrome("fixture", None, None, None, None, None),
+        &railed(App::new().chrome("fixture", None, None, None, None, None)),
         FILES,
     )
+}
+
+/// A chrome that has asked for the rail.
+///
+/// **The rail is a gesture since `SPEC.md` §11.2 B14**
+/// ([#295](https://github.com/breferrari/vigia/issues/295)), so the arm of this
+/// file that is about the deeper region beside a rail has to ask for one. The
+/// stacked arm reads the same layout at eighty columns, where the request cannot
+/// be honoured and changes nothing.
+fn railed(mut chrome: vigia::Chrome) -> vigia::Chrome {
+    chrome.rail = true;
+    chrome
 }
 
 /// What one screenful cost, and what it produced.

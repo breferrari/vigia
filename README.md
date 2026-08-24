@@ -101,7 +101,7 @@ cargo install --git https://github.com/breferrari/vigia vigia
    status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
-The list is **pinned**, so the signals stay on screen while you read the diff under them. From 134 columns it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. The pane drawn above is narrower than that, so it shows the stacked layout. Every file gets the same row in both regions:
+The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 134 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 134 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width. Every file gets the same row in both regions:
 
 | | | Answers |
 |---|---|---|
@@ -225,6 +225,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `J` `K` | scroll the pinned list |
 | `f` | follow the newest change, or stop |
 | `m` | show or hide the masthead |
+| `r` | list beside the diff, or above it |
 | `?` | **all of this, on screen**, a page at a time where the pane is small |
 | `q` `Esc` `Ctrl+C` | quit |
 

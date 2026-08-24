@@ -278,6 +278,7 @@ fn chrome() -> Chrome {
         notice: None,
         following: false,
         masthead: true,
+        rail: false,
         sheet: None,
         // The first paint's chrome: no frame has completed, so there is no p99
         // to draw. Every snapshot below inherits it, which keeps them comparing

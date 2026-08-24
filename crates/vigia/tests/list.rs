@@ -87,6 +87,22 @@ fn chrome(app: &App) -> vigia::Chrome {
     app.chrome("fixture", None, None, None, None, None)
 }
 
+/// The same, with the rail asked for.
+///
+/// **Two gates here sweep past 134 columns to reach the rail's own arm, and
+/// [#295](https://github.com/breferrari/vigia/issues/295) made that a gesture.**
+/// The default chrome stopped drawing a rail at any width, so both sweeps went on
+/// covering the stacked shape twice under comments claiming otherwise, and one of
+/// them is what `Body::split`'s docblock names as holding the notice invariant it
+/// gave up when it took a `&Chrome`. Found by that change's own audit; the
+/// `saw_rail` guards below are what makes it loud rather than silent next time.
+fn railed(app: &App) -> vigia::Chrome {
+    vigia::Chrome {
+        rail: true,
+        ..chrome(app)
+    }
+}
+
 fn split(width: u16, height: u16, files: usize) -> Body {
     body_layout(Rect::new(0, 0, width, height), &chrome(&App::new()), files)
 }
@@ -393,12 +409,17 @@ fn a_notice_does_not_change_the_list_height() {
     // Follow state is swept too. It changes the *footer's* height, so it changes
     // the body, and this is what says the list still divides that body the same
     // way rather than absorbing the difference itself.
+    // **Railed, because two of the widths below exist to reach the rail's arm**
+    // and since #295 the default chrome never does. Both chromes ask, so the
+    // notice is the only thing that differs between them, which is what this gate
+    // is about.
     let mut app = App::new();
-    let quiet = chrome(&app);
+    let quiet = railed(&app);
     app.warn("a file vanished between being named and being read");
-    let noisy = chrome(&app);
+    let noisy = railed(&app);
 
     let mut compared = 0;
+    let mut saw_rail = false;
     for height in 3..=40u16 {
         // The rail's widths too: a notice changes the footer's height, which
         // changes the body, and beside a rail the body divides differently
@@ -407,6 +428,7 @@ fn a_notice_does_not_change_the_list_height() {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);
                 let without = body_layout(area, &quiet, files);
+                saw_rail |= without.rail;
                 let with = body_layout(area, &noisy, files);
                 assert_eq!(
                     without, with,
@@ -418,6 +440,11 @@ fn a_notice_does_not_change_the_list_height() {
         }
     }
     assert!(compared > 0, "the sweep compared nothing");
+    assert!(
+        saw_rail,
+        "no shape in the sweep drew a rail, so the widths past 134 are sweeping \
+         the stacked shape a second time"
+    );
 }
 
 #[test]
@@ -771,6 +798,7 @@ fn the_two_regions_tile_the_body_exactly() {
     // every height and for every number of entries a view might carry.
     let mut checked = 0;
     let mut saw_a_clamp = false;
+    let mut saw_rail = false;
 
     for height in 1..=40u16 {
         // **Two widths past the rail's arrival**
@@ -782,8 +810,12 @@ fn the_two_regions_tile_the_body_exactly() {
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [0usize, 1, 3, LIST_SETTLED, LIST_SETTLED + 1, 200] {
                 let area = Rect::new(0, 0, width, height);
-                let chrome = chrome(&App::new());
+                // Railed, so the two widths past 134 reach `clamped_to`'s rail
+                // arm rather than sweeping the stacked shape five times. Since
+                // #295 the default chrome never draws one.
+                let chrome = railed(&App::new());
                 let full = body_layout(area, &chrome, files);
+                saw_rail |= full.rail;
 
                 for have in 0..=LIST_SETTLED + 2 {
                     let body = full.clamped_to(have);
@@ -832,6 +864,11 @@ fn the_two_regions_tile_the_body_exactly() {
         saw_a_clamp,
         "no shape in the sweep actually shortened the region, so the clamp is \
          never exercised"
+    );
+    assert!(
+        saw_rail,
+        "no shape in the sweep drew a rail, so `clamped_to`'s rail arm is covered \
+         by a comment rather than by this gate"
     );
 }
 

@@ -697,6 +697,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::DiffTo(_)
         | Action::ToggleFollow
         | Action::ToggleMasthead
+        | Action::ToggleRail
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::Redraw
@@ -978,6 +979,26 @@ pub enum Action {
     /// nothing at all on a tall one, and a reader who has decided which is what
     /// this asks.
     ToggleMasthead,
+    /// Put the pinned list beside the diff as a left rail, or back above it.
+    ///
+    /// `SPEC.md` §11.2 **B14**, from `r`
+    /// ([#295](https://github.com/breferrari/vigia/issues/295)).
+    /// [#252](https://github.com/breferrari/vigia/issues/252) shipped the rail
+    /// arriving on its own at 134 columns, and what that meant is that a reader who
+    /// had not asked for a narrower diff got one: at 133 the diff plans against 129
+    /// columns and at 134 against 60. The width is still #252's and still derived;
+    /// crossing it is now a gesture.
+    ///
+    /// **Below 134 it changes nothing and eats nothing**, exactly as
+    /// [`Action::ToggleMasthead`] does on a pane that cannot carry the band. The
+    /// state is kept either way, so a reader who asked for a rail on a wide pane,
+    /// narrowed it and widened it again gets the rail back rather than having to
+    /// ask twice.
+    ///
+    /// It is **not a mode**. No key changes meaning while the rail is up, which is
+    /// what keeps it out of B4's refusal the way B12's sheet is kept out of it: the
+    /// list is still not navigable, it is merely somewhere else.
+    ToggleRail,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///
     /// `SPEC.md` §11.2's B12 ruling, from `?` or from a click on the sheet's own
@@ -1105,6 +1126,7 @@ impl Action {
             | Self::DiffTo(_)
             | Self::ToggleFollow
             | Self::ToggleMasthead
+            | Self::ToggleRail
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Redraw
@@ -1154,6 +1176,10 @@ impl Action {
             // not move the reader inside it, which is a resize by another name
             // and the same answer §11.1 gives one: a resize expresses no intent
             // about what the diff should show.
+            // A rail moves the map to the other side of the pane and the diff
+            // keeps the row it was on, which is `ToggleMasthead`'s own answer one
+            // region over: a resize expresses no intent about what the diff shows.
+            | Self::ToggleRail
             | Self::ToggleMasthead
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
@@ -1206,6 +1232,7 @@ impl Action {
             | Self::Redraw
             | Self::ToggleFollow
             | Self::ToggleMasthead
+            | Self::ToggleRail
             | Self::ToggleSheet
             | Self::CloseSheet => false,
         }
@@ -1229,6 +1256,21 @@ pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
     }
 }
 
+/// **It takes the key and nothing else, and that is what makes "not a mode"
+/// structural rather than a claim.** `SPEC.md` §11.2 B4 refuses a navigable list,
+/// B12 reconciles the gestures sheet with it by ruling that no key changes meaning
+/// while the sheet is up, and B14 inherits the same for the left rail. None of
+/// those needs a gate: this function is handed no shell state, so a key whose
+/// meaning depended on one could not be written here without changing the
+/// signature, and that is a compile error rather than a red test.
+///
+/// A gate was written for B14 anyway and it was **tautological**: it compared this
+/// function's answers either side of a state change it cannot see. Deleted 2026-08-24
+/// with [#295](https://github.com/breferrari/vigia/issues/295)'s own simplify pass,
+/// and the claim recorded here instead, where the next person to reach for the
+/// state is standing. What a rail genuinely moves is the **pointer**'s regions, and
+/// `tests/rail.rs::a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over`
+/// is the gate for that.
 fn key_action(key: &KeyEvent) -> Option<Action> {
     // Windows reports press *and* release; Unix terminals report press only.
     // Acting on both would double every keystroke on one platform and not the
@@ -1345,6 +1387,7 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // always needed"*, which is the honest read of an element that costs
         // four rows of the thing the tool exists to show.
         KeyCode::Char('m') => Some(Action::ToggleMasthead),
+        KeyCode::Char('r') => Some(Action::ToggleRail),
         // **`?` and nothing else**, which is `SPEC.md` §11.2's B12: `btop`,
         // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
         // is refused because it is a vi motion everywhere else on a pane with no

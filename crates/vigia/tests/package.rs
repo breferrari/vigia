@@ -55,10 +55,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 15;
+const ESCAPING_FILES: usize = 16;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "fifteen";
+const ESCAPING_FILES_SPELLED: &str = "sixteen";
 
 /// The repository root, two levels above this package.
 ///
@@ -141,10 +141,14 @@ fn escaping_tests() -> Vec<String> {
         .map(|(name, _)| name)
         .collect();
 
-    // **Exactly fifteen, not at least.** A floor was the first spelling and it
-    // reopens the very defect this file exists to close: adding a sixteenth
+    // **Exactly sixteen, not at least.** A floor was the first spelling and it
+    // reopens the very defect this file exists to close: adding a seventeenth
     // escaping test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml`
-    // and `RELEASE-SMOKE.md` all go on saying "fifteen" with nothing red. The
+    // and `RELEASE-SMOKE.md` all go on saying "sixteen" with nothing red.
+    //
+    // It fired for real on 2026-08-24, when
+    // [#295](https://github.com/breferrari/vigia/issues/295) made `rail.rs` the
+    // sixteenth, and the four documents moved together because it did. The
     // whole point is that a count in prose cannot notice a new test, and a
     // floor is a count that cannot notice one either.
     //
@@ -745,7 +749,7 @@ fn package_list(package: &str, gate: &str) -> Option<String> {
 /// reader who did nothing wrong.
 ///
 /// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: fifteen of the twenty-one test files escape
+/// per-file, and that is deliberate: sixteen of the twenty-one test files escape
 /// already, a per-file list would need editing every time a test is added, and
 /// the failure mode of forgetting is silent. This gate holds either shape,
 /// because it asks whether each escaping file is *covered*, not how.
@@ -796,12 +800,12 @@ fn the_spec_names_every_test_that_escapes_the_package() {
     // **And every document that states the count states the right one.**
     // Asserting the number in a test and leaving the three files to agree with
     // it by hand is the same defect with a smaller radius: bumping the constant
-    // for a sixteenth escaping test would otherwise leave all three saying
-    // "fifteen", green.
+    // for a seventeenth escaping test would otherwise leave all three saying
+    // "sixteen", green.
     // Each document's own sentence, not the bare numeral, and the reason survives
     // every bump rather than being about one number: a bare `contains("fifteen")`
-    // is satisfied by "fifteen**th**" the moment the manifest writes about a
-    // sixteenth escape, and the numeral for the previous count was already sitting
+    // is satisfied by "sixteen**th**" the moment the manifest writes about a
+    // seventeenth escape, and the numeral for the previous count was already sitting
     // in SPEC.md about column widths, so two of the three documents would pass
     // untouched while still saying the old number. Found at thirteen, paid for at
     // fourteen, and it is why these are phrases: a count assertion an unrelated

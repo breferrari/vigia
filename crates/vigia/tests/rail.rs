@@ -47,12 +47,23 @@
 
 mod support;
 
+/// The repository fixture, under a second name because this file already has a
+/// `support` of its own.
+#[path = "../../vigia-core/tests/support/mod.rs"]
+mod repo;
+
 use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use vigia::{
-    App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Position, Row, Theme, View,
-    body_layout, regions, render,
+    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Position, Regions, Row,
+    Theme, View, action_for, body_layout, regions, render,
 };
+
+/// A key event, spelled once.
+fn press(code: KeyCode) -> Event {
+    Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
 use vigia_core::Recency;
 
 /// The block one heat slice is drawn as, restated rather than imported.
@@ -127,7 +138,22 @@ const THE_CLIMB: u16 = 402;
 /// A pane tall enough that neither region is the thing giving way.
 const TALL: u16 = 24;
 
+/// A shell that has asked for the rail, which is what every gate below is about.
+///
+/// **The gesture, not the width, since `SPEC.md` §11.2 B14**
+/// ([#295](https://github.com/breferrari/vigia/issues/295)). The rail arrived on
+/// its own until then, so `App::new()` was enough and the width alone decided the
+/// layout. It is a request now, and this file's subject is the rail that a reader
+/// asked for: the width is a precondition and the gesture is the cause. The one
+/// gate about the *default* builds its own chrome and says so.
 fn chrome() -> Chrome {
+    let mut chrome = stacked_chrome();
+    chrome.rail = true;
+    chrome
+}
+
+/// A shell that has not asked, which is what ships.
+fn stacked_chrome() -> Chrome {
     App::new().chrome("fixture", None, None, None, None, None)
 }
 
@@ -1261,5 +1287,258 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         matches!(action_for(&event(2, empty), told), Some(Action::Scroll(_))),
         "a wheel below the rail's last file did not fall through to the diff: {:?}",
         action_for(&event(2, empty), told)
+    );
+}
+
+#[test]
+fn the_rail_is_off_until_the_reader_asks_for_it() {
+    // **`SPEC.md` §11.2 B14's whole claim.** The rail arrives at 134 columns and
+    // until this row it arrived on its own, so a reader who had not asked for a
+    // narrower diff got one: at 133 the diff plans against 129 columns and at 134
+    // against 60. #252's derivation of *where* the split can happen is untouched;
+    // what changes is that crossing it is a gesture.
+    //
+    // Swept across every width the gate can reach rather than sampled at 134,
+    // because a default that held at the arrival width and lapsed at 200 is the
+    // shape a single screen cannot see.
+    let files = 3;
+    for width in 1..=WIDEST {
+        let at = Rect::new(0, 0, width, TALL);
+        assert!(
+            !body_layout(at, &stacked_chrome(), files).rail,
+            "a {width} column pane drew a rail nobody asked for"
+        );
+    }
+}
+
+#[test]
+fn r_asks_for_the_rail_and_r_puts_it_back() {
+    // **The gesture, end to end**: the key resolves to the action, the action moves
+    // the state, and the state reaches the layout. Three links, and the gate above
+    // reads only the last of them, so a key bound to nothing would leave it green.
+    //
+    // Driven through `App::apply` rather than by setting the field, which is what
+    // `chrome()` does above and is right for gates about the *rail*; this one is
+    // about the *toggle*.
+    let scratch = repo::Scratch::large_diff("rail-gesture", 3, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+
+    assert_eq!(
+        action_for(&press(KeyCode::Char('r')), Regions::default()),
+        Some(Action::ToggleRail),
+        "`r` is not bound to the rail"
+    );
+
+    let wide = Rect::new(0, 0, 160, TALL);
+    let railed =
+        |app: &App| body_layout(wide, &app.chrome("f", None, None, None, None, None), 3).rail;
+    assert!(!railed(&app), "a fresh shell drew a rail");
+
+    let height = body_layout(wide, &app.chrome("f", None, None, None, None, None), 3).diff;
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    assert!(railed(&app), "`r` did not put the list beside the diff");
+
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    assert!(
+        !railed(&app),
+        "`r` did not put the list back above the diff"
+    );
+}
+
+#[test]
+fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
+    // **`m`'s own behaviour one region over**: a pane that cannot carry the thing
+    // draws nothing different, and the request is still kept, so a reader who
+    // narrows a railed pane and widens it again gets the rail back rather than the
+    // question.
+    //
+    // Asserted as *the whole body is identical*, not as `!body.rail`, because the
+    // second would pass against a layout that had quietly changed something else.
+    let arrives = first_rail();
+    for width in 1..arrives {
+        let at = Rect::new(0, 0, width, TALL);
+        assert_eq!(
+            body_layout(at, &stacked_chrome(), 3),
+            body_layout(at, &chrome(), 3),
+            "a {width} column pane laid out differently for a rail it cannot draw"
+        );
+    }
+
+    // **The request survives a pane that cannot honour it**, which is the half
+    // that would be lost by clearing the flag instead of ignoring it, and it is
+    // driven through an `App` rather than through a chrome built railed.
+    //
+    // The first spelling of this asserted `body_layout(.., &chrome(), ..).rail` at
+    // `arrives` and `arrives - 1`, which is the predicate `first_rail` is *defined
+    // by*: neither assert could fail. What it has to test is the **state**, so a
+    // mutation that cleared `App::rail` on a resize would be caught.
+    let scratch = repo::Scratch::large_diff("rail-survives-narrow", 3, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+    let wide = Rect::new(0, 0, arrives, TALL);
+    let of = |app: &App, at| body_layout(at, &app.chrome("f", None, None, None, None, None), 3);
+
+    let height = of(&app, wide).diff;
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("ask for the rail");
+    assert!(of(&app, wide).rail, "`r` did not reach the layout");
+
+    // Narrow past the arrival and back, with a paint at the narrow size so the
+    // shell has actually drawn the pane that cannot honour it.
+    let narrow = Rect::new(0, 0, arrives - 1, TALL);
+    assert!(
+        !of(&app, narrow).rail,
+        "a pane one column short of the arrival drew a rail"
+    );
+    assert!(
+        of(&app, wide).rail,
+        "widening the pane again lost the reader's request"
+    );
+}
+
+#[test]
+fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
+    // **`ToggleMasthead`'s own promise one region over**, and the half the gesture
+    // gate above does not reach: a reader asking where the map goes is not asking
+    // to be moved inside the diff. A rail narrows the diff rather than reflowing
+    // it, so a preserved position looks like the same line clipped shorter, and
+    // the narrower row is a **prefix** of the wider one.
+    //
+    // Read after a scroll rather than at the top, because the top is where a lost
+    // position lands: a gate that only ever looked there could not tell a kept
+    // position from a reset one.
+    //
+    // **The leading columns, not the whole row.** The scrollbar is pinned to each
+    // region's right edge, so the wider row ends `…spaces…▲` and the narrower one
+    // ends `…▲` sooner: neither is a prefix of the other, and the first spelling of
+    // this gate failed on that furniture while the position it is about was
+    // preserved.
+    //
+    // **Derived from the narrower region rather than chosen.** A hand-tuned
+    // constant compares whatever it happens to reach: thirty was inside the railed
+    // diff at this pane and would have compared half of what it safely could, and
+    // it loosens silently if the pane or the margins move. `lead_of` asks the
+    // railed layout how wide its diff is and stops one column short of its bar.
+    let scratch = repo::Scratch::large_diff("rail-keeps-the-row", 3, 200);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+    let at = Rect::new(0, 0, 160, TALL);
+    let mut highlighter = vigia_core::Highlighter::eager();
+    let history = vigia_core::History::new();
+
+    let height = body_layout(at, &app.chrome("f", None, None, None, None, None), 3).diff;
+    app.apply(Action::Scroll(30), &mut frame, height)
+        .expect("scroll");
+
+    let mut top_row = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> String {
+        let chrome = app.chrome("f", None, None, None, None, None);
+        let body = body_layout(at, &chrome, 3);
+        let view = app
+            .view(frame, &mut highlighter, &history, body)
+            .expect("view");
+        let mut buf = Buffer::empty(at);
+        render(
+            &mut buf,
+            at,
+            &view,
+            &Theme::default(),
+            Glyphs::default(),
+            &chrome,
+        );
+        let laid = regions(at, &chrome, &view);
+        let diff = laid.diff;
+        (diff.left..diff.left + diff.width)
+            .map(|x| buf[(x, diff.top)].symbol())
+            .collect::<String>()
+    };
+
+    let stacked = top_row(&mut app, &mut frame);
+    assert!(!stacked.trim().is_empty(), "the fixture drew an empty diff");
+
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    // **Without this the gate passes against a `ToggleRail` that does nothing**,
+    // because the two rows are then identical and a string is trivially a prefix
+    // of itself. Found by mutation.
+    assert!(
+        body_layout(at, &app.chrome("f", None, None, None, None, None), 3).rail,
+        "the toggle did not reach the layout, so the comparison below is between \
+         two stacked frames"
+    );
+    let beside = top_row(&mut app, &mut frame);
+
+    // **The comparison length comes from the drawn row, not from a constant.** A
+    // hand-tuned number compares whatever it happens to reach and loosens silently
+    // when the pane or the margins move; the railed row's own content, once its
+    // right-edge furniture is off it, is exactly the overlap the two layouts have.
+    let content = beside.trim_end_matches([' ', '▲', '▼', '█', '│']);
+    assert!(
+        content.chars().count() > 20,
+        "the railed diff drew nothing but furniture: {beside:?}"
+    );
+    assert!(
+        stacked.starts_with(content),
+        "asking for the rail moved the diff off the row it was on:\n  stacked \
+         {stacked:?}\n  beside  {content:?}"
+    );
+}
+
+#[test]
+fn r_reaches_the_painted_screen_and_not_only_the_layout() {
+    // **Every other gesture gate here stops at `Body::rail`**, so a painter that
+    // ignored the flag entirely would leave the whole file green: the layout would
+    // say rail, the regions would say rail, and the screen would draw a strip.
+    // Read off the buffer instead, at the one place the two shapes differ most
+    // plainly: whether the row under the header carries a file path or the diff.
+    let scratch = repo::Scratch::large_diff("rail-painted", 3, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    repo::materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = vigia_core::Highlighter::eager();
+    let history = vigia_core::History::new();
+    let at = Rect::new(0, 0, 160, TALL);
+
+    let mut shape = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> (u16, u16) {
+        let chrome = app.chrome("f", None, None, None, None, None);
+        let body = body_layout(at, &chrome, 3);
+        let view = app
+            .view(frame, &mut highlighter, &history, body)
+            .expect("view");
+        let laid = regions(at, &chrome, &view);
+        // The list's own left edge and width, read off the published regions the
+        // painter drew from rather than off the layout it was planned with.
+        (laid.list.left, laid.list.width)
+    };
+
+    let stacked = shape(&mut app, &mut frame);
+    let height = body_layout(at, &app.chrome("f", None, None, None, None, None), 3).diff;
+    app.apply(Action::ToggleRail, &mut frame, height)
+        .expect("toggle");
+    let beside = shape(&mut app, &mut frame);
+
+    assert_ne!(
+        stacked, beside,
+        "the painted list is in the same place with the rail up as with it down"
+    );
+    assert!(
+        beside.1 < at.width / 2,
+        "the railed list takes {} of {} columns, which is not a rail",
+        beside.1,
+        at.width
+    );
+    assert_eq!(
+        stacked.1, at.width,
+        "the stacked list is not the full pane wide, so the comparison above is \
+         between two rails"
     );
 }
