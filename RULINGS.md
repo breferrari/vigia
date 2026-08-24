@@ -293,3 +293,57 @@ Two lessons, and the second is the general one:
 
 - **A number measured on one target is a claim about that target.** The whole of the original write-up was going to be entered as a property of the profile, and it would have been wrong on two of the three tier-1 targets. `SPEC.md` §9 ships four; a `[profile.release]` key is shared by all of them and a measurement is not.
 - **A gate calibrated against a platform-specific artefact encodes that artefact as a requirement.** `warm.rs` asserted a 10x cold-to-warm ratio, sized against a Windows cold parse that was mostly the codegen penalty. The first time the suite ran on Linux it failed, at 5.70x, and it failed identically at `codegen-units` 1 and 2, so it had never been this platform's number: nothing had ever run it here. Lowering the constant would have kept the shape and moved the edge. It now asserts what `warm` actually claims, in absolute terms that no codegen setting can re-invalidate: the warmed parse fits inside a frame, and warming removed a frame's worth of work from the one behind it.
+
+## B13 — the sheet's height axis dropped gestures in silence, and the width axis still can
+
+The ruling is in `SPEC.md` §11.2 B13 and what the shell does is §11.1. This is the
+measurement it rests on, kept here because a number in a ruling is a claim and a
+number here is a trail.
+
+**Before, on `main` at 0.25.0.** Every width from 20 to 140 swept against every
+height from 3 to 40, counting the gestures actually painted inside the sheet's own
+rect rather than anywhere on the pane:
+
+| pane width | most gestures reachable, at any height |
+|---|---|
+| 24 to 25 | 3 of 16 |
+| 26 to 31 | 4 to 5 of 16 |
+| 32 to 34 | 9 of 16 |
+| 35 to 44 | 11 of 16 |
+| 45 and up | 16 of 16 |
+
+Two things that table says and [#286](https://github.com/breferrari/vigia/issues/286)'s
+own did not. The height floor drew **4** of 16 rather than 3, because `SHEET_KEEP`
+is a keep-count and the floor rung had room for one more than it. And the residual
+was as much **width** as height: at 40 columns, the width I6 is named for, the
+ceiling was 11 at every height, and the five missing were the whole mouse group.
+No pane height reached them, because the tight one-column sheet with the mouse
+group was 43 columns wide and a 40 column pane has 40 to give.
+
+**The one string that made it 43.** `MOUSE`'s tight verbs topped out at
+`scroll what you point at` (24) and `one row, repeats held` (21); the keyboard
+group's topped out at 18, and keys at `click a track` (13). So the table's verb
+field was the wheel's alone. At 17 and 19 the field is 19, the sheet is
+`13 + 2 + 19 + 4 = 38`, and 40 columns of room takes it with two to spare.
+
+**After.** Every pane of 38 columns and up reaches all sixteen, at every height
+that draws a sheet at all. 35 to 37 reach eleven, 32 to 34 eight, 30 to 31 four,
+and below 30 nothing is drawn. The narrowest sheet the ladder draws went from 24
+columns to 30, because every rung charges the page counter's widest spelling so a
+centred box cannot resize between pages.
+
+**The two-column rung moved with the copy and the plan did not predict it.**
+`sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
+its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew
+eleven gestures and now draws sixteen on one page. Recorded as a deviation rather
+than folded in, because a number that moves without being predicted is the thing
+this ledger exists to catch.
+
+**What the counter cost, found by a gate rather than by reading.** The first
+`sheet_counter_floor` asked the formatter for `(16, 16)` and got the *short*
+spelling, ten columns rather than thirteen, because that pair is the one case the
+range form never draws. Every rung was then three columns narrower than the counter
+it had to fit and the sheet drew at 27 where the ruling says 30. The fix is a
+maximum over the pairs the planner can actually return, taken once per process.
+Deriving the width arithmetically instead would have been the same defect one layer
+over: two expressions agreeing about a sum by hand.
