@@ -19,6 +19,15 @@ This is a reconstruction. The original lived in a global skills directory, was n
 > plan diff, 17 killed mutants and before/after budgets, then stopped at the
 > audit to ask permission for something this file already mandates.
 >
+> **Step 3 is the one exception, and it is not negotiable.** Plan approval is the
+> single sanctioned stop in this skill — "run to the end" starts *after* it. An
+> unattended pass that reaches step 3 **stops and waits**. It does not
+> self-approve, and it does not proceed on the grounds that nobody is awake.
+> **Not wanting to disturb someone is not approval**, and a plan nobody answered
+> is not an approved plan. Halting at step 3 costs a night. Skipping it ships
+> *what* nobody chose and silently disables the plan-fidelity gate downstream,
+> which is the one gate that would have caught it.
+>
 > The line is **what** versus **how**. What gets built is settled at step 3 and
 > the plan is where a question belongs, because it is free there. Everything
 > after it is execution, and execution questions have answers in this file:
@@ -234,7 +243,11 @@ recall   accumulated constraints — empty early, and empty is not evidence of n
 
 ## 3. Plan it, in plan mode, before touching code
 
-**Enter plan mode and write the plan. No code before an approved plan.** The plan is not ceremony and it is not for you — it is the only artifact the finished work can be *audited against*, and code cannot audit itself.
+**Enter plan mode and write the plan. No code before an approved plan.**
+
+**Approved means a person answered.** Not "the plan is written", not "the plan is obviously right", not "it was late and asking would have woken someone". If this pass is unattended, step 3 is where it ends for the night: present the plan and wait. That is the designed outcome, not a failed pass — step 3 settles *what* gets built, and that was never the session's call to make.
+
+The plan is not ceremony and it is not for you — it is the only artifact the finished work can be *audited against*, and code cannot audit itself.
 
 Without it the completeness check downstream has nothing to compare to. `/harden` carries a plan-fidelity phase that explicitly skips when no written plan exists, so a session that skips planning silently disables the one gate designed to catch under-delivery. That gate exists because a session once passed five clean audit rounds with 501 tests green and had still quietly shipped three promises short.
 
@@ -590,6 +603,7 @@ Say what the record gave you, too: which recorded decisions the work stood on, o
 - Surveying the whole roadmap instead of taking one task
 - Taking a later task because it looks more interesting
 - Writing code before an approved plan exists
+- Self-approving a plan because the pass is unattended, or to avoid disturbing someone
 - A plan too vague to diff — it passes the fidelity check by promising nothing
 - A plan that lives only in the conversation, so it dies at the next compaction
 - Justifying a deviation at audit time instead of when it was taken
