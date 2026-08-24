@@ -1280,6 +1280,16 @@ enum RoomyRow {
 
 /// The roomy rung's shape, row by row, in the order it is drawn.
 ///
+/// **What the gate reading this cannot see, said rather than left implicit.** It
+/// indexes a `Vec<char>` by column, so a cell holding a base character plus a
+/// combining mark would shift every column assertion after it while the renderer
+/// stayed correct, and a double-width glyph would shift them the other way. The
+/// two-column rung's own placement gate has read columns the same way since #220
+/// and this inherits the limit rather than adding it: no cell or label in either
+/// table holds a combining mark today, and a table that gained one would be
+/// caught by the renderer's own `width_of` against `set_stringn`'s clip rather
+/// than here.
+///
 /// The sections carry **slices of [`GESTURES`]** rather than counts, so the mapping from a section to the rows
 /// under it is written where it can be read instead of being re-derived by hand
 /// as an offset. `GESTURES` is itself restated rather than imported, so this
