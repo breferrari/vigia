@@ -1144,6 +1144,21 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
                 let Some(sheet) = laid.sheet else { continue };
                 seen += 1;
                 assert!(sheet.top > at.y, "the sheet reached the header at {w}x{h}");
+
+                // **The three rows `SHEET_KEEP` promises survive.** `KEYBOARD`'s
+                // docblock names them and nothing asserted them: dropping
+                // `SHEET_KEEP` to 2 adds a rung that loses `f`, and it fires only
+                // where the body is four rows, which is one height in this whole
+                // sweep. The unguessable outlives the reflexive, or it does not.
+                let (_, drawn) = read_sheet(&buf, &laid);
+                for kept in ["follow the newest", "churn band", "this sheet"] {
+                    assert!(
+                        drawn.contains(kept),
+                        "a {w}x{h} pane drew a sheet without {kept:?}, which \
+                         `SHEET_KEEP` promises is never dropped:\n{drawn}"
+                    );
+                }
+
                 let pane = text_of(&buf, at);
                 if let Some(hint) = pane.lines().position(|r| r.contains("q quit")) {
                     cleared += 1;
@@ -1277,21 +1292,30 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
                 "the {spelling} keyboard label is not against the frame:\n{sheet}"
             );
 
-            // **The last row of each group as well as the first.** Pinning only
-            // the first leaves the rows between them free to permute: swapping the
-            // last two mouse rows changes no count, no column and no frame.
-            let keyboard_last: String = rows[12][cols[0]..].iter().collect();
-            let mouse_last: String = rows[6][cols[2]..].iter().collect();
-            assert!(
-                keyboard_last.starts_with('?'),
-                "the {spelling} left column does not end with the keyboard group's \
-                 last row:\n{sheet}"
-            );
-            assert!(
-                mouse_last.starts_with("click a"),
-                "the {spelling} right column does not end with the mouse group's \
-                 last row:\n{sheet}"
-            );
+            // **Every row of both groups, in order, not merely the ends.**
+            // Pinning the first and the last leaves the rows between them free
+            // to permute: swapping the middle two mouse rows changed no count,
+            // no column and no frame. `KEYBOARD`'s docblock calls its order "the
+            // order a reader meets it" and `MOUSE`'s is the ladder's drop order,
+            // so the sequence is a property rather than an accident.
+            //
+            // Walked against [`GESTURES`], which is already one entry per row in
+            // table order and is restated here rather than imported, so this
+            // cannot agree with the renderer by construction.
+            for (n, token) in GESTURES.iter().enumerate() {
+                let (col, row) = if n < 11 {
+                    (cols[0], 2 + n)
+                } else {
+                    (cols[2], 2 + (n - 11))
+                };
+                let text: String = rows[row][col..].iter().collect();
+                assert!(
+                    text.contains(token),
+                    "the {spelling} rung's row {row} does not carry {token:?}, so \
+                     the two groups' rows are not in the order their tables \
+                     declare:\n{sheet}"
+                );
+            }
 
             // The first gesture row carries all four fields.
             let first = &rows[2];
@@ -1392,5 +1416,199 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
                 .expect("the dim weight carries a colour"),
             "the {spelling} verb cell is not drawn dim"
         );
+    }
+}
+
+#[test]
+fn the_one_column_rung_places_its_cells_where_the_plan_says() {
+    // **The rung every reader sees, and its columns were never pinned.** The
+    // two-column rung has had absolute columns since #220's round 1; the one that
+    // draws on a default 80 by 24 pane had none, so moving `Group { at: 1 }` to
+    // `at: 0` shifted the whole table against the left pipe and survived every
+    // gate in this file. Width comes from `sheet_fields` rather than from `at`, so
+    // the size and origin gates see nothing; the frame gate sees an under-fill
+    // rather than an overwrite; and the weights gate reads two cells that are
+    // still lit and still dim one column over.
+    for (w, h, keys_at, verb_at, first_key) in [
+        (80u16, 24u16, 2usize, 26usize, 'q'),
+        (120, 30, 2, 26, 'q'),
+        // A dropping rung, so its first row is not the table's first: at nine
+        // gestures the ladder has already dropped 'q' and 'j k'.
+        (50, 14, 2, 15, 'S'),
+    ] {
+        sweep!("sheet-one-column-cells", |paint| {
+            let at = Rect::new(0, 0, w, h);
+            let (buf, laid) = paint(at);
+            let (_, sheet) = read_sheet(&buf, &laid);
+            assert!(
+                !sheet.contains("keyboard"),
+                "the {w}x{h} case is not the one-column rung:\n{sheet}"
+            );
+            let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
+            let first = &rows[1];
+            assert_eq!(
+                first[keys_at], first_key,
+                "the one-column keys field does not start at column {keys_at} at \
+                 {w}x{h}:\n{sheet}"
+            );
+            assert_eq!(
+                first[keys_at - 1],
+                ' ',
+                "the one-column keys field is not inset from the frame at \
+                 {w}x{h}:\n{sheet}"
+            );
+            assert!(
+                first[verb_at] != ' ' && first[verb_at - 1] == ' ',
+                "the one-column verb field does not start at column {verb_at} at \
+                 {w}x{h}:\n{sheet}"
+            );
+        });
+    }
+}
+
+#[test]
+fn the_two_column_rung_swallows_what_lands_on_it() {
+    // **Every behavioural gate on this element runs at 80 by 24, which takes the
+    // one-column rung.** The two-column rung was proven only by geometry and by
+    // what the text says. It matters most here: the sheet went from 56 columns to
+    // 104, so a click at column 90 used to reach a diff row and is now the
+    // sheet's, and nothing resolved a gesture at that shape.
+    //
+    // B12's rule is that the sheet swallows what lands on it rather than letting
+    // it fall through, because a click seeking a scrollbar the reader cannot see
+    // is the one way something that moves no content could still move content.
+    let scratch = Scratch::large_diff("sheet-beside-input", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 120, 21);
+
+    let height = body_layout(at, &chrome(&app), FILES).diff;
+    assert!(
+        app.apply(Action::ToggleSheet, &mut frame, height)
+            .expect("toggle"),
+        "the sheet's toggle asked the shell to quit"
+    );
+
+    let (_, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let sheet = laid.sheet.expect("a 120 by 21 pane draws no sheet");
+    assert_eq!(
+        sheet.width, 104,
+        "this gate is not looking at the two-column rung"
+    );
+
+    // A column the one-column sheet never covered, which this rung does.
+    let inside = sheet.left + 90;
+    assert!(
+        sheet.covers(inside, sheet.top + 3),
+        "column {inside} is not inside the two-column sheet, so the case below \
+         proves nothing"
+    );
+    assert!(
+        action_for(&click(inside, sheet.top + 3), laid).is_none(),
+        "a click inside the two-column rung fell through to whatever is beneath it"
+    );
+    assert!(
+        action_for(&wheel(inside, sheet.top + 3), laid).is_none(),
+        "a wheel inside the two-column rung scrolled a region the sheet is covering"
+    );
+
+    // And the close control still dismisses at this rung.
+    let close = action_for(&click(sheet.close.0, sheet.close.1), laid);
+    assert_eq!(
+        close,
+        Some(Action::ToggleSheet),
+        "the close control does not dismiss the two-column rung"
+    );
+}
+
+#[test]
+fn the_two_guards_no_rung_reaches_are_still_the_right_size() {
+    // **Two branches in the layout that nothing can currently make fire**, both
+    // documented as guards rather than rungs, and both one table edit from going
+    // live: #285 shrinks the tables and #288 adds a `MOUSE` row.
+    //
+    // A guard whose slack nobody states is a guard nobody will notice binding, so
+    // the numbers are asserted rather than described. They are restated here
+    // rather than imported for [`TITLE`]'s reason.
+    //
+    // `sheet_floor` raises any rung to the width its own title bar needs. The
+    // title is `─ gestures ` at eleven columns, plus a border and a space at each
+    // end and the two-of-gap the fields already carry, so the floor is 17.
+    let floor = "─ gestures ".chars().count() + 6;
+    assert_eq!(floor, 17, "the title bar's floor is not what §11.1 states");
+
+    // The narrowest sheet the ladder can actually produce, and the narrowest
+    // two-column one. Both are well clear of the floor, which is why it is a
+    // guard: measured, not assumed.
+    sweep!("sheet-guards", |paint| {
+        let mut narrowest = u16::MAX;
+        let mut narrowest_beside = u16::MAX;
+        for w in LADDER_WIDTHS {
+            for h in LADDER_HEIGHTS {
+                let at = Rect::new(0, 0, w, h);
+                let (buf, laid) = paint(at);
+                let Some(sheet) = laid.sheet else { continue };
+                let (_, drawn) = read_sheet(&buf, &laid);
+                narrowest = narrowest.min(sheet.width);
+                if drawn.contains("keyboard") {
+                    narrowest_beside = narrowest_beside.min(sheet.width);
+                }
+            }
+        }
+        assert_eq!(
+            narrowest, 24,
+            "the narrowest rung the ladder draws is not the 24 columns §11.1 \
+             names, so `sheet_floor`'s slack is not what it says"
+        );
+        assert_eq!(
+            narrowest_beside, 76,
+            "the narrowest two-column rung is not the 76 columns §11.1 names"
+        );
+        assert!(
+            narrowest > floor as u16,
+            "`sheet_floor` has stopped being a guard and become a rung: the \
+             narrowest sheet is {narrowest} against a floor of {floor}"
+        );
+    });
+
+    // The keyboard block must be wide enough for its own heading label, or
+    // ` mouse ` would land inside the word `keyboard`. The label needs
+    // `mouse.at >= 1 + 10`; the keyboard block puts it at 55 wide and 34 tight.
+    let label = " keyboard ".chars().count();
+    assert_eq!(
+        label, 10,
+        "the keyboard label is not the width the floor assumes"
+    );
+    for (w, h, at) in [(120u16, 21u16, 55usize), (80, 17, 34)] {
+        sweep!("sheet-label-floor", |paint| {
+            let pane = Rect::new(0, 0, w, h);
+            let (buf, laid) = paint(pane);
+            let (_, sheet) = read_sheet(&buf, &laid);
+            let heading = sheet
+                .lines()
+                .nth(1)
+                .expect("a two-column sheet has a heading");
+            // By character rather than by byte: the heading is mostly box-drawing
+            // glyphs, so `str::find` returns an offset three times the column.
+            let cells: Vec<char> = heading.chars().collect();
+            let mouse_at = (0..cells.len())
+                .find(|&i| cells[i..].starts_with(&['m', 'o', 'u', 's', 'e']))
+                .expect("the mouse label is drawn");
+            assert_eq!(
+                mouse_at - 1,
+                at,
+                "the mouse label sits at {mouse_at} rather than {at} at {w}x{h}, \
+                 so the heading floor's stated slack is wrong"
+            );
+            assert!(
+                at > label,
+                "the keyboard block no longer clears its own label, so the floor \
+                 has gone live and its behaviour is untested"
+            );
+        });
     }
 }
