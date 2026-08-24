@@ -4350,7 +4350,7 @@ const MOUSE: [Gesture; 5] = [
 /// `None` arm meant *the mouse group*, which is
 /// [#220](https://github.com/breferrari/vigia/issues/220)'s ruling on [`Shape`]
 /// applied one table over.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 enum Rows {
     /// `KEYBOARD[from..to]`.
     Keyboard {
@@ -4376,8 +4376,9 @@ impl Rows {
 /// One labelled run of the sheet's table, which the roomy rung draws as a section
 /// and every other rung draws unlabelled.
 ///
-/// No `PartialEq`: [`Rows`] carries one because `sheet_tables` compares against
-/// `Rows::Mouse`, and nothing compares whole sections.
+/// No `PartialEq` on either this or [`Rows`]: nothing compares them. The `const`
+/// block beside [`SECTIONS`] matches on the enum rather than comparing it, which
+/// is what a `const` can do and an equality cannot.
 #[derive(Debug, Clone, Copy)]
 struct Section {
     /// What the heading spells. Plain text on the roomy rung, standing back from
@@ -4396,8 +4397,9 @@ struct Section {
 /// keyboard rows *after* a labelled mouse group without them reading as more
 /// mouse gestures.
 ///
-/// The keyboard runs tile [`KEYBOARD`] exactly once and in order, which
-/// `sheet_tables::the_sections_tile_the_keyboard_table_exactly_once` holds.
+/// The keyboard runs tile [`KEYBOARD`] exactly once and in order, which the
+/// `const` block below holds at build time rather than a gate holding it at test
+/// time: out-of-range bounds are an index panic on the frame path.
 const SECTIONS: [Section; 5] = [
     Section {
         label: "moving",
@@ -4752,9 +4754,9 @@ impl Group {
 /// now, so an arithmetic count is a second derivation of the number the painter
 /// walks, and the two can disagree: a [`DROP_ORDER`] that repeated an index would
 /// leave the painter drawing one row more than the frame was planned for, over
-/// the bottom border. That it cannot repeat one is held by a gate on the table
-/// rather than by construction, and `sheet_roomy_rows` states the same rule one
-/// function away.
+/// the bottom border. That it cannot repeat one is held by the `const` block
+/// beside [`DROP_ORDER`], so the disagreement is unreachable rather than merely
+/// untested, and `sheet_roomy_rows` states the same rule one function away.
 fn sheet_rows(from: usize, mouse: bool) -> usize {
     kept_keyboard(from).count() + if mouse { 1 + MOUSE.len() } else { 0 }
 }
@@ -7812,7 +7814,10 @@ mod sheet_tables {
         // gate searching a *roomy* pane for a bare key would score on a heading,
         // and `every_key_the_map_binds_is_named_on_the_sheet` searches for exactly
         // those bare tokens. It runs at eighty by twenty-four, which draws no
-        // headings at all, and it must stay on a rung that draws none.
+        // *section* headings, and it must stay on a rung that draws none. That
+        // rung does draw the ` mouse ` rule, so `m`, `u`, `s` and `e` are already
+        // satisfied by furniture there: what the roomy rung would add is `f`, `g`
+        // and `n` from `files`, `moving` and `view`, and `m` a second time.
         for section in SECTIONS.iter() {
             for row in KEYBOARD.iter().chain(MOUSE.iter()) {
                 for cell in row.keys.iter().chain(row.verb.iter()) {

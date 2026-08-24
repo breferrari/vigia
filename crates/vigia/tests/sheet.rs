@@ -850,8 +850,8 @@ const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
 /// **Raised from 32 by [#285](https://github.com/breferrari/vigia/issues/285)**,
 /// and the old ceiling is why: the roomy rung needs a body of twenty-nine rows,
 /// which this fixture reaches at a pane of thirty-two, so a sweep stopping there
-/// would have covered the new rung at exactly one height of twenty-seven and
-/// called it swept.
+/// would have covered the new rung at exactly one height, thirty-two, and called
+/// it swept.
 const LADDER_HEIGHTS: std::ops::RangeInclusive<u16> = 6..=38;
 
 /// One materialised fixture, painted at many sizes.
@@ -882,9 +882,11 @@ macro_rules! sweep {
 
 /// Walk the ladder, handing each cell's painted pane to `each`.
 ///
-/// The scaffold three gates below shared by copy until #220's own audit pointed
-/// at it. `name` is the fixture's, so each gate still gets an independent
-/// repository and the three keep running in parallel.
+/// The scaffold the gates below shared by copy until #220's own audit pointed at
+/// it. `name` is the fixture's, so each gate still gets an independent repository
+/// and they keep running in parallel. The count is deliberately not spelled out:
+/// it read "three" while four were calling it, which is what [`LADDER_WIDTHS`]'s
+/// own docblock thirty lines up warns about.
 fn walk_the_ladder(name: &'static str, mut each: impl FnMut(u16, u16, Rect, &Buffer, &Regions)) {
     sweep!(name, |paint| {
         for w in LADDER_WIDTHS {
@@ -2285,8 +2287,9 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     // other gate in this file.
     //
     // It is the rung where it matters most now, because it is what a full-screen
-    // pane draws, and it is twenty-nine rows tall against fourteen: the rows a
-    // click can land on that the other rungs never covered are its own.
+    // pane draws, and it is twenty-nine rows tall against the plain rung's
+    // nineteen: the rows a click can land on that no other rung reaches are its
+    // own.
     let scratch = Scratch::large_diff("sheet-roomy-input", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -2375,8 +2378,10 @@ fn the_two_guards_no_rung_reaches_are_still_the_right_size() {
     // becomes reachable and untested. That is the moment to gate the value; until
     // then there is nothing to gate.
     //
-    // The roomy rung is not a candidate either: it is the *widest* rung on the
-    // ladder at sixty-eight columns, so it moves neither of the numbers below.
+    // The roomy rung is not a candidate either: at sixty-eight columns it is
+    // wider than the narrowest rung and narrower than the two-column one, so it
+    // moves neither of the numbers below. (It is the *largest* rung by cells,
+    // which is a different superlative and the one `budgets.rs` cares about.)
     //
     // `sheet_floor` raises any rung to the width its own title bar needs. The
     // title is `─ gestures ` at eleven columns, plus a border and a space at each
