@@ -1429,12 +1429,13 @@ fn the_one_column_rung_places_its_cells_where_the_plan_says() {
     // the size and origin gates see nothing; the frame gate sees an under-fill
     // rather than an overwrite; and the weights gate reads two cells that are
     // still lit and still dim one column over.
-    for (w, h, keys_at, verb_at, first_key) in [
-        (80u16, 24u16, 2usize, 26usize, 'q'),
-        (120, 30, 2, 26, 'q'),
+    for (w, h, keys_at, verb_at, first_key, mouse_from) in [
+        (80u16, 24u16, 2usize, 26usize, 'q', Some(12usize)),
+        (120, 30, 2, 26, 'q', Some(12)),
         // A dropping rung, so its first row is not the table's first: at nine
-        // gestures the ladder has already dropped 'q' and 'j k'.
-        (50, 14, 2, 15, 'S'),
+        // gestures the ladder has already dropped `q` and `j k`, and the mouse
+        // group is gone entirely.
+        (50, 14, 2, 15, 'S', None),
     ] {
         sweep!("sheet-one-column-cells", |paint| {
             let at = Rect::new(0, 0, w, h);
@@ -1462,6 +1463,39 @@ fn the_one_column_rung_places_its_cells_where_the_plan_says() {
                 "the one-column verb field does not start at column {verb_at} at \
                  {w}x{h}:\n{sheet}"
             );
+
+            // **The mouse group's rows too, not only the keyboard group's.**
+            // Both are drawn by the same loop with the same `Group`, but from
+            // two call sites, and only one of them was read: sliding the mouse
+            // call's origin one column right moved the whole group on the
+            // default 80 by 24 pane and reddened nothing. Every gate with an
+            // absolute mouse column ran on the two-column rung only, and the
+            // weights gate reads a keyboard row.
+            if let Some(heading) = mouse_from {
+                let rule: String = rows[heading].iter().collect();
+                assert!(
+                    rule.contains("mouse"),
+                    "row {heading} is not the mouse group's heading at {w}x{h}, \
+                     so the rows below it are not what this pins:\n{sheet}"
+                );
+                let mouse_first = &rows[heading + 1];
+                assert_eq!(
+                    mouse_first[keys_at], 'w',
+                    "the one-column mouse group's keys field does not start at \
+                     column {keys_at} at {w}x{h}:\n{sheet}"
+                );
+                assert_eq!(
+                    mouse_first[keys_at - 1],
+                    ' ',
+                    "the one-column mouse group is not inset from the frame at \
+                     {w}x{h}:\n{sheet}"
+                );
+                assert!(
+                    mouse_first[verb_at] != ' ' && mouse_first[verb_at - 1] == ' ',
+                    "the one-column mouse group's verb field does not start at \
+                     column {verb_at} at {w}x{h}:\n{sheet}"
+                );
+            }
         });
     }
 }
@@ -1534,6 +1568,18 @@ fn the_two_guards_no_rung_reaches_are_still_the_right_size() {
     // A guard whose slack nobody states is a guard nobody will notice binding, so
     // the numbers are asserted rather than described. They are restated here
     // rather than imported for [`TITLE`]'s reason.
+    //
+    // **What this gate cannot do, said plainly rather than implied.** A branch
+    // that never fires has no observable value, so no gate can pin the production
+    // constants themselves: `sheet_floor`'s `+ 6` could become `+ 13` and the
+    // `.max` could be deleted outright, and nothing here would redden, because
+    // neither changes a cell. What is pinned is the *slack* — that the narrowest
+    // rung the ladder draws clears the floor, and that the keyboard block clears
+    // its own label — which is the property that decides whether the guard is
+    // live. The day #285 shrinks the tables or #288 adds a `MOUSE` row, one of
+    // these stops clearing, this gate reddens, and the behaviour behind the guard
+    // becomes reachable and untested. That is the moment to gate the value; until
+    // then there is nothing to gate.
     //
     // `sheet_floor` raises any rung to the width its own title bar needs. The
     // title is `─ gestures ` at eleven columns, plus a border and a space at each
