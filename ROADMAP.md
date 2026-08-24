@@ -466,7 +466,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The sheet has no roomy rung: no air, no sections, and a reorder that would invert the keep-set | [#285](https://github.com/breferrari/vigia/issues/285) |
 | ✅ | At the residual floor the sheet still drops gestures in silence, and reaching them is an input-model ruling | [#286](https://github.com/breferrari/vigia/issues/286) |
 | ⬜ | The sheet omits a gesture the README teaches, and the gate for exactly that is a hand-written list | [#288](https://github.com/breferrari/vigia/issues/288) |
-| ⬜ | The close control's pressed weight is unreachable, and its docblock claims three | [#298](https://github.com/breferrari/vigia/issues/298) |
+| ✅ | The close control's pressed weight is unreachable, and its docblock claims three | [#298](https://github.com/breferrari/vigia/issues/298) |
 | ✅ | The churn band samples once a second, so a bursty worktree draws scatter | [#223](https://github.com/breferrari/vigia/issues/223) |
 | ✅ | Attribute a wall-clock overshoot with thread CPU time | [#212](https://github.com/breferrari/vigia/issues/212) |
 | ✅ | The status sigil sits two columns apart between the list and the diff's headings | [#173](https://github.com/breferrari/vigia/issues/173) |
