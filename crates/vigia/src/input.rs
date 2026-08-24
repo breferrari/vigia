@@ -365,10 +365,21 @@ impl Regions {
     ///
     /// It also settles the ladder one element over. `Chrome::pressed` is
     /// [`Held::at`], so with nothing on the sheet able to arm a hold, the close
-    /// control's pressed weight is unreachable **by construction** rather than by
-    /// the geometry coincidence the sweep measured, which is what #298 rules it
+    /// control's pressed weight is unreachable, which is what #298 rules it
     /// down to two rungs on. `crates/vigia/tests/sheet.rs::nothing_can_press_the_close_control`
     /// is that half.
+    ///
+    /// **Not *by construction*, and a draft of this said so.** That would need
+    /// `Regions` to always describe the sheet the reader is looking at, and it does
+    /// not: `Shell::regions` is written once per painted frame, so every event in
+    /// one drained batch reads the same pre-batch snapshot. A `?` and a press that
+    /// coalesce therefore test the press against a sheet that was not yet open,
+    /// which bypasses this guard and [`action_for`]'s alike. That is older and
+    /// wider than #298, it reaches the swallow rule as a whole rather than these
+    /// two methods, and it is tracked separately. What still makes the weight
+    /// unreachable is the measurement: over every pane from 30 to 140 columns by 8
+    /// to 40 rows, the close control's own cell is a bar's cell **zero** times, so
+    /// there is no pane on which a stale snapshot could name it either.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
         // **Before the columns, because the sheet is drawn over them.** The order
         // is [`Regions::hover_at`]'s own and for the same reason: the sheet

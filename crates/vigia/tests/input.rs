@@ -1445,6 +1445,27 @@ fn a_track_the_sheet_covers_grabs_nothing() {
         "a track row the sheet does not cover stopped answering, so the guard is \
          on the sheet existing rather than on the cell it covers"
     );
+
+    // **The close control is not an exception here either**, and it is asserted by
+    // name for the reason its twin is one gate up: it is the one cell of the sheet a
+    // click acts on, so a reader of the guard will ask. It dismisses through
+    // `action_for`, and it must take hold of no bar.
+    let over_close = Regions {
+        sheet: Some(Sheet {
+            left: 70,
+            top: 10,
+            width: 10,
+            height: 4,
+            close: (79, 12),
+        }),
+        ..bare
+    };
+    assert_eq!(
+        over_close.grab_at(79, 12),
+        None,
+        "the close control took hold of the bar underneath it, so a drag from it \
+         moves a region the reader cannot see"
+    );
 }
 
 #[test]
