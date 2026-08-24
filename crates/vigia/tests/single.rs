@@ -636,3 +636,94 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
         "the unpinned total is one file's, so the pin is on when nobody asked"
     );
 }
+
+#[test]
+fn a_pinned_gesture_survives_the_diff_it_was_made_against() {
+    // **The panic the pin reaches that no other gesture does.** `G` and a drag on
+    // the diff's bar are the only two gestures that ask the frame how tall a file
+    // is *before* `View::collect` has clamped the position against the files that
+    // exist, and under a pin both of them do: unpinned, `G` is
+    // `jump_to(len - 1)`, which saturates on an empty list and touches no frame,
+    // and a drag walks the list it is iterating.
+    //
+    // Two shapes, and the second is the one that matters most because it is not
+    // an edge at all. A **clean worktree** is the state a monitor sits in most of
+    // the time, so `s` and then `G` on a pane somebody left open is the ordinary
+    // use of this tool, and `Frame::diff` panics on an index into an empty list by
+    // design. The first shape is the agent in the other pane committing its work,
+    // which renumbers the changed set under a position nobody touched.
+    let scratch = fixture("shell-single-shrink");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = pinned(&mut frame);
+
+    // Pinned to the last file, so the shrink below has somewhere to strand it.
+    // Stepped rather than jumped, because `G` under a pin is one of the two
+    // gestures this gate is about and using it as setup would be assuming the
+    // thing under test.
+    app.apply(
+        Action::File((FILES - 1 - PINNED) as isize),
+        &mut frame,
+        body(),
+    )
+    .expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        view.top.file,
+        FILES - 1,
+        "the fixture never pinned the last file, so the shrink strands nothing"
+    );
+
+    // Half the changes go away, the way an agent committing does it.
+    for index in (FILES / 2)..FILES {
+        scratch.git(&["checkout", "--", &format!("src/mod_{index}.rs")]);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
+
+    for action in [
+        Action::Bottom,
+        Action::Top,
+        Action::DiffTo(TRACK_SCALE / 2),
+        Action::Scroll(3),
+        Action::Scroll(-3),
+    ] {
+        app.apply(action, &mut frame, body())
+            .unwrap_or_else(|error| panic!("{action:?} after the shrink: {error}"));
+        let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert!(
+            view.top.file < FILES / 2,
+            "{action:?} left the pin on file {}, which is past the {} that exist",
+            view.top.file,
+            FILES / 2
+        );
+    }
+
+    // And all the way to nothing, which is the ordinary state rather than the
+    // edge: a monitor left open beside an agent that has committed.
+    scratch.commit_all("everything");
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 0, "the worktree is not clean");
+
+    for action in [
+        Action::Bottom,
+        Action::Top,
+        Action::DiffTo(TRACK_SCALE / 2),
+        Action::Scroll(1),
+        Action::Scroll(-1),
+        Action::File(1),
+        Action::ListRow(0),
+        Action::ToggleSingle,
+    ] {
+        app.apply(action, &mut frame, body())
+            .unwrap_or_else(|error| panic!("{action:?} on a clean worktree: {error}"));
+        let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert!(
+            view.rows.is_empty(),
+            "a clean worktree drew diff rows after {action:?}"
+        );
+    }
+}

@@ -818,8 +818,7 @@ impl App {
             // exactly the shape that passes a test asserting the ends.
             Action::DiffTo(at) => {
                 self.anchored = false;
-                if self.single {
-                    let file = self.position.file;
+                if let Some(file) = self.pinned_file(frame) {
                     let total = crate::view::span_in(frame, file)?;
                     self.position = Position {
                         file,
@@ -890,16 +889,53 @@ impl App {
             // file's full height and `View::collect` clamps it to the last
             // screenful on the way, which is the same path a scroll off the end
             // takes: one place decides where the bottom is.
-            Action::Bottom => {
-                if self.single {
+            Action::Bottom => match self.pinned_file(frame) {
+                Some(file) => {
                     self.anchored = false;
-                    self.position.row = crate::view::span_in(frame, self.position.file)?;
-                } else {
-                    self.jump_to(frame.files().len().saturating_sub(1));
+                    self.position = Position {
+                        file,
+                        row: crate::view::span_in(frame, file)?,
+                    };
                 }
-            }
+                None => self.jump_to(frame.files().len().saturating_sub(1)),
+            },
         }
         Ok(true)
+    }
+
+    /// The file a pin is on, resolved against the files that actually exist.
+    ///
+    /// **`None` is *not pinned*, and it covers two different states on purpose**:
+    /// the reader has not asked for a pin, and there is nothing to pin to. Both
+    /// want the arm's unpinned branch, and both are states the arms below would
+    /// otherwise have had to test for separately.
+    ///
+    /// **The clamp is what makes this a function rather than a field read**, and
+    /// it is load-bearing rather than defensive. `SPEC.md` §11.2 B16 puts the
+    /// pinned file in [`Self::position`], and a position is exactly the index
+    /// that outlives the list it was resolved against:
+    /// [`vigia_core::Frame::advance`] rebuilds the changed set from scratch, so
+    /// the agent in the other pane committing its work, reverting an edit or
+    /// switching branch leaves this naming a file that is gone.
+    /// [`vigia_core::Frame::diff`] **panics** on that index by design, and the two
+    /// arms below are the only gestures on this map that reach it *before*
+    /// [`View::collect`] has had a chance to clamp. A clean worktree is the whole
+    /// of the second case and it is not an edge: it is the state a monitor sits in
+    /// most of the time, so `s` and then `G` on a pane that has been left open is
+    /// a panic in a tool whose job is to be left open.
+    ///
+    /// Clamped rather than refused, which is [`View::collect`]'s own answer to the
+    /// same staleness: the reader asked for the end of the file they were on, and
+    /// the nearest file that still exists is a better answer than nothing
+    /// happening. `tests/single.rs::a_pinned_gesture_survives_the_diff_it_was_made_against`
+    /// holds both shapes.
+    ///
+    /// [`Action::Top`] does not come through here, and that is not an omission:
+    /// it writes an index and reads nothing, so a stale one is resolved by the
+    /// same clamp every other jump gets.
+    fn pinned_file(&self, frame: &Frame) -> Option<usize> {
+        let files = frame.files().len();
+        (self.single && files > 0).then(|| self.position.file.min(files - 1))
     }
 
     /// Put the viewport at the top of `file`, which is what a **jump** means.
