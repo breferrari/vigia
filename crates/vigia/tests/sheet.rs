@@ -52,6 +52,10 @@ const SHEET_CLOSE: char = '✕';
 /// the way to tell furniture from a row.
 const RULE: char = '─';
 
+/// [`RULE`] as a `str`, because a `Cell`'s symbol is one and comparing the two
+/// spellings of the same glyph in two places is how they drift apart.
+const RULE_STR: &str = "─";
+
 /// Keyboard rows the height ladder may never drop, restated for [`TITLE`]'s
 /// reason. `SPEC.md` §11.1 names the three: `f`, `m` and `?`.
 const KEEP: usize = 3;
@@ -492,6 +496,20 @@ fn the_close_control_brightens_under_the_pointer() {
         weight(hovered.1),
         "the control draws the same held as merely hovered, so B10's ladder is two \
          rungs rather than three"
+    );
+    // **The bottom rung, which is the one of three nothing asserted positively.**
+    // Every other assertion here is a comparison, so the resting weight was pinned
+    // only by being *different* from the hover: painting the control permanently
+    // `bar_active` keeps `at_rest != hovered`, keeps both `weight` equalities and
+    // keeps the glyph, so the control could ship looking pressed on every frame,
+    // or drawn in `chrome_dim` and reading as part of the frame that
+    // [#166](https://github.com/breferrari/vigia/issues/166) rules it is not part
+    // of. A ladder is three rungs or it is not a ladder.
+    assert_eq!(
+        weight(at_rest.1),
+        weight(theme.chrome),
+        "the resting control is not on B10's chrome rung, so it is drawn as \
+         something other than a control at rest"
     );
     assert_eq!(
         at_rest.0, SHEET_CLOSE,
@@ -2153,6 +2171,21 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
             spelling == "roomy",
             "the {w}x{h} case is not the {spelling} rung:\n{drawn}"
         );
+        // **A cell has to hold something before its colour means anything**, and
+        // the whole of this gate reads colours at fixed columns. The sheet's blank
+        // pass paints its entire rect `chrome_dim`, so every "is dim" assertion
+        // below passes on *air*: move the verb field and this would go on
+        // reporting the right weight for a space. Only a glyph assertion in some
+        // *other* gate rescues it today, which is precisely the coupling that
+        // makes a gate unable to fail on its own terms.
+        for (x, what) in [(keys_at, "keys cell"), (verb_at, "verb")] {
+            assert_ne!(
+                buf[(sheet.left + x, row)].symbol(),
+                " ",
+                "column {x} of the {spelling} rung's first row is blank, so the \
+                 weight read below is a blank cell's rather than a {what}'s"
+            );
+        }
         assert_eq!(
             buf[(sheet.left + keys_at, row)].fg,
             theme.chrome.fg.expect("the chrome weight carries a colour"),
@@ -2179,14 +2212,23 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
             .expect("the dim weight carries a colour");
         let right = sheet.left + sheet.width - 1;
         let bottom = sheet.top + sheet.height - 1;
-        for (x, y, what) in [
-            (sheet.left, sheet.top, "the top-left corner"),
-            (sheet.left + 1, sheet.top, "the title bar's rule"),
-            (sheet.left, row, "the left pipe"),
-            (right, row, "the right pipe"),
-            (sheet.left, bottom, "the bottom-left corner"),
-            (sheet.left + 1, bottom, "the bottom border"),
+        // Each carries the glyph it is named for, asserted before its weight for
+        // the reason above: `└` and `─` are as unreadable in the wrong colour as
+        // in the wrong place, and a blank cell reports the right colour either way.
+        for (x, y, glyph, what) in [
+            (sheet.left, sheet.top, "┌", "the top-left corner"),
+            (sheet.left + 1, sheet.top, RULE_STR, "the title bar's rule"),
+            (sheet.left, row, "│", "the left pipe"),
+            (right, row, "│", "the right pipe"),
+            (sheet.left, bottom, "└", "the bottom-left corner"),
+            (sheet.left + 1, bottom, RULE_STR, "the bottom border"),
         ] {
+            assert_eq!(
+                buf[(x, y)].symbol(),
+                glyph,
+                "{what} of the {spelling} sheet does not hold {glyph:?}, so the \
+                 weight read below is some other cell's"
+            );
             assert_eq!(
                 buf[(x, y)].fg,
                 dim,
@@ -2254,7 +2296,16 @@ fn the_keys_cell_is_lit_and_the_verb_is_dim() {
         .chrome_dim
         .fg
         .expect("the dim weight carries a colour");
-    for (col, what) in [(2u16, "the keyboard label"), (56, "the mouse label")] {
+    for (col, glyph, what) in [
+        (2u16, "k", "the keyboard label"),
+        (56, "m", "the mouse label"),
+    ] {
+        assert_eq!(
+            buf[(sheet.left + col, sheet.top + 1)].symbol(),
+            glyph,
+            "{what} does not start at column {col}, so the weight read below is a \
+             blank cell's"
+        );
         assert_eq!(
             buf[(sheet.left + col, sheet.top + 1)].fg,
             dim,

@@ -4423,7 +4423,11 @@ const SECTIONS: [Section; 5] = [
     },
 ];
 
-// **What [`SECTIONS`] promises, asserted where nothing that runs can reach it.**
+// **What [`SECTIONS`]' *shape* promises, asserted where nothing that runs can
+// reach it.** The labels are not checked here and deliberately so: an empty or
+// duplicated one is caught by
+// `sheet_tables::no_section_label_hides_inside_a_cell_or_another_label`, which
+// needs string comparison, and a `const` cannot compare two `&str`.
 // A `const` block is the instrument this file already reaches for when a claim no
 // gate can fail is a wish ([`RAIL_FLOOR`]'s own block says so in its words), and
 // here it is doing something a test cannot: `Rows::rows` indexes `KEYBOARD` at
