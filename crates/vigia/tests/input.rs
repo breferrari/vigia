@@ -2098,3 +2098,79 @@ fn shift_r_and_ctrl_r_are_unbound() {
         "ctrl-r did something, where the control arm binds only `c` and `d`"
     );
 }
+
+#[test]
+fn the_arrows_move_between_files() {
+    // **`SPEC.md` §11.2 B15**: vertical keys move inside the diff, horizontal keys
+    // move between files, so `↑` `↓` `←` `→` are one complete pair rather than half
+    // of one. `←` is `p` and `→` is `n`.
+    //
+    // Asserted **against the keys they alias** rather than against a literal
+    // `Action`, which is what stops the alias drifting from its original: change
+    // what `n` means and this goes red rather than pinning the old meaning under a
+    // new key.
+    assert_eq!(
+        action_for(&press(KeyCode::Right), Regions::default()),
+        action_for(&press(KeyCode::Char('n')), Regions::default()),
+        "`→` does not do what `n` does"
+    );
+    assert_eq!(
+        action_for(&press(KeyCode::Left), Regions::default()),
+        action_for(&press(KeyCode::Char('p')), Regions::default()),
+        "`←` does not do what `p` does"
+    );
+    // And the pair is the *file* step rather than something that merely matches:
+    // two keys both bound to `None` would satisfy the two asserts above.
+    assert_eq!(
+        action_for(&press(KeyCode::Right), Regions::default()),
+        Some(Action::File(1)),
+        "`→` is not the forward file step"
+    );
+    assert_eq!(
+        action_for(&press(KeyCode::Left), Regions::default()),
+        Some(Action::File(-1)),
+        "`←` is not the backward file step"
+    );
+}
+
+#[test]
+fn the_arrows_under_modifiers_do_not_reach_the_list() {
+    // **The `SHIFT` block above the plain arms binds `Up` and `Down` only**, and
+    // falls through for everything else. So `Shift+←` reaches the plain arm and
+    // steps a file, where `Shift+↓` is intercepted and scrolls the pinned list.
+    // That asymmetry is real, it is a consequence of the block's own `_ => {}`,
+    // and nothing stated it until #296 put keys on the other axis.
+    //
+    // Pinned in the direction that matters: a shifted horizontal arrow must not
+    // become a *list* gesture, because that is the confusion this row exists to
+    // end. Whether it steps a file or does nothing is a smaller question; today it
+    // steps, and this says so rather than leaving it to be discovered.
+    for (code, plain) in [
+        (KeyCode::Left, Action::File(-1)),
+        (KeyCode::Right, Action::File(1)),
+    ] {
+        let shifted = action_for(
+            &Event::Key(KeyEvent::new(code, KeyModifiers::SHIFT)),
+            Regions::default(),
+        );
+        assert_eq!(
+            shifted,
+            Some(plain),
+            "a shifted horizontal arrow does not fall through to the plain arm"
+        );
+        assert!(
+            !matches!(shifted, Some(Action::ScrollList(_))),
+            "a shifted horizontal arrow reached the pinned list, which is the \
+             confusion #296 exists to end"
+        );
+        assert_eq!(
+            action_for(
+                &Event::Key(KeyEvent::new(code, KeyModifiers::CONTROL)),
+                Regions::default()
+            ),
+            None,
+            "a control-arrow did something, where the control arm binds only `c` \
+             and `d`"
+        );
+    }
+}

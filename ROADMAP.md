@@ -425,7 +425,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | | Task | Issue |
 |---|---|---|
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
-| ⬜ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
+| ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
 | ⬜ | Nothing pins the pane to one file, so reading a file means scrolling past its end into the next | [#297](https://github.com/breferrari/vigia/issues/297) |
 | ✅ | Braille returns to the band, and the rung stops being a constant | [#244](https://github.com/breferrari/vigia/issues/244) |
 | ✅ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |

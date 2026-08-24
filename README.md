@@ -220,7 +220,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `Space` `PgDn` `PgUp` | page |
 | `d` `u` | half a page |
 | `g` `G` | first / last file |
-| `n` `p` | next / previous file |
+| `n` `p` `→` `←` | next / previous file |
 | `1` to `6` | jump to that list row |
 | `J` `K` | scroll the pinned list |
 | `f` | follow the newest change, or stop |

@@ -4345,7 +4345,16 @@ const KEYBOARD: [Gesture; 12] = [
         verb: ["first / last changed file", "first / last file"],
     },
     Gesture {
-        keys: ["n  /  p", "n  /  p"],
+        // **The arrows at the wide spelling and not at the tight one, and that is
+        // measured rather than preferred** ([#296](https://github.com/breferrari/vigia/issues/296)).
+        // The tight keyboard keys field is eleven, on `Space  PgDn`; this cell is
+        // thirteen, so keeping the arrows there takes the keyboard-only rung from
+        // thirty-five columns to thirty-seven and costs panes of 35 and 36 their
+        // twelve gestures. Two columns of pane losing gestures to an *alias* is
+        // the wrong trade, and dropping aliases at the tight spelling is what
+        // `q  Esc  Ctrl+C  Ctrl+D` and `g  Home  /  G  End` already do.
+        // `j  k  ↓  ↑` keeps its arrows because there they cost nothing.
+        keys: ["n  →  /  p  ←", "n  /  p"],
         verb: ["next / previous changed file", "next / prev file"],
     },
     Gesture {

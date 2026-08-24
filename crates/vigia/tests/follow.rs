@@ -1376,3 +1376,78 @@ fn the_landing_turns_on_the_diff_regions_own_height() {
         );
     }
 }
+
+#[test]
+fn the_arrows_move_the_caret_and_are_inert_at_both_ends() {
+    // **What a reader sees when they press `→`**, which the keymap gate one file
+    // over cannot reach: it asserts that `→` resolves to the same `Action` as `n`,
+    // and an action that resolved correctly and moved nothing would satisfy it.
+    //
+    // The oracle is `top_file`, the same one every gate here uses: following is a
+    // claim about what is drawn, and the caret is drawn on the row whose index is
+    // the diff's own file, so a moving heading is a moving caret.
+    let scratch = fixture("arrows-move-the-caret");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+    let height = body();
+
+    // Start at the first file rather than wherever follow put us, so both ends of
+    // the walk below are the ones this gate is named for.
+    app.apply(Action::Top, &mut frame, height).expect("top");
+    let first = path_at(&frame, 0);
+    assert_eq!(
+        top_file(&mut app, &mut frame, &mut highlighter, &history),
+        first,
+        "the fixture did not start on the first changed file"
+    );
+
+    // `←` at the first file moves nothing, rather than wrapping to the last.
+    app.apply(Action::File(-1), &mut frame, height)
+        .expect("left");
+    assert_eq!(
+        top_file(&mut app, &mut frame, &mut highlighter, &history),
+        first,
+        "`←` on the first changed file wrapped instead of doing nothing"
+    );
+
+    // Forward one, and the heading is the next file status reports, which is not
+    // the next one lexically by name: `path_at` reads the order out of the frame.
+    app.apply(Action::File(1), &mut frame, height)
+        .expect("right");
+    assert_eq!(
+        top_file(&mut app, &mut frame, &mut highlighter, &history),
+        path_at(&frame, 1),
+        "`→` did not move to the next changed file"
+    );
+
+    // And back, which is the half a one-directional binding would fail.
+    app.apply(Action::File(-1), &mut frame, height)
+        .expect("left");
+    assert_eq!(
+        top_file(&mut app, &mut frame, &mut highlighter, &history),
+        first,
+        "`←` did not return to the file `→` left"
+    );
+
+    // The far end, walked rather than jumped, so the inertness below is asserted
+    // at a position the steps actually reached.
+    app.apply(Action::Bottom, &mut frame, height)
+        .expect("bottom");
+    let last = top_file(&mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        last,
+        path_at(&frame, FILES - 1),
+        "`G` did not land on the last changed file"
+    );
+    app.apply(Action::File(1), &mut frame, height)
+        .expect("right");
+    assert_eq!(
+        top_file(&mut app, &mut frame, &mut highlighter, &history),
+        last,
+        "`→` on the last changed file wrapped instead of doing nothing"
+    );
+}

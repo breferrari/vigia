@@ -3528,3 +3528,55 @@ fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
         "the pane came back on a different page:\n{sheet}"
     );
 }
+
+#[test]
+fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
+    // **The measured trade #296 took, pinned so it cannot be undone silently.**
+    // The `n / p` row's keys cell names `→` and `←` at the wide spelling. It does
+    // **not** at the tight one, and that is arithmetic rather than taste: the
+    // tight keyboard keys field is eleven columns, the arrowed cell is thirteen,
+    // and putting it there takes the keyboard-only rung from thirty-five columns
+    // to thirty-seven, which costs panes of 35 and 36 their twelve gestures.
+    //
+    // Both halves are asserted, because only the pair says which trade was made.
+    // Adding the arrows to the tight cell reddens the second and would otherwise
+    // move two panes' reachability with nothing to see.
+    let scratch = Scratch::large_diff("sheet-arrow-aliases", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // Wide: a pane the whole table fits on in one column at the wide spelling.
+    let wide = walk_the_pages(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Rect::new(0, 0, 80, 24),
+    );
+    let drawn = &wide.first().expect("no sheet at 80x24").text;
+    assert!(
+        drawn.contains("n  →  /  p  ←"),
+        "the wide spelling does not name the arrows beside `n` and `p`:\n{drawn}"
+    );
+
+    // Tight: the widest pane that still takes the tight spelling, so this is the
+    // cell a forty-column reader sees rather than a hypothetical one.
+    let tight = walk_the_pages(
+        &mut frame,
+        &mut highlighter,
+        &history,
+        Rect::new(0, 0, 40, 30),
+    );
+    let drawn = &tight.first().expect("no sheet at 40x30").text;
+    assert!(
+        drawn.contains("n  /  p"),
+        "the tight spelling lost the `n / p` row entirely:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains('→') && !drawn.contains('←'),
+        "the tight spelling names the arrows, which takes the keyboard-only rung \
+         from 35 columns to 37 and costs panes of 35 and 36 their gestures:\n{drawn}"
+    );
+}
