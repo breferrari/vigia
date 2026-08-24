@@ -302,9 +302,17 @@ fn a_continuous_writer_still_gets_a_tick_within_max_delay() {
     // burst loop re-checks its deadline once per event, so the overshoot is
     // whatever one `accept` costs, and one `accept` is a `stat` plus a gitignore
     // probe. On a Windows CI runner scanning files created milliseconds earlier
-    // that single syscall has been measured at 244ms past the deadline, which is
-    // not something the loop can preempt. A developer machine still runs this at
-    // zero slack.
+    // that single syscall has been measured at 244ms past the deadline, and on a
+    // post-merge run of `main` at **473ms past** (773.68ms held against a 300ms
+    // `max_delay`), which is not something the loop can preempt. A developer
+    // machine still runs this at zero slack and measures 300.1ms — an overshoot
+    // of 0.1ms — so the slack buys nothing locally and everything on a runner.
+    //
+    // That 773.68ms went red because the `test` step supplied no
+    // `VIGIA_BUDGET_SLACK`, so this `budget()` call was resolving to 1. The step
+    // sets it now. Do NOT respond to a future red here by raising the constant:
+    // it is the local bound too, and at zero slack it is currently tight to
+    // within a millisecond.
     assert!(
         tick.coalesced_for < budget(MAX_DELAY_BOUND),
         "the burst was held for {:?}, past the {:?} its max_delay allows",
