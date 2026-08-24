@@ -497,6 +497,64 @@ becomes `g  /  G`. `j  k  ↓  ↑` is the exception and it keeps its arrows bec
 there they cost nothing, which is the same test applied and answered differently.
 
 **No row was added, and that is why this diff is small where #295's was large.**
-An alias goes in an existing cell, so `KEYBOARD` is still twelve rows, the counter
-still counts to seventeen, and every rung height and reachability boundary §11.1
-states is untouched. #295 added a row and moved every one of them.
+An alias goes in an existing cell, so `KEYBOARD` was still twelve rows, the counter
+still counted to seventeen, and every rung height and reachability boundary §11.1
+states was untouched. #295 added a row and moved every one of them. (**Those
+numbers are B15's own and are not current**: B16 added `s` the next day and moved
+them again. The current ones are in §11.1.)
+## B16 — the pin makes the frame path cheaper, and the guard that would have made it dearer
+
+The ruling is `SPEC.md` §11.2 B16 and the behaviour is §11.1. This is the
+archaeology: one defect found by reading, one premise checked instead of
+inherited, and what a thirteenth key did to the sheet.
+
+**The defect is a literal that stopped meaning what it says.** `View::collect`
+backs a short screen up so the diff's last row rests on the bottom, and it skips
+that when the position is already the first one the walk can reach. That test is
+spelled `view.top != Position::default()`, and `Position::default()` is *file
+zero, row zero*. It has been correct for as long as the walk always started at
+the first changed file. Under a pin it does not: the first position a pinned walk
+can reach is the pinned file's own row zero, so on any pinned file but the first
+the guard cannot fire, and a pinned file shorter than the pane is `short` on every
+frame, restarts on every frame, and pays what that guard's own paragraph records
+at **three walks and six `Frame::diff` calls a frame against two** — on the file
+an agent is writing to, which `Frame::diff` re-reads inside the settle margin by
+design.
+
+Both walks resolve to the same position and draw the same rows. Nothing on screen
+can see it, no snapshot moves, and the only instrument is the frame's own read
+count, which is what `tests/single.rs::a_pinned_file_shorter_than_the_pane_walks_once`
+asserts. It was found by reading the guard's docblock while working out what the
+pin had to bound, which is the cheapest way this could have been found and was
+luck rather than method: nothing would have gone red.
+
+**The generalisable half**: a bound written as a type's `default()` reads as *the
+floor* and means *the floor of the old walk*. When a feature narrows what a walk
+may reach, every such literal is part of the change, and the ones that are
+`Default::default()` are the ones no reviewer looks twice at.
+
+**The premise checked rather than inherited is B14's.** That ruling ranks `r`
+outside the sheet's keep-set and its **first** stated reason was false: it said
+`r` cannot fire on the pane that drops it, and no drawable pane drops it at all.
+The correction is in B14. Ranking `s` at nine raised exactly the same question, and
+the answer was taken from drawn output rather than from B14's conclusion: swept
+over every width from 20 to 45, the deepest rung a drawable pane reaches is still
+`from = 7`, so the `NARROW` table now shows both `r` and `s` **kept** at thirty
+columns, and both reorders remain defence rather than behaviour.
+
+**What a key costs, measured twice now.** `r` and `s` are the same shape of change
+and the same shape of cost: every row count moves and no width does. The four
+reachability boundaries sit at 30, 32, 35 and 38 columns and have not moved
+through either, and the counts behind them went 16, 11, 8, 4 to 17, 12, 9, 5 to
+18, 13, 10, 6. They were re-derived from a swept pane both times rather than
+incremented, which is the only way a boundary that *did* move would be noticed.
+
+**The one number that goes the other way.** Every feature added to this pane so
+far has cost the frame path something. A pin removes I4's single exception from
+the frames it is on: the diff's height is counted for every changed file once per
+tick and is the only thing in the frame path not bounded by the window, and a
+pinned frame reads its total off the pinned file's span instead. The gate asserts
+the **unpinned** frame counted something before it asserts the pinned frame
+counted nothing, because a zero over a fixture that had nothing to count is not
+evidence, and that is the same two-fixture rule §7 states for every other cost
+claim here.

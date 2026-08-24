@@ -101,7 +101,11 @@ cargo install --git https://github.com/breferrari/vigia vigia
    status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
-The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 134 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 134 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width. Every file gets the same row in both regions:
+The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 134 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 134 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
+
+Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
+
+Every file gets the same row in both regions:
 
 | | | Answers |
 |---|---|---|
@@ -226,6 +230,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `f` | follow the newest change, or stop |
 | `m` | show or hide the masthead |
 | `r` | list beside the diff, or above it |
+| `s` | one file, or the whole diff |
 | `?` | **all of this, on screen**, a page at a time where the pane is small |
 | `q` `Esc` `Ctrl+C` | quit |
 
@@ -246,7 +251,7 @@ The blank above the band is the row the header keeps between itself and the list
 </table>
 
 > [!TIP]
-> Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every other key still means what it meant. On a pane too small to hold the whole table, `?` again turns the page and the last one closes it; the title bar says how many of the sixteen you are looking at.
+> Press `?` and you never have to remember any of it. The sheet draws over rows that are already there, so **nothing moves** when it opens or closes, and every other key still means what it meant. On a pane too small to hold the whole table, `?` again turns the page and the last one closes it; the title bar says how many of them you are looking at.
 
 <details>
 <summary><b>The small print on the keys</b></summary>
