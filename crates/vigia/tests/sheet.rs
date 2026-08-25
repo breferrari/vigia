@@ -535,7 +535,13 @@ fn the_close_control_brightens_under_the_pointer() {
 }
 
 /// Walk every pane in `widths` x `heights` that draws a sheet, and hand each one's
-/// published regions and sheet to `check`. Returns how many drew one.
+/// published regions and sheet to `check`. Returns how many drew one, and how many
+/// panes the grid held.
+///
+/// **Both numbers, because a caller that wants a share needs the denominator too.**
+/// `nothing_can_press_the_close_control` spelled its own `444` while this computed
+/// `panes` from the same two arguments, so the two could drift with nothing to say
+/// so. Round 3.
 ///
 /// **A helper for three gates rather than the file's usual bespoke loop**, and the
 /// difference is that these three are one claim at three call sites: #298's rule is
@@ -553,7 +559,7 @@ fn over_sheets(
     widths: std::ops::RangeInclusive<u16>,
     heights: &[u16],
     mut check: impl FnMut(u16, u16, Regions, Sheet),
-) -> usize {
+) -> (usize, usize) {
     let scratch = Scratch::large_diff(name, FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -586,14 +592,26 @@ fn over_sheets(
     // includes the panes which drew nothing, which is exactly the mutation round 2
     // predicted would survive and did: `drew` moved above the `continue` still
     // fits `<= panes`, and every caller's floor is a `>` that more only helps.
-    // Some pane in every grid swept here draws no sheet, since B13's floor refuses
-    // one below thirty columns, so `<` is both true and load-bearing.
+    //
+    // **What guarantees a non-drawing pane is the short-and-narrow corner, and it
+    // took two wrong answers and a measurement to say so.** The first draft cited
+    // B13's thirty-column floor, which cannot fire here because both callers sweep
+    // from thirty columns up. Round 3 replaced it with `sheet_plan`'s height floor
+    // alone, and that is wrong in the other direction: a pane of eight rows draws a
+    // sheet at almost every width.
+    //
+    // Counted rather than reasoned about, on the fixture both callers use: **11
+    // panes of 444 draw none, every one of them at height 8 and at one of the
+    // eleven narrowest widths**, and the larger grid finds the same 11 of 3663. So
+    // it is the corner where a pane is short **and** narrow at once, which is the
+    // case B13 names, and `<` is true with eleven panes of margin rather than one.
+    // A grid that raised its minimum height past eight is what would make this fail.
     assert!(
         drew < panes,
         "the sweep counted {drew} sheets over {panes} panes, so it is counting \
          panes that drew none and the floors below it mean nothing"
     );
-    drew
+    (drew, panes)
 }
 
 /// Every cell the sheet covers, as a flat iterator.
@@ -631,7 +649,7 @@ fn a_press_under_the_sheet_arms_no_step() {
     // counter below is what stops that instead.
     let mut guarded = 0usize;
     let heights: Vec<u16> = (8..=40).collect();
-    let drew = over_sheets(
+    let (drew, _) = over_sheets(
         "sheet-press-under",
         30..=140,
         &heights,
@@ -706,7 +724,7 @@ fn nothing_can_press_the_close_control() {
     // The drawn ladder is `the_close_control_brightens_under_the_pointer`'s; this is
     // the half no drawing test can reach, which is the producer-versus-decider split
     // #298 names.
-    let drew = over_sheets(
+    let (drew, panes) = over_sheets(
         "sheet-close-press",
         30..=140,
         &[8, 13, 24, 40],
@@ -741,9 +759,14 @@ fn nothing_can_press_the_close_control() {
     // `drew` by construction, so the assertion comparing them could not fail, and
     // deleting it left `drew` unread and the lint job red where a plain `cargo
     // test` stayed green.
+    //
+    // **And the denominator comes from the same call**, which is round 3's: this
+    // spelled `444` while `over_sheets` computed the grid from the arguments it was
+    // handed, so changing the sweep here would have left the constant stale with
+    // nothing to catch it.
     assert!(
-        drew * 4 > 444 * 3,
-        "only {drew} of 444 panes drew a sheet, so this sweep has stopped \
+        drew * 4 > panes * 3,
+        "only {drew} of {panes} panes drew a sheet, so this sweep has stopped \
          covering the ladder rather than proving anything about it"
     );
 }
@@ -767,7 +790,7 @@ fn a_press_on_a_track_under_the_sheet_grabs_nothing() {
     // reported the drawn weight and not either producer.
     let mut guarded = 0usize;
     let heights: Vec<u16> = (8..=40).collect();
-    let drew = over_sheets(
+    let (drew, _) = over_sheets(
         "sheet-grab-under",
         30..=140,
         &heights,
