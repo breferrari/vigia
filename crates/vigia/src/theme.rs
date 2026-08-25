@@ -27,11 +27,20 @@
 //!
 //! ## Configuring it
 //!
-//! `SPEC.md` §11.2 B6 is ruled here: no config file and no flags. `VIGIA_THEME`
-//! names a built-in or points at a file, `VIGIA_COLOR` overrides the depth. A
-//! monitor is launched from the shell rc that opens the pane, which is where a
-//! setting made once belongs, and a config file with one thing in it invites a
-//! second thing.
+//! `SPEC.md` §11.2 B6 is ruled here: **no flags**. `VIGIA_THEME` names a built-in
+//! or points at a file, `VIGIA_COLOR` overrides the depth, and `~/.config/vigia/theme`
+//! is where a palette set once lives.
+//!
+//! **This said "no config file" until 2026-08-25 and had been wrong for two
+//! phases.** B6's *first* ruling was two variables and no file, on the argument
+//! that a config file with one thing in it invites a second thing; it was amended
+//! within the day, and this sentence never followed. The amendment's own reasoning
+//! is the opposite: a variable has to be re-declared per shell, so a preference
+//! set once belongs in a file. And the second thing did arrive, in
+//! [#306](https://github.com/breferrari/vigia/issues/306), which put the view
+//! defaults in `crate::config` rather than here: `VIGIA_THEME` naming a built-in
+//! never opens this file, so keys that are not colours would be lost by a reader
+//! choosing a palette for one session.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -1178,7 +1187,7 @@ pub fn from_env(
             Some(built_in) => built_in,
             None => load(Path::new(named))?,
         }
-    } else if let Some(path) = default_path(&lookup).filter(|path| path.is_file()) {
+    } else if let Some(path) = home_file(THEME_FILE, &lookup).filter(|path| path.is_file()) {
         // Then the file, which is where a preference set once lives. **Absent is
         // not an error and unreadable is**, which is the distinction that matters:
         // nobody has to have one, but a reader who wrote one and got the default
@@ -1190,13 +1199,18 @@ pub fn from_env(
     Ok(theme.resolve(depth))
 }
 
-/// [`THEME_FILE`] under the reader's home directory, if there is one.
+/// `rela` under the reader's home directory, if there is one.
 ///
 /// `HOME` first, because it is set on every Unix and by Git Bash on Windows too,
-/// then `USERPROFILE`. Read through the same lookup the rest of this function
-/// uses, so a test can place a home directory without touching the process
-/// environment.
-fn default_path(lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+/// then `USERPROFILE`. Read through the same lookup its callers use, so a test can
+/// place a home directory without touching the process environment.
+///
+/// **Takes the relative path since [#306](https://github.com/breferrari/vigia/issues/306)**,
+/// because there are two files under that directory now and the empty-versus-unset
+/// rule below is the kind that is got wrong once per copy. It was got wrong once
+/// already, in this function, before there was a second caller to get it wrong
+/// again. `crate::config::CONFIG_FILE` is the other one.
+pub(crate) fn home_file(rela: &str, lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     // **Each candidate is emptied-checked before the next is tried**, which is the
     // whole of this function and was wrong on the first write. Filtering after the
     // fallback reads naturally and is a different rule: `HOME=""` is `Some("")`, so
@@ -1211,7 +1225,7 @@ fn default_path(lookup: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
         .into_iter()
         .filter_map(lookup)
         .find(|home| !home.trim().is_empty())
-        .map(|home| Path::new(home.trim()).join(THEME_FILE))
+        .map(|home| Path::new(home.trim()).join(rela))
 }
 
 /// Read and parse a theme file.

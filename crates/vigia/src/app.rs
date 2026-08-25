@@ -338,6 +338,33 @@ impl App {
         }
     }
 
+    /// [`App::new`] with the view toggles a reader's config file asked for.
+    ///
+    /// `SPEC.md` §11.2 **B6** as amended by
+    /// [#306](https://github.com/breferrari/vigia/issues/306). The three fields it
+    /// sets are the three the file has keys for, and they are the *requests*
+    /// rather than what a pane can honour: `rail` here is `Chrome::rail`, and a
+    /// pane under 134 columns still draws none, which is B14 unchanged.
+    ///
+    /// **Beside [`App::new`] rather than replacing it**, and that is deliberate
+    /// rather than shy. Every gate in this workspace builds an `App` and expects
+    /// the shipped defaults; a constructor that read a file, or that took a
+    /// `Config` everywhere, would put a reader's home directory inside several
+    /// hundred tests. `Config::default()` is exactly `App::new`, which is what
+    /// makes this additive: the one caller who has a file is `crate::run`.
+    ///
+    /// **`following` is not among the fields**, and that is I5 rather than an
+    /// omission: *correct with zero interaction* is a promise about the program,
+    /// so it is set here the way `App::new` sets it and no file can reach it.
+    pub fn configured(config: crate::Config) -> Self {
+        Self {
+            masthead: config.masthead,
+            rail: config.rail,
+            single: config.single,
+            ..Self::new()
+        }
+    }
+
     /// A shell already past its opening two frames, so the next one colours.
     ///
     /// **A test affordance, and `doc(hidden)` because it is one.** [`App::new`]

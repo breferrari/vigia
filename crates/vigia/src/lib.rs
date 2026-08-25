@@ -75,6 +75,13 @@
 
 mod app;
 mod colour;
+/// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
+///
+/// `pub` for the reason [`theme`] gives in its own declaration below: the
+/// functions that resolve a file take a lookup so a gate can place a home
+/// directory without touching the process environment, and a gate can only call
+/// them if it can name them.
+pub mod config;
 mod glyphs;
 mod input;
 /// Public where its seven siblings are private, and for one reason: `soak.rs` is
@@ -96,6 +103,7 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
+pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
@@ -380,6 +388,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // here because the two are easy to conflate.
     let glyphs = Glyphs::detect()?;
 
+    // **Beside the palette and for the palette's reason**, which is the whole of
+    // why it is here rather than inside `App`: a config file that does not parse
+    // has to be said on a terminal the reader can still read, and an error painted
+    // inside a TUI that then hands the terminal back is an error nobody sees.
+    // `SPEC.md` §11.2 B6 as amended by
+    // [#306](https://github.com/breferrari/vigia/issues/306).
+    //
+    // Read once, before the screen is taken, so the frame path never asks the
+    // filesystem what the reader prefers. Absent is not an error; unreadable is.
+    let config = config::from_env(|key| std::env::var(key).ok())?;
+
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
     // sees it. Built here because the handler on it is armed on the next line,
     // before the terminal is taken, and the other two senders are armed after the
@@ -406,7 +425,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     let mut shell = Shell {
         session: Session::enter()?,
-        app: App::new(),
+        app: App::configured(config),
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame
@@ -1911,6 +1930,46 @@ mod tests {
             "the signal handler is armed after the terminal is taken, so a signal \
              arriving during the takeover is uncaught"
         );
+
+        // **Every input a reader can get wrong is read before the takeover too**,
+        // and the same scan is what says so. `SPEC.md` §11.1 rules that a path
+        // that is not a repository, a `VIGIA_THEME` naming nothing, a variable
+        // this does not recognise and a file that does not parse are all reported
+        // on a terminal the reader can still see, because an error painted inside
+        // a TUI that then hands the terminal back is an error nobody reads.
+        //
+        // **The config file joined them with [#309](https://github.com/breferrari/vigia/issues/309)
+        // and nothing enforced the position**: the ordering was verified by
+        // running the binary, which is evidence that dies with the shell it ran
+        // in. Adding it here costs one line and covers the whole family, so the
+        // next input added is a failing assertion rather than a hand check
+        // somebody remembers to repeat.
+        // **`frame.advance()` is in the list too**, and leaving it out was the
+        // block's own claim about itself being wider than the block: its comment
+        // in `run` makes exactly this promise, that a repository failing on its
+        // first walk reports on a terminal the reader can still see.
+        //
+        // **Two of these appear twice in the shipped source**, `Worktree::discover(`
+        // and `frame.advance()`, and in both the second occurrence is after the
+        // takeover. `find` returns the first, which is what this wants: a moved
+        // call cannot hide behind a *later* occurrence, only behind an earlier
+        // one, and neither has one.
+        for reader in [
+            "Worktree::discover(",
+            "frame.advance()",
+            "theme::from_env(",
+            "Glyphs::detect(",
+            "config::from_env(",
+        ] {
+            let at = code
+                .find(reader)
+                .unwrap_or_else(|| panic!("`run` no longer calls {reader}"));
+            assert!(
+                at < takeover,
+                "{reader} is read after the terminal is taken, so an error in it \
+                 is painted inside a screen that is about to be handed back"
+            );
+        }
 
         // **Form.** `signal`'s escalation latches after one ask: the second goes to
         // the default disposition and kills the process. That is only safe because
