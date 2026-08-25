@@ -1100,6 +1100,146 @@ fn names(keys: &str, token: &str) -> bool {
     })
 }
 
+/// The gestures `README.md`'s two tables teach, as the cells a reader meets there.
+///
+/// **The drift path [#288](https://github.com/breferrari/vigia/issues/288) was
+/// actually filed for, and the one nothing gated.** That row's title is *the sheet
+/// omits a gesture the README teaches*: `README.md` carried `just point` and
+/// `MOUSE` did not, so the sheet omitted it, and no test compared the two. The
+/// gates beside this one check the sheet against the **keymap**, which is a
+/// different pair and would never have caught it.
+///
+/// **Read from the file rather than restated**, which is the one place in this
+/// suite where that is right and the rest of it is not. `TITLE`'s rule is that a
+/// constant shared with the renderer makes a gate agree by construction; here the
+/// renderer is not the other side. The other side is a document a human edits, and
+/// the whole hazard is that the two say different things, so a restated copy would
+/// be a third thing to keep in step.
+fn readme_gestures() -> Vec<String> {
+    let readme = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md"),
+    )
+    .expect("README.md is where the crate says it is");
+
+    // The two tables live inside one `<td>` each under a bold caption. A row is
+    // `| cell | cell |`, and the left cell is what a reader looks for.
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in readme.lines() {
+        let trimmed = line.trim();
+        if trimmed == "**Keys**" || trimmed == "**Mouse**" {
+            inside = true;
+            continue;
+        }
+        if inside && trimmed.starts_with("</td>") {
+            inside = false;
+            continue;
+        }
+        if !inside || !trimmed.starts_with('|') {
+            continue;
+        }
+        // The header separator and the empty header row carry no gesture.
+        if trimmed.contains("---") || trimmed.trim_matches(['|', ' ']).is_empty() {
+            continue;
+        }
+        let Some(cell) = trimmed.split('|').nth(1) else {
+            continue;
+        };
+        let cell = cell.trim().replace('`', "");
+        if !cell.is_empty() {
+            out.push(cell);
+        }
+    }
+    assert!(
+        out.len() > 10,
+        "README.md's key and mouse tables parsed to {} rows, so this gate is \
+         reading the wrong thing and would pass over anything",
+        out.len()
+    );
+    out
+}
+
+#[test]
+fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
+    // **The comparison #288's own title names, and the one no gate made.** The
+    // sheet is checked against the keymap by the two gates above; this checks it
+    // against the **README**, which is where the reported omission lived: the
+    // README taught `just point` and the sheet did not draw it, and both gates
+    // beside this one would have stayed green forever.
+    //
+    // **Token by token rather than cell by cell**, because the two spell a set
+    // differently on purpose: the README writes `j` `k` `↑` `↓` as four ticked
+    // spans in one cell and the sheet draws `j  k  ↓  ↑` in one, and neither is
+    // wrong. What must hold is that every key or word the README teaches is
+    // findable on the sheet, which is what a reader who read one and opened the
+    // other is entitled to.
+    let scratch = Scratch::large_diff("sheet-readme", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    // The wide one-column rung, so every cell is at its longest spelling.
+    let at = Rect::new(0, 0, WIDE, 26);
+
+    toggle_at(&mut app, &mut frame, at);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let (_, drawn) = read_sheet(&buf, &laid);
+
+    for cell in readme_gestures() {
+        for token in cell.split_whitespace() {
+            // `to` joins the digits' range on both sides and is not a gesture.
+            if token == "to" {
+                continue;
+            }
+            assert!(
+                names(&drawn, token) || drawn.contains(token),
+                "README.md teaches {token:?} (in {cell:?}) and the sheet names it \
+                 nowhere, so a reader who read one and opened the other is \
+                 missing a gesture:\n{drawn}"
+            );
+        }
+    }
+}
+
+/// One value of every [`Action`] variant, for the two gates that walk them.
+///
+/// **Written once, and the reason is this diff's own subject.** It was typed out
+/// twice, in `mouse_phrases` and in `the_action_table_covers_every_variant`, which
+/// is exactly the failure [#288](https://github.com/breferrari/vigia/issues/288)
+/// exists to remove: two hand-written lists that agree because one hand wrote both,
+/// and drift the moment a variant is added to one. Caught by this row's own
+/// `/simplify` round, in the code written to fix it.
+///
+/// **The array is not what makes the classification safe and never was.**
+/// [`reach_of`]'s `match` is, because it is exhaustive: a new variant fails to
+/// compile there whatever this holds. What a shared const buys is that the two
+/// callers cannot come to disagree about which variants exist.
+///
+/// The payloads are arbitrary. Both callers compare discriminants or ask
+/// [`reach_of`], and neither reads a value.
+const ALL_ACTIONS: [Action; 18] = [
+    Action::Quit,
+    Action::Scroll(1),
+    Action::ScrollList(1),
+    Action::Page(1),
+    Action::HalfPage(1),
+    Action::File(1),
+    Action::Top,
+    Action::Bottom,
+    Action::ToggleFollow,
+    Action::ToggleMasthead,
+    Action::ToggleRail,
+    Action::ToggleSingle,
+    Action::ToggleSheet,
+    Action::CloseSheet,
+    Action::ListTo(0),
+    Action::ListRow(0),
+    Action::DiffTo(0),
+    Action::Redraw,
+];
+
 /// Where a gesture can be asked for, as the reason a variant is or is not on the
 /// sheet's keyboard half.
 ///
@@ -1225,6 +1365,14 @@ fn token_of(event: KeyEvent) -> String {
         KeyCode::PageUp => "PgUp".into(),
         KeyCode::PageDown => "PgDn".into(),
         KeyCode::Esc => "Esc".into(),
+        // **Unreachable today, and carried rather than removed.** `bound_keys` only
+        // spells events `action_for` already bound, and the map binds none of the
+        // codes that would land here: `Enter`, `Backspace`, `Tab`, `Delete`,
+        // `Insert` and `F1` to `F12`. `KeyCode` is an external and effectively open
+        // enum, so a total match is the honest shape, and the `Debug` spelling
+        // happens to match the arms above for the codes most likely to be bound
+        // next. Confirmed unreachable by this row's `/simplify` round rather than
+        // assumed.
         other => format!("{other:?}"),
     };
     // `Space` is drawn by name, because a blank cell is not a cell.
@@ -1294,26 +1442,7 @@ fn mouse_phrases() -> Vec<&'static str> {
     let mut phrases: Vec<&'static str> = Vec::new();
 
     // The `Action` half, from the same exhaustive table the keyboard half reads.
-    for action in [
-        Action::Quit,
-        Action::Scroll(1),
-        Action::ScrollList(1),
-        Action::Page(1),
-        Action::HalfPage(1),
-        Action::File(1),
-        Action::Top,
-        Action::Bottom,
-        Action::ToggleFollow,
-        Action::ToggleMasthead,
-        Action::ToggleRail,
-        Action::ToggleSingle,
-        Action::ToggleSheet,
-        Action::CloseSheet,
-        Action::ListTo(0),
-        Action::ListRow(0),
-        Action::DiffTo(0),
-        Action::Redraw,
-    ] {
+    for action in ALL_ACTIONS {
         if !matches!(reach_of(&action), Reach::Mouse | Reach::Both) {
             continue;
         }
@@ -1371,26 +1500,7 @@ fn the_action_table_covers_every_variant() {
         .filter_map(|(event, _)| action_for(&Event::Key(event), Regions::default()))
         .collect();
 
-    for action in [
-        Action::Quit,
-        Action::Scroll(1),
-        Action::ScrollList(1),
-        Action::Page(1),
-        Action::HalfPage(1),
-        Action::File(1),
-        Action::Top,
-        Action::Bottom,
-        Action::ToggleFollow,
-        Action::ToggleMasthead,
-        Action::ToggleRail,
-        Action::ToggleSingle,
-        Action::ToggleSheet,
-        Action::CloseSheet,
-        Action::ListTo(0),
-        Action::ListRow(0),
-        Action::DiffTo(0),
-        Action::Redraw,
-    ] {
+    for action in ALL_ACTIONS {
         let wanted = matches!(reach_of(&action), Reach::Keyboard | Reach::Both);
         let seen = produced
             .iter()
