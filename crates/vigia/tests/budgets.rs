@@ -2505,3 +2505,107 @@ fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
 fn a_pinned_frame_holds_the_frame_budget() {
     frame_budget_on("shell-i9-single", 0, area(), None, false, true);
 }
+
+/// **What the staged run costs, in the frame it sits in rather than on its own.**
+///
+/// `SPEC.md` §11.2 **B17** ([#313](https://github.com/breferrari/vigia/issues/313)).
+/// Reported rather than gated, which is the same tier
+/// [`what_a_bulk_rewrite_of_undrawn_files_costs`] sits in and for the same reason:
+/// the interesting figure is a *ratio between two arms on one machine*, and a
+/// ceiling on either arm alone would be a number about the runner.
+///
+/// **Interleaved, because a sequential pair under varying load is not a controlled
+/// experiment** — the same trap `sizing_a_whole_burst_does_not_change_the_frame_it_sits_in`
+/// records nearly filing a phantom regression on. Both arms draw the same worktree
+/// through the whole shell frame, and the only difference is whether the frame is
+/// also walking `HEAD^{tree}` against the index and diffing what it finds.
+///
+/// **Why the whole frame and not the walk.** `CLAUDE.md`'s rule, from the episode
+/// where a syscall was measured twice in isolation and read two opposite ways: a
+/// component timed alone answers a question nobody asked, and what decides whether
+/// something is affordable is the thing it sits inside, measured with and without
+/// it. In isolation the staged walk is 430µs against the index-worktree walk's
+/// 2.15ms on a 200-file fixture; that number priced the design and this one prices
+/// the product.
+///
+/// **Measured 2026-08-25 over a hundred files of five hundred lines, half of them
+/// staged: a frame is 5.15ms p50 drawing both runs and 3.10ms drawing one**, which
+/// is 32% of I9's 16ms against 19%. The extra two milliseconds are real and they
+/// are what a second walk and fifty more diffs cost; what makes them affordable is
+/// that the frame has three times that left in headroom and that **nobody pays
+/// them unasked**, since the run is off until a reader presses `a`. Quoted with
+/// the budget rather than alone, which is `CLAUDE.md`'s rule about citing one: a
+/// ceiling without the floor the tool is standing on is a mood.
+#[test]
+fn what_the_staged_run_costs_the_frame_it_is_drawn_in() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::large_diff("staged-frame", FILES, LINES);
+    // Half the changed set staged, so both runs are populated and the pane is
+    // actually drawing the shape B17 added rather than a second empty walk.
+    let staged: Vec<String> = (0..FILES / 2).map(|i| format!("src/mod_{i}.rs")).collect();
+    let mut args: Vec<&str> = vec!["add"];
+    args.extend(staged.iter().map(String::as_str));
+    scratch.git(&args);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let screen = layout(&app, FILES);
+    let theme = Theme::default();
+    let mut buf = Buffer::empty(area());
+
+    let (mut both, mut one) = (Samples::new(SAMPLED_BURSTS), Samples::new(SAMPLED_BURSTS));
+    for round in 1..=SAMPLED_BURSTS {
+        for run in [true, false] {
+            scratch.rewrite_all(FILES, LINES, round);
+            frame.show_staged(run);
+            let (wall, _) = time_cpu(|| {
+                shell_frame(
+                    &mut frame,
+                    &mut app,
+                    &mut highlighter,
+                    &history,
+                    &mut buf,
+                    &theme,
+                    screen,
+                );
+            });
+            // Warm rounds only, for the reason every gate in this file warms.
+            if round > SAMPLED_BURSTS / 4 {
+                if run { both.push(wall) } else { one.push(wall) }
+            }
+        }
+    }
+
+    let with = both.percentile(0.5).expect("a sampled round");
+    let without = one.percentile(0.5).expect("a sampled round");
+
+    // **Non-vacuity on what the run did rather than on what the fixture is.** A
+    // fixture assertion would be true by construction; this says the frame really
+    // did hold two runs on the arm that claims to.
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let staged_files = frame
+        .files()
+        .iter()
+        .filter(|change| change.origin == vigia_core::Origin::Staged)
+        .count();
+    assert!(
+        staged_files > 0 && staged_files < frame.files().len(),
+        "the fixture does not hold both runs, so the two arms are the same frame: \
+         {staged_files} staged of {}",
+        frame.files().len()
+    );
+
+    println!(
+        "staged run: frame p50 {with:?} with both runs, {without:?} with one, over \
+         {FILES} files and {LINES} lines"
+    );
+}
