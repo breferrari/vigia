@@ -5085,8 +5085,16 @@ fn sheet_counter(shown: (usize, usize)) -> String {
 /// no such argument, and an argument of exactly that shape is what produced the
 /// twenty-seven.
 ///
-/// A hundred and thirty-six formats, `16 * 17 / 2` ordered pairs, once per process
-/// rather than once per frame, which is what the lock is for.
+/// `SHEET_TOTAL * (SHEET_TOTAL + 1) / 2` ordered pairs, once per process rather
+/// than once per frame, which is what the lock is for.
+///
+/// **Stated as the expression rather than as a count**, which is
+/// [#288](https://github.com/breferrari/vigia/issues/288)'s doing: it read *"a
+/// hundred and thirty-six formats, `16 * 17 / 2`"*, and the table has grown three
+/// times since that was written, so the number described nothing. The code was
+/// always derived from `SHEET_TOTAL` and only the prose went stale, which is the
+/// shape this file names elsewhere as a restated number that quietly stops
+/// describing its own line.
 static SHEET_COUNTER_FLOOR: LazyLock<usize> = LazyLock::new(|| {
     (1..=SHEET_TOTAL)
         .flat_map(|first| (first..=SHEET_TOTAL).map(move |last| (first, last)))

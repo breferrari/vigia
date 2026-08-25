@@ -1188,18 +1188,30 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
     let (_, drawn) = read_sheet(&buf, &laid);
 
     for cell in readme_gestures() {
-        for token in cell.split_whitespace() {
+        // **Every token of a cell on ONE drawn row, not each token anywhere on the
+        // sheet.** The first spelling of this gate asked the second question and
+        // both audit agents caught it independently: `q` and `point` each appear
+        // somewhere, so a README cell reading `q point` would have passed while the
+        // sheet named no such gesture. Checking the whole sheet text for a token is
+        // nearly vacuous for a common word, and this row exists to close a drift
+        // class rather than to add a check that cannot see one.
+        let wanted: Vec<&str> = cell
+            .split_whitespace()
             // `to` joins the digits' range on both sides and is not a gesture.
-            if token == "to" {
-                continue;
-            }
-            assert!(
-                names(&drawn, token) || drawn.contains(token),
-                "README.md teaches {token:?} (in {cell:?}) and the sheet names it \
-                 nowhere, so a reader who read one and opened the other is \
-                 missing a gesture:\n{drawn}"
-            );
-        }
+            .filter(|t| *t != "to")
+            .collect();
+        assert!(
+            !wanted.is_empty(),
+            "README.md has a gesture cell {cell:?} with nothing in it to look for"
+        );
+        assert!(
+            drawn
+                .lines()
+                .any(|row| wanted.iter().all(|t| names(row, t) || row.contains(t))),
+            "README.md teaches {wanted:?} (in {cell:?}) as one gesture and no single \
+             row of the sheet names all of it, so a reader who read one and opened \
+             the other is missing a gesture:\n{drawn}"
+        );
     }
 }
 
@@ -1428,7 +1440,13 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// The phrases the sheet must carry for the gestures a pointer produces.
 ///
 /// **Compiler-forced rather than derived, and the difference is stated rather than
-/// glossed.** A key sweep can enumerate the keyboard because `action_for` answers
+/// glossed.** The force is two exhaustive `match`es with no wildcard between them,
+/// [`reach_of`]'s and this function's, so a new [`Action`] variant fails to build
+/// until somebody both classifies it and says what teaches it. What [`ALL_ACTIONS`]
+/// adds is only that the two callers walk the same set; it is data and was never
+/// the guarantee. Round 1 of this row's audit found a `_ => panic!()` arm here that
+/// made the second half a runtime failure, and made it one only for a variant
+/// somebody had already added to that array. A key sweep can enumerate the keyboard because `action_for` answers
 /// per key event. Nothing does that for the mouse: *wheel*, *drag a bar* and *click
 /// a track* are event **shapes**, not enum variants, so there is no set to walk.
 ///
@@ -1446,6 +1464,15 @@ fn mouse_phrases() -> Vec<&'static str> {
         if !matches!(reach_of(&action), Reach::Mouse | Reach::Both) {
             continue;
         }
+        // **Exhaustive, with no wildcard, and that is the whole of the claim.** A
+        // `_ => panic!()` arm made a newly pointer-reachable variant a *runtime*
+        // failure, and only if somebody had also added it to `ALL_ACTIONS`; spelled
+        // out, it is a compile error the moment the variant exists. Round 1 of this
+        // row's audit found the wildcard and the docblock claiming otherwise.
+        //
+        // The keyboard-only arms are listed and return nothing rather than being
+        // swept up, because that is what makes the match exhaustive: a new variant
+        // has to be put somewhere by hand.
         phrases.extend(match action {
             // The wheel scrolls whichever region is under the pointer, and the
             // step buttons move one row.
@@ -1453,10 +1480,18 @@ fn mouse_phrases() -> Vec<&'static str> {
             Action::ListTo(_) | Action::DiffTo(_) => vec!["click a track"],
             Action::ListRow(_) => vec!["click a listed file"],
             Action::CloseSheet => vec!["click  ✕"],
-            other => panic!(
-                "{other:?} is reachable by pointer and no phrase teaches it, so \
-                 the sheet cannot be naming it"
-            ),
+            Action::Quit
+            | Action::Page(_)
+            | Action::HalfPage(_)
+            | Action::File(_)
+            | Action::Top
+            | Action::Bottom
+            | Action::ToggleFollow
+            | Action::ToggleMasthead
+            | Action::ToggleRail
+            | Action::ToggleSingle
+            | Action::ToggleSheet
+            | Action::Redraw => Vec::new(),
         });
     }
 
@@ -2903,11 +2938,17 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // Odd slack, which the first three above lack on both axes: halving
             // the slack the other way (`div_ceil`) or taking the trailing margin
             // instead of the leading one reproduces every one of them and misses
-            // these. **The odd row moved again with #297's row**: the sheet is
-            // twenty-one where the body is twenty-three, so this case and the
-            // 43x25 one below it carry the odd slack that 120x30 and 58x30 used
-            // to, which is why this list is read as a set rather than case by
+            // these, which is why this list is read as a set rather than case by
             // case.
+            //
+            // **This pane changed rung with [#288](https://github.com/breferrari/vigia/issues/288)**,
+            // and the comment here described the old one until round 1 of that
+            // row's audit read the two together. It took the one-column rung at
+            // `(12, 1, 56, 21)`, and twenty gestures no longer fit one column in a
+            // twenty-five-row pane, so it takes the two-column rung at
+            // `(5, 4, 71, 16)`. It still carries odd slack and still tests the
+            // halving, on both axes now rather than one: 81 less the 71 it draws
+            // is ten, and the body less sixteen is nine.
             (81, 25, (5, 4, 71, 16)),
             // The whole table in one column reaches this width since #286, so
             // where this used to be a dropping rung of thirteen rows it is the
