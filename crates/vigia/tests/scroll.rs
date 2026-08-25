@@ -881,6 +881,16 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                     // so seeding with a scroll alone made the pinned run byte
                     // identical to the unpinned one for the *other* action B16
                     // changed.
+                    //
+                    // **Defence rather than behaviour, and recorded as such**,
+                    // which is B14's own precedent for a reorder no pane reaches:
+                    // removing this seed leaves the suite green, because this gate
+                    // compares two *heights* within one configuration and `Top`
+                    // reads no height in either. What it buys is that the pinned
+                    // half exercises a state that differs at all, so an action
+                    // that starts reading a height only under a pin is seen here
+                    // rather than in production. That is exactly how `Bottom` got
+                    // out.
                     app.apply(Action::File(2), &mut frame, full)
                         .expect("seed a file");
                     app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
