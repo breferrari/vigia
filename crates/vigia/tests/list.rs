@@ -2034,3 +2034,117 @@ fn a_one_row_list_draws_a_file_rather_than_a_label() {
         "two rows do not buy a label and the file beneath it: {plan:?}"
     );
 }
+
+/// **The plan's files run contiguously from `top`, which is what lets the painter
+/// count rather than ask.**
+///
+/// `Painter::list` walks `view.list` and increments a file index per drawn file,
+/// starting at `view.list_top`. That is only correct while the plan's files are
+/// `top`, `top + 1`, … with nothing skipped — and it is a coupling that prose
+/// alone holds, between a function in `view.rs` and a loop in `render.rs` that
+/// never calls it. If the plan ever grew a gap, every row below it would draw the
+/// caret and the hover mark against the wrong file, silently.
+///
+/// Swept over every `(top, rows)` the fixture can produce, on a grouped list,
+/// because separators are the only thing that has ever made the two counts differ.
+#[test]
+fn the_plans_files_run_contiguously_from_the_top_it_was_given() {
+    let scratch = two_runs("list-contiguous");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    let mut saw_a_separator = false;
+    for top in 0..files.len() {
+        for rows in 1..=files.len() + 3 {
+            let plan = vigia::list_plan(files, top, rows);
+            saw_a_separator |= plan
+                .iter()
+                .any(|slot| matches!(slot, vigia::Slot::Group { .. }));
+            let drawn: Vec<usize> = plan
+                .iter()
+                .filter_map(|slot| match slot {
+                    vigia::Slot::File(at) => Some(*at),
+                    vigia::Slot::Group { .. } => None,
+                })
+                .collect();
+            let want: Vec<usize> = (top..top + drawn.len()).collect();
+            assert_eq!(
+                drawn, want,
+                "the plan from top {top} with {rows} rows drew {drawn:?}, which is \
+                 not a run starting at {top}: the painter counts files as it draws \
+                 them and would mark the wrong one"
+            );
+            assert!(
+                plan.len() <= rows,
+                "the plan from top {top} drew {} rows where the region has {rows}",
+                plan.len()
+            );
+        }
+    }
+    assert!(
+        saw_a_separator,
+        "the sweep drew no separator at all, so it never exercised the only thing \
+         that can make the two counts differ"
+    );
+}
+
+/// **The list's scrollbar and its drag agree about how far the window can go.**
+///
+/// All three terms of that bar are files: the position is a file index, the total
+/// is the changed set, and the span has to be one too. Handed the *row* count it
+/// over-reported how much of the list was on screen, so the thumb drew longer than
+/// the travel `Action::ListTo` maps the track onto — the pointer reached the
+/// bottom of a thumb that said it was already there.
+#[test]
+fn the_lists_bar_is_measured_in_files_at_both_ends() {
+    let scratch = two_runs("list-bar-units");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let body = split(80, 16, frame.files().len());
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    assert!(
+        view.list
+            .iter()
+            .any(|row| matches!(row, vigia::ListRow::Group { .. })),
+        "the fixture drew no separator, so the row count and the file count are \
+         the same number and this asserts nothing"
+    );
+    assert_eq!(
+        view.listed_files(),
+        view.list
+            .iter()
+            .filter(|row| matches!(row, vigia::ListRow::File(_)))
+            .count(),
+        "the span counts something other than the files on screen"
+    );
+    assert!(
+        view.listed_files() < view.list.len(),
+        "a grouped window spends no row on a separator, so the two units cannot \
+         be told apart here"
+    );
+
+    // And the span never claims more of the list than there is travel for: the
+    // window can start at `last_top` at the furthest, so what it shows plus what
+    // it can still scroll past has to reach the whole changed set.
+    let ceiling = vigia::last_top(frame.files(), view.listed_files().max(1));
+    assert!(
+        ceiling + view.listed_files() >= view.files,
+        "the window shows {} files and can start no later than {ceiling}, which \
+         together do not reach the {} the tree has: the bar would report travel \
+         the list does not have",
+        view.listed_files(),
+        view.files
+    );
+}

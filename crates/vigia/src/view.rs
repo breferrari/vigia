@@ -1423,6 +1423,20 @@ impl View {
         }
     }
 
+    /// How many **files** the pinned list is showing, which is not how many rows
+    /// it drew.
+    ///
+    /// **The list's scrollbar is measured in files at both ends** — its position is
+    /// a file index and its total is the changed-file count — so the span between
+    /// them has to be one too. `View::list.len()` is the row count, and since
+    /// [#313](https://github.com/breferrari/vigia/issues/313) a grouped window
+    /// spends one or two of those on separators: passed as the span it claimed the
+    /// window showed more files than it does, and the thumb drew longer than the
+    /// travel the drag actually has.
+    pub fn listed_files(&self) -> usize {
+        self.list.iter().filter_map(ListRow::entry).count()
+    }
+
     /// Collect the rows visible from `position`, and no others.
     ///
     /// `height` is the body's height in rows. Zero is legal and gives an empty

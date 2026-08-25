@@ -4340,7 +4340,12 @@ pub fn render(
                 Grabbed::List,
                 bar,
                 view.list_top as u64,
-                body.list as u64,
+                // **Files, not rows**, so all three terms of this bar are in one
+                // unit: the position is a file index and the total is the changed
+                // set. A grouped window spends rows on separators, so `body.list`
+                // over-reports how much of the list is on screen and drew a thumb
+                // longer than the travel `Action::ListTo` actually has.
+                view.listed_files() as u64,
                 view.files as u64,
             );
         }
