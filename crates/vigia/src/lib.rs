@@ -358,14 +358,27 @@ fn request_for_one(arg: &OsStr) -> Request {
     }
 }
 
+/// Tell a frame what the shell's view defaults ask it to walk.
+///
+/// **One line, and it is a seam rather than a convenience.** `App` holds what was
+/// *asked for* and `Frame` holds what is *walked*, which is the same split
+/// `Chrome::rail` and `Body::rail` draw one region over; everything that sets the
+/// first has to set the second, and there are two such places — the config at
+/// startup and `a` at run time. Written twice they drifted immediately: the
+/// keypress was wired and the file was not, so `staged = on` set a flag nothing
+/// acted on.
+///
+/// `pub` and `doc(hidden)` for `tests/config.rs`, which drives the startup path
+/// without a terminal.
+#[doc(hidden)]
+pub fn arm_frame(frame: &mut vigia_core::Frame, app: &App) {
+    frame.show_staged(app.staged());
+}
+
 /// Watch the working tree at `path` and draw it until the reader quits.
 pub fn run(path: &Path) -> Result<(), Failure> {
     let worktree = Worktree::discover(path)?;
     let mut frame = worktree.frame();
-
-    // Before the screen is taken, so a repository that fails on its first walk
-    // reports on a terminal the reader can still see.
-    frame.advance()?;
 
     // Same rule, same reason, one input over: a `VIGIA_THEME` that names nothing
     // or a file that does not parse has to be said on a terminal the reader can
@@ -399,6 +412,25 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Read once, before the screen is taken, so the frame path never asks the
     // filesystem what the reader prefers. Absent is not an error; unreadable is.
     let config = config::from_env(|key| std::env::var(key).ok())?;
+
+    // **The view defaults reach the frame before its first walk, not just the
+    // shell** ([#313](https://github.com/breferrari/vigia/issues/313)). Three of
+    // the four keys decide how rows the frame already holds are arranged, so
+    // setting them on `App` is all they need. `staged` decides what the frame
+    // *walks*, so a reader whose file says `staged = on` has to be honoured here
+    // or the key sets a flag nothing acts on and the opening pane is the one they
+    // were trying to change. Same defect `Action::ToggleStaged` had against the
+    // keypress, on the path that has no keypress to trigger it.
+    //
+    // **Which is why the first walk moved below the config read.** It used to run
+    // three lines after `Worktree::discover`, before this file had been looked at,
+    // so no amount of telling the frame afterwards could have reached it without
+    // walking twice. The rule that put it early is untouched and is why it is
+    // still above `Session::enter`: a repository that fails on its first walk
+    // reports on a terminal the reader can still see, and so does a config file
+    // that does not parse. The two now happen in the order they are needed in.
+    arm_frame(&mut frame, &App::configured(config));
+    frame.advance()?;
 
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
     // sees it. Built here because the handler on it is armed on the next line,

@@ -584,3 +584,62 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
         );
     }
 }
+
+/// **`staged = on` in the file reaches the frame, not just the shell.**
+///
+/// The other three keys decide how rows the frame already holds are *arranged*,
+/// so setting them on `App` is the whole of what they need. `staged` decides what
+/// the frame **walks**, and `vigia_core::Frame::show_staged` is what tells it —
+/// so a shell configured from a file has to say so before its first advance or
+/// the key sets a flag nothing acts on and the reader sees the pane they were
+/// trying to change.
+///
+/// It is the same defect `Action::ToggleStaged` had against the keypress, on the
+/// path that has no keypress to trigger it, which is why it is worth a gate of its
+/// own rather than an assertion inside one: nothing about the toggle's own test
+/// reaches this.
+#[test]
+fn a_configured_staged_run_is_walked_on_the_first_frame() {
+    let scratch = support::Scratch::new("config-staged");
+    scratch.write("src/a.rs", "one\ntwo\n");
+    scratch.write("src/b.rs", "alpha\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    scratch.write("src/a.rs", "one\nSTAGED\n");
+    scratch.git(&["add", "src/a.rs"]);
+    scratch.write("src/b.rs", "alpha\nUNSTAGED\n");
+
+    let worktree = scratch.worktree();
+
+    // What `main` does for a reader whose file says `staged = on`.
+    let config = Config {
+        staged: true,
+        ..Config::default()
+    };
+    let app = App::configured(config);
+    let mut frame = worktree.frame();
+    vigia::arm_frame(&mut frame, &app);
+    frame.advance().expect("advance");
+
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.origin == vigia_core::Origin::Staged),
+        "a shell configured with `staged = on` walked one comparison, so the key \
+         sets a flag nothing acts on"
+    );
+
+    // And the default is untouched: a reader with no file gets one run.
+    let plain = App::configured(Config::default());
+    let mut frame = worktree.frame();
+    vigia::arm_frame(&mut frame, &plain);
+    frame.advance().expect("advance");
+    assert!(
+        frame
+            .files()
+            .iter()
+            .all(|change| change.origin == vigia_core::Origin::Unstaged),
+        "a shell with no config file drew the staged run anyway"
+    );
+}
