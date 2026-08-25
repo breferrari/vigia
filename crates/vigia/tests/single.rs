@@ -1465,7 +1465,12 @@ fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
     //
     // Every straddle elsewhere in this file is reached with `Scroll` or `DiffTo`,
     // both of which already anchor, which is exactly why nothing saw it.
-    let scratch = fixture("shell-single-short-tail");
+    // **A fixture of one-line files, not this file's usual tall one.** A short
+    // tail means a *file shorter than the pane*, and every file in `fixture` is
+    // twenty-two rows against a thirteen-row body, so a jump to the last one
+    // fills the screen and there is no tail to protect. The first version of this
+    // gate used it and was vacuous: the mutation that re-adds the leak survived.
+    let scratch = Scratch::large_diff("shell-single-short-tail", FILES, 1);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
@@ -1487,12 +1492,16 @@ fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
         "the jump did not land on the last file's heading"
     );
 
-    // Non-vacuity: the screen has to be short, or the back-up has nothing to fire
-    // on and this gate would pass against every licence.
-    let tail = SPAN.min(body());
+    // **Non-vacuity, with no escape clause.** The screen has to be genuinely
+    // short or the back-up has nothing to fire on and this gate passes against
+    // every licence, which is what the first version did: it carried an
+    // `|| tail == body()` alternative that was true on its own fixture and made
+    // the assertion unfalsifiable.
     assert!(
-        jumped.rows.len() < body() || tail == body(),
-        "the jump filled the pane, so there is no short tail to protect"
+        jumped.rows.len() < body(),
+        "the jump filled the pane with {} rows, so there is no short tail to \
+         protect and this gate cannot fail",
+        jumped.rows.len()
     );
 
     for round in 0..3 {
