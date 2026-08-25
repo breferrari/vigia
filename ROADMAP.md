@@ -598,6 +598,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 |---|---|---|
 | ✅ | A symlink diffs as its target's contents, and on Windows was never reusable | [#15](https://github.com/breferrari/vigia/issues/15) |
 | ⬜ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
+| ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ⬜ | A frame reads a whole file to discover it is binary | [#18](https://github.com/breferrari/vigia/issues/18) |
@@ -667,6 +668,7 @@ Everything on the deferral shelf below has a milestone here, so shelved work is 
 | ⬜ | The host-versus-work attribution needs a resolution floor, because the CPU clock is coarser than the budget it defends | [#270](https://github.com/breferrari/vigia/issues/270) |
 | ⬜ | A commit can describe a gate it deleted, and the suite stays green because a missing gate is what no gate can see | [#289](https://github.com/breferrari/vigia/issues/289) |
 | ✅ | `take-next` step 8 names a recurrence and prescribes a workaround, with no point at which the recurrence becomes a bug | [#290](https://github.com/breferrari/vigia/issues/290) |
+| ⬜ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ⬜ | The mutation harness is re-improvised every pass, and the same footgun has fired in four of them | [#299](https://github.com/breferrari/vigia/issues/299) |
 | ⬜ | A PR reached ready, mergeable and never checked, because the push and the ready raced | [#301](https://github.com/breferrari/vigia/issues/301) |
 | ⬜ | take-next says a draft shows no checks, and this repo's draft shows a red one | [#293](https://github.com/breferrari/vigia/issues/293) |
