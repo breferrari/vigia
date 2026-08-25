@@ -339,6 +339,14 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
         // silently, is exactly what refusing unknown keys exists to prevent, so
         // the drift produced the failure the whole grammar is designed against.
         // `theme::parse` has always read its own `set` for this reason.
+        //
+        // **A mutation deleting this branch survives the suite, and that is
+        // accurate rather than a gap.** The two lists agree today, so `set` always
+        // returns `true` and the branch is unreachable: it is defence against an
+        // edit nobody has made. What it buys when that edit happens is the
+        // difference between a reader seeing an error and a reader seeing nothing,
+        // because `tests/config.rs::every_key_is_a_field_and_every_field_is_a_key`
+        // catches the drift in CI either way.
         if !config.set(key, on) {
             return Err(ConfigError::UnknownKey {
                 line,
