@@ -871,6 +871,40 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
             "the sheet does not name the mouse gesture {gesture:?}"
         );
     }
+
+    // **And every keyboard verb in full, which nothing checked until #297's
+    // mutation round.** The keys above say a gesture is *findable*; the verb is
+    // what says what it does, and `GESTURES` matches only the prefix both
+    // spellings share, so the wide rung's own wording was unchecked at every
+    // rung. Shortening `s`'s wide verb from `one file, or the whole diff` to
+    // `one file` moved no width, lost no gesture, kept every token, and left the
+    // whole file green.
+    //
+    // This pane takes the wide one-column rung, so every row here draws its wide
+    // spelling. Restated rather than imported for [`TITLE`]'s reason: a gate
+    // reading `KEYBOARD` would agree with it by construction, and what this
+    // exists to catch is the table changing without anybody meaning it to.
+    for verb in [
+        "scroll a row",
+        "page",
+        "half a page",
+        "first / last changed file",
+        "next / previous changed file",
+        "jump to that row of the list",
+        "scroll the pinned file list",
+        "follow the newest change",
+        "show or hide the churn band",
+        "show or hide the left rail",
+        "one file, or the whole diff",
+        "this sheet",
+        "quit",
+    ] {
+        assert!(
+            drawn.contains(verb),
+            "the wide sheet does not spell the verb {verb:?}, so a reader is \
+             being told less than the table says:\n{drawn}"
+        );
+    }
 }
 
 /// Every gesture the sheet can draw, as the token a reader would look for.
