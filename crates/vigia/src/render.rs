@@ -4462,7 +4462,7 @@ fn kept_keyboard(from: usize) -> impl Iterator<Item = &'static Gesture> {
 /// It goes before any keyboard row for the reason the hint bar drops `JK files`
 /// first: a mouse gesture announces itself by being tried, where a key does not
 /// exist until somebody says it does.
-const MOUSE: [Gesture; 5] = [
+const MOUSE: [Gesture; 7] = [
     Gesture {
         keys: ["wheel", "wheel"],
         verb: ["scroll what you point at", "what you point at"],
@@ -4482,6 +4482,47 @@ const MOUSE: [Gesture; 5] = [
     Gesture {
         keys: ["click a listed file", "click a file"],
         verb: ["jump the diff to it", "jump the diff to it"],
+    },
+    // **The sheet's own close control, which was named nowhere at all until
+    // [#288](https://github.com/breferrari/vigia/issues/288)**: not here, not in
+    // `README.md`'s Mouse table, and so not on the sheet a reader opens to find out
+    // what the pane answers. It is the only cell of this element a click acts on,
+    // and the only way to learn it was a control rather than decoration was to rest
+    // a pointer on it and notice it brighten.
+    //
+    // **`✕` in a keys cell needs no ruling of its own.** `SHEET_CLOSE` records that
+    // the glyph sits outside CP437 exactly as the scrollbar's `▲` and `▼` do, and
+    // the row above already draws those here, so this inherits a decision rather
+    // than reopening one. [#237](https://github.com/breferrari/vigia/issues/237)
+    // tracks the marks outside CP437 that have no rung, and `✕` is not among them.
+    //
+    // **The verb says what it does and not how it looks.** It takes two weights
+    // rather than three since [#298](https://github.com/breferrari/vigia/issues/298),
+    // because it dismisses on the press, so wording that implied a held state would
+    // be teaching a rung that cannot draw.
+    //
+    // **`close the sheet` rather than `close this sheet`, and the difference is a
+    // gate rather than taste.** `tests/sheet.rs` counts the gestures on a page by
+    // asking which of its restated tokens the page contains, and `this sheet` is
+    // already the token for `?`. A verb spelling it made every page carrying this
+    // row count one gesture too many, which `the_counter_is_right_where_a_page_spans_the_mouse_heading`
+    // caught as a counter disagreeing with its own page.
+    Gesture {
+        keys: ["click  ✕", "click  ✕"],
+        verb: ["close the sheet", "close the sheet"],
+    },
+    // **The hover mark, which `README.md` has taught since
+    // [#189](https://github.com/breferrari/vigia/issues/189) and this table never
+    // did.** That is the drift #288 was filed for: two hand-written lists, one of
+    // them a table of six and the other a table of five, with nothing comparing
+    // them.
+    //
+    // **One row for three marked surfaces**, which is `SPEC.md` §11.1's own reading:
+    // a step button, a bar and a listed file all take the pointer's single colour,
+    // so what a reader needs to know is that pointing marks things, not which three.
+    Gesture {
+        keys: ["just point", "just point"],
+        verb: ["it marks itself", "it marks itself"],
     },
 ];
 
