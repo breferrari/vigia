@@ -427,7 +427,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
 | ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
 | ✅ | Nothing pins the pane to one file, so reading a file means scrolling past its end into the next | [#297](https://github.com/breferrari/vigia/issues/297) |
-| ⬜ | decision: nothing carries a view default, so every pane starts with the toggles a reader has already chosen turned off | [#306](https://github.com/breferrari/vigia/issues/306) |
+| ✅ | decision: nothing carries a view default, so every pane starts with the toggles a reader has already chosen turned off. **Ruled: a second file**, `~/.config/vigia/config` | [#306](https://github.com/breferrari/vigia/issues/306) |
+| ⬜ | Build: the ruling says a reader can set view defaults and nothing reads the file | [#309](https://github.com/breferrari/vigia/issues/309) |
 | ✅ | Braille returns to the band, and the rung stops being a constant | [#244](https://github.com/breferrari/vigia/issues/244) |
 | ✅ | The mockup insets its text and the shell draws full-bleed — a fourth departure, unrecorded | [#119](https://github.com/breferrari/vigia/issues/119) |
 | ✅ | Half-page scroll: `d` and `u`, the `less` bindings | [#121](https://github.com/breferrari/vigia/issues/121) |

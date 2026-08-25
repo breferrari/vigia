@@ -880,3 +880,60 @@ moves, grep for the places that state the rule it obeyed, not only the places th
 implement it** — and when a fix is *reverted* rather than extended, grep again,
 because a revert leaves a description of something that no longer exists and reads
 exactly like a description of something that does.
+
+## B6 — the amendment the ruling predicted, and the one-line defect that shaped it
+
+`SPEC.md` §11.2 B6 is the ruling and §11.1 is the behaviour. This is why the shape
+is two files rather than three more keys in one.
+
+**B6 predicted this amendment and named the test it would have to pass.** Its
+closing line reads *"there is nowhere to put a setting that is neither of those…
+the next setting that is neither a preference about you nor a fact about the
+terminal in front of you will find it again."* A view default is not in that gap.
+It is B6's **first** kind without strain, a preference about you, and B6 already
+rules that those live in a file. So the amendment **applies** the taxonomy rather
+than widening it, and B7 remains the only candidate that has ever been in the gap.
+
+That distinction is what kept this cheap. Widening B6 would have needed the
+argument B7 was refused for; applying it needed only a place to look.
+
+**The shape was decided by a defect, not by taste, and the defect is one line of
+`theme::from_env`.** That function resolves `VIGIA_THEME` first, and a built-in
+name wins outright:
+
+```rust
+match Theme::named(named) {
+    Some(built_in) => built_in,
+    None => load(Path::new(named))?,
+}
+```
+
+So `VIGIA_THEME=dark` **never opens the theme file at all**. Had the view keys
+gone in beside the colours, a reader naming a palette for one session would have
+silently lost their view defaults, on a gesture with nothing to do with the
+settings it discarded. That is the same class of failure the theme parser already
+refuses unknown keys to avoid: a setting that does nothing, with no way to find
+out why.
+
+The tidiness argument points the same way and is the weaker half: a file called
+`theme` holding `rail on` reads as a mistake. It is recorded second because it
+would not have been enough on its own.
+
+**What the two files share is everything that costs something**: one format, one
+discovery rule (`HOME` then `USERPROFILE`, each checked for emptiness before the
+next is tried), one error path, one report-before-the-takeover order. What they do
+not share is a subject. The amendment therefore adds a place to look and three
+keys to look for, which is the same shape the `VIGIA_GLYPHS` amendment took when
+it added a detector rather than a surface.
+
+**`follow` is excluded, and that is I5 doing work rather than an omission.**
+*Correct with zero interaction* is a promise about the program; a file able to
+turn following off would quietly make it a promise about one reader's
+configuration. The three keys that are in have in common that every combination of
+them is a legitimate pane, which is not true of a pane that has stopped following.
+
+**And no variable joins them.** A variable exists for *not this time*, which is
+`VIGIA_THEME`'s whole job. Here that sentence is already spoken by `m`, `r` and
+`s`, one press each and named on the gestures sheet, so a variable would be a
+second spelling of something the pane says better. B6's count of one is untouched;
+its count of files is what moved.
