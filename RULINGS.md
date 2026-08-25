@@ -825,11 +825,17 @@ straddle in `tests/single.rs` was reached with `Action::Scroll`, which anchors. 
 suite that reaches one state four ways, all of them the same way, cannot see the
 fifth.
 
-`ToggleSingle` anchors on the way in now, which is the same argument
+`ToggleSingle` anchored on the way in, which is the same argument
 `Action::Bottom`'s arm already makes: a pin is a claim about what the diff may
 **reach**, not about what belongs on the top row, so when the position it inherits
-overruns the pinned file the pager's answer is the right one. Only on the way in;
-unpinning restores no claim of its own.
+overruns the pinned file the pager's answer is the right one.
+
+**That fix leaked and round seven replaced it; this paragraph is kept because the
+argument survived and only the mechanism changed.** `anchored` outlives the pin,
+so a jump onto a short tail followed by `s` and `s` left an *unpinned* frame
+anchored and backed the reader out of the file the jump was for. The licence is a
+term in the guard now, `anchored || landed_inside || single`, which has no state
+to leak and is excluded on a pinned jump for free.
 
 **And the gate that sold the pin's one cheap property was vacuous.**
 `a_pinned_frame_counts_no_height_at_all` asserted `measured == 0` on a second
@@ -841,3 +847,35 @@ its spans unproven, so the zero means what the ruling says it means.
 
 Both are the same shape as everything else this audit found: **a claim that was
 true for the cases anyone had tried.**
+
+## B16 — rounds seven and eight: where a reverted fix leaves its description
+
+Round seven replaced round six's mechanism and round eight found the two places
+that still described the old one. Both are prose, neither runs, and the second is
+the reason this is written down rather than fixed quietly.
+
+**What changed.** The pin's back-up was licensed by writing `anchored` from the
+toggle's arm; it is licensed by a **term** now, `anchored || landed_inside ||
+single`. The argument did not move: a pin is a claim about what the diff may
+reach rather than about what belongs on the top row, so a position that overruns
+the pinned file gets the pager's answer. Only the mechanism moved, because the
+flag outlives the pin and the term does not.
+
+**Where the description stayed behind.** Round seven corrected `app.rs`,
+`view.rs`, `reads.rs`, `scroll.rs` and one number in this file, and left
+`SPEC.md` §11.2 B16 and this file's own round-six section saying the pin sets
+`anchored`. Code and `SPEC.md` disagreeing is a stop condition in `CLAUDE.md`, and
+it went one round undetected.
+
+**That is the seventh instance of one mechanism and the last worth counting.**
+Every serious finding on this branch after round one was a claim that stopped
+being true when the code moved under it, and the count of *statement* sites has
+been consistently larger than the count of *implementation* sites: one arm, three
+prose sites; one guard, two rulings. No gate can read a comment, so the only
+instrument is a reader holding the sentence against the code.
+
+The rule this branch earns, for anyone changing this area: **when a behaviour
+moves, grep for the places that state the rule it obeyed, not only the places that
+implement it** — and when a fix is *reverted* rather than extended, grep again,
+because a revert leaves a description of something that no longer exists and reads
+exactly like a description of something that does.
