@@ -730,6 +730,27 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // viewport by the wrong amount. So the claim is checked against `App::apply`
     // itself, by driving each action twice with heights that could not both be
     // right and asserting the answer did not depend on which.
+    //
+    // **Two things were blind here until [#297](https://github.com/breferrari/vigia/issues/297),
+    // and between them they let a wrong classification ship.**
+    //
+    // The first is that every `App` was unpinned. `Action::Bottom` reads the
+    // height only under `SPEC.md` §11.2 B16's pin, where it rests the file's last
+    // row on the bottom; unpinned it is a jump to a heading and no height can
+    // move it. So the classification was checked in the one state that cannot see
+    // it, `Bottom` stayed in the `false` arm, `crate::run` handed it a zero, and
+    // the resting row saturated back to the whole span. Every action is driven
+    // pinned **and** unpinned now, and `needs_height` is a claim about whether
+    // *any* reachable state reads it.
+    //
+    // The second is that it compared `View::top`, which is the position after
+    // `View::collect` has resolved it. That walk clamps, so two different
+    // requests land on the same drawn row and the difference the gate exists to
+    // see is exactly what the clamp hides: `G` writing the whole span and `G`
+    // writing the resting row draw the identical screen. What separates them is
+    // the position the shell **keeps**, which is what the next action in the same
+    // drained batch moves from. `App::position` is read before any view, and the
+    // drawn top is kept as a second signal rather than the only one.
     let scratch = fixture("shell-scroll-height");
     let worktree = scratch.worktree();
 
@@ -750,6 +771,10 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // no-op is exactly the shape that passes a height check vacuously.
         Action::File(1),
         Action::File(-1),
+        // The pin itself, which moves no viewport and so must not be told a
+        // height. It is in this list because B16 added it, and the list is what
+        // a new variant has to reach.
+        Action::ToggleSingle,
     ];
 
     // **Built once, because none of it varies with the action or the height.**
@@ -767,34 +792,52 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     let full = body();
 
     for action in actions {
-        // Two heights far enough apart that any action reading one would land
-        // somewhere different. Started from the same place each time.
-        let landed: Vec<Position> = [0usize, full]
-            .into_iter()
-            .map(|height| {
-                let mut app = App::new();
-                app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
-                    .expect("seed");
-                app.apply(action, &mut frame, height).expect("apply");
-                app.view(&mut frame, &mut highlighter, &history, split())
-                    .expect("view")
-                    .top
-            })
-            .collect();
+        // Whether the answer moved with the height, in each configuration.
+        let mut moved_anywhere = false;
+        for pinned in [false, true] {
+            // Two heights far enough apart that any action reading one would land
+            // somewhere different. Started from the same place each time.
+            let landed: Vec<(Position, Position)> = [0usize, full]
+                .into_iter()
+                .map(|height| {
+                    let mut app = App::new();
+                    app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
+                        .expect("seed");
+                    if pinned {
+                        app.apply(Action::ToggleSingle, &mut frame, full)
+                            .expect("pin");
+                    }
+                    app.apply(action, &mut frame, height).expect("apply");
+                    // The retained request first, then what the walk resolved it
+                    // to. The clamp can make two requests draw one screen, so the
+                    // first is the sensitive one and the second is corroboration.
+                    let kept = app.position();
+                    let drawn = app
+                        .view(&mut frame, &mut highlighter, &history, split())
+                        .expect("view")
+                        .top;
+                    (kept, drawn)
+                })
+                .collect();
 
-        if action.needs_height() {
-            assert_ne!(
-                landed[0], landed[1],
-                "{action:?} says it needs the height and lands in the same place \
-                 without one, so either the claim or the action is wrong"
-            );
-        } else {
-            assert_eq!(
-                landed[0], landed[1],
+            let moved = landed[0] != landed[1];
+            moved_anywhere |= moved;
+            assert!(
+                action.needs_height() || !moved,
                 "{action:?} says it does not need the height and moved when it \
-                 changed, so the shell is about to hand it a zero"
+                 changed{}, so the shell is about to hand it a zero: {:?} against \
+                 {:?}",
+                if pinned { " under a pin" } else { "" },
+                landed[0],
+                landed[1]
             );
         }
+
+        assert!(
+            !action.needs_height() || moved_anywhere,
+            "{action:?} says it needs the height and lands in the same place \
+             without one, pinned or not, so either the claim or the action is wrong"
+        );
     }
 }
 
@@ -1136,4 +1179,85 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
             view.top
         );
     }
+}
+
+#[test]
+fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
+    // **`a_position_survives_the_file_it_pointed_at_disappearing` above covers the
+    // *draw*; this covers the *gesture*, and until #297's second audit round
+    // nothing did.** That one lets `View::collect` clamp a stale position on the
+    // way to the screen, which is the path a redraw takes. `App::up` reaches the
+    // frame ahead of any collect: it walks back a file at a time asking each how
+    // tall it is, through `rows_in` into `Frame::diff`, which indexes the file
+    // list directly and panics past its end.
+    //
+    // **The batch is what makes it reachable.** The shell drains every pending
+    // action before it paints, so a `Wake::Tick` carrying an agent's commit and a
+    // wheel-up arriving together are applied with no frame between them, and the
+    // position resolved against the old list is handed straight to the new one.
+    // No test drove a scroll across an advance without a paint, so the crash sat
+    // behind a suite that exercised both halves separately.
+    let scratch = fixture("shell-scroll-back-shrink");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // Deep into the changed set, resolved, so the position names a real file.
+    app.apply(Action::Bottom, &mut frame, body())
+        .expect("apply");
+    let far = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view")
+        .top;
+    assert_eq!(
+        far.file,
+        FILES - 1,
+        "the fixture never reached its last file"
+    );
+
+    // The other pane commits, and the wheel-up arrives in the same drain.
+    scratch.commit_all("everything the agent was working on");
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 0, "the worktree is not clean");
+
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("a scroll back over a changed set that is gone");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view");
+    assert!(view.rows.is_empty(), "a clean worktree drew diff rows");
+
+    // And the half-shrunk case, which is the commoner one: files still exist and
+    // the position names one past their end.
+    let scratch = fixture("shell-scroll-back-half");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    app.apply(Action::Bottom, &mut frame, body())
+        .expect("apply");
+    let _ = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view");
+    for index in (FILES / 2)..FILES {
+        scratch.git(&["checkout", "--", &format!("src/mod_{index}.rs")]);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
+
+    app.apply(Action::Scroll(-(SPAN as isize)), &mut frame, body())
+        .expect("a scroll back over a shortened changed set");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view");
+    assert!(
+        view.top.file < FILES / 2,
+        "the walk back left the position on file {}, past the {} that exist",
+        view.top.file,
+        FILES / 2
+    );
 }

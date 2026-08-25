@@ -431,7 +431,9 @@ for, they describe the same pane at every width.
 **What it cost, which is the sheet and not the pane.** A key is a row, so the
 gestures table went from eleven keyboard rows to twelve and every row count in
 §11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x
-15` and `71 x 15`, the roomy rung to `68 x 30`. **No width moved**, and that is what
+15` and `71 x 15`, the roomy rung to `68 x 30`. (**Those numbers are B14's own and
+are not current**: B15 and then B16 moved them again. The current ones are in
+§11.1.) **No width moved**, and that is what
 kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left
 rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28
 wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording
@@ -502,6 +504,7 @@ still counted to seventeen, and every rung height and reachability boundary §11
 states was untouched. #295 added a row and moved every one of them. (**Those
 numbers are B15's own and are not current**: B16 added `s` the next day and moved
 them again. The current ones are in §11.1.)
+
 ## B16 — the pin makes the frame path cheaper, and the guard that would have made it dearer
 
 The ruling is `SPEC.md` §11.2 B16 and the behaviour is §11.1. This is the

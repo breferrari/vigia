@@ -4380,7 +4380,7 @@ const KEYBOARD: [Gesture; 13] = [
     // **Both cells sit inside the field maxima this table already had**, so no
     // rung's width moves: the wide verb field is 28 on `next / previous changed
     // file` and the tight one is 19 on the mouse group's `a row, held repeats`,
-    // where these are 26 and 13. B16's row costs height and nothing else, which
+    // where these are 27 and 13. B16's row costs height and nothing else, which
     // is the same trade B14's did.
     Gesture {
         keys: ["s", "s"],

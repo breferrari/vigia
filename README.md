@@ -223,7 +223,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `j` `k` `↑` `↓` | scroll a row |
 | `Space` `PgDn` `PgUp` | page |
 | `d` `u` | half a page |
-| `g` `G` | first / last file |
+| `g` `G` | first / last file, or the ends of the pinned file |
 | `n` `p` `→` `←` | next / previous file |
 | `1` to `6` | jump to that list row |
 | `J` `K` | scroll the pinned list |

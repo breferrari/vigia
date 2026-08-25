@@ -782,7 +782,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     // that row of the list`, so `d  u` could become `d  y` (a key the map does not
     // bind, taught to the reader as one it does) with every gate in the suite
     // green: the verb is untouched, so the width, the row count, the frame and
-    // `GESTURES`' sixteen all stay exactly as they were.
+    // every one of `GESTURES` stays exactly as it was.
     //
     // **The furniture has to go too, and leaving it in is the first thing that
     // went wrong here.** The title row carries `gestures` from column 3 and the
@@ -1134,7 +1134,7 @@ fn read_sheet(buf: &Buffer, laid: &Regions) -> (usize, String) {
 #[test]
 fn the_sheet_spends_width_before_it_spends_gestures() {
     // **#220's whole claim, at the pane that reported it.** A pane too short for
-    // the seventeen-row column but wide enough to put the mouse group beside the
+    // the twenty-one-row column but wide enough to put the mouse group beside the
     // keyboard group draws every gesture, where before this rung it dropped the
     // whole mouse group and said nothing about it.
     //
@@ -1522,7 +1522,7 @@ fn roomy_shape() -> Vec<RoomyRow> {
 
 #[test]
 fn the_roomy_rung_is_the_size_the_ruling_states() {
-    // **`SPEC.md` §11.1 states 68 by 30, and Mock A drew 76 by 29.** The
+    // **`SPEC.md` §11.1 states 68 by 31, and Mock A drew 76 by 29.** The
     // difference is the twelve blank columns the mock leaves after its verb field
     // against the four before its keys, which is the box the reader drew rather
     // than a table they designed: §11.1's own rule for a mockup and a drawer that
@@ -1765,7 +1765,7 @@ fn the_roomy_rung_is_additive_and_costs_no_pane_a_gesture() {
             // that.** Measured at the pane's own `level` instead of at 0 it
             // becomes reachable at exactly one room width, fifty-five, where it
             // would trade the spelled-out verbs for air. Every other assertion
-            // here survives that: it is still seventeen gestures, still additive,
+            // here survives that: it is still every gesture, still additive,
             // still monotone. Its width is the only thing that moves.
             assert_eq!(
                 laid.sheet.map(|s| s.width),
@@ -1947,7 +1947,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
 
 #[test]
 fn the_two_column_rung_is_the_size_the_ruling_states() {
-    // **`SPEC.md` §11.1 states 104 by 15 wide and 71 by 15 tight, and until this
+    // **`SPEC.md` §11.1 states 104 by 16 wide and 71 by 16 tight, and until this
     // gate no test could fail on either.** The tight number was 76 until #286
     // shortened two tight mouse verbs so the whole table would fit I6's forty
     // columns in one column: the two-column rung measures the same cells, so it
@@ -2118,7 +2118,7 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             (81, 25, (12, 1, 56, 21)),
             // The whole table in one column reaches this width since #286, so
             // where this used to be a dropping rung of thirteen rows it is the
-            // twenty-row sheet.
+            // twenty-one-row sheet.
             //
             // **It stopped carrying the odd vertical slack when #295 added a
             // row and took it back when #297 added another**: the body is
@@ -2680,14 +2680,14 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     // **The same hole one rung up.** #220 wrote the gate below because every
     // behavioural gate ran at 80 by 24, where the sheet is 56 wide, so the
     // two-column rung was proven by geometry and by text alone. The roomy rung
-    // arrived the same way: nothing clicks or wheels inside a 68 by 30 sheet, and
+    // arrived the same way: nothing clicks or wheels inside a 68 by 31 sheet, and
     // narrowing `SheetPlan::target` for `Shape::Roomy` alone would pass every
     // other gate in this file.
     //
     // It is the rung where it matters most now, because it is what a full-screen
-    // pane draws, and it is thirty rows tall against the plain rung's
-    // nineteen: the rows a click can land on that no other rung reaches are its
-    // own.
+    // pane draws, and it is thirty-one rows tall against the plain rung's
+    // twenty-one: the rows a click can land on that no other rung reaches are
+    // its own.
     let scratch = Scratch::large_diff("sheet-roomy-input", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

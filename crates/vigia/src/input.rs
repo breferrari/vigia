@@ -1275,13 +1275,26 @@ impl Action {
             // last screenful, so all three need to know how tall one is.
             // `ListTo` does not: the list's travel is its own row count, which
             // the app already holds.
-            Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) => true,
+            //
+            // **`Bottom` joined them with `SPEC.md` §11.2 B16**
+            // ([#297](https://github.com/breferrari/vigia/issues/297)), and this
+            // arm is the whole of what makes that ruling reach a reader. Unpinned
+            // it is `jump_to(len - 1)`, which lands on a heading and is measured
+            // in files exactly as the comment below says; **pinned it rests the
+            // file's last row on the bottom**, and *the bottom* is a height. Left
+            // in the arm below, `crate::run` hands it a height of zero, the
+            // resting row saturates back to the file's whole span, and every
+            // keystroke batched behind `G` in the same wake is swallowed by the
+            // walk's own clamp. That is the defect B16 records as fixed, still
+            // shipping, with the gate green because a test calls `App::apply`
+            // with the height a shell does not pass. `crates/vigia/tests/scroll.rs::only_the_action_that_reads_the_height_is_given_one`
+            // is where the two are held together, and it now runs pinned as well.
+            Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) | Self::Bottom => true,
             // `File` steps a file index and lands on a heading, so it is
             // measured in files and never in rows: no height can change where it
-            // arrives.
-            Self::Scroll(_) | Self::File(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => {
-                false
-            }
+            // arrives. `Top` is a heading under a pin too, which is why it stays
+            // here and `Bottom` does not.
+            Self::Scroll(_) | Self::File(_) | Self::Top | Self::ScrollList(_) => false,
             Self::ListTo(_) | Self::ListRow(_) => false,
             // A toggle changes the region's height; it does not need to be
             // told one to decide what it means.

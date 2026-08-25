@@ -147,18 +147,19 @@ by minting a token scoped to this repository alone and pointing the bump at it.
       glancing over sees what the agent just did.
 - [ ] Press `?`, then **resize the pane through the sheet's own ladder** and
       watch it, rather than opening it once on one size. Start full-screen,
-      where a pane 70 columns or wider with 29 rows of body draws the roomy
+      where a pane 70 columns or wider with 31 rows of body draws the roomy
       rung, the one with sections and air in it. Shorten it until the sections
       and their air go and the table closes up. Narrow it until the table takes
       the tight spellings, shorten it until the mouse group moves *beside* the
-      keyboard group rather than below it (a pane 78 columns or wider and 17 to
-      21 rows high is the two-column rung), and shorten it further until rows
+      keyboard group rather than below it (on a hundred-column pane, 19 to 23
+      rows high is the two-column rung and 24 to 33 is one column), and shorten
+      it further until rows
       start dropping. Nothing should jump, tear, or straddle the header or the
       footer, and `?` should still take it away at every size. A gate walks 105
       widths by 33 heights and can only read cells; whether each snap *reads* as
       one element changing shape or as three different boxes is a judgement only
-      an eye makes, and the roomy-to-plain snap is the largest of them: 68 by 29
-      to 56 by 19.
+      an eye makes, and the roomy-to-plain snap is the largest of them: 68 by 31
+      to 56 by 21.
       ([#220](https://github.com/breferrari/vigia/issues/220) added the
       two-column rung and [#285](https://github.com/breferrari/vigia/issues/285)
       the roomy one; [#286](https://github.com/breferrari/vigia/issues/286) will

@@ -722,7 +722,39 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // that end.
                     if let Some(on) = shell.grabbed {
                         if let Some(drag) = drag_action(&event, regions, on) {
-                            match shell.app.apply(drag, &mut frame, 0) {
+                            // **The height, because a drag on the diff's bar is a
+                            // `DiffTo` and `DiffTo` reads one.** This block passed
+                            // zero from the day it was written, and the ordinary
+                            // path forty lines down has always asked
+                            // `Action::needs_height`. So the **first** event of a
+                            // drag resolved through `action_for` with a real
+                            // height and every motion after it resolved here
+                            // without one, which maps the track onto the whole
+                            // rather than onto travel: the thumb runs past its own
+                            // bottom and the last screenful of track is dead.
+                            // That is the arithmetic
+                            // `tests/scroll.rs::a_drag_maps_the_track_onto_travel`
+                            // pins for the press, one gesture over from where the
+                            // reader spends the rest of the drag.
+                            //
+                            // Found on this branch and not caused by it
+                            // ([#297](https://github.com/breferrari/vigia/issues/297)'s
+                            // audit): the pinned arm inherits the same parameter,
+                            // so fixing it here fixes both.
+                            let height = if drag.needs_height() {
+                                let chrome = shell.app.chrome(
+                                    &shell.name,
+                                    shell.branch.as_deref(),
+                                    shell.pressed(),
+                                    shell.gripped(),
+                                    shell.hovered(),
+                                    shell.scrolling,
+                                );
+                                diff_height(shell.area()?, &chrome, frame.files().len())
+                            } else {
+                                0
+                            };
+                            match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
                                 Err(e) => {

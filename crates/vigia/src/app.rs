@@ -910,9 +910,12 @@ impl App {
     /// the agent in the other pane committing its work, reverting an edit or
     /// switching branch leaves this naming a file that is gone.
     /// [`vigia_core::Frame::rows_of`] **panics** on that index by design, the same
-    /// way [`vigia_core::Frame::diff`] does, and the two callers below are the
-    /// only gestures on this map that reach the frame *before* [`View::collect`]
-    /// has had a chance to clamp. A clean worktree is the whole
+    /// way [`vigia_core::Frame::diff`] does, and the two callers below reach the
+    /// frame *before* [`View::collect`] has had a chance to clamp. **They are not
+    /// the only ones, and an earlier draft of this sentence said they were**:
+    /// [`Self::up`]'s walk back does too, it had the same latent panic, and the
+    /// claim here is what kept anyone from looking. It carries its own clamp now,
+    /// and this says *two of three* rather than *the only two*. A clean worktree is the whole
     /// of the second case and it is not an edge: it is the state a monitor sits in
     /// most of the time, so `s` and then `G` on a pane that has been left open is
     /// a panic in a tool whose job is to be left open.
@@ -1055,6 +1058,17 @@ impl App {
     /// against a bar drawn from `diff_rows`. Both arms therefore invert the bar
     /// the reader is actually looking at, which is the whole contract a drag has;
     /// see `span_in`'s own docblock for the route that gets it.
+    ///
+    /// **What it costs is a span lookup and not always a free one**, and the first
+    /// two spellings of this sentence were both wrong in the cheap direction.
+    /// [`vigia_core::Frame::fill_span`] answers from the cached diff for the file
+    /// the viewport is inside, which is free and is the ordinary case, because
+    /// that file is the one the walk drew. It is *not* guaranteed: after the
+    /// changed set shrinks, [`Self::pinned_file`] clamps onto a file this frame
+    /// has never drawn, and the cache then falls through to a measurement. One
+    /// file, on a keypress rather than per frame, and it is the honest description
+    /// rather than "a `stat` against a span this tick has already proved", which
+    /// was `block_rows`' cost quoted under a different call.
     fn diff_to(&mut self, at: u32, height: usize, frame: &mut Frame) -> Result<()> {
         self.anchored = false;
         if let Some(file) = self.pinned_file(frame) {
@@ -1103,6 +1117,33 @@ impl App {
             self.position.row = self.position.row.saturating_sub(rows);
             return Ok(());
         }
+        // **The walk back reaches the frame before anything has clamped, and it
+        // panicked on a stale index until [#297](https://github.com/breferrari/vigia/issues/297)'s
+        // second audit round.** [`crate::view::rows_in`] is
+        // [`vigia_core::Frame::diff`], which indexes `files` directly and panics
+        // past the end; a position is exactly the index that outlives the list it
+        // was resolved against, since [`vigia_core::Frame::advance`] rebuilds the
+        // changed set whenever the worktree moves. So a reader scrolled deep into
+        // the changed set, an agent committing in the other pane, and a wheel-up
+        // batched into the same drain as that tick is a crash, with no paint in
+        // between to clamp anything.
+        //
+        // Clamped rather than refused, which is [`View::collect`]'s own answer to
+        // the same staleness: it opens with `position.file.min(files - 1)` for
+        // exactly this reason, and a reader whose file is gone is better served by
+        // the nearest one that exists than by a panic.
+        //
+        // **Pre-existing rather than this ruling's**, and found because
+        // [`Self::pinned_file`]'s docblock claimed its two callers were the only
+        // gestures that reach the frame ahead of the walk. They are not, this is
+        // the third, and the sentence that was wrong is what kept anyone from
+        // looking.
+        let files = frame.files().len();
+        if files == 0 {
+            self.position = Position::default();
+            return Ok(());
+        }
+        self.position.file = self.position.file.min(files - 1);
         let mut left = rows;
         loop {
             if left <= self.position.row {
