@@ -651,6 +651,7 @@ fn every_row_kind() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -717,6 +718,7 @@ fn awkward() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -749,6 +751,7 @@ fn empty() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 0,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -789,6 +792,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 0,
         grouped: false,
         list: (0..listed)
             .map(|i| ListRow::from(entry(&format!("src/f{i}.rs"))))
@@ -862,6 +866,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     // shape. A matrix of single-digit counts exercises one column-width class
     // and reads as though it covered them all.
     let many = View {
+        list_span: 100,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -1000,6 +1005,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         (
             "readouts at a hundred files",
             View {
+                list_span: 100,
                 grouped: false,
                 list: Vec::new(),
                 list_top: 0,
@@ -1065,6 +1071,7 @@ fn glancing() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 3,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2853,6 +2860,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2996,6 +3004,7 @@ fn a_clipped_content_line_says_it_continues() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -3942,6 +3951,10 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // Ten files with three rows shown, so a bar is drawn; and three with three
     // shown, so one is not.
     let with_bar = View {
+        // Three rows shown, which is what the fixture's own comment says and what
+        // decides whether a bar exists: a screenful of three out of ten files
+        // scrolls, and three out of three does not.
+        list_span: 3,
         grouped: false,
         list: entries.iter().cloned().map(ListRow::from).collect(),
         list_top: 0,
@@ -3950,6 +3963,7 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         ..every_row_kind()
     };
     let without_bar = View {
+        list_span: 3,
         grouped: false,
         list: entries.into_iter().map(ListRow::from).collect(),
         list_top: 0,
@@ -4492,6 +4506,7 @@ fn overlong(rows: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: vec![entry("src/f.rs").into()],
         list_top: 0,
@@ -4605,6 +4620,7 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
 /// representative screen.
 fn pinned_and_streamed() -> View {
     View {
+        list_span: 3,
         grouped: false,
         list: vec![
             entry("crates/vigia-core/src/frame.rs").into(),
@@ -4638,6 +4654,7 @@ fn both_runs_pinned() -> View {
         entry
     };
     View {
+        list_span: 6,
         grouped: true,
         list: vec![
             ListRow::Group {
@@ -6098,6 +6115,7 @@ fn the_staged_gutter_never_pushes_a_path_off_its_own_row() {
     // The same rows with no second run, so the only difference between the two
     // screens at a given width is the column under test.
     let plain = View {
+        list_span: 0,
         grouped: false,
         list: grouped
             .list

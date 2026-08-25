@@ -362,11 +362,16 @@ fn request_for_one(arg: &OsStr) -> Request {
 ///
 /// **One line, and it is a seam rather than a convenience.** `App` holds what was
 /// *asked for* and `Frame` holds what is *walked*, which is the same split
-/// `Chrome::rail` and `Body::rail` draw one region over; everything that sets the
-/// first has to set the second, and there are two such places — the config at
-/// startup and `a` at run time. Written twice they drifted immediately: the
+/// `Chrome::rail` and `Body::rail` draw one region over, and everything that sets
+/// the first has to set the second. Written twice they drifted immediately: the
 /// keypress was wired and the file was not, so `staged = on` set a flag nothing
 /// acted on.
+///
+/// **This is the startup half.** `Action::ToggleStaged` sets both in one arm of
+/// `App::apply`, where the frame is already in hand and the pairing is one
+/// statement; naming it there too would mean handing `apply` a borrow of the `App`
+/// it is already mutating. Two call sites, one rule, and the rule is stated here
+/// because this is the one a reader will not think to look for.
 ///
 /// `pub` and `doc(hidden)` for `tests/config.rs`, which drives the startup path
 /// without a terminal.

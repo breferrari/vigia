@@ -80,21 +80,6 @@ pub struct FileEntry {
     pub heat: [HeatBucket; HEAT_BUCKETS],
 }
 
-/// **The stream has no separator of its own, and that is a ruling.**
-///
-/// The obvious symmetry is a run separator in the diff stream too, and it was in
-/// [#313](https://github.com/breferrari/vigia/issues/313)'s plan. It is refused on
-/// contact with what a stream row *is*: every row there is a row in the height
-/// arithmetic [`span_of`], [`block_of`], [`gap_rows`], [`landing_of`] and
-/// [`vigia_core::Frame::height`] all share, and that arithmetic is what the diff's
-/// scrollbar, the scroll clamp and I4's counting bound are computed from. A label
-/// row there is a change to the scroll model, bought to say a second time what
-/// every heading in the stream already says with its gutter mark.
-///
-/// So the two regions divide it: **the map names the runs, and every row marks its
-/// own**. A reader scrolled deep into the stream reads the mark, which travels with
-/// the row, rather than a heading that has scrolled away.
-///
 /// One row of the pinned list's window.
 ///
 /// **The list stopped being one file per row in
@@ -107,6 +92,16 @@ pub struct FileEntry {
 /// `kept_keyboard`'s rule one region over: a plan taken twice is a plan that can
 /// disagree with itself, and here the two copies would be a list whose digits
 /// address rows the painter put somewhere else.
+///
+/// **The stream has no separator of its own, and that is a ruling.** The obvious
+/// symmetry is one there too, and it was in #313's plan. It is refused on contact
+/// with what a stream row *is*: every row there is a row in the height arithmetic
+/// [`span_of`], [`block_of`], [`gap_rows`], [`landing_of`] and
+/// [`vigia_core::Frame::height`] all share, and that arithmetic is what the diff's
+/// scrollbar, the scroll clamp and I4's counting bound are computed from. A label
+/// row there would be a change to the scroll model, bought to say a second time
+/// what every heading already says with its gutter mark. So the two regions divide
+/// it: **the map names the runs, and every row marks its own.**
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListRow {
     /// A run's separator: `──  staged  2 ─────`.
@@ -178,8 +173,8 @@ pub enum Slot {
 /// is exactly what it has always been and not one cell moves. With the run shown
 /// but one side empty the same holds: there is nothing to separate.
 ///
-/// **A window scrolled into the middle of a run still opens with that run's
-/// label.** Without it the rows at the top of the window are unattributed, which
+/// **A window scrolled into the middle of a run opens with that run's label wherever
+/// it has a row to spare for one.** Without it the rows at the top of the window are unattributed, which
 /// is worse than the label costing a row: a reader who scrolled would be looking
 /// at files with no idea which comparison they belong to. So the first row of any
 /// grouped window is a separator.
@@ -327,8 +322,8 @@ fn top_showing(files: &[vigia_core::FileChange], runs: Runs, file: usize, rows: 
     best
 }
 
-/// The furthest a window of `rows` drawn rows can start and still show the last
-/// file.
+/// The last top a window of `rows` drawn rows can start at and still show the
+/// last file, which is the **tightest** such top rather than the largest.
 ///
 /// **`files - rows` is the answer only while every drawn row is a file**, and a
 /// grouped window spends one or two of them on separators. Clamped that way the
@@ -859,6 +854,22 @@ pub struct View {
     /// both runs opens each with a separator. [`list_plan`] is what decides, and
     /// it is what a caller turning a row back into a file must resolve through.
     pub list: Vec<ListRow>,
+    /// How many files the pinned list's scrollbar treats as one screenful.
+    ///
+    /// **The complement of the window's ceiling**, so the bar's travel
+    /// (`files - span`) is exactly the travel `Action::ListTo` scales the track
+    /// onto, and the two cannot disagree about where the bottom is.
+    ///
+    /// **Not the row count and not what this window happens to show**, which were
+    /// the two previous answers and were each wrong in their own way. The row
+    /// count over-reports, because a grouped window spends rows on separators. What
+    /// *this* window shows varies with where it starts — a window opening on a run
+    /// boundary spends one separator and one inside a run spends two — so the thumb
+    /// changed length mid-drag and walked away from where the reader dropped it.
+    ///
+    /// A screenful is a property of the list, not of the position, which is what
+    /// makes this constant across a scroll and what makes a drag round-trip.
+    pub list_span: usize,
     /// Whether this frame shows both runs, and therefore draws the gutter column.
     ///
     /// **A fact about the frame rather than about any row**, which is why it is
@@ -1498,6 +1509,7 @@ impl View {
         let grouped = first.is_some() && runs.any(|origin| Some(origin) != first);
         let mut view = Self {
             grouped,
+            list_span: 0,
             // Bounded by the screen, not by the diff. The cap keeps a caller
             // asking for an absurd height from allocating for it up front.
             rows: Vec::with_capacity(height.min(64)),
@@ -2000,6 +2012,9 @@ impl View {
         // ([#313](https://github.com/breferrari/vigia/issues/313)). See
         // [`last_top`].
         let ceiling = last_top(frame.files(), rows);
+        // A screenful in files, taken from the ceiling so the bar's travel is the
+        // drag's travel. See [`View::list_span`].
+        self.list_span = self.files.saturating_sub(ceiling).max(1);
         let mut top = self.list_top.min(ceiling);
         if follows {
             // And snapped onto the current file, but **only** when the window is

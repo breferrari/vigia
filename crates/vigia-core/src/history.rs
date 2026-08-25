@@ -299,7 +299,8 @@ pub const HISTORY_SAMPLE: Duration =
 /// it gets amended for a decoration. Keeping the mark for the newest two samples
 /// instead needs no new wake, no new clock and no new state: the roll that was
 /// already going to happen is still the only thing that retires it. The lifetime
-/// becomes `[HISTORY_SAMPLE, 2 × HISTORY_SAMPLE)`, so the **worst** case is now
+/// becomes `[HISTORY_SAMPLE, PULSE_SAMPLES x HISTORY_SAMPLE]`, closed at both ends,
+/// so the **worst** case is now
 /// what the best case used to be.
 ///
 /// **It is still bounded, which is the half that matters to §5.3.** A mark with no

@@ -651,10 +651,32 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
     frame.show_staged(true);
     frame.advance().expect("advance");
 
-    // Every staged row must be diffable without aborting. What each one *reports*
-    // is not the claim — a gitlink may be dropped by the walk or may reach the
-    // read and fail there, and both are fine. What is not fine is a panic.
+    // **Every staged row must diff without an error, not merely without a panic.**
+    // That is the claim, and asserting only "no panic" is what let a mutation
+    // removing the gitlink drop survive: `try_into_blob` refuses safely either
+    // way, so both arms are panic-free and only one is usable. An `Err` here is
+    // not benign — `View::collect` propagates it with `?`, so the whole collect
+    // fails, the shell keeps the previous screen, and the pane freezes exactly the
+    // way a sparse index made it freeze.
     for at in 0..frame.files().len() {
-        let _ = frame.diff(at);
+        let path = frame.files()[at].path.clone();
+        let origin = frame.files()[at].origin;
+        assert!(
+            frame.diff(at).is_ok(),
+            "{origin:?} {path} cannot be diffed, so a collect over this worktree \
+             fails and the pane stops updating"
+        );
     }
+
+    // And the submodule is not in the run at all, which is the shape of the fix:
+    // a gitlink has no content to compare, so it is dropped at the walk rather
+    // than carried to a read that must then refuse it.
+    assert!(
+        !frame
+            .files()
+            .iter()
+            .any(|change| change.origin == Origin::Staged && change.path == "sub"),
+        "the staged run reports a submodule, which `SPEC.md` §11.2 B5 keeps out \
+         of v1 and which has no content to diff"
+    );
 }

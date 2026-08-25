@@ -200,6 +200,7 @@ const LONG: &str = "crates/vigia-core/src/engine/incremental/watch.rs";
 /// rail those are the same row of the pane.
 fn beside() -> View {
     View {
+        list_span: 3,
         grouped: false,
         list: vec![
             entry(LONG).into(),
@@ -235,6 +236,7 @@ fn beside() -> View {
 /// zeroed it and the gate's own non-vacuity guard caught it.
 fn streamed() -> View {
     View {
+        list_span: 0,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -1562,5 +1564,75 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
         stacked.1, at.width,
         "the stacked list is not the full pane wide, so the comparison above is \
          between two rails"
+    );
+}
+
+/// **The rail draws both runs whole, and it was the layout the row-budget fix
+/// missed.**
+///
+/// `Body::split` takes a list *row* budget since
+/// [#313](https://github.com/breferrari/vigia/issues/313), because a grouped list
+/// draws a separator per run and a region sized from its files alone is short by
+/// exactly those rows. The stacked branch was given it and `Body::beside` was not,
+/// so #313's own headline defect stayed live in one of the two shapes this tool
+/// draws: the staged run was announced and its tail was not there.
+///
+/// Nothing in this file had ever called `show_staged`, which is why a round of
+/// auditing did not reach it.
+#[test]
+fn a_rail_draws_the_tail_of_the_staged_run() {
+    let scratch = repo::Scratch::large_diff("rail-staged-tail", 6, 8);
+    let worktree = scratch.worktree();
+    // Three staged, three left on disk.
+    scratch.git(&["add", "src/mod_0.rs", "src/mod_1.rs", "src/mod_2.rs"]);
+
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 6, "the fixture holds both runs");
+
+    let mut app = App::new();
+    app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
+    let mut highlighter = vigia_core::Highlighter::eager();
+    let history = vigia_core::History::new();
+
+    // Wide enough for the rail and tall enough for every file plus both labels.
+    let at = Rect::new(0, 0, 200, 30);
+    let chrome = Chrome {
+        rail: true,
+        staged: Some(3),
+        ..App::new().chrome("fixture", None, Pointing::default(), 0)
+    };
+    let body = body_layout(
+        at,
+        &chrome,
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    );
+    assert!(
+        body.rail,
+        "the pane did not take the rail, so this proves nothing"
+    );
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+        .iter()
+        .filter_map(|slot| match slot {
+            vigia::Slot::File(at) => Some(*at),
+            vigia::Slot::Group { .. } => None,
+        })
+        .collect();
+    assert!(
+        drawn.contains(&5),
+        "the rail drew {drawn:?} and the last staged file is not among them, so \
+         the run is announced with its tail missing"
+    );
+    assert_eq!(
+        view.listed_files(),
+        6,
+        "the rail is short of the changed set by the rows its separators took"
     );
 }

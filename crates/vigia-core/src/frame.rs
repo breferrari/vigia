@@ -306,7 +306,7 @@ impl Taken {
 /// path.** `HashMap`'s `Borrow` does not reach inside a tuple, so a tuple key
 /// cannot be looked up from a `(Origin, &str)` — every `get` would allocate a
 /// `String` to ask a question, on a path that runs per file per frame and that
-/// [`put`]'s own docblock exists to keep allocation-free. Indexing by run keeps
+/// [`Cache::put`]'s own docblock exists to keep allocation-free. Indexing by run keeps
 /// `&str` lookups exactly as they were and costs one array index.
 ///
 /// **An array rather than two named fields**, so [`Origin`] is the only thing that
@@ -820,7 +820,7 @@ impl<'w> Frame<'w> {
     ///
     /// Dropping both is the same trade [`Frame::advance`] already makes for an
     /// attributes change: a rare event, paying what the first frame pays, rather
-    /// than a term in [`reusable`] that no fingerprint can carry.
+    /// than a term in the reuse rule that no fingerprint can carry.
     ///
     /// A no-op when the answer is unchanged, so a shell that calls this every
     /// frame costs nothing.

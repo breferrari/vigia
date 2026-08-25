@@ -402,6 +402,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -501,6 +502,7 @@ fn one_file() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 3,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -692,6 +694,7 @@ fn nothing_changed() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 0,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -955,6 +958,7 @@ fn ragged_counts() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 3,
         grouped: false,
         list: vec![
             listed("src/engine/watch.rs", 139, 131).into(),
@@ -1584,11 +1588,13 @@ fn scrolling_the_list_does_not_move_the_columns() {
     view.files = 3;
 
     let narrow = View {
+        list_span: 0,
         grouped: false,
         list: view.list[..2].to_vec(),
         ..view.clone()
     };
     let wide = View {
+        list_span: 0,
         grouped: false,
         list: view.list[1..].to_vec(),
         list_top: 1,
@@ -1646,6 +1652,7 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
         .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
         .collect();
     let view_of = |files: usize| View {
+        list_span: 0,
         grouped: false,
         list: entries[..files.min(entries.len())]
             .iter()
@@ -2116,6 +2123,7 @@ fn a_file_with_no_line_diff_says_why() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 3,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2173,6 +2181,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2204,6 +2213,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2489,6 +2499,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2526,6 +2537,7 @@ fn a_double_width_character_is_never_cut_in_half() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2584,6 +2596,7 @@ fn the_gutter_gives_way_before_the_text_does() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -2673,6 +2686,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
     let view = View {
         landed: false,
         recorded: 0,
+        list_span: 2,
         grouped: false,
         list: vec![saturated.clone().into(), listed("a.rs", 0, 0).into()],
         list_top: 0,
@@ -2723,6 +2737,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     let view = View {
+        list_span: 1,
         grouped: false,
         list: vec![renamed.clone().into()],
         rows: vec![Row::file(renamed)],
@@ -2804,6 +2819,7 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
     let mut added_at = Vec::new();
     for (lines, want) in BOUNDARIES {
         let view = View {
+            list_span: 1,
             grouped: false,
             list: vec![listed("src/f.rs", lines, 0).into()],
             files: 1,
@@ -3117,6 +3133,7 @@ fn glancing() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 3,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -3890,6 +3907,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 3,
         grouped: false,
         list: vec![
             entry("src/engine/change.rs", 8, 2).into(),
@@ -4333,6 +4351,12 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        // **A screenful is `shown`**, which is what this fixture's name says and
+        // what the bar is measured in: `View::list_span` is the complement of the
+        // window's ceiling, and for an ungrouped list of `shown` rows that is
+        // exactly `shown`. Written out because a hand-built view has no frame to
+        // derive it from.
+        list_span: shown,
         grouped: false,
         list: (0..shown)
             .map(|i| ListRow::from(entry(&format!("src/f{i}.rs"), 1, 0)))
@@ -5757,6 +5781,7 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         },
         // A path of wide glyphs, at the caret and bar boundary.
         View {
+            list_span: 1,
             grouped: false,
             list: vec![entry("src/日本語/テスト.rs", 3, 1).into()],
             ..a_list_of(9, 1, 0)
@@ -6627,6 +6652,7 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
             Row::file(listed("src/engine/watch.rs", 42, 7)),
             line(LineKind::Added, 258, "    pub fn advance(&mut self) {"),
         ],
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         files: 1,
@@ -6683,6 +6709,7 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
             one_file(),
             View {
                 files: 0,
+                list_span: 0,
                 grouped: false,
                 list: Vec::new(),
                 rows: Vec::new(),
@@ -6691,6 +6718,7 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
             // A heat strip, a pinned list to put a rule on screen, and enough
             // files to make the list scrollable so the bar is drawn too.
             View {
+                list_span: 2,
                 grouped: false,
                 list: vec![
                     listed("src/engine/watch.rs", 42, 7).into(),
@@ -7299,6 +7327,7 @@ fn both_runs() -> View {
         entry
     };
     View {
+        list_span: 6,
         grouped: true,
         // Built the way `list_plan` builds one, separators included, because that
         // is what the region actually draws. `tests/list.rs` is what holds the

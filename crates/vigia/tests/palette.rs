@@ -91,6 +91,7 @@ fn three_kinds() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,
@@ -689,6 +690,7 @@ fn graded_heat() -> View {
     View {
         landed: false,
         recorded: 0,
+        list_span: 1,
         grouped: false,
         list: Vec::new(),
         list_top: 0,

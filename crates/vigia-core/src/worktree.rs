@@ -679,11 +679,15 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     }
 }
 
-/// The index-side mode of a tree-index change, where it has one.
+/// The mode of a tree-index change's own entry.
 ///
-/// Every variant carries the destination entry's mode under a different field
-/// name, which is why this is a function rather than a field read: matched inline
-/// at the one call site it would be a fifth copy of the same four-arm match.
+/// **The destination's, except on a deletion, where the destination is nothing and
+/// the mode is the tree side's.** That asymmetry is `gix`'s rather than a choice
+/// here, and it is harmless for the one question asked of it: a gitlink is a
+/// gitlink on whichever side it exists, so the caller's test is right either way.
+///
+/// A function rather than a match at the call site because the four variants spell
+/// the same field four ways, and the arms are what a reader has to check.
 fn staged_mode(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<gix::index::entry::Mode> {
     use gix::diff::index::ChangeRef;
     match change {

@@ -113,6 +113,23 @@ fn split(width: u16, height: u16, files: usize) -> Body {
     )
 }
 
+/// [`split`], sized the way the shell sizes a region for **this** changed set.
+///
+/// **`split` passes the file count for both of `body_layout`'s inputs**, which is
+/// the pre-#313 shape and is right only while every drawn row is a file. Every
+/// grouped test in this file sized its region that way, which is why two layout
+/// defects survived a round of auditing: the region was two rows short of what the
+/// shell would have given it, so the tests agreed with a bug rather than with the
+/// product.
+fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
+    body_layout(
+        Rect::new(0, 0, width, height),
+        &chrome(&App::new()),
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    )
+}
+
 /// Each region reports its **own** bar's column, not the pane's.
 ///
 /// **The claim the removed field could not make**
@@ -1964,7 +1981,7 @@ fn browsing_reaches_the_bottom_of_a_grouped_list() {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let body = split(80, 16, frame.files().len());
+    let body = split_for(80, 16, &frame);
     // Prime `list_rows`, then scroll the map to its end and past it.
     app.view(&mut frame, &mut highlighter, &history, body)
         .expect("collect");
@@ -2109,7 +2126,7 @@ fn the_lists_bar_is_measured_in_files_at_both_ends() {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let body = split(80, 16, frame.files().len());
+    let body = split_for(80, 16, &frame);
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("collect");
@@ -2146,5 +2163,199 @@ fn the_lists_bar_is_measured_in_files_at_both_ends() {
          the list does not have",
         view.listed_files(),
         view.files
+    );
+}
+
+/// **The drawn thumb agrees with the travel the drag has**, which is the half of
+/// the units fix a reader can see.
+///
+/// `View::listed_files` being right is not the claim: `render` has to pass it. A
+/// gate on the helper alone left a mutation putting the row count back at the call
+/// site alive, and that mutation is the defect — the thumb drew longer than the
+/// track's travel, so the pointer reached the bottom of a bar that said it was
+/// already there.
+///
+/// Read off the painted buffer rather than computed, because computing it from the
+/// same numbers `render` uses would be the renderer agreeing with itself.
+#[test]
+fn the_lists_thumb_is_no_longer_than_the_files_it_covers() {
+    let scratch = support::Scratch::large_diff("list-thumb-units", 24, 6);
+    let worktree = scratch.worktree();
+    // Stage half of them, so both runs are populated and the list is scrollable.
+    let staged: Vec<String> = (0..12).map(|i| format!("src/mod_{i}.rs")).collect();
+    let mut args: Vec<&str> = vec!["add"];
+    args.extend(staged.iter().map(String::as_str));
+    scratch.git(&args);
+
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 80, 30);
+    let chrome = chrome(&app);
+    let body = body_layout(
+        at,
+        &chrome,
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    );
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let told = regions(at, &chrome, &view);
+    let bar = told.list.bar.expect("the list is scrollable at this size");
+
+    let mut buf = ratatui::buffer::Buffer::empty(at);
+    vigia::render(
+        &mut buf,
+        at,
+        &view,
+        &vigia::Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
+    let thumb = (told.list.top..told.list.top + told.list.rows)
+        .filter(|y| buf[(bar, *y)].symbol() == "█")
+        .count();
+
+    assert!(thumb > 0, "no thumb was drawn, so this asserts nothing");
+    assert!(
+        view.listed_files() < view.list.len(),
+        "the fixture drew no separator, so the two units are the same number here"
+    );
+
+    // The thumb covers what is on screen out of what there is. Measured against
+    // the **files** the window shows: with the row count it draws longer, which is
+    // the mutation this gate exists to kill.
+    let track = usize::from(told.list.rows);
+    let want = (view.listed_files() * track).div_ceil(view.files);
+    assert!(
+        thumb <= want,
+        "the thumb is {thumb} rows of a {track}-row track where the window shows \
+         {} of {} files, which is at most {want}: the bar is reporting rows as \
+         files and claims travel the list does not have",
+        view.listed_files(),
+        view.files
+    );
+}
+
+/// **A drag round-trips: drop the thumb somewhere and it is still there.**
+///
+/// The bar's travel and the drag's travel have to be one quantity. They were three
+/// at one point — the thumb drawn from a row count, the drag scaled against
+/// `last_top`, and the row count itself varying with where the window happened to
+/// start, because a window opening on a run boundary spends one separator and one
+/// inside a run spends two. The thumb then changed length mid-drag and walked away
+/// from where the reader dropped it.
+///
+/// **Stated as a round-trip rather than as an arithmetic**, because that is the
+/// thing a reader can see and the only form that cannot be satisfied by two wrong
+/// numbers agreeing with each other.
+#[test]
+fn dropping_the_lists_thumb_leaves_it_where_it_was_dropped() {
+    let scratch = support::Scratch::large_diff("list-drag-roundtrip", 24, 6);
+    let worktree = scratch.worktree();
+    let staged: Vec<String> = (0..12).map(|i| format!("src/mod_{i}.rs")).collect();
+    let mut args: Vec<&str> = vec!["add"];
+    args.extend(staged.iter().map(String::as_str));
+    scratch.git(&args);
+
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 80, 30);
+    let chrome = chrome(&app);
+    let body = body_layout(
+        at,
+        &chrome,
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    );
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("prime the row count");
+
+    // Every position the track can express, dropped and then read back.
+    for step in 0..=8u32 {
+        let at_track = step * (vigia::TRACK_SCALE / 8);
+        app.apply(Action::ListTo(at_track), &mut frame, 40)
+            .expect("apply");
+        let first = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("collect")
+            .list_top;
+
+        // Land on the same track position again. A stable bar puts the window
+        // back where it already is; a bar whose travel disagrees with the drag's
+        // walks.
+        app.apply(Action::ListTo(at_track), &mut frame, 40)
+            .expect("apply");
+        let again = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("collect")
+            .list_top;
+
+        assert_eq!(
+            first,
+            again,
+            "dropping the thumb at {at_track}/{} put the window at {first} and \
+             then at {again}, so the bar's travel and the drag's are not one \
+             quantity",
+            vigia::TRACK_SCALE
+        );
+    }
+}
+
+/// **A screenful is the complement of the ceiling**, which is the definition the
+/// bar, the drag and the clamp all read.
+///
+/// Pinned because three call sites depend on it and none of them can see the
+/// others: a mutation putting the *row* count back was invisible to every
+/// behavioural gate in the suite, because the two differ by the separator count
+/// and a short track rounds that away.
+#[test]
+fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
+    let scratch = two_runs("list-span-definition");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut separated = 0usize;
+    for height in 12..=26u16 {
+        let body = split_for(80, height, &frame);
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("collect");
+        if view.list.is_empty() {
+            continue;
+        }
+        let ceiling = vigia::last_top(frame.files(), body.list);
+        assert_eq!(
+            view.list_span,
+            view.files.saturating_sub(ceiling).max(1),
+            "at 80x{height} the bar reports a screenful of {} where the window \
+             can never start past {ceiling} of {}",
+            view.list_span,
+            view.files
+        );
+        if view.list_span != body.list {
+            separated += 1;
+        }
+    }
+    assert!(
+        separated > 0,
+        "no height told a screenful from the region's row count, so this gate \
+         cannot see the two being confused"
     );
 }

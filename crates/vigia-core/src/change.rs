@@ -25,9 +25,10 @@ pub enum Origin {
 impl Origin {
     /// The word the pane draws for this run.
     ///
-    /// Here rather than in the shell because two surfaces spell it — the run
-    /// separator and the header's count — and a second copy would be free to
-    /// disagree with the first.
+    /// Here rather than in the shell because it is the run's own name rather than
+    /// one drawer's wording, and because the shell already spells the word in more
+    /// than one place: the separator draws this, and `count_of`'s header fact and
+    /// `empty_state`'s line each spell their own sentence around it.
     pub fn label(self) -> &'static str {
         match self {
             Self::Unstaged => "unstaged",

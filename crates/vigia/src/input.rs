@@ -520,17 +520,6 @@ impl Regions {
     }
 }
 
-/// What the pointer is resting on, when it is on something a click acts on.
-///
-/// **An enum with one variant, on purpose.** [`Hovered::Button`] carries a cell
-/// the way `Chrome::pressed` does, so the drawer compares one kind of thing;
-/// what is not here yet is a variant for the thumb and one for a list row, both
-/// of which are surfaces a click acts on and both of which are waiting on the
-/// same ruling ([#189](https://github.com/breferrari/vigia/issues/189)) about
-/// what mark a region with no spare rung gets. A bare `Option<(u16, u16)>` would
-/// say the mark is always a cell, which is the thing that is about to stop being
-/// true.
-///
 /// What the pointer is doing this frame, as one value.
 ///
 /// **Four facts that always travel together**, and bundling them is the same
@@ -555,6 +544,17 @@ pub struct Pointing {
     pub scrolling: Option<(Grabbed, isize)>,
 }
 
+/// What the pointer is resting on, when it is on something a click acts on.
+///
+/// **An enum with one variant, on purpose.** [`Hovered::Button`] carries a cell
+/// the way `Chrome::pressed` does, so the drawer compares one kind of thing;
+/// what is not here yet is a variant for the thumb and one for a list row, both
+/// of which are surfaces a click acts on and both of which are waiting on the
+/// same ruling ([#189](https://github.com/breferrari/vigia/issues/189)) about
+/// what mark a region with no spare rung gets. A bare `Option<(u16, u16)>` would
+/// say the mark is always a cell, which is the thing that is about to stop being
+/// true.
+///
 /// **This is view state and never an [`Action`]**, which is §11.1's ruling and
 /// the reason `action_for` never learns about it: the mark says where a pointer
 /// is, it is not a thing a reader asked for, and B4 stands because no key means

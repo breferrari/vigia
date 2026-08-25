@@ -3574,7 +3574,7 @@ impl Body {
         // it meant is that a pane crossing 134 narrowed a reader's diff from 129
         // planning columns to 60 without being asked.
         if chrome.rail && affords_rail(area.width) && files > 0 {
-            return Self::beside(body, area.width, files, masthead);
+            return Self::beside(body, area.width, list_rows, masthead);
         }
 
         // The rule costs a row and [`LEAD_ROWS`] costs another, so the diff needs
@@ -3709,7 +3709,7 @@ impl Body {
     /// rows. `the_rail_is_monotone_in_pane_height` asserts both halves, because
     /// an earlier draft of this paragraph claimed monotonicity outright and was
     /// wrong.
-    fn beside(body: usize, width: u16, files: usize, masthead: bool) -> Self {
+    fn beside(body: usize, width: u16, list_rows: usize, masthead: bool) -> Self {
         // **The rail is drawn only where a list would have been drawn at all**, and
         // that is [`Body::split`]'s own `affordable` test rather than a floor of
         // this layout's own. A rail costs [`LEAD_ROWS`] where the stacked layout at
@@ -3760,7 +3760,15 @@ impl Body {
             lead: LEAD_ROWS,
             graph,
             air,
-            list: files.min(rows),
+            // **`list_rows` rather than `files`**, for the reason
+            // [`Body::split`]'s stacked branch takes it
+            // ([#313](https://github.com/breferrari/vigia/issues/313)): a grouped
+            // list draws a separator per run and a region sized from the files
+            // alone is short by exactly those rows, so the last run is announced
+            // and its tail is not drawn. The stacked layout was fixed and this one
+            // was not, which left #313's own headline defect live in one of the
+            // two shapes this tool draws.
+            list: list_rows.min(rows),
             // **No rule, and it is dissolved rather than declined.**
             // [#124](https://github.com/breferrari/vigia/issues/124) ruled the rule
             // between the regions stays bare, and `Body::split`'s `rule: list > 0`
@@ -4214,7 +4222,12 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
     let list_bar = bar_for(
         list_bars,
         areas.list.height,
-        body.list as u64,
+        // **A screenful in files**, which is what this bar is measured in at both
+        // ends. Asked in *rows* it decided a grouped list was complete when it was
+        // not: the separators made the row count reach the file count while the
+        // window still could not show the tail, so a scrollable list reported
+        // itself as whole and gave up its column. See [`View::list_span`].
+        view.list_span as u64,
         view.files as u64,
     );
     let diff_bar = bar_for(
@@ -4329,7 +4342,7 @@ pub fn render(
         // Counted in **files**, which is exactly what this region shows.
         let full = region;
         let (region, bar) =
-            painter.with_bar(region, list_bars, body.list as u64, view.files as u64);
+            painter.with_bar(region, list_bars, view.list_span as u64, view.files as u64);
         // **Before the content here, and it does not matter which**, because a list
         // row carries no wash: the bar's cell and the row's cells never overlap. The
         // diff region below is the one where the order is load-bearing, and it draws
@@ -4340,12 +4353,11 @@ pub fn render(
                 Grabbed::List,
                 bar,
                 view.list_top as u64,
-                // **Files, not rows**, so all three terms of this bar are in one
-                // unit: the position is a file index and the total is the changed
-                // set. A grouped window spends rows on separators, so `body.list`
-                // over-reports how much of the list is on screen and drew a thumb
-                // longer than the travel `Action::ListTo` actually has.
-                view.listed_files() as u64,
+                // **A screenful in files**, so all three terms of this bar are
+                // one unit and its travel is the drag's travel. See
+                // [`View::list_span`], which is where the two previous answers and
+                // what each got wrong are recorded.
+                view.list_span as u64,
                 view.files as u64,
             );
         }
@@ -7299,6 +7311,8 @@ impl Painter<'_> {
         );
     }
 
+    /// Draw the body: the masthead, the pinned list, the rule and the diff.
+    ///
     /// **`empty` is a parameter rather than a field on the painter**, which is
     /// where it started. The line needs two facts that belong to the chrome —
     /// whether the staged run is drawn, and how many changes the run that is

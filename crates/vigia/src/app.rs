@@ -875,7 +875,9 @@ impl App {
             Action::ListTo(at) => {
                 // The same ceiling `browse` clamps with, for the same reason: the
                 // track maps onto **travel**, and travel is how far the window can
-                // actually go rather than how many files there are.
+                // actually go rather than how many files there are. `View::list_span`
+                // is that same number seen from the other end, so the drawn thumb's
+                // travel and this one are one quantity.
                 let travel = crate::view::last_top(frame.files(), self.list_rows.max(1));
                 self.browse(scaled(at, travel), frame);
             }
