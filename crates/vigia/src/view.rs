@@ -45,7 +45,7 @@ pub struct FileEntry {
     pub path: String,
     /// Which run this row belongs to.
     ///
-    /// **What the green gutter bar is drawn from**, `SPEC.md` §11.2 **B17**. It is
+    /// **What the green staged mark is drawn from**, `SPEC.md` §11.2 **B17**. It is
     /// on the *entry* rather than looked up beside it because one path can be in
     /// both runs at once, so the path is not enough to say which row this is.
     pub origin: Origin,
@@ -100,7 +100,7 @@ pub struct FileEntry {
 /// [`vigia_core::Frame::height`] all share, and that arithmetic is what the diff's
 /// scrollbar, the scroll clamp and I4's counting bound are computed from. A label
 /// row there would be a change to the scroll model, bought to say a second time
-/// what every heading already says with its gutter mark. So the two regions divide
+/// what every heading already says in its kind letter's ink. So the two regions divide
 /// it: **the map names the runs, and every row marks its own.**
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListRow {
@@ -276,8 +276,8 @@ fn plan_with(files: &[vigia_core::FileChange], runs: Runs, top: usize, rows: usi
         // the `+ 1` says: a label naming a run the window has no room to show is a
         // row of the map spent saying nothing about the map. At one row the list
         // therefore draws a *file* and no label at all, which is the same rule the
-        // staged gutter follows below its own floor — the mark gives way before
-        // the content does. Written as a pop after the fact it emptied a one-row
+        // caret follows below `affords_caret`: furniture gives way before the
+        // content does. Written as a pop after the fact it emptied a one-row
         // list completely, because the only row it had was the label it then took
         // back.
         if grouped && run != Some(change.origin) && plan.len() + 1 < rows {
@@ -887,14 +887,18 @@ pub struct View {
     /// A screenful is a property of the list, not of the position, which is what
     /// makes this constant across a scroll and what makes a drag round-trip.
     pub list_span: usize,
-    /// Whether this frame shows both runs, and therefore draws the gutter column.
+    /// Whether this frame shows both runs, and therefore draws the run separators.
     ///
     /// **A fact about the frame rather than about any row**, which is why it is
-    /// here and not on [`FileEntry`]: the column has to be taken on *every* row or
-    /// the two runs' paths start in different places and the map slides sideways
-    /// at the boundary. It is the same quantity [`list_plan`] groups on, resolved
-    /// once so the list's separators and the stream's gutters cannot disagree
-    /// about whether there are two runs.
+    /// here and not on [`FileEntry`]: a separator names a run, and whether there
+    /// are two runs to name is not something a single row can answer. It is the
+    /// same quantity [`list_plan`] groups on, resolved once so the list's
+    /// separators and the stream's cannot disagree about it.
+    ///
+    /// **It used to decide a column as well**, and that is gone with
+    /// [#316](https://github.com/breferrari/vigia/issues/316): the staged mark is
+    /// the kind letter's own ink now, so nothing about the row's geometry depends
+    /// on this and a grouped pane lays out exactly like an ungrouped one.
     pub grouped: bool,
     /// Which file the pinned list starts at, once the request was resolved
     /// against the files that exist and against where the diff is.
@@ -1287,7 +1291,7 @@ pub fn diff_rows(frame: &mut Frame) -> Result<usize> {
 /// clippy is willing to read.
 struct Changed<'f> {
     kind: &'f ChangeKind,
-    /// Which run this file is in, for the row's gutter mark.
+    /// Which run this file is in, for the ink on the row's kind letter.
     origin: Origin,
     diff: &'f FileDiff,
     index: usize,

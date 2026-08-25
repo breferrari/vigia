@@ -7350,66 +7350,72 @@ fn both_runs() -> View {
 
 /// The mark, and it is the whole of what tells one run from the other on a row.
 ///
-/// **Position rather than presence**: the gutter column exists on *every* row of a
-/// grouped view, so a run boundary does not slide the paths beside it one cell
-/// sideways. What differs is what stands in it.
+/// **Ink rather than a glyph in a column of its own**
+/// ([#316](https://github.com/breferrari/vigia/issues/316)). The gutter this
+/// replaces spent a column on every row of *both* runs to mark the rows of one,
+/// so the fact now rides on the kind letter the row was already drawing.
+///
+/// Read at `path - KIND_WIDTH` rather than at a pinned column, so the gate keeps
+/// meaning the same thing if anything upstream of the letter ever moves.
 #[test]
-fn a_staged_row_draws_the_gutter_and_an_unstaged_row_draws_none() {
-    let drawn = screen(80, 12, &both_runs(), &chrome());
-    let rows: Vec<String> = (0..12)
-        .map(|y| {
-            (0..80)
-                .map(|x| {
-                    drawn
-                        .buffer()
-                        .cell((x, y))
-                        .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
-                })
-                .collect()
-        })
-        .collect();
+fn a_staged_rows_kind_letter_carries_the_mark_and_an_unstaged_rows_does_not() {
+    let theme = Theme::default();
+    // Not vacuous only while the two keys differ. They are *not* the same by
+    // design here, where `staged` and `added` are, so this needs no perturbed
+    // palette; it needs the guard that says so if that ever changes.
+    assert_ne!(
+        theme.staged.fg, theme.kind.fg,
+        "Theme::staged and Theme::kind hold one colour, so every assertion below          passes whichever key the painter reached for"
+    );
 
-    let staged_rows: Vec<&String> = rows
-        .iter()
-        .filter(|row| row.contains("tests/staged.rs"))
-        .collect();
-    assert!(
-        !staged_rows.is_empty(),
-        "the fixture drew no staged row at all, so this asserts nothing:\n{}",
+    let drawn = screen(80, 12, &both_runs(), &chrome());
+    let buf = drawn.buffer();
+    let rows = text_rows(&drawn, 80, 12);
+
+    // The kind letter sits `KIND_WIDTH` cells left of the path it labels.
+    let letter_fg = |needle: &str| {
+        let (y, row) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, row)| row.contains(needle))?;
+        let at = row.find(needle).expect("just matched");
+        let x = u16::try_from(at.checked_sub(2)?).ok()?;
+        buf.cell((x, u16::try_from(y).ok()?))
+            .map(|cell| cell.style().fg)
+    };
+
+    assert_eq!(
+        letter_fg("tests/staged.rs"),
+        Some(theme.staged.fg),
+        "a staged row's kind letter is not drawn from Theme::staged, so nothing          on the row says which comparison it is:\n{}",
         rows.join("\n")
     );
-    for row in &staged_rows {
-        assert!(
-            row.contains('│'),
-            "a staged row carries no gutter mark, so nothing on it says which \
-             comparison it is:\n{row}"
-        );
-    }
+    assert_eq!(
+        letter_fg("src/frame.rs"),
+        Some(theme.kind.fg),
+        "an unstaged row's kind letter took the staged mark:\n{}",
+        rows.join("\n")
+    );
 
-    // And an unstaged row leaves the column blank rather than filling it with
-    // something else: two marks would be two things to learn for one fact.
-    let unstaged: Vec<&String> = rows
-        .iter()
-        .filter(|row| row.contains("src/frame.rs"))
-        .collect();
-    for row in &unstaged {
-        assert!(
-            !row.contains('│'),
-            "an unstaged row carries the staged gutter mark:\n{row}"
-        );
-    }
+    // And the glyph the column used to hold is gone from the pane entirely,
+    // rather than merely moved somewhere the assertions above cannot see.
+    assert!(
+        !rows.iter().any(|row| row.contains('\u{2502}')),
+        "a gutter bar survives somewhere on the pane:\n{}",
+        rows.join("\n")
+    );
 }
 
-/// **The gutter takes the staged colour and never the diff's own green.**
+/// **The mark takes the staged colour and never the diff's own green.**
 ///
 /// They are the same hue by design — git paints a staged path green and this
 /// borrows that — and they are different *roles*, so a theme must be free to move
-/// one without the other. What keeps them from collapsing is that the bar is drawn
-/// from `Theme::staged` rather than from `Theme::added`, and a palette that made
+/// one without the other. What keeps them from collapsing is that the letter is
+/// inked from `Theme::staged` rather than from `Theme::added`, and a palette that made
 /// them one key would look identical today and be one edit from a row where the
 /// mark and the counters say the same thing about different facts.
 #[test]
-fn the_gutter_takes_the_staged_colour_and_never_the_diffs_green() {
+fn the_mark_takes_the_staged_colour_and_never_the_diffs_green() {
     // **A perturbed palette, because the shipped one cannot tell the two apart.**
     // `staged` and `added` hold byte-identical values in all three palettes by
     // design — git paints a staged path green and the mark borrows that — so an
@@ -7440,43 +7446,55 @@ fn the_gutter_takes_the_staged_colour_and_never_the_diffs_green() {
         .expect("draw");
     let buf = terminal.backend().buffer().clone();
 
+    // The marked cells are the kind letters of the staged rows, found through the
+    // path each one labels rather than by scanning for a glyph: the mark has no
+    // glyph of its own any more, which is the whole of #316.
+    let rows = text_rows(terminal.backend(), 80, 12);
     let mut found = 0;
-    for y in 0..12u16 {
-        for x in 0..80u16 {
-            let Some(cell) = buf.cell((x, y)) else {
-                continue;
-            };
-            if cell.symbol() != "│" {
-                continue;
-            }
-            found += 1;
-            assert_eq!(
-                cell.style().fg,
-                theme.staged.fg,
-                "the gutter mark at {x},{y} is not drawn from Theme::staged"
-            );
-            assert_ne!(
-                cell.style().fg,
-                theme.added.fg,
-                "the gutter mark at {x},{y} took the diff's own green, so the two \
-                 roles have collapsed into one key"
-            );
-        }
+    for (y, row) in rows.iter().enumerate() {
+        let Some(at) = row.find("tests/staged.rs").or_else(|| {
+            row.contains("src/render.rs")
+                .then(|| row.find("src/render.rs"))
+                .flatten()
+                .filter(|_| row.contains("+42"))
+        }) else {
+            continue;
+        };
+        let (Ok(x), Ok(y)) = (u16::try_from(at - 2), u16::try_from(y)) else {
+            continue;
+        };
+        let Some(cell) = buf.cell((x, y)) else {
+            continue;
+        };
+        found += 1;
+        assert_eq!(
+            cell.style().fg,
+            theme.staged.fg,
+            "the mark at {x},{y} is not drawn from Theme::staged"
+        );
+        assert_ne!(
+            cell.style().fg,
+            theme.added.fg,
+            "the mark at {x},{y} took the diff's own green, so the two \
+             roles have collapsed into one key"
+        );
     }
     assert!(
         found > 0,
-        "no gutter mark reached the screen, so nothing was asserted"
+        "no staged row reached the screen, so nothing was asserted"
     );
 }
 
-/// A pane with one run draws no gutter column at all.
+/// Drawing both runs costs the path no column at all.
 ///
-/// **The default view does not move one cell**, which is what makes the toggle a
-/// thing a reader asks for rather than a column everyone pays for. Asserted
-/// against the very same fixture with `grouped` cleared, so the only difference
-/// between the two screens is the flag.
+/// **This is #316's whole claim, and it is the gate that would catch its
+/// reversal.** It used to read `with - 1 == without`, which is the same
+/// measurement with the opposite verdict: the mark cost every row of both runs
+/// one column of the pane's most contested element. Now the two screens put the
+/// path in the same place, so a reader who asks for the staged run pays nothing
+/// for it and a reader who does not is unaffected either way.
 #[test]
-fn one_run_spends_no_column_on_a_gutter_it_would_never_fill() {
+fn drawing_both_runs_spends_no_column_on_the_mark() {
     let mut ungrouped = both_runs();
     ungrouped.grouped = false;
     ungrouped.list.retain(|row| {
@@ -7499,10 +7517,8 @@ fn one_run_spends_no_column_on_a_gutter_it_would_never_fill() {
         "the fixture lost its row"
     );
     assert_eq!(
-        with.map(|at| at - 1),
-        without,
-        "the gutter costs the path exactly one column when it is drawn and none \
-         when it is not"
+        with, without,
+        "drawing both runs moved the path, so the mark is costing a column again"
     );
 }
 
