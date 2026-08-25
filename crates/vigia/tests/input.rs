@@ -1441,10 +1441,22 @@ fn a_track_the_sheet_covers_grabs_nothing() {
     let box_of = covered.sheet.expect("a sheet");
     assert!(box_of.covers(70, 10), "the first cell the sheet occupies");
     assert!(box_of.covers(79, 13), "the last cell the sheet occupies");
-    assert!(!box_of.covers(80, 13), "one past the last column is not the sheet's");
-    assert!(!box_of.covers(79, 14), "one past the last row is not the sheet's");
-    assert!(!box_of.covers(69, 10), "one before the first column is not the sheet's");
-    assert!(!box_of.covers(79, 9), "one before the first row is not the sheet's");
+    assert!(
+        !box_of.covers(80, 13),
+        "one past the last column is not the sheet's"
+    );
+    assert!(
+        !box_of.covers(79, 14),
+        "one past the last row is not the sheet's"
+    );
+    assert!(
+        !box_of.covers(69, 10),
+        "one before the first column is not the sheet's"
+    );
+    assert!(
+        !box_of.covers(79, 9),
+        "one before the first row is not the sheet's"
+    );
 
     // And a track row the sheet does not reach still answers, so the guard is
     // bounded by the sheet rather than switched on by its presence.

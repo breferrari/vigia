@@ -679,8 +679,7 @@ fn a_press_under_the_sheet_arms_no_step() {
                      on a region the reader cannot see"
                 );
                 assert!(
-                    action_for(&click(column, row), laid).is_none()
-                        || (column, row) == sheet.close,
+                    action_for(&click(column, row), laid).is_none() || (column, row) == sheet.close,
                     "on a {width} by {height} pane, a click at ({column},{row}) \
                      fell through the sheet"
                 );
@@ -689,7 +688,10 @@ fn a_press_under_the_sheet_arms_no_step() {
         },
     );
 
-    assert!(drew > 1000, "only {drew} panes drew a sheet, so this sweep is thin");
+    assert!(
+        drew > 1000,
+        "only {drew} panes drew a sheet, so this sweep is thin"
+    );
     // **The assertion that makes the loop above mean something.** Every cell in it
     // passes trivially on a build where no sheet ever reaches a bar, and that is not
     // a hypothetical: it is what a rung change does. This counts the cells the guard
@@ -818,7 +820,10 @@ fn a_press_on_a_track_under_the_sheet_grabs_nothing() {
         },
     );
 
-    assert!(drew > 1000, "only {drew} panes drew a sheet, so this sweep is thin");
+    assert!(
+        drew > 1000,
+        "only {drew} panes drew a sheet, so this sweep is thin"
+    );
     // The same vacuity floor its sibling carries, and for the same reason: without
     // it a rung change that moved the box clear of every bar would leave this gate
     // green over panes that prove nothing.
