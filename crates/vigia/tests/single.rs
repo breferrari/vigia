@@ -1447,3 +1447,75 @@ fn a_straddle_reached_by_a_drag_pins_to_the_bottom_too() {
         "the frame after a dragged pin moved with no input"
     );
 }
+
+#[test]
+fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
+    // **The state that made the pin's first two licences leak.** `SPEC.md` §11.1
+    // keeps a deliberate exception for a jump onto a tail shorter than the pane
+    // ([#59](https://github.com/breferrari/vigia/issues/59)): the file the jump
+    // was for keeps the top row and the blanks under it stay, because a jump is a
+    // claim about the top and backing up would move the file off it.
+    //
+    // Two attempts at licensing the pin's own back-up went through `anchored`,
+    // and `anchored` outlives the pin. So `n` onto a short tail, then `s` and `s`,
+    // left an **unpinned** frame anchored, `View::collect` found it short, and the
+    // reader was pulled out of the file they had asked for with no input at all.
+    // Licensing from `single` has no state to leak, and this is the gate that
+    // says so.
+    //
+    // Every straddle elsewhere in this file is reached with `Scroll` or `DiffTo`,
+    // both of which already anchor, which is exactly why nothing saw it.
+    let scratch = fixture("shell-single-short-tail");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+
+    // The last file, whose remaining rows cannot fill the pane: `SPAN` is the
+    // whole file and the diff ends there, so a jump to it leaves blanks.
+    app.apply(Action::Bottom, &mut frame, body())
+        .expect("apply");
+    let jumped = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        jumped.top,
+        Position {
+            file: FILES - 1,
+            row: 0
+        },
+        "the jump did not land on the last file's heading"
+    );
+
+    // Non-vacuity: the screen has to be short, or the back-up has nothing to fire
+    // on and this gate would pass against every licence.
+    let tail = SPAN.min(body());
+    assert!(
+        jumped.rows.len() < body() || tail == body(),
+        "the jump filled the pane, so there is no short tail to protect"
+    );
+
+    for round in 0..3 {
+        app.apply(Action::ToggleSingle, &mut frame, body())
+            .expect("apply");
+        let pinned = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert_eq!(
+            pinned.top, jumped.top,
+            "pass {round}: pinning a jump onto a short tail moved it off the top row"
+        );
+
+        app.apply(Action::ToggleSingle, &mut frame, body())
+            .expect("apply");
+        let after = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+        assert_eq!(
+            after.top, jumped.top,
+            "pass {round}: unpinning backed the reader out of the file the jump \
+             was for, which is #59's exception undone with no input"
+        );
+        assert_eq!(
+            after.rows.len(),
+            jumped.rows.len(),
+            "pass {round}: the unpinned screen changed shape"
+        );
+    }
+}
