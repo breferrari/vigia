@@ -7463,7 +7463,9 @@ fn the_mark_takes_the_staged_colour_and_never_the_diffs_green() {
         let (Ok(x), Ok(y)) = (u16::try_from(at - 2), u16::try_from(y)) else {
             continue;
         };
-        let Some(cell) = buf.cell((x, y)) else { continue };
+        let Some(cell) = buf.cell((x, y)) else {
+            continue;
+        };
         found += 1;
         assert_eq!(
             cell.style().fg,

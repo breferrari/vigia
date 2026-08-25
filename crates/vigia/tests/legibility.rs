@@ -6163,11 +6163,9 @@ fn drawing_both_runs_costs_the_path_no_column_at_any_width() {
     // And the run this is all about is genuinely on screen somewhere, or the
     // comparison is between two screens that differ in nothing.
     assert!(
-        WIDTHS
-            .into_iter()
-            .any(|w| rows_at(w, 12, &grouped, &chrome)
-                .iter()
-                .any(|row| row.contains("staged"))),
+        WIDTHS.into_iter().any(|w| rows_at(w, 12, &grouped, &chrome)
+            .iter()
+            .any(|row| row.contains("staged"))),
         "no width drew the staged run at all, so the grouped screen under test \
          was never actually grouped"
     );
