@@ -424,6 +424,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
 | ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
 | ✅ | Nothing pins the pane to one file, so reading a file means scrolling past its end into the next | [#297](https://github.com/breferrari/vigia/issues/297) |
@@ -481,6 +482,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The scrollbar cuts a one-column hole through every washed row | [#239](https://github.com/breferrari/vigia/issues/239) |
 | ⬜ | A wide pane repeats the band's samples rather than resolving them | [#241](https://github.com/breferrari/vigia/issues/241) |
 | ✅ | The glance elements draw spikes where the picture draws a wave | [#242](https://github.com/breferrari/vigia/issues/242) |
+
+**[#313](https://github.com/breferrari/vigia/issues/313) is the next row to take, asked for on 2026-08-25.** The pane cannot see staged files at all, because `SPEC.md` §11.1's opening contract is *working tree against the index*, so an agent that stages its own work empties the diff as it goes. That is a monitor doing the opposite of its job. What is asked is a **toggle**, and a way to tell a staged file from an unstaged one on screen; the second half is deliberately left to the session that takes it, with the constraints it will meet written into the issue rather than left to be rediscovered. **It is not [#50](https://github.com/breferrari/vigia/issues/50)**, which is a `decision` on the Shelf asking which comparison should be the *default* and is blocked on a week of real use. A toggle is a third answer that makes that question smaller rather than answering it: #50 stays open and becomes which way the toggle starts, which is [#306](https://github.com/breferrari/vigia/issues/306)'s territory once view defaults are configurable.
 
 **Three rows moved to the front on 2026-08-24, asked for from the pane while [#286](https://github.com/breferrari/vigia/issues/286) was being built, and they are the next three to take.** All three are gestures a reader reached for and did not find, which is this phase's own filter arriving from the only instrument that can produce it.
 

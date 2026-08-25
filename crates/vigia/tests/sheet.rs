@@ -1177,15 +1177,24 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     materialise(&mut frame);
-    let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    // The wide one-column rung, so every cell is at its longest spelling.
-    let at = Rect::new(0, 0, WIDE, 26);
-
-    toggle_at(&mut app, &mut frame, at);
-    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
-    let (_, drawn) = read_sheet(&buf, &laid);
+    // **Both one-column rungs, because the README writes the tight spelling.** It
+    // says `drag a bar` and `click a file`, which are what this table draws at the
+    // tight rung; the wide rung says `drag a scrollbar` and `click a listed file`.
+    // Reading only the wide one made `bar` match inside `scrollbar`, which passed
+    // by substring luck rather than because the sheet named the gesture. A cell has
+    // to land on one row of one rung, and both are legitimate spellings of it.
+    let mut rows: Vec<String> = Vec::new();
+    for (w, h) in [(WIDE, 26u16), (43u16, 25u16)] {
+        let at = Rect::new(0, 0, w, h);
+        let mut app = App::new();
+        toggle_at(&mut app, &mut frame, at);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let (_, drawn) = read_sheet(&buf, &laid);
+        rows.extend(drawn.lines().map(str::to_owned));
+    }
+    let drawn = rows.join("\n");
 
     for cell in readme_gestures() {
         // **Every token of a cell on ONE drawn row, not each token anywhere on the
@@ -1204,10 +1213,16 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
             !wanted.is_empty(),
             "README.md has a gesture cell {cell:?} with nothing in it to look for"
         );
+        // **`names` alone, with no `contains` fallback.** The fallback was round 1's
+        // and round 2 found what it cost: a single-character token like `f`, `m`,
+        // `r` or `s` is a substring of ordinary verb prose, so `f` matched
+        // `half a page`, and deleting the whole `f` row from `KEYBOARD` left this
+        // gate green. Those are the very keys `SPEC.md` records as having shipped
+        // uncovered. `names` compares whitespace-delimited cells and understands
+        // the digits' `1  to  6` range, which is the only spelling that is not one
+        // cell, so the fallback bought nothing once both rungs are read.
         assert!(
-            drawn
-                .lines()
-                .any(|row| wanted.iter().all(|t| names(row, t) || row.contains(t))),
+            rows.iter().any(|row| wanted.iter().all(|t| names(row, t))),
             "README.md teaches {wanted:?} (in {cell:?}) as one gesture and no single \
              row of the sheet names all of it, so a reader who read one and opened \
              the other is missing a gesture:\n{drawn}"
@@ -1451,11 +1466,19 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// a track* are event **shapes**, not enum variants, so there is no set to walk.
 ///
 /// What the exhaustive matches below buy instead is that a new [`Action`],
-/// [`Hovered`] or [`Grabbed`] variant **cannot be forgotten**: the build fails until
-/// somebody names the phrase that teaches it, or records that it has none. That is
-/// strictly stronger than the hand-written list this replaced, which could be and
-/// was forgotten twice, and strictly weaker than derivation. Saying so is the
-/// point: a gate whose coverage is overstated is the shape #288 is about.
+/// [`Hovered`] or [`Grabbed`] variant **cannot fail to compile** until somebody
+/// names the phrase that teaches it, or records that it has none. That is strictly
+/// stronger than the hand-written list this replaced, which could be and was
+/// forgotten twice, and strictly weaker than derivation. Saying so is the point: a
+/// gate whose coverage is overstated is the shape #288 is about.
+///
+/// **And *cannot be forgotten* is what this said until round 2, which is one claim
+/// too many.** Compiling is forced; being *exercised* is not. [`ALL_ACTIONS`] is a
+/// hand-maintained array, so a variant can be classified in [`reach_of`], given an
+/// arm here, and still reach neither gate if nobody adds it there. That is one
+/// unenforced step, named rather than papered over, and
+/// `the_action_table_covers_every_variant` pins the array's length so missing it is
+/// at least loud.
 fn mouse_phrases() -> Vec<&'static str> {
     let mut phrases: Vec<&'static str> = Vec::new();
 
@@ -1530,6 +1553,20 @@ fn the_action_table_covers_every_variant() {
     // reachable must actually have been produced by the sweep, and a mismatch means
     // either the space is too narrow or the table is wrong. Both want fixing and
     // neither is silent.
+    // **The array's length, pinned, because it is the one step nothing forces.**
+    // `reach_of` and `mouse_phrases` are exhaustive matches, so a new `Action`
+    // cannot compile until it is classified and given a phrase. Neither reaches
+    // `ALL_ACTIONS`, which is data: a variant added to the type and to both matches
+    // but not to the array compiles clean and is exercised by nothing. Bumping this
+    // number is the reminder, and round 2 of this row's audit found the docblock
+    // claiming that gap was closed.
+    assert_eq!(
+        ALL_ACTIONS.len(),
+        18,
+        "`Action` gained or lost a variant and `ALL_ACTIONS` was not updated with \
+         it, so both gates walk a set that is no longer the type"
+    );
+
     let produced: Vec<Action> = bound_keys()
         .into_iter()
         .filter_map(|(event, _)| action_for(&Event::Key(event), Regions::default()))
@@ -2947,8 +2984,11 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // `(12, 1, 56, 21)`, and twenty gestures no longer fit one column in a
             // twenty-five-row pane, so it takes the two-column rung at
             // `(5, 4, 71, 16)`. It still carries odd slack and still tests the
-            // halving, on both axes now rather than one: 81 less the 71 it draws
-            // is ten, and the body less sixteen is nine.
+            // halving, on the **height** axis: the body less sixteen is nine, so
+            // the margins split four and five. The width slack is 81 less 71, which
+            // is ten and splits evenly, so this case exercises one axis rather than
+            // two. Round 2 of this row's audit caught a first spelling of this
+            // comment claiming both.
             (81, 25, (5, 4, 71, 16)),
             // The whole table in one column reaches this width since #286, so
             // where this used to be a dropping rung of thirteen rows it is the
