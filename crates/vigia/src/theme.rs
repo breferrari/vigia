@@ -345,17 +345,26 @@ palette! {
 
     /// The letter naming what happened to a file.
     kind,
-    /// The gutter bar and the run label that mark a **staged** change.
+    /// The kind letter and the run label that mark a **staged** change.
     ///
     /// **Green, because that is git's own vocabulary for staged**: `git status`
     /// paints a staged path green and an unstaged one red, so a reader who has
     /// used git has already learned this. It is `SPEC.md` §5.3's green amendment
     /// ([#313](https://github.com/breferrari/vigia/issues/313)), and what keeps it
-    /// from colliding with the diff's own green is *where* it is drawn: the bar
-    /// lives in the gutter left of the kind letter and never on a content row, so
-    /// it is never beside a `+` sigil or a `+42` counter.
+    /// from colliding with the diff's own green is *where* it is drawn: it inks a
+    /// file row's kind letter and never a content row, so it is never beside a `+`
+    /// sigil or a `+42` counter.
     ///
-    /// One key for both marks on purpose. The bar on a row and the word in the
+    /// **It was a bar in a column of its own until
+    /// [#316](https://github.com/breferrari/vigia/issues/316)**, and the column is
+    /// what it cost: taken on every row of *both* runs, so that a run boundary did
+    /// not slide the paths beside it, to mark the rows of one. Colour says the same
+    /// thing for nothing, needs no glyph the reader's font may not have, and is the
+    /// channel `git status` was already using. What it gives up is `NO_COLOR`,
+    /// where the run separators carry the fact alone, which is what they already
+    /// did below the old gutter's own floor.
+    ///
+    /// One key for both marks on purpose. The letter's ink and the word in the
     /// run's separator are the same statement said twice, so a theme that moved
     /// one and not the other would be saying it two ways.
     staged,

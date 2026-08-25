@@ -516,44 +516,6 @@ const MIN_PATH_WIDTH: usize = 12;
 /// would silently have moved the kind letter's allowance too.
 const KIND_WIDTH: usize = 2;
 
-/// The glyph marking a staged row, in the gutter left of the kind letter.
-///
-/// **`SPEC.md` §11.2 B17's mark**
-/// ([#313](https://github.com/breferrari/vigia/issues/313)). A light vertical bar
-/// rather than a letter, so contiguous staged rows draw one continuous line and
-/// the run reads as a block rather than as rows that happen to share a column.
-///
-/// **Light rather than heavy**, because it is furniture and the row's content
-/// outranks it: `│` is the same weight the box-drawing rules elsewhere on this
-/// pane use, where `┃` would be the loudest thing in a region full of quiet ones.
-const STAGED_MARK: &str = "│";
-
-/// Columns the staged gutter takes off a row when it is drawn.
-///
-/// **One, and only while both runs are on screen.** With the staged run hidden —
-/// the default — there is nothing to distinguish, so the column does not exist and
-/// not one cell of the pane moves from what it has always been. That is the same
-/// rule `Chrome::masthead` and `Body::rail` follow: an element that costs space is
-/// asked for rather than reserved.
-const GUTTER_WIDTH: usize = 1;
-
-/// Whether a row `room` columns wide can afford the staged gutter.
-///
-/// **The mark gives way before the path does**, which is [`MIN_PATH_WIDTH`]'s rule
-/// applied to one more glance element: a row that spent its file's name on a marker
-/// beside it would be naming nothing. So at I6's floor the gutter is dropped and
-/// the run separators above carry the fact instead, exactly as the caret is dropped
-/// below [`affords_caret`] and the pinned list keeps saying which file the diff is
-/// in by other means.
-///
-/// A predicate over the room a row actually has rather than a width rung, because
-/// this is the only element on the row whose presence is decided per *view* as well
-/// as per pane: the same 80-column pane draws it with the staged run shown and not
-/// without.
-const fn affords_gutter(room: usize) -> bool {
-    room >= ROW_FLOOR + GUTTER_WIDTH
-}
-
 /// The narrowest a file row can be and still name its own file.
 ///
 /// What [`Painter::file_row`] refuses to go below, and therefore what every
@@ -7749,32 +7711,46 @@ impl Painter<'_> {
         past(&mut right, width_of(columns.pulse));
 
         let mut room = usize::from(right.width);
-        let mut at = area.x;
+        let at = area.x;
 
-        // **The gutter, before the letter and inside the same slot discipline as
-        // everything else on this row**: the column is taken whether or not this
-        // particular row fills it, so a run boundary does not slide every path
-        // beside it one cell sideways. `Columns::plan` reserves the glance slots
-        // for the same reason and #77's ruling is the same ruling.
+        // **The kind letter carries the staged mark rather than a column beside it
+        // carrying one** ([#316](https://github.com/breferrari/vigia/issues/316)).
+        // B17 first spent a gutter column on a `\u{2502}`, and the column was the whole
+        // cost: it was taken on *every* row of *both* runs, because a mark that
+        // appears and disappears per row would slide every path beside it one cell
+        // sideways. So *every* row of *both* runs paid for a mark only the staged
+        // rows carry, which is a tax on the pane's most contested element to say
+        // something the letter's own ink says for free. The two runs were never
+        // misaligned with each other; the pane was simply one column narrower
+        // than it needed to be everywhere at once, which is the harder cost to
+        // see and the reason the reader felt it before anyone measured it.
         //
-        // Dropped whole below [`affords_gutter`] rather than squeezed, because
-        // half a mark is not a quieter mark, it is a different glyph.
-        if heading.origin.is_some() && affords_gutter(room) {
-            let mark = match heading.origin {
-                Some(Origin::Staged) => STAGED_MARK,
-                // The column exists and this row has nothing to put in it. A
-                // space rather than nothing at all: `put` is what advances `at`,
-                // so writing the blank is what keeps the two runs' paths in one
-                // column.
-                _ => " ",
-            };
-            let x = self.put(at, area.y, mark, room, self.theme.staged);
-            room = room.saturating_sub(usize::from(x - at));
-            at = x;
-        }
-
+        // **An overlay was the reader's first ask and it was checked before this
+        // was written.** `U+20D2 COMBINING LONG VERTICAL LINE OVERLAY` composes
+        // correctly here (`ratatui` segments by extended grapheme cluster, so
+        // `"M\u{20d2}"` is one cell of width one and no arithmetic moves) and is
+        // useless anyway: it is absent from every one of the 48 codepoints in its
+        // block on a stock `JetBrainsMono Nerd Font`, where the block-element and
+        // braille ranges a monitor-class TUI actually draws with are covered
+        // whole. A mark that needs a font we cannot see is a mark that vanishes
+        // for an unknown fraction of readers with no fallback to trigger, which
+        // is I5's floor, and glyph coverage cannot be probed from inside a
+        // terminal: tofu occupies a cell exactly as a real glyph does.
+        //
+        // Colour is the channel that survives instead. It costs no column, it
+        // needs no glyph, and it is the same channel `git status` marks a staged
+        // path with, which is what §5.3 loaned green for in the first place.
+        //
+        // `None` and `Some(Unstaged)` are one case here where the gutter had to
+        // tell them apart: with no column to reserve, a view that draws one run
+        // and a row inside the unstaged run of a view that draws two want the
+        // same ink, and only the staged rows differ.
+        let ink = match heading.origin {
+            Some(Origin::Staged) => self.theme.staged,
+            _ => self.theme.kind,
+        };
         let letter = format!("{} ", heading.kind);
-        let x = self.put(at, area.y, &letter, room, self.theme.kind);
+        let x = self.put(at, area.y, &letter, room, ink);
         room = room.saturating_sub(usize::from(x - at));
 
         // Which file it *was* is the whole content of a rename, so it is part of

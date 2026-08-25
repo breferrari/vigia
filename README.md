@@ -105,7 +105,7 @@ The list is **pinned**, so the signals stay on screen while you read the diff un
 
 Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
 
-Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row carries a green bar down its left edge so the two never blur together. It exists because an agent that stages its own work used to empty the pane: `vigia` shows the working tree against the index, so a fully staged worktree had nothing to show and said so, which reads exactly like a clean one. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane now says where the work went: `no unstaged changes · 3 staged`.
+Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row draws its status letter in green so the two never blur together. The mark costs no width, so asking for the staged run never shortens a filename. It exists because an agent that stages its own work used to empty the pane: `vigia` shows the working tree against the index, so a fully staged worktree had nothing to show and said so, which reads exactly like a clean one. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane now says where the work went: `no unstaged changes · 3 staged`.
 
 Every file gets the same row in both regions:
 
@@ -115,7 +115,7 @@ Every file gets the same row in both regions:
 | `M` | **kind** | modified, added, deleted, renamed |
 | `src/…` | **path** | which file. How brightly it is drawn is how recently it changed |
 | `●` | **pulse** | ⚡ it changed on the newest tick |
-| `│` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
+| green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
 | `__▁▂▆█` | **sparkline** | ⏱️ **when** it changed, over the last two minutes |
 | `+42 -7` | **counters** | 📊 **how much**, in lines |

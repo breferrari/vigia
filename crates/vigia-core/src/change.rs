@@ -98,8 +98,8 @@ pub struct FileChange {
     ///
     /// See [`Origin`]. Two entries for one path are ordinary since
     /// [#313](https://github.com/breferrari/vigia/issues/313), and this is what
-    /// tells them apart everywhere downstream: the row's gutter mark, the cache
-    /// key, and which run the separator counts it into.
+    /// tells them apart everywhere downstream: the ink on the row's kind letter,
+    /// the cache key, and which run the separator counts it into.
     pub origin: Origin,
     /// Blob the left-hand side holds for this path, when there is one.
     ///

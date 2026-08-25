@@ -6088,32 +6088,27 @@ fn a_pane_too_short_for_a_body_keeps_no_rule_over_its_footer() {
     }
 }
 
-/// **The staged gutter may take room from the path. It may not take the path.**
+/// Drawing both runs costs the path no column, at every width in the sweep.
 ///
-/// `MIN_PATH_WIDTH` outranks every glance element (§5.3), and the gutter is one
-/// more of them: `SPEC.md` §11.2 **B17** rules that below I6's floor the mark is
-/// dropped whole and the run separators carry the fact instead. This is the
-/// assertion that makes that load bearing, and it is the pulse's own gate one
-/// element over.
+/// **This is the width-swept half of #316's claim**, and it replaces the gate that
+/// asked whether the gutter ever pushed a path off its row. That question is gone
+/// with the column: what is checked now is that a grouped screen and a plain one
+/// put the kind letter, and therefore the path that follows it, in the same place.
 ///
-/// **Stated against the ungrouped row rather than against a constant**, which is
-/// what makes it checkable at all: `MIN_PATH_WIDTH` is private to the renderer, and
-/// a test that restated the number would agree with a stale copy of it forever.
-/// What a reader is owed is *the mark never costs a row its file's name*, so the
-/// comparison is between the same row with the column and without it. A width
-/// where the plain row names its file and the grouped one does not is the mark
-/// spending content to decorate itself.
+/// **The letter's column is the measurement, and the path's right edge is not.**
+/// The obvious assertion is where `watch.rs` lands, and it is worthless: the old
+/// gutter shifted the path's origin one cell right *and* took one cell off its
+/// width, so the right edge did not move and a tail-anchored comparison passed
+/// under both designs. What the column cost was head characters, which is what the
+/// reader actually lost and what the letter's own position reports.
 ///
-/// **Both directions**, for `the_caret_threshold_is_the_row_floor_it_claims`'
-/// reason: *never drawn where the row cannot afford it* is half a rule, and a floor
-/// left overstated after the pieces it sums get cheaper is invisible without the
-/// converse. So the sweep also counts the widths that draw the mark, and fails if
-/// there are none.
+/// Swept rather than pinned to one width because the old column was conditional on
+/// room, so a regression could reappear at some widths and not others.
 #[test]
-fn the_staged_gutter_never_pushes_a_path_off_its_own_row() {
+fn drawing_both_runs_costs_the_path_no_column_at_any_width() {
     let grouped = both_runs_pinned();
     // The same rows with no second run, so the only difference between the two
-    // screens at a given width is the column under test.
+    // screens at a given width is the grouping.
     let plain = View {
         list_span: 0,
         grouped: false,
@@ -6132,43 +6127,48 @@ fn the_staged_gutter_never_pushes_a_path_off_its_own_row() {
     };
 
     let tail = "watch.rs";
-    let (mut marked, mut bare) = (0usize, 0usize);
+    // Leading blanks and the caret are the only things that may precede the kind
+    // letter, so counting them is the letter's column without the renderer having
+    // to export it.
+    let letter_at = |row: &str| {
+        row.chars()
+            .take_while(|c| *c == ' ' || *c == '\u{25b8}')
+            .count()
+    };
+    let mut compared = 0usize;
 
     for width in WIDTHS {
         let with = rows_at(width, 12, &grouped, &chrome);
         let without = rows_at(width, 12, &plain, &chrome);
 
-        // The row `tail` is on in each screen. It moves between the two, because
-        // the grouped list opens with a separator, so it is found rather than
-        // indexed.
-        let named = |rows: &[String]| rows.iter().any(|row| row.contains(tail));
-        if named(&without) {
-            assert!(
-                named(&with),
-                "at {width} columns the staged gutter is what costs the row its \
-                 file's name: the plain screen still shows {tail:?} and the \
-                 grouped one does not:\n{}",
-                with.join("\n")
-            );
-        }
-
-        // And count which widths actually draw the mark, so the floor cannot be
-        // left overstated without this saying so.
-        if with.iter().any(|row| row.contains('│')) {
-            marked += 1;
-        } else {
-            bare += 1;
-        }
+        let row_of = |rows: &[String]| rows.iter().find(|row| row.contains(tail)).cloned();
+        let (Some(a), Some(b)) = (row_of(&with), row_of(&without)) else {
+            continue;
+        };
+        compared += 1;
+        assert_eq!(
+            letter_at(&a),
+            letter_at(&b),
+            "at {width} columns the grouped screen indents {tail:?} further than \
+             the plain one, so drawing both runs is costing the path a column \
+             again:\n{a}\n{b}"
+        );
     }
 
     assert!(
-        marked > 0,
-        "no width in the sweep drew the gutter at all, so the assertion above \
-         compared two identical screens and proved nothing"
+        compared > 0,
+        "no width in the sweep drew {tail:?} on both screens, so the assertion \
+         above compared nothing"
     );
+    // And the run this is all about is genuinely on screen somewhere, or the
+    // comparison is between two screens that differ in nothing.
     assert!(
-        bare > 0,
-        "every width in the sweep drew the gutter, so the floor that drops it is \
-         unreachable and this gate cannot see it move"
+        WIDTHS
+            .into_iter()
+            .any(|w| rows_at(w, 12, &grouped, &chrome)
+                .iter()
+                .any(|row| row.contains("staged"))),
+        "no width drew the staged run at all, so the grouped screen under test \
+         was never actually grouped"
     );
 }
