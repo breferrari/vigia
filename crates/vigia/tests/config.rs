@@ -616,9 +616,12 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
         staged: true,
         ..Config::default()
     };
+    // Both halves of what `run` does for a reader whose file says `staged = on`:
+    // the shell takes the config and so does the frame.
     let app = App::configured(config);
+    assert!(app.staged(), "the shell did not take the setting");
     let mut frame = worktree.frame();
-    vigia::arm_frame(&mut frame, &app);
+    vigia::arm_frame(&mut frame, config);
     frame.advance().expect("advance");
 
     assert!(
@@ -632,8 +635,12 @@ fn a_configured_staged_run_is_walked_on_the_first_frame() {
 
     // And the default is untouched: a reader with no file gets one run.
     let plain = App::configured(Config::default());
+    assert!(
+        !plain.staged(),
+        "a shell with no file took the setting anyway"
+    );
     let mut frame = worktree.frame();
-    vigia::arm_frame(&mut frame, &plain);
+    vigia::arm_frame(&mut frame, Config::default());
     frame.advance().expect("advance");
     assert!(
         frame

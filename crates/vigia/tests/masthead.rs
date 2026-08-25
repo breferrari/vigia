@@ -21,12 +21,18 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+/// The shell's own screen-reading selectors, under a second name because this
+/// file's `support` is `vigia-core`'s repository fixture. `tests/rail.rs` carries
+/// the same pair the other way round.
+#[path = "support/mod.rs"]
+mod screen;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use vigia::{
-    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing, Row,
-    Theme, View, body_layout, render,
+    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Pointing, Row, Theme, View,
+    body_layout, render,
 };
 
 use vigia_core::{
@@ -35,16 +41,6 @@ use vigia_core::{
 };
 
 use support::{Scratch, materialise};
-
-/// Every file the pinned list draws, skipping the run separators.
-///
-/// **The list stopped being one file per row in
-/// [#313](https://github.com/breferrari/vigia/issues/313)**, so a test that wants
-/// the files has to say so. `ListRow::entry` makes that a filter rather than an
-/// unwrap nobody would notice going wrong.
-fn listed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
-    view.list.iter().filter_map(ListRow::entry)
-}
 
 /// A pane with room to spare, so nothing here is answered by a floor.
 ///
@@ -346,7 +342,7 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
         ..chrome(&App::new())
     };
     assert!(
-        !listed_files(&banded(BURSTY))
+        !screen::listed_files(&banded(BURSTY))
             .next()
             .expect("the fixture lists a file")
             .path

@@ -382,16 +382,17 @@ impl<T> Cache<T> {
         }
     }
 
-    /// **Split between the runs rather than given to each**, because `additional`
-    /// is the whole changed set and the two maps partition it: reserving it twice
-    /// allocates for twice the entries that can ever exist. Halved and rounded up,
-    /// so a one-run changed set still reserves what it needs in the map it lands
-    /// in and the empty one keeps a spare slot rather than none.
-    fn reserve(&mut self, additional: usize) {
-        let each = additional.div_ceil(2);
-        for run in &mut self.runs {
-            run.reserve(each);
-        }
+    /// **Reserved per run from the real split, not halved.** `additional` is the
+    /// whole changed set and the two maps partition it, so giving each the total
+    /// allocates for twice the entries that can ever exist — and halving is worse
+    /// on the path that matters: the staged run is off by default, so every entry
+    /// lands in one map, which then reserves half of what it needs and grows and
+    /// rehashes on every tick while the other holds a table nothing arrives in.
+    ///
+    /// `Frame::advance` knows where the runs part, so it passes both counts.
+    fn reserve(&mut self, unstaged: usize, staged: usize) {
+        self.runs[0].reserve(unstaged);
+        self.runs[1].reserve(staged);
     }
 }
 
@@ -617,6 +618,9 @@ pub struct Frame<'w> {
     /// what is drawn: this one decides what is *walked*, so it has to be known
     /// before [`Frame::advance`] runs rather than after it.
     staged: bool,
+    /// Where [`Self::files`]'s staged run begins, recorded by the walk that built
+    /// it rather than recovered by scanning. See [`Frame::staged_at`].
+    staged_at: usize,
     stats: FrameStats,
 }
 
@@ -629,6 +633,7 @@ impl<'w> Frame<'w> {
             spans: Cache::default(),
             attributes: HashMap::new(),
             staged: false,
+            staged_at: 0,
             stats: FrameStats::default(),
         }
     }
@@ -662,6 +667,9 @@ impl<'w> Frame<'w> {
         // has already put away. Concatenating rather than merging is also what
         // lets one path hold an entry in each: they are two comparisons of two
         // different pairs of bytes, and the pane says so rather than choosing one.
+        // Recorded here rather than recovered later: this is the one line that
+        // knows where the second walk's output begins. See [`Frame::staged_at`].
+        let staged_at = files.len();
         if self.staged {
             for change in self
                 .worktree
@@ -774,9 +782,9 @@ impl<'w> Frame<'w> {
         // being changed is dropped from both, so each map is the size of the
         // current diff and not of the session, which is I3.
         let mut previous = std::mem::take(&mut self.cached);
-        self.cached.reserve(files.len());
+        self.cached.reserve(staged_at, files.len() - staged_at);
         let mut previous_spans = std::mem::take(&mut self.spans);
-        self.spans.reserve(files.len());
+        self.spans.reserve(staged_at, files.len() - staged_at);
         for change in &files {
             // `Cache::migrate` moves the key the old map owns rather than cloning
             // it. With two maps that is up to 2N needless `String` allocations a
@@ -794,13 +802,29 @@ impl<'w> Frame<'w> {
         // into it would make that number mean neither one.
         self.stats.evicted += previous.len() as u64;
 
+        self.staged_at = staged_at;
         self.files = files;
         Ok(())
     }
 
-    /// Whether the staged run is drawn beside the unstaged one.
-    pub fn staged(&self) -> bool {
-        self.staged
+    /// Where the staged run begins in [`Frame::files`].
+    ///
+    /// **The boundary is a fact this walk already has, and five places were
+    /// rebuilding it by scanning.** [`Frame::advance`] concatenates the runs,
+    /// unstaged then staged, so the partition point is where the second walk's
+    /// output starts; the shell was recovering it with a filter over the whole
+    /// changed set, four times in `view.rs` and once in `app.rs`, on every frame.
+    ///
+    /// Handing it back makes each of those `O(1)` and, more to the point, gives
+    /// *what the two runs are* one owner: five scans agreeing by inspection is
+    /// five chances to disagree, and one of them drives the gutter column while
+    /// another drives the separators.
+    ///
+    /// Equal to `files().len()` when the staged run is not drawn, which is the
+    /// honest answer rather than a sentinel: everything is unstaged and the staged
+    /// run begins past the end.
+    pub fn staged_at(&self) -> usize {
+        self.staged_at
     }
 
     /// Draw the staged run, or stop drawing it.
@@ -923,6 +947,20 @@ impl<'w> Frame<'w> {
         Ok(rows_of(change, &self.span_of(change).span))
     }
 
+    /// The span this change's row is drawn from, which [`Self::fill_span`] has
+    /// just guaranteed exists.
+    ///
+    /// **A named accessor rather than an index expression**, because the key grew
+    /// a second component in [#313](https://github.com/breferrari/vigia/issues/313)
+    /// and two call sites were spelling it out. Panicking on a miss is deliberate
+    /// and unchanged: both callers fill first, and a silent zero here would draw a
+    /// file with no height rather than fail.
+    fn span_of(&self, change: &FileChange) -> &Measured {
+        self.spans
+            .get(change)
+            .expect("fill_span guarantees this, and both callers fill first")
+    }
+
     /// Put a span for the file at `index` in the cache, if one is not there.
     ///
     /// **Shared, because the two callers answered the same question
@@ -972,20 +1010,6 @@ impl<'w> Frame<'w> {
     /// [`Taken`] evidence, and it inherits the same single limit: a write that
     /// restores both length and modification time
     /// ([#16](https://github.com/breferrari/vigia/issues/16)).
-    /// The span this change's row is drawn from, which [`Self::fill_span`] has
-    /// just guaranteed exists.
-    ///
-    /// **A named accessor rather than an index expression**, because the key grew
-    /// a second component in [#313](https://github.com/breferrari/vigia/issues/313)
-    /// and two call sites were spelling it out. Panicking on a miss is deliberate
-    /// and unchanged: both callers fill first, and a silent zero here would draw a
-    /// file with no height rather than fail.
-    fn span_of(&self, change: &FileChange) -> &Measured {
-        self.spans
-            .get(change)
-            .expect("fill_span guarantees this, and both callers fill first")
-    }
-
     fn fill_span(&mut self, index: usize) {
         let change = &self.files[index];
         if self

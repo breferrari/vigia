@@ -1407,18 +1407,6 @@ impl App {
         // again, on a frame no tick armed. Reachable by opening the sheet, which
         // moves no viewport and whose own ruling says a reader who opens it and
         // closes it sees the screen they left.
-        // **The staged total, from the changed set the frame already holds.**
-        // A pass over a `Vec`, so no read, no `stat` and no diff: `Frame::advance`
-        // has already reported both runs and this is the header asking which half
-        // is which. Recorded here rather than in the chrome because this is the one
-        // call every frame makes with the frame in hand, and because the chrome is
-        // built twice per paint — once before the layout and once after — where a
-        // count taken there would be a walk taken twice.
-        self.staged_files = frame
-            .files()
-            .iter()
-            .filter(|change| change.origin == vigia_core::Origin::Staged)
-            .count();
         let owed = self.landing && self.still_the_followed_file(frame);
         // **Recorded here because this is the one call every frame makes with the
         // pane's own layout in hand.** `?` advancing needs to know which page is
@@ -1517,6 +1505,17 @@ impl App {
         // reader on the heading for good: the tick that armed it is spent.
         self.landing = owed && !view.landed;
         self.list_rows = body.list;
+        // **The staged total, below the collect and for the reason `elsewhere` is.**
+        // The header draws it beside `View::files`, and `Shell::screen` keeps the
+        // previous view when a collect fails — so taken from the frame it could
+        // pair this frame's staged count with last frame's changed count and read
+        // `3 changed · 5 staged`, which cannot happen: staged is a subset. Round 4
+        // fixed exactly this split on `elsewhere` and left its sibling standing.
+        //
+        // **From `Frame::staged_at` rather than a filter**, which is the boundary
+        // the walk already recorded: `advance` concatenates unstaged then staged,
+        // so the count is a subtraction rather than a pass over the changed set.
+        self.staged_files = frame.files().len() - frame.staged_at();
         // Stored back for the reason the position is: resolution happens once,
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.

@@ -24,6 +24,8 @@
 //! into these rows is `reads.rs` and `scroll.rs`; whether these rows become the
 //! right cells is here.
 
+mod support;
+
 use std::time::Duration;
 
 use ratatui::Terminal;
@@ -37,16 +39,6 @@ use vigia::{
     Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
-
-/// Every file the pinned list draws, skipping the run separators.
-///
-/// **The list stopped being one file per row in
-/// [#313](https://github.com/breferrari/vigia/issues/313)**, so a test that wants
-/// the files has to say so. `ListRow::entry` makes that a filter rather than an
-/// unwrap nobody would notice going wrong.
-fn listed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
-    view.list.iter().filter_map(ListRow::entry)
-}
 
 /// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
 ///
@@ -1084,7 +1076,7 @@ fn streamed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
 /// is here because three gates need it now and a second copy would check the
 /// first copy rather than the fixture.
 fn guard_sigil_free_paths(view: &View) {
-    for path in listed_files(view)
+    for path in support::listed_files(view)
         .chain(streamed_files(view))
         .map(|entry| &entry.path)
     {
@@ -1151,7 +1143,7 @@ fn the_counters_take_the_pictures_green_and_red() {
         .iter()
         .copied()
         .zip(
-            listed_files(&view)
+            support::listed_files(&view)
                 .map(|entry| entry.churn.expect("the fixture gives every list row churn")),
         )
         .chain(
@@ -1247,7 +1239,7 @@ fn a_zero_counter_stays_grey_because_it_restates_no_change() {
     // Guard the fixture: without a zero in it this is a test about a row that
     // removes something, and it would pass against a renderer with no rule at
     // all. Read off the view rather than off the screen, for the same reason.
-    let zeroed: Vec<u16> = listed_files(&view)
+    let zeroed: Vec<u16> = support::listed_files(&view)
         .enumerate()
         .filter(|(_, entry)| entry.churn.is_some_and(|(_, removed)| removed == 0))
         .map(|(index, _)| index as u16 + LIST_TOP)
@@ -1309,7 +1301,7 @@ fn the_glance_columns_agree_down_the_list() {
     // Guard the fixture first. If every row's counts were the same width, right
     // packing and columns would draw identically and this test would pass
     // against the defect it exists to catch.
-    let widths: Vec<usize> = listed_files(&view)
+    let widths: Vec<usize> = support::listed_files(&view)
         .map(|e| {
             let (a, r) = e.churn.expect("the fixture gives every row churn");
             format!("+{a} -{r}").chars().count()
@@ -1459,7 +1451,7 @@ fn a_row_missing_a_glance_element_keeps_its_column() {
     // for its sigils: `glance_columns` reads any digit as a counts cell, so a
     // path carrying one would be classified as content and the comparison would
     // be over the wrong columns.
-    for path in listed_files(&ragged_counts()).map(|entry| entry.path.clone()) {
+    for path in support::listed_files(&ragged_counts()).map(|entry| entry.path.clone()) {
         assert!(
             !path.contains(|c: char| c.is_ascii_digit()),
             "the fixture path {path:?} carries a digit, which `glance_columns` \
@@ -1604,8 +1596,8 @@ fn scrolling_the_list_does_not_move_the_columns() {
     // Non-vacuity: the two windows really do disagree about how wide a raw count
     // is, or this compares two identical screens.
     assert_ne!(
-        listed_files(&narrow).filter_map(|e| e.churn).max(),
-        listed_files(&wide).filter_map(|e| e.churn).max(),
+        support::listed_files(&narrow).filter_map(|e| e.churn).max(),
+        support::listed_files(&wide).filter_map(|e| e.churn).max(),
         "both windows hold the same widest count, so neither layout is under \
          pressure and this proves nothing"
     );

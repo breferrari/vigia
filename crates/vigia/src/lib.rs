@@ -373,11 +373,15 @@ fn request_for_one(arg: &OsStr) -> Request {
 /// it is already mutating. Two call sites, one rule, and the rule is stated here
 /// because this is the one a reader will not think to look for.
 ///
+/// **Takes the [`Config`] rather than an [`App`]**, which is the whole of what it
+/// needs: building an `App` to read one bool and then building the real one three
+/// lines later said the seam was about the shell when it is about the file.
+///
 /// `pub` and `doc(hidden)` for `tests/config.rs`, which drives the startup path
 /// without a terminal.
 #[doc(hidden)]
-pub fn arm_frame(frame: &mut vigia_core::Frame, app: &App) {
-    frame.show_staged(app.staged());
+pub fn arm_frame(frame: &mut vigia_core::Frame, config: crate::Config) {
+    frame.show_staged(config.staged);
 }
 
 /// Watch the working tree at `path` and draw it until the reader quits.
@@ -434,7 +438,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // still above `Session::enter`: a repository that fails on its first walk
     // reports on a terminal the reader can still see, and so does a config file
     // that does not parse. The two now happen in the order they are needed in.
-    arm_frame(&mut frame, &App::configured(config));
+    arm_frame(&mut frame, config);
     frame.advance()?;
 
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
@@ -1624,26 +1628,6 @@ impl Shell {
         // exactly the screen that exists to orient a reader.
         self.branch = worktree.branch();
 
-        // **And on a frame with nothing to draw, where the work went.**
-        // [#313](https://github.com/breferrari/vigia/issues/313) was reported as
-        // an agent that stages its own work emptying the pane: `no unstaged
-        // changes` is true of a clean tree and of a fully staged one alike, and
-        // the reader had no way to tell them apart. Counting the other run turns
-        // that line into `no unstaged changes · 3 staged`.
-        //
-        // **Guarded by the frame's own file count, which is the whole of I4 for
-        // this read** — the same rule the branch above is now *satisfied* by
-        // rather than guarded by, applied to a read that genuinely is conditional.
-        // A frame with a diff on it never asks. A frame without one has no diff to
-        // compute and reads nothing else, and the walk it pays for is the cheaper
-        // of the two: the staged comparison touches no file at all, measured at
-        // 430us against 2.15ms on a 200-file fixture.
-        //
-        // Asked only while the staged run is **off**, because with it on the pane
-        // already holds both comparisons and an empty frame means both are empty.
-        // A failed walk is not worth a notice: it costs the reader a hint on one
-        // frame, and saying so on the footer would push a real notice off it.
-
         // The chrome is built before the layout, not after, because the footer
         // takes a second line at narrow widths and `body_layout` has to know
         // whether this frame is one of those. `frame.files().len()` is the same
@@ -1670,6 +1654,13 @@ impl Shell {
             Err(e) => self.app.warn(e.to_string()),
         }
 
+        // **On a frame with nothing to draw, where the work went.**
+        // [#313](https://github.com/breferrari/vigia/issues/313) was reported as an
+        // agent that stages its own work emptying the pane: `no unstaged changes`
+        // is true of a clean tree and of a fully staged one alike, and the reader
+        // had no way to tell them apart. Counting the other run turns that line
+        // into `no unstaged changes · 3 staged`.
+        //
         // **Decided from the screen that will be drawn, not from the frame**, and
         // the difference is a failed collect. `Shell::screen` keeps the previous
         // view when a collect fails, so a frame whose walk succeeded and whose

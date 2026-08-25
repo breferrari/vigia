@@ -219,6 +219,10 @@ struct Runs {
 }
 
 impl Runs {
+    /// **Counted by scanning, because a slice does not carry the boundary.**
+    /// `Frame::staged_at` is the same number for free where a caller has the
+    /// frame, and [`Runs::at`] is that door; this one exists for the public
+    /// entry points that take a slice and for tests that build one by hand.
     fn of(files: &[vigia_core::FileChange]) -> Self {
         let staged = files
             .iter()
@@ -227,6 +231,14 @@ impl Runs {
         Self {
             unstaged: files.len() - staged,
             staged,
+        }
+    }
+
+    /// The runs, from the boundary [`vigia_core::Frame::advance`] recorded.
+    fn at(files: &[vigia_core::FileChange], staged_at: usize) -> Self {
+        Self {
+            unstaged: staged_at,
+            staged: files.len() - staged_at,
         }
     }
 
@@ -284,6 +296,25 @@ fn plan_with(files: &[vigia_core::FileChange], runs: Runs, top: usize, rows: usi
     plan
 }
 
+/// Whether a window of `rows` drawn rows starting at `top` draws `file`.
+///
+/// **One predicate, two callers**, and it is the question both searches below are
+/// actually asking: [`top_showing`] walks tops until it stops being true, and
+/// [`following_top`] asks it once about the window it already has. Written twice
+/// it was also written two ways, the second collecting a `Vec` of every drawn
+/// index to ask about one of them.
+fn draws_file(
+    files: &[vigia_core::FileChange],
+    runs: Runs,
+    top: usize,
+    rows: usize,
+    file: usize,
+) -> bool {
+    plan_with(files, runs, top, rows)
+        .iter()
+        .any(|slot| matches!(slot, Slot::File(at) if *at == file))
+}
+
 /// The **smallest** top a window of `rows` drawn rows can start at and still draw
 /// `file`.
 ///
@@ -303,11 +334,7 @@ fn top_showing(files: &[vigia_core::FileChange], runs: Runs, file: usize, rows: 
         return 0;
     }
     let file = file.min(files.len() - 1);
-    let draws = |top: usize| {
-        plan_with(files, runs, top, rows)
-            .iter()
-            .any(|slot| matches!(slot, Slot::File(at) if *at == file))
-    };
+    let draws = |top: usize| draws_file(files, runs, top, rows, file);
     let floor = file.saturating_sub(rows);
     let mut best = file;
     for top in (floor..file).rev() {
@@ -362,14 +389,7 @@ pub fn following_top(
         return 0;
     }
     let runs = Runs::of(files);
-    let shown: Vec<usize> = plan_with(files, runs, from, rows)
-        .iter()
-        .filter_map(|slot| match slot {
-            Slot::File(at) => Some(*at),
-            Slot::Group { .. } => None,
-        })
-        .collect();
-    if shown.contains(&current) {
+    if draws_file(files, runs, from, rows, current) {
         return from;
     }
     if current < from {
@@ -1501,7 +1521,11 @@ impl View {
         // who asks for the staged run and has nothing staged gets the pane they
         // already had rather than a column and a label saying nothing. The header
         // is what acknowledges the keypress in that case.
-        let grouped = Runs::of(frame.files()).grouped();
+        //
+        // **From the boundary the walk recorded**, which is a subtraction where a
+        // filter over the changed set would be a pass: `Frame::advance`
+        // concatenates the runs and knows where they part.
+        let grouped = Runs::at(frame.files(), frame.staged_at()).grouped();
         let mut view = Self {
             grouped,
             // **Initialised to "nothing to scroll" rather than to zero**, so every

@@ -1486,12 +1486,14 @@ pub struct Chrome {
     pub worktree: String,
     /// The branch the empty state names, when there is one.
     ///
-    /// `None` covers two different things on purpose, because the empty state
-    /// draws them identically: a detached HEAD, which names no branch, and a
-    /// frame that has a diff to show and therefore never asked. The second is
-    /// what keeps I4 true. Reading `.git/HEAD` on a frame that will not draw the
-    /// answer is exactly the shape I4 forbids, so the shell asks only when the
-    /// diff is empty.
+    /// **`None` means a detached HEAD and nothing else, since
+    /// [#158](https://github.com/breferrari/vigia/issues/158).** It used to cover
+    /// a second case — a populated frame, which never asked — and that half is
+    /// gone: the *header* draws the branch on every frame, so the read is
+    /// unconditional and I4 is **satisfied** rather than guarded, because the
+    /// thing read is the thing drawn. The claim survived the change it was made
+    /// false by, and `Chrome::elsewhere` below then cited it as precedent for a
+    /// read that genuinely is conditional.
     pub branch: Option<String>,
     /// How many files the **staged** run holds, or `None` when it is not drawn.
     ///
@@ -1993,11 +1995,10 @@ fn header_left(
 /// The one body line a worktree with no changes gets.
 ///
 /// This is B3, ruled into `SPEC.md` §11.1 with its number left behind in §11.2,
-/// and it carries two of that ruling's four facts.
-/// The other two are the header's: which repository, from the worktree name, and
-/// that it is watching, from the mode word. So the empty state costs one row
-/// rather than four, and the mode word is what makes the fourth fact sayable in
-/// none at all.
+/// and it carries two of that ruling's four facts. The other two are the header's:
+/// which repository, from the worktree name, and that it is watching, from the
+/// mode word. So the empty state costs one row rather than four, and the mode word
+/// is what makes the fourth fact sayable in none at all.
 ///
 /// **The branch left this line on 2026-08-17**
 /// ([#158](https://github.com/breferrari/vigia/issues/158)), and the ruling that
@@ -2015,34 +2016,26 @@ fn header_left(
 ///
 /// A detached HEAD is still not invented anywhere: `HEAD@abc123` would put a
 /// commit id in a monitor that shows no commits.
-fn empty_state(staged: Option<usize>) -> String {
-    match staged {
+///
+/// **Three cases in one function since §11.2 B17**
+/// ([#313](https://github.com/breferrari/vigia/issues/313)), which is also what
+/// makes visible that the two arguments are mutually exclusive by construction:
+/// `staged` is `Some` only while the run is drawn, and `elsewhere` is non-zero
+/// only while it is not.
+fn empty_state_with(staged: Option<usize>, elsewhere: usize) -> String {
+    match (staged, elsewhere) {
         // The run is on and there is nothing in either. One line, both named.
-        Some(_) => NOTHING_ANYWHERE.to_owned(),
+        (Some(_), _) => NOTHING_ANYWHERE.to_owned(),
         // **The run is off and the index has work in it: say where the work
         // went.** This is the whole of what
-        // [#313](https://github.com/breferrari/vigia/issues/313) was reported on —
+        // [#313](https://github.com/breferrari/vigia/issues/313) was reported on:
         // an agent that stages its own work emptied the pane, and the reader was
         // left looking at `no unstaged changes` with no way to tell a clean tree
         // from a fully staged one. A blank pane that names the run holding the
         // work is a signpost; one that does not is a dead end.
-        //
-        // It costs one walk of the other comparison, on a frame that computes no
-        // diff and reads nothing else, and the walk that answers it is the cheaper
-        // of the two (it touches no file). `crate::Shell` asks only on this frame,
-        // which is the rule `Worktree::branch` already follows and what keeps I4
-        // true: the thing read is the thing drawn.
-        None => NOTHING_CHANGED.to_owned(),
-    }
-}
-
-/// [`empty_state`], plus where the work went when this run is empty and the other
-/// is not.
-fn empty_state_with(staged: Option<usize>, elsewhere: usize) -> String {
-    let line = empty_state(staged);
-    match (staged, elsewhere) {
-        (None, n) if n > 0 => format!("{line}{FACT_SEPARATOR}{n} staged"),
-        _ => line,
+        (None, n) if n > 0 => format!("{NOTHING_CHANGED}{FACT_SEPARATOR}{n} staged"),
+        // A genuinely clean tree, which is B3's own line unchanged.
+        (None, _) => NOTHING_CHANGED.to_owned(),
     }
 }
 
@@ -6677,11 +6670,20 @@ impl Painter<'_> {
         // The trailing rule takes whatever is left, which is what makes the row
         // read as a rule with a word on it rather than as a word with two dashes
         // in front. Nothing is drawn where nothing is left.
-        let used = usize::from(at - area.x);
-        let rest = room - used;
+        //
+        // **Through [`Painter::rule`] rather than a built string**, which is the
+        // same glyph over the same shape and carries that function's own recorded
+        // measurement: a `repeat` here is an allocation plus a grapheme pass, and
+        // writing cells is six times cheaper than either fix to the allocation
+        // alone. It also means [`RULE`] is spelled once rather than twice.
+        let rest = room - usize::from(at - area.x);
         if rest > 0 {
-            let fill = "\u{2500}".repeat(rest);
-            self.put(at, area.y, &fill, rest, self.theme.chrome_dim);
+            self.rule(Rect {
+                x: at,
+                width: rest as u16,
+                height: 1,
+                ..area
+            });
         }
     }
 

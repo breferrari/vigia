@@ -26,7 +26,7 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::style::Color;
-use vigia::Theme;
+use vigia::{FileEntry, ListRow, Theme, View};
 
 /// Columns of row `y` between `from` and `to` whose glyph is one of `symbols`
 /// **and** whose foreground is one of `colours`.
@@ -99,4 +99,17 @@ pub fn spark_colours(theme: &Theme) -> Vec<Color> {
         .into_iter()
         .filter_map(|style| style.fg)
         .collect()
+}
+
+/// Every file the pinned list draws, skipping the run separators.
+///
+/// **The list stopped being one file per row in
+/// [#313](https://github.com/breferrari/vigia/issues/313)**, so a test that wants
+/// the files has to say so. `ListRow::entry` makes that a filter rather than an
+/// unwrap nobody would notice going wrong, and it lives here for this module's own
+/// reason: three files were about to spell the row-to-file rule three ways, and it
+/// is a rule about the *renderer's* row model rather than an alphabet a test
+/// should restate.
+pub fn listed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
+    view.list.iter().filter_map(ListRow::entry)
 }
