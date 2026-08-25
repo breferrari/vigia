@@ -917,6 +917,27 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         // shared list rather than given gates of its own, which is the point:
         // every structural rule already swept here now covers the mode word too.
         ("every row kind, watch lost", every_row_kind(), lost()),
+        // **Both runs drawn**, which is the widest a file row ever gets: the
+        // gutter is a third column competing with the path and the glance
+        // elements, and the list holds two rows that are not files. Following as
+        // well as idle, because the footer's own ladder moves under it and the two
+        // are where a width-dependent bug in the new column would hide.
+        (
+            "both runs, following",
+            both_runs_pinned(),
+            Chrome {
+                staged: Some(2),
+                ..following()
+            },
+        ),
+        (
+            "both runs, idle",
+            both_runs_pinned(),
+            Chrome {
+                staged: Some(2),
+                ..chrome()
+            },
+        ),
         // **A worktree whose name is two columns per character**, which nothing
         // put through the header's left before. A directory name is whatever the
         // filesystem holds, and since #67 the left is a clause the ladder builds
@@ -4596,6 +4617,53 @@ fn pinned_and_streamed() -> View {
     }
 }
 
+/// The same screen with **both runs** on it, which is `SPEC.md` §11.2 **B17**.
+///
+/// **A third column on every file row and two rows of the list that are not
+/// files**, which is a shape none of this file's sweeps had seen: the gutter comes
+/// out of the same room the path and the glance elements are competing for, and
+/// the separators are drawn by a drawer with a degradation ladder of its own. Both
+/// are exactly what I6 is about, so this goes in [`cases`] rather than getting a
+/// gate of its own — the same reasoning the wide worktree name and the lost watch
+/// were added on, and the reason those two are in the list rather than beside it.
+///
+/// The staged entries are marked on the entry rather than on the view, because
+/// that is what the painter reads: a fixture that set `grouped` and left every row
+/// `Unstaged` would draw the column and never fill it, which is a narrower screen
+/// than the one that ships.
+fn both_runs_pinned() -> View {
+    let staged = |path: &str| {
+        let mut entry = entry(path);
+        entry.origin = Origin::Staged;
+        entry
+    };
+    View {
+        grouped: true,
+        list: vec![
+            ListRow::Group {
+                origin: Origin::Unstaged,
+                count: 2,
+            },
+            entry("crates/vigia-core/src/frame.rs").into(),
+            entry("src/engine/watch.rs").into(),
+            ListRow::Group {
+                origin: Origin::Staged,
+                count: 2,
+            },
+            staged("Cargo.toml").into(),
+            staged("crates/vigia/src/render.rs").into(),
+        ],
+        list_top: 0,
+        files: 4,
+        rows: vec![
+            Row::file(entry("crates/vigia-core/src/frame.rs")),
+            Row::file(staged("crates/vigia/src/render.rs")),
+        ],
+        top: Position { file: 0, row: 0 },
+        ..every_row_kind()
+    }
+}
+
 /// The column a file row's status sigil sits in, or `None` on a row that draws
 /// none.
 ///
@@ -6001,4 +6069,88 @@ fn a_pane_too_short_for_a_body_keeps_no_rule_over_its_footer() {
             rows.join("\n")
         );
     }
+}
+
+/// **The staged gutter may take room from the path. It may not take the path.**
+///
+/// `MIN_PATH_WIDTH` outranks every glance element (§5.3), and the gutter is one
+/// more of them: `SPEC.md` §11.2 **B17** rules that below I6's floor the mark is
+/// dropped whole and the run separators carry the fact instead. This is the
+/// assertion that makes that load bearing, and it is the pulse's own gate one
+/// element over.
+///
+/// **Stated against the ungrouped row rather than against a constant**, which is
+/// what makes it checkable at all: `MIN_PATH_WIDTH` is private to the renderer, and
+/// a test that restated the number would agree with a stale copy of it forever.
+/// What a reader is owed is *the mark never costs a row its file's name*, so the
+/// comparison is between the same row with the column and without it. A width
+/// where the plain row names its file and the grouped one does not is the mark
+/// spending content to decorate itself.
+///
+/// **Both directions**, for `the_caret_threshold_is_the_row_floor_it_claims`'
+/// reason: *never drawn where the row cannot afford it* is half a rule, and a floor
+/// left overstated after the pieces it sums get cheaper is invisible without the
+/// converse. So the sweep also counts the widths that draw the mark, and fails if
+/// there are none.
+#[test]
+fn the_staged_gutter_never_pushes_a_path_off_its_own_row() {
+    let grouped = both_runs_pinned();
+    // The same rows with no second run, so the only difference between the two
+    // screens at a given width is the column under test.
+    let plain = View {
+        grouped: false,
+        list: grouped
+            .list
+            .iter()
+            .filter_map(ListRow::entry)
+            .cloned()
+            .map(ListRow::from)
+            .collect(),
+        ..grouped.clone()
+    };
+    let chrome = Chrome {
+        staged: Some(2),
+        ..following()
+    };
+
+    let tail = "watch.rs";
+    let (mut marked, mut bare) = (0usize, 0usize);
+
+    for width in WIDTHS {
+        let with = rows_at(width, 12, &grouped, &chrome);
+        let without = rows_at(width, 12, &plain, &chrome);
+
+        // The row `tail` is on in each screen. It moves between the two, because
+        // the grouped list opens with a separator, so it is found rather than
+        // indexed.
+        let named = |rows: &[String]| rows.iter().any(|row| row.contains(tail));
+        if named(&without) {
+            assert!(
+                named(&with),
+                "at {width} columns the staged gutter is what costs the row its \
+                 file's name: the plain screen still shows {tail:?} and the \
+                 grouped one does not:\n{}",
+                with.join("\n")
+            );
+        }
+
+        // And count which widths actually draw the mark, so the floor cannot be
+        // left overstated without this saying so.
+        if with.iter().any(|row| row.contains('│')) {
+            marked += 1;
+        } else {
+            bare += 1;
+        }
+    }
+
+    assert!(
+        marked > 0,
+        "no width in the sweep drew the gutter at all, so the assertion above \
+         compared two identical screens and proved nothing"
+    );
+    assert!(
+        bare > 0,
+        "every width in the sweep drew the gutter, so the floor that drops it is \
+         unreachable and this gate cannot see it move"
+    );
 }
