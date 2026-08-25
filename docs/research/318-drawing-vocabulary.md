@@ -129,9 +129,40 @@ So the font itself already carries: complete box drawing, blocks, braille, the f
 5. **Delta-style diff washes read exactly as intended**: whole-line dark green/red tint, brighter tint on the changed word, text legible throughout.
 6. **Nerd Font icons and rounded Powerline caps are crisp** (they are real font glyphs here, per 3.1).
 
-### 3.3 Side-by-sides
+### 3.3 The tool as it draws today, across its modes
 
-(to fill: vigia beside btop and the best examples found)
+Captured 2026-08-25 in foot on the chaotic synthetic repo (`assets/probe.py`'s sibling scripts; ~19 changed files: multi-hunk edits, block deletions, whole-file delete, renames with and without edits on top, staged+unstaged mixes, a binary, a 600-column line, untracked files, plus a burst driver writing at uneven cadence). Screenshots in `assets/`: `mode-default`, `mode-masthead`, `mode-rail`, `mode-staged`, `mode-sheet`, `mode-narrow60`, `mode-light`, `mode-ansi16`, `mode-nocolor`, `mode-braille`, and `btop-reference` from the same machine.
+
+What the captures say about the current look, held beside the survey:
+
+- **The diff wash is the dated surface.** An added or removed block paints one flat tinted slab across the pane, at one intensity, with no word-level emphasis and no gutter separation. Beside delta's low-chroma wash + hotter same-hue word emphasis, or crush's two-tone gutter, it reads 2019. It is also the *dominant* surface: in a real burst the pane is mostly wash.
+- **The file list is already strong.** Heat strips with mixed bands, sparklines, right-anchored counters, kind sigils, the staged run with `new ← old` renames: the glance row is ahead of most of the field. What it lacks is entirely decorative: no gradient in the ramps (three flat stops), no icons, no hover affordances beyond the underline.
+- **Chrome is nearly absent by design** and mostly reads well: one rule under the header, a bottom status line. The gestures sheet is the one bordered element (plain single-line box, square corners). Nothing is rounded anywhere; the field's default is rounded or deliberately borderless.
+- **The ladders exist and work**: light, 256, 16-colour, `NO_COLOR`, and the glyph rungs all drew correctly in captures, which is a real asset most of the surveyed tools do not have in this form; degradation here is a mechanism, not a hope.
+- **Observation, filed not concluded**: under the chaotic driver the status bar's frame cell read `60-69ms` where the quiet lab read `12-17ms` and the spec's budget gate reads 2.4ms p50 at 80x24. Different pane (220x55), different workload, and the cell may measure the whole wake rather than the paint; noted for [#72](https://github.com/breferrari/vigia/issues/72)'s workload evidence rather than treated as a regression claim here.
+
+## 4. Opportunity map
+
+Ranked draft, pending the terminal-support matrix (agent still out) and the checkpoint. Payoff is visual, judged against the captures; cost is engineering; every row keeps the ladder (what it becomes at 256, 16, `NO_COLOR`, ASCII is part of the row).
+
+| # | candidate | payoff | cost | spec rulings touched |
+|---|---|---|---|---|
+| 1 | **Delta-formula diff washes**: low-chroma line wash, hotter same-hue word-level emphasis, two-tone gutter (crush) | highest: it is the dominant surface | medium: word-pairing needs an edit-distance bound; theme keys exist | green/red roles kept (hue unchanged); picture redrawn |
+| 2 | **Terminal-adaptive theme**: OSC 10/11 query, system palette theme, live dark/light (mode 2031) | high: native look everywhere, no flag | medium: query plumbing | `VIGIA_THEME` stays as override; default changes |
+| 3 | **Truecolour gradients on glance elements** (btop mechanism: precomputed ramps; per-row for multi-row, per-value for one-row) | med-high | low: theme + paint only | 3-stop rulings dated by the 256 cube; top rung gains stops, lower rungs keep today's |
+| 4 | **Octant/sextant sparkline rungs by terminal table** (foot/ghostty/kitty self-render; ratatui `Marker::Octant` shipped) | medium | low: extend `Glyphs::detect`'s existing table | "detection never returns octants" corrected: it was a font fact, not a terminal fact |
+| 5 | **Chrome polish**: rounded corners + border-spliced title on the sheet; Powerline caps in header/status segments (font-guaranteed 16/16) | medium | low | none |
+| 6 | **OSC 8 hyperlinks on file paths** (ratatui 0.30.1 `CellDiffOption::ForcedWidth`) | medium: click a path, editor opens | medium | new capability; no ruling contradicts |
+| 7 | **Nerd Font file icons in the list**, opt-in, theme-driven, ASCII fallback (lazygit/yazi shape) | medium | medium: icon table | I5 floor respected by opt-in + fallback |
+| 8 | **#316 premise correction**: combining overlays render via font fallback on both terminals here; the refusal's "vanishes with nothing to fall back to" was `fc-list` quoted as rendering truth | low direct (mark is solved with ink) | ruling-only | §11.2 correction; reopens the vocabulary, not the mark |
+| 9 | **Styled/coloured underlines** | unknown: no fact currently wants the channel | low | §5.3 reservation was written when plain was the only underline; a ruling should say whether the *style* axis is also reserved |
+| 10 | **Motion vocabulary** (OpenCode restraint: fps clamp, one toggle, active-only) | low-med | varies | I1 untouched while animation is change-driven |
+
+(to refine at the checkpoint)
+
+## 4.1 Checkpoint
+
+(to fill: what was decided with the reader)
 
 ## 4. Opportunity map
 
