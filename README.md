@@ -412,8 +412,6 @@ set -ga terminal-overrides ",*:Tc"
 
 </details>
 
----
-
 ### 🪟 The pane you want, every time
 
 `m`, `r` and `s` change what the body is made of, and all three start off. If you always want one of them, say so once:
@@ -428,6 +426,8 @@ single   = on     # one file at a time
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
 
 **`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
+
+---
 
 ## 🧱 Built with
 

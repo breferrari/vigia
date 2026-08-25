@@ -1315,7 +1315,6 @@ What is still left open, and is the intended pressure: there is nowhere to put a
 
 **The branch not taken: put the keys in the theme file and add no second path.** It is the smaller change and it is recorded because it will be raised again. Refused on the `VIGIA_THEME=dark` case above, which is not a matter of taste: it loses a reader's settings without saying so, on a gesture that has nothing to do with the settings it loses.
 
-
 **B7 — Does the monitor write an observation log? Ruled 2026-08-05: no. See §11.1.** ([#117](https://github.com/breferrari/vigia/issues/117).) B6's pressure arriving with a concrete proposal behind it: `VIGIA_OBSERVE=<path>`, off by default, appending per-tick aggregates — frame p99, changed-file count, depth rung, follow transitions — to a file **outside** the worktree, so that the week of real use [#72](https://github.com/breferrari/vigia/issues/72) needs leaves numbers rather than memories.
 
 **It is the first entry here with no `(proposed)` line, and that is deliberate rather than an omission.** B1 through B6 were written into this section open and ruled later, so each keeps the recommendation it was carrying. This one arrived as a tracked question and was ruled in the same change that gave it a number, so there is no earlier recommendation to preserve; what a later reader will want to argue with is the adopt case below, which is recorded in full for exactly that reason.
