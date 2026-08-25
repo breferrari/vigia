@@ -27,8 +27,8 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    Action, App, Chrome, Glyphs, Hovered, Regions, Sheet, Theme, action_for, body_layout, regions,
-    render,
+    Action, App, Chrome, Glyphs, Grabbed, Hovered, Regions, Sheet, Theme, action_for, body_layout,
+    regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
@@ -973,10 +973,17 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    toggle(&mut app, &mut frame);
+    // **80 by 26 rather than the default pane since
+    // [#288](https://github.com/breferrari/vigia/issues/288)**, and the failure it
+    // caused is worth naming: at twenty-four rows the pane now takes the
+    // two-column rung, whose *tight* spelling draws `q  Esc` where this gate looks
+    // for `Ctrl+C`. Nothing had dropped a rung; the pane had changed which one it
+    // was on.
+    let wide_at = Rect::new(0, 0, WIDE, 26);
+    toggle_at(&mut app, &mut frame, wide_at);
 
-    let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
-    let wide = text_of(&buf, area());
+    let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, wide_at);
+    let wide = text_of(&buf, wide_at);
     assert!(
         wide.contains("mouse") && wide.contains("Ctrl+C"),
         "an eighty column pane dropped a rung it can afford:\n{wide}"
@@ -1029,12 +1036,585 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
 }
 
 #[test]
+fn every_mouse_gesture_the_pane_answers_is_named_on_the_sheet() {
+    // **The other half of the table, and its own gate rather than a second loop
+    // inside the keyboard one.** They fail for different reasons and are found by
+    // different means: the keyboard half is a sweep of `action_for` and reddens
+    // when a *binding* has no row, this one is `mouse_phrases`' exhaustive matches
+    // and reddens when a *variant* has no phrase. One test covering both would
+    // report either as the same failure.
+    //
+    // #288's two omissions were both on this side, and neither was a key.
+    let scratch = Scratch::large_diff("sheet-mouse-covers", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    // The pane its sibling uses, and for the same reason: one column, no section
+    // headings, the whole table on one page.
+    let at = Rect::new(0, 0, WIDE, 26);
+
+    toggle_at(&mut app, &mut frame, at);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let (_, drawn) = read_sheet(&buf, &laid);
+
+    for phrase in mouse_phrases() {
+        assert!(
+            drawn.contains(phrase),
+            "the sheet does not name the mouse gesture {phrase:?}, which the pane \
+             answers:\n{drawn}"
+        );
+    }
+}
+
+/// Whether the sheet's keys column names `token`, as a cell or inside a range.
+///
+/// **A range names its members, and finding that out is what the derived sweep
+/// bought on its first run.** The digits are drawn `1  to  6`, one cell for six
+/// bindings, so a check that only compared whole cells reported `2` as unfindable.
+/// The list this gate replaced spelled `"1"` and `"6"` and never asked about the
+/// four between them: it agreed with the sheet because both were written by the
+/// same hand, which is precisely the failure #288 is about, one layer in from the
+/// one it was filed for.
+///
+/// Only the shape the sheet actually draws, `a  to  b` over single characters.
+/// Anything wider would be this gate inventing a spelling the table does not use.
+fn names(keys: &str, token: &str) -> bool {
+    if keys.split_whitespace().any(|cell| cell == token) {
+        return true;
+    }
+    let Some(ch) = token.chars().next().filter(|_| token.chars().count() == 1) else {
+        return false;
+    };
+    keys.lines().any(|row| {
+        let cells: Vec<&str> = row.split_whitespace().collect();
+        cells.windows(3).any(|w| {
+            w[1] == "to"
+                && w[0].chars().count() == 1
+                && w[2].chars().count() == 1
+                && (w[0].chars().next().unwrap_or('\0')..=w[2].chars().next().unwrap_or('\0'))
+                    .contains(&ch)
+        })
+    })
+}
+
+/// The gestures `README.md`'s two tables teach, as the cells a reader meets there.
+///
+/// **The drift path [#288](https://github.com/breferrari/vigia/issues/288) was
+/// actually filed for, and the one nothing gated.** That row's title is *the sheet
+/// omits a gesture the README teaches*: `README.md` carried `just point` and
+/// `MOUSE` did not, so the sheet omitted it, and no test compared the two. The
+/// gates beside this one check the sheet against the **keymap**, which is a
+/// different pair and would never have caught it.
+///
+/// **Read from the file rather than restated**, which is the one place in this
+/// suite where that is right and the rest of it is not. `TITLE`'s rule is that a
+/// constant shared with the renderer makes a gate agree by construction; here the
+/// renderer is not the other side. The other side is a document a human edits, and
+/// the whole hazard is that the two say different things, so a restated copy would
+/// be a third thing to keep in step.
+fn readme_gestures() -> Vec<String> {
+    let readme = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md"),
+    )
+    .expect("README.md is where the crate says it is");
+
+    // The two tables live inside one `<td>` each under a bold caption. A row is
+    // `| cell | cell |`, and the left cell is what a reader looks for.
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in readme.lines() {
+        let trimmed = line.trim();
+        if trimmed == "**Keys**" || trimmed == "**Mouse**" {
+            inside = true;
+            continue;
+        }
+        if inside && trimmed.starts_with("</td>") {
+            inside = false;
+            continue;
+        }
+        if !inside || !trimmed.starts_with('|') {
+            continue;
+        }
+        // The header separator and the empty header row carry no gesture.
+        if trimmed.contains("---") || trimmed.trim_matches(['|', ' ']).is_empty() {
+            continue;
+        }
+        let Some(cell) = trimmed.split('|').nth(1) else {
+            continue;
+        };
+        let cell = cell.trim().replace('`', "");
+        if !cell.is_empty() {
+            out.push(cell);
+        }
+    }
+    assert!(
+        out.len() > 10,
+        "README.md's key and mouse tables parsed to {} rows, so this gate is \
+         reading the wrong thing and would pass over anything",
+        out.len()
+    );
+    out
+}
+
+#[test]
+fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
+    // **The comparison #288's own title names, and the one no gate made.** The
+    // sheet is checked against the keymap by the two gates above; this checks it
+    // against the **README**, which is where the reported omission lived: the
+    // README taught `just point` and the sheet did not draw it, and both gates
+    // beside this one would have stayed green forever.
+    //
+    // **Token by token rather than cell by cell**, because the two spell a set
+    // differently on purpose: the README writes `j` `k` `↑` `↓` as four ticked
+    // spans in one cell and the sheet draws `j  k  ↓  ↑` in one, and neither is
+    // wrong. What must hold is that every key or word the README teaches is
+    // findable on the sheet, which is what a reader who read one and opened the
+    // other is entitled to.
+    let scratch = Scratch::large_diff("sheet-readme", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    // **Both one-column rungs, because the README writes the tight spelling.** It
+    // says `drag a bar` and `click a file`, which are what this table draws at the
+    // tight rung; the wide rung says `drag a scrollbar` and `click a listed file`.
+    // Reading only the wide one made `bar` match inside `scrollbar`, which passed
+    // by substring luck rather than because the sheet named the gesture. A cell has
+    // to land on one row of one rung, and both are legitimate spellings of it.
+    let mut rows: Vec<String> = Vec::new();
+    for (w, h) in [(WIDE, 26u16), (43u16, 25u16)] {
+        let at = Rect::new(0, 0, w, h);
+        let mut app = App::new();
+        toggle_at(&mut app, &mut frame, at);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let (_, drawn) = read_sheet(&buf, &laid);
+        rows.extend(drawn.lines().map(str::to_owned));
+    }
+    let drawn = rows.join("\n");
+
+    for cell in readme_gestures() {
+        // **Every token of a cell on ONE drawn row, not each token anywhere on the
+        // sheet.** The first spelling of this gate asked the second question and
+        // both audit agents caught it independently: `q` and `point` each appear
+        // somewhere, so a README cell reading `q point` would have passed while the
+        // sheet named no such gesture. Checking the whole sheet text for a token is
+        // nearly vacuous for a common word, and this row exists to close a drift
+        // class rather than to add a check that cannot see one.
+        let wanted: Vec<&str> = cell
+            .split_whitespace()
+            // `to` joins the digits' range on both sides and is not a gesture.
+            .filter(|t| *t != "to")
+            .collect();
+        assert!(
+            !wanted.is_empty(),
+            "README.md has a gesture cell {cell:?} with nothing in it to look for"
+        );
+        // **`names` alone, with no `contains` fallback.** The fallback was round 1's
+        // and round 2 found what it cost: a single-character token like `f`, `m`,
+        // `r` or `s` is a substring of ordinary verb prose, so `f` matched
+        // `half a page`, and deleting the whole `f` row from `KEYBOARD` left this
+        // gate green. Those are the very keys `SPEC.md` records as having shipped
+        // uncovered. `names` compares whitespace-delimited cells and understands
+        // the digits' `1  to  6` range, which is the only spelling that is not one
+        // cell, so the fallback bought nothing once both rungs are read.
+        assert!(
+            rows.iter().any(|row| wanted.iter().all(|t| names(row, t))),
+            "README.md teaches {wanted:?} (in {cell:?}) as one gesture and no single \
+             row of the sheet names all of it, so a reader who read one and opened \
+             the other is missing a gesture:\n{drawn}"
+        );
+    }
+}
+
+/// One value of every [`Action`] variant, for the two gates that walk them.
+///
+/// **Written once, and the reason is this diff's own subject.** It was typed out
+/// twice, in `mouse_phrases` and in `the_action_table_covers_every_variant`, which
+/// is exactly the failure [#288](https://github.com/breferrari/vigia/issues/288)
+/// exists to remove: two hand-written lists that agree because one hand wrote both,
+/// and drift the moment a variant is added to one. Caught by this row's own
+/// `/simplify` round, in the code written to fix it.
+///
+/// **The array is not what makes the classification safe and never was.**
+/// [`reach_of`]'s `match` is, because it is exhaustive: a new variant fails to
+/// compile there whatever this holds. What a shared const buys is that the two
+/// callers cannot come to disagree about which variants exist.
+///
+/// The payloads are arbitrary. Both callers compare discriminants or ask
+/// [`reach_of`], and neither reads a value.
+const ALL_ACTIONS: [Action; 18] = [
+    Action::Quit,
+    Action::Scroll(1),
+    Action::ScrollList(1),
+    Action::Page(1),
+    Action::HalfPage(1),
+    Action::File(1),
+    Action::Top,
+    Action::Bottom,
+    Action::ToggleFollow,
+    Action::ToggleMasthead,
+    Action::ToggleRail,
+    Action::ToggleSingle,
+    Action::ToggleSheet,
+    Action::CloseSheet,
+    Action::ListTo(0),
+    Action::ListRow(0),
+    Action::DiffTo(0),
+    Action::Redraw,
+];
+
+/// Where a gesture can be asked for, as the reason a variant is or is not on the
+/// sheet's keyboard half.
+///
+/// **The compiler is the reminder, which is what
+/// [#288](https://github.com/breferrari/vigia/issues/288) is for.** The gate this
+/// replaced held a hand-written list of tokens, so a new binding was covered only
+/// if somebody remembered to add it, and four did not get remembered: `r`
+/// ([#295](https://github.com/breferrari/vigia/issues/295)) shipped a whole
+/// release uncovered, the arrows ([#296](https://github.com/breferrari/vigia/issues/296))
+/// a day, and `s` ([#297](https://github.com/breferrari/vigia/issues/297)) until that
+/// row's own audit. A fifth and sixth fell through the mouse list beside it.
+///
+/// Matching exhaustively on [`Action`] means a variant added to the map **cannot
+/// compile** until somebody says where it is reachable from. That is the property
+/// a list cannot have at any length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    /// A key binds it, so [`bound_keys`] must find it.
+    Keyboard,
+    /// The pointer produces it, so [`mouse_phrases`] must teach it.
+    Mouse,
+    /// Both, and both halves apply.
+    Both,
+    /// Neither asks for it: the shell raises it itself. Carries why, so that a
+    /// reader can disagree with the classification rather than only read it.
+    Shell(&'static str),
+}
+
+/// Where each [`Action`] can be asked for.
+///
+/// Written as a `match` on a value rather than a table so it is **exhaustive**: the
+/// arms below are the whole of `Action`, and adding a variant reddens the build.
+fn reach_of(action: &Action) -> Reach {
+    match action {
+        // The way out, and `q`, `Esc`, `Ctrl+C`, `Ctrl+D` are all keys.
+        Action::Quit => Reach::Keyboard,
+        // `j`/`k`/arrows, and the wheel and the step buttons.
+        Action::Scroll(_) => Reach::Both,
+        // `J`/`K`/`Shift`+arrows, and the list's own bar.
+        Action::ScrollList(_) => Reach::Both,
+        Action::Page(_) => Reach::Keyboard,
+        Action::HalfPage(_) => Reach::Keyboard,
+        // `n`/`p` and the horizontal arrows.
+        Action::File(_) => Reach::Keyboard,
+        Action::Top => Reach::Keyboard,
+        Action::Bottom => Reach::Keyboard,
+        Action::ToggleFollow => Reach::Keyboard,
+        Action::ToggleMasthead => Reach::Keyboard,
+        Action::ToggleRail => Reach::Keyboard,
+        Action::ToggleSingle => Reach::Keyboard,
+        Action::ToggleSheet => Reach::Keyboard,
+        // **The close control, and the row #288 found named nowhere at all.** `?`
+        // means *the sheet* and advances; this means *close* and is the pointer's
+        // only escape, which is why it is its own variant since
+        // [#286](https://github.com/breferrari/vigia/issues/286).
+        Action::CloseSheet => Reach::Mouse,
+        // Dragging or clicking a bar. No key seeks to a fraction.
+        Action::ListTo(_) => Reach::Mouse,
+        Action::DiffTo(_) => Reach::Mouse,
+        // The digits, and a click on a listed file.
+        Action::ListRow(_) => Reach::Both,
+        Action::Redraw => Reach::Shell(
+            "a resize, which the terminal reports and no reader asks for, so there \
+             is nothing to teach",
+        ),
+    }
+}
+
+/// The candidate key space the sweep walks.
+///
+/// **Wider than the map on purpose.** The point is to find what `action_for`
+/// answers to, so the space has to contain keys it refuses as well as keys it
+/// binds; a space narrowed to the bindings would be the hand-written list again
+/// wearing a sweep's clothes. `the_action_table_covers_every_variant` is what
+/// fails if a binding ever lands outside it.
+fn candidate_keys() -> Vec<KeyEvent> {
+    let mut codes: Vec<KeyCode> = (b' '..=b'~').map(|c| KeyCode::Char(c as char)).collect();
+    codes.extend([
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+        KeyCode::Enter,
+        KeyCode::Esc,
+        KeyCode::Backspace,
+        KeyCode::Tab,
+        KeyCode::Delete,
+        KeyCode::Insert,
+    ]);
+    codes.extend((1..=12).map(KeyCode::F));
+    let mods = [
+        KeyModifiers::NONE,
+        KeyModifiers::SHIFT,
+        KeyModifiers::CONTROL,
+        KeyModifiers::ALT,
+    ];
+    codes
+        .into_iter()
+        .flat_map(|code| mods.iter().map(move |m| KeyEvent::new(code, *m)))
+        .collect()
+}
+
+/// How the sheet spells one key event in its keys column.
+///
+/// **A rendering rule, not a roster.** It answers for every key rather than for the
+/// bound ones, so it is not the list this gate exists to delete: which keys are
+/// bound comes from [`bound_keys`]' sweep, and this only says how to write one down.
+///
+/// Restated rather than imported for [`TITLE`]'s reason.
+fn token_of(event: KeyEvent) -> String {
+    let base = match event.code {
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Up => "↑".into(),
+        KeyCode::Down => "↓".into(),
+        KeyCode::Left => "←".into(),
+        KeyCode::Right => "→".into(),
+        KeyCode::Home => "Home".into(),
+        KeyCode::End => "End".into(),
+        KeyCode::PageUp => "PgUp".into(),
+        KeyCode::PageDown => "PgDn".into(),
+        KeyCode::Esc => "Esc".into(),
+        // **Unreachable today, and carried rather than removed.** `bound_keys` only
+        // spells events `action_for` already bound, and the map binds none of the
+        // codes that would land here: `Enter`, `Backspace`, `Tab`, `Delete`,
+        // `Insert` and `F1` to `F12`. `KeyCode` is an external and effectively open
+        // enum, so a total match is the honest shape, and the `Debug` spelling
+        // happens to match the arms above for the codes most likely to be bound
+        // next. Confirmed unreachable by this row's `/simplify` round rather than
+        // assumed.
+        other => format!("{other:?}"),
+    };
+    // `Space` is drawn by name, because a blank cell is not a cell.
+    let base = if base == " " { "Space".into() } else { base };
+    match event.modifiers {
+        KeyModifiers::CONTROL => format!("Ctrl+{}", base.to_uppercase()),
+        KeyModifiers::SHIFT => format!("Shift+{base}"),
+        _ => base,
+    }
+}
+
+/// Every key `action_for` binds, with the token the sheet must spell for it.
+///
+/// **The set is derived**, which is the whole point: it is whatever the shell
+/// answers to today, so a key added to the map is covered here without this file
+/// being touched.
+///
+/// **A modifier that changes nothing is not a gesture**, and this rule was written
+/// by the sweep rather than for it. Two cases turned up on its first runs and both
+/// are the same shape: the terminal sends `Char('J')` for a shifted `j` and the map
+/// reads the character, so `Shift+j` resolves exactly as `J` already does; and
+/// `key_action` matches `KeyCode::Left` without consulting modifiers, so `Shift+←`
+/// steps a file exactly as `←` does. Neither is a second gesture and the sheet must
+/// not be made to name one twice.
+///
+/// So a modified event is kept only when it means something **different** from the
+/// same key unmodified. `Shift+↑` survives, because it scrolls the list where `↑`
+/// scrolls the diff; `Ctrl+D` survives, because it quits where `d` pages. That is
+/// the distinction the sheet itself draws, derived rather than assumed.
+fn bound_keys() -> Vec<(KeyEvent, String)> {
+    let plain = |code: KeyCode| {
+        action_for(
+            &Event::Key(KeyEvent::new(code, KeyModifiers::NONE)),
+            Regions::default(),
+        )
+    };
+    let mut found: Vec<(KeyEvent, String)> = Vec::new();
+    for event in candidate_keys() {
+        let Some(action) = action_for(&Event::Key(event), Regions::default()) else {
+            continue;
+        };
+        if event.modifiers != KeyModifiers::NONE && plain(event.code) == Some(action) {
+            continue;
+        }
+        let token = token_of(event);
+        if !found.iter().any(|(_, t)| *t == token) {
+            found.push((event, token));
+        }
+    }
+    found
+}
+
+/// The phrases the sheet must carry for the gestures a pointer produces.
+///
+/// **Compiler-forced rather than derived, and the difference is stated rather than
+/// glossed.** The force is two exhaustive `match`es with no wildcard between them,
+/// [`reach_of`]'s and this function's, so a new [`Action`] variant fails to build
+/// until somebody both classifies it and says what teaches it. What [`ALL_ACTIONS`]
+/// adds is only that the two callers walk the same set; it is data and was never
+/// the guarantee. Round 1 of this row's audit found a `_ => panic!()` arm here that
+/// made the second half a runtime failure, and made it one only for a variant
+/// somebody had already added to that array. A key sweep can enumerate the keyboard because `action_for` answers
+/// per key event. Nothing does that for the mouse: *wheel*, *drag a bar* and *click
+/// a track* are event **shapes**, not enum variants, so there is no set to walk.
+///
+/// What the exhaustive matches below buy instead is that a new [`Action`],
+/// [`Hovered`] or [`Grabbed`] variant **cannot fail to compile** until somebody
+/// names the phrase that teaches it, or records that it has none. That is strictly
+/// stronger than the hand-written list this replaced, which could be and was
+/// forgotten twice, and strictly weaker than derivation. Saying so is the point: a
+/// gate whose coverage is overstated is the shape #288 is about.
+///
+/// **And *cannot be forgotten* is what this said until round 2, which is one claim
+/// too many.** Compiling is forced; being *exercised* is not. [`ALL_ACTIONS`] is a
+/// hand-maintained array, so a variant can be classified in [`reach_of`], given an
+/// arm here, and still reach neither gate if nobody adds it there. That is one
+/// unenforced step, named rather than papered over.
+///
+/// **Round 2 claimed a length pin made missing it loud and round 3 showed it did
+/// not**: comparing the array's length against a literal compares two things the
+/// same edit would touch. What `the_action_table_covers_every_variant` checks now
+/// is the array against the **sweep**, which is derived, so a variant bound to a
+/// key cannot be left out of it. A variant reachable only by pointer still can be,
+/// and that is the residue.
+fn mouse_phrases() -> Vec<&'static str> {
+    let mut phrases: Vec<&'static str> = Vec::new();
+
+    // The `Action` half, from the same exhaustive table the keyboard half reads.
+    for action in ALL_ACTIONS {
+        if !matches!(reach_of(&action), Reach::Mouse | Reach::Both) {
+            continue;
+        }
+        // **Exhaustive, with no wildcard.** The keyboard-only arms are listed and
+        // return nothing rather than being swept up, because that is what makes the
+        // match exhaustive: a new variant has to be put somewhere by hand. See this
+        // function's docblock for what a `_` arm cost when it was here.
+        phrases.extend(match action {
+            // The wheel scrolls whichever region is under the pointer, and the
+            // step buttons move one row.
+            Action::Scroll(_) | Action::ScrollList(_) => vec!["wheel", "click  ▲ ▼"],
+            Action::ListTo(_) | Action::DiffTo(_) => vec!["click a track"],
+            Action::ListRow(_) => vec!["click a listed file"],
+            Action::CloseSheet => vec!["click  ✕"],
+            Action::Quit
+            | Action::Page(_)
+            | Action::HalfPage(_)
+            | Action::File(_)
+            | Action::Top
+            | Action::Bottom
+            | Action::ToggleFollow
+            | Action::ToggleMasthead
+            | Action::ToggleRail
+            | Action::ToggleSingle
+            | Action::ToggleSheet
+            | Action::Redraw => Vec::new(),
+        });
+    }
+
+    // The two pointer states that are not `Action`s at all.
+    for hovered in [
+        Hovered::Button(0, 0),
+        Hovered::Track(Grabbed::Diff),
+        Hovered::Row(0),
+    ] {
+        phrases.push(match hovered {
+            // One mark, one phrase: `SPEC.md` §11.1 gives every marked surface the
+            // same reading, so three variants share it rather than each naming a
+            // row of its own.
+            Hovered::Button(..) | Hovered::Track(_) | Hovered::Row(_) => "just point",
+        });
+    }
+    for grabbed in [Grabbed::List, Grabbed::Diff] {
+        phrases.push(match grabbed {
+            Grabbed::List | Grabbed::Diff => "drag a scrollbar",
+        });
+    }
+
+    phrases.sort_unstable();
+    phrases.dedup();
+    phrases
+}
+
+#[test]
+fn the_action_table_covers_every_variant() {
+    // **What makes the sweep's coverage checkable.** `bound_keys` walks a candidate
+    // space, and a space is only as good as what it contains: a binding on a
+    // `KeyCode` the sweep never tries is invisible to it, and the failure looks
+    // exactly like a key that is correctly absent.
+    //
+    // So the two are compared. Every `Action` that `reach_of` calls keyboard
+    // reachable must actually have been produced by the sweep, and a mismatch means
+    // either the space is too narrow or the table is wrong. Both want fixing and
+    // neither is silent.
+    let produced: Vec<Action> = bound_keys()
+        .into_iter()
+        .filter_map(|(event, _)| action_for(&Event::Key(event), Regions::default()))
+        .collect();
+
+    // **Every action the sweep found must be in the array**, which is the half of
+    // `ALL_ACTIONS`' upkeep that can be checked against something other than
+    // itself. `produced` is derived from `action_for`, so a variant bound to a key
+    // and left out of the array reddens here.
+    //
+    // **Round 2 put a length pin here instead and round 3 showed it proved
+    // nothing**: `ALL_ACTIONS.len() == 18` compares a hand-maintained array against
+    // a hand-maintained literal, both of which the same edit would have to touch,
+    // so it passes in exactly the scenario its own comment described. Deleted
+    // rather than kept as reassurance.
+    //
+    // **What remains unenforced is narrower and is stated rather than papered
+    // over**: a variant reachable only by *pointer*, classified and given a phrase
+    // but never added to the array, still reaches no gate. No sweep produces it,
+    // because the mouse side has none, which is `mouse_phrases`' own recorded
+    // limit.
+    for action in &produced {
+        assert!(
+            ALL_ACTIONS
+                .iter()
+                .any(|known| std::mem::discriminant(known) == std::mem::discriminant(action)),
+            "`action_for` binds a key to {action:?} and `ALL_ACTIONS` does not \
+             carry that variant, so both gates walk a set that is no longer the type"
+        );
+    }
+
+    for action in ALL_ACTIONS {
+        let wanted = matches!(reach_of(&action), Reach::Keyboard | Reach::Both);
+        let seen = produced
+            .iter()
+            .any(|got| std::mem::discriminant(got) == std::mem::discriminant(&action));
+        assert_eq!(
+            seen,
+            wanted,
+            "`reach_of` says {action:?} is {:?}, and the key sweep {} it: either \
+             the candidate space in `candidate_keys` is too narrow to reach its \
+             binding, or the table is wrong",
+            reach_of(&action),
+            if seen { "found" } else { "did not find" }
+        );
+    }
+}
+
+#[test]
 fn every_key_the_map_binds_is_named_on_the_sheet() {
     // **The gate that fails when somebody adds a key and forgets the sheet**,
     // which is the whole reason the sheet is worth having: it is now where the
     // keymap is written down, so a binding missing from it is a binding nobody can
     // find. Spelled as the tokens a reader would look for rather than as key
     // codes, because tokens are what the sheet draws.
+    // **80 by 26 rather than the default pane, and the two rows are why**
+    // ([#288](https://github.com/breferrari/vigia/issues/288)). This ran at 80 by 24
+    // until the mouse group grew to seven: twenty gestures no longer fit one column
+    // in that body, so the pane takes the two-column rung, and this gate needs a
+    // rung that is one column *and* draws no section headings. 80 by 26 is the
+    // smallest that is, measured over the widths and heights around it, and it
+    // draws the whole table on one page at 56 by 23.
     let scratch = Scratch::large_diff("sheet-covers", FILES, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1042,9 +1622,10 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
+    let at = Rect::new(0, 0, WIDE, 26);
 
-    toggle(&mut app, &mut frame);
-    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, area());
+    toggle_at(&mut app, &mut frame, at);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
 
     // **Inside the sheet's own rect, and on a rung that draws no headings.**
     // Both halves are load-bearing and neither was here. Read over the whole
@@ -1102,68 +1683,18 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
         "the keys column this gate reads is not where the keys are:\n{keys}"
     );
 
-    for token in [
-        "q",
-        "Esc",
-        "Ctrl+C",
-        "Ctrl+D",
-        "j",
-        "k",
-        "↓",
-        "↑",
-        "Space",
-        "PgDn",
-        "PgUp",
-        "d",
-        "u",
-        "g",
-        "Home",
-        "G",
-        "End",
-        "n",
-        "p",
-        "1",
-        "6",
-        "J",
-        "K",
-        "Shift+↑",
-        "Shift+↓",
-        "f",
-        "m",
-        // **`r`, `s`, `→` and `←` were all missing until #297's audit**, which is
-        // the hole [#288](https://github.com/breferrari/vigia/issues/288) exists
-        // to close properly: this list is hand written, so a key added to
-        // `KEYBOARD` is covered here only if somebody remembers, and the last
-        // three changes to bind one did not. `r` (#295) shipped uncovered for a
-        // release and the arrows (#296) for a day.
-        //
-        // **The first version of this comment said "what this change owes is not
-        // to add a third", and a third was already there**: it was written
-        // against `KEYBOARD` before the arrows landed and never re-read against
-        // the merge. A hand-written list cannot be fixed by promising to
-        // remember, which is the whole of #288's case.
-        "r",
-        "s",
-        "→",
-        "←",
-        "?",
-    ] {
+    // **Derived from `action_for`, not listed here.** Every key the shell binds is
+    // whatever the sweep below finds, so a binding added to the map is covered by
+    // this gate with no edit to it. That is the whole of
+    // [#288](https://github.com/breferrari/vigia/issues/288)'s case: the list this
+    // replaced was a second hand-maintained copy of the table it checked, so it
+    // failed only when somebody added a key, forgot the sheet, **and** remembered
+    // the test. Four keys had already fallen through it, `r` for a whole release.
+    for (event, token) in bound_keys() {
         assert!(
-            keys.split_whitespace().any(|cell| cell == token),
-            "the sheet's keys column does not name {token:?} as a cell of its own, \
-             so that gesture is unfindable:\n{drawn}"
-        );
-    }
-
-    for gesture in [
-        "wheel",
-        "drag a scrollbar",
-        "click a track",
-        "click a listed file",
-    ] {
-        assert!(
-            drawn.contains(gesture),
-            "the sheet does not name the mouse gesture {gesture:?}"
+            names(&keys, &token),
+            "`action_for` binds {event:?}, which the sheet's keys column does not \
+             name, so that gesture is unfindable:\n{drawn}"
         );
     }
 
@@ -1224,7 +1755,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
 /// the ladder gives it up first. Several gates walk this against drawn rows, so
 /// the order is load-bearing rather than decorative. The count is not spelled
 /// out, for the reason [`LADDER_WIDTHS`]' own docblock gives.
-const GESTURES: [&str; 18] = [
+const GESTURES: [&str; 20] = [
     "scroll a row",
     "Space  PgDn",
     "half a page",
@@ -1243,6 +1774,10 @@ const GESTURES: [&str; 18] = [
     "click a track",
     "click  ▲ ▼",
     "jump the diff to it",
+    // The two [#288](https://github.com/breferrari/vigia/issues/288) added: the
+    // sheet's own close control, and the hover mark the README already taught.
+    "click  ✕",
+    "just point",
 ];
 
 #[test]
@@ -1267,6 +1802,50 @@ fn no_gesture_token_hides_inside_another() {
                 "GESTURES[{i}] {a:?} hides inside GESTURES[{j}] {b:?}, so every \
                  rung that draws the second and not the first counts one gesture \
                  too many"
+            );
+        }
+    }
+
+    // **And no token may hide inside a drawn row either, which is the half this
+    // gate was missing** ([#288](https://github.com/breferrari/vigia/issues/288)).
+    // The loop above compares tokens against tokens, so it sees only a collision
+    // between two entries of this list. The count is taken against the **drawn
+    // sheet**, so a token hiding inside any row the renderer writes scores the same
+    // way, whether or not that row is itself a token.
+    //
+    // It would have fired on this row's own first draft: the close control's verb
+    // was spelled `close this sheet`, and `this sheet` is already the token for
+    // `?`, so every page carrying the close row counted one gesture too many. What
+    // noticed was `the_counter_is_right_where_a_page_spans_the_mouse_heading`,
+    // a counter disagreeing with its own page, which is a long way from the cause.
+    //
+    // **Against the drawn sheet rather than a second restated table**, because the
+    // hazard is exactly that a restated token and a *drawn* cell collide: two
+    // restated lists were written by the same hand and would agree.
+    let scratch = Scratch::large_diff("sheet-hiding", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    // **One-column rungs only, and both spellings.** A row of the *two*-column rung
+    // carries a keyboard gesture and a mouse gesture side by side, so two tokens on
+    // one row is correct there and says nothing about hiding. Where a row is one
+    // gesture, a second token on it can only be a collision. 80 by 26 draws the
+    // wide one column and 43 by 25 the tight one, so both spellings are read.
+    for (w, h) in [(WIDE, 26u16), (43u16, 25u16)] {
+        let at = Rect::new(0, 0, w, h);
+        let mut app = App::new();
+        toggle_at(&mut app, &mut frame, at);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let (_, sheet) = read_sheet(&buf, &laid);
+        for row in sheet.lines() {
+            let carried: Vec<&&str> = GESTURES.iter().filter(|g| row.contains(**g)).collect();
+            assert!(
+                carried.len() <= 1,
+                "the drawn row {row:?} on a {w}x{h} pane carries {} tokens at once \
+                 ({carried:?}), so every page holding it counts a gesture too many",
+                carried.len()
             );
         }
     }
@@ -1458,8 +2037,8 @@ fn the_sheet_spends_width_before_it_spends_gestures() {
         let (count, sheet) = read_sheet(&buf, &laid);
         assert_eq!(
             sheet.lines().count(),
-            21,
-            "a tall pane stopped drawing the twenty-one-row one-column sheet:\n{sheet}"
+            23,
+            "a tall pane stopped drawing the twenty-three-row one-column sheet:\n{sheet}"
         );
         assert!(
             !sheet.contains("keyboard"),
@@ -1805,7 +2384,8 @@ fn roomy_shape() -> Vec<RoomyRow> {
         // Four since #297: `r` and `s` join `f` and `m` in `view`, which is the
         // section for the things that change what the body is made of.
         ("view", &GESTURES[7..11]),
-        ("mouse", &GESTURES[13..18]),
+        // Seven since #288: the close control and the hover mark.
+        ("mouse", &GESTURES[13..20]),
         ("leaving", &GESTURES[11..13]),
     ] {
         rows.push(RoomyRow::Heading(label));
@@ -1840,7 +2420,7 @@ fn the_roomy_rung_is_the_size_the_ruling_states() {
         );
         assert_eq!(
             (sheet.width, sheet.height),
-            (68u16, 31u16),
+            (68u16, 33u16),
             "the roomy rung is not the size SPEC.md §11.1 states:\n{drawn}"
         );
         assert_eq!(
@@ -1909,8 +2489,8 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     });
     assert_eq!(
         arrival,
-        Some(34),
-        "the roomy rung does not arrive at the pane height a body of thirty-one \
+        Some(36),
+        "the roomy rung does not arrive at the pane height a body of thirty-three \
          rows implies on this fixture"
     );
 }
@@ -1932,8 +2512,8 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
         let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
         assert_eq!(
             rows.len(),
-            31,
-            "the roomy rung is not thirty-one rows tall:\n{sheet}"
+            33,
+            "the roomy rung is not thirty-three rows tall:\n{sheet}"
         );
 
         // Interior rows only: the title bar and the bottom border are the frame's.
@@ -2126,7 +2706,9 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
     // the two orders again and the second fails, because dropping from the top of
     // the reader's order keeps `q`.
     sweep!("sheet-orders", |paint| {
-        let at = Rect::new(0, 0, 80, 24);
+        // 80 by 26 since #288, for the reason `every_key_the_map_binds_is_named_on_the_sheet`
+        // gives: twenty gestures need two more rows of body to stay in one column.
+        let at = Rect::new(0, 0, 80, 26);
         let (buf, laid) = paint(at);
         let (_, sheet) = read_sheet(&buf, &laid);
         let rows: Vec<&str> = sheet.lines().collect();
@@ -2387,11 +2969,11 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
     // four were checked by hand against `margins_of` and the plan's own halving.
     sweep!("sheet-origin", |paint| {
         for (w, h, want) in [
-            (120u16, 30u16, (32u16, 4u16, 56u16, 21u16)),
+            (120u16, 30u16, (32u16, 3u16, 56u16, 23u16)),
             // The roomy rung, which #285 put at the head of the ladder. A pane
             // this tall took the nineteen-row sheet at (22, 10, 56, 19) before it
             // existed, and the row it lost to air it had spare.
-            (100, 40, (16, 4, 68, 31)),
+            (100, 40, (16, 3, 68, 33)),
             (120, 21, (8, 2, 104, 16)),
             // The tight two-column rung, five columns narrower since #286
             // shortened two tight mouse verbs and a row taller with each key added
@@ -2405,12 +2987,30 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // Odd slack, which the first three above lack on both axes: halving
             // the slack the other way (`div_ceil`) or taking the trailing margin
             // instead of the leading one reproduces every one of them and misses
-            // these. **The odd row moved again with #297's row**: the sheet is
-            // twenty-one where the body is twenty-three, so this case and the
-            // 43x25 one below it carry the odd slack that 120x30 and 58x30 used
-            // to, which is why this list is read as a set rather than case by
+            // these, which is why this list is read as a set rather than case by
             // case.
-            (81, 25, (12, 1, 56, 21)),
+            //
+            // **This pane changed rung with [#288](https://github.com/breferrari/vigia/issues/288)**,
+            // and the comment here described the old one until round 1 of that
+            // row's audit read the two together. It took the one-column rung at
+            // `(12, 1, 56, 21)`, and twenty gestures no longer fit one column in a
+            // twenty-five-row pane, so it takes the two-column rung at
+            // `(5, 4, 71, 16)`.
+            //
+            // **What this case demonstrates is no longer written here, and the
+            // reason is worth more than the claim was.** Three spellings of this
+            // comment in three rounds each asserted a slack arithmetic, and each
+            // was wrong: two axes, then the height axis at nine splitting four and
+            // five. The pinned tuple does not settle it, because a one-row and a
+            // two-row footer both produce `top: 4` from this pane, so the height
+            // slack is six or seven and no number here can say which without a
+            // measurement nobody took. The width slack is ten and splits evenly at
+            // five, which the tuple does show.
+            //
+            // So the case is kept for the rung it now covers and the list is read
+            // as a set, which is what the paragraph above already said and what
+            // three attempts at a per-case story failed to improve on.
+            (81, 25, (5, 4, 71, 16)),
             // The whole table in one column reaches this width since #286, so
             // where this used to be a dropping rung of thirteen rows it is the
             // twenty-one-row sheet.
@@ -2420,14 +3020,14 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // twenty-two and the sheet is twenty-one, so the slack is one. Saying
             // which cases carry it beats leaving a comment that quietly stopped
             // describing its own line, and it has now stopped twice.
-            (43, 25, (3, 1, 38, 21)),
+            (43, 25, (3, 1, 38, 22)),
             // The level probe's own boundary. `margin_of(58)` is 2, so the room is
             // exactly 56 and the wide one-column sheet is exactly 56: turning the
             // probe's `>` into `>=` flips this width and no other, dropping
             // `Ctrl+C`, `PgUp`, `Home`, `End` and the shifted arrows at a width
             // that fits them. Every count, every frame and every other origin is
             // identical.
-            (58, 30, (1, 4, 56, 21)),
+            (58, 30, (1, 3, 56, 23)),
         ] {
             let at = Rect::new(0, 0, w, h);
             let (_, laid) = paint(at);
@@ -2582,13 +3182,13 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
     // buys is the mouse group's heading rather than a gesture.
     let expected = [
         (8u16, 3usize, 7usize),
-        (9, 4, 5),
-        (10, 5, 4),
+        (9, 4, 6),
+        (10, 5, 5),
         (11, 6, 4),
         (12, 7, 3),
         (13, 8, 3),
         (14, 9, 3),
-        (15, 10, 2),
+        (15, 10, 3),
         (16, 11, 2),
         (17, 12, 2),
         (18, 13, 2),
@@ -2604,7 +3204,11 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
         (23, 17, 2),
         // The whole table in one column, which is the rung above the paged ones
         // and unchanged by #286: a pane that fits everything pages not at all.
-        (24, GESTURES.len(), 1),
+        (24, 18, 2),
+        (25, 19, 2),
+        // Twenty-six since #288, twenty-four before it: the two rows the mouse
+        // group gained are two more rows of body before one page holds them all.
+        (26, GESTURES.len(), 1),
     ];
 
     let scratch = Scratch::large_diff("sheet-paging", FILES, 40);
@@ -2836,7 +3440,8 @@ fn the_one_column_rung_places_its_cells_where_the_plan_says() {
         // **The mouse heading is row fourteen since #297**, thirteen since #295,
         // twelve before: it is one past the keyboard group's last row, and the
         // number moves with the table by one every time a key is added.
-        (80u16, 24u16, 2usize, 26usize, 'j', Some(14usize)),
+        // 80 by 26 since #288: at twenty-four this pane takes the two-column rung.
+        (80u16, 26u16, 2usize, 26usize, 'j', Some(14usize)),
         (120, 30, 2, 26, 'j', Some(14)),
         // A **paged** rung since #286, so its first row is the table's first
         // again: the height ladder no longer drops rows, it splits them, and page
@@ -3002,7 +3607,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     let sheet = laid.sheet.expect("the roomy pane draws no sheet");
     assert_eq!(
         (sheet.width, sheet.height),
-        (68, 31),
+        (68, 33),
         "this gate is not looking at the roomy rung"
     );
 
@@ -3386,10 +3991,10 @@ fn the_counter_names_what_the_pane_reaches() {
     for (at, want) in [
         (
             Rect::new(0, 0, 50, 8),
-            vec!["1-3 of 18", "4-6 of 18", "7-9 of 18"],
+            vec!["1-3 of 20", "4-6 of 20", "7-9 of 20"],
         ),
-        (Rect::new(0, 0, 32, 40), vec!["1-10 of 18"]),
-        (Rect::new(0, 0, 30, 40), vec!["1-6 of 18"]),
+        (Rect::new(0, 0, 32, 40), vec!["1-10 of 20"]),
+        (Rect::new(0, 0, 30, 40), vec!["1-6 of 20"]),
     ] {
         let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
         for (n, spelling) in want.iter().enumerate() {
@@ -3569,7 +4174,7 @@ fn a_resize_clamps_the_page_rather_than_closing_the_sheet() {
     let (count, drawn) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&drawn).unwrap_or_default().trim(),
-        "18 of 18",
+        "18-20 of 20",
         "the clamped page is not the pane's last one:\n{drawn}"
     );
     assert!(count > 0, "the clamped page draws nothing:\n{drawn}");
@@ -3633,7 +4238,7 @@ fn two_presses_in_one_wake_reach_page_two() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "4-6 of 18",
+        "4-6 of 20",
         "the batched second press did not land on page two:\n{sheet}"
     );
 }
@@ -3712,18 +4317,18 @@ fn the_counter_is_right_where_a_page_spans_the_mouse_heading() {
     assert_eq!(
         spellings,
         [
-            "1-3 of 18",
-            "4-6 of 18",
-            "7-9 of 18",
-            "10-12 of 18",
+            "1-3 of 20",
+            "4-6 of 20",
+            "7-9 of 20",
+            "10-12 of 20",
             // The heading costs this page a row and no ordinal, so it names two
             // gestures where every page above it names three.
-            "13-14 of 18",
-            "15-17 of 18",
+            "13-14 of 20",
+            "15-17 of 20",
             // And the eighteenth gesture is alone on a page of its own, which is
             // the tail a paged rung leaves rather than a defect: #297's row made
             // the table one longer than six pages of three can hold.
-            "18 of 18",
+            "18-20 of 20",
         ],
         "the ordinals do not step over the mouse group's heading"
     );
@@ -3775,7 +4380,7 @@ fn a_resize_clamps_rather_than_wrapping() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "18 of 18",
+        "18-20 of 20",
         "the resize wrapped the page instead of clamping it:\n{sheet}"
     );
     assert_eq!(
@@ -3899,7 +4504,7 @@ fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "10-12 of 18",
+        "10-12 of 20",
         "the pane came back on a different page:\n{sheet}"
     );
 }
@@ -3934,7 +4539,10 @@ fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
     };
 
     // Wide: a pane the whole table fits on in one column at the wide spelling.
-    let drawn = page_one(&mut frame, Rect::new(0, 0, 80, 24));
+    // 80 by 26 since #288: twenty gestures no longer fit one column in a
+    // twenty-four-row pane, so that size takes the two-column rung and its tight
+    // spelling, which is not what this gate is about.
+    let drawn = page_one(&mut frame, Rect::new(0, 0, 80, 26));
     assert!(
         drawn.contains("n  →  /  p  ←"),
         "the wide spelling does not name the arrows beside `n` and `p`:\n{drawn}"

@@ -245,6 +245,7 @@ The blank above the band is the row the header keeps between itself and the list
 | click a track | send it there |
 | click `▲` `▼` | one row, and repeats held |
 | click a file | jump the diff to it |
+| click `✕` | close the sheet |
 | just point | it marks itself |
 
 </td></tr>
