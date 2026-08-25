@@ -537,6 +537,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
         number,
         text: text.to_owned(),
         spans: Vec::new(),
+        emph: Vec::new(),
     }
 }
 

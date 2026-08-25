@@ -80,6 +80,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
         number,
         text: text.to_owned(),
         spans: Vec::new(),
+        emph: Vec::new(),
     }
 }
 
@@ -471,6 +472,14 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         heat_track: _,
         bar_track: _,
         spark_track: _,
+
+        // Exempt: backgrounds by contract, and unset on this palette anyway.
+        // The word patch and the gutter tone exist only where the wash does,
+        // and `ansi` draws no wash at any depth.
+        added_word: _,
+        removed_word: _,
+        added_gutter: _,
+        removed_gutter: _,
 
         // Exempt: marks and fills, none of them text, none of them colour 8.
         pulse: _,

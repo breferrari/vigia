@@ -466,6 +466,12 @@ pub enum Row {
         /// an empty list and a single [`vigia_core::Class::Plain`] span reach the
         /// screen identically.
         spans: Vec<Span>,
+        /// Byte ranges of `text` that changed within the line, from
+        /// [`vigia_core::Line::emph`]: the pair-aligned word-level diff the
+        /// renderer draws as the hotter wash. Empty means whole-line, which is
+        /// every context row, every unpaired changed row, and every row of a
+        /// diff computed before this field existed.
+        emph: Vec<std::ops::Range<u32>>,
     },
     /// Why a file has no lines under it.
     Note(&'static str),
@@ -2349,6 +2355,7 @@ impl View {
                             kind: line.kind,
                             number,
                             text: line.text.clone(),
+                            emph: line.emph.clone(),
                             // `None` is the plain first frame, and empty spans
                             // are already a legal, drawn state: it is what a
                             // file type with no grammar produces, so the
@@ -2404,6 +2411,7 @@ mod tests {
         Line {
             kind,
             text: String::new(),
+            emph: Vec::new(),
         }
     }
 

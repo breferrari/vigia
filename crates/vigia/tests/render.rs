@@ -368,6 +368,7 @@ fn line(kind: LineKind, number: u32, text: &str) -> Row {
         number,
         text: text.to_owned(),
         spans: Vec::new(),
+        emph: Vec::new(),
     }
 }
 
@@ -414,6 +415,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
                 number: 5,
                 text: text.to_owned(),
                 spans,
+                emph: Vec::new(),
             },
         ],
         files: 1,
@@ -5892,7 +5894,11 @@ fn a_wash_runs_under_the_scrollbar_column() {
         .find(|y| row_text(&backend, *y).contains("let stale"))
         .expect("the removed line was not drawn at all");
 
-    let wash = buffer[(1, washed)].bg;
+    // The wash sampled from the row's trailing blank, not from column 1:
+    // since #321 the gutter's cells carry their own two-tone background, and
+    // at this width column 1 is the gutter's first cell. The tail of a washed
+    // row past its text is band all the way to the bar.
+    let wash = buffer[(width - 3, washed)].bg;
     let bar = buffer[(width - 1, washed)].bg;
     assert_ne!(
         wash,
@@ -6065,17 +6071,16 @@ fn every_row_of_the_bar_carries_its_own_rows_background() {
                 // That row's own background, read from a cell the row owns rather
                 // than restated from the palette.
                 //
-                // **Column 1, and not because it is margin.** An earlier version of
-                // this comment said it was, which is false at the width this gate
-                // uses: `inset_of(64)` is 1, so column 0 is the whole margin and
-                // column 1 is the line number's first cell. Margin only reaches
-                // column 1 from eighty columns up. What makes it the right cell is
-                // narrower and holds at every width: the wash runs the row's full
-                // span and the gutter carries no background of its own, so column 1
-                // shows the band wherever the row has one and the pane's own colour
-                // where it does not. Column 0 would be the wrong choice, because
-                // §5.1's left bar paints an accent there on a changed row.
-                let behind = buffer[(1, y)].bg;
+                // **The cell just left of the bar's reserve, and the reason it
+                // moved off column 1 is #321.** Column 1 was right while the
+                // gutter carried no background of its own; the two-tone gutter
+                // ended that, and at this width column 1 is the line number's
+                // first cell wearing the tone. The wash still runs the row's
+                // full span, so any trailing cell shows the band wherever the
+                // row has one and the pane's own colour where it does not.
+                // Column 0 stays the wrong choice, because §5.1's left bar
+                // paints an accent there on a changed row.
+                let behind = buffer[(width - 3, y)].bg;
                 let button = glyph == BAR_GLYPHS[2] || glyph == BAR_GLYPHS[3];
                 saw_buttons |= button;
                 if behind != ratatui::style::Color::Reset {
@@ -6286,7 +6291,9 @@ fn a_bar_styles_own_background_wins_over_the_band() {
             .expect("the removed line was not drawn at all");
         (
             backend.buffer()[(width - 1, y)].bg,
-            backend.buffer()[(1, y)].bg,
+            // The trailing blank rather than column 1: the gutter carries its
+            // own tone since #321, and column 1 is a gutter cell at this width.
+            backend.buffer()[(width - 3, y)].bg,
         )
     }
 
@@ -6811,7 +6818,10 @@ fn the_wash_bleeds_under_the_inset() {
             .find(|y| row_text(&backend, *y).contains("let stale"))
             .expect("the removed line was not drawn at all");
 
-        let inside = buffer[(inset, row)].bg;
+        // Sampled from the trailing blank rather than the first text cell:
+        // `(inset, row)` is the gutter's first cell, and since #321 that cell
+        // carries the two-tone gutter's own background, not the wash.
+        let inside = buffer[(width - 3, row)].bg;
         assert_ne!(
             inside,
             ratatui::style::Color::Reset,
@@ -7683,5 +7693,141 @@ fn the_layout_is_the_same_whatever_the_staged_facts_say() {
                  one frame stale when it is asked"
             );
         }
+    }
+}
+
+/// Like [`washed_screen`], with the palette chosen by the caller: the ladder
+/// tests below need a theme already resolved at a depth.
+fn themed_screen(
+    width: u16,
+    height: u16,
+    view: &View,
+    chrome: &Chrome,
+    theme: &vigia::Theme,
+) -> TestBackend {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(f.buffer_mut(), area, view, theme, Glyphs::default(), chrome);
+        })
+        .expect("draw");
+    terminal.backend().clone()
+}
+
+/// A removed line whose pair diff marked one word, beside a context line:
+/// the fixture every #321 gate below reads.
+fn emphasised_view() -> View {
+    let text = "    let stale = self.pending.take();";
+    let stale = text.find("stale").expect("fixture") as u32;
+    View {
+        total_rows: 400,
+        rows_above: 40,
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            Row::Hunk {
+                old_start: 38,
+                old_lines: 8,
+                new_start: 38,
+                new_lines: 9,
+            },
+            Row::Line {
+                kind: LineKind::Removed,
+                number: 38,
+                text: text.to_owned(),
+                spans: Vec::new(),
+                emph: vec![stale..stale + 5],
+            },
+            line(LineKind::Context, 39, "    if self.pending.is_empty() {"),
+        ],
+        ..two_regions(1)
+    }
+}
+
+/// `SPEC.md` §11.2 B18, [#321](https://github.com/breferrari/vigia/issues/321):
+/// the bytes the pair diff marked take the hotter wash, and the bytes around
+/// them keep the row's own.
+#[test]
+fn a_paired_rows_changed_words_take_the_hotter_wash() {
+    let view = emphasised_view();
+    let backend = washed_screen(64, 18, &view, &chrome());
+    let buffer = backend.buffer();
+    let theme = vigia::Theme::dark();
+
+    let row = (0..18u16)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn");
+    let drawn = row_text(&backend, row);
+    let at = drawn.find("stale").expect("the word was not drawn") as u16;
+
+    for x in at..at + 5 {
+        assert_eq!(
+            buffer[(x, row)].bg,
+            theme.removed_word.bg.expect("dark declares a word patch"),
+            "column {x} of the marked word does not wear the hotter wash"
+        );
+    }
+    let outside = drawn.find("let").expect("fixture") as u16;
+    assert_eq!(
+        buffer[(outside, row)].bg,
+        theme.removed_row.bg.expect("dark declares a wash"),
+        "a column outside the marked word lost the row's own wash"
+    );
+}
+
+/// The two-tone gutter marks the changed row's number cells and leaves a
+/// context row's alone.
+#[test]
+fn the_gutter_tone_marks_changed_rows_and_leaves_context_alone() {
+    let view = emphasised_view();
+    let backend = washed_screen(64, 18, &view, &chrome());
+    let buffer = backend.buffer();
+    let theme = vigia::Theme::dark();
+
+    let removed = (0..18u16)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn");
+    let context = (0..18u16)
+        .find(|y| row_text(&backend, *y).contains("is_empty"))
+        .expect("the context line was not drawn");
+
+    let drawn = row_text(&backend, removed);
+    let number = drawn.find("38").expect("the line number was not drawn") as u16;
+    assert_eq!(
+        buffer[(number, removed)].bg,
+        theme
+            .removed_gutter
+            .bg
+            .expect("dark declares a gutter tone"),
+        "the changed row's number cells do not wear the tone"
+    );
+    let drawn = row_text(&backend, context);
+    let number = drawn.find("39").expect("the context number was not drawn") as u16;
+    assert_eq!(
+        buffer[(number, context)].bg,
+        ratatui::style::Color::Reset,
+        "a context row's gutter took a tone it has no wash to be a tone of"
+    );
+}
+
+/// Below truecolour the word patch and the gutter tone drop with the wash they
+/// belong to, through the same resolve that drops every background: nothing
+/// here is a second ladder.
+#[test]
+fn the_word_patch_and_gutter_tone_drop_out_below_truecolor() {
+    let view = emphasised_view();
+    let theme = vigia::Theme::dark().resolve(vigia::Depth::Ansi256);
+    let backend = themed_screen(64, 18, &view, &chrome(), &theme);
+    let buffer = backend.buffer();
+
+    let row = (0..18u16)
+        .find(|y| row_text(&backend, *y).contains("let stale"))
+        .expect("the removed line was not drawn");
+    for x in 0..64u16 {
+        assert_eq!(
+            buffer[(x, row)].bg,
+            ratatui::style::Color::Reset,
+            "column {x} kept a background at a depth whose quantiser drops them all"
+        );
     }
 }
