@@ -143,14 +143,6 @@ impl ListRow {
             Self::Group { .. } => None,
         }
     }
-
-    /// The file this row draws, mutably.
-    pub fn entry_mut(&mut self) -> Option<&mut FileEntry> {
-        match self {
-            Self::File(entry) => Some(entry),
-            Self::Group { .. } => None,
-        }
-    }
 }
 
 impl From<FileEntry> for ListRow {
@@ -257,6 +249,42 @@ pub fn list_rows_wanted(files: &[vigia_core::FileChange]) -> usize {
     let first = runs.next();
     let grouped = first.is_some() && runs.any(|origin| Some(origin) != first);
     files.len() + if grouped { 2 } else { 0 }
+}
+
+/// The furthest a window of `rows` drawn rows can start and still show the last
+/// file.
+///
+/// **`files - rows` is the answer only while every drawn row is a file**, and a
+/// grouped window spends one or two of them on separators. Clamped that way the
+/// window stops short and the tail of the staged run cannot be reached at all —
+/// silently, because nothing on screen says the map has an end it will not show.
+///
+/// **Walked rather than computed**, because how many separators a window draws
+/// depends on where it starts: a window wholly inside one run draws one, a window
+/// straddling the boundary draws two. Subtracting a constant would be right for
+/// one of those and wrong for the other. This asks [`list_plan`] the question
+/// directly, from the back, and takes the first start that reaches the end — which
+/// is also what makes it *the same* answer the painter will draw, rather than a
+/// second arithmetic that agrees with it today.
+///
+/// Bounded by the changed set, so it is at most one pass per file over a `Vec`
+/// the frame already holds: no read, no `stat`, no diff.
+pub fn last_top(files: &[vigia_core::FileChange], rows: usize) -> usize {
+    if rows == 0 || files.is_empty() {
+        return 0;
+    }
+    let last = files.len() - 1;
+    // From the back: the largest `top` that still draws the final file is the one
+    // a reader scrolling down should stop at, and every smaller one also shows it.
+    for top in (0..files.len()).rev() {
+        let shows_last = list_plan(files, top, rows)
+            .iter()
+            .any(|slot| matches!(slot, Slot::File(at) if *at == last));
+        if shows_last {
+            return top;
+        }
+    }
+    0
 }
 
 /// The file a drawn list row addresses, or `None` for a separator.
@@ -1851,7 +1879,12 @@ impl View {
         // Always pulled back so the last file can rest on the bottom row rather
         // than leaving blanks a reader would read as "no more files". That is
         // validity, and holds however the window got there.
-        let mut top = self.list_top.min(self.files.saturating_sub(rows));
+        // **The furthest start that still reaches the last file, which is not
+        // `files - rows` once a window can hold rows that are not files**
+        // ([#313](https://github.com/breferrari/vigia/issues/313)). See
+        // [`last_top`].
+        let ceiling = last_top(frame.files(), rows);
+        let mut top = self.list_top.min(ceiling);
         if follows {
             // And snapped onto the current file, but **only** when the window is
             // the diff's to move. A reader who browsed away with `J` keeps their
@@ -1904,7 +1937,7 @@ impl View {
             } else if current >= top + rows {
                 top = current + 1 - rows;
             }
-            top = top.min(self.files.saturating_sub(rows));
+            top = top.min(ceiling);
         }
         self.list_top = top;
 

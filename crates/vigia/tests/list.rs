@@ -1731,3 +1731,122 @@ fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
         "the staged run is still drawn after the reader asked for it to go"
     );
 }
+
+/// **Every file in the list is reachable when both runs are drawn.**
+///
+/// The window's top was clamped to `files - rows`, which compares a count of
+/// *files* against a count of *drawn rows*. A grouped window spends one or two of
+/// those rows on separators, so the clamp stops the window one or two files short
+/// and the tail of the staged run cannot be scrolled to at all — silently, since
+/// nothing on screen says the map has an end it will not show.
+#[test]
+fn the_last_file_is_reachable_when_the_list_is_grouped() {
+    let scratch = two_runs("list-tail-reachable");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files().len();
+    assert_eq!(files, 6);
+
+    // A window shorter than the changed set, so the clamp is what decides where
+    // it can stop.
+    for rows in 3..=files {
+        let ceiling = vigia::last_top(frame.files(), rows);
+        let reached: Vec<usize> = vigia::list_plan(frame.files(), ceiling, rows)
+            .iter()
+            .filter_map(|slot| match slot {
+                vigia::Slot::File(at) => Some(*at),
+                vigia::Slot::Group { .. } => None,
+            })
+            .collect();
+        assert!(
+            reached.contains(&(files - 1)),
+            "a window of {rows} rows clamped to its furthest top ({ceiling}) \
+             cannot reach the last file: it draws {reached:?}"
+        );
+
+        // **And the old arithmetic really does fall short here**, or this fixture
+        // cannot see the defect it exists for. The naive clamp compares a count of
+        // files against a count of drawn rows, and the separators are the
+        // difference.
+        let naive = files.saturating_sub(rows);
+        let naive_reach: Vec<usize> = vigia::list_plan(frame.files(), naive, rows)
+            .iter()
+            .filter_map(|slot| match slot {
+                vigia::Slot::File(at) => Some(*at),
+                vigia::Slot::Group { .. } => None,
+            })
+            .collect();
+        if !naive_reach.contains(&(files - 1)) {
+            assert!(
+                ceiling > naive,
+                "the naive clamp misses the last file at {rows} rows and the \
+                 rule agrees with it anyway"
+            );
+        }
+    }
+
+    // Non-vacuity over the sweep: at least one width has to be a width the naive
+    // clamp gets wrong, or the loop above compared two identical answers.
+    let short = 3;
+    assert!(
+        vigia::last_top(frame.files(), short) > files.saturating_sub(short),
+        "no window in this fixture separates the two clamps, so the gate proves \
+         nothing"
+    );
+}
+
+/// **The height a scroll step is measured in is the height the paint lays out.**
+///
+/// `diff_height` and the paint path both split the body, and they have to agree or
+/// a page-down steps by more rows than the diff has. They took the same inputs
+/// until the list's row budget stopped being its file count: `diff_height` went on
+/// passing `files` for both, so with the staged run drawn it computed a diff up to
+/// two rows taller than the one the reader is looking at.
+#[test]
+fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
+    let scratch = two_runs("list-diff-height");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let chrome = vigia::Chrome {
+        staged: Some(3),
+        ..vigia::App::new().chrome("fixture", None, vigia::Pointing::default(), 0)
+    };
+    // Both derived from the changed set the way `Shell::diff_rows_for` and
+    // `Shell::paint` derive them, which is what the two seams now do by
+    // construction: each is handed the slice rather than a pair of numbers.
+    let files = frame.files();
+    let (count, wanted) = (files.len(), vigia::list_rows_wanted(files));
+
+    let mut separated = 0usize;
+    for height in 10..=30u16 {
+        let at = Rect::new(0, 0, 80, height);
+        let stepped = vigia::diff_height(at, &chrome, count, wanted);
+        let laid = body_layout(at, &chrome, count, wanted).diff;
+        assert_eq!(
+            stepped, laid,
+            "at 80x{height} a scroll step is measured in {stepped} rows where the \
+             paint lays out {laid}"
+        );
+
+        // **And the two inputs are not interchangeable, which is the finding.**
+        // `diff_height` took one number and passed it for both until B17 gave the
+        // list a row budget its file count no longer equals. Counting the heights
+        // where the old form disagrees is what stops this gate from being the
+        // identity it would otherwise be: `diff_height` *is* `body_layout(..).diff`,
+        // so comparing them with the same arguments asserts nothing at all.
+        if vigia::diff_height(at, &chrome, count, count) != laid {
+            separated += 1;
+        }
+    }
+
+    assert!(
+        separated > 0,
+        "no height in the sweep tells the two inputs apart, so this fixture \
+         cannot see a caller that passes the file count for both"
+    );
+}

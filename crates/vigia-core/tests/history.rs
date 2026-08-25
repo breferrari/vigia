@@ -1530,11 +1530,25 @@ fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
              The mark is the whole of B2 and one this short is one a reader \
              never catches"
         );
+        // **The ceiling is written out rather than computed from
+        // [`PULSE_SAMPLES`], and that is the whole difference between a gate and
+        // a tautology.** Stated as `HISTORY_SAMPLE * PULSE_SAMPLES` it adds the
+        // constant under test to both sides: widening the window to three
+        // samples widened the assertion with it and this test stayed green,
+        // which is exactly what happened when it was mutated. A bound on a
+        // constant has to come from somewhere the constant cannot reach.
+        //
+        // **Two seconds because that is the ruling**, not because it is twice
+        // one sample: a mark saying *it changed on the newest tick* has to be
+        // gone while that is still true of the pane, and one to two seconds is
+        // where the terminal's own transient marks sit (`tmux`'s `display-time`
+        // is 750ms, its `display-panes-time` 1s, vim's `matchtime` 500ms). Move
+        // `PULSE_SAMPLES` and this reddens, which is the point.
         assert!(
-            alive <= HISTORY_SAMPLE * PULSE_SAMPLES as u32,
+            alive <= Duration::from_secs(2),
             "a write at +{offset}ms into the sample pulsed for {alive:?}, which \
-             is past the bound. A mark that outlives what it describes is the \
-             frozen clock #243 removed"
+             is past the two seconds the ruling allows. A mark that outlives \
+             what it describes is the frozen clock #243 removed"
         );
     }
 }

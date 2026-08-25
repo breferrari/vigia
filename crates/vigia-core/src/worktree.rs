@@ -184,13 +184,14 @@ impl Worktree {
     /// [`Worktree::branch`] follows and it is what keeps I4 true: the thing read
     /// is the thing drawn.
     pub fn count_of(&self, origin: Origin) -> Result<usize> {
-        // Rename tracking off: a count does not care whether a deletion and an
-        // addition are one change or two, and pairing them is the expensive half
-        // of either walk.
-        let options = ChangeOptions {
-            track_renames: false,
-        };
-        self.changes_of(origin, options)?
+        // **Rename tracking on, and the cheaper spelling is wrong here.** A count
+        // does not care about pairing *in the abstract* — but this number is drawn
+        // beside the one `Frame::advance` produces, and that walk pairs. With
+        // tracking off a staged rename counts two, so the empty state said
+        // `· 4 staged` and pressing `a` drew three rows. Two numbers about one
+        // worktree that disagree is worse than a walk that costs a little more, on
+        // the one frame that has no diff to compute anyway.
+        self.changes_of(origin, ChangeOptions::default())?
             .try_fold(0, |n, change| change.map(|_| n + 1))
     }
 
@@ -222,14 +223,37 @@ impl Worktree {
         };
 
         let mut changes = Vec::new();
-        self.repo
+        let walked = self
+            .repo
             .tree_index_status(&tree, &index, None, renames, |change, _, _| {
                 if let Some(change) = staged_change(&change) {
                     changes.push(change);
                 }
                 Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
-            })
-            .map_err(|e| Error::Status(Box::new(e)))?;
+            });
+
+        // **A sparse index yields no staged run rather than a dead pane.**
+        // `gix_diff::index` refuses outright on one (`Error::IsSparse`), and it is
+        // a refusal the index-worktree walk beside it does not have — so before
+        // this arm, pressing `a` in a `git sparse-checkout --sparse-index`
+        // repository made **every** later `Frame::advance` fail for as long as the
+        // toggle stayed on. The core leaves a frame intact on failure, which is
+        // the right rule and is exactly what made this bad: the pane kept its
+        // pre-`a` contents and stopped updating, quietly, on a tree the reader was
+        // watching precisely because it was changing.
+        //
+        // Empty is the honest answer rather than a fallback: this walk cannot see
+        // that index, so it has nothing to report. The unstaged run is unaffected
+        // and goes on drawing.
+        if let Err(e) = walked {
+            if matches!(
+                e,
+                gix::status::tree_index::Error::TreeIndexDiff(gix::diff::index::Error::IsSparse)
+            ) {
+                return Ok(Vec::new());
+            }
+            return Err(Error::Status(Box::new(e)));
+        }
         Ok(changes)
     }
 
@@ -345,11 +369,29 @@ impl Worktree {
         Ok((before, after))
     }
 
+    /// **`try_into_blob`, never `into_blob`, and the difference is a panic.**
+    /// `gix`'s `into_blob` is documented as *"or panic if it is none"*, and an id
+    /// that names something other than a blob is reachable: a **gitlink** — a
+    /// submodule's recorded commit — is an ordinary index entry whose id is a
+    /// *commit*. On a repository whose object database can resolve it (a clone
+    /// made with `--reference`, or any alternates setup) `find_object` succeeds
+    /// and the conversion aborts the process.
+    ///
+    /// A monitor that panics is the worst failure this product has, and it would
+    /// land on the reader's whole terminal rather than on one row. So an object of
+    /// the wrong kind reaches the same `MissingBlob` a missing one does: the file
+    /// draws its state and nothing else stops.
+    ///
+    /// Reachable on both sides since
+    /// [#313](https://github.com/breferrari/vigia/issues/313) — the staged run's
+    /// right-hand side is an index id too — which is what turned a latent
+    /// unstaged-only hazard into one worth closing rather than recording.
     fn blob(&self, id: gix::ObjectId, path: &str) -> Result<Vec<u8>> {
-        let object = self.repo.find_object(id).map_err(|_| Error::MissingBlob {
+        let missing = || Error::MissingBlob {
             path: path.to_owned(),
-        })?;
-        Ok(object.into_blob().take_data())
+        };
+        let object = self.repo.find_object(id).map_err(|_| missing())?;
+        Ok(object.try_into_blob().map_err(|_| missing())?.take_data())
     }
 
     /// Drop the cached clean filter, so the next read rebuilds it.
@@ -644,10 +686,18 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
 /// what the tree holds against what the index holds, and it has both blobs in hand
 /// by the time it calls back.
 ///
-/// `None` drops a shape this does not understand, which is the same ruling the
-/// index-worktree mapper's own `_ => continue` arm makes: a `gix` version that
-/// grows a variant here should cost a reader one missing row rather than a
-/// mislabelled one.
+/// **`None` is a gitlink**, and it is the only thing dropped here. A submodule's
+/// recorded commit is an ordinary index entry whose id names a *commit* rather
+/// than a blob, so diffing it as content is a category error; `SPEC.md` §11.2 B5
+/// keeps submodules out of v1, and the unstaged walk reaches the same answer by a
+/// different road (`gix` reports a modified submodule and the read then fails).
+/// Dropping it costs a reader one row about a thing this tool does not draw.
+///
+/// **The match is otherwise exhaustive with no fallback**, deliberately: a `gix`
+/// version that grows a `ChangeRef` variant is a compile error here rather than a
+/// silently missing row, which is the stronger of the two answers and the one the
+/// index-worktree mapper cannot have (its summaries and item shapes are paired at
+/// run time, so it needs `_ => continue`).
 fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileChange> {
     use gix::diff::index::ChangeRef;
 

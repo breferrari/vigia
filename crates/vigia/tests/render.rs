@@ -2630,7 +2630,7 @@ fn any_area_renders_including_the_ones_that_fit_nothing() {
         let backend = screen(width, height, &view, &chrome());
         let area = ratatui::layout::Rect::new(0, 0, width, height);
         assert!(
-            diff_height(area, &chrome(), view.files) < usize::from(height).max(1),
+            diff_height(area, &chrome(), view.files, view.files) < usize::from(height).max(1),
             "diff_height asked for more rows than {width}x{height} has"
         );
         // Non-vacuity: the loop must actually have produced a buffer of the size
@@ -7389,7 +7389,18 @@ fn a_staged_row_draws_the_gutter_and_an_unstaged_row_draws_none() {
 /// mark and the counters say the same thing about different facts.
 #[test]
 fn the_gutter_takes_the_staged_colour_and_never_the_diffs_green() {
-    let theme = Theme::default();
+    // **A perturbed palette, because the shipped one cannot tell the two apart.**
+    // `staged` and `added` hold byte-identical values in all three palettes by
+    // design — git paints a staged path green and the mark borrows that — so an
+    // assertion against `Theme::default()` passes whether the painter reached for
+    // `staged` or for `added`, and the gate `SPEC.md` §5.3 names would have been
+    // green against the very collapse it exists to forbid. Moving one key apart
+    // is what makes the two distinguishable, and it is exactly the freedom the
+    // rule is protecting: a theme must be able to move one without the other.
+    let theme = Theme {
+        staged: ratatui::style::Style::new().fg(ratatui::style::Color::Magenta),
+        ..Theme::default()
+    };
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 12)).expect("terminal");
     let view = both_runs();
@@ -7422,6 +7433,12 @@ fn the_gutter_takes_the_staged_colour_and_never_the_diffs_green() {
                 cell.style().fg,
                 theme.staged.fg,
                 "the gutter mark at {x},{y} is not drawn from Theme::staged"
+            );
+            assert_ne!(
+                cell.style().fg,
+                theme.added.fg,
+                "the gutter mark at {x},{y} took the diff's own green, so the two \
+                 roles have collapsed into one key"
             );
         }
     }

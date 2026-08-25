@@ -513,6 +513,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         Rect::new(0, 0, 80, 24),
         &configured.chrome("fixture", None, Pointing::default(), 0),
         6,
+        6,
     );
     for app in [&mut configured, &mut pressed] {
         app.apply(Action::Bottom, &mut frame, body).expect("apply");

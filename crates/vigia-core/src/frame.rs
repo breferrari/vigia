@@ -292,61 +292,99 @@ impl Taken {
     }
 }
 
-/// What a cached artefact is filed under.
+/// One cache, split by which run a change came from.
 ///
-/// **A path is no longer a key, and that is
+/// **A path stopped being a key in
 /// [#313](https://github.com/breferrari/vigia/issues/313).** With the staged run
 /// drawn, one path can be changed on both sides at once — staged, and then edited
 /// again on disk — and the two are different diffs of different bytes. Keyed by
 /// path alone the second entry read the first one's answer back, which is a diff
 /// drawn against content it was never computed from and the exact stale-pane
-/// defect this whole module exists to prevent.
+/// defect this module exists to prevent.
 ///
-/// Borrowed for lookup so the common path allocates nothing: [`Key`] holds the
-/// `String` and [`Ref`] is what a caller with a `&FileChange` can build for free.
-type Key = (Origin, String);
-
-/// A borrowed [`Key`], for looking one up without owning it.
-type Ref<'a> = (Origin, &'a str);
-
-/// This change's cache key, borrowed.
-fn key_of(change: &FileChange) -> Ref<'_> {
-    (change.origin, change.path.as_str())
+/// **Two maps rather than a `(Origin, String)` key, and the reason is the hot
+/// path.** `HashMap`'s `Borrow` does not reach inside a tuple, so a tuple key
+/// cannot be looked up from a `(Origin, &str)` — every `get` would allocate a
+/// `String` to ask a question, on a path that runs per file per frame and that
+/// [`put`]'s own docblock exists to keep allocation-free. Indexing by run keeps
+/// `&str` lookups exactly as they were and costs one array index.
+///
+/// **An array rather than two named fields**, so [`Origin`] is the only thing that
+/// decides which map is meant and a caller cannot reach for the wrong one by
+/// spelling a field name.
+#[derive(Debug)]
+struct Cache<T> {
+    runs: [HashMap<String, T>; 2],
 }
 
-/// `HashMap` cannot look up a `(Origin, String)` from a `(Origin, &str)`, because
-/// `Borrow` does not reach inside a tuple. Two maps keyed on nested maps would be
-/// the other answer and it costs a second layer of allocation and iteration on
-/// every path this file has; a wrapper that implements the lookup traits is a
-/// third and it is a lot of unsafe-adjacent boilerplate for one field.
-///
-/// So lookups go through this, which is one `String` allocation on a **miss** path
-/// only. Every hot caller below already had the owned key in hand or was already
-/// on a recompute.
-fn get<'m, T>(map: &'m HashMap<Key, T>, at: Ref<'_>) -> Option<&'m T> {
-    map.get(&(at.0, at.1.to_owned()))
+impl<T> Default for Cache<T> {
+    fn default() -> Self {
+        Self {
+            runs: [HashMap::new(), HashMap::new()],
+        }
+    }
 }
 
-/// [`get`], mutably.
-fn get_mut<'m, T>(map: &'m mut HashMap<Key, T>, at: Ref<'_>) -> Option<&'m mut T> {
-    map.get_mut(&(at.0, at.1.to_owned()))
-}
+impl<T> Cache<T> {
+    fn of(origin: Origin) -> usize {
+        match origin {
+            Origin::Unstaged => 0,
+            Origin::Staged => 1,
+        }
+    }
 
-/// Store `value` under `at`, keeping the key the map already owns.
-///
-/// `HashMap::insert` keeps the existing key and drops the one handed to it, so
-/// the obvious `insert(key.clone(), …)` allocates a `String` per call and frees
-/// it again on the common path, where [`Frame::advance`] has already migrated an
-/// entry for every changed file. Only a genuine miss needs a new key.
-///
-/// Generic over the value because both caches want it: the span map pays it once
-/// per changed file, the diff map once per recompute.
-fn put<T>(map: &mut HashMap<Key, T>, at: Ref<'_>, value: T) {
-    let owned = (at.0, at.1.to_owned());
-    match map.get_mut(&owned) {
-        Some(slot) => *slot = value,
-        None => {
-            map.insert(owned, value);
+    fn get(&self, change: &FileChange) -> Option<&T> {
+        self.runs[Self::of(change.origin)].get(change.path.as_str())
+    }
+
+    fn get_mut(&mut self, change: &FileChange) -> Option<&mut T> {
+        self.runs[Self::of(change.origin)].get_mut(change.path.as_str())
+    }
+
+    /// Store `value` for this change, keeping the key the map already owns.
+    ///
+    /// `HashMap::insert` keeps the existing key and drops the one handed to it, so
+    /// the obvious `insert(path.to_owned(), …)` allocates a `String` per call and
+    /// frees it again on the common path, where [`Frame::advance`] has already
+    /// migrated an entry for every changed file. Only a genuine miss needs a new
+    /// key.
+    fn put(&mut self, change: &FileChange, value: T) {
+        let run = &mut self.runs[Self::of(change.origin)];
+        match run.get_mut(change.path.as_str()) {
+            Some(slot) => *slot = value,
+            None => {
+                run.insert(change.path.clone(), value);
+            }
+        }
+    }
+
+    fn remove(&mut self, change: &FileChange) -> Option<T> {
+        self.runs[Self::of(change.origin)].remove(change.path.as_str())
+    }
+
+    /// Move this change's entry out of `previous` and into this cache, carrying
+    /// the `String` the old map owns rather than allocating a new one.
+    fn migrate(&mut self, previous: &mut Self, change: &FileChange, mut then: impl FnMut(&mut T)) {
+        let run = Self::of(change.origin);
+        if let Some((path, mut value)) = previous.runs[run].remove_entry(change.path.as_str()) {
+            then(&mut value);
+            self.runs[run].insert(path, value);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.runs.iter().map(HashMap::len).sum()
+    }
+
+    fn clear(&mut self) {
+        for run in &mut self.runs {
+            run.clear();
+        }
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        for run in &mut self.runs {
+            run.reserve(additional);
         }
     }
 }
@@ -535,7 +573,7 @@ fn reusable(
 pub struct Frame<'w> {
     worktree: &'w Worktree,
     files: Vec<FileChange>,
-    cached: HashMap<Key, Cached>,
+    cached: Cache<Cached>,
     /// How tall every changed file is, once something has asked.
     ///
     /// Separate from [`Self::cached`] because it answers a different question
@@ -544,7 +582,7 @@ pub struct Frame<'w> {
     /// [`Frame::advance`] under the same proof the diffs beside it are carried
     /// under, and migrated so it is bounded by the changed set rather than by
     /// the session.
-    spans: HashMap<Key, Measured>,
+    spans: Cache<Measured>,
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     ///
@@ -581,8 +619,8 @@ impl<'w> Frame<'w> {
         Self {
             worktree,
             files: Vec::new(),
-            cached: HashMap::new(),
-            spans: HashMap::new(),
+            cached: Cache::default(),
+            spans: Cache::default(),
             attributes: HashMap::new(),
             staged: false,
             stats: FrameStats::default(),
@@ -726,20 +764,15 @@ impl<'w> Frame<'w> {
         let mut previous_spans = std::mem::take(&mut self.spans);
         self.spans.reserve(files.len());
         for change in &files {
-            // `remove_entry` rather than `remove`, so the key the old map owns
-            // is moved rather than cloned. With two maps that is up to 2N
-            // needless `String` allocations a tick, which on the hundred-file
-            // gate is two hundred.
-            let key = (change.origin, change.path.clone());
-            if let Some((key, cached)) = previous.remove_entry(&key) {
-                self.cached.insert(key, cached);
-            }
-            if let Some((key, mut measured)) = previous_spans.remove_entry(&key) {
+            // `Cache::migrate` moves the key the old map owns rather than cloning
+            // it. With two maps that is up to 2N needless `String` allocations a
+            // tick, which on the hundred-file gate is two hundred.
+            self.cached.migrate(&mut previous, change, |_| {});
+            self.spans.migrate(&mut previous_spans, change, |measured| {
                 // Carried, and no longer proved. What it described was true of
                 // the previous tick, and `fill_span` is where it is asked again.
                 measured.proven = false;
-                self.spans.insert(key, measured);
-            }
+            });
         }
         // Whatever is left is a path that stopped being changed. Counted from
         // the diffs alone: `evicted` is what a caller reads to check I3's bound
@@ -782,6 +815,15 @@ impl<'w> Frame<'w> {
             return;
         }
         self.staged = staged;
+        // **Credited before the clear, so I3's bound stays observable across a
+        // toggle.** `FrameStats::evicted` is what a caller reads to check that the
+        // diff cache is bounded by the *current* changed set rather than by the
+        // session, and a whole cache dropped without being counted is that bound
+        // going quiet for as long as the reader keeps pressing `a`. Counted from
+        // the diffs alone, which is the same population `Frame::advance` credits:
+        // adding the spans would put two differently-sized sets into one number
+        // and it would then mean neither.
+        self.stats.evicted += self.cached.len() as u64;
         self.cached.clear();
         self.spans.clear();
     }
@@ -925,23 +967,29 @@ impl<'w> Frame<'w> {
     /// and unchanged: both callers fill first, and a silent zero here would draw a
     /// file with no height rather than fail.
     fn span_of(&self, change: &FileChange) -> &Measured {
-        &self.spans[&(change.origin, change.path.clone())]
+        self.spans
+            .get(change)
+            .expect("fill_span guarantees this, and both callers fill first")
     }
 
     fn fill_span(&mut self, index: usize) {
         let change = &self.files[index];
-        if get(&self.spans, key_of(change)).is_some_and(|measured| measured.proven) {
+        if self
+            .spans
+            .get(change)
+            .is_some_and(|measured| measured.proven)
+        {
             return;
         }
 
         // (1) A diff in hand. Free, and no syscall.
-        if let Some(cached) = get(&self.cached, key_of(change)) {
+        if let Some(cached) = self.cached.get(change) {
             let measured = Measured {
                 taken: Some(cached.taken.clone()),
                 span: FileSpan::from(&cached.diff),
                 proven: true,
             };
-            put(&mut self.spans, key_of(change), measured);
+            self.spans.put(change, measured);
             return;
         }
 
@@ -959,7 +1007,7 @@ impl<'w> Frame<'w> {
         let path = self.worktree.workdir().join(&change.path);
         let mut probed = false;
         let mut proved = false;
-        if let Some(measured) = get_mut(&mut self.spans, key_of(change))
+        if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
             && reusable(taken, change, || {
                 probed = true;
@@ -1017,7 +1065,7 @@ impl<'w> Frame<'w> {
             span,
             proven: true,
         };
-        put(&mut self.spans, key_of(change), measured);
+        self.spans.put(change, measured);
     }
 
     /// The change at `index` and its diff, computed now or reused from an
@@ -1050,7 +1098,7 @@ impl<'w> Frame<'w> {
         // not read is a syscall bought for nothing, and `probes` should count
         // the ones actually taken.
         let mut probed = false;
-        let reuse = match get(&self.cached, key_of(change)) {
+        let reuse = match self.cached.get(change) {
             None => false,
             Some(cached) => reusable(&cached.taken, change, || {
                 probed = true;
@@ -1061,10 +1109,12 @@ impl<'w> Frame<'w> {
 
         if reuse {
             self.stats.reused += 1;
-            return Ok((
-                change,
-                &self.cached[&(change.origin, change.path.clone())].diff,
-            ));
+            let diff = &self
+                .cached
+                .get(change)
+                .expect("`reuse` is only true where the lookup above found one")
+                .diff;
+            return Ok((change, diff));
         }
 
         // Timed from before the read starts, so the window a write would have
@@ -1094,16 +1144,16 @@ impl<'w> Frame<'w> {
         // rebuilds it from the fresh diff without reading a byte. This is the
         // half of #84 that is free. The half that is not is a file that changed
         // and has *not* been re-diffed, which needs a read to notice.
-        let key = (change.origin, change.path.clone());
-        self.spans.remove(&key);
-        self.cached.insert(
-            key.clone(),
+        self.spans.remove(change);
+        self.cached.put(
+            change,
             Cached {
                 taken: Taken::of(change, worktree),
                 diff,
             },
         );
-        Ok((change, &self.cached[&key].diff))
+        let diff = &self.cached.get(change).expect("just inserted").diff;
+        Ok((change, diff))
     }
 }
 

@@ -118,7 +118,8 @@ pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
-    block_rows, diff_rows, file_at, list_plan, list_rows_wanted, rows_in, rows_of, span_in,
+    block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of,
+    span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -637,7 +638,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // No test drives this loop, so what protects it is that there is now
             // one function every site calls rather than three answers that can
             // drift apart.
-            let height = shell.diff_rows_for(step, frame.files().len())?;
+            let height = shell.diff_rows_for(step, frame.files())?;
             match shell.app.apply(step, &mut frame, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
@@ -775,7 +776,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // ([#297](https://github.com/breferrari/vigia/issues/297)'s
                             // audit): the pinned arm inherits the same parameter,
                             // so fixing it here fixes both.
-                            let height = shell.diff_rows_for(drag, frame.files().len())?;
+                            let height = shell.diff_rows_for(drag, frame.files())?;
                             match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
@@ -829,7 +830,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // which is right rather than merely cheap: it feeds
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
-                    let height = shell.diff_rows_for(action, frame.files().len())?;
+                    let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
@@ -1260,7 +1261,20 @@ impl Shell {
     /// the terminal-size syscall and the `Chrome` this builds. **Four rather than
     /// three since `Action::Bottom` joined them**, which is B16's doing: pinned,
     /// `G` rests a file's last row on the bottom, and *the bottom* is a height.
-    fn diff_rows_for(&mut self, action: Action, files: usize) -> Result<usize, Failure> {
+    ///
+    /// **Takes the changed set rather than its length**, since
+    /// [#313](https://github.com/breferrari/vigia/issues/313). The body's split
+    /// needs two numbers now — how many files the footer counts, and how many
+    /// *rows* the list wants once its run separators are in — and they are equal
+    /// only while one comparison is drawn. Passed as a pair at this seam they were
+    /// got wrong immediately: `files` went to both, and a scroll step was measured
+    /// in a diff up to two rows taller than the paint laid out. Handed the slice,
+    /// neither can be supplied without the other.
+    fn diff_rows_for(
+        &mut self,
+        action: Action,
+        files: &[vigia_core::FileChange],
+    ) -> Result<usize, Failure> {
         if !action.needs_height() {
             return Ok(0);
         }
@@ -1271,7 +1285,12 @@ impl Shell {
             self.elsewhere,
         );
         let area = self.area()?;
-        Ok(diff_height(area, &chrome, files))
+        Ok(diff_height(
+            area,
+            &chrome,
+            files.len(),
+            view::list_rows_wanted(files),
+        ))
     }
 
     /// The cell a step button is being held on, for the frame that draws it lit.

@@ -315,6 +315,17 @@ pub const HISTORY_SAMPLE: Duration =
 /// chosen from taste.
 pub const PULSE_SAMPLES: usize = 2;
 
+// **A slice of the newest samples has to fit inside the window it slices**, and
+// `recency` indexes with a subtraction: past `HISTORY_SAMPLES` that underflows and
+// panics on the frame path, where a monitor that panics is the worst failure this
+// product has. A `const` block is the instrument this repository already reaches
+// for when a claim no test can fail is a wish, and it stops the build rather than
+// a suite.
+const _: () = assert!(
+    PULSE_SAMPLES >= 1 && PULSE_SAMPLES <= HISTORY_SAMPLES,
+    "PULSE_SAMPLES must name at least one sample and no more than the window holds"
+);
+
 /// How many samples one source bucket is the sum of.
 ///
 /// **Exact, and asserted at compile time rather than by a test**, because a test

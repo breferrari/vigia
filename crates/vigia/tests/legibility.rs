@@ -2524,10 +2524,10 @@ fn a_notice_never_moves_the_diff() {
     for width in WIDTHS {
         for height in [5u16, 24] {
             let area = Rect::new(0, 0, width, height);
-            let quiet = diff_height(area, &following(), view.files);
+            let quiet = diff_height(area, &following(), view.files, view.files);
             assert_eq!(
                 quiet,
-                diff_height(area, &with_notice(), view.files),
+                diff_height(area, &with_notice(), view.files, view.files),
                 "a notice changed the body height at {width}x{height}"
             );
             if quiet == usize::from(height) - 3 {
@@ -2564,10 +2564,10 @@ fn the_status_readouts_never_move_the_diff() {
     for width in WIDTHS {
         for height in [5u16, 24] {
             let area = Rect::new(0, 0, width, height);
-            let bare = diff_height(area, &following(), view.files);
+            let bare = diff_height(area, &following(), view.files, view.files);
             assert_eq!(
                 bare,
-                diff_height(area, &diagnostics(), view.files),
+                diff_height(area, &diagnostics(), view.files, view.files),
                 "the status readouts changed the body height at {width}x{height}"
             );
             if bare == usize::from(height) - 3 {
@@ -2699,7 +2699,7 @@ fn a_short_screen_keeps_its_body_rather_than_growing_the_footer() {
     for height in [3u16, 4] {
         let area = Rect::new(0, 0, 40, height);
         assert_eq!(
-            diff_height(area, &following(), view.files),
+            diff_height(area, &following(), view.files, view.files),
             usize::from(height) - 2,
             "the footer grew at 40x{height} and spent a body row it could not spare"
         );
@@ -2708,7 +2708,7 @@ fn a_short_screen_keeps_its_body_rather_than_growing_the_footer() {
     // it rather than the collision never happening at these widths.
     let area = Rect::new(0, 0, 40, 5);
     assert_eq!(
-        diff_height(area, &following(), view.files),
+        diff_height(area, &following(), view.files, view.files),
         2,
         "at five rows the footer should take its second line"
     );

@@ -1218,7 +1218,7 @@ fn drive(
 
         if let Some(action) = scripted(frames, body.diff) {
             let chrome = app.chrome(NAME, None, Pointing::default(), 0);
-            let height = diff_height(area, &chrome, frame.files().len());
+            let height = diff_height(area, &chrome, frame.files().len(), frame.files().len());
             if let Err(e) = app.apply(action, &mut frame, height) {
                 failed += 1;
                 last_error = Some(e.to_string());

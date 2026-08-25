@@ -4115,8 +4115,18 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) 
 /// goes to `View::collect` and to `Action::Page`, neither of which has anything
 /// to say about the file list — and a name that quietly means one region is
 /// worse than one that says which.
-pub fn diff_height(area: Rect, chrome: &Chrome, files: usize) -> usize {
-    body_layout(area, chrome, files, files).diff
+///
+/// **`list_rows` is a second parameter rather than `files` passed twice**, and the
+/// pair is load bearing: this and the paint path both split the body, and a scroll
+/// step measured in a taller diff than the reader is looking at pages past its
+/// end. They took the same input until the list's row budget stopped being its
+/// file count ([#313](https://github.com/breferrari/vigia/issues/313)); passing
+/// `files` for both here computed a diff up to two rows taller than the paint laid
+/// out, on exactly the frames drawing both runs. See
+/// [`crate::view::list_rows_wanted`], and
+/// `tests/list.rs::the_scroll_step_is_measured_in_the_height_the_paint_uses`.
+pub fn diff_height(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) -> usize {
+    body_layout(area, chrome, files, list_rows).diff
 }
 
 /// What one paint cost, in the term that decides whether it followed the pane.
@@ -4281,7 +4291,6 @@ pub fn render(
         inset: margins.0,
         trailing: margins.1,
         paint: PaintStats::default(),
-        empty: empty_state_with(chrome.staged, chrome.elsewhere),
         pressed: chrome.pressed,
         gripped: chrome.gripped,
         hovered: chrome.hovered,
@@ -4423,7 +4432,13 @@ pub fn render(
         // to land instead of a defect to fix. That rung is this one, the diff no
         // longer spans the pane, and the ruling is in `SPEC.md` §5.3 now rather
         // than only here: furniture spans the region that drew it.
-        painter.body(region, full, view, area);
+        painter.body(
+            region,
+            full,
+            view,
+            area,
+            &empty_state_with(chrome.staged, chrome.elsewhere),
+        );
         if bar.drawn() {
             painter.scrollbar(
                 full,
@@ -5680,20 +5695,6 @@ struct Painter<'a> {
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(Grabbed, isize)>,
-    /// The body's empty-state line, resolved before anything is drawn.
-    ///
-    /// **Built here rather than in [`Painter::body`]**, which is where every other
-    /// drawer would reach for `chrome` and cannot: `body` is handed a [`View`] and
-    /// the two facts this line needs — whether the staged run is on, and how many
-    /// changes the run that is *not* drawn holds — are the chrome's. Resolving it
-    /// beside `pressed` and `hovered` is the same rule those follow: a fact decided
-    /// once for the whole screen is copied onto the painter, so no drawer can reach
-    /// back and answer it differently.
-    ///
-    /// A `String` per frame, on the one frame a pane draws no diff at all. Every
-    /// other frame builds it and never looks at it, which is one small allocation
-    /// against a frame that is about to walk a screenful of hunks.
-    empty: String,
 }
 
 impl Painter<'_> {
@@ -7293,7 +7294,15 @@ impl Painter<'_> {
         );
     }
 
-    fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect) {
+    /// **`empty` is a parameter rather than a field on the painter**, which is
+    /// where it started. The line needs two facts that belong to the chrome —
+    /// whether the staged run is drawn, and how many changes the run that is
+    /// *not* drawn holds — and `body` is handed a [`View`]. Parked on the painter
+    /// it was reachable, and then unusable: `put_marked` takes `&mut self`, so
+    /// drawing `&self.empty` borrows the painter twice and the field had to be
+    /// cloned on every frame to get around it. Handed down, the one drawer that
+    /// wants it has it and nothing else carries it.
+    fn body(&mut self, area: Rect, full: Rect, view: &View, pane: Rect, empty: &str) {
         // **Two rects, because this region draws both roles.** A heading is placed
         // against the pane through [`planning_width`]; everything else here keeps
         // the region's own right edge and only stands back from it, through
@@ -7315,7 +7324,7 @@ impl Painter<'_> {
             self.put_marked(
                 glyphs.x,
                 glyphs.y,
-                &self.empty.clone(),
+                empty,
                 usize::from(glyphs.width),
                 self.theme.chrome_dim,
             );
@@ -8328,7 +8337,6 @@ mod tests {
         let mut painter = Painter {
             buf: &mut buf,
             theme: &theme,
-            empty: String::new(),
             glyphs: Glyphs::default(),
             gutter: 0,
             inset: 0,

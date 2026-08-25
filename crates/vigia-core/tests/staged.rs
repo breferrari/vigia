@@ -429,3 +429,215 @@ fn a_run_can_be_counted_without_being_walked_for_content() {
          blank that #313 was opened on"
     );
 }
+
+/// **The whole staged run survives the working tree being deleted**, which is the
+/// same claim as the test above made over one file, made over every file and
+/// without naming a counter.
+///
+/// **It exists because a mutation survived.** `FileChange::maybe_symlink` is set to
+/// `true` on every staged change and setting it to `false` changed nothing
+/// anywhere in the suite — correctly, because a staged change has both sides in
+/// the object database and so never reaches the read that field decides. An inert
+/// field is only safe while the invariant *making* it inert is gated, and it was
+/// not: what held it was a docblock.
+///
+/// **Stated as "the answers do not move" rather than as a syscall count**, because
+/// the counters cannot carry it. `FrameStats::bytes` counts what a diff *compared*,
+/// which for a staged change is two blobs and therefore non-zero; `probes` is spent
+/// only where `maybe_symlink` is set, so a zero there is equally consistent with an
+/// ordinary read. Comparing every diff across a worktree that no longer exists is
+/// the one form with nothing left to be satisfied by accident.
+#[test]
+fn the_staged_run_is_unchanged_by_the_working_tree_disappearing() {
+    let scratch = fixture("staged-tree-gone");
+    scratch.write(FILE, "one\nSTAGED\nthree\n");
+    scratch.write(OTHER, "alpha\nSTAGED TOO\n");
+    scratch.write("src/added.rs", "brand new\n");
+    scratch.git(&["add", "-A"]);
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let staged: Vec<usize> = frame
+        .files()
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change.origin == Origin::Staged)
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(staged.len(), 3, "the fixture stages three files");
+
+    let before: Vec<_> = staged
+        .iter()
+        .map(|at| {
+            let (change, diff) = frame.diff(*at).expect("staged diff");
+            (change.path.clone(), diff.clone())
+        })
+        .collect();
+
+    // The whole working tree goes. The index is untouched, so `git diff --cached`
+    // still reports every one of these and so must this.
+    for change in [FILE, OTHER, "src/added.rs"] {
+        scratch.remove(change);
+    }
+
+    let mut fresh = worktree.frame();
+    fresh.show_staged(true);
+    fresh.advance().expect("advance");
+    let after: Vec<_> = fresh
+        .files()
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change.origin == Origin::Staged)
+        .map(|(at, change)| {
+            let path = change.path.clone();
+            (at, path)
+        })
+        .collect();
+    assert_eq!(
+        after.len(),
+        3,
+        "the staged run lost a file when the working tree did, so it is reading \
+         from disk rather than from the index"
+    );
+
+    for (at, path) in after {
+        let (_, diff) = fresh.diff(at).expect("staged diff");
+        let (_, want) = before
+            .iter()
+            .find(|(had, _)| *had == path)
+            .expect("the same path is in both runs");
+        assert_eq!(
+            &diff.clone(),
+            want,
+            "{path}'s staged diff changed when the working tree was deleted, so \
+             it was computed from a file rather than from the index"
+        );
+    }
+}
+
+/// **A sparse index yields no staged run rather than a dead pane.**
+///
+/// `gix_diff::index` refuses outright on a sparse index (`Error::IsSparse`), and
+/// the index-worktree walk beside it has no such refusal — so this is a failure
+/// mode the staged run introduced. Before the arm that handles it, pressing `a` in
+/// a `git sparse-checkout --sparse-index` repository made **every** later
+/// `Frame::advance` fail for as long as the toggle stayed on.
+///
+/// **The core leaving a frame intact on failure is what made that bad**, which is
+/// the right rule and is why this needed catching rather than surfacing: the pane
+/// kept its pre-`a` contents and silently stopped updating, on a tree the reader
+/// was watching precisely because it was changing. Measured before the fix:
+/// *"could not read working tree status: Cannot diff indices that contain sparse
+/// entries"*, on every tick.
+#[test]
+fn a_sparse_index_leaves_the_unstaged_run_drawn() {
+    let scratch = Scratch::new("staged-sparse");
+    scratch.write("kept/a.txt", "one\n");
+    scratch.write("dropped/b.txt", "two\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+
+    // A cone-mode sparse index. Older gits do not have `--sparse-index`; if this
+    // one cannot make the index sparse there is nothing to assert, so say so
+    // rather than passing vacuously.
+    let made = std::process::Command::new("git")
+        .args(["sparse-checkout", "init", "--cone", "--sparse-index"])
+        .current_dir(scratch.root())
+        .output()
+        .expect("run git");
+    if !made.status.success() {
+        eprintln!("skipped: this git cannot build a sparse index");
+        return;
+    }
+    scratch.git(&["sparse-checkout", "set", "kept"]);
+
+    let listed = scratch.git(&["ls-files", "--sparse"]);
+    assert!(
+        listed.lines().any(|line| line.ends_with('/')),
+        "the fixture's index is not actually sparse, so this asserts nothing: \
+         {listed:?}"
+    );
+
+    // Something staged and something not, so both runs have work in them.
+    scratch.write("kept/a.txt", "one\nSTAGED\n");
+    scratch.git(&["add", "kept/a.txt"]);
+    scratch.write("kept/c.txt", "untracked\n");
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect(
+        "a sparse index must not fail the walk: the pane would keep its \
+                 pre-toggle contents and stop updating",
+    );
+
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.origin == Origin::Unstaged),
+        "the unstaged run went with the staged one, so a sparse checkout has no \
+         pane at all"
+    );
+    assert!(
+        !frame
+            .files()
+            .iter()
+            .any(|change| change.origin == Origin::Staged),
+        "the staged run reported changes from an index this walk cannot read"
+    );
+}
+
+/// **A staged submodule bump does not take the process with it.**
+///
+/// A gitlink is an ordinary index entry whose id names a **commit**, and `gix`'s
+/// `Object::into_blob` is documented as *"or panic if it is none"*. On a
+/// repository whose object database can resolve that commit — a clone made with
+/// `--reference`, or any alternates setup — `find_object` succeeds and the
+/// conversion aborts the process. A monitor that panics is the worst failure this
+/// product has: it takes the reader's whole terminal, not one row.
+///
+/// The staged run made it commoner rather than possible: the right-hand side of a
+/// staged change is an index id too, so both sides can now name one.
+#[test]
+fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
+    let inner = Scratch::new("staged-submodule-inner");
+    inner.write("f.txt", "one\n");
+    inner.git(&["add", "-A"]);
+    inner.git(&["commit", "-m", "init"]);
+
+    let scratch = fixture("staged-submodule");
+    // `-c protocol.file.allow=always` because git refuses local submodule adds by
+    // default since CVE-2022-39253.
+    let added = std::process::Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            inner.root().to_str().expect("utf-8 fixture path"),
+            "sub",
+        ])
+        .current_dir(scratch.root())
+        .output()
+        .expect("run git");
+    if !added.status.success() {
+        eprintln!("skipped: this git will not add a local submodule");
+        return;
+    }
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    // Every staged row must be diffable without aborting. What each one *reports*
+    // is not the claim — a gitlink may be dropped by the walk or may reach the
+    // read and fail there, and both are fine. What is not fine is a panic.
+    for at in 0..frame.files().len() {
+        let _ = frame.diff(at);
+    }
+}
