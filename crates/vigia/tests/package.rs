@@ -752,7 +752,7 @@ fn package_list(package: &str, gate: &str) -> Option<String> {
 /// reader who did nothing wrong.
 ///
 /// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: sixteen of the twenty-one test files escape
+/// per-file, and that is deliberate: eighteen of the twenty-six test files escape
 /// already, a per-file list would need editing every time a test is added, and
 /// the failure mode of forgetting is silent. This gate holds either shape,
 /// because it asks whether each escaping file is *covered*, not how.

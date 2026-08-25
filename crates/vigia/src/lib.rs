@@ -77,9 +77,10 @@ mod app;
 mod colour;
 /// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
 ///
-/// `pub` for `theme`'s reason one module down: the functions that resolve a file
-/// take a lookup so a gate can place a home directory without touching the
-/// process environment, and a gate can only call them if it can name them.
+/// `pub` for the reason [`theme`] gives in its own declaration below: the
+/// functions that resolve a file take a lookup so a gate can place a home
+/// directory without touching the process environment, and a gate can only call
+/// them if it can name them.
 pub mod config;
 mod glyphs;
 mod input;
@@ -1929,6 +1930,35 @@ mod tests {
             "the signal handler is armed after the terminal is taken, so a signal \
              arriving during the takeover is uncaught"
         );
+
+        // **Every input a reader can get wrong is read before the takeover too**,
+        // and the same scan is what says so. `SPEC.md` §11.1 rules that a path
+        // that is not a repository, a `VIGIA_THEME` naming nothing, a variable
+        // this does not recognise and a file that does not parse are all reported
+        // on a terminal the reader can still see, because an error painted inside
+        // a TUI that then hands the terminal back is an error nobody reads.
+        //
+        // **The config file joined them with [#309](https://github.com/breferrari/vigia/issues/309)
+        // and nothing enforced the position**: the ordering was verified by
+        // running the binary, which is evidence that dies with the shell it ran
+        // in. Adding it here costs one line and covers the whole family, so the
+        // next input added is a failing assertion rather than a hand check
+        // somebody remembers to repeat.
+        for reader in [
+            "Worktree::discover(",
+            "theme::from_env(",
+            "Glyphs::detect(",
+            "config::from_env(",
+        ] {
+            let at = code
+                .find(reader)
+                .unwrap_or_else(|| panic!("`run` no longer calls {reader}"));
+            assert!(
+                at < takeover,
+                "{reader} is read after the terminal is taken, so an error in it \
+                 is painted inside a screen that is about to be handed back"
+            );
+        }
 
         // **Form.** `signal`'s escalation latches after one ask: the second goes to
         // the default disposition and kills the process. That is only safe because

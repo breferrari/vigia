@@ -83,19 +83,30 @@ pub struct Config {
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
 ///
-/// **Named rather than derived**, so the error below can print the set a reader
-/// may have meant, and so adding a field to [`Config`] without deciding whether it
-/// is configurable is a compile error at [`Config::set`] rather than a silent
-/// omission here.
-const KEYS: [&str; 3] = ["masthead", "rail", "single"];
+/// **This is what [`parse`] admits a key by**, not merely what the error message
+/// prints, and the two were separate in the first draft: the list was decoration
+/// beside a `match` that did the real work, so they could drift and the message
+/// would have advertised a set the parser did not accept.
+///
+/// **It is not a compile-time guarantee and an earlier docblock claimed it was.**
+/// [`Config::set`] matches on a `&str` with a fallback arm, so a fourth field on
+/// [`Config`] compiles perfectly well with no key and no entry here. What ties the
+/// two together is `tests/config.rs::every_key_is_a_field_and_every_field_is_a_key`,
+/// which sets every key in this list and compares the result against a **struct
+/// literal naming every field** — and a literal is where a new field does stop the
+/// build. That is a gate rather than the type system, and saying so is the
+/// difference between a check and a claim that suppresses one.
+pub const KEYS: [&str; 3] = ["masthead", "rail", "single"];
 
 impl Config {
-    /// Set `key`, or report that it is not one.
+    /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
     ///
-    /// The exhaustive `match` is the point: a fourth field on [`Config`] does not
-    /// compile until somebody decides what its key is called, which is the same
-    /// guarantee [`crate::input::Action::needs_height`] gets from being
-    /// exhaustive and the one a lookup table would not give.
+    /// **The fallback arm is unreachable from [`parse`] and is not a guarantee.**
+    /// This `match` is on a `&str`, so it proves nothing about [`Config`]'s
+    /// fields; an earlier docblock claimed it was exhaustive the way
+    /// [`crate::input::Action::needs_height`] is, and that comparison was wrong,
+    /// because that one matches an **enum**. What keeps this and [`KEYS`] in step
+    /// is the gate named there.
     fn set(&mut self, key: &str, on: bool) -> bool {
         match key {
             "masthead" => self.masthead = on,
@@ -111,7 +122,8 @@ impl Config {
 ///
 /// Shaped after [`crate::theme::ThemeError`] deliberately: the two files share a
 /// grammar, so they should fail in the same words, and a reader who has met one
-/// error should not have to learn a second vocabulary.
+/// error should not have to learn a second vocabulary. **[`Self::RepeatedKey`] is
+/// the one word they do not share**, and its own docblock says why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
     /// The file exists and could not be read.
@@ -248,18 +260,45 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
         };
         let key = key.trim();
 
-        // The first token, and a `#` ends the value rather than being part of it.
-        // Taken before the key is validated so `rail = # oops` reports the missing
-        // value rather than accepting a comment as one.
-        let value = value
+        // **The key is judged before its value, which is the theme parser's order
+        // and was not this one's.** Written the other way round, `sidebar = yes`
+        // reported that `sidebar` is *"neither `on` nor `off`"*, which asserts
+        // that `sidebar` is a setting; and `sidebar =` reported a missing value
+        // and named no key at all. The first thing wrong with a line is the thing
+        // to say about it.
+        if !KEYS.contains(&key) {
+            return Err(ConfigError::UnknownKey {
+                line,
+                key: key.to_owned(),
+            });
+        }
+
+        // **And a repeat is judged before the value too**, so `rail = on` followed
+        // by `rail = yes` reports the repeat rather than the typo: the repeat is
+        // the reason the line should not be there at all.
+        if let Some((_, first)) = seen.iter().find(|(name, _)| name == key) {
+            return Err(ConfigError::RepeatedKey {
+                line,
+                key: key.to_owned(),
+                first: *first,
+            });
+        }
+
+        // **The whole value, not its first word.** A `#` ends it, so
+        // `rail = on # from 134` works; everything before that `#` has to be the
+        // value. Taking only the first token accepted `rail = on off` and
+        // `rail=on=off` by discarding what it did not understand, which is the
+        // silence this parser refuses unknown keys to avoid, one field over.
+        let value: Vec<&str> = value
             .split_whitespace()
             .take_while(|word| !word.starts_with('#'))
-            .next();
-        let Some(value) = value else {
+            .collect();
+        if value.is_empty() {
             return Err(ConfigError::MissingValue { line });
-        };
+        }
+        let value = value.join(" ");
 
-        let on = match value {
+        let on = match value.as_str() {
             "on" => true,
             "off" => false,
             other => {
@@ -271,20 +310,11 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             }
         };
 
-        if let Some((_, first)) = seen.iter().find(|(name, _)| name == key) {
-            return Err(ConfigError::RepeatedKey {
-                line,
-                key: key.to_owned(),
-                first: *first,
-            });
-        }
-
-        if !config.set(key, on) {
-            return Err(ConfigError::UnknownKey {
-                line,
-                key: key.to_owned(),
-            });
-        }
+        // Unreachable: `KEYS` admitted this key above. Kept as a `bool` rather
+        // than a panic because an unreachable branch that returns is cheaper to
+        // read than one that aborts, and the gate named on `KEYS` is what makes
+        // it unreachable rather than this line.
+        config.set(key, on);
         seen.push((key.to_owned(), line));
     }
 

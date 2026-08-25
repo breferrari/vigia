@@ -18,7 +18,7 @@
 //! nothing here can leak into another binary.
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Config, ConfigError, body_layout, config};
+use vigia::{Action, App, Config, ConfigError, body_layout, config, diff_height};
 
 /// A home directory holding a config file, or holding none.
 ///
@@ -64,22 +64,34 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 
     let plain = App::new();
     let configured = App::configured(config);
-    let area = Rect::new(0, 0, 200, 40);
     assert_eq!(
-        chrome_of(&configured, area),
-        chrome_of(&plain, area),
+        chrome_of(&configured),
+        chrome_of(&plain),
         "a shell with no config file is not the shell `App::new` builds"
     );
 }
 
-/// The three flags a config file can reach, read off a drawn chrome.
+/// What a config file can reach on the chrome, read off a drawn one.
 ///
 /// **Through `Chrome` rather than through `App`'s fields**, which are private on
 /// purpose: what the ruling promises is a *pane*, and a gate reading the struct
 /// would pass against a shell that stored the settings and drew none of them.
-fn chrome_of(app: &App, _area: Rect) -> (bool, bool, Option<usize>) {
+///
+/// **`following` is in the tuple and the first draft left it out**, which made
+/// `App::configured`'s `..Self::new()` ungated: mutating it to `..Self::default()`
+/// flips `following` to false and reddened nothing, so a config file would have
+/// silently killed I5 for everyone who wrote one.
+///
+/// **`single` is deliberately absent, because `Chrome` has no such field.** It
+/// reaches the walk rather than the chrome, so no comparison of chromes can see
+/// it and a gate claiming otherwise would be describing itself wrongly. The gate
+/// that covers it drives a gesture and reads the resolved position.
+///
+/// It takes no area because `App::chrome` is width-independent; the first draft
+/// took one and ignored it, which read as a sweep and was not.
+fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
     let chrome = app.chrome("fixture", None, None, None, None, None);
-    (chrome.masthead, chrome.rail, chrome.sheet)
+    (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
 }
 
 #[test]
@@ -146,12 +158,15 @@ fn the_key_still_toggles_from_the_configured_state() {
         single: true,
     };
     let mut app = App::configured(config);
-    let area = Rect::new(0, 0, 200, 40);
 
-    let (masthead, rail, _) = chrome_of(&app, area);
+    let (masthead, rail, following, _) = chrome_of(&app);
     assert!(
         masthead && rail,
         "the configured shell did not start configured"
+    );
+    assert!(
+        following,
+        "a config file turned follow off, which is I5 and no key of this file"
     );
 
     let scratch = support::Scratch::large_diff("config-toggles", 6, 1);
@@ -162,15 +177,16 @@ fn the_key_still_toggles_from_the_configured_state() {
     app.apply(Action::ToggleMasthead, &mut frame, 0)
         .expect("apply");
     app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
-    let (masthead, rail, _) = chrome_of(&app, area);
+    let (masthead, rail, following, _) = chrome_of(&app);
     assert!(
         !masthead && !rail,
         "the keys did not toggle away from what the file asked for"
     );
+    assert!(following, "toggling a view key disengaged follow");
 
     app.apply(Action::ToggleMasthead, &mut frame, 0)
         .expect("apply");
-    let (masthead, _, _) = chrome_of(&app, area);
+    let (masthead, _, _, _) = chrome_of(&app);
     assert!(masthead, "the key did not toggle back");
 }
 
@@ -413,7 +429,11 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // parser reaches: a file and three keystrokes have to arrive at the same
     // shell. If they can differ, the file is a second implementation of the
     // toggles rather than a default for them.
-    let scratch = support::Scratch::large_diff("config-equivalent", 6, 1);
+    // **Files taller than the pane**, or `G` under the pin lands on row zero and
+    // the assertion below cannot fail: a four-row file in a thirteen-row body
+    // rests its last row on the bottom by not moving at all. The non-vacuity
+    // guard caught exactly that on the first run.
+    let scratch = support::Scratch::large_diff("config-equivalent", 6, 10);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     support::materialise(&mut frame);
@@ -427,30 +447,90 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         pressed.apply(action, &mut frame, 0).expect("apply");
     }
 
-    let configured = App::configured(Config {
+    let mut configured = App::configured(Config {
         masthead: true,
         rail: true,
         single: true,
     });
 
-    let area = Rect::new(0, 0, 200, 40);
+    // **Non-vacuity first**, which every sibling has and this gate did not: two
+    // identically broken shells agree with each other perfectly.
     assert_eq!(
-        chrome_of(&configured, area),
-        chrome_of(&pressed, area),
+        chrome_of(&configured),
+        (true, true, true, None),
+        "the configured shell is not configured, so the comparison below is \
+         between two shells that both did nothing"
+    );
+    assert_eq!(
+        chrome_of(&configured),
+        chrome_of(&pressed),
         "the configured shell and the pressed shell are not the same shell"
     );
 
-    // And the layouts they produce agree, which is the half a chrome comparison
-    // cannot see: `single` reaches the walk rather than the chrome.
-    let a = body_layout(
-        area,
+    // **And `single`, which no comparison of chromes can reach.** `Chrome` has no
+    // such field: the pin narrows what `View::collect` may walk rather than what
+    // the chrome describes, so the only way to see it is to drive a gesture that
+    // the pin changes the answer to. `G` under a pin rests the pinned file's last
+    // row on the bottom; unpinned it goes to the last file's heading. The first
+    // draft of this gate compared two `body_layout`s and claimed they covered
+    // `single`, which they cannot, and deleting `single: config.single` from
+    // `App::configured` left all 945 tests green.
+    let body = diff_height(
+        Rect::new(0, 0, 80, 24),
         &configured.chrome("fixture", None, None, None, None, None),
         6,
     );
-    let b = body_layout(
-        area,
-        &pressed.chrome("fixture", None, None, None, None, None),
-        6,
+    for app in [&mut configured, &mut pressed] {
+        app.apply(Action::Bottom, &mut frame, body).expect("apply");
+    }
+    assert_eq!(
+        configured.position(),
+        pressed.position(),
+        "the pin the file asked for and the pin `s` asks for send `G` to \
+         different places"
     );
-    assert_eq!((a.diff, a.list, a.rail), (b.diff, b.list, b.rail));
+    assert_ne!(
+        configured.position(),
+        App::new().position(),
+        "`G` under the pin landed where an untouched shell already was, so this \
+         assertion cannot fail"
+    );
+}
+
+#[test]
+fn every_key_is_a_field_and_every_field_is_a_key() {
+    // **The tie between `KEYS` and `Config`'s fields, which the type system does
+    // not give.** `Config::set` matches on a `&str` with a fallback arm, so a
+    // fourth field compiles with no key and no entry in `KEYS`, and an earlier
+    // docblock claimed otherwise. `theme.rs` gets this by construction from its
+    // `palette!` macro, and gates it anyway at
+    // `palette.rs::every_key_the_struct_has_is_a_key_a_file_can_set`; three keys
+    // do not earn a second macro, so this is the gate without it.
+    //
+    // **The struct literal is the mechanism.** It names every field, so adding one
+    // stops this file compiling until somebody decides whether it is configurable,
+    // which is the compile-time half. The loop is the other half: every key in
+    // `KEYS` has to be one `parse` accepts, so a name that drifts out of
+    // `Config::set` is red rather than a message advertising a key nothing takes.
+    let mut source = String::new();
+    for key in vigia::config::KEYS {
+        source.push_str(key);
+        source.push_str(" = on\n");
+    }
+    assert_eq!(
+        config::parse(&source).expect("every key in KEYS parses"),
+        Config {
+            masthead: true,
+            rail: true,
+            single: true,
+        },
+        "setting every key in KEYS did not set every field, so the two have drifted"
+    );
+
+    // And each one alone is accepted, so a key present in `KEYS` but missing from
+    // `Config::set` cannot hide behind the others.
+    for key in vigia::config::KEYS {
+        config::parse(&format!("{key} = on\n"))
+            .unwrap_or_else(|why| panic!("KEYS names {key:?} and parse refuses it: {why}"));
+    }
 }
