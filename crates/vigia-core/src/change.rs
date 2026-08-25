@@ -28,7 +28,7 @@ impl Origin {
     /// Here rather than in the shell because it is the run's own name rather than
     /// one drawer's wording, and because the shell already spells the word in more
     /// than one place: the separator draws this, and `count_of`'s header fact and
-    /// `empty_state`'s line each spell their own sentence around it.
+    /// `empty_state_with`'s line each spell their own sentence around it.
     pub fn label(self) -> &'static str {
         match self {
             Self::Unstaged => "unstaged",

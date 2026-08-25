@@ -1891,7 +1891,7 @@ fn count_of(files: usize, staged: Option<usize>) -> String {
 /// here, so it needs [`widest_fitting_or_last`] rather than [`widest_fitting`].
 /// Its last rung is a token to be marked, not a rung to be dropped.
 /// **A worktree that draws no name gets the count and no separator**, which is
-/// the same guard [`count_of`] applies to zero and [`empty_state`] applies to a
+/// the same guard [`count_of`] applies to zero and [`empty_state_with`] applies to a
 /// detached head: a separator is only owed where both facts exist.
 /// `" · 3 changed"` joins a fact to nothing and promises a subject that is not on
 /// the row, which is [#67](https://github.com/breferrari/vigia/issues/67)'s own
@@ -1939,7 +1939,7 @@ fn header_left(
     // screen, but the name is what identifies the pane.
     //
     // A detached HEAD carries `None` and the ladder is what it always was, which
-    // is the same refusal `empty_state` makes one function down: `HEAD@abc123`
+    // is the same refusal `empty_state_with` makes one function down: `HEAD@abc123`
     // would put a commit id in a monitor that shows no commits.
     let named = branch.map(str::trim).filter(|branch| !branch.is_empty());
 

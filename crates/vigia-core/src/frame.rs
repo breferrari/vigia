@@ -382,8 +382,8 @@ impl<T> Cache<T> {
         }
     }
 
-    /// **Reserved per run from the real split, not halved.** `additional` is the
-    /// whole changed set and the two maps partition it, so giving each the total
+    /// **Reserved per run from the real split, not halved.** The changed set is
+    /// what the two maps partition, so giving each the total
     /// allocates for twice the entries that can ever exist — and halving is worse
     /// on the path that matters: the staged run is off by default, so every entry
     /// lands in one map, which then reserves half of what it needs and grows and
@@ -391,8 +391,8 @@ impl<T> Cache<T> {
     ///
     /// `Frame::advance` knows where the runs part, so it passes both counts.
     fn reserve(&mut self, unstaged: usize, staged: usize) {
-        self.runs[0].reserve(unstaged);
-        self.runs[1].reserve(staged);
+        self.runs[Self::of(Origin::Unstaged)].reserve(unstaged);
+        self.runs[Self::of(Origin::Staged)].reserve(staged);
     }
 }
 
