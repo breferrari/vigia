@@ -1492,15 +1492,10 @@ fn mouse_phrases() -> Vec<&'static str> {
         if !matches!(reach_of(&action), Reach::Mouse | Reach::Both) {
             continue;
         }
-        // **Exhaustive, with no wildcard, and that is the whole of the claim.** A
-        // `_ => panic!()` arm made a newly pointer-reachable variant a *runtime*
-        // failure, and only if somebody had also added it to `ALL_ACTIONS`; spelled
-        // out, it is a compile error the moment the variant exists. Round 1 of this
-        // row's audit found the wildcard and the docblock claiming otherwise.
-        //
-        // The keyboard-only arms are listed and return nothing rather than being
-        // swept up, because that is what makes the match exhaustive: a new variant
-        // has to be put somewhere by hand.
+        // **Exhaustive, with no wildcard.** The keyboard-only arms are listed and
+        // return nothing rather than being swept up, because that is what makes the
+        // match exhaustive: a new variant has to be put somewhere by hand. See this
+        // function's docblock for what a `_` arm cost when it was here.
         phrases.extend(match action {
             // The wheel scrolls whichever region is under the pointer, and the
             // step buttons move one row.
