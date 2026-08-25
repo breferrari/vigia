@@ -606,6 +606,12 @@ fn over_sheets(
     // it is the corner where a pane is short **and** narrow at once, which is the
     // case B13 names, and `<` is true with eleven panes of margin rather than one.
     // A grid that raised its minimum height past eight is what would make this fail.
+    //
+    // **So this is a precondition on the caller's grid, not a property of the
+    // helper**, and it is stated because a future sweep is the thing most likely to
+    // trip it: a grid of heights thirteen and up would never reach the corner, every
+    // pane would draw, and this would fire on a `check` that is perfectly correct.
+    // Named by round 4, which found nothing else.
     assert!(
         drew < panes,
         "the sweep counted {drew} sheets over {panes} panes, so it is counting \
