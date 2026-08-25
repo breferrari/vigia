@@ -154,11 +154,21 @@ pub struct App {
     /// pane.
     ///
     /// A jump is a claim about what belongs at the *top*: follow puts the file
-    /// that just changed there and `G` puts the last file there. Backing up to
-    /// fill a short tail would move that file off the top row and make a reader
-    /// hunt for what the jump was for. Scrolling makes no such claim, and running
-    /// off the end of the diff into a half-blank pane is what
+    /// that just changed there and `G` **unpinned** puts the last file there.
+    /// Backing up to fill a short tail would move that file off the top row and
+    /// make a reader hunt for what the jump was for. Scrolling makes no such
+    /// claim, and running off the end of the diff into a half-blank pane is what
     /// [#59](https://github.com/breferrari/vigia/issues/59) reported.
+    ///
+    /// **`G` under `SPEC.md` §11.2 B16's pin is the exception, and it is
+    /// deliberate rather than an oversight.** Pinned, `G` asks for the file's
+    /// last row on the *bottom*, which is a claim about the bottom and not about
+    /// the top, so it sets this **true** and takes the back-up on purpose. That
+    /// is what corrects a height measured before `App::apply` turned follow off;
+    /// [`Action::Bottom`]'s arm carries the whole of why. This sentence used to
+    /// name `G` as the exemplar of a jump that must not anchor, which is exactly
+    /// the shape a later session "restores" and reinstates a fixed defect with,
+    /// so the qualifier is load-bearing rather than pedantic.
     ///
     /// The two are indistinguishable from a [`Position`], so it is carried here
     /// rather than inferred in [`View::collect`].

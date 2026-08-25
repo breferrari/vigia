@@ -1230,11 +1230,16 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
 
         let after = app.chrome("fixture", None, None, None, None, None);
         let laid = body_layout(at, &after, FILES);
-        if laid.diff != height {
-            narrow += 1;
-        }
         if laid.diff == 0 || laid.diff >= SPAN {
             continue;
+        }
+        // **Counted after the skips, not before.** Counting first lets a width
+        // that the assertion never reaches satisfy the non-vacuity guard below,
+        // which is a guard certifying a case the gate may have skipped. Neither
+        // skip fires on this fixture today; the ordering is what keeps that from
+        // being load-bearing.
+        if laid.diff != height {
+            narrow += 1;
         }
         let view = app
             .view(&mut frame, &mut highlighter, &history, laid)

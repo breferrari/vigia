@@ -1367,8 +1367,11 @@ impl View {
             // the rows the diff does not have.
             // **Only when the reader scrolled here, or when follow landed
             // inside a file.** A position placed by a jump is a claim about what
-            // should be at the *top*: `G` puts the last file there and a digit
-            // puts the file it names there. If the tail is shorter than the pane,
+            // should be at the *top*: `G` **unpinned** puts the last file there
+            // and a digit puts the file it names there. (Pinned, `G` is a claim
+            // about the *bottom* and anchors deliberately, which is B16 and is
+            // `App::apply`'s `Action::Bottom` arm; naming it here as a jump that
+            // must not anchor is what a later session would read and revert.) If the tail is shorter than the pane,
             // backing up to fill it would move that file off the top row and make
             // the reader hunt for what the jump was for. Blank rows under a
             // deliberately placed file are the honest answer; blank rows under a

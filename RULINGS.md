@@ -770,3 +770,36 @@ They share a mechanism worth naming: **a docblock answers the question a reader
 would otherwise have gone and checked**, so a wrong one does not merely fail to
 help, it actively stops the check. No gate can see a comment. What finally caught
 each was an agent reading the sentence against the code beside it.
+
+## B16 — round five: the rule stated in two places, inverted in one
+
+Round five found nothing that runs and one thing that matters more than most of
+what runs, which is what a converging audit looks like at the end.
+
+**`anchored` is defined in two canonical places and both name `G` as the exemplar
+of a jump that must *not* anchor.** `App::anchored`'s own field docblock, which is
+*the* definition of the flag, and the short-screen guard's comment in
+`View::collect`, which is its only reader. Round four made pinned `G` set it
+**true**, wrote twenty-five lines of justification inside the arm, and left both
+statements standing.
+
+Nothing breaks today. What breaks is later: a session editing either site reads
+the rule with `G` as its worked example, "restores" `false`, and reinstates the
+stale-chrome short screen that round four fixed. Both are qualified now, and the
+qualifier says out loud that it is load-bearing rather than pedantic.
+
+**That is the fifth instance of one mechanism, and the mechanism is worth stating
+once for the next reader rather than five times for this one.** Every serious
+finding on this branch after the first round was a **claim that stopped being
+true when the code moved under it**: three cost claims about `span_in`, one about
+which gestures reach the frame before the walk clamps, one about a gate's own
+coverage, and now one about which key anchors. No gate can read a comment, so
+none of them could go red. Each was found by a reader holding the sentence against
+the code beside it, and each was found only after the previous one was fixed,
+because a wrong docblock **answers the question a reader would otherwise have gone
+and checked**.
+
+The practical form of that, for anyone changing this area: when a behaviour moves,
+grep for the places that state the rule it obeyed, not only the places that
+implement it. On this branch the implementation sites were always one and the
+statement sites were always two or three.
