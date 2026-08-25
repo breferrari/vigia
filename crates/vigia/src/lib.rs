@@ -75,6 +75,12 @@
 
 mod app;
 mod colour;
+/// What the pane starts as, which `SPEC.md` §11.2 B6 puts in a file.
+///
+/// `pub` for `theme`'s reason one module down: the functions that resolve a file
+/// take a lookup so a gate can place a home directory without touching the
+/// process environment, and a gate can only call them if it can name them.
+pub mod config;
 mod glyphs;
 mod input;
 /// Public where its seven siblings are private, and for one reason: `soak.rs` is
@@ -96,6 +102,7 @@ mod view;
 
 pub use app::App;
 pub use colour::{DEPTH_VAR, Depth, DepthError};
+pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
     Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
@@ -380,6 +387,17 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // here because the two are easy to conflate.
     let glyphs = Glyphs::detect()?;
 
+    // **Beside the palette and for the palette's reason**, which is the whole of
+    // why it is here rather than inside `App`: a config file that does not parse
+    // has to be said on a terminal the reader can still read, and an error painted
+    // inside a TUI that then hands the terminal back is an error nobody sees.
+    // `SPEC.md` §11.2 B6 as amended by
+    // [#306](https://github.com/breferrari/vigia/issues/306).
+    //
+    // Read once, before the screen is taken, so the frame path never asks the
+    // filesystem what the reader prefers. Absent is not an error; unreadable is.
+    let config = config::from_env(|key| std::env::var(key).ok())?;
+
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
     // sees it. Built here because the handler on it is armed on the next line,
     // before the terminal is taken, and the other two senders are armed after the
@@ -406,7 +424,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
 
     let mut shell = Shell {
         session: Session::enter()?,
-        app: App::new(),
+        app: App::configured(config),
         // Its 318µs of grammar *loading* lands before first paint, which is
         // where it belongs: I7 gives startup 50ms, so this is well under one
         // percent of it and deferring it would only move it onto the first frame

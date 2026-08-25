@@ -105,7 +105,7 @@ by minting a token scoped to this repository alone and pointing the bump at it.
 ## 1. The artifact, not the checkout
 
 - [ ] `cargo package --list -p vigia` — no `.github/`, no `tests/`, and
-      `README.md` present. SPEC.md §9 counts seventeen test files that read
+      `README.md` present. SPEC.md §9 counts eighteen test files that read
       outside the package, and `exclude = ["tests/**"]` is what keeps them out of
       the tarball. Gated by
       `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests`,
