@@ -110,7 +110,7 @@ pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
     FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, Scale, View, Viewport, block_rows,
-    diff_rows, rows_in, rows_of,
+    diff_rows, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -604,7 +604,21 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         let repeat = shell.held.and_then(|hold| hold.fire(Instant::now()));
         if let Some((step, next)) = repeat {
             shell.held = Some(next);
-            match shell.app.apply(step, &mut frame, 0) {
+            // **The third of three, and it joined last.** `Regions::step_at`
+            // yields only `Scroll` and `ScrollList` today, neither of which reads
+            // a height, so the literal zero this replaced was right by accident
+            // rather than by rule. It is the identical shape to the drag site
+            // [`Shell::diff_rows_for`] was extracted for, and the identical shape
+            // to `Action::Bottom` being classified wrongly: a call site that
+            // decides a height instead of asking for one.
+            //
+            // Found by [#297](https://github.com/breferrari/vigia/issues/297)'s
+            // third audit round, after the second had unified two of the three.
+            // No test drives this loop, so what protects it is that there is now
+            // one function every site calls rather than three answers that can
+            // drift apart.
+            let height = shell.diff_rows_for(step, frame.files().len())?;
+            match shell.app.apply(step, &mut frame, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
                 Err(e) => shell.app.warn(e.to_string()),
@@ -722,7 +736,27 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // that end.
                     if let Some(on) = shell.grabbed {
                         if let Some(drag) = drag_action(&event, regions, on) {
-                            match shell.app.apply(drag, &mut frame, 0) {
+                            // **The height, because a drag on the diff's bar is a
+                            // `DiffTo` and `DiffTo` reads one.** This block passed
+                            // zero from the day it was written, and the ordinary
+                            // path forty lines down has always asked
+                            // `Action::needs_height`. So the **first** event of a
+                            // drag resolved through `action_for` with a real
+                            // height and every motion after it resolved here
+                            // without one, which maps the track onto the whole
+                            // rather than onto travel: the thumb runs past its own
+                            // bottom and the last screenful of track is dead.
+                            // That is the arithmetic
+                            // `tests/scroll.rs::dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end`
+                            // pins for the press, one gesture over from where the
+                            // reader spends the rest of the drag.
+                            //
+                            // Found on this branch and not caused by it
+                            // ([#297](https://github.com/breferrari/vigia/issues/297)'s
+                            // audit): the pinned arm inherits the same parameter,
+                            // so fixing it here fixes both.
+                            let height = shell.diff_rows_for(drag, frame.files().len())?;
+                            match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
                                 Err(e) => {
@@ -775,19 +809,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // which is right rather than merely cheap: it feeds
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
-                    let height = if action.needs_height() {
-                        let chrome = shell.app.chrome(
-                            &shell.name,
-                            shell.branch.as_deref(),
-                            shell.pressed(),
-                            shell.gripped(),
-                            shell.hovered(),
-                            shell.scrolling,
-                        );
-                        diff_height(shell.area()?, &chrome, frame.files().len())
-                    } else {
-                        0
-                    };
+                    let height = shell.diff_rows_for(action, frame.files().len())?;
                     shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
@@ -1184,6 +1206,45 @@ struct Shell {
 }
 
 impl Shell {
+    /// The diff region's height for `action`, or zero where it reads none.
+    ///
+    /// **One expression, because there were two and they disagreed.** The
+    /// ordinary path has asked [`Action::needs_height`] since the predicate
+    /// existed; the drag-under-way path passed a literal `0` from the day it was
+    /// written. A drag on the diff's bar is a [`Action::DiffTo`], which reads the
+    /// height to map the track onto **travel** rather than onto the whole, so the
+    /// first event of a gesture resolved correctly and every motion after it
+    /// resolved a screenful short. The two ends of the track agree under both
+    /// arithmetics and only the middle does not, which is why nothing noticed.
+    ///
+    /// Found by [#297](https://github.com/breferrari/vigia/issues/297)'s second
+    /// audit round, in the same sweep that found `Action::Bottom` classified
+    /// wrongly. **The classification is gated and this wiring is not**: it lives
+    /// inside the takeover loop, which no test drives, so the answer is to leave
+    /// one place that can be wrong rather than two that can disagree. A mutation
+    /// that empties this function survives the suite and is recorded as such.
+    ///
+    /// Cheap by construction: a drained trackpad flick is up to sixty-four
+    /// actions between two paints, and only the four that read a height pay for
+    /// the terminal-size syscall and the `Chrome` this builds. **Four rather than
+    /// three since `Action::Bottom` joined them**, which is B16's doing: pinned,
+    /// `G` rests a file's last row on the bottom, and *the bottom* is a height.
+    fn diff_rows_for(&mut self, action: Action, files: usize) -> Result<usize, Failure> {
+        if !action.needs_height() {
+            return Ok(0);
+        }
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            self.pressed(),
+            self.gripped(),
+            self.hovered(),
+            self.scrolling,
+        );
+        let area = self.area()?;
+        Ok(diff_height(area, &chrome, files))
+    }
+
     /// The cell a step button is being held on, for the frame that draws it lit.
     fn pressed(&self) -> Option<(u16, u16)> {
         self.held.map(Held::at)

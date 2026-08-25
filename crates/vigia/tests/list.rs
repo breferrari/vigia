@@ -913,6 +913,13 @@ fn collect_resolves_every_degenerate_viewport() {
                                 // can be asked for in. Pinned at `false` it left
                                 // the whole grid blind to it.
                                 landing,
+                                // **Not a sweep dimension, unlike `landing`
+                                // above.** This grid is about how the two
+                                // regions divide a pane, and a pinned diff
+                                // divides it identically: B16 changes which rows
+                                // the body may reach, never how many rows the
+                                // body has. `tests/single.rs` sweeps the pin.
+                                single: false,
                                 // This sweep is about where the two regions
                                 // land, which is decided before anything is
                                 // coloured. Highlighting on keeps it the same

@@ -55,10 +55,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 16;
+const ESCAPING_FILES: usize = 17;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "sixteen";
+const ESCAPING_FILES_SPELLED: &str = "seventeen";
 
 /// The repository root, two levels above this package.
 ///
@@ -141,16 +141,18 @@ fn escaping_tests() -> Vec<String> {
         .map(|(name, _)| name)
         .collect();
 
-    // **Exactly sixteen, not at least.** A floor was the first spelling and it
-    // reopens the very defect this file exists to close: adding a seventeenth
-    // escaping test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml`
-    // and `RELEASE-SMOKE.md` all go on saying "sixteen" with nothing red.
+    // **Exactly this many, not at least.** A floor was the first spelling and it
+    // reopens the very defect this file exists to close: adding one more escaping
+    // test passes the floor, so `SPEC.md` §9, `crates/vigia/Cargo.toml` and
+    // `RELEASE-SMOKE.md` all go on saying the old number with nothing red.
     //
-    // It fired for real on 2026-08-24, when
+    // It has now fired for real twice, and both times the four documents moved
+    // together because it did: 2026-08-24 when
     // [#295](https://github.com/breferrari/vigia/issues/295) made `rail.rs` the
-    // sixteenth, and the four documents moved together because it did. The
-    // whole point is that a count in prose cannot notice a new test, and a
-    // floor is a count that cannot notice one either.
+    // sixteenth, and again when [#297](https://github.com/breferrari/vigia/issues/297)
+    // made `single.rs` the seventeenth. The whole point is that a count in prose
+    // cannot notice a new test, and a floor is a count that cannot notice one
+    // either.
     //
     // The cost is that adding a test which escapes now requires editing this
     // number, which is the intended cost: it is one line, and it is attached to

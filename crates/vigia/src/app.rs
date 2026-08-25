@@ -99,6 +99,23 @@ pub struct App {
     /// on its own before that, and the reader whose diff went from 129 planning
     /// columns to 60 had not asked for it.
     rail: bool,
+    /// Whether the reader has asked for the diff to show one file at a time.
+    ///
+    /// `SPEC.md` §11.2 **B16**, from `s`
+    /// ([#297](https://github.com/breferrari/vigia/issues/297)). Unlike
+    /// [`Self::rail`] there is no pane that cannot honour it, so this is a
+    /// request and an answer at once and nothing downstream has to distinguish
+    /// them: every pane with a body has a file the viewport is inside, and that
+    /// file is the whole of what the pin names.
+    ///
+    /// **Which file is not stored here**, and that is what keeps this a `bool`.
+    /// The pinned file is [`Self::position`]'s, so `n`, `p`, a digit, a click and
+    /// a follow move the pin by moving the thing that was already moving, and
+    /// there is no second answer to *which file* for the two to disagree over.
+    ///
+    /// Off by default, which is the derived answer and also the ruled one: a
+    /// reader who has pressed nothing gets the diff the tool has always drawn.
+    single: bool,
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
     ///
     /// **Retained here rather than lived for one frame, and that is the whole
@@ -137,11 +154,21 @@ pub struct App {
     /// pane.
     ///
     /// A jump is a claim about what belongs at the *top*: follow puts the file
-    /// that just changed there and `G` puts the last file there. Backing up to
-    /// fill a short tail would move that file off the top row and make a reader
-    /// hunt for what the jump was for. Scrolling makes no such claim, and running
-    /// off the end of the diff into a half-blank pane is what
+    /// that just changed there and `G` **unpinned** puts the last file there.
+    /// Backing up to fill a short tail would move that file off the top row and
+    /// make a reader hunt for what the jump was for. Scrolling makes no such
+    /// claim, and running off the end of the diff into a half-blank pane is what
     /// [#59](https://github.com/breferrari/vigia/issues/59) reported.
+    ///
+    /// **`G` under `SPEC.md` §11.2 B16's pin is the exception, and it is
+    /// deliberate rather than an oversight.** Pinned, `G` asks for the file's
+    /// last row on the *bottom*, which is a claim about the bottom and not about
+    /// the top, so it sets this **true** and takes the back-up on purpose. That
+    /// is what corrects a height measured before `App::apply` turned follow off;
+    /// [`Action::Bottom`]'s arm carries the whole of why. This sentence used to
+    /// name `G` as the exemplar of a jump that must not anchor, which is exactly
+    /// the shape a later session "restores" and reinstates a fixed defect with,
+    /// so the qualifier is load-bearing rather than pedantic.
     ///
     /// The two are indistinguishable from a [`Position`], so it is carried here
     /// rather than inferred in [`View::collect`].
@@ -269,6 +296,9 @@ impl Default for App {
             // `following`: a shell nobody has pressed `m` on draws no band.
             masthead: false,
             rail: false,
+            // Derived, and B16's ruling as well: an unpressed shell scrolls the
+            // whole changed set, which is every version of this tool so far.
+            single: false,
             // Derived, and for once trivially so: nobody has pressed `?`.
             sheet: None,
             sheet_pages: 1,
@@ -631,6 +661,41 @@ impl App {
             // back rather than being asked twice. `Chrome::rail` is the request and
             // `Body::rail` is what the pane could give them.
             Action::ToggleRail => self.rail = !self.rail,
+            // **No jump and no clamp here, which is the arm doing the least of
+            // the four and is deliberate.** Every other toggle in this family
+            // leaves the viewport exactly where it was; this one narrows what
+            // the viewport is allowed to reach, and the position it already
+            // holds may be outside that. Resolving it *here* would mean asking
+            // how tall the pinned file is at the moment of the keystroke, which
+            // is a second place that decides where a viewport lands.
+            //
+            // `View::collect` already has both answers and needs neither a new
+            // branch nor a read to give them: a position past the pinned file's
+            // end takes the same clamp the end of the diff takes, and a screen
+            // left short takes the same back-up a short tail takes, both now
+            // bounded at the file. So the screen after `s` is the pinned file's
+            // last screenful with its final row on the bottom, which is what a
+            // pager does and what the reader was already looking at most of.
+            //
+            // **The back-up is gated on `anchored || landed_inside || single`,
+            // and the third term is the pin's own licence.** Two audit rounds
+            // went into getting that right. It was left to whatever placed the
+            // position first, which made this paragraph true only for a reader
+            // who had arrived by scrolling: after a drag on the diff's bar, which
+            // sets `anchored` false, the pinned screen came out short. Setting
+            // `anchored` from the toggle's arm was the next attempt and it
+            // leaked, because the flag outlives the pin: a jump onto a short
+            // tail, then `s` and `s`, left an *unpinned* frame anchored and
+            // backed the reader out of the file the jump was for. Licensing the
+            // back-up from `single` itself has no state to leak.
+            //
+            // The cost is stated rather than hidden: a position that needed
+            // clamping is **rewritten**, so pressing `s` twice from a screen
+            // straddling two files does not restore the straddle. From every
+            // screen already inside one file it is exactly identity, and from
+            // any screen at all the second on-and-off pair is. `SPEC.md` §11.2
+            // B16 says so out loud and `tests/single.rs` holds both halves.
+            Action::ToggleSingle => self.single = !self.single,
             // **No jump and no move at all**, which is one better than the
             // masthead: that toggle resizes the diff's region, and this one draws
             // over rows the diff keeps. Nothing about the viewport changes, so a
@@ -765,29 +830,15 @@ impl App {
             // `Frame::height` is the count the bar already drew itself with, and
             // every span it needs was proved earlier in this same tick, so the
             // walk below reads nothing that this frame has not read already.
-            Action::DiffTo(at) => {
-                self.anchored = false;
-                let total = crate::view::diff_rows(frame)?;
-                let target = scaled(at, total.saturating_sub(height));
-                let mut seen = 0;
-                let files = frame.files().len();
-                let mut position = Position {
-                    file: files.saturating_sub(1),
-                    row: 0,
-                };
-                for file in 0..files {
-                    let rows = crate::view::block_rows(frame, file)?;
-                    if seen + rows > target {
-                        position = Position {
-                            file,
-                            row: target - seen,
-                        };
-                        break;
-                    }
-                    seen += rows;
-                }
-                self.position = position;
-            }
+            //
+            // **Under a pin the same arithmetic runs over the pinned file**, and
+            // this is the half of B16 that would have been easy to leave behind.
+            // The thumb is drawn from `View::total_rows`, which under a pin is
+            // the pinned file's own height, so a drag resolved against the whole
+            // diff would be a gesture inverting a readout nobody drew. The two
+            // agree at both ends of the track and nowhere in between, which is
+            // exactly the shape that passes a test asserting the ends.
+            Action::DiffTo(at) => self.diff_to(at, height, frame)?,
             // A page keeps one row of overlap, which is what stops a reader
             // losing their place at the seam between two screens.
             Action::Page(pages) => {
@@ -807,17 +858,134 @@ impl App {
             Action::HalfPage(halves) => {
                 self.step_by(halves, height / 2, frame)?;
             }
+            // **The first row of what the reader can reach**, which is the
+            // first changed file unpinned and the pinned file's own heading
+            // under B16. One meaning over two subjects rather than two meanings:
+            // `g` has always been *the top*, and the pin is what decides the top
+            // of what. Jumping to file zero under a pin would change which file
+            // is pinned, which is the one thing this gesture takes away from
+            // everything that is not `n`, `p`, a digit or a click.
             Action::Top => {
-                self.jump_to(0);
+                self.jump_to(if self.single { self.position.file } else { 0 });
             }
             // The last *file*, from its top, rather than the last row of the
             // whole diff. Finding that row would mean diffing every file to add
             // up their heights, which is the read I4 forbids.
+            //
+            // **Under a pin it is the last row, and that is affordable here and
+            // nowhere else.** The subject is one file and that file has been
+            // diffed by definition, so [`crate::view::span_in`] answers from the
+            // diff the walk already holds. `G` therefore keeps meaning *the end
+            // of what you can scroll to* while the thing it reaches gets better,
+            // rather than meaning something different.
+            //
+            // What that costs is [`Self::diff_to`]'s docblock's to state and it
+            // is not free in every case; two earlier spellings of this paragraph
+            // said `span_in` was "a `stat` against a span this tick has already
+            // proved", which is [`crate::view::block_rows`]' cost quoted under a
+            // different call, and the sentence outlived both corrections because
+            // nothing reads a comment. The resting row itself is the inner
+            // comment below, and an earlier draft of this one contradicted it.
             Action::Bottom => {
-                self.jump_to(frame.files().len().saturating_sub(1));
+                if let Some(file) = self.pinned_file(frame) {
+                    // **`true`, unlike every other jump on this map, and it is
+                    // what makes the resting row survive a stale height.**
+                    // `anchored` means *reached by scrolling*, and it licenses
+                    // `View::collect`'s back-up: a screen that came out short
+                    // rests its last row on the bottom. `G` under a pin is asking
+                    // for exactly that. It is not a claim about what belongs on
+                    // the **top** row, which is what a jump is and why `jump_to`
+                    // clears this.
+                    //
+                    // Without it the arm is sized against a chrome its own side
+                    // effect invalidates. `Shell::diff_rows_for` builds the chrome
+                    // *before* `apply` runs; `Bottom` is a manual scroll, so
+                    // `apply` then turns follow off; and `Footer::plan` sizes its
+                    // rungs from `Chrome::following`, where `follow ▶  N/M` is
+                    // thirteen columns and `N/M` is three. On a pane narrow enough
+                    // for that to decide between a one-line and a two-line footer,
+                    // the region the frame actually draws is a row taller than the
+                    // one this subtracted, the file's last row rests one line
+                    // above the bottom, and `App::view` writes the same position
+                    // back every frame: [#57](https://github.com/breferrari/vigia/issues/57)'s
+                    // symptom, on the arm written to avoid it.
+                    //
+                    // The alternative is computing the height after `apply`, which
+                    // cannot work: `apply` is what needs it. Letting the walk
+                    // correct a short screen is the mechanism that already exists
+                    // for exactly this, and it costs nothing when the height was
+                    // right, because a full screen is not short.
+                    self.anchored = true;
+                    // **The resting row rather than the file's height, and the
+                    // difference is a whole batch of keystrokes.** `View::collect`
+                    // clamps an overrun to the last screenful either way, so
+                    // writing the raw span draws the right screen; what it does
+                    // not do is leave a *position* a later action in the same
+                    // wake can move from. The shell drains actions in a batch and
+                    // paints once at the end of it, so `G` and then a held `k`
+                    // arrive together: the `k`s walk `span` down toward
+                    // `span - height`, every one of them still clamps to the same
+                    // row, and the reader presses a key up to `span - height`
+                    // times before the screen moves. Nine on this file at this
+                    // pane. Unpinned the case cannot arise, because `G` there is
+                    // `jump_to`, which resolves to row zero.
+                    //
+                    // Clamping here costs the staleness correction `collect`'s own
+                    // clamp gave for free: `span_in` reads the generation the bar
+                    // was drawn from ([#84](https://github.com/breferrari/vigia/issues/84)),
+                    // so a file that grew since then rests slightly short of its
+                    // true bottom for one tick. That is invisible and
+                    // self-correcting, where swallowed keystrokes are neither.
+                    let span = crate::view::span_in(frame, file)?;
+                    self.position = Position {
+                        file,
+                        row: span.saturating_sub(height),
+                    };
+                } else {
+                    self.jump_to(frame.files().len().saturating_sub(1));
+                }
             }
         }
         Ok(true)
+    }
+
+    /// The file a pin is on, resolved against the files that actually exist.
+    ///
+    /// **`None` is *not pinned*, and it covers two different states on purpose**:
+    /// the reader has not asked for a pin, and there is nothing to pin to. Both
+    /// want the arm's unpinned branch, and both are states the arms below would
+    /// otherwise have had to test for separately.
+    ///
+    /// **The clamp is what makes this a function rather than a field read**, and
+    /// it is load-bearing rather than defensive. `SPEC.md` §11.2 B16 puts the
+    /// pinned file in [`Self::position`], and a position is exactly the index
+    /// that outlives the list it was resolved against:
+    /// [`vigia_core::Frame::advance`] rebuilds the changed set from scratch, so
+    /// the agent in the other pane committing its work, reverting an edit or
+    /// switching branch leaves this naming a file that is gone.
+    /// [`vigia_core::Frame::rows_of`] **panics** on that index by design, the same
+    /// way [`vigia_core::Frame::diff`] does, and the two callers below reach the
+    /// frame *before* [`View::collect`] has had a chance to clamp. **They are not
+    /// the only ones, and an earlier draft of this sentence said they were**:
+    /// [`Self::up`]'s walk back does too, it had the same latent panic, and the
+    /// claim here is what kept anyone from looking. It carries its own clamp now,
+    /// and this says *two of three* rather than *the only two*. A clean worktree is the whole
+    /// of the second case and it is not an edge: it is the state a monitor sits in
+    /// most of the time, so `s` and then `G` on a pane that has been left open is
+    /// a panic in a tool whose job is to be left open.
+    ///
+    /// Clamped rather than refused, which is [`View::collect`]'s own answer to the
+    /// same staleness: the reader asked for the end of the file they were on, and
+    /// the nearest file that still exists is a better answer than nothing
+    /// happening. `tests/single.rs::a_pinned_gesture_survives_the_diff_it_was_made_against`
+    /// holds both shapes.
+    ///
+    /// [`Action::Top`] does not come through here, and that is not an omission:
+    /// it writes an index and reads nothing, so a stale one is resolved by the
+    /// same clamp every other jump gets.
+    fn pinned_file(&self, frame: &Frame) -> Option<usize> {
+        let files = frame.files().len();
+        (self.single && files > 0).then(|| self.position.file.min(files - 1))
     }
 
     /// Put the viewport at the top of `file`, which is what a **jump** means.
@@ -929,7 +1097,107 @@ impl App {
         }
     }
 
+    /// Resolve a drag on the diff's bar into a position.
+    ///
+    /// **A method rather than an arm since the pin gave it a second branch**,
+    /// which is the shape [`Self::up`] below and [`Self::step_by`] above already
+    /// have: the unpinned walk is twenty lines and nesting it inside an `else`
+    /// to add a three-line guard puts the arm's own body at a depth
+    /// [`Self::apply`]'s match has nowhere else.
+    ///
+    /// **The pinned branch is a guard rather than a fork**, and the two read one
+    /// quantity: `View::measure` under a pin reports the pinned file's span and
+    /// [`crate::view::span_in`] reads the same generation of it, where the
+    /// unpinned walk below sums [`crate::view::block_rows`] over the changed set
+    /// against a bar drawn from `diff_rows`. Both arms therefore invert the bar
+    /// the reader is actually looking at, which is the whole contract a drag has;
+    /// see `span_in`'s own docblock for the route that gets it.
+    ///
+    /// **What it costs is a span lookup and not always a free one**, and the first
+    /// two spellings of this sentence were both wrong in the cheap direction.
+    /// [`vigia_core::Frame::fill_span`] answers from the cached diff for the file
+    /// the viewport is inside, which is free and is the ordinary case, because
+    /// that file is the one the walk drew. It is *not* guaranteed: after the
+    /// changed set shrinks, [`Self::pinned_file`] clamps onto a file this frame
+    /// has never drawn, and the cache then falls through to a measurement. One
+    /// file, on a keypress rather than per frame, and it is the honest description
+    /// rather than "a `stat` against a span this tick has already proved", which
+    /// was `block_rows`' cost quoted under a different call.
+    fn diff_to(&mut self, at: u32, height: usize, frame: &mut Frame) -> Result<()> {
+        self.anchored = false;
+        if let Some(file) = self.pinned_file(frame) {
+            let total = crate::view::span_in(frame, file)?;
+            self.position = Position {
+                file,
+                row: scaled(at, total.saturating_sub(height)),
+            };
+            return Ok(());
+        }
+        let total = crate::view::diff_rows(frame)?;
+        let target = scaled(at, total.saturating_sub(height));
+        let mut seen = 0;
+        let files = frame.files().len();
+        let mut position = Position {
+            file: files.saturating_sub(1),
+            row: 0,
+        };
+        for file in 0..files {
+            let rows = crate::view::block_rows(frame, file)?;
+            if seen + rows > target {
+                position = Position {
+                    file,
+                    row: target - seen,
+                };
+                break;
+            }
+            seen += rows;
+        }
+        self.position = position;
+        Ok(())
+    }
+
     fn up(&mut self, rows: usize, frame: &mut Frame) -> Result<()> {
+        // **The upper clamp B16 needs, and the only one that cannot live in the
+        // walk.** Scrolling *down* overruns into a row number `View::collect`
+        // resolves, so the pin is enforced there by the walk simply not
+        // advancing. Scrolling up is resolved here instead, because stepping off
+        // the top of a file means knowing how tall the one above it is, and
+        // under a pin there is no file above it to step into: the reader asked
+        // for one file and the top of that file is where up stops.
+        //
+        // Above the loop rather than inside it, so the pin costs no `Frame::diff`
+        // at all rather than one that is then discarded.
+        if self.single {
+            self.position.row = self.position.row.saturating_sub(rows);
+            return Ok(());
+        }
+        // **The walk back reaches the frame before anything has clamped, and it
+        // panicked on a stale index until [#297](https://github.com/breferrari/vigia/issues/297)'s
+        // second audit round.** [`crate::view::rows_in`] is
+        // [`vigia_core::Frame::diff`], which indexes `files` directly and panics
+        // past the end; a position is exactly the index that outlives the list it
+        // was resolved against, since [`vigia_core::Frame::advance`] rebuilds the
+        // changed set whenever the worktree moves. So a reader scrolled deep into
+        // the changed set, an agent committing in the other pane, and a wheel-up
+        // batched into the same drain as that tick is a crash, with no paint in
+        // between to clamp anything.
+        //
+        // Clamped rather than refused, which is [`View::collect`]'s own answer to
+        // the same staleness: it opens with `position.file.min(files - 1)` for
+        // exactly this reason, and a reader whose file is gone is better served by
+        // the nearest one that exists than by a panic.
+        //
+        // **Pre-existing rather than this ruling's**, and found because
+        // [`Self::pinned_file`]'s docblock claimed its two callers were the only
+        // gestures that reach the frame ahead of the walk. They are not, this is
+        // the third, and the sentence that was wrong is what kept anyone from
+        // looking.
+        let files = frame.files().len();
+        if files == 0 {
+            self.position = Position::default();
+            return Ok(());
+        }
+        self.position.file = self.position.file.min(files - 1);
         let mut left = rows;
         loop {
             if left <= self.position.row {
@@ -1054,6 +1322,11 @@ impl App {
                 // `a_tick_that_follows_nothing_drops_the_landing_the_one_before_it_armed`
                 // rules.
                 landing: owed,
+                // Passed through rather than resolved here, for the reason the
+                // arm that sets it gives: the walk is where a position meets the
+                // file it is inside, so the walk is where a pin can be enforced
+                // without asking the frame anything twice.
+                single: self.single,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].

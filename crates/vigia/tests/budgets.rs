@@ -362,7 +362,7 @@ fn a_frame_beside_a_rail_holds_the_frame_budget() {
          which is not the deeper region this gate exists to time",
         rail.list
     );
-    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, None, true);
+    frame_budget_on("shell-i9-rail", 0, RAIL_PANE, None, true, false);
 }
 
 #[test]
@@ -636,7 +636,7 @@ fn a_frame_holds_the_budget_however_deep_the_reader_has_scrolled() {
 /// depths have to agree about every other term for the comparison to mean
 /// anything.
 fn frame_budget_at_depth(name: &str, depth: usize) {
-    frame_budget_on(name, depth, area(), None, false);
+    frame_budget_on(name, depth, area(), None, false, false);
 }
 
 /// The same, on a named pane.
@@ -647,7 +647,14 @@ fn frame_budget_at_depth(name: &str, depth: usize) {
 /// changed file it has. Each visible list row costs one `Frame::diff`, which
 /// `tests/reads.rs` bounds structurally; what only a clock can answer is whether
 /// four times as many of them still fit inside I9.
-fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>, rail: bool) {
+fn frame_budget_on(
+    name: &str,
+    depth: usize,
+    pane: Rect,
+    sheet: Option<&str>,
+    rail: bool,
+    single: bool,
+) {
     let scratch = Scratch::large_diff(name, FILES, LINES);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -669,6 +676,15 @@ fn frame_budget_on(name: &str, depth: usize, pane: Rect, sheet: Option<&str>, ra
         let stacked = layout_of(&app, pane, FILES).diff;
         app.apply(vigia::Action::ToggleRail, &mut frame, stacked)
             .expect("toggle the rail");
+    }
+
+    // **The pin, asked for the same way**, and it moves no rows: `SPEC.md` §11.2
+    // B16 narrows what the walk may *reach* rather than how tall the body is, so
+    // unlike the rail above it needs no re-layout and the height taken below is
+    // the same one either way.
+    if single {
+        app.apply(vigia::Action::ToggleSingle, &mut frame, 0)
+            .expect("pin the diff");
     }
 
     let screen = layout_of(&app, pane, FILES);
@@ -2396,21 +2412,28 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 15),
+        (104, 16),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
         SHEET_PANE.height
     );
 
-    frame_budget_on("shell-i9-sheet", 0, SHEET_PANE, Some("keyboard"), false);
+    frame_budget_on(
+        "shell-i9-sheet",
+        0,
+        SHEET_PANE,
+        Some("keyboard"),
+        false,
+        false,
+    );
 }
 
 /// The pane the roomy rung's own budget is measured on.
 ///
 /// **Tall and wide**, because that is what the roomy rung needs
 /// ([#285](https://github.com/breferrari/vigia/issues/285)): a room of
-/// sixty-eight columns and a body of thirty rows.
+/// sixty-eight columns and a body of thirty-one rows.
 const ROOMY_PANE: Rect = Rect {
     x: 0,
     y: 0,
@@ -2422,7 +2445,7 @@ const ROOMY_PANE: Rect = Rect {
 ///
 /// **The two-column rung is the widest the sheet draws and this one covers the
 /// most cells**, which are two different superlatives and only the first was
-/// gated: 68 by 30 is 2,040 cells against 104 by 15's 1,560. It is also the rung
+/// gated: 68 by 31 is 2,108 cells against 104 by 16's 1,664. It is also the rung
 /// a full-screen terminal now takes, so it is the shape most readers will
 /// actually have on the pane, where the two-column rung is what a short one falls
 /// to.
@@ -2437,12 +2460,46 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 30),
+        (68, 31),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,
         ROOMY_PANE.height
     );
 
-    frame_budget_on("shell-i9-roomy", 0, ROOMY_PANE, Some("moving"), false);
+    frame_budget_on(
+        "shell-i9-roomy",
+        0,
+        ROOMY_PANE,
+        Some("moving"),
+        false,
+        false,
+    );
+}
+
+/// I9 with the diff pinned to one file, which is `SPEC.md` §11.2 B16.
+///
+/// **A gate for the direction nobody measures, and that is why it is here.** The
+/// pin is the one gesture on this map that makes a frame do *less*: the walk is
+/// bounded to one file and `View::measure` skips `diff_rows`, which is I4's only
+/// exception and the only thing in the frame path not bounded by the window. So
+/// the expectation is that a pinned frame is cheaper than the gate above it, and
+/// an expectation is exactly what §7 says a budget must not be. Until #297's
+/// second audit round no budget, no soak and no snapshot ever set `single`, on
+/// the one state that changes the walk's range.
+///
+/// **It is not measured against the unpinned frame**, and that is deliberate: a
+/// part compared against the whole it belongs to is the shape §7 records as
+/// failing silently in the green direction. This asserts the absolute budget, the
+/// same 16ms every other gate in this file asserts, and the *reads* claim is
+/// `tests/reads.rs::a_pinned_frame_counts_no_height_at_all`, which is structural
+/// and has a non-vacuous control.
+///
+/// Non-vacuity: the pane is the one every other frame gate uses, so a pin that
+/// stopped reaching the walk would leave this timing the gate above under a
+/// different name. `a_pinned_frame_counts_no_height_at_all` is what would redden
+/// for that, and it is the reason this one does not restate it.
+#[test]
+fn a_pinned_frame_holds_the_frame_budget() {
+    frame_budget_on("shell-i9-single", 0, area(), None, false, true);
 }

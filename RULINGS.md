@@ -343,7 +343,10 @@ one of them is true.
 **The two-column rung moved with the copy and the plan did not predict it.**
 `sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
 its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew
-eleven gestures and now draws sixteen on one page. Recorded as a deviation rather
+eleven gestures and drew sixteen on one page after it. (**B13's counts throughout
+this section are B13's own and are not current**: `r` and then `s` were added
+after it and every one of them moved. The current ones are in `SPEC.md` §11.1.)
+Recorded as a deviation rather
 than folded in, because a number that moves without being predicted is the thing
 this ledger exists to catch.
 
@@ -431,7 +434,9 @@ for, they describe the same pane at every width.
 **What it cost, which is the sheet and not the pane.** A key is a row, so the
 gestures table went from eleven keyboard rows to twelve and every row count in
 §11.1 moved: the one-column rung to eighteen table lines in a twenty-row box, the two-column rung to `104 x
-15` and `71 x 15`, the roomy rung to `68 x 30`. **No width moved**, and that is what
+15` and `71 x 15`, the roomy rung to `68 x 30`. (**Those numbers are B14's own and
+are not current**: B15 and then B16 moved them again. The current ones are in
+§11.1.) **No width moved**, and that is what
 kept this one issue rather than two: `r`'s cells are `r` and `show or hide the left
 rail` (25 columns) or `the left rail` (13), inside the existing maxima of 22 and 28
 wide, 13 and 18 tight. Every prediction in the plan held, which is worth recording
@@ -440,7 +445,7 @@ because the plan made them before the run rather than after.
 **The keep-set did not move, and the reason first written for that was false.**
 `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and
 `SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at
-rank eight of `DROP_ORDER`, one before `f`.
+rank eight of `DROP_ORDER`, two before `f`, with `s` between them since B16.
 
 The reason recorded at the time was that the drop order binds at 30 to 34 columns
 and a rail needs 134, so `r` could not fire on the pane dropping it. **That
@@ -497,6 +502,381 @@ becomes `g  /  G`. `j  k  ↓  ↑` is the exception and it keeps its arrows bec
 there they cost nothing, which is the same test applied and answered differently.
 
 **No row was added, and that is why this diff is small where #295's was large.**
-An alias goes in an existing cell, so `KEYBOARD` is still twelve rows, the counter
-still counts to seventeen, and every rung height and reachability boundary §11.1
-states is untouched. #295 added a row and moved every one of them.
+An alias goes in an existing cell, so `KEYBOARD` was still twelve rows, the counter
+still counted to seventeen, and every rung height and reachability boundary §11.1
+states was untouched. #295 added a row and moved every one of them. (**Those
+numbers are B15's own and are not current**: B16 added `s` the next day and moved
+them again. The current ones are in §11.1.)
+
+## B16 — the pin makes the frame path cheaper, and the guard that would have made it dearer
+
+The ruling is `SPEC.md` §11.2 B16 and the behaviour is §11.1. This is the
+archaeology: one defect found by reading, one premise checked instead of
+inherited, and what a thirteenth key did to the sheet.
+
+**The defect is a literal that stopped meaning what it says.** `View::collect`
+backs a short screen up so the diff's last row rests on the bottom, and it skips
+that when the position is already the first one the walk can reach. That test is
+spelled `view.top != Position::default()`, and `Position::default()` is *file
+zero, row zero*. It has been correct for as long as the walk always started at
+the first changed file. Under a pin it does not: the first position a pinned walk
+can reach is the pinned file's own row zero, so on any pinned file but the first
+the guard cannot fire, and a pinned file shorter than the pane is `short` on every
+frame, restarts on every frame, and pays what that guard's own paragraph records
+at **three walks and six `Frame::diff` calls a frame against two** — on the file
+an agent is writing to, which `Frame::diff` re-reads inside the settle margin by
+design.
+
+Both walks resolve to the same position and draw the same rows. Nothing on screen
+can see it, no snapshot moves, and the only instrument is the frame's own read
+count, which is what `tests/single.rs::a_pinned_file_shorter_than_the_pane_walks_once`
+asserts. It was found by reading the guard's docblock while working out what the
+pin had to bound, which is the cheapest way this could have been found and was
+luck rather than method: nothing would have gone red.
+
+**The generalisable half**: a bound written as a type's `default()` reads as *the
+floor* and means *the floor of the old walk*. When a feature narrows what a walk
+may reach, every such literal is part of the change, and the ones that are
+`Default::default()` are the ones no reviewer looks twice at.
+
+**The premise checked rather than inherited is B14's.** That ruling ranks `r`
+outside the sheet's keep-set and its **first** stated reason was false: it said
+`r` cannot fire on the pane that drops it, and no drawable pane drops it at all.
+The correction is in B14. Ranking `s` at nine raised exactly the same question, and
+the answer was taken from drawn output rather than from B14's conclusion: swept
+over every width from 20 to 45, the deepest rung a drawable pane reaches is still
+`from = 7`, so the `NARROW` table now shows both `r` and `s` **kept** at thirty
+columns, and both reorders remain defence rather than behaviour.
+
+**What a key costs, measured twice now.** `r` and `s` are the same shape of change
+and the same shape of cost: every row count moves and no width does. The four
+reachability boundaries sit at 30, 32, 35 and 38 columns and have not moved
+through either, and the counts behind them went 16, 11, 8, 4 to 17, 12, 9, 5 to
+18, 13, 10, 6. They were re-derived from a swept pane both times rather than
+incremented, which is the only way a boundary that *did* move would be noticed.
+
+**The one number that goes the other way.** Every feature added to this pane so
+far has cost the frame path something. A pin removes I4's single exception from
+the frames it is on: the diff's height is counted for every changed file once per
+tick and is the only thing in the frame path not bounded by the window, and a
+pinned frame reads its total off the pinned file's span instead. The gate asserts
+the **unpinned** frame counted something before it asserts the pinned frame
+counted nothing, because a zero over a fixture that had nothing to count is not
+evidence, and that is the same two-fixture rule §7 states for every other cost
+claim here.
+
+## B16 — the audit: three gates that were green with the feature deleted
+
+The ruling is `SPEC.md` §11.2 B16. This is what its own audit found, and the
+shape is worth more than any single finding: **every serious one was in the
+tests rather than in the code.**
+
+**Three gates passed against a `vigia` with the pin removed**, and each was
+vacuous for its own reason, which is why noticing one would not have found the
+others.
+
+- *The toggle gate discarded the middle draw.* It pressed `s`, wrote
+  `let _ = draw(...)`, pressed `s` again and compared the ends. That asserts only
+  that doing nothing twice does nothing. It observes the pinned screen now.
+- *The follow gate followed the last file.* Nothing comes after the last file, so
+  a screen resting in it draws one file whether or not anything is pinned. It
+  follows a middle file now, and scrolls off its end before it looks.
+- *The file-changing gate never left row zero.* `n`, `p`, a digit and a click all
+  land on a heading, and every file in the fixture is taller than the body, so
+  one file is drawn either way. It scrolls into the new file before it looks.
+
+**And a fourth gap was worse, because nothing covered it at all: `s` was never
+proven bound to a key.** Deleting the `KeyCode::Char('s')` arm left the whole
+workspace green, since every gate constructed `Action::ToggleSingle` directly.
+B16 could have shipped a gesture no keyboard could reach. [#295](https://github.com/breferrari/vigia/issues/295)
+closed exactly that hole for `r` with a gate of its own and the lesson did not
+travel; `r` was also missing from `every_key_the_map_binds_is_named_on_the_sheet`,
+whose hand-written list is [#288](https://github.com/breferrari/vigia/issues/288)'s
+to fix, and both are in it now.
+
+**The one behavioural defect the audit found is an input defect, not a drawing
+one.** The shell drains actions in a batch and paints once at the end of it, so
+`G` and a held `k` arrive together with no frame between them. `G` under a pin
+wrote the pinned file's whole height and let `View::collect` clamp it on the way
+to the screen: the right rows are drawn, and the *position* left behind is one
+nothing can move from, so every `k` in the same batch walked the row down and
+every one of them clamped to the same screen. Nine keystrokes swallowed on a
+22-row file at a 13-row body. Unpinned the case cannot arise, because `G` there
+resolves to row zero. `Action::Bottom` writes the resting row now, and pays for
+it with a staleness correction it used to get from `collect`'s clamp for free:
+a file that grew since the bar was drawn rests slightly short of its true bottom
+for one tick, which is invisible and self-correcting where swallowed keystrokes
+are neither.
+
+**`View::fits` was deleted rather than fixed**, and the reason is the same
+literal the defect above the fold is about. It compared `top == Position::default()`,
+which under a pin can never hold, so it would have claimed every pinned file
+overflows its pane. It was the **third** instance of that bound in this file and
+the only one with no caller anywhere in the workspace: the other two were fixed
+because something depended on them. A dead function that this change makes wrong
+is the clearest case for removal there is, and keeping a public one alive to
+avoid an API break in a library that exists to serve one binary is the worse
+trade. The alternative, giving `View` a `first` field so the function could be
+made correct, is adding surface to justify surface.
+
+**The stale-number sweep found nine more in docblocks the diff never touched.**
+`render.rs` and `tests/sheet.rs` carry the sheet's dimensions in prose beside the
+code that draws it, and the diff re-derived every number it *stated* while
+leaving the ones it merely *passed*. One was a live literal rather than prose:
+`the_floor_is_a_rung_now...` computed the title bar's floor from `" 16-16 of 16 "`,
+which has the same character count as `" 18-18 of 18 "`, so it went on computing
+thirty and going green while describing a table two rows smaller than the one it
+was measuring. That is the same shape as the counter's own reason for being
+`KEYBOARD.len() + MOUSE.len()` rather than a literal, one layer down in the gate.
+
+## B16 — round two: the fix that never reached the shell
+
+The three round-one fixes were the round-two suspects, and one of them had not
+been a fix at all.
+
+**`Action::needs_height` classified `Bottom` as reading no height**, which was
+true for as long as `G` was a jump to a heading. B16 made it rest the pinned
+file's last row on the bottom, and *the bottom* is a height. `crate::run` hands a
+zero to anything the predicate calls false, so `span.saturating_sub(0)` is the
+whole span, and the swallowed-keystroke defect the ruling above records as fixed
+was still shipping in the binary while the branch's own gate went green.
+
+**The gate went green because a test calls `App::apply` with a height a shell
+never passes.** That is the coverage-shape failure exactly: the suite modelled
+the function, not the program. `only_the_action_that_reads_the_height_is_given_one`
+was written for precisely this class and was blind twice over — every `App` in it
+was unpinned, which is the one state where `Bottom` cannot read a height, and it
+compared `View::top`, which is the position *after* the walk clamps, so two
+different requests that draw one screen looked identical. It drives both
+configurations now and reads the position the shell keeps.
+
+**A drag under way was handed a zero too**, and that one predates the pin: the
+first event of a gesture resolved through `action_for` with a real height and
+every motion after it resolved without one, which maps the track onto the whole
+rather than onto travel. The two ends of a track agree under both arithmetics and
+only the middle does not, which is the same reason the row-exact bar's own
+regression hid. There is one expression deciding the height now, `Shell::diff_rows_for`,
+because the wiring inside the takeover loop is not reachable by any test: the
+answer to an untestable call site is to leave one place that can be wrong rather
+than two that can disagree. A mutation emptying that function survives, and it is
+recorded here rather than papered over.
+
+**And a latent panic that a sentence of mine was hiding.** `App::up` walks back a
+file at a time asking each how tall it is, through `Frame::diff`, which indexes
+the changed-file list directly. A position is the index that outlives the list it
+was resolved against, so a tick carrying an agent's commit and a wheel-up in the
+same drained batch reach it with no paint in between. It is pre-existing, and what
+kept it unfound is that `App::pinned_file`'s docblock asserted its two callers
+were *the only* gestures reaching the frame ahead of the walk. They were not.
+**A docblock that overstates a guarantee is worse than none**, because it answers
+the question a reader would otherwise have gone and checked, and this is the
+second one in the same area on this branch: the first said `span_in` cost a
+`stat`, and it cost a whole-file diff.
+
+## B16 — round three: two of three call sites, and a claim of coverage nothing enforced
+
+Round three found no blocker and nothing a reader could see, which is what an
+audit converging looks like. What it found instead is the same defect one layer
+further out, twice, and the pattern across the three rounds is worth more than any
+of them individually.
+
+**Round one found gates that were green with the feature deleted. Round two found
+that a round-one fix never reached the shell. Round three found that round two's
+fix reached two of the three call sites.** The third is the held-repeat path, and
+it passed a literal zero for a height. It is benign today, because
+`Regions::step_at` yields only `Scroll` and `ScrollList` and neither reads a
+height, so the literal was right by accident rather than by rule. Every one of
+those three findings lives inside `crate::run`, the loop no test enters, and that
+is the class the whole audit is structurally blind to: the answer is not a better
+gate but **one function every site calls**, so there is one place that can be
+wrong instead of three answers that can drift.
+
+**And a claim of coverage that nothing enforced.**
+`only_the_action_that_reads_the_height_is_given_one` is the gate written for a
+wrongly classified height, and its own docblock said *"every action, so a new
+variant reaches this list by failing to be in it"*. Nothing made that true: it was
+a plain array naming eight of the seventeen variants that existed then, and one
+of the nine it omitted was
+`DiffTo`, which is the second wrong height this branch found. **That is how
+`Bottom` shipped misclassified in the first place**, and it is the exact shape
+this file calls worse than no claim at all, in a gate whose subject is that shape.
+
+It is exhaustive by construction now, in two steps that cannot be satisfied by
+prose: a `tag` function matching every variant, so a new one is a **compile
+error**, and a count assertion under it, so an added arm fails loudly until the
+variant is actually driven.
+
+**Three false cost claims about one function, in three places.** `span_in` was
+described as "a `stat` against a span this tick has already proved" in its own
+docblock, in `diff_to`'s, and in `Bottom`'s arm. Two were corrected in earlier
+rounds and the third outlived both corrections, because nothing reads a comment
+and no gate can. It is `block_rows`' cost quoted under a different call, and the
+truth is that the lookup is free for the file the walk drew and a whole-file
+measurement for one it did not, which is reachable after the changed set shrinks.
+
+**The `needs_height` predicate is *reads it in some reachable state*, not *always
+reads it*, and it now says so.** `Bottom` is measured in files unpinned and in
+rows pinned. Answering `true` costs it a height it ignores half the time, which is
+the conservative direction; the other reading hands it a zero in the state that
+reads one, and `saturating_sub(0)` then quietly means *the whole file*.
+
+## B16 — round four: the fourth layer out, and the claim that overstated the fix for the third
+
+Round four found one live defect, and it is the fourth instance of a pattern the
+three rounds before it each produced once. Stated plainly, because the pattern is
+worth more than any of its instances:
+
+| round | what it found |
+|---|---|
+| one | three gates green with the feature deleted, and a key nothing proved was bound |
+| two | a round-one fix that never reached the shell, and a latent panic a docblock hid |
+| three | a round-two fix that reached two of three call sites, and a coverage claim nothing enforced |
+| four | a round-three fix sized against a chrome its own side effect invalidates, and a coverage claim that overstated round three's fix |
+
+**The live one.** `Shell::diff_rows_for` builds the chrome to size the body
+*before* `App::apply` runs, and `Action::Bottom` is a manual scroll, so `apply`
+turns follow off underneath it. `Footer::plan` sizes its rungs from
+`Chrome::following`, where `follow ▶  N/M` is thirteen columns against `N/M`'s
+three, and between **31 and 40 columns** that decides a one-line footer against a
+two-line one. So the region the frame draws is thirteen rows where `span - height`
+was taken against twelve, the pinned file's last row rests one line above the
+bottom, and `App::view` writes the position straight back every frame: it stays
+wrong until the reader scrolls. That is
+[#57](https://github.com/breferrari/vigia/issues/57)'s symptom on the arm written
+to avoid it.
+
+`anchored = true` is the fix, and it is a truthful statement rather than a
+workaround. `anchored` means *reached by scrolling* and it licenses the walk's
+back-up for a short screen; `G` under a pin is asking for exactly that, and it is
+not a claim about what belongs on the top row, which is what a jump is and why
+`jump_to` clears it. Computing the height after `apply` cannot work, because
+`apply` is what needs it.
+
+**And the claim that overstated round three.** That round made the height gate
+drive all eighteen `Action` variants and wrote that "an added arm fails loudly
+until the variant is actually driven". False: the assertion compared
+`named.len()` with a hand-written `VARIANTS`, so a new arm tagged `18` and left
+undriven keeps both at eighteen. It compares the *set* against `0..VARIANTS` now,
+and says out loud that `VARIANTS` is hand maintained with the compile error in
+`tag` as the prompt to bump it. **Three of the eighteen rows were vacuous besides**:
+`ScrollList`, `ListTo` and `ListRow` move the list's window and nothing else, so a
+gate reading only the diff's position could never fail on them, and `ListRow` was a
+hard no-op because `App::list_rows` is zero until a view is drawn. Real coverage
+was fifteen asserted as eighteen.
+
+**The count of overstated guarantees on this branch is four**, in four places, and
+every one was found only after the previous was fixed: three cost claims about
+`span_in` and one about which gestures reach the frame before the walk clamps.
+They share a mechanism worth naming: **a docblock answers the question a reader
+would otherwise have gone and checked**, so a wrong one does not merely fail to
+help, it actively stops the check. No gate can see a comment. What finally caught
+each was an agent reading the sentence against the code beside it.
+
+## B16 — round five: the rule stated in two places, inverted in one
+
+Round five found nothing that runs and one thing that matters more than most of
+what runs, which is what a converging audit looks like at the end.
+
+**`anchored` is defined in two canonical places and both name `G` as the exemplar
+of a jump that must *not* anchor.** `App::anchored`'s own field docblock, which is
+*the* definition of the flag, and the short-screen guard's comment in
+`View::collect`, which is its only reader. Round four made pinned `G` set it
+**true**, wrote twenty-five lines of justification inside the arm, and left both
+statements standing.
+
+Nothing breaks today. What breaks is later: a session editing either site reads
+the rule with `G` as its worked example, "restores" `false`, and reinstates the
+stale-chrome short screen that round four fixed. Both are qualified now, and the
+qualifier says out loud that it is load-bearing rather than pedantic.
+
+**That is the fifth instance of one mechanism, and the mechanism is worth stating
+once for the next reader rather than five times for this one.** Every serious
+finding on this branch after the first round was a **claim that stopped being
+true when the code moved under it**: three cost claims about `span_in`, one about
+which gestures reach the frame before the walk clamps, one about a gate's own
+coverage, and now one about which key anchors. No gate can read a comment, so
+none of them could go red. Each was found by a reader holding the sentence against
+the code beside it, and each was found only after the previous one was fixed,
+because a wrong docblock **answers the question a reader would otherwise have gone
+and checked**.
+
+The practical form of that, for anyone changing this area: when a behaviour moves,
+grep for the places that state the rule it obeyed, not only the places that
+implement it. On this branch the implementation sites were always one and the
+statement sites were always two or three.
+
+## B16 — round six: the clamp that only worked for readers who had scrolled
+
+Round six found one behavioural defect, and it is the last of the family: **the
+pin's clamp was gated on a flag the pin did not set.**
+
+`View::collect`'s back-up rests a short screen's last row on the bottom, and it
+fired only for `anchored || landed_inside` at the time, because a position a
+*jump* placed is
+a claim about the top row and must not be moved off it. `Action::ToggleSingle` is
+not a manual scroll, so it inherited whatever set the position, and `App::diff_to`
+sets `anchored` **false**. So a reader who dragged the diff's bar into the middle
+of a tall file and then pressed `s` got a short screen with trailing blanks, which
+jumped upward on their next `j`.
+
+**Three places said the opposite**, including this ruling's own §11.2 text: *"a
+screen straddling two files comes to rest on the pinned file's last screenful"*.
+The claim was true, but only for a reader who had arrived by scrolling, and every
+straddle in `tests/single.rs` was reached with `Action::Scroll`, which anchors. A
+suite that reaches one state four ways, all of them the same way, cannot see the
+fifth.
+
+`ToggleSingle` anchored on the way in, which is the same argument
+`Action::Bottom`'s arm already makes: a pin is a claim about what the diff may
+**reach**, not about what belongs on the top row, so when the position it inherits
+overruns the pinned file the pager's answer is the right one.
+
+**That fix leaked and round seven replaced it; this paragraph is kept because the
+argument survived and only the mechanism changed.** `anchored` outlives the pin,
+so a jump onto a short tail followed by `s` and `s` left an *unpinned* frame
+anchored and backed the reader out of the file the jump was for. The licence is a
+term in the guard now, `anchored || landed_inside || single`, which has no state
+to leak and is excluded on a pinned jump for free.
+
+**And the gate that sold the pin's one cheap property was vacuous.**
+`a_pinned_frame_counts_no_height_at_all` asserted `measured == 0` on a second
+frame over a tick whose spans the first frame had already proved, and an
+*unpinned* second frame reports zero too, which the gate immediately above it
+asserts by name. The stated control measured the first frame rather than the
+counterfactual. The pinned half has a freshly advanced frame of its own now, with
+its spans unproven, so the zero means what the ruling says it means.
+
+Both are the same shape as everything else this audit found: **a claim that was
+true for the cases anyone had tried.**
+
+## B16 — rounds seven and eight: where a reverted fix leaves its description
+
+Round seven replaced round six's mechanism and round eight found the two places
+that still described the old one. Both are prose, neither runs, and the second is
+the reason this is written down rather than fixed quietly.
+
+**What changed.** The pin's back-up was licensed by writing `anchored` from the
+toggle's arm; it is licensed by a **term** now, `anchored || landed_inside ||
+single`. The argument did not move: a pin is a claim about what the diff may
+reach rather than about what belongs on the top row, so a position that overruns
+the pinned file gets the pager's answer. Only the mechanism moved, because the
+flag outlives the pin and the term does not.
+
+**Where the description stayed behind.** Round seven corrected `app.rs`,
+`view.rs`, `reads.rs`, `scroll.rs` and one number in this file, and left
+`SPEC.md` §11.2 B16 and this file's own round-six section saying the pin sets
+`anchored`. Code and `SPEC.md` disagreeing is a stop condition in `CLAUDE.md`, and
+it went one round undetected.
+
+**That is the seventh instance of one mechanism and the last worth counting.**
+Every serious finding on this branch after round one was a claim that stopped
+being true when the code moved under it, and the count of *statement* sites has
+been consistently larger than the count of *implementation* sites: one arm, three
+prose sites; one guard, two rulings. No gate can read a comment, so the only
+instrument is a reader holding the sentence against the code.
+
+The rule this branch earns, for anyone changing this area: **when a behaviour
+moves, grep for the places that state the rule it obeyed, not only the places that
+implement it** — and when a fix is *reverted* rather than extended, grep again,
+because a revert leaves a description of something that no longer exists and reads
+exactly like a description of something that does.

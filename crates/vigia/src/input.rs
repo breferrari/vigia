@@ -783,6 +783,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleFollow
         | Action::ToggleMasthead
         | Action::ToggleRail
+        | Action::ToggleSingle
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::Redraw
@@ -1099,6 +1100,36 @@ pub enum Action {
     /// what keeps it out of B4's refusal the way B12's sheet is kept out of it: the
     /// list is still not navigable, it is merely somewhere else.
     ToggleRail,
+    /// Pin the diff to the file the viewport is inside, or unpin it.
+    ///
+    /// `SPEC.md` §11.2 **B16**, from `s`
+    /// ([#297](https://github.com/breferrari/vigia/issues/297)). While it is on,
+    /// the diff is the one file the caret marks: scrolling clamps at that file's
+    /// two ends instead of carrying on into the file below, and the scrollbar
+    /// measures the file rather than the changeset.
+    ///
+    /// **It is not a mode**, which is what keeps it out of B4's refusal the way
+    /// [`Action::ToggleRail`] and B12's sheet are kept out of it. No key changes
+    /// meaning while it is on: `j` and `k` still scroll a row, `Space` still
+    /// pages, a digit still jumps. They have one file's worth of rows to move
+    /// through, and `n`, `p`, a digit and a click on a listed file are still how
+    /// the file changes.
+    ///
+    /// **`g` and `G` are the case that has to be argued rather than asserted.**
+    /// They mean the first and last row of the pinned file, which is the same
+    /// meaning they always had — *the ends of what you can scroll to* — over the
+    /// subject the pin narrows. `G` reaching a real last **row** is affordable
+    /// here and nowhere else: the pinned file has been diffed by definition,
+    /// where finding the last row of the whole diff means adding up every file's
+    /// height, which is the read I4 forbids and which is why `G` unpinned is the
+    /// last file's *heading*.
+    ///
+    /// **Follow still moves between files while it is on**, because `f` and an
+    /// automatic follow are explicit requests to be moved and this is about what
+    /// a reader's own scrolling reaches. It is not a manual scroll for the same
+    /// reason [`Action::ToggleRail`] is not: it expresses no opinion about where
+    /// the viewport should be.
+    ToggleSingle,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///
     /// `SPEC.md` §11.2's B12 ruling, from `?` or from a click on the sheet's own
@@ -1227,6 +1258,7 @@ impl Action {
             | Self::ToggleFollow
             | Self::ToggleMasthead
             | Self::ToggleRail
+            | Self::ToggleSingle
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Redraw
@@ -1281,6 +1313,19 @@ impl Action {
             // region over: a resize expresses no intent about what the diff shows.
             | Self::ToggleRail
             | Self::ToggleMasthead
+            // **And a pin is the one of the three that can move the viewport,
+            // and still expresses no intent about where it should be.** B16 asks
+            // for a *subject*, not a position: a screen straddling two files
+            // comes to rest on the pinned file's last screenful because that is
+            // the nearest legal answer to the position the reader already had,
+            // which is the same resolution a diff shrinking under them gets. (The
+            // arm that anchors on the way in is what makes that hold from a
+            // position a *drag* placed as well as one a scroll did; see
+            // `App::apply`.)
+            // Calling it a manual scroll would disengage follow for a reader who
+            // asked to see one file, which is the pairing the ruling is most
+            // useful in: follow chooses the file, the pin keeps the diff on it.
+            | Self::ToggleSingle
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
@@ -1298,8 +1343,23 @@ impl Action {
 
     /// Whether applying this needs to know how tall the body is.
     ///
-    /// Only the actions measured in screens do, rather than in rows. Everything
+    /// Mostly the actions measured in screens rather than in rows. Everything
     /// else is given the height and ignores it.
+    ///
+    /// **It is *reads it in some reachable state*, not *always reads it*, and
+    /// `SPEC.md` §11.2 B16 is what made the distinction load-bearing.**
+    /// [`Action::Bottom`] is measured in files unpinned, where it lands on a
+    /// heading and no height can move it, and in **rows** under a pin, where it
+    /// rests the file's last row on the bottom. So it answers `true` and pays a
+    /// height it ignores half the time, which is the conservative direction: the
+    /// other reading hands it a zero in the state that reads one, and
+    /// `saturating_sub(0)` then quietly means *the whole file*. That shipped
+    /// once ([#297](https://github.com/breferrari/vigia/issues/297)) with the
+    /// gate for it green, because the gate drove only the unpinned state.
+    ///
+    /// No other action is state-dependent today, and that is checked rather than
+    /// assumed: `Top` writes an index and reads nothing pinned or not, and every
+    /// other `false` arm ignores the height in both states.
     ///
     /// This exists because the answer is **expensive**, not because it is
     /// interesting. Deriving the height costs an uncached terminal-size syscall
@@ -1318,13 +1378,26 @@ impl Action {
             // last screenful, so all three need to know how tall one is.
             // `ListTo` does not: the list's travel is its own row count, which
             // the app already holds.
-            Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) => true,
+            //
+            // **`Bottom` joined them with `SPEC.md` §11.2 B16**
+            // ([#297](https://github.com/breferrari/vigia/issues/297)), and this
+            // arm is the whole of what makes that ruling reach a reader. Unpinned
+            // it is `jump_to(len - 1)`, which lands on a heading and is measured
+            // in files exactly as the comment below says; **pinned it rests the
+            // file's last row on the bottom**, and *the bottom* is a height. Left
+            // in the arm below, `crate::run` hands it a height of zero, the
+            // resting row saturates back to the file's whole span, and every
+            // keystroke batched behind `G` in the same wake is swallowed by the
+            // walk's own clamp. That is the defect B16 records as fixed, still
+            // shipping, with the gate green because a test calls `App::apply`
+            // with the height a shell does not pass. `crates/vigia/tests/scroll.rs::only_the_action_that_reads_the_height_is_given_one`
+            // is where the two are held together, and it now runs pinned as well.
+            Self::Page(_) | Self::HalfPage(_) | Self::DiffTo(_) | Self::Bottom => true,
             // `File` steps a file index and lands on a heading, so it is
             // measured in files and never in rows: no height can change where it
-            // arrives.
-            Self::Scroll(_) | Self::File(_) | Self::Top | Self::Bottom | Self::ScrollList(_) => {
-                false
-            }
+            // arrives. `Top` is a heading under a pin too, which is why it stays
+            // here and `Bottom` does not.
+            Self::Scroll(_) | Self::File(_) | Self::Top | Self::ScrollList(_) => false,
             Self::ListTo(_) | Self::ListRow(_) => false,
             // A toggle changes the region's height; it does not need to be
             // told one to decide what it means.
@@ -1333,6 +1406,7 @@ impl Action {
             | Self::ToggleFollow
             | Self::ToggleMasthead
             | Self::ToggleRail
+            | Self::ToggleSingle
             | Self::ToggleSheet
             | Self::CloseSheet => false,
         }
@@ -1492,6 +1566,10 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // four rows of the thing the tool exists to show.
         KeyCode::Char('m') => Some(Action::ToggleMasthead),
         KeyCode::Char('r') => Some(Action::ToggleRail),
+        // `s` for single, unbound and in the same lowercase family as `f`, `m`
+        // and `r`: the keys that change what the body is made of rather than
+        // where in it the reader is. B16.
+        KeyCode::Char('s') => Some(Action::ToggleSingle),
         // **`?` and nothing else**, which is `SPEC.md` §11.2's B12: `btop`,
         // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
         // is refused because it is a vi motion everywhere else on a pane with no

@@ -17,7 +17,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Position, Row, View, diff_height};
+use vigia::{Action, App, Body, Position, Row, View, body_layout, diff_height};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, generated, materialise};
@@ -63,6 +63,21 @@ fn body() -> usize {
 /// state rather than a test convenience.
 fn split() -> Body {
     Body::diff_only(body())
+}
+
+/// The shipped split, list included.
+///
+/// **Only `only_the_action_that_reads_the_height_is_given_one` wants it**, and it
+/// wants it because three of the eighteen `Action` variants move the list's
+/// window and nothing else: a list-free body makes those three unobservable, and
+/// leaves `App::list_rows` at zero so `ListRow` is a hard no-op as well.
+/// Everything else in this file is deliberately list-free; see [`split`].
+fn listed() -> Body {
+    body_layout(
+        Rect::new(0, 0, 80, 24),
+        &App::new().chrome("fixture", None, None, None, None, None),
+        FILES,
+    )
 }
 
 /// Many files, each a single rewritten line, so scrolling crosses them quickly.
@@ -717,6 +732,57 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     );
 }
 
+/// How many variants [`Action`] has.
+///
+/// **Hand maintained, and saying so is the point.** The compile error in [`tag`]
+/// is what *prompts* a bump; nothing forces one. An earlier version of this gate
+/// asserted `named.len() == VARIANTS` and claimed that "an added arm fails loudly
+/// until the variant is actually driven", which was false: give a new arm the tag
+/// `18`, leave it undriven, and the count is still eighteen against an unbumped
+/// eighteen. That is the fourth overstated guarantee this branch has produced and
+/// the second inside a gate whose whole subject is overstated guarantees.
+///
+/// What holds now is weaker and true: the set is compared against `0..VARIANTS`,
+/// so an added arm with the next tag is **not** in the driven set and the gate is
+/// red until it is driven; and forgetting to bump this number is caught by that
+/// same comparison the moment two variants share a tag or one is skipped.
+const VARIANTS: usize = 18;
+
+/// One number per [`Action`] variant, from an exhaustive `match`.
+///
+/// **The `match` is the instrument.** A new variant does not compile here, which
+/// is the same guarantee `Action::needs_height` and `Action::is_manual_scroll`
+/// get from being exhaustive, and which the gate that drives them did not have.
+/// Adding an arm with the next tag then leaves that tag out of the driven set,
+/// and the assertion under the list compares the two sets rather than their
+/// sizes, so it is red until the variant is really driven.
+///
+/// Numbers rather than the variants themselves because `Action` is not `Ord` and
+/// the payloads are irrelevant here: two `Scroll`s with different rows are one
+/// variant for this purpose, and the list above deliberately drives both.
+fn tag(action: Action) -> usize {
+    match action {
+        Action::Quit => 0,
+        Action::Scroll(_) => 1,
+        Action::ScrollList(_) => 2,
+        Action::Page(_) => 3,
+        Action::HalfPage(_) => 4,
+        Action::File(_) => 5,
+        Action::Top => 6,
+        Action::Bottom => 7,
+        Action::ToggleFollow => 8,
+        Action::ToggleMasthead => 9,
+        Action::ToggleRail => 10,
+        Action::ToggleSingle => 11,
+        Action::ToggleSheet => 12,
+        Action::CloseSheet => 13,
+        Action::ListTo(_) => 14,
+        Action::ListRow(_) => 15,
+        Action::DiffTo(_) => 16,
+        Action::Redraw => 17,
+    }
+}
+
 #[test]
 fn only_the_action_that_reads_the_height_is_given_one() {
     // `Action::needs_height` exists so the shell can skip an uncached
@@ -730,17 +796,49 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // viewport by the wrong amount. So the claim is checked against `App::apply`
     // itself, by driving each action twice with heights that could not both be
     // right and asserting the answer did not depend on which.
+    //
+    // **Two things were blind here until [#297](https://github.com/breferrari/vigia/issues/297),
+    // and between them they let a wrong classification ship.**
+    //
+    // The first is that every `App` was unpinned. `Action::Bottom` reads the
+    // height only under `SPEC.md` §11.2 B16's pin, where it rests the file's last
+    // row on the bottom; unpinned it is a jump to a heading and no height can
+    // move it. So the classification was checked in the one state that cannot see
+    // it, `Bottom` stayed in the `false` arm, `crate::run` handed it a zero, and
+    // the resting row saturated back to the whole span. Every action is driven
+    // pinned **and** unpinned now, and `needs_height` is a claim about whether
+    // *any* reachable state reads it.
+    //
+    // The second is that it compared `View::top`, which is the position after
+    // `View::collect` has resolved it. That walk clamps, so two different
+    // requests land on the same drawn row and the difference the gate exists to
+    // see is exactly what the clamp hides: `G` writing the whole span and `G`
+    // writing the resting row draw the identical screen. What separates them is
+    // the position the shell **keeps**, which is what the next action in the same
+    // drained batch moves from. `App::position` is read before any view, and the
+    // drawn top is kept as a second signal rather than the only one.
     let scratch = fixture("shell-scroll-height");
     let worktree = scratch.worktree();
 
-    // Every action, so a new variant reaches this list by failing to be in it.
+    // **Every variant, and the list is exhaustive by construction rather than by
+    // a comment saying so.** This read *"every action, so a new variant reaches
+    // this list by failing to be in it"* and nothing made that true: it was a
+    // plain array naming eight of the seventeen variants that existed then, and
+    // `Action::DiffTo` — the second wrong height this branch found — was one of
+    // the nine it omitted. A claim of
+    // coverage that nothing enforces is the shape `RULINGS.md` calls worse than
+    // no claim at all, and it is how `Bottom` shipped misclassified in the first
+    // place.
+    //
+    // [`tag`] below is what enforces it: an exhaustive `match`, so a new variant
+    // is a **compile error** there, and then the assertion under it is a loud
+    // failure until the new variant is named here too. Two steps, and the first
+    // one cannot be skipped.
     let actions = [
+        Action::Quit,
         Action::Scroll(SPAN as isize * 3),
         Action::Scroll(-(SPAN as isize)),
-        Action::Top,
-        Action::Bottom,
-        Action::Redraw,
-        Action::ToggleFollow,
+        Action::ScrollList(1),
         Action::Page(1),
         Action::Page(-1),
         Action::HalfPage(1),
@@ -750,7 +848,36 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // no-op is exactly the shape that passes a height check vacuously.
         Action::File(1),
         Action::File(-1),
+        Action::Top,
+        Action::Bottom,
+        Action::ToggleFollow,
+        Action::ToggleMasthead,
+        Action::ToggleRail,
+        // The pin itself, which moves no viewport and so must not be told a
+        // height.
+        Action::ToggleSingle,
+        Action::ToggleSheet,
+        Action::CloseSheet,
+        // **Mid-track, for the reason `DiffTo` below is**: `ListTo(0)` resolves
+        // to the first row under any height and could not fail.
+        Action::ListTo(vigia::TRACK_SCALE / 2),
+        Action::ListRow(1),
+        // **Mid-track, because the ends are degenerate.** `DiffTo(0)` resolves
+        // to row zero under any height, so it lands in the same place with and
+        // without one and would read as a wrong classification. The middle is the
+        // only part of a track where mapping onto travel and mapping onto the
+        // whole disagree, which is the same reason the drag gates walk it.
+        Action::DiffTo(vigia::TRACK_SCALE / 2),
+        Action::Redraw,
     ];
+
+    let named: std::collections::BTreeSet<usize> = actions.into_iter().map(tag).collect();
+    let every: std::collections::BTreeSet<usize> = (0..VARIANTS).collect();
+    assert_eq!(
+        named, every,
+        "the list does not drive every variant, so a height misclassified on one \
+         of the rest would pass here exactly as `Bottom`'s did"
+    );
 
     // **Built once, because none of it varies with the action or the height.**
     // The frame is a forty-file `gix` diff and `Highlighter::new` loads the
@@ -766,35 +893,86 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     let history = History::new();
     let full = body();
 
+    // **The list's own window is an observable here too**, and three of the
+    // eighteen rows were vacuous without it: `ScrollList`, `ListTo` and `ListRow`
+    // move `list_top` and nothing else, so a gate reading only the diff's
+    // position could never have failed on them. Real coverage was fifteen
+    // asserted as eighteen, which is the same overstatement one layer down.
+    //
+    // `ListRow` needs one more thing: `App::list_rows` is zero until a view has
+    // been drawn, so `offset < self.list_rows` is `1 < 0` and the action is a
+    // hard no-op. Each run below draws before it acts.
     for action in actions {
-        // Two heights far enough apart that any action reading one would land
-        // somewhere different. Started from the same place each time.
-        let landed: Vec<Position> = [0usize, full]
-            .into_iter()
-            .map(|height| {
-                let mut app = App::new();
-                app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
-                    .expect("seed");
-                app.apply(action, &mut frame, height).expect("apply");
-                app.view(&mut frame, &mut highlighter, &history, split())
-                    .expect("view")
-                    .top
-            })
-            .collect();
+        // Whether the answer moved with the height, in each configuration.
+        let mut moved_anywhere = false;
+        for pinned in [false, true] {
+            // Two heights far enough apart that any action reading one would land
+            // somewhere different. Started from the same place each time.
+            let landed: Vec<(Position, (Position, usize))> = [0usize, full]
+                .into_iter()
+                .map(|height| {
+                    let mut app = App::new();
+                    // **Off file zero, or the pinned arm is dead for `Top`.**
+                    // `Top` under a pin is `jump_to(position.file)`, which is
+                    // `jump_to(0)` when the position never left the first file,
+                    // so seeding with a scroll alone made the pinned run byte
+                    // identical to the unpinned one for the *other* action B16
+                    // changed.
+                    //
+                    // **Defence rather than behaviour, and recorded as such**,
+                    // which is B14's own precedent for a reorder no pane reaches:
+                    // removing this seed leaves the suite green, because this gate
+                    // compares two *heights* within one configuration and `Top`
+                    // reads no height in either. What it buys is that the pinned
+                    // half exercises a state that differs at all, so an action
+                    // that starts reading a height only under a pin is seen here
+                    // rather than in production. That is exactly how `Bottom` got
+                    // out.
+                    app.apply(Action::File(2), &mut frame, full)
+                        .expect("seed a file");
+                    app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
+                        .expect("seed");
+                    if pinned {
+                        app.apply(Action::ToggleSingle, &mut frame, full)
+                            .expect("pin");
+                    }
+                    // Drawn once before the action, so `App::list_rows` is not
+                    // zero and the list gestures are not no-ops.
+                    let _ = app
+                        .view(&mut frame, &mut highlighter, &history, listed())
+                        .expect("seed the list");
+                    app.apply(action, &mut frame, height).expect("apply");
+                    // The retained request first, then what the walk resolved it
+                    // to. The clamp can make two requests draw one screen, so the
+                    // first is the sensitive one and the second is corroboration.
+                    // The list's window rides along, because three of the eighteen
+                    // variants move nothing else.
+                    let kept = app.position();
+                    let view = app
+                        .view(&mut frame, &mut highlighter, &history, listed())
+                        .expect("view");
+                    (kept, (view.top, view.list_top))
+                })
+                .collect();
 
-        if action.needs_height() {
-            assert_ne!(
-                landed[0], landed[1],
-                "{action:?} says it needs the height and lands in the same place \
-                 without one, so either the claim or the action is wrong"
-            );
-        } else {
-            assert_eq!(
-                landed[0], landed[1],
+            let moved = landed[0] != landed[1];
+            moved_anywhere |= moved;
+            assert!(
+                action.needs_height() || !moved,
                 "{action:?} says it does not need the height and moved when it \
-                 changed, so the shell is about to hand it a zero"
+                 changed{}, so the shell is about to hand it a zero: {:?} against \
+                 {:?}",
+                if pinned { " under a pin" } else { "" },
+                landed[0],
+                landed[1]
             );
         }
+
+        assert!(
+            !action.needs_height() || moved_anywhere,
+            "{action:?} says it needs the height and lands in the same place \
+             without one, pinned or not, so either the claim or the action is wrong"
+        );
     }
 }
 
@@ -1136,4 +1314,85 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
             view.top
         );
     }
+}
+
+#[test]
+fn a_walk_back_survives_the_file_it_pointed_into_disappearing() {
+    // **`a_position_survives_the_file_it_pointed_at_disappearing` above covers the
+    // *draw*; this covers the *gesture*, and until #297's second audit round
+    // nothing did.** That one lets `View::collect` clamp a stale position on the
+    // way to the screen, which is the path a redraw takes. `App::up` reaches the
+    // frame ahead of any collect: it walks back a file at a time asking each how
+    // tall it is, through `rows_in` into `Frame::diff`, which indexes the file
+    // list directly and panics past its end.
+    //
+    // **The batch is what makes it reachable.** The shell drains every pending
+    // action before it paints, so a `Wake::Tick` carrying an agent's commit and a
+    // wheel-up arriving together are applied with no frame between them, and the
+    // position resolved against the old list is handed straight to the new one.
+    // No test drove a scroll across an advance without a paint, so the crash sat
+    // behind a suite that exercised both halves separately.
+    let scratch = fixture("shell-scroll-back-shrink");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // Deep into the changed set, resolved, so the position names a real file.
+    app.apply(Action::Bottom, &mut frame, body())
+        .expect("apply");
+    let far = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view")
+        .top;
+    assert_eq!(
+        far.file,
+        FILES - 1,
+        "the fixture never reached its last file"
+    );
+
+    // The other pane commits, and the wheel-up arrives in the same drain.
+    scratch.commit_all("everything the agent was working on");
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 0, "the worktree is not clean");
+
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("a scroll back over a changed set that is gone");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view");
+    assert!(view.rows.is_empty(), "a clean worktree drew diff rows");
+
+    // And the half-shrunk case, which is the commoner one: files still exist and
+    // the position names one past their end.
+    let scratch = fixture("shell-scroll-back-half");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+
+    app.apply(Action::Bottom, &mut frame, body())
+        .expect("apply");
+    let _ = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view");
+    for index in (FILES / 2)..FILES {
+        scratch.git(&["checkout", "--", &format!("src/mod_{index}.rs")]);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), FILES / 2, "the fixture did not shrink");
+
+    app.apply(Action::Scroll(-(SPAN as isize)), &mut frame, body())
+        .expect("a scroll back over a shortened changed set");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split())
+        .expect("view");
+    assert!(
+        view.top.file < FILES / 2,
+        "the walk back left the position on file {}, past the {} that exist",
+        view.top.file,
+        FILES / 2
+    );
 }
