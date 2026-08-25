@@ -77,6 +77,33 @@ Surveyed 2026-08-25 against shallow clones (delta, crush, lazygit, gitui, helix,
 
 **The one-paragraph synthesis.** The field's diff state of the art is delta's formula (syntax fg + low-chroma wash + hotter emph wash, light/dark by OSC query, not flag), modernised by crush's two-tone gutter. Chrome is rounded-or-borderless with focus as border colour; icons are theme-driven with a mandatory clean fallback; density comes from eighth-blocks and now octants, which ratatui already ships; OSC 8 on file names is the newest table-stakes nicety.
 
+### 1.4 Terminal support matrix, 2025-2026
+
+Verified 2026-08-25 against official docs, changelogs and the terminals' own source at tagged versions; nothing from memory. Versions at time of check: ghostty 1.2/1.3, foot 1.20+, kitty 0.47, Alacritty 0.17.0, WezTerm 20240203 (+nightly), iTerm2 3.6.11, Windows Terminal 1.24, Konsole 26.08, VTE 0.82-0.84 / Ptyxis, tmux 3.7c.
+
+| Terminal | COLORTERM | 4:3/4:4/4:5 underline | CSI 58 colour | OSC 8 | mode 2026 | native sextants | native octants |
+|---|---|---|---|---|---|---|---|
+| ghostty | yes | yes | yes | on by default | yes | yes | **yes** (1.2+) |
+| foot | yes | 1.18+ | 1.18+ | 1.7+ | 1.8+ | yes | **yes** (1.20+) |
+| kitty | yes | yes (origin) | yes | on by default | 0.22+ | yes | **yes** (0.40+) |
+| Alacritty | yes | 0.11+ | 0.11+ | 0.11+ | 0.13+ | partial | no |
+| WezTerm | yes | yes | yes | yes | yes | yes | nightly only |
+| iTerm2 | yes | curly 3.4; dotted/dashed 3.6.7 | 3.5+ | yes | 3.5+ | 3.6.7+ | no |
+| Windows Terminal | **no** (#11057) | 1.20+ | 1.20+ | 1.4+ | 1.23 stable | 1.21+ | no (font has them) |
+| Konsole | yes | 22.12+ | 22.12+ | **off by default** | 26.04+ | **no** | no |
+| VTE / Ptyxis | yes | curly 0.52; dotted/dashed 0.76 | 0.52+ | yes (apps enable) | **no** | 0.60+ | **yes** (0.78+) |
+| tmux (layer) | inward since 3.6 | passes since 3.0; outward needs Smulx | passes; outward needs Setulc | 3.4+ | inner apps since 3.7 | width caveats | width caveats |
+
+Deltas from common belief, the cells a year-old memory gets wrong:
+
+1. **VTE has no synchronized output** (0.82 recognises the mode, implements nothing), and VTE-based Ptyxis is now the Fedora/Ubuntu default terminal. Mode 2026 stays a progressive enhancement.
+2. Windows Terminal styled underlines arrived in 1.20 (not 1.18); mode 2026 reached stable in 1.23 (2026-01); **it still does not set COLORTERM**, making it the canonical false negative for env-sniffed truecolour.
+3. tmux sets COLORTERM inward only since 3.6 (2025-11) and passes inner mode 2026 only since 3.7 (2026-06).
+4. **Octants are natively drawn by exactly four engines**: ghostty 1.2+, foot 1.20+, kitty 0.40+, VTE 0.78+. Alacritty, iTerm2, Windows Terminal and Konsole rely on the font, and Konsole does not even self-draw sextants.
+5. Konsole ships OSC 8 disabled by default. OSC 8 degrades silently everywhere (text renders, link inert), so emitting it always costs nothing.
+
+Prevalence: no public COLORTERM telemetry exists; synthesis of the 2025 surveys (jvns ~995 responses; Arch n=3,923; Homebrew casks) puts truecolour-capable terminals at the order of 90%+ of developer usage. The correct 2026 posture: **COLORTERM is a trustworthy positive signal whose absence proves nothing.** Practical floors for vigia: curly + underline-colour is safe everywhere modern (fallback from dotted/dashed to plain); emit 4:3/58:2 and OSC 8 unconditionally but depend on neither under tmux defaults; sextant/octant rungs come from a terminal table, not a font probe.
+
 ## 1.9 Premises settled against the code
 
 - **Truecolour already reaches every terminal that advertises it.** `Depth::from_env` (`crates/vigia/src/colour.rs:137`) treats `COLORTERM=truecolor|24bit` as "the strongest positive signal", on top of a terminal table. The `Ansi16` default bites only where nothing says anything: ssh (forwards `TERM`, not `COLORTERM`) and multiplexers. So a truecolour-first look is not gated on a policy change; it is gated on nothing for most local terminals, and the ssh/tmux story is the part that needs a ladder, which exists.
@@ -162,7 +189,15 @@ Ranked draft, pending the terminal-support matrix (agent still out) and the chec
 
 ## 4.1 Checkpoint
 
-(to fill: what was decided with the reader)
+Held 2026-08-25 with the reader, against the vision boards (`assets/board1.png`, `assets/board2.png`: honest ANSI mocks rendered in foot with the real font; `assets/vision.py` generates them).
+
+**The ruling is: everything.** Delta-formula washes with word-level emphasis, gradient ramps and the band, the chrome bundle, octant/sextant rungs, the adaptive theme, and OSC 8 all get YES rulings and all get built. Three qualifiers the reader attached:
+
+1. **Customizable.** Every hue introduced is a theme key; nothing hardcodes a colour the theme cannot move.
+2. **A nice theme as the default.** The out-of-the-box look is the showcase, not a neutral base.
+3. **Documented.** Every new key and rung lands in the docs with the ruling that introduced it.
+
+Sequencing (the one part left to engineering judgement): the theme-system expansion is the foundation and lands first; the washes, gradients, chrome, rungs, adaptive theme and OSC 8 build on it as separate issues, one PR each, taken in order of visual payoff per cost.
 
 ## 4. Opportunity map
 
