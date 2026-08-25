@@ -246,6 +246,19 @@ fn a_value_that_is_neither_on_nor_off_names_its_line_and_its_key() {
     );
     let said = err.to_string();
     assert!(said.contains("rail") && said.contains("yes"), "{said}");
+
+    // **A trailing token is a typo, not a value with something after it**, and
+    // the first version of this parser took the first word and dropped the rest:
+    // `rail = on off` set the rail and said nothing. That is the silence unknown
+    // keys are refused to avoid, one field over, so the whole of what is left
+    // after a comment is stripped has to be the value.
+    for source in ["rail = on off\n", "rail=on=off\n", "single = on true\n"] {
+        let err = config::parse(source).expect_err("a trailing token");
+        assert!(
+            matches!(&err, ConfigError::UnknownValue { value, .. } if value.contains(' ') || value.contains('=')),
+            "{source:?} was accepted, or refused without quoting what it read: {err:?}"
+        );
+    }
 }
 
 #[test]
