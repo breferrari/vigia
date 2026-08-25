@@ -625,3 +625,47 @@ which has the same character count as `" 18-18 of 18 "`, so it went on computing
 thirty and going green while describing a table two rows smaller than the one it
 was measuring. That is the same shape as the counter's own reason for being
 `KEYBOARD.len() + MOUSE.len()` rather than a literal, one layer down in the gate.
+
+## B16 — round two: the fix that never reached the shell
+
+The three round-one fixes were the round-two suspects, and one of them had not
+been a fix at all.
+
+**`Action::needs_height` classified `Bottom` as reading no height**, which was
+true for as long as `G` was a jump to a heading. B16 made it rest the pinned
+file's last row on the bottom, and *the bottom* is a height. `crate::run` hands a
+zero to anything the predicate calls false, so `span.saturating_sub(0)` is the
+whole span, and the swallowed-keystroke defect the ruling above records as fixed
+was still shipping in the binary while the branch's own gate went green.
+
+**The gate went green because a test calls `App::apply` with a height a shell
+never passes.** That is the coverage-shape failure exactly: the suite modelled
+the function, not the program. `only_the_action_that_reads_the_height_is_given_one`
+was written for precisely this class and was blind twice over — every `App` in it
+was unpinned, which is the one state where `Bottom` cannot read a height, and it
+compared `View::top`, which is the position *after* the walk clamps, so two
+different requests that draw one screen looked identical. It drives both
+configurations now and reads the position the shell keeps.
+
+**A drag under way was handed a zero too**, and that one predates the pin: the
+first event of a gesture resolved through `action_for` with a real height and
+every motion after it resolved without one, which maps the track onto the whole
+rather than onto travel. The two ends of a track agree under both arithmetics and
+only the middle does not, which is the same reason the row-exact bar's own
+regression hid. There is one expression deciding the height now, `Shell::diff_rows_for`,
+because the wiring inside the takeover loop is not reachable by any test: the
+answer to an untestable call site is to leave one place that can be wrong rather
+than two that can disagree. A mutation emptying that function survives, and it is
+recorded here rather than papered over.
+
+**And a latent panic that a sentence of mine was hiding.** `App::up` walks back a
+file at a time asking each how tall it is, through `Frame::diff`, which indexes
+the changed-file list directly. A position is the index that outlives the list it
+was resolved against, so a tick carrying an agent's commit and a wheel-up in the
+same drained batch reach it with no paint in between. It is pre-existing, and what
+kept it unfound is that `App::pinned_file`'s docblock asserted its two callers
+were *the only* gestures reaching the frame ahead of the walk. They were not.
+**A docblock that overstates a guarantee is worse than none**, because it answers
+the question a reader would otherwise have gone and checked, and this is the
+second one in the same area on this branch: the first said `span_in` cost a
+`stat`, and it cost a whole-file diff.

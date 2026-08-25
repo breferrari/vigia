@@ -741,19 +741,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // ([#297](https://github.com/breferrari/vigia/issues/297)'s
                             // audit): the pinned arm inherits the same parameter,
                             // so fixing it here fixes both.
-                            let height = if drag.needs_height() {
-                                let chrome = shell.app.chrome(
-                                    &shell.name,
-                                    shell.branch.as_deref(),
-                                    shell.pressed(),
-                                    shell.gripped(),
-                                    shell.hovered(),
-                                    shell.scrolling,
-                                );
-                                diff_height(shell.area()?, &chrome, frame.files().len())
-                            } else {
-                                0
-                            };
+                            let height = shell.diff_rows_for(drag, frame.files().len())?;
                             match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
@@ -807,19 +795,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // which is right rather than merely cheap: it feeds
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
-                    let height = if action.needs_height() {
-                        let chrome = shell.app.chrome(
-                            &shell.name,
-                            shell.branch.as_deref(),
-                            shell.pressed(),
-                            shell.gripped(),
-                            shell.hovered(),
-                            shell.scrolling,
-                        );
-                        diff_height(shell.area()?, &chrome, frame.files().len())
-                    } else {
-                        0
-                    };
+                    let height = shell.diff_rows_for(action, frame.files().len())?;
                     shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
@@ -1216,6 +1192,43 @@ struct Shell {
 }
 
 impl Shell {
+    /// The diff region's height for `action`, or zero where it reads none.
+    ///
+    /// **One expression, because there were two and they disagreed.** The
+    /// ordinary path has asked [`Action::needs_height`] since the predicate
+    /// existed; the drag-under-way path passed a literal `0` from the day it was
+    /// written. A drag on the diff's bar is a [`Action::DiffTo`], which reads the
+    /// height to map the track onto **travel** rather than onto the whole, so the
+    /// first event of a gesture resolved correctly and every motion after it
+    /// resolved a screenful short. The two ends of the track agree under both
+    /// arithmetics and only the middle does not, which is why nothing noticed.
+    ///
+    /// Found by [#297](https://github.com/breferrari/vigia/issues/297)'s second
+    /// audit round, in the same sweep that found `Action::Bottom` classified
+    /// wrongly. **The classification is gated and this wiring is not**: it lives
+    /// inside the takeover loop, which no test drives, so the answer is to leave
+    /// one place that can be wrong rather than two that can disagree. A mutation
+    /// that empties this function survives the suite and is recorded as such.
+    ///
+    /// Cheap by construction: a drained trackpad flick is up to sixty-four
+    /// actions between two paints, and only the three that read a height pay for
+    /// the terminal-size syscall and the `Chrome` this builds.
+    fn diff_rows_for(&mut self, action: Action, files: usize) -> Result<usize, Failure> {
+        if !action.needs_height() {
+            return Ok(0);
+        }
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            self.pressed(),
+            self.gripped(),
+            self.hovered(),
+            self.scrolling,
+        );
+        let area = self.area()?;
+        Ok(diff_height(area, &chrome, files))
+    }
+
     /// The cell a step button is being held on, for the frame that draws it lit.
     fn pressed(&self) -> Option<(u16, u16)> {
         self.held.map(Held::at)
