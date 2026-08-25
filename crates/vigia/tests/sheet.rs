@@ -1035,6 +1035,40 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     );
 }
 
+#[test]
+fn every_mouse_gesture_the_pane_answers_is_named_on_the_sheet() {
+    // **The other half of the table, and its own gate rather than a second loop
+    // inside the keyboard one.** They fail for different reasons and are found by
+    // different means: the keyboard half is a sweep of `action_for` and reddens
+    // when a *binding* has no row, this one is `mouse_phrases`' exhaustive matches
+    // and reddens when a *variant* has no phrase. One test covering both would
+    // report either as the same failure.
+    //
+    // #288's two omissions were both on this side, and neither was a key.
+    let scratch = Scratch::large_diff("sheet-mouse-covers", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    // The pane its sibling uses, and for the same reason: one column, no section
+    // headings, the whole table on one page.
+    let at = Rect::new(0, 0, WIDE, 26);
+
+    toggle_at(&mut app, &mut frame, at);
+    let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    let (_, drawn) = read_sheet(&buf, &laid);
+
+    for phrase in mouse_phrases() {
+        assert!(
+            drawn.contains(phrase),
+            "the sheet does not name the mouse gesture {phrase:?}, which the pane \
+             answers:\n{drawn}"
+        );
+    }
+}
+
 /// Whether the sheet's keys column names `token`, as a cell or inside a range.
 ///
 /// **A range names its members, and finding that out is what the derived sweep
@@ -1467,16 +1501,6 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
             names(&keys, &token),
             "`action_for` binds {event:?}, which the sheet's keys column does not \
              name, so that gesture is unfindable:\n{drawn}"
-        );
-    }
-
-    // **And the mouse half, which no sweep can derive.** See `Reach` for why, and
-    // for what the exhaustive matches buy instead.
-    for phrase in mouse_phrases() {
-        assert!(
-            drawn.contains(phrase),
-            "the sheet does not name the mouse gesture {phrase:?}, which the pane \
-             answers:\n{drawn}"
         );
     }
 
