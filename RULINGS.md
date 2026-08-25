@@ -811,7 +811,8 @@ Round six found one behavioural defect, and it is the last of the family: **the
 pin's clamp was gated on a flag the pin did not set.**
 
 `View::collect`'s back-up rests a short screen's last row on the bottom, and it
-fires only for `anchored || landed_inside`, because a position a *jump* placed is
+fired only for `anchored || landed_inside` at the time, because a position a
+*jump* placed is
 a claim about the top row and must not be moved off it. `Action::ToggleSingle` is
 not a manual scroll, so it inherited whatever set the position, and `App::diff_to`
 sets `anchored` **false**. So a reader who dragged the diff's bar into the middle
