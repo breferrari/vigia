@@ -708,3 +708,68 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
          of v1 and which has no content to diff"
     );
 }
+
+/// **The run boundary is the walk's own answer, on every path out of it.**
+///
+/// `Frame::staged_at` exists so the shell stops recovering the partition by
+/// scanning the changed set, and five call sites now trust it. What makes that
+/// safe is that it is written in the same statement as the file list, so the two
+/// cannot describe different frames: an advance that fails leaves both, and a
+/// toggle that has not been walked yet leaves both.
+#[test]
+fn the_run_boundary_agrees_with_the_files_it_partitions() {
+    let scratch = fixture("staged-boundary");
+    scratch.write(FILE, "one\nSTAGED\nthree\n");
+    scratch.git(&["add", FILE]);
+    scratch.write(OTHER, "alpha\nUNSTAGED\n");
+
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+
+    // A frame that has never advanced: no files, and the staged run begins at the
+    // end of them, which is zero.
+    assert_eq!(frame.staged_at(), 0);
+    assert_eq!(frame.files().len(), 0);
+
+    // The run hidden: everything is unstaged, so the staged run begins past the
+    // end. That is the honest answer rather than a sentinel.
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.staged_at(),
+        frame.files().len(),
+        "with the staged run hidden the boundary is not the end of the list"
+    );
+
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    boundary_agrees(&frame);
+
+    // **Flipped but not yet walked**: the pair still describes the frame that is
+    // actually in hand, which is what everything reading it between a keypress
+    // and its walk depends on.
+    frame.show_staged(false);
+    boundary_agrees(&frame);
+    frame.advance().expect("advance");
+    boundary_agrees(&frame);
+}
+
+/// Everything before the boundary is unstaged and everything from it is staged.
+fn boundary_agrees(frame: &Frame) {
+    let at = frame.staged_at();
+    assert!(
+        at <= frame.files().len(),
+        "the boundary is past the end of the list, so the staged count underflows"
+    );
+    for (index, change) in frame.files().iter().enumerate() {
+        let want = if index < at {
+            Origin::Unstaged
+        } else {
+            Origin::Staged
+        };
+        assert_eq!(
+            change.origin, want,
+            "{} sits at {index} against a boundary of {at} and is {:?}",
+            change.path, change.origin
+        );
+    }
+}
