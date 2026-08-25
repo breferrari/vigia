@@ -17,7 +17,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Position, Row, View, diff_height};
+use vigia::{Action, App, Body, Position, Row, View, body_layout, diff_height};
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, generated, materialise};
@@ -63,6 +63,21 @@ fn body() -> usize {
 /// state rather than a test convenience.
 fn split() -> Body {
     Body::diff_only(body())
+}
+
+/// The shipped split, list included.
+///
+/// **Only `only_the_action_that_reads_the_height_is_given_one` wants it**, and it
+/// wants it because three of the eighteen `Action` variants move the list's
+/// window and nothing else: a list-free body makes those three unobservable, and
+/// leaves `App::list_rows` at zero so `ListRow` is a hard no-op as well.
+/// Everything else in this file is deliberately list-free; see [`split`].
+fn listed() -> Body {
+    body_layout(
+        Rect::new(0, 0, 80, 24),
+        &App::new().chrome("fixture", None, None, None, None, None),
+        FILES,
+    )
 }
 
 /// Many files, each a single rewritten line, so scrolling crosses them quickly.
@@ -717,7 +732,20 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     );
 }
 
-/// How many variants [`Action`] has, which [`tag`] is what keeps honest.
+/// How many variants [`Action`] has.
+///
+/// **Hand maintained, and saying so is the point.** The compile error in [`tag`]
+/// is what *prompts* a bump; nothing forces one. An earlier version of this gate
+/// asserted `named.len() == VARIANTS` and claimed that "an added arm fails loudly
+/// until the variant is actually driven", which was false: give a new arm the tag
+/// `18`, leave it undriven, and the count is still eighteen against an unbumped
+/// eighteen. That is the fourth overstated guarantee this branch has produced and
+/// the second inside a gate whose whole subject is overstated guarantees.
+///
+/// What holds now is weaker and true: the set is compared against `0..VARIANTS`,
+/// so an added arm with the next tag is **not** in the driven set and the gate is
+/// red until it is driven; and forgetting to bump this number is caught by that
+/// same comparison the moment two variants share a tag or one is skipped.
 const VARIANTS: usize = 18;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
@@ -725,8 +753,9 @@ const VARIANTS: usize = 18;
 /// **The `match` is the instrument.** A new variant does not compile here, which
 /// is the same guarantee `Action::needs_height` and `Action::is_manual_scroll`
 /// get from being exhaustive, and which the gate that drives them did not have.
-/// Adding an arm then makes the count assertion fail until the variant is
-/// actually driven, so neither half can be satisfied by writing a comment.
+/// Adding an arm with the next tag then leaves that tag out of the driven set,
+/// and the assertion under the list compares the two sets rather than their
+/// sizes, so it is red until the variant is really driven.
 ///
 /// Numbers rather than the variants themselves because `Action` is not `Ord` and
 /// the payloads are irrelevant here: two `Scroll`s with different rows are one
@@ -828,7 +857,9 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::ToggleSingle,
         Action::ToggleSheet,
         Action::CloseSheet,
-        Action::ListTo(0),
+        // **Mid-track, for the reason `DiffTo` below is**: `ListTo(0)` resolves
+        // to the first row under any height and could not fail.
+        Action::ListTo(vigia::TRACK_SCALE / 2),
         Action::ListRow(1),
         // **Mid-track, because the ends are degenerate.** `DiffTo(0)` resolves
         // to row zero under any height, so it lands in the same place with and
@@ -839,16 +870,12 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::Redraw,
     ];
 
-    let mut named = std::collections::BTreeSet::new();
-    for action in actions {
-        named.insert(tag(action));
-    }
+    let named: std::collections::BTreeSet<usize> = actions.into_iter().map(tag).collect();
+    let every: std::collections::BTreeSet<usize> = (0..VARIANTS).collect();
     assert_eq!(
-        named.len(),
-        VARIANTS,
-        "the list drives {} of {VARIANTS} variants, so a height misclassified on \
-         one of the rest would pass here exactly as `Bottom`'s did",
-        named.len()
+        named, every,
+        "the list does not drive every variant, so a height misclassified on one \
+         of the rest would pass here exactly as `Bottom`'s did"
     );
 
     // **Built once, because none of it varies with the action or the height.**
@@ -865,13 +892,22 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     let history = History::new();
     let full = body();
 
+    // **The list's own window is an observable here too**, and three of the
+    // eighteen rows were vacuous without it: `ScrollList`, `ListTo` and `ListRow`
+    // move `list_top` and nothing else, so a gate reading only the diff's
+    // position could never have failed on them. Real coverage was fifteen
+    // asserted as eighteen, which is the same overstatement one layer down.
+    //
+    // `ListRow` needs one more thing: `App::list_rows` is zero until a view has
+    // been drawn, so `offset < self.list_rows` is `1 < 0` and the action is a
+    // hard no-op. Each run below draws before it acts.
     for action in actions {
         // Whether the answer moved with the height, in each configuration.
         let mut moved_anywhere = false;
         for pinned in [false, true] {
             // Two heights far enough apart that any action reading one would land
             // somewhere different. Started from the same place each time.
-            let landed: Vec<(Position, Position)> = [0usize, full]
+            let landed: Vec<(Position, (Position, usize))> = [0usize, full]
                 .into_iter()
                 .map(|height| {
                     let mut app = App::new();
@@ -899,16 +935,22 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                         app.apply(Action::ToggleSingle, &mut frame, full)
                             .expect("pin");
                     }
+                    // Drawn once before the action, so `App::list_rows` is not
+                    // zero and the list gestures are not no-ops.
+                    let _ = app
+                        .view(&mut frame, &mut highlighter, &history, listed())
+                        .expect("seed the list");
                     app.apply(action, &mut frame, height).expect("apply");
                     // The retained request first, then what the walk resolved it
                     // to. The clamp can make two requests draw one screen, so the
                     // first is the sensitive one and the second is corroboration.
+                    // The list's window rides along, because three of the eighteen
+                    // variants move nothing else.
                     let kept = app.position();
-                    let drawn = app
-                        .view(&mut frame, &mut highlighter, &history, split())
-                        .expect("view")
-                        .top;
-                    (kept, drawn)
+                    let view = app
+                        .view(&mut frame, &mut highlighter, &history, listed())
+                        .expect("view");
+                    (kept, (view.top, view.list_top))
                 })
                 .collect();
 

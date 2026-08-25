@@ -4987,7 +4987,7 @@ fn column_lines(from: usize, mouse: bool) -> impl Iterator<Item = Line> {
 /// Gestures the whole sheet holds, which is what the page counter counts against.
 ///
 /// **Derived, never a literal.** [#288](https://github.com/breferrari/vigia/issues/288)
-/// adds a sixth mouse row, and a counter reading *of 17* on a table of eighteen
+/// adds a sixth mouse row, and a counter reading *of 18* on a table of nineteen
 /// is a lie no gate over the drawn output would catch: the number is furniture and
 /// every gate here reads the tables.
 const SHEET_TOTAL: usize = KEYBOARD.len() + MOUSE.len();
@@ -5027,7 +5027,8 @@ fn sheet_counter(shown: (usize, usize)) -> String {
 /// gates, which is the opposite of what the claim predicted.
 ///
 /// It costs the rungs below thirty columns, which are the rungs that drew four
-/// gestures of seventeen with nothing saying so.
+/// gestures of sixteen with nothing saying so, that being the table's size when
+/// B13 measured them.
 ///
 /// **The maximum is taken over the pairs [`shown_of`] can return, not guessed at
 /// one of them.** The first version asked [`sheet_counter`] for `(16, 16)` and got
@@ -5128,7 +5129,7 @@ fn sheet_plan(area: Rect, footer_rows: u16, margins: (u16, u16), page: usize) ->
     let capacity = usize::from(body).saturating_sub(SHEET_FRAME);
     // **The floor, stated once and early rather than folded into the rung
     // sequence.** Below it no rung fits on the height axis at all, and not only the
-    // paged ones: the shortest rung above them is the two-column one at twelve
+    // paged ones: the shortest rung above them is the two-column one at sixteen
     // rows. So an empty set of paged rungs and an early `None` are the same answer,
     // and the early one says which floor it is.
     if capacity < SHEET_KEEP {
@@ -6826,7 +6827,7 @@ impl Painter<'_> {
     /// answer to §11.1's *"reads as two unrelated tables"*: they were two labelled
     /// groups before they were two columns.
     ///
-    /// The columns are different heights (eleven keyboard rows against five mouse
+    /// The columns are different heights (thirteen keyboard rows against five mouse
     /// ones) and both carry the frame down their whole block, so the pipes are
     /// drawn over the taller of the two rather than per group.
     fn sheet_beside(&mut self, plan: &SheetPlan, keyboard: Group, mouse: Group) {

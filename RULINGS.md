@@ -445,7 +445,7 @@ because the plan made them before the run rather than after.
 **The keep-set did not move, and the reason first written for that was false.**
 `r` is a fourth gesture a reader cannot guess at, beside `f`, `m` and `?`, and
 `SHEET_KEEP` keeps three, so one of the four has to go first. It is given up at
-rank eight of `DROP_ORDER`, one before `f`.
+rank eight of `DROP_ORDER`, two before `f`, with `s` between them since B16.
 
 The reason recorded at the time was that the drop order binds at 30 to 34 columns
 and a rail needs 134, so `r` could not fire on the pane dropping it. **That
@@ -718,3 +718,55 @@ reads it*, and it now says so.** `Bottom` is measured in files unpinned and in
 rows pinned. Answering `true` costs it a height it ignores half the time, which is
 the conservative direction; the other reading hands it a zero in the state that
 reads one, and `saturating_sub(0)` then quietly means *the whole file*.
+
+## B16 — round four: the fourth layer out, and the claim that overstated the fix for the third
+
+Round four found one live defect, and it is the fourth instance of a pattern the
+three rounds before it each produced once. Stated plainly, because the pattern is
+worth more than any of its instances:
+
+| round | what it found |
+|---|---|
+| one | three gates green with the feature deleted, and a key nothing proved was bound |
+| two | a round-one fix that never reached the shell, and a latent panic a docblock hid |
+| three | a round-two fix that reached two of three call sites, and a coverage claim nothing enforced |
+| four | a round-three fix sized against a chrome its own side effect invalidates, and a coverage claim that overstated round three's fix |
+
+**The live one.** `Shell::diff_rows_for` builds the chrome to size the body
+*before* `App::apply` runs, and `Action::Bottom` is a manual scroll, so `apply`
+turns follow off underneath it. `Footer::plan` sizes its rungs from
+`Chrome::following`, where `follow ▶  N/M` is thirteen columns against `N/M`'s
+three, and between **31 and 40 columns** that decides a one-line footer against a
+two-line one. So the region the frame draws is thirteen rows where `span - height`
+was taken against twelve, the pinned file's last row rests one line above the
+bottom, and `App::view` writes the position straight back every frame: it stays
+wrong until the reader scrolls. That is
+[#57](https://github.com/breferrari/vigia/issues/57)'s symptom on the arm written
+to avoid it.
+
+`anchored = true` is the fix, and it is a truthful statement rather than a
+workaround. `anchored` means *reached by scrolling* and it licenses the walk's
+back-up for a short screen; `G` under a pin is asking for exactly that, and it is
+not a claim about what belongs on the top row, which is what a jump is and why
+`jump_to` clears it. Computing the height after `apply` cannot work, because
+`apply` is what needs it.
+
+**And the claim that overstated round three.** That round made the height gate
+drive all eighteen `Action` variants and wrote that "an added arm fails loudly
+until the variant is actually driven". False: the assertion compared
+`named.len()` with a hand-written `VARIANTS`, so a new arm tagged `18` and left
+undriven keeps both at eighteen. It compares the *set* against `0..VARIANTS` now,
+and says out loud that `VARIANTS` is hand maintained with the compile error in
+`tag` as the prompt to bump it. **Three of the eighteen rows were vacuous besides**:
+`ScrollList`, `ListTo` and `ListRow` move the list's window and nothing else, so a
+gate reading only the diff's position could never fail on them, and `ListRow` was a
+hard no-op because `App::list_rows` is zero until a view is drawn. Real coverage
+was fifteen asserted as eighteen.
+
+**The count of overstated guarantees on this branch is four**, in four places, and
+every one was found only after the previous was fixed: three cost claims about
+`span_in` and one about which gestures reach the frame before the walk clamps.
+They share a mechanism worth naming: **a docblock answers the question a reader
+would otherwise have gone and checked**, so a wrong one does not merely fail to
+help, it actively stops the check. No gate can see a comment. What finally caught
+each was an agent reading the sentence against the code beside it.

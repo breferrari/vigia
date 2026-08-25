@@ -312,7 +312,7 @@ fn the_sheet_moves_no_content() {
     }
 }
 
-/// A pane the roomy rung fits on: a room of 68 columns and a body of 30 rows.
+/// A pane the roomy rung fits on: a room of 68 columns and a body of 31 rows.
 ///
 /// Named because three gates run at both rungs now, and a pane size copied into
 /// three places is three places that can disagree about which rung they are
@@ -1004,9 +1004,9 @@ const LADDER_WIDTHS: std::ops::RangeInclusive<u16> = 40..=144;
 ///
 /// **Raised from 32 by [#285](https://github.com/breferrari/vigia/issues/285)**,
 /// and the old ceiling is why: the roomy rung needs a body of thirty-one rows,
-/// which this fixture reaches at a pane of thirty-two, so a sweep stopping there
-/// would have covered the new rung at exactly one height, thirty-two, and called
-/// it swept.
+/// which this fixture reaches at a pane of thirty-four, so a sweep stopping at
+/// thirty-two would have covered the new rung at no height at all and called it
+/// swept.
 const LADDER_HEIGHTS: std::ops::RangeInclusive<u16> = 6..=38;
 
 /// One materialised fixture, painted at many sizes.
@@ -2720,7 +2720,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     );
 
     // A row no other rung reaches: the plain rung is twenty-one rows tall and the
-    // two-column rung fourteen, so row 25 of this sheet is the roomy rung's alone.
+    // two-column rung sixteen, so row 25 of this sheet is the roomy rung's alone.
     let deep = sheet.top + 25;
     let inside = sheet.left + 34;
     assert!(

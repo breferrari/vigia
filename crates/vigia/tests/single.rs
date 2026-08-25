@@ -702,10 +702,14 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
 
 #[test]
 fn a_pinned_gesture_survives_the_diff_it_was_made_against() {
-    // **The panic the pin reaches that no other gesture does.** `G` and a drag on
-    // the diff's bar are the only two gestures that ask the frame how tall a file
-    // is *before* `View::collect` has clamped the position against the files that
-    // exist, and under a pin both of them do: unpinned, `G` is
+    // **The panic the pin reaches.** `G` and a drag on the diff's bar are two of
+    // the three gestures that ask the frame how tall a file is *before*
+    // `View::collect` has clamped the position against the files that exist, and
+    // under a pin both of them do. **The third is `App::up`'s walk back**, which
+    // had the same latent panic and is gated by
+    // `tests/scroll.rs::a_walk_back_survives_the_file_it_pointed_into_disappearing`;
+    // an earlier version of this sentence said *the only two*, which is the claim
+    // that kept it unfound. unpinned, `G` is
     // `jump_to(len - 1)`, which saturates on an empty list and touches no frame,
     // and a drag walks the list it is iterating.
     //
@@ -1254,5 +1258,111 @@ fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
         narrow > 0,
         "no width in the sweep changed its body height when follow went off, so \
          this gate never reaches the case it is named for"
+    );
+}
+
+#[test]
+fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
+    // **The pairing B16 calls the gesture's best case, and nothing exercised
+    // it.** Follow chooses the file an agent is writing and the pin keeps the diff
+    // on it, so a landing owed by `App::follow` resolving *inside* a pinned walk
+    // is the ordinary state of this feature, not an edge. Until #297's fourth
+    // audit round no test anywhere set `single` with a landing owed:
+    // `follow_still_moves_between_files_while_it_is_pinned` clears it with a
+    // scroll before it draws, `tests/follow.rs` never pins, and `tests/list.rs`'s
+    // degenerate grid pins `single: false` by name.
+    //
+    // Two things have to hold, and they are on opposite sides of the walk.
+    // `landing_of` has to place the viewport at the busiest hunk of the pinned
+    // file ([#257](https://github.com/breferrari/vigia/issues/257)), and the
+    // `landed_inside` restart has to back a short screen up against the *pinned*
+    // floor rather than the diff's, which is the bound whose earlier reading was
+    // this ruling's recorded defect.
+    //
+    // **A sparse fixture rather than this file's usual one**, and that is what
+    // makes the landing a landing. `landing_of` keeps the heading whenever the
+    // busiest hunk is already drawn from it, which is the right answer and is
+    // what the ordinary fixture gets: one hunk starting two rows down, visible
+    // from row zero. A file edited every fortieth line has hunks all the way
+    // down, so the busiest is below the fold and the landing has somewhere to go.
+    let scratch = Scratch::sparse_edits("shell-single-landing", FILES, 200, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+
+    app.apply(Action::ToggleSingle, &mut frame, body())
+        .expect("apply");
+    assert!(
+        app.following(),
+        "`s` disengaged follow, so nothing owes a landing"
+    );
+
+    // A middle file, so the landing has files on both sides to spill into if the
+    // pin let go.
+    const FOLLOWED: usize = 2;
+    const _: () = assert!(FOLLOWED + 1 < FILES, "the followed file is the last");
+    let target = frame.files()[FOLLOWED].path.clone();
+    assert!(
+        app.follow(&target, &frame),
+        "the follow did not move the viewport"
+    );
+
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    let span = vigia::span_in(&mut frame, FOLLOWED).expect("span");
+    assert!(
+        span > body(),
+        "the followed file is not taller than the body, so a landing and a \
+         heading are the same row"
+    );
+    assert_eq!(
+        files_on(&view),
+        vec![FOLLOWED],
+        "a landing under the pin drew rows of another file"
+    );
+    assert!(
+        view.landed,
+        "the landing was never resolved, so this gate is about a plain jump"
+    );
+    // **Where the landing lands is not asserted here, and that is deliberate.**
+    // `landing_of` keeps the heading whenever the busiest hunk is already drawn
+    // from it and moves off it only when it is not, which is
+    // [#257](https://github.com/breferrari/vigia/issues/257)'s rule and
+    // `tests/follow.rs`'s gate. Two fixtures were tried here before that was
+    // clear: one hunk starting two rows down is visible from row zero, and hunks
+    // of equal size tie to the earliest, which is also visible. Both keep the
+    // heading, correctly.
+    //
+    // What this gate owns is the half `follow.rs` cannot see: that the request
+    // was **resolved by a pinned walk at all**, that the walk did not leave the
+    // file to do it, and that the restart it can trigger backs up against the
+    // pinned floor rather than the diff's. `View::landed` above is the first,
+    // `files_on` the second, and the full screen and the stable next frame are
+    // the third.
+    assert_eq!(
+        view.rows.len(),
+        body(),
+        "the landed screen is short, so the back-up did not fill it"
+    );
+    assert_eq!(
+        view.total_rows, span,
+        "the bar under a landed pin measures the changed set"
+    );
+
+    // And the frame after it, which is where a landing that was not cleared, or a
+    // restart that resolved against the diff's floor instead of the pin's, would
+    // show up as the screen moving on its own.
+    let settled = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        (settled.top, settled.rows.len()),
+        (view.top, view.rows.len()),
+        "the frame after a landed pin moved with no input at all"
+    );
+    assert_eq!(
+        files_on(&settled),
+        vec![FOLLOWED],
+        "the frame after a landed pin left the pinned file"
     );
 }
