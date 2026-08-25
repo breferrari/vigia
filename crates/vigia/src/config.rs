@@ -109,15 +109,20 @@ pub const KEYS: [&str; 3] = ["masthead", "rail", "single"];
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
     ///
-    /// **The fallback arm is reachable and its `bool` is read.** This `match` is
-    /// on a `&str`, so it proves nothing about [`Config`]'s fields; an earlier
-    /// docblock claimed it was exhaustive the way
-    /// [`crate::input::Action::needs_height`] is, and that comparison was wrong,
-    /// because that one matches an **enum**. A later one called this arm
-    /// unreachable, which was also wrong: [`KEYS`] and this function are two
-    /// lists, and two lists drift. [`parse`] refuses the key when this returns
-    /// `false`, so a name in one and not the other is an error a reader sees
-    /// rather than a setting that quietly does nothing.
+    /// **The fallback arm is unreachable today and its `bool` is read anyway**,
+    /// because [`KEYS`] and this function are two lists and two lists drift.
+    /// [`parse`] admits a key by that list and applies it here, so while the two
+    /// agree this returns `true` every time; when they stop agreeing, `parse`
+    /// refuses the key and a reader sees an error rather than a setting that
+    /// quietly does nothing.
+    ///
+    /// **Two earlier docblocks got this wrong in opposite directions**, which is
+    /// worth leaving on the page. The first called the `match` exhaustive the way
+    /// [`crate::input::Action::needs_height`] is; that comparison is wrong,
+    /// because the other one matches an **enum** and this matches a `&str`. The
+    /// second overcorrected to *reachable*, which contradicted [`parse`]'s own
+    /// paragraph in the same file. Unreachable-but-read is the accurate one, and
+    /// it is why a mutation deleting the check survives the suite.
     fn set(&mut self, key: &str, on: bool) -> bool {
         match key {
             "masthead" => self.masthead = on,
@@ -242,7 +247,11 @@ impl std::error::Error for ConfigError {}
 /// single   = off
 /// ```
 ///
-/// **The theme file's grammar, with one deliberate divergence.** A byte order mark
+/// **The theme file's grammar, with three deliberate divergences**, all of them
+/// the same trade in different clothes: this file has no `base` and no value that
+/// begins with `#`, so several things a theme legitimately expresses are mistakes
+/// here. They are [`ConfigError::RepeatedKey`], a value with a trailing token, and
+/// the comment-only value below. A byte order mark
 /// is stripped, because U+FEFF is `Cf` rather than `White_Space` and survives
 /// every trim, landing inside the first key: a file saved by Notepad would
 /// otherwise stop the shell with an error naming an invisible byte. A comment is
@@ -252,11 +261,18 @@ impl std::error::Error for ConfigError {}
 /// nothing, and "it was discarded" is the one explanation a reader cannot arrive
 /// at by looking at their screen.
 ///
-/// **The divergence is a value that is nothing but a comment.** `theme::words_of`
-/// keeps a bare `#` as a token, because a theme value legitimately begins with one
-/// and `added = #3fb950` has to parse. No value here begins with `#`, so
+/// **The third is a value that is nothing but a comment.** `theme::words_of` keeps
+/// a bare `#` as a token, because a theme value legitimately begins with one and
+/// `added = #3fb950` has to parse. No value here begins with `#`, so
 /// `rail = # oops` is a key with nothing after its `=` rather than a key whose
 /// value is `#`, and it reports [`ConfigError::MissingValue`] accordingly.
+///
+/// The other two are the same shape. A theme is a base plus overrides, so a
+/// repeated key is a later line replacing an earlier one and `theme::parse` takes
+/// the last; here there is no base, so a repeat is a mistake and
+/// [`ConfigError::RepeatedKey`] says so. And a theme value is several words, so
+/// `theme::style_of` reads them all; here a value is one word, so a second is a
+/// typo rather than more value.
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
 

@@ -1949,10 +1949,11 @@ mod tests {
         // in `run` makes exactly this promise, that a repository failing on its
         // first walk reports on a terminal the reader can still see.
         //
-        // `Worktree::discover(` appears twice in the shipped source, and the
-        // second is inside `spawn_watch` *after* the takeover, so `find` returning
-        // the first is what this wants: a moved call cannot hide behind a later
-        // occurrence, only behind an earlier one, and there is none.
+        // **Two of these appear twice in the shipped source**, `Worktree::discover(`
+        // and `frame.advance()`, and in both the second occurrence is after the
+        // takeover. `find` returns the first, which is what this wants: a moved
+        // call cannot hide behind a *later* occurrence, only behind an earlier
+        // one, and neither has one.
         for reader in [
             "Worktree::discover(",
             "frame.advance()",
