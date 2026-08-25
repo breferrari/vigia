@@ -963,7 +963,13 @@ fn a_pinned_pane_draws_and_its_bar_is_the_files() {
         &chrome,
     );
 
-    let drawn: String = (0..at.height)
+    // **Inside the diff's own rows, not anywhere on the pane.** The first
+    // spelling asserted `drawn.contains(&pinned_path)` over the whole buffer, and
+    // the pinned path is also in the *list*, which the same pane draws: deleting
+    // every diff row from the painter left it green. The region is what makes it
+    // a claim about the diff.
+    let laid_regions = regions(at, &chrome, &view);
+    let diff_rows: String = (laid_regions.diff.top..laid_regions.diff.top + laid_regions.diff.rows)
         .map(|row| {
             (0..at.width)
                 .map(|col| buf[(col, row)].symbol())
@@ -971,12 +977,24 @@ fn a_pinned_pane_draws_and_its_bar_is_the_files() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-
     let pinned_path = frame.files()[PINNED].path.clone();
     assert!(
-        drawn.contains(&pinned_path),
-        "the pinned file's own path is not on the drawn pane:\n{drawn}"
+        laid_regions.diff.rows > 0,
+        "the pane published no diff region, so there is nothing to read"
     );
+    assert!(
+        diff_rows.contains(&pinned_path),
+        "the pinned file's heading is not among the diff's own rows:\n{diff_rows}"
+    );
+    for (index, file) in frame.files().iter().enumerate() {
+        if index != PINNED {
+            assert!(
+                !diff_rows.contains(&file.path),
+                "the drawn diff carries {:?}, which is not the pinned file",
+                file.path
+            );
+        }
+    }
     // Every other changed file is still in the **list**, which is the map the pin
     // leaves alone, so the drawn pane naming them is not a failure. What must not
     // be there is another file's *diff heading*, and the view is the oracle for
