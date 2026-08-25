@@ -144,28 +144,49 @@ fn tokens(line: &str) -> Vec<Range<u32>> {
 
 /// Longest common subsequence over token *content*, returned as index pairs
 /// `(removed_token, added_token)` in order.
+///
+/// Two things keep this affordable on the diff path, and both were bought by a
+/// measurement rather than assumed (the numbers are in #321's PR): tokens are
+/// compared as borrowed slices, never allocated, and the common prefix and
+/// suffix are stripped before the table is built, so the quadratic part runs
+/// over the middle the two lines actually disagree on. A changed line's edit
+/// is usually a few tokens inside a long shared frame, which makes the trim
+/// the difference between a table over the line and a table over the edit.
 fn lcs(
     r_text: &str,
     r_tokens: &[Range<u32>],
     a_text: &str,
     a_tokens: &[Range<u32>],
 ) -> Vec<(usize, usize)> {
-    let text = |source: &str, range: &Range<u32>| {
+    fn slice<'t>(source: &'t str, range: &Range<u32>) -> &'t str {
         source
             .get(range.start as usize..range.end as usize)
             .unwrap_or_default()
-            .to_owned()
-    };
-    let r: Vec<String> = r_tokens.iter().map(|range| text(r_text, range)).collect();
-    let a: Vec<String> = a_tokens.iter().map(|range| text(a_text, range)).collect();
+    }
+    let r: Vec<&str> = r_tokens.iter().map(|range| slice(r_text, range)).collect();
+    let a: Vec<&str> = a_tokens.iter().map(|range| slice(a_text, range)).collect();
 
-    // One flat table, lengths only; u16 is enough because TOKEN_CAP bounds both
-    // axes far below it.
-    let width = a.len() + 1;
-    let mut table = vec![0u16; (r.len() + 1) * width];
-    for i in (0..r.len()).rev() {
-        for j in (0..a.len()).rev() {
-            table[i * width + j] = if r[i] == a[j] {
+    let mut prefix = 0;
+    while prefix < r.len() && prefix < a.len() && r[prefix] == a[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < r.len() - prefix
+        && suffix < a.len() - prefix
+        && r[r.len() - 1 - suffix] == a[a.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let rm = &r[prefix..r.len() - suffix];
+    let am = &a[prefix..a.len() - suffix];
+
+    // One flat table over the disagreeing middle, lengths only; u16 is enough
+    // because TOKEN_CAP bounds both axes far below it.
+    let width = am.len() + 1;
+    let mut table = vec![0u16; (rm.len() + 1) * width];
+    for i in (0..rm.len()).rev() {
+        for j in (0..am.len()).rev() {
+            table[i * width + j] = if rm[i] == am[j] {
                 table[(i + 1) * width + j + 1] + 1
             } else {
                 table[(i + 1) * width + j].max(table[i * width + j + 1])
@@ -173,11 +194,11 @@ fn lcs(
         }
     }
 
-    let mut out = Vec::new();
+    let mut out: Vec<(usize, usize)> = (0..prefix).map(|i| (i, i)).collect();
     let (mut i, mut j) = (0, 0);
-    while i < r.len() && j < a.len() {
-        if r[i] == a[j] {
-            out.push((i, j));
+    while i < rm.len() && j < am.len() {
+        if rm[i] == am[j] {
+            out.push((prefix + i, prefix + j));
             i += 1;
             j += 1;
         } else if table[(i + 1) * width + j] >= table[i * width + j + 1] {
@@ -185,6 +206,9 @@ fn lcs(
         } else {
             j += 1;
         }
+    }
+    for k in (0..suffix).rev() {
+        out.push((r.len() - 1 - k, a.len() - 1 - k));
     }
     out
 }

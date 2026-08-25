@@ -7736,6 +7736,8 @@ fn emphasised_view() -> View {
                 number: 38,
                 text: text.to_owned(),
                 spans: Vec::new(),
+                // One range today; the type holds many per line.
+                #[allow(clippy::single_range_in_vec_init)]
                 emph: vec![stale..stale + 5],
             },
             line(LineKind::Context, 39, "    if self.pending.is_empty() {"),

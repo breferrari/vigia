@@ -8009,6 +8009,7 @@ impl Painter<'_> {
     /// Both are absent on a palette that declines them and on a depth that cannot
     /// express them, and then this draws exactly what it drew before #11: the sigil
     /// alone, which is the loss §11.1 records.
+    #[allow(clippy::too_many_arguments)]
     fn line_row(
         &mut self,
         area: Rect,
