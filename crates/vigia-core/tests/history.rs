@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use vigia_core::{
     Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
-    HISTORY_WINDOW, History, Recency, SPARK_GROUPS, scale_of,
+    HISTORY_WINDOW, History, PULSE_SAMPLES, Recency, SPARK_GROUPS, scale_of,
 };
 
 /// Paths a bulk operation invents, well past the cap.
@@ -1399,14 +1399,27 @@ fn a_write_after_the_whole_window_turned_over_still_accumulates() {
     // And it has to still be there one sample later. This is the assertion the
     // missing re-base fails: with `opened` left behind, this roll measures the
     // overnight gap a second time and clears the write above.
+    //
+    // **Asserted as "still tracked" rather than as a rung**, which is the
+    // correction this gate needed when [`PULSE_SAMPLES`] widened the mark: it read
+    // `Live` after one roll, which was the *mark's* lifetime rather than this
+    // test's subject, so a change to that number reddened a test about something
+    // else. What the missing re-base actually destroys is the track, and
+    // `tracked` says so without borrowing a rule from the row above.
     history.record_sized([], woke + HISTORY_SAMPLE);
     assert_eq!(
-        history.recency("src/b.rs"),
-        Recency::Live,
+        history.tracked(),
+        1,
         "a write made after the window drained was cleared by the next roll, so \
          the window re-measures the same overnight gap forever and can never \
          hold more than the instant being written"
     );
+    assert_ne!(history.recency("src/b.rs"), Recency::Cold);
+
+    // And it ages the ordinary way from there, which is what says the re-based
+    // window is a real window rather than one frozen at the turnover.
+    history.record_sized([], woke + HISTORY_SAMPLE * PULSE_SAMPLES as u32);
+    assert_eq!(history.recency("src/b.rs"), Recency::Live);
 }
 
 #[test]
@@ -1422,14 +1435,32 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
     history.record(["src/a.rs"], start);
     assert_eq!(history.recency("src/a.rs"), Recency::Pulse);
 
-    // One boundary is all it takes: `Track::shift` zeroes the newest sample, so
-    // the mark expires by construction rather than by anything retiring it.
-    history.record_sized([], start + HISTORY_SAMPLE);
+    // **[`PULSE_SAMPLES`] boundaries, and the mark expires by construction rather
+    // than by anything retiring it**: `Track::shift` walks the write out of the
+    // newest end of the track and the mark goes with it.
+    //
+    // **The number was one until 2026-08-25 and is two now**, which is the floor
+    // [`a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`]
+    // exists for: at one sample the lifetime was whatever was left of the second
+    // the write landed in, measured as low as 5ms, and the reader stopped seeing
+    // the dot. What this gate holds is unchanged and is the half #243 was about —
+    // the mark **expires** rather than freezing — and the assertion below is what
+    // fails if it stops.
+    for step in 1..PULSE_SAMPLES as u32 {
+        history.record_sized([], start + HISTORY_SAMPLE * step);
+        assert_eq!(
+            history.recency("src/a.rs"),
+            Recency::Pulse,
+            "the mark went early, so a write landing late in a sample is one the \
+             reader never catches"
+        );
+    }
+    history.record_sized([], start + HISTORY_SAMPLE * PULSE_SAMPLES as u32);
     assert_eq!(
         history.recency("src/a.rs"),
         Recency::Live,
-        "the pulse survived a roll, so a file that went quiet keeps claiming it \
-         just wrote"
+        "the pulse survived its window, so a file that went quiet keeps claiming \
+         it just wrote"
     );
 
     // **The rung above already carries "still tracked", so nothing asserts it
@@ -1441,4 +1472,100 @@ fn the_pulse_ages_with_the_window_it_is_drawn_beside() {
     // evidence and a second line restating it is a line that cannot fail.
     history.record_sized([], start + HISTORY_WINDOW * 2);
     assert_eq!(history.recency("src/a.rs"), Recency::Cold);
+}
+
+/// **The pulse must last long enough to be seen, whenever the write lands.**
+///
+/// `SPEC.md` §11.2 **B2** makes the mark the whole of *it changed on the newest
+/// tick*: the label went in [#99](https://github.com/breferrari/vigia/issues/99)
+/// and the dot is all that is left, so a dot nobody catches is the element gone.
+///
+/// **Reported from a live pane on 2026-08-25** as *"the dot showing a file was
+/// changed recently isn't showing up anymore"*, and it is a regression from
+/// [#279](https://github.com/breferrari/vigia/issues/279), which gave the window
+/// a clock of its own. Before it the window rolled only on a tick, so the mark
+/// survived until the next write; after it the mark dies at the next boundary of
+/// a **fixed one-second grid**, and where a write falls in that grid is
+/// arbitrary. Measured across the grid before the fix: a write at +0ms pulsed for
+/// 1s, at +500ms for 500ms, at +990ms for **10ms** and at +999ms for **5ms**. An
+/// agent saving files continuously lands wherever it lands, so the mark was a
+/// coin toss and the reader was losing it.
+///
+/// **The floor is what this asserts and the ceiling is what makes it honest.**
+/// A mark with no upper bound is the frozen clock §5.3 refuses and #243 removed;
+/// a mark with no lower bound is the one nobody sees. Both are gated, and the
+/// span between them is `PULSE_SAMPLES` samples by construction.
+#[test]
+fn a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed() {
+    // Every corner of the grid, including the two that measured 10ms and 5ms.
+    let offsets = [0, 1, 250, 500, 750, 900, 990, 999];
+    for offset in offsets {
+        let start = base();
+        let wrote = start + Duration::from_millis(offset);
+        let mut history = History::starting_at(start);
+        history.record(["src/a.rs"], wrote);
+        assert_eq!(
+            history.recency("src/a.rs"),
+            Recency::Pulse,
+            "a write pulses on the frame it caused (+{offset}ms)"
+        );
+
+        // Roll the way `Shell::draw` does, in fine steps, and find the moment the
+        // mark goes. Nothing else in the store may be touched: a second write
+        // would take the pulse for itself, which is a different rule.
+        let mut alive = None;
+        for step in 1..4_000u32 {
+            let now = wrote + Duration::from_millis(5 * u64::from(step));
+            history.record_sized([], now);
+            if history.recency("src/a.rs") != Recency::Pulse {
+                alive = Some(now.duration_since(wrote));
+                break;
+            }
+        }
+        let alive = alive.expect("the mark expires rather than freezing");
+
+        assert!(
+            alive >= HISTORY_SAMPLE,
+            "a write at +{offset}ms into the sample pulsed for only {alive:?}. \
+             The mark is the whole of B2 and one this short is one a reader \
+             never catches"
+        );
+        assert!(
+            alive <= HISTORY_SAMPLE * PULSE_SAMPLES as u32,
+            "a write at +{offset}ms into the sample pulsed for {alive:?}, which \
+             is past the bound. A mark that outlives what it describes is the \
+             frozen clock #243 removed"
+        );
+    }
+}
+
+/// And a newer burst still takes the mark from an older one **immediately**.
+///
+/// The widened lifetime must not turn into two files pulsing at once: *newest*
+/// is the whole meaning of the mark, and two of them says nothing. This is what
+/// fails if the fix reaches for the samples alone and drops the ordinal.
+#[test]
+fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
+    let start = base();
+    let mut history = History::starting_at(start);
+
+    history.record(["src/a.rs"], start + Duration::from_millis(100));
+    history.record(["src/b.rs"], start + Duration::from_millis(200));
+
+    assert_eq!(
+        history.recency("src/b.rs"),
+        Recency::Pulse,
+        "the newer burst"
+    );
+    assert_eq!(
+        history.recency("src/a.rs"),
+        Recency::Live,
+        "the older one is still in the window and is no longer the newest"
+    );
+
+    // And across a boundary, where both writes are now in older samples: the
+    // ordinal is what still separates them.
+    history.record_sized([], start + HISTORY_SAMPLE + Duration::from_millis(300));
+    assert_eq!(history.recency("src/b.rs"), Recency::Pulse);
+    assert_eq!(history.recency("src/a.rs"), Recency::Live);
 }

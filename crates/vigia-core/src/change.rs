@@ -1,4 +1,61 @@
-/// What happened to a path between the index and the working tree.
+/// Which comparison a change was found by.
+///
+/// **Two comparisons, drawn at once rather than one at a time**, which is
+/// `SPEC.md` §11.2 **B17**. The pane's default is still the working tree against
+/// the index; `a` adds the index against `HEAD` beside it as a second run, so a
+/// reader watching an agent that stages its own work sees where the work went
+/// instead of an emptying pane ([#313](https://github.com/breferrari/vigia/issues/313)).
+///
+/// **Carried on the change rather than derived from it**, because one path can be
+/// in both runs at once — staged, and then edited again on disk — and the two
+/// entries are genuinely two different diffs. Every consumer that has to mark a
+/// row, key a cache or count a run reads this rather than re-deriving it from the
+/// walk that produced it, which is a thing only [`crate::Frame::advance`] is in a
+/// position to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+pub enum Origin {
+    /// The working tree against the index. The pane's default, and the thesis:
+    /// it is what the agent in the other pane just wrote.
+    #[default]
+    Unstaged,
+    /// The index against `HEAD^{tree}`. What has been staged and not committed.
+    Staged,
+}
+
+impl Origin {
+    /// The word the pane draws for this run.
+    ///
+    /// Here rather than in the shell because two surfaces spell it — the run
+    /// separator and the header's count — and a second copy would be free to
+    /// disagree with the first.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unstaged => "unstaged",
+            Self::Staged => "staged",
+        }
+    }
+}
+
+/// Where the right-hand side of a diff comes from.
+///
+/// **Both sides used to be implied and one of them has stopped being.** Before
+/// [#313](https://github.com/breferrari/vigia/issues/313) the left side was always
+/// the index blob and the right was always the working tree, so
+/// [`FileChange::reads_worktree`] could answer from [`ChangeKind`] alone. A staged
+/// change compares two *blobs* — `HEAD`'s against the index's — and reads no file
+/// at all, so the right-hand side became data rather than a rule.
+///
+/// `None` on [`FileChange::after`] is a removal: there is no right-hand side,
+/// which is a third case neither variant here should have to represent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    /// Read the file on disk, through git's clean filter.
+    Worktree,
+    /// Take the object database's bytes for this id.
+    Blob(gix::ObjectId),
+}
+
+/// What happened to a path between the two sides of a comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChangeKind {
     /// Untracked in the index, present on disk.
@@ -36,10 +93,23 @@ pub struct FileChange {
     pub path: String,
     /// What happened to it.
     pub kind: ChangeKind,
-    /// Blob the index holds for this path, when there is one.
+    /// Which comparison found this change.
     ///
-    /// `None` for additions, which have no index-side content.
-    pub(crate) index_blob: Option<gix::ObjectId>,
+    /// See [`Origin`]. Two entries for one path are ordinary since
+    /// [#313](https://github.com/breferrari/vigia/issues/313), and this is what
+    /// tells them apart everywhere downstream: the row's gutter mark, the cache
+    /// key, and which run the separator counts it into.
+    pub origin: Origin,
+    /// Blob the left-hand side holds for this path, when there is one.
+    ///
+    /// The index's blob for an unstaged change and `HEAD`'s for a staged one.
+    /// `None` for an addition, which has no left-hand side on either.
+    pub(crate) before: Option<gix::ObjectId>,
+    /// Where the right-hand side comes from, or `None` for a removal.
+    ///
+    /// See [`Side`]. An unstaged change reads the working tree; a staged change
+    /// takes the index's blob and touches no file.
+    pub(crate) after: Option<Side>,
     /// Whether the working-tree side may be a symlink, as the status walk saw
     /// it.
     ///
@@ -109,6 +179,11 @@ pub struct FileChange {
     /// is what keeps that honest. The lesson generalises past the instance: a
     /// dependency's *behaviour* is only as uniform as its match arms, and this
     /// field reads one of those.
+    /// **Meaningful only where [`Self::after`] is [`Side::Worktree`].** A staged
+    /// change compares two blobs and never opens a file, so nothing consults this
+    /// on that path; the staged walk sets it `true`, which is the conservative
+    /// value every arm of [`crate::worktree::maybe_symlink`] already defaults to
+    /// and which costs nothing where no read happens.
     pub(crate) maybe_symlink: bool,
 }
 
@@ -129,8 +204,13 @@ impl FileChange {
     /// of this rule would let them drift into disagreeing about whether a
     /// cached diff can go stale, and the failure would be a stale frame rather
     /// than a compile error.
+    /// **Resolved from [`Self::after`] rather than from [`Self::kind`] since
+    /// [#313](https://github.com/breferrari/vigia/issues/313).** A staged
+    /// modification is a `Modified` that reads no file, so the kind stopped being
+    /// evidence the moment a second comparison existed. The rule is now the datum
+    /// the walk recorded, which cannot disagree with the diff that reads it.
     pub(crate) fn reads_worktree(&self) -> bool {
-        self.is_diffable() && !matches!(self.kind, ChangeKind::Removed)
+        self.is_diffable() && matches!(self.after, Some(Side::Worktree))
     }
 
     /// Whether this change can alter what git's clean filter does to **other**

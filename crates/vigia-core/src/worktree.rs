@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use gix::bstr::{BString, ByteSlice};
 use gix::status::index_worktree::{Item, RewriteSource, iter::Summary};
 
-use crate::change::{ChangeKind, FileChange};
+use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::{Error, Result};
 use crate::filter::Filter;
 use crate::frame::Frame;
@@ -118,18 +118,119 @@ impl Worktree {
     }
 
     /// Stream the working-tree-vs-index changes.
+    ///
+    /// Kept as the unstaged spelling of [`Worktree::changes_of`] rather than
+    /// removed: it is the comparison this tool is named for, every caller that
+    /// does not know about runs wants it, and a default argument is not a thing
+    /// Rust has.
     pub fn changes_with(&self, options: ChangeOptions) -> Result<Changes> {
-        let iter = self
+        self.changes_of(Origin::Unstaged, options)
+    }
+
+    /// Stream one comparison's changes.
+    ///
+    /// **Two comparisons since [#313](https://github.com/breferrari/vigia/issues/313),
+    /// and they are not the same shape.** [`Origin::Unstaged`] streams: `gix`
+    /// hands back an iterator over the index-worktree walk and this wraps it.
+    /// [`Origin::Staged`] does **not** stream and cannot, because
+    /// `Repository::tree_index_status` is callback-driven — it takes an `FnMut`
+    /// and drives the whole diff itself, so the only iterator available is over
+    /// what it has already produced.
+    ///
+    /// **That is stated rather than hidden behind the shared return type**, for
+    /// the reason this repository already learned once about the walk beside it:
+    /// an `impl Iterator` is not evidence that work is incremental, and only a
+    /// time-to-first-item measurement tells a lazy iterator from a lazy-looking
+    /// one over an eager batch. The unstaged walk is itself barely incremental
+    /// while rename tracking is on (first item at 97% of the walk), which is
+    /// `SPEC.md` §10's own open bullet, so the staged arm is a difference of
+    /// degree rather than of kind here.
+    ///
+    /// **What makes buffering affordable is that it reads no content.** A staged
+    /// change is two object ids compared, so this walk touches no file, allocates
+    /// one `FileChange` per changed path and nothing per line. Measured on a
+    /// 200-file fixture: **430µs against 2.15ms** for the index-worktree walk
+    /// beside it. I4 governs building what is drawn, and nothing here is built.
+    pub fn changes_of(&self, origin: Origin, options: ChangeOptions) -> Result<Changes> {
+        match origin {
+            Origin::Unstaged => {
+                let iter = self
+                    .repo
+                    .status(gix::progress::Discard)
+                    .map_err(|e| Error::Status(Box::new(e)))?
+                    // Collapsed would report a changed directory as one entry. A
+                    // monitor has to name the file that changed.
+                    .untracked_files(gix::status::UntrackedFiles::Files)
+                    .index_worktree_rewrites(
+                        options.track_renames.then(gix::diff::Rewrites::default),
+                    )
+                    .into_index_worktree_iter(Vec::<BString>::new())
+                    .map_err(|e| Error::Status(Box::new(e)))?;
+                Ok(Changes::Unstaged(iter))
+            }
+            Origin::Staged => Ok(Changes::Staged(self.staged(options)?.into_iter())),
+        }
+    }
+
+    /// How many changes one comparison holds, without keeping any of them.
+    ///
+    /// **For the empty state and nothing else.** B3's line says which comparison
+    /// it is empty *for*, and since #313 it also says where the work went when the
+    /// other run has some: `no unstaged changes · 3 staged` turns a blank pane
+    /// into a signpost instead of a dead end.
+    ///
+    /// Asked only on a frame that draws that line, which is a frame with no diff
+    /// to compute and nothing else to read. That is the same rule
+    /// [`Worktree::branch`] follows and it is what keeps I4 true: the thing read
+    /// is the thing drawn.
+    pub fn count_of(&self, origin: Origin) -> Result<usize> {
+        // Rename tracking off: a count does not care whether a deletion and an
+        // addition are one change or two, and pairing them is the expensive half
+        // of either walk.
+        let options = ChangeOptions {
+            track_renames: false,
+        };
+        self.changes_of(origin, options)?
+            .try_fold(0, |n, change| change.map(|_| n + 1))
+    }
+
+    /// The index against `HEAD^{tree}`, collected.
+    ///
+    /// **An unborn `HEAD` is an ordinary answer rather than a failure**, and it is
+    /// the case an agent's first minute is actually in: a repository with no
+    /// commits has no tree to compare against, so the comparison is against the
+    /// empty one and every indexed path reads as a staged addition. That is what
+    /// `git diff --cached` reports there too.
+    fn staged(&self, options: ChangeOptions) -> Result<Vec<FileChange>> {
+        let tree = match self.repo.head_tree_id() {
+            Ok(id) => id.detach(),
+            // Unborn, detached at nothing, or an unreadable `HEAD`. All three
+            // reach the same place for the same reason `branch` returns `None`
+            // for them: a monitor that refused to draw because it could not
+            // resolve a ref has stopped doing its job.
+            Err(_) => self.repo.empty_tree().id().detach(),
+        };
+        let index = self
             .repo
-            .status(gix::progress::Discard)
-            .map_err(|e| Error::Status(Box::new(e)))?
-            // Collapsed would report a changed directory as one entry. A
-            // monitor has to name the file that changed.
-            .untracked_files(gix::status::UntrackedFiles::Files)
-            .index_worktree_rewrites(options.track_renames.then(gix::diff::Rewrites::default))
-            .into_index_worktree_iter(Vec::<BString>::new())
+            .index_or_empty()
             .map_err(|e| Error::Status(Box::new(e)))?;
-        Ok(Changes { inner: iter })
+
+        let renames = if options.track_renames {
+            gix::status::tree_index::TrackRenames::Given(gix::diff::Rewrites::default())
+        } else {
+            gix::status::tree_index::TrackRenames::Disabled
+        };
+
+        let mut changes = Vec::new();
+        self.repo
+            .tree_index_status(&tree, &index, None, renames, |change, _, _| {
+                if let Some(change) = staged_change(&change) {
+                    changes.push(change);
+                }
+                Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
+            })
+            .map_err(|e| Error::Status(Box::new(e)))?;
+        Ok(changes)
     }
 
     /// Start watching this working tree for change.
@@ -187,16 +288,7 @@ impl Worktree {
             });
         }
 
-        let before = match change.index_blob {
-            Some(id) => self.blob(id, &change.path)?,
-            None => Vec::new(),
-        };
-        let after = if change.reads_worktree() {
-            self.read_worktree(change, probes)?
-        } else {
-            Vec::new()
-        };
-
+        let (before, after) = self.sides(change, probes)?;
         Ok(hunk::compute(change.path.clone(), &before, &after))
     }
 
@@ -222,17 +314,35 @@ impl Worktree {
             return Ok(hunk::FileSpan::default());
         }
 
-        let before = match change.index_blob {
+        let (before, after) = self.sides(change, probes)?;
+        Ok(hunk::measure(&before, &after))
+    }
+
+    /// Both sides of one change's diff, in the bytes git would compare.
+    ///
+    /// **One function since [#313](https://github.com/breferrari/vigia/issues/313)**,
+    /// where [`Worktree::diff_counted`] and [`Worktree::measure_counted`] each had
+    /// their own copy of it. The two must read the *same* bytes or a measured
+    /// height describes a diff nobody will draw, and two copies of a rule that now
+    /// has three cases — a blob, a working-tree read, or nothing at all — is the
+    /// same drift argument [`FileChange::reads_worktree`] was extracted on.
+    ///
+    /// A staged change reaches [`Side::Blob`] on both sides and spends no
+    /// syscall, which is what makes the second walk affordable: the run a reader
+    /// has just asked for costs object-database reads rather than filesystem ones.
+    fn sides(&self, change: &FileChange, probes: &mut u64) -> Result<(Vec<u8>, Vec<u8>)> {
+        let before = match change.before {
             Some(id) => self.blob(id, &change.path)?,
             None => Vec::new(),
         };
-        let after = if change.reads_worktree() {
-            self.read_worktree(change, probes)?
-        } else {
-            Vec::new()
+        let after = match change.after {
+            Some(Side::Worktree) => self.read_worktree(change, probes)?,
+            Some(Side::Blob(id)) => self.blob(id, &change.path)?,
+            // A removal, on either side. Nothing is read, which is the same
+            // early answer this had before there was a second comparison.
+            None => Vec::new(),
         };
-
-        Ok(hunk::measure(&before, &after))
+        Ok((before, after))
     }
 
     fn blob(&self, id: gix::ObjectId, path: &str) -> Result<Vec<u8>> {
@@ -421,12 +531,29 @@ fn git_separators(mut bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
-/// Iterator over working-tree-vs-index changes.
+/// Iterator over one comparison's changes.
 ///
 /// Yields one `Result` per path, so a single unreadable file does not end the
 /// stream. A monitor keeps going.
-pub struct Changes {
-    inner: gix::status::index_worktree::Iter,
+///
+/// **Two arms, and only one of them streams.** See [`Worktree::changes_of`] for
+/// why: `gix` gives the index-worktree walk an iterator and gives the tree-index
+/// walk a callback, so the staged arm is over a `Vec` that has already been
+/// filled. The type is shared because every caller wants the same thing from
+/// either, and the difference is documented rather than implied — a lazy-looking
+/// iterator over an eager batch is exactly the shape that has misled this
+/// repository once before.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the streaming arm is `gix`'s own iterator and is 1.5KB; boxing it \
+              would put an allocation and a pointer chase on the walk I4 measures, \
+              to shrink a value that exists once per frame"
+)]
+pub enum Changes {
+    /// The working tree against the index, streamed off `gix`'s own iterator.
+    Unstaged(gix::status::index_worktree::Iter),
+    /// The index against `HEAD^{tree}`, already collected.
+    Staged(std::vec::IntoIter<FileChange>),
 }
 
 fn path_of(raw: &gix::bstr::BStr) -> String {
@@ -497,12 +624,108 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
     }
 }
 
+/// The right-hand side an index-worktree change of this kind has.
+///
+/// **The rule [`FileChange::reads_worktree`] used to *be*, applied once at the
+/// walk instead of on every consultation.** A conflict and a type change are
+/// states rather than diffs and a removal has nothing on the right, so all three
+/// carry no side at all; everything else reads the file on disk.
+pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
+    match kind {
+        ChangeKind::Conflict | ChangeKind::TypeChange | ChangeKind::Removed => None,
+        _ => Some(Side::Worktree),
+    }
+}
+
+/// One tree-index change, as this crate spells changes.
+///
+/// **Both sides are object ids and neither is a file**, which is the whole reason
+/// the staged run is cheaper than the run beside it: `gix_diff::index` compares
+/// what the tree holds against what the index holds, and it has both blobs in hand
+/// by the time it calls back.
+///
+/// `None` drops a shape this does not understand, which is the same ruling the
+/// index-worktree mapper's own `_ => continue` arm makes: a `gix` version that
+/// grows a variant here should cost a reader one missing row rather than a
+/// mislabelled one.
+fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileChange> {
+    use gix::diff::index::ChangeRef;
+
+    let (path, kind, before, after) = match change {
+        ChangeRef::Addition { location, id, .. } => (
+            path_of(location.as_ref()),
+            ChangeKind::Added,
+            None,
+            Some(Side::Blob(id.as_ref().to_owned())),
+        ),
+        ChangeRef::Deletion { location, id, .. } => (
+            path_of(location.as_ref()),
+            ChangeKind::Removed,
+            Some(id.as_ref().to_owned()),
+            None,
+        ),
+        ChangeRef::Modification {
+            location,
+            previous_id,
+            id,
+            ..
+        } => (
+            path_of(location.as_ref()),
+            ChangeKind::Modified,
+            Some(previous_id.as_ref().to_owned()),
+            Some(Side::Blob(id.as_ref().to_owned())),
+        ),
+        // The *destination* names the change, exactly as it does for an
+        // index-worktree rewrite: the row a reader sees is the path the content
+        // is at now, and `from` is what it says about where it came from.
+        ChangeRef::Rewrite {
+            source_location,
+            source_id,
+            location,
+            id,
+            copy,
+            ..
+        } => {
+            let from = path_of(source_location.as_ref());
+            let kind = if *copy {
+                ChangeKind::Copied { from }
+            } else {
+                ChangeKind::Renamed { from }
+            };
+            (
+                path_of(location.as_ref()),
+                kind,
+                Some(source_id.as_ref().to_owned()),
+                Some(Side::Blob(id.as_ref().to_owned())),
+            )
+        }
+    };
+
+    Some(FileChange {
+        path,
+        kind,
+        origin: Origin::Staged,
+        before,
+        after,
+        // **Conservative, and it costs nothing here.** Nothing on the staged path
+        // reads a file, so this is never consulted; `true` is the value every arm
+        // of [`maybe_symlink`] defaults to when the walk cannot positively call an
+        // entry a plain file, and claiming `false` would be claiming something
+        // this walk never looked at.
+        maybe_symlink: true,
+    })
+}
+
 impl Iterator for Changes {
     type Item = Result<FileChange>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let inner = match self {
+            Self::Unstaged(iter) => iter,
+            Self::Staged(iter) => return iter.next().map(Ok),
+        };
         loop {
-            let item = match self.inner.next()? {
+            let item = match inner.next()? {
                 Ok(item) => item,
                 Err(e) => return Some(Err(Error::Status(Box::new(e)))),
             };
@@ -558,10 +781,17 @@ impl Iterator for Changes {
                 _ => continue,
             };
 
+            let after = reads_side(&kind);
             return Some(Ok(FileChange {
                 path,
                 kind,
-                index_blob,
+                origin: Origin::Unstaged,
+                before: index_blob,
+                // The working tree, unless there is nothing there to read. A
+                // removal and the two states `is_diffable` refuses all reach the
+                // same `None`, which is what `reads_worktree` used to derive from
+                // the kind and now reads straight off.
+                after,
                 maybe_symlink: maybe_symlink(&item, &summary),
             }));
         }

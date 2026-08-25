@@ -418,14 +418,7 @@ impl<'repo> Watcher<'repo> {
             .find_map(|root| path.strip_prefix(root).ok())?;
 
         if rela.components().next().map(|c| c.as_os_str()) == Some(OsStr::new(".git")) {
-            // Inside the git directory only the index matters, because the
-            // index is the left-hand side of every diff we draw. Everything
-            // else there is object and log churn that changes no pixel.
-            //
-            // Matching on the file name rather than the full path also catches
-            // `index.lock`'s rename into place, which is how git actually
-            // publishes a new index.
-            return (rela.file_name() == Some(OsStr::new("index"))).then_some(rela);
+            return watched_in_git_dir(rela).then_some(rela);
         }
 
         // The mode is not cosmetic. A rule like `target/` matches directories
@@ -532,6 +525,72 @@ fn accept_paths<'p>(
 /// Where the view should move for a worktree-relative path an event named, or
 /// `None` when there is nowhere to move.
 ///
+/// Whether a path inside `.git` is one the pane's contents depend on.
+///
+/// **The index was the whole answer until
+/// [#313](https://github.com/breferrari/vigia/issues/313), and it was the whole
+/// answer because there was one comparison.** The working tree against the index
+/// depends on `.git/index` and on nothing else in there; the index against
+/// `HEAD^{tree}` depends on where `HEAD` resolves to as well, and `HEAD` can move
+/// without the index being written at all.
+///
+/// **Measured rather than reasoned**, on a fixture repository: `git add`,
+/// `git commit` and `git reset --mixed` all rewrite `.git/index`, so staging was
+/// always seen. `git reset --soft` writes `.git/refs/heads/<branch>`,
+/// `.git/logs/HEAD` and `.git/ORIG_HEAD` and **not** `.git/index` — so the staged
+/// run would have gone on drawing a comparison against a commit that is no longer
+/// `HEAD`, indefinitely, with nothing on screen saying so. That is I5 failing
+/// silently, which is the failure this whole module is priced against.
+///
+/// **It also repays a defect that predates the staged run.** The empty state names
+/// the branch, read from `HEAD` on the frame that draws it, and `git switch -c`
+/// does not write the index either: the pane named the old branch until something
+/// else happened to wake it.
+///
+/// Four names, and the ones left out are left out deliberately:
+///
+/// * **`index`**, matched by file name rather than by full path, which is what
+///   catches the *destination* of `index.lock`'s rename into place — how git
+///   actually publishes a new index. The lock file itself is not watched: waking
+///   on it would draw the outgoing index one frame before the incoming one.
+/// * **`HEAD`**, which is rewritten by a checkout and by detaching, and which
+///   carries the object id itself while detached.
+/// * **`refs/heads/**`**, because `HEAD` is a symref into it almost always, so a
+///   branch tip moving is `HEAD` moving.
+/// * **`packed-refs`**, because `git pack-refs` and `git gc` move a loose ref into
+///   it and the loose file then stops existing.
+///
+/// **`refs/remotes` and `refs/tags` stay excluded**, and that is what keeps a
+/// `git fetch` from waking a monitor that would draw exactly what it drew before:
+/// `HEAD` cannot resolve to either. So can `logs/`, `ORIG_HEAD` and the object
+/// database, which are records of what happened rather than statements of what is.
+fn watched_in_git_dir(rela: &Path) -> bool {
+    if rela.file_name() == Some(OsStr::new("index")) {
+        return true;
+    }
+
+    // Everything below is judged on the path *within* `.git`, so strip it once.
+    let mut inside = rela.components();
+    inside.next();
+    let mut inside = inside.peekable();
+    let Some(first) = inside.next() else {
+        return false;
+    };
+    let first = first.as_os_str();
+
+    if first == OsStr::new("HEAD") || first == OsStr::new("packed-refs") {
+        // Only when it *is* that file: a directory called `HEAD` somewhere below
+        // is not one, and `refs/heads/HEAD` reaches the arm underneath.
+        return inside.peek().is_none();
+    }
+
+    // `refs/heads/**`, at any depth, because a branch name may carry slashes.
+    // A bare `refs/heads` directory event names no ref and is dropped with it.
+    first == OsStr::new("refs")
+        && inside.next().map(|c| c.as_os_str()) == Some(OsStr::new("heads"))
+        && inside.next().is_some()
+}
+
 /// Pure, and deliberately not inlined into [`Watcher::accept`], for the reason
 /// `SPEC.md` §7 gives: neither of the two things it decides has a reachable
 /// integration path on every platform. The separator rule is unobservable on
@@ -670,6 +729,94 @@ mod tests {
     fn an_index_write_names_no_file_to_follow() {
         assert_eq!(followable(&native(&[".git", "index"])), None);
         assert_eq!(followable(&native(&[".git", "index.lock"])), None);
+    }
+
+    /// **A branch tip moving is a change the monitor must see**, and until
+    /// [#313](https://github.com/breferrari/vigia/issues/313) it did not.
+    ///
+    /// The staged run compares the index against `HEAD^{tree}`, so where `HEAD`
+    /// resolves to is an input to it. Measured on a fixture: `git reset --soft`
+    /// writes `refs/heads/<branch>`, `logs/HEAD` and `ORIG_HEAD`, and **not**
+    /// `index` — so under the old rule the run went on drawing a comparison
+    /// against a commit that was no longer `HEAD`, indefinitely. I5 failing with
+    /// nothing on screen to say so.
+    ///
+    /// It repays an older defect too: the empty state names the branch, and
+    /// `git switch -c` does not write the index either.
+    #[test]
+    fn a_branch_tip_moving_is_a_change_the_monitor_must_see() {
+        let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
+
+        assert!(watched(&[".git", "index"]), "staging, as it always was");
+        assert!(watched(&[".git", "HEAD"]), "a checkout, or detaching");
+        assert!(
+            watched(&[".git", "refs", "heads", "main"]),
+            "a branch tip moving is HEAD moving, because HEAD is a symref"
+        );
+        assert!(
+            watched(&[".git", "refs", "heads", "feature", "nested"]),
+            "and a branch name may carry slashes"
+        );
+        assert!(
+            watched(&[".git", "packed-refs"]),
+            "because gc moves a loose ref into it and the loose file then goes"
+        );
+    }
+
+    /// **What stays excluded, and why each one would be a wake that draws exactly
+    /// what was already on screen.**
+    ///
+    /// This is the half that keeps the widening honest. `HEAD` cannot resolve to a
+    /// remote branch or to a tag, so neither can change either comparison; the
+    /// reflogs and `ORIG_HEAD` are records of what happened rather than statements
+    /// of what is; and the object database is where content lands *before* any ref
+    /// names it.
+    ///
+    /// Without this test the rule above is satisfied by returning `true`, which is
+    /// a monitor woken by every `git fetch` and every `git gc`.
+    #[test]
+    fn the_rest_of_the_git_directory_still_wakes_nothing() {
+        let watched = |parts: &[&str]| watched_in_git_dir(&native(parts));
+
+        assert!(!watched(&[".git", "refs", "remotes", "origin", "main"]));
+        assert!(!watched(&[".git", "refs", "tags", "v1.0.0"]));
+        assert!(!watched(&[".git", "logs", "HEAD"]));
+        assert!(!watched(&[".git", "ORIG_HEAD"]));
+        assert!(!watched(&[".git", "objects", "ab", "cdef01"]));
+        assert!(!watched(&[".git", "COMMIT_EDITMSG"]));
+        assert!(!watched(&[".git", "config"]));
+
+        // **The lock file itself is not the write, and that is deliberate rather
+        // than an oversight this widening should have swept up.** Git publishes a
+        // new index by writing `index.lock` and renaming it over `index`, and it
+        // is the rename's destination that names `index`. Waking on the lock too
+        // would draw the *old* index a moment before the new one landed, then
+        // draw it again — one wasted frame per stage, and the first of the two
+        // showing a comparison that is about to stop being true.
+        assert!(!watched(&[".git", "index.lock"]));
+
+        // A directory event rather than a file one. `refs/heads` itself names no
+        // ref, and a `HEAD` that is a directory somewhere below is not the file.
+        assert!(!watched(&[".git", "refs", "heads"]));
+        assert!(!watched(&[".git", "refs"]));
+        assert!(
+            !watched(&[".git", "worktrees", "other", "HEAD"]),
+            "another worktree's HEAD is another worktree's business"
+        );
+    }
+
+    /// Neither of the refs the staged run watches is somewhere to scroll to.
+    ///
+    /// Same ruling as the index one above, applied to the three names that joined
+    /// it: they produce a real tick and they are not files the viewport can rest on.
+    #[test]
+    fn a_ref_write_names_no_file_to_follow() {
+        assert_eq!(followable(&native(&[".git", "HEAD"])), None);
+        assert_eq!(
+            followable(&native(&[".git", "refs", "heads", "main"])),
+            None
+        );
+        assert_eq!(followable(&native(&[".git", "packed-refs"])), None);
     }
 
     /// A prefix match would take `.github/workflows/ci.yml` with it, and that

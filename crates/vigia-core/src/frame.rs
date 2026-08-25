@@ -60,10 +60,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::change::{ChangeKind, FileChange};
+use crate::change::{ChangeKind, FileChange, Origin, Side};
 use crate::error::Result;
 use crate::hunk::{FileDiff, FileSpan};
-use crate::worktree::Worktree;
+use crate::worktree::{ChangeOptions, Worktree};
 
 /// What a [`Frame`] has done since it was created.
 ///
@@ -259,7 +259,15 @@ fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
 #[derive(Clone)]
 struct Taken {
     kind: ChangeKind,
-    index_blob: Option<gix::ObjectId>,
+    before: Option<gix::ObjectId>,
+    /// The right-hand side this artefact was computed from.
+    ///
+    /// **Two object ids are proof and a working-tree read is not**, which is the
+    /// asymmetry [#313](https://github.com/breferrari/vigia/issues/313) added and
+    /// the reason this is stored rather than re-derived: a staged change compares
+    /// blob against blob, so a pair that still matches identifies the exact bytes,
+    /// with no fingerprint and no settle margin in it at all.
+    after: Option<Side>,
     /// The working-tree side as it was when the content was read. `None` when
     /// this artefact has no working-tree side, or when it could not be
     /// fingerprinted.
@@ -277,26 +285,68 @@ impl Taken {
     fn of(change: &FileChange, worktree: Option<Observed>) -> Self {
         Self {
             kind: change.kind.clone(),
-            index_blob: change.index_blob,
+            before: change.before,
+            after: change.after,
             worktree,
         }
     }
 }
 
-/// Store `value` under `path`, keeping the key the map already owns.
+/// What a cached artefact is filed under.
+///
+/// **A path is no longer a key, and that is
+/// [#313](https://github.com/breferrari/vigia/issues/313).** With the staged run
+/// drawn, one path can be changed on both sides at once — staged, and then edited
+/// again on disk — and the two are different diffs of different bytes. Keyed by
+/// path alone the second entry read the first one's answer back, which is a diff
+/// drawn against content it was never computed from and the exact stale-pane
+/// defect this whole module exists to prevent.
+///
+/// Borrowed for lookup so the common path allocates nothing: [`Key`] holds the
+/// `String` and [`Ref`] is what a caller with a `&FileChange` can build for free.
+type Key = (Origin, String);
+
+/// A borrowed [`Key`], for looking one up without owning it.
+type Ref<'a> = (Origin, &'a str);
+
+/// This change's cache key, borrowed.
+fn key_of(change: &FileChange) -> Ref<'_> {
+    (change.origin, change.path.as_str())
+}
+
+/// `HashMap` cannot look up a `(Origin, String)` from a `(Origin, &str)`, because
+/// `Borrow` does not reach inside a tuple. Two maps keyed on nested maps would be
+/// the other answer and it costs a second layer of allocation and iteration on
+/// every path this file has; a wrapper that implements the lookup traits is a
+/// third and it is a lot of unsafe-adjacent boilerplate for one field.
+///
+/// So lookups go through this, which is one `String` allocation on a **miss** path
+/// only. Every hot caller below already had the owned key in hand or was already
+/// on a recompute.
+fn get<'m, T>(map: &'m HashMap<Key, T>, at: Ref<'_>) -> Option<&'m T> {
+    map.get(&(at.0, at.1.to_owned()))
+}
+
+/// [`get`], mutably.
+fn get_mut<'m, T>(map: &'m mut HashMap<Key, T>, at: Ref<'_>) -> Option<&'m mut T> {
+    map.get_mut(&(at.0, at.1.to_owned()))
+}
+
+/// Store `value` under `at`, keeping the key the map already owns.
 ///
 /// `HashMap::insert` keeps the existing key and drops the one handed to it, so
-/// the obvious `insert(path.clone(), …)` allocates a `String` per call and frees
+/// the obvious `insert(key.clone(), …)` allocates a `String` per call and frees
 /// it again on the common path, where [`Frame::advance`] has already migrated an
 /// entry for every changed file. Only a genuine miss needs a new key.
 ///
 /// Generic over the value because both caches want it: the span map pays it once
 /// per changed file, the diff map once per recompute.
-fn put<T>(map: &mut HashMap<String, T>, path: &str, value: T) {
-    match map.get_mut(path) {
+fn put<T>(map: &mut HashMap<Key, T>, at: Ref<'_>, value: T) {
+    let owned = (at.0, at.1.to_owned());
+    match map.get_mut(&owned) {
         Some(slot) => *slot = value,
         None => {
-            map.insert(path.to_owned(), value);
+            map.insert(owned, value);
         }
     }
 }
@@ -433,14 +483,22 @@ fn reusable(
     current: &FileChange,
     fresh: impl FnOnce() -> Option<Fingerprint>,
 ) -> bool {
-    // A new blob for this path is a new diff even when the file on disk never
+    // A new blob on either side is a new diff even when the file on disk never
     // moved, and a new kind is a different diff outright.
-    if taken.kind != current.kind || taken.index_blob != current.index_blob {
+    if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
+    {
         return false;
     }
 
-    // A removal, a conflict and a type change are computed from the index side
+    // A removal, a conflict and a type change are computed from the left side
     // alone, so they have no working-tree side that could have gone stale.
+    //
+    // **And since #313 a staged change reaches here too, on a stronger claim
+    // rather than the same one.** Both of its sides are object ids, the equality
+    // above has just compared them, and a git object id names its bytes: there is
+    // no granule to be racily clean about and no `stat` that could add anything.
+    // `reads_worktree` is `false` for it because [`FileChange::after`] is a blob,
+    // which is the same datum this rule now reads.
     if !current.reads_worktree() {
         return true;
     }
@@ -477,7 +535,7 @@ fn reusable(
 pub struct Frame<'w> {
     worktree: &'w Worktree,
     files: Vec<FileChange>,
-    cached: HashMap<String, Cached>,
+    cached: HashMap<Key, Cached>,
     /// How tall every changed file is, once something has asked.
     ///
     /// Separate from [`Self::cached`] because it answers a different question
@@ -486,7 +544,7 @@ pub struct Frame<'w> {
     /// [`Frame::advance`] under the same proof the diffs beside it are carried
     /// under, and migrated so it is bounded by the changed set rather than by
     /// the session.
-    spans: HashMap<String, Measured>,
+    spans: HashMap<Key, Measured>,
     /// The attributes files in the changed set, and what they looked like, as of
     /// the last tick.
     ///
@@ -502,6 +560,19 @@ pub struct Frame<'w> {
     /// Comparing this against the next tick's costs one `stat` per attributes
     /// file, and a worktree has none of those in it almost always.
     attributes: HashMap<String, Option<Fingerprint>>,
+    /// Whether the staged run is drawn beside the unstaged one.
+    ///
+    /// `SPEC.md` §11.2 **B17**, from `a`
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)). Off by default,
+    /// which is both the derived answer and the ruled one: a reader who has
+    /// pressed nothing gets the comparison this tool has always drawn, and which
+    /// way the toggle *starts* is still
+    /// [#50](https://github.com/breferrari/vigia/issues/50)'s question.
+    ///
+    /// **Here rather than in the shell**, unlike the four toggles that only decide
+    /// what is drawn: this one decides what is *walked*, so it has to be known
+    /// before [`Frame::advance`] runs rather than after it.
+    staged: bool,
     stats: FrameStats,
 }
 
@@ -513,6 +584,7 @@ impl<'w> Frame<'w> {
             cached: HashMap::new(),
             spans: HashMap::new(),
             attributes: HashMap::new(),
+            staged: false,
             stats: FrameStats::default(),
         }
     }
@@ -539,6 +611,20 @@ impl<'w> Frame<'w> {
         let mut files = Vec::with_capacity(self.files.len());
         for change in self.worktree.changes()? {
             files.push(change?);
+        }
+        // **Unstaged first, then staged, and the order is the product.** The runs
+        // are drawn in this order and the separators are emitted at the boundary,
+        // so a reader reads down from what the agent has just written to what it
+        // has already put away. Concatenating rather than merging is also what
+        // lets one path hold an entry in each: they are two comparisons of two
+        // different pairs of bytes, and the pane says so rather than choosing one.
+        if self.staged {
+            for change in self
+                .worktree
+                .changes_of(Origin::Staged, ChangeOptions::default())?
+            {
+                files.push(change?);
+            }
         }
 
         // Nothing above this line mutated anything, which is what makes a failed
@@ -644,14 +730,15 @@ impl<'w> Frame<'w> {
             // is moved rather than cloned. With two maps that is up to 2N
             // needless `String` allocations a tick, which on the hundred-file
             // gate is two hundred.
-            if let Some((path, cached)) = previous.remove_entry(&change.path) {
-                self.cached.insert(path, cached);
+            let key = (change.origin, change.path.clone());
+            if let Some((key, cached)) = previous.remove_entry(&key) {
+                self.cached.insert(key, cached);
             }
-            if let Some((path, mut measured)) = previous_spans.remove_entry(&change.path) {
+            if let Some((key, mut measured)) = previous_spans.remove_entry(&key) {
                 // Carried, and no longer proved. What it described was true of
                 // the previous tick, and `fill_span` is where it is asked again.
                 measured.proven = false;
-                self.spans.insert(path, measured);
+                self.spans.insert(key, measured);
             }
         }
         // Whatever is left is a path that stopped being changed. Counted from
@@ -662,6 +749,41 @@ impl<'w> Frame<'w> {
 
         self.files = files;
         Ok(())
+    }
+
+    /// Whether the staged run is drawn beside the unstaged one.
+    pub fn staged(&self) -> bool {
+        self.staged
+    }
+
+    /// Draw the staged run, or stop drawing it.
+    ///
+    /// **Both caches are dropped when this actually changes**, and it is not
+    /// tidiness. Turning the run *off* leaves every staged entry's diff behind
+    /// with nothing that will ever evict it, since [`Frame::advance`]'s migration
+    /// only keeps what the new file list names and [`FrameStats::evicted`] counts
+    /// what it drops — so the entries would be dropped correctly, but the *count*
+    /// would report a whole run's worth of eviction as ordinary churn. Turning it
+    /// *on* is the case that matters: nothing about an unstaged entry changes, so
+    /// nothing would be recomputed, which is correct — and a `Frame` that had held
+    /// a staged entry from an earlier stretch with the toggle on would hand back
+    /// an answer taken under a `HEAD` that may since have moved, because a staged
+    /// artefact's freshness rests on object ids the walk supplies and no walk ran
+    /// for it while the toggle was off.
+    ///
+    /// Dropping both is the same trade [`Frame::advance`] already makes for an
+    /// attributes change: a rare event, paying what the first frame pays, rather
+    /// than a term in [`reusable`] that no fingerprint can carry.
+    ///
+    /// A no-op when the answer is unchanged, so a shell that calls this every
+    /// frame costs nothing.
+    pub fn show_staged(&mut self, staged: bool) {
+        if self.staged == staged {
+            return;
+        }
+        self.staged = staged;
+        self.cached.clear();
+        self.spans.clear();
     }
 
     /// The changed files, in the order status reported them.
@@ -726,7 +848,7 @@ impl<'w> Frame<'w> {
         for index in 0..self.files.len() {
             self.fill_span(index);
             let change = &self.files[index];
-            total += rows_of(change, &self.spans[&change.path].span);
+            total += rows_of(change, &self.span_of(change).span);
         }
         Ok(total)
     }
@@ -742,7 +864,7 @@ impl<'w> Frame<'w> {
     ) -> Result<usize> {
         self.fill_span(index);
         let change = &self.files[index];
-        Ok(rows_of(change, &self.spans[&change.path].span))
+        Ok(rows_of(change, &self.span_of(change).span))
     }
 
     /// Put a span for the file at `index` in the cache, if one is not there.
@@ -794,24 +916,32 @@ impl<'w> Frame<'w> {
     /// [`Taken`] evidence, and it inherits the same single limit: a write that
     /// restores both length and modification time
     /// ([#16](https://github.com/breferrari/vigia/issues/16)).
+    /// The span this change's row is drawn from, which [`Self::fill_span`] has
+    /// just guaranteed exists.
+    ///
+    /// **A named accessor rather than an index expression**, because the key grew
+    /// a second component in [#313](https://github.com/breferrari/vigia/issues/313)
+    /// and two call sites were spelling it out. Panicking on a miss is deliberate
+    /// and unchanged: both callers fill first, and a silent zero here would draw a
+    /// file with no height rather than fail.
+    fn span_of(&self, change: &FileChange) -> &Measured {
+        &self.spans[&(change.origin, change.path.clone())]
+    }
+
     fn fill_span(&mut self, index: usize) {
         let change = &self.files[index];
-        if self
-            .spans
-            .get(&change.path)
-            .is_some_and(|measured| measured.proven)
-        {
+        if get(&self.spans, key_of(change)).is_some_and(|measured| measured.proven) {
             return;
         }
 
         // (1) A diff in hand. Free, and no syscall.
-        if let Some(cached) = self.cached.get(&change.path) {
+        if let Some(cached) = get(&self.cached, key_of(change)) {
             let measured = Measured {
                 taken: Some(cached.taken.clone()),
                 span: FileSpan::from(&cached.diff),
                 proven: true,
             };
-            put(&mut self.spans, &change.path, measured);
+            put(&mut self.spans, key_of(change), measured);
             return;
         }
 
@@ -829,7 +959,7 @@ impl<'w> Frame<'w> {
         let path = self.worktree.workdir().join(&change.path);
         let mut probed = false;
         let mut proved = false;
-        if let Some(measured) = self.spans.get_mut(&change.path)
+        if let Some(measured) = get_mut(&mut self.spans, key_of(change))
             && let Some(taken) = measured.taken.as_ref()
             && reusable(taken, change, || {
                 probed = true;
@@ -887,7 +1017,7 @@ impl<'w> Frame<'w> {
             span,
             proven: true,
         };
-        put(&mut self.spans, &change.path, measured);
+        put(&mut self.spans, key_of(change), measured);
     }
 
     /// The change at `index` and its diff, computed now or reused from an
@@ -920,7 +1050,7 @@ impl<'w> Frame<'w> {
         // not read is a syscall bought for nothing, and `probes` should count
         // the ones actually taken.
         let mut probed = false;
-        let reuse = match self.cached.get(&change.path) {
+        let reuse = match get(&self.cached, key_of(change)) {
             None => false,
             Some(cached) => reusable(&cached.taken, change, || {
                 probed = true;
@@ -931,7 +1061,10 @@ impl<'w> Frame<'w> {
 
         if reuse {
             self.stats.reused += 1;
-            return Ok((change, &self.cached[&change.path].diff));
+            return Ok((
+                change,
+                &self.cached[&(change.origin, change.path.clone())].diff,
+            ));
         }
 
         // Timed from before the read starts, so the window a write would have
@@ -961,16 +1094,16 @@ impl<'w> Frame<'w> {
         // rebuilds it from the fresh diff without reading a byte. This is the
         // half of #84 that is free. The half that is not is a file that changed
         // and has *not* been re-diffed, which needs a read to notice.
-        self.spans.remove(&change.path);
-        put(
-            &mut self.cached,
-            &change.path,
+        let key = (change.origin, change.path.clone());
+        self.spans.remove(&key);
+        self.cached.insert(
+            key.clone(),
             Cached {
                 taken: Taken::of(change, worktree),
                 diff,
             },
         );
-        Ok((change, &self.cached[&change.path].diff))
+        Ok((change, &self.cached[&key].diff))
     }
 }
 
@@ -1000,13 +1133,32 @@ mod tests {
     }
 
     fn change(kind: ChangeKind, index_blob: Option<gix::ObjectId>) -> FileChange {
+        let after = crate::worktree::reads_side(&kind);
         FileChange {
             path: "src/lib.rs".to_owned(),
             kind,
-            index_blob,
+            origin: Origin::Unstaged,
+            before: index_blob,
+            after,
             // These unit tests are over [`reusable`], which does not consult it:
             // the field decides how a file is *read*, and nothing here reads one.
             maybe_symlink: false,
+        }
+    }
+
+    /// The same path as a **staged** change: two object ids and no file at all.
+    ///
+    /// The arm [#313](https://github.com/breferrari/vigia/issues/313) added to
+    /// [`reusable`], which is the one place a `false` from `reads_worktree` now
+    /// means "proved" rather than "computed from the left side alone".
+    fn staged_change(before: Option<gix::ObjectId>, after: Option<gix::ObjectId>) -> FileChange {
+        FileChange {
+            path: "src/lib.rs".to_owned(),
+            kind: ChangeKind::Modified,
+            origin: Origin::Staged,
+            before,
+            after: after.map(Side::Blob),
+            maybe_symlink: true,
         }
     }
 
@@ -1020,10 +1172,22 @@ mod tests {
         index_blob: Option<gix::ObjectId>,
         worktree: Option<Observed>,
     ) -> Taken {
+        let after = crate::worktree::reads_side(&kind);
         Taken {
             kind,
-            index_blob,
+            before: index_blob,
+            after,
             worktree,
+        }
+    }
+
+    /// [`taken`] for a staged artefact, whose right-hand side is a blob.
+    fn taken_staged(before: Option<gix::ObjectId>, after: Option<gix::ObjectId>) -> Taken {
+        Taken {
+            kind: ChangeKind::Modified,
+            before,
+            after: after.map(Side::Blob),
+            worktree: None,
         }
     }
 
@@ -1033,6 +1197,49 @@ mod tests {
             print: print(len, mtime),
             settled: true,
         })
+    }
+
+    /// **A staged artefact is proved by two object ids and nothing else**, which
+    /// is the arm [#313](https://github.com/breferrari/vigia/issues/313) added.
+    ///
+    /// `reads_worktree` is `false` for it, so it takes the same early `true` a
+    /// removal takes — but on a stronger claim rather than the same one: a git
+    /// object id names its bytes, so there is no granule to be racily clean about
+    /// and no `stat` that could add anything. The `fresh` closure must therefore
+    /// never be called, and the panic inside it is what says so.
+    #[test]
+    fn a_staged_artefact_with_both_ids_unchanged_is_reusable_without_a_fingerprint() {
+        assert!(reusable(
+            &taken_staged(blob(1), blob(2)),
+            &staged_change(blob(1), blob(2)),
+            || panic!("a staged artefact must not reach for a fingerprint"),
+        ));
+    }
+
+    /// And either id moving is a different diff.
+    ///
+    /// Both directions, because they are different events: the left one moving is
+    /// a commit landing under the index, and the right one moving is a fresh
+    /// `git add`. A rule that compared only one of them would draw a stale run
+    /// after whichever it skipped.
+    #[test]
+    fn a_staged_artefact_is_refused_when_either_side_moved() {
+        assert!(
+            !reusable(
+                &taken_staged(blob(1), blob(2)),
+                &staged_change(blob(9), blob(2)),
+                || None,
+            ),
+            "HEAD moved under the index"
+        );
+        assert!(
+            !reusable(
+                &taken_staged(blob(1), blob(2)),
+                &staged_change(blob(1), blob(9)),
+                || None,
+            ),
+            "something else was staged"
+        );
     }
 
     /// The rule that cannot be raced, so it is checked arithmetically instead.
