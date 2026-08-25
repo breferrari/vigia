@@ -1677,3 +1677,57 @@ fn the_list_asks_for_the_rows_its_separators_will_take() {
          and the last run loses its tail"
     );
 }
+
+/// **Pressing `a` shows the staged run on that frame, not on the next write.**
+///
+/// The defect this closes reached a live pane: `Action::ToggleStaged` told the
+/// frame what to walk and nothing re-walked, because `Frame::advance` runs on a
+/// **tick** and a keypress is not one. So the reader pressed the key, the header
+/// said `0 staged` over a worktree with two staged files, and the pane went on
+/// showing exactly what it showed before — until something happened to be written,
+/// which on a tree an agent has finished with may be never.
+///
+/// That is the failure `SPEC.md` §11.2 B17 is named for, one layer down: a key
+/// that does nothing a reader can see. The three toggles beside it need no advance
+/// because they rearrange rows the frame already holds; this one changes what the
+/// frame *contains*.
+#[test]
+fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
+    let scratch = two_runs("list-toggle-advances");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        3,
+        "the fixture opens with the unstaged run alone"
+    );
+
+    let mut app = App::new();
+    app.apply(Action::ToggleStaged, &mut frame, 20)
+        .expect("apply");
+
+    assert_eq!(
+        frame.files().len(),
+        6,
+        "the staged run is empty on the frame the reader asked for it, so `a` \
+         draws nothing until something else happens to be written"
+    );
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.origin == Origin::Staged),
+        "the frame grew rows that are not the staged run"
+    );
+
+    // And pressing it again puts the pane back on the same frame, rather than
+    // leaving the run on screen until the next write.
+    app.apply(Action::ToggleStaged, &mut frame, 20)
+        .expect("apply");
+    assert_eq!(
+        frame.files().len(),
+        3,
+        "the staged run is still drawn after the reader asked for it to go"
+    );
+}

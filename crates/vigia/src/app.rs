@@ -792,6 +792,30 @@ impl App {
                 self.staged = !self.staged;
                 frame.show_staged(self.staged);
                 self.position = Position::default();
+                // **And the frame is walked here, which no other toggle needs.**
+                // `Frame::advance` runs on a **tick**, and a keypress is not one:
+                // the other three rearrange rows the frame already holds, so a
+                // paint is the whole of what they owe. This one changes what the
+                // frame *contains*, and without a walk the reader pressed `a`,
+                // the header said `0 staged` over a worktree with two staged
+                // files, and the pane went on drawing exactly what it drew before
+                // — until something happened to be written, which on a tree an
+                // agent has finished with may be never. Found in a live pane, and
+                // it is the failure §11.2 B17 is named for one layer down: a key
+                // that does nothing a reader can see.
+                //
+                // **I1 is untouched.** This is not a clock and not an unbidden
+                // wake: it is work on a wake the reader caused, which is the same
+                // licence every other key on this map already has.
+                //
+                // The error goes to the footer rather than out of `apply`, for the
+                // reason the tick's own `advance` does: the core leaves the frame
+                // exactly as it was on failure, so the previous run is still valid
+                // to draw, and refusing the keystroke would blank a pane over a
+                // walk that may succeed on the next one.
+                if let Err(e) = frame.advance() {
+                    self.warn(e.to_string());
+                }
             }
             // **No jump and no move at all**, which is one better than the
             // masthead: that toggle resizes the diff's region, and this one draws
