@@ -55,10 +55,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 18;
+const ESCAPING_FILES: usize = 19;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "eighteen";
+const ESCAPING_FILES_SPELLED: &str = "nineteen";
 
 /// The repository root, two levels above this package.
 ///
@@ -151,7 +151,9 @@ fn escaping_tests() -> Vec<String> {
     // [#295](https://github.com/breferrari/vigia/issues/295) made `rail.rs` the
     // sixteenth, [#297](https://github.com/breferrari/vigia/issues/297) making
     // `single.rs` the seventeenth, and [#309](https://github.com/breferrari/vigia/issues/309)
-    // making `config.rs` the eighteenth. The whole point is that a count in prose
+    // making `config.rs` the eighteenth, and 2026-08-25 when
+    // [#320](https://github.com/breferrari/vigia/issues/320) made `theme_docs.rs`
+    // the nineteenth. The whole point is that a count in prose
     // cannot notice a new test, and a floor is a count that cannot notice one
     // either.
     //
@@ -752,7 +754,7 @@ fn package_list(package: &str, gate: &str) -> Option<String> {
 /// reader who did nothing wrong.
 ///
 /// The resolution is directory-wide (`exclude = ["tests/**"]`) rather than
-/// per-file, and that is deliberate: eighteen of the twenty-six test files escape
+/// per-file, and that is deliberate: nineteen of the twenty-seven test files escape
 /// already, a per-file list would need editing every time a test is added, and
 /// the failure mode of forgetting is silent. This gate holds either shape,
 /// because it asks whether each escaping file is *covered*, not how.
