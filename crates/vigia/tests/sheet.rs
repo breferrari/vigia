@@ -346,7 +346,7 @@ fn the_sheet_is_opaque() {
     washed_theme.removed_row = washed_theme.removed_row.bg(Color::Red);
 
     // **At both rungs since [#285](https://github.com/breferrari/vigia/issues/285).**
-    // The roomy rung is the one with air in it: six of its twenty-seven interior
+    // The roomy rung is the one with air in it: six of its twenty-nine interior
     // rows are blank, and a blank row is exactly a row the drawer writes nothing
     // over, so it is the shape most exposed to a background the blank pass failed
     // to clear. The rung that had this gate is the one with the least air.
@@ -711,8 +711,8 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     // A short pane keeps the keyboard group and loses the mouse group, which is
     // the height axis on its own. **Sixteen rows is still below #220's widening
     // rung** and the case survived it unchanged: the pane's footer is two rows
-    // here, so the body is thirteen and the two-column rung needs fourteen. One
-    // row taller and the mouse group comes back beside the keyboard group
+    // here, so the body is thirteen and the two-column rung needs sixteen. Three
+    // rows taller and the mouse group comes back beside the keyboard group
     // instead, which is what `the_sheet_spends_width_before_it_spends_gestures`
     // holds.
     let short_at = Rect::new(0, 0, WIDE, 16);
@@ -843,14 +843,22 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
         "Shift+↓",
         "f",
         "m",
-        // **`r` and `s` were missing until #297**, which is the hole
-        // [#288](https://github.com/breferrari/vigia/issues/288) exists to close
-        // properly: this list is hand written, so a key added to `KEYBOARD` is
-        // covered here only if somebody remembers, and #295 did not. `r` shipped
-        // uncovered for a release. The list is still hand written and that is
-        // #288's to fix; what this change owes is not to add a third.
+        // **`r`, `s`, `→` and `←` were all missing until #297's audit**, which is
+        // the hole [#288](https://github.com/breferrari/vigia/issues/288) exists
+        // to close properly: this list is hand written, so a key added to
+        // `KEYBOARD` is covered here only if somebody remembers, and the last
+        // three changes to bind one did not. `r` (#295) shipped uncovered for a
+        // release and the arrows (#296) for a day.
+        //
+        // **The first version of this comment said "what this change owes is not
+        // to add a third", and a third was already there**: it was written
+        // against `KEYBOARD` before the arrows landed and never re-read against
+        // the merge. A hand-written list cannot be fixed by promising to
+        // remember, which is the whole of #288's case.
         "r",
         "s",
+        "→",
+        "←",
         "?",
     ] {
         assert!(
@@ -925,7 +933,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
 ///
 /// **The order is the reader's, not the ladder's**, since
 /// [#285](https://github.com/breferrari/vigia/issues/285) separated the two: `q`
-/// is last of the eleven keyboard entries because the sheet draws it last, and
+/// is last of the thirteen keyboard entries because the sheet draws it last, and
 /// the ladder gives it up first. Several gates walk this against drawn rows, so
 /// the order is load-bearing rather than decorative. The count is not spelled
 /// out, for the reason [`LADDER_WIDTHS`]' own docblock gives.
@@ -1601,8 +1609,8 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     // **The other axis, and the one no gate walked.** `SPEC.md` §11.1 states the
     // rung needs "a body of thirty-one rows", and a body is the pane less the
     // header and less a footer whose height is its own ladder in the width. So the
-    // pane height it arrives at is not thirty and cannot be derived by
-    // reading: on this fixture at a hundred columns it is thirty-two, three rows
+    // pane height it arrives at is not thirty-one and cannot be derived by
+    // reading: on this fixture at a hundred columns it is thirty-four, three rows
     // above the number the ruling names.
     //
     // That gap is exactly what produced #220's wrong arrival width, where the
@@ -1825,7 +1833,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
     // sees, and the two are not the same claim: a drawer free to iterate the
     // table backwards would satisfy every assertion over the constants.
     //
-    // The reader's end: the full one-column rung draws the eleven keyboard rows in
+    // The reader's end: the full one-column rung draws the thirteen keyboard rows in
     // the order Mock A reads them, `q` last. The ladder's end: at the floor, the
     // three rows left are `f`, `m` and `?`, and `q` is not among them. Conflate
     // the two orders again and the second fails, because dropping from the top of

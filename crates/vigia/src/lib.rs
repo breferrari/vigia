@@ -604,7 +604,21 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         let repeat = shell.held.and_then(|hold| hold.fire(Instant::now()));
         if let Some((step, next)) = repeat {
             shell.held = Some(next);
-            match shell.app.apply(step, &mut frame, 0) {
+            // **The third of three, and it joined last.** `Regions::step_at`
+            // yields only `Scroll` and `ScrollList` today, neither of which reads
+            // a height, so the literal zero this replaced was right by accident
+            // rather than by rule. It is the identical shape to the drag site
+            // [`Shell::diff_rows_for`] was extracted for, and the identical shape
+            // to `Action::Bottom` being classified wrongly: a call site that
+            // decides a height instead of asking for one.
+            //
+            // Found by [#297](https://github.com/breferrari/vigia/issues/297)'s
+            // third audit round, after the second had unified two of the three.
+            // No test drives this loop, so what protects it is that there is now
+            // one function every site calls rather than three answers that can
+            // drift apart.
+            let height = shell.diff_rows_for(step, frame.files().len())?;
+            match shell.app.apply(step, &mut frame, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
                 Err(e) => shell.app.warn(e.to_string()),
@@ -733,7 +747,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // rather than onto travel: the thumb runs past its own
                             // bottom and the last screenful of track is dead.
                             // That is the arithmetic
-                            // `tests/scroll.rs::a_drag_maps_the_track_onto_travel`
+                            // `tests/scroll.rs::dragging_the_diff_bar_resolves_to_a_row_and_reaches_the_end`
                             // pins for the press, one gesture over from where the
                             // reader spends the rest of the drag.
                             //
@@ -1211,8 +1225,10 @@ impl Shell {
     /// that empties this function survives the suite and is recorded as such.
     ///
     /// Cheap by construction: a drained trackpad flick is up to sixty-four
-    /// actions between two paints, and only the three that read a height pay for
-    /// the terminal-size syscall and the `Chrome` this builds.
+    /// actions between two paints, and only the four that read a height pay for
+    /// the terminal-size syscall and the `Chrome` this builds. **Four rather than
+    /// three since `Action::Bottom` joined them**, which is B16's doing: pinned,
+    /// `G` rests a file's last row on the bottom, and *the bottom* is a height.
     fn diff_rows_for(&mut self, action: Action, files: usize) -> Result<usize, Failure> {
         if !action.needs_height() {
             return Ok(0);

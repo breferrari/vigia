@@ -717,6 +717,43 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     );
 }
 
+/// How many variants [`Action`] has, which [`tag`] is what keeps honest.
+const VARIANTS: usize = 18;
+
+/// One number per [`Action`] variant, from an exhaustive `match`.
+///
+/// **The `match` is the instrument.** A new variant does not compile here, which
+/// is the same guarantee `Action::needs_height` and `Action::is_manual_scroll`
+/// get from being exhaustive, and which the gate that drives them did not have.
+/// Adding an arm then makes the count assertion fail until the variant is
+/// actually driven, so neither half can be satisfied by writing a comment.
+///
+/// Numbers rather than the variants themselves because `Action` is not `Ord` and
+/// the payloads are irrelevant here: two `Scroll`s with different rows are one
+/// variant for this purpose, and the list above deliberately drives both.
+fn tag(action: Action) -> usize {
+    match action {
+        Action::Quit => 0,
+        Action::Scroll(_) => 1,
+        Action::ScrollList(_) => 2,
+        Action::Page(_) => 3,
+        Action::HalfPage(_) => 4,
+        Action::File(_) => 5,
+        Action::Top => 6,
+        Action::Bottom => 7,
+        Action::ToggleFollow => 8,
+        Action::ToggleMasthead => 9,
+        Action::ToggleRail => 10,
+        Action::ToggleSingle => 11,
+        Action::ToggleSheet => 12,
+        Action::CloseSheet => 13,
+        Action::ListTo(_) => 14,
+        Action::ListRow(_) => 15,
+        Action::DiffTo(_) => 16,
+        Action::Redraw => 17,
+    }
+}
+
 #[test]
 fn only_the_action_that_reads_the_height_is_given_one() {
     // `Action::needs_height` exists so the shell can skip an uncached
@@ -754,14 +791,24 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     let scratch = fixture("shell-scroll-height");
     let worktree = scratch.worktree();
 
-    // Every action, so a new variant reaches this list by failing to be in it.
+    // **Every variant, and the list is exhaustive by construction rather than by
+    // a comment saying so.** This read *"every action, so a new variant reaches
+    // this list by failing to be in it"* and nothing made that true: it was a
+    // plain array naming nine of eighteen, and `Action::DiffTo` — the second
+    // wrong height this branch found — was one of the nine it omitted. A claim of
+    // coverage that nothing enforces is the shape `RULINGS.md` calls worse than
+    // no claim at all, and it is how `Bottom` shipped misclassified in the first
+    // place.
+    //
+    // [`tag`] below is what enforces it: an exhaustive `match`, so a new variant
+    // is a **compile error** there, and then the assertion under it is a loud
+    // failure until the new variant is named here too. Two steps, and the first
+    // one cannot be skipped.
     let actions = [
+        Action::Quit,
         Action::Scroll(SPAN as isize * 3),
         Action::Scroll(-(SPAN as isize)),
-        Action::Top,
-        Action::Bottom,
-        Action::Redraw,
-        Action::ToggleFollow,
+        Action::ScrollList(1),
         Action::Page(1),
         Action::Page(-1),
         Action::HalfPage(1),
@@ -771,11 +818,38 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // no-op is exactly the shape that passes a height check vacuously.
         Action::File(1),
         Action::File(-1),
+        Action::Top,
+        Action::Bottom,
+        Action::ToggleFollow,
+        Action::ToggleMasthead,
+        Action::ToggleRail,
         // The pin itself, which moves no viewport and so must not be told a
-        // height. It is in this list because B16 added it, and the list is what
-        // a new variant has to reach.
+        // height.
         Action::ToggleSingle,
+        Action::ToggleSheet,
+        Action::CloseSheet,
+        Action::ListTo(0),
+        Action::ListRow(1),
+        // **Mid-track, because the ends are degenerate.** `DiffTo(0)` resolves
+        // to row zero under any height, so it lands in the same place with and
+        // without one and would read as a wrong classification. The middle is the
+        // only part of a track where mapping onto travel and mapping onto the
+        // whole disagree, which is the same reason the drag gates walk it.
+        Action::DiffTo(vigia::TRACK_SCALE / 2),
+        Action::Redraw,
     ];
+
+    let mut named = std::collections::BTreeSet::new();
+    for action in actions {
+        named.insert(tag(action));
+    }
+    assert_eq!(
+        named.len(),
+        VARIANTS,
+        "the list drives {} of {VARIANTS} variants, so a height misclassified on \
+         one of the rest would pass here exactly as `Bottom`'s did",
+        named.len()
+    );
 
     // **Built once, because none of it varies with the action or the height.**
     // The frame is a forty-file `gix` diff and `Highlighter::new` loads the
@@ -801,6 +875,14 @@ fn only_the_action_that_reads_the_height_is_given_one() {
                 .into_iter()
                 .map(|height| {
                     let mut app = App::new();
+                    // **Off file zero, or the pinned arm is dead for `Top`.**
+                    // `Top` under a pin is `jump_to(position.file)`, which is
+                    // `jump_to(0)` when the position never left the first file,
+                    // so seeding with a scroll alone made the pinned run byte
+                    // identical to the unpinned one for the *other* action B16
+                    // changed.
+                    app.apply(Action::File(2), &mut frame, full)
+                        .expect("seed a file");
                     app.apply(Action::Scroll(SPAN as isize * 8), &mut frame, full)
                         .expect("seed");
                     if pinned {

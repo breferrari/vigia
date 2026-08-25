@@ -1255,8 +1255,23 @@ impl Action {
 
     /// Whether applying this needs to know how tall the body is.
     ///
-    /// Only the actions measured in screens do, rather than in rows. Everything
+    /// Mostly the actions measured in screens rather than in rows. Everything
     /// else is given the height and ignores it.
+    ///
+    /// **It is *reads it in some reachable state*, not *always reads it*, and
+    /// `SPEC.md` §11.2 B16 is what made the distinction load-bearing.**
+    /// [`Action::Bottom`] is measured in files unpinned, where it lands on a
+    /// heading and no height can move it, and in **rows** under a pin, where it
+    /// rests the file's last row on the bottom. So it answers `true` and pays a
+    /// height it ignores half the time, which is the conservative direction: the
+    /// other reading hands it a zero in the state that reads one, and
+    /// `saturating_sub(0)` then quietly means *the whole file*. That shipped
+    /// once ([#297](https://github.com/breferrari/vigia/issues/297)) with the
+    /// gate for it green, because the gate drove only the unpinned state.
+    ///
+    /// No other action is state-dependent today, and that is checked rather than
+    /// assumed: `Top` writes an index and reads nothing pinned or not, and every
+    /// other `false` arm ignores the height in both states.
     ///
     /// This exists because the answer is **expensive**, not because it is
     /// interesting. Deriving the height costs an uncached terminal-size syscall

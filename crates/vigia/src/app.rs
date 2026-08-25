@@ -851,14 +851,19 @@ impl App {
             // up their heights, which is the read I4 forbids.
             //
             // **Under a pin it is the last row, and that is affordable here and
-            // nowhere else.** The subject is one file, that file has been diffed
-            // by definition, and [`crate::view::span_in`] is a `stat` against a
-            // span this tick has already proved. So `G` keeps meaning *the end
+            // nowhere else.** The subject is one file and that file has been
+            // diffed by definition, so [`crate::view::span_in`] answers from the
+            // diff the walk already holds. `G` therefore keeps meaning *the end
             // of what you can scroll to* while the thing it reaches gets better,
-            // rather than meaning something different. The row asked for is the
-            // file's full height and `View::collect` clamps it to the last
-            // screenful on the way, which is the same path a scroll off the end
-            // takes: one place decides where the bottom is.
+            // rather than meaning something different.
+            //
+            // What that costs is [`Self::diff_to`]'s docblock's to state and it
+            // is not free in every case; two earlier spellings of this paragraph
+            // said `span_in` was "a `stat` against a span this tick has already
+            // proved", which is [`crate::view::block_rows`]' cost quoted under a
+            // different call, and the sentence outlived both corrections because
+            // nothing reads a comment. The resting row itself is the inner
+            // comment below, and an earlier draft of this one contradicted it.
             Action::Bottom => {
                 if let Some(file) = self.pinned_file(frame) {
                     self.anchored = false;

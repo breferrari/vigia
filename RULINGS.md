@@ -343,7 +343,10 @@ one of them is true.
 **The two-column rung moved with the copy and the plan did not predict it.**
 `sheet_beside` measures the same mouse cells, so the tight rung went 76 to 71 and
 its arrival 78 to 73. Additive: the block of panes between 73 and 77 columns drew
-eleven gestures and now draws sixteen on one page. Recorded as a deviation rather
+eleven gestures and drew sixteen on one page after it. (**B13's counts throughout
+this section are B13's own and are not current**: `r` and then `s` were added
+after it and every one of them moved. The current ones are in `SPEC.md` §11.1.)
+Recorded as a deviation rather
 than folded in, because a number that moves without being predicted is the thing
 this ledger exists to catch.
 
@@ -669,3 +672,49 @@ were *the only* gestures reaching the frame ahead of the walk. They were not.
 the question a reader would otherwise have gone and checked, and this is the
 second one in the same area on this branch: the first said `span_in` cost a
 `stat`, and it cost a whole-file diff.
+
+## B16 — round three: two of three call sites, and a claim of coverage nothing enforced
+
+Round three found no blocker and nothing a reader could see, which is what an
+audit converging looks like. What it found instead is the same defect one layer
+further out, twice, and the pattern across the three rounds is worth more than any
+of them individually.
+
+**Round one found gates that were green with the feature deleted. Round two found
+that a round-one fix never reached the shell. Round three found that round two's
+fix reached two of the three call sites.** The third is the held-repeat path, and
+it passed a literal zero for a height. It is benign today, because
+`Regions::step_at` yields only `Scroll` and `ScrollList` and neither reads a
+height, so the literal was right by accident rather than by rule. Every one of
+those three findings lives inside `crate::run`, the loop no test enters, and that
+is the class the whole audit is structurally blind to: the answer is not a better
+gate but **one function every site calls**, so there is one place that can be
+wrong instead of three answers that can drift.
+
+**And a claim of coverage that nothing enforced.**
+`only_the_action_that_reads_the_height_is_given_one` is the gate written for a
+wrongly classified height, and its own docblock said *"every action, so a new
+variant reaches this list by failing to be in it"*. Nothing made that true: it was
+a plain array naming nine of eighteen variants, and one of the nine it omitted was
+`DiffTo`, which is the second wrong height this branch found. **That is how
+`Bottom` shipped misclassified in the first place**, and it is the exact shape
+this file calls worse than no claim at all, in a gate whose subject is that shape.
+
+It is exhaustive by construction now, in two steps that cannot be satisfied by
+prose: a `tag` function matching every variant, so a new one is a **compile
+error**, and a count assertion under it, so an added arm fails loudly until the
+variant is actually driven.
+
+**Three false cost claims about one function, in three places.** `span_in` was
+described as "a `stat` against a span this tick has already proved" in its own
+docblock, in `diff_to`'s, and in `Bottom`'s arm. Two were corrected in earlier
+rounds and the third outlived both corrections, because nothing reads a comment
+and no gate can. It is `block_rows`' cost quoted under a different call, and the
+truth is that the lookup is free for the file the walk drew and a whole-file
+measurement for one it did not, which is reachable after the changed set shrinks.
+
+**The `needs_height` predicate is *reads it in some reachable state*, not *always
+reads it*, and it now says so.** `Bottom` is measured in files unpinned and in
+rows pinned. Answering `true` costs it a height it ignores half the time, which is
+the conservative direction; the other reading hands it a zero in the state that
+reads one, and `saturating_sub(0)` then quietly means *the whole file*.
