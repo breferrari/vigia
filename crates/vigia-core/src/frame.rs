@@ -382,9 +382,15 @@ impl<T> Cache<T> {
         }
     }
 
+    /// **Split between the runs rather than given to each**, because `additional`
+    /// is the whole changed set and the two maps partition it: reserving it twice
+    /// allocates for twice the entries that can ever exist. Halved and rounded up,
+    /// so a one-run changed set still reserves what it needs in the map it lands
+    /// in and the empty one keeps a spare slot rather than none.
     fn reserve(&mut self, additional: usize) {
+        let each = additional.div_ceil(2);
         for run in &mut self.runs {
-            run.reserve(additional);
+            run.reserve(each);
         }
     }
 }
@@ -743,6 +749,14 @@ impl<'w> Frame<'w> {
             .flatten()
             .all(|print| settled(print.mtime, taken_at));
         if !provable || attributes != self.attributes {
+            // **Credited before the clear, for the reason [`Frame::show_staged`]
+            // credits its own.** `FrameStats::evicted` is what a caller reads to
+            // check I3's bound on the diff cache, and a whole cache dropped without
+            // being counted is that bound going quiet — here for as long as an
+            // uncommitted `.gitattributes` sits in the changed set, which is the
+            // ordinary state of a repository being set up. The two clears used to
+            // differ about this and nothing said why.
+            self.stats.evicted += self.cached.len() as u64;
             self.cached.clear();
             self.spans.clear();
         }

@@ -190,44 +190,7 @@ pub enum Slot {
 /// actually runs: the reader asked for a second run and the map costs what the
 /// second run costs.
 pub fn list_plan(files: &[vigia_core::FileChange], top: usize, rows: usize) -> Vec<Slot> {
-    let mut plan = Vec::with_capacity(rows);
-    if rows == 0 || top >= files.len() {
-        return plan;
-    }
-
-    // One pass over the whole changed set rather than over the window, because a
-    // run's *total* is what its label says and the window cannot see it. It is a
-    // count over a `Vec` the frame already holds: no diff, no read, no `stat`.
-    let counts = |origin: Origin| files.iter().filter(|f| f.origin == origin).count();
-    let (unstaged, staged) = (counts(Origin::Unstaged), counts(Origin::Staged));
-    let grouped = unstaged > 0 && staged > 0;
-
-    let mut run: Option<Origin> = None;
-    for (index, change) in files.iter().enumerate().skip(top) {
-        if plan.len() == rows {
-            break;
-        }
-        if grouped && run != Some(change.origin) {
-            let count = match change.origin {
-                Origin::Unstaged => unstaged,
-                Origin::Staged => staged,
-            };
-            plan.push(Slot::Group {
-                origin: change.origin,
-                count,
-            });
-            run = Some(change.origin);
-            // **A separator with no room for a file under it is not drawn.** It
-            // would be a label naming a run the window cannot show, which is a
-            // row of the map spent saying nothing about the map.
-            if plan.len() == rows {
-                plan.pop();
-                break;
-            }
-        }
-        plan.push(Slot::File(index));
-    }
-    plan
+    plan_with(files, Runs::of(files), top, rows)
 }
 
 /// Rows the pinned list wants, which is its files **plus its separators**.
@@ -251,6 +214,119 @@ pub fn list_rows_wanted(files: &[vigia_core::FileChange]) -> usize {
     files.len() + if grouped { 2 } else { 0 }
 }
 
+/// How many files each run holds, counted once.
+///
+/// **Extracted so the plan is not `O(files)` per call**, which is what made a
+/// search over tops quadratic on the frame path: a plan draws at most `rows`
+/// things and the only reason it walked the whole changed set was to count the
+/// runs. Both searches below count once and plan many times.
+#[derive(Debug, Clone, Copy)]
+struct Runs {
+    unstaged: usize,
+    staged: usize,
+}
+
+impl Runs {
+    fn of(files: &[vigia_core::FileChange]) -> Self {
+        let staged = files
+            .iter()
+            .filter(|change| change.origin == Origin::Staged)
+            .count();
+        Self {
+            unstaged: files.len() - staged,
+            staged,
+        }
+    }
+
+    /// Whether the list draws run separators at all.
+    fn grouped(self) -> bool {
+        self.unstaged > 0 && self.staged > 0
+    }
+
+    fn count(self, origin: Origin) -> usize {
+        match origin {
+            Origin::Unstaged => self.unstaged,
+            Origin::Staged => self.staged,
+        }
+    }
+}
+
+/// [`list_plan`], with the run counts already taken.
+///
+/// **The one arithmetic**, so nothing below can compute a window's shape a second
+/// way and come to disagree with what the painter draws — which is precisely the
+/// class of defect this whole family of functions exists to close.
+fn plan_with(files: &[vigia_core::FileChange], runs: Runs, top: usize, rows: usize) -> Vec<Slot> {
+    let mut plan = Vec::with_capacity(rows);
+    if rows == 0 || top >= files.len() {
+        return plan;
+    }
+    let grouped = runs.grouped();
+
+    let mut run: Option<Origin> = None;
+    for (index, change) in files.iter().enumerate().skip(top) {
+        if plan.len() == rows {
+            break;
+        }
+        // **A separator is drawn only where a file can follow it**, which is what
+        // the `+ 1` says: a label naming a run the window has no room to show is a
+        // row of the map spent saying nothing about the map. At one row the list
+        // therefore draws a *file* and no label at all, which is the same rule the
+        // staged gutter follows below its own floor — the mark gives way before
+        // the content does. Written as a pop after the fact it emptied a one-row
+        // list completely, because the only row it had was the label it then took
+        // back.
+        if grouped && run != Some(change.origin) && plan.len() + 1 < rows {
+            plan.push(Slot::Group {
+                origin: change.origin,
+                count: runs.count(change.origin),
+            });
+            run = Some(change.origin);
+        } else if grouped {
+            // The label was skipped for want of room; the run is still entered, or
+            // the next file would try for a label of its own.
+            run = Some(change.origin);
+        }
+        plan.push(Slot::File(index));
+    }
+    plan
+}
+
+/// The **smallest** top a window of `rows` drawn rows can start at and still draw
+/// `file`.
+///
+/// **Smallest, and the first version of this returned the largest**, which is a
+/// bound that never binds: the largest top showing any file is that file's own
+/// index, trivially, so the clamp built on it let the window scroll past the end
+/// and leave the last file alone above a region of blanks. The gate missed it by
+/// asserting only that the answer *shows* the file, which the wrong answer does.
+///
+/// **Searched from `file` downward and bounded by `rows`**, because a window of
+/// `rows` rows can never draw more than `rows` files, so nothing further back can
+/// reach it. That keeps this `O(rows^2)` against a changed set of any size, where
+/// walking every index and planning `O(files)` each time was `O(files^2)` on the
+/// frame path.
+fn top_showing(files: &[vigia_core::FileChange], runs: Runs, file: usize, rows: usize) -> usize {
+    if rows == 0 || files.is_empty() {
+        return 0;
+    }
+    let file = file.min(files.len() - 1);
+    let draws = |top: usize| {
+        plan_with(files, runs, top, rows)
+            .iter()
+            .any(|slot| matches!(slot, Slot::File(at) if *at == file))
+    };
+    let floor = file.saturating_sub(rows);
+    let mut best = file;
+    for top in (floor..file).rev() {
+        if !draws(top) {
+            break;
+        }
+        best = top;
+    }
+    best
+}
+
 /// The furthest a window of `rows` drawn rows can start and still show the last
 /// file.
 ///
@@ -259,35 +335,61 @@ pub fn list_rows_wanted(files: &[vigia_core::FileChange]) -> usize {
 /// window stops short and the tail of the staged run cannot be reached at all —
 /// silently, because nothing on screen says the map has an end it will not show.
 ///
-/// **Walked rather than computed**, because how many separators a window draws
-/// depends on where it starts: a window wholly inside one run draws one, a window
-/// straddling the boundary draws two. Subtracting a constant would be right for
-/// one of those and wrong for the other. This asks [`list_plan`] the question
-/// directly, from the back, and takes the first start that reaches the end — which
-/// is also what makes it *the same* answer the painter will draw, rather than a
-/// second arithmetic that agrees with it today.
-///
-/// Bounded by the changed set, so it is at most one pass per file over a `Vec`
-/// the frame already holds: no read, no `stat`, no diff.
+/// **And it is the *tightest* such top**, so the window is still pulled back the
+/// way `take_list` has always pulled it back: the last file rests on the bottom
+/// row rather than leaving blanks under it, which matters most when the changed
+/// set shrinks under a stale position (an agent committing, resetting or switching
+/// branch, which is the ordinary event on the pane this tool is for).
 pub fn last_top(files: &[vigia_core::FileChange], rows: usize) -> usize {
-    if rows == 0 || files.is_empty() {
+    if files.is_empty() {
         return 0;
     }
-    let last = files.len() - 1;
-    // From the back: the largest `top` that still draws the final file is the one
-    // a reader scrolling down should stop at, and every smaller one also shows it.
-    for top in (0..files.len()).rev() {
-        let shows_last = list_plan(files, top, rows)
-            .iter()
-            .any(|slot| matches!(slot, Slot::File(at) if *at == last));
-        if shows_last {
-            return top;
-        }
-    }
-    0
+    top_showing(files, Runs::of(files), files.len() - 1, rows)
 }
 
-/// The file a drawn list row addresses, or `None` for a separator.
+/// The window a list following the diff should show, given where the diff is.
+///
+/// **Minimal movement, which is `take_list`'s own rule**: the window is held while
+/// the current file is inside it and pushed by exactly the overshoot when it
+/// leaves, so scrolling from the start walks the caret down the rows before the
+/// list moves under it.
+///
+/// **What this replaces is `current + 1 - rows`**, which subtracts a count of
+/// *drawn rows* from a *file index*. They are the same number only while every row
+/// is a file: once a window can hold a separator the arithmetic lands short, the
+/// list scrolls, and the file the diff is inside is not among the rows it drew —
+/// so the caret marking that file is simply absent, on exactly the frames a reader
+/// is watching it move.
+pub fn following_top(
+    files: &[vigia_core::FileChange],
+    from: usize,
+    current: usize,
+    rows: usize,
+) -> usize {
+    if files.is_empty() || rows == 0 {
+        return 0;
+    }
+    let runs = Runs::of(files);
+    let shown: Vec<usize> = plan_with(files, runs, from, rows)
+        .iter()
+        .filter_map(|slot| match slot {
+            Slot::File(at) => Some(*at),
+            Slot::Group { .. } => None,
+        })
+        .collect();
+    if shown.contains(&current) {
+        return from;
+    }
+    if current < from {
+        // Off the top: the window starts on it.
+        return current;
+    }
+    // Off the bottom: the smallest window that reaches it, so it lands on the
+    // last row rather than the first and the rows above it stay on screen.
+    top_showing(files, runs, current, rows)
+}
+
+/// The file a drawn list row addresses, or `None` for a separator./// The file a drawn list row addresses, or `None` for a separator.
 ///
 /// **The one place a row becomes a file**, read by the click handler and by the
 /// digit jumps alike. Both used to add the offset to the window's first *file*,
@@ -1931,13 +2033,12 @@ impl View {
             // Still **not navigable**, which is §11.2 B4: the caret cannot be
             // moved on its own, nothing is selected, and no key changes meaning.
             // What travels is a marker, not a cursor.
-            let current = self.top.file;
-            if current < top {
-                top = current;
-            } else if current >= top + rows {
-                top = current + 1 - rows;
-            }
-            top = top.min(ceiling);
+            // **Resolved through the plan rather than by arithmetic on `rows`**,
+            // which is [`following_top`]'s own docblock: `current + 1 - rows`
+            // subtracts drawn rows from a file index and lands short the moment a
+            // window can hold a separator, leaving the caret's own file off the map
+            // it just computed.
+            top = following_top(frame.files(), top, self.top.file, rows).min(ceiling);
         }
         self.list_top = top;
 

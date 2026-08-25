@@ -679,6 +679,21 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     }
 }
 
+/// The index-side mode of a tree-index change, where it has one.
+///
+/// Every variant carries the destination entry's mode under a different field
+/// name, which is why this is a function rather than a field read: matched inline
+/// at the one call site it would be a fifth copy of the same four-arm match.
+fn staged_mode(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<gix::index::entry::Mode> {
+    use gix::diff::index::ChangeRef;
+    match change {
+        ChangeRef::Addition { entry_mode, .. }
+        | ChangeRef::Deletion { entry_mode, .. }
+        | ChangeRef::Modification { entry_mode, .. }
+        | ChangeRef::Rewrite { entry_mode, .. } => Some(*entry_mode),
+    }
+}
+
 /// One tree-index change, as this crate spells changes.
 ///
 /// **Both sides are object ids and neither is a file**, which is the whole reason
@@ -700,6 +715,19 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
 /// run time, so it needs `_ => continue`).
 fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileChange> {
     use gix::diff::index::ChangeRef;
+
+    // **A gitlink is dropped, and the docblock above promised this before the code
+    // did.** A submodule's recorded commit is an ordinary index entry whose id
+    // names a *commit*, so both sides of its "diff" are commits and there is no
+    // content to compare; `blob` refuses them safely now, but a refusal is an
+    // `Err`, and `View::collect` propagates one — so the collect failed, the shell
+    // kept the previous screen, and the pane froze exactly the way the sparse index
+    // made it freeze. Found by an adversarial pass reading the arms against the
+    // paragraph above them, which is the "promised and absent" shape rather than a
+    // wrong branch.
+    if staged_mode(change).is_some_and(|mode| mode == gix::index::entry::Mode::COMMIT) {
+        return None;
+    }
 
     let (path, kind, before, after) = match change {
         ChangeRef::Addition { location, id, .. } => (

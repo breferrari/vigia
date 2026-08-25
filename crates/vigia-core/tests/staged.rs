@@ -14,7 +14,7 @@
 mod support;
 
 use support::Scratch;
-use vigia_core::{ChangeKind, FileChange, Frame, Origin, Worktree};
+use vigia_core::{ChangeKind, FileChange, Frame, LineKind, Origin, Worktree};
 
 const FILE: &str = "src/lib.rs";
 const OTHER: &str = "src/other.rs";
@@ -150,14 +150,31 @@ fn a_path_staged_and_then_edited_again_appears_once_in_each_run_with_different_c
             .any(|line| line.text.contains("AND UNSTAGED")),
         "the unstaged run draws the edit that is not staged yet"
     );
+    // **Which side each line is on, not merely that it appears.** Found by
+    // mutation: swapping `before` and `after` on a staged modification left the
+    // whole suite green, because a fixture that rewrites one line is +1/-1 either
+    // way and the word is in the hunk whichever side it lands on. A diff drawn
+    // backwards shows every staged addition as a removal, in green and red, on
+    // every row of the run.
     let (_, staged_diff) = frame.diff(staged).expect("staged diff");
-    assert!(
+    let side = |want: &str| {
         staged_diff
             .hunks
             .iter()
             .flat_map(|hunk| hunk.lines.iter())
-            .any(|line| line.text.contains("STAGED")),
-        "the staged run draws what is in the index"
+            .find(|line| line.text.contains(want))
+            .map(|line| line.kind)
+    };
+    assert_eq!(
+        side("STAGED"),
+        Some(LineKind::Added),
+        "the index's content is not on the added side, so the staged run is \
+         diffing HEAD against the index backwards"
+    );
+    assert_eq!(
+        side("two"),
+        Some(LineKind::Removed),
+        "HEAD's content is not on the removed side"
     );
 }
 

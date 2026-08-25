@@ -873,7 +873,10 @@ impl App {
             // whole instead leaves the last screenful's worth of track dead: the
             // pointer reaches the bottom and the view is still short of the end.
             Action::ListTo(at) => {
-                let travel = frame.files().len().saturating_sub(self.list_rows.max(1));
+                // The same ceiling `browse` clamps with, for the same reason: the
+                // track maps onto **travel**, and travel is how far the window can
+                // actually go rather than how many files there are.
+                let travel = crate::view::last_top(frame.files(), self.list_rows.max(1));
                 self.browse(scaled(at, travel), frame);
             }
             // A click on a listed file, or one of the digits `1`-`6`. Out of
@@ -1180,7 +1183,15 @@ impl App {
     /// `following` has `follow ▶` in the footer to say what it is doing and this
     /// has nothing.
     fn browse(&mut self, to: usize, frame: &Frame) {
-        let bound = frame.files().len().saturating_sub(self.list_rows.max(1));
+        // **The list's own ceiling, not `files - rows`**
+        // ([#313](https://github.com/breferrari/vigia/issues/313)). The naive bound
+        // compares a count of files against a count of drawn rows, and a grouped
+        // window spends one or two of those on separators — so `J`, the wheel and
+        // a drag to the bottom of the track all stopped one or two files short of
+        // the end, with nothing on screen saying the map had more. Clamping in
+        // `take_list` alone could not fix it: that only ever takes the *smaller*
+        // of the two, so a bound already too low stays.
+        let bound = crate::view::last_top(frame.files(), self.list_rows.max(1));
         let moved = to.min(bound);
         if moved != self.list_top {
             self.list_top = moved;

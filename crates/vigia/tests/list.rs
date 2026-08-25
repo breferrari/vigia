@@ -1850,3 +1850,187 @@ fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
          cannot see a caller that passes the file count for both"
     );
 }
+
+/// **`last_top` is the *tightest* ceiling, not merely a top that works.**
+///
+/// The first version returned the **largest** top from which the last file is
+/// drawn, which for any window is the last file's own index: trivially true, and a
+/// ceiling that never binds. The window could then scroll past the end and leave
+/// blank rows under the last file, which is the thing the clamp exists to prevent
+/// and which its own docblock claims it does.
+///
+/// **The gate that missed it asserted only that the ceiling shows the last file**,
+/// satisfied vacuously by the wrong answer. Naming the row *below* is what makes
+/// it a bound rather than an example.
+#[test]
+fn the_lists_ceiling_is_the_tightest_top_that_still_shows_the_last_file() {
+    let scratch = two_runs("list-tight-ceiling");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+    let last = files.len() - 1;
+
+    let draws = |top: usize, rows: usize| {
+        vigia::list_plan(files, top, rows)
+            .iter()
+            .any(|slot| matches!(slot, vigia::Slot::File(at) if *at == last))
+    };
+
+    for rows in 2..=files.len() + 2 {
+        let ceiling = vigia::last_top(files, rows);
+        assert!(
+            draws(ceiling, rows),
+            "the ceiling for {rows} rows does not show the last file"
+        );
+        assert!(
+            ceiling == 0 || !draws(ceiling - 1, rows),
+            "the ceiling for {rows} rows is {ceiling}, and {} shows the last file \
+             too, so it is an example rather than a bound and the window can \
+             scroll past the end",
+            ceiling - 1
+        );
+    }
+}
+
+/// **Follow keeps the caret's own file inside the window it computes.**
+///
+/// The window's forward push was `current + 1 - rows`, which subtracts a count of
+/// **drawn rows** from a **file index**. Once a window can hold rows that are not
+/// files the two are different units, and the arithmetic lands short: the list
+/// scrolls, the file the diff is inside is not among the rows it drew, and the
+/// caret marking that file simply is not there.
+#[test]
+fn follow_marks_the_current_file_at_every_window_it_chooses() {
+    let scratch = two_runs("list-follow-caret");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    for height in 12..=24u16 {
+        for current in 0..frame.files().len() {
+            let mut app = App::new();
+            let body = split(80, height, frame.files().len());
+            // Put the diff inside `current`, the way a digit does, then collect
+            // and ask whether that file is on the map the list drew.
+            app.apply(Action::File(current as isize), &mut frame, 40)
+                .expect("apply");
+            for _ in 0..current {
+                app.apply(Action::File(1), &mut frame, 40).expect("apply");
+            }
+            let view = app
+                .view(&mut frame, &mut highlighter, &history, body)
+                .expect("collect");
+            if view.list.is_empty() {
+                continue;
+            }
+            let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+                .iter()
+                .filter_map(|slot| match slot {
+                    vigia::Slot::File(at) => Some(*at),
+                    vigia::Slot::Group { .. } => None,
+                })
+                .collect();
+            assert!(
+                drawn.contains(&view.top.file),
+                "at 80x{height} with the diff inside file {} the list drew \
+                 {drawn:?} from top {}, so the caret's own file is not on the map",
+                view.top.file,
+                view.list_top
+            );
+        }
+    }
+}
+
+/// **`J` reaches the end of a grouped list.**
+///
+/// `browse` clamps with `files - list_rows`, which is the naive bound the ceiling
+/// replaced — and `take_list` only takes the smaller of the two, so it cannot
+/// raise one that is already too low. A reader scrolling the map with `J` stopped
+/// one or two files short of the end with nothing saying so.
+#[test]
+fn browsing_reaches_the_bottom_of_a_grouped_list() {
+    let scratch = two_runs("list-browse-tail");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let last = frame.files().len() - 1;
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let body = split(80, 16, frame.files().len());
+    // Prime `list_rows`, then scroll the map to its end and past it.
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+    for _ in 0..20 {
+        app.apply(Action::ScrollList(1), &mut frame, 40)
+            .expect("apply");
+    }
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+        .iter()
+        .filter_map(|slot| match slot {
+            vigia::Slot::File(at) => Some(*at),
+            vigia::Slot::Group { .. } => None,
+        })
+        .collect();
+    assert!(
+        drawn.contains(&last),
+        "`J` held to the end drew {drawn:?} from top {}, so the last file of the \
+         staged run cannot be reached at all",
+        view.list_top
+    );
+}
+
+/// **A window with one row draws a file, not a label with nothing under it.**
+///
+/// A separator is only worth a row where a file can follow it: a label naming a
+/// run the window has no room to show is a row of the map spent saying nothing
+/// about the map. Written as a pop after the fact — emit the label, then take it
+/// back when no file fits — a one-row grouped list came out **empty**, because the
+/// only row it had was the label it then retracted. The region drew nothing at all
+/// while `Body::split` had given it a row.
+///
+/// It is the gutter's rule one element over, and the caret's: the mark gives way
+/// before the content does.
+#[test]
+fn a_one_row_list_draws_a_file_rather_than_a_label() {
+    let scratch = two_runs("list-one-row");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    for top in 0..files.len() {
+        let plan = vigia::list_plan(files, top, 1);
+        assert_eq!(
+            plan.len(),
+            1,
+            "a one-row list from top {top} drew {} rows",
+            plan.len()
+        );
+        assert!(
+            matches!(plan[0], vigia::Slot::File(at) if at == top),
+            "a one-row list from top {top} spent its only row on a label: \
+             {plan:?}"
+        );
+    }
+
+    // And two rows is where a label first earns its keep: one for it, one for the
+    // file under it.
+    let plan = vigia::list_plan(files, 0, 2);
+    assert!(
+        matches!(plan[0], vigia::Slot::Group { .. }) && matches!(plan[1], vigia::Slot::File(0)),
+        "two rows do not buy a label and the file beneath it: {plan:?}"
+    );
+}
