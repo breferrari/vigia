@@ -4,7 +4,7 @@ Research dossier for [#318](https://github.com/breferrari/vigia/issues/318). Thi
 
 The mandate, from the reader: lightweight and fast stays, but the ambition ceiling comes off. It is 2026 and this is a CLI; cutting-edge and cool is possible. Spec rulings are dated evidence with checkable reasons, not walls. Survey broadly and be thorough.
 
-Status: **in progress**. Sections fill as the research runs.
+Status: **complete, 2026-08-25.** Section 5 carries the rulings; SPEC.md §11.2 B18 is the authority.
 
 ## 1. Survey of the world
 
@@ -207,6 +207,13 @@ Ranked candidates: visual payoff, cost, degradation, spec rulings touched with r
 
 ## 5. Rulings
 
-What moved into SPEC.md, what was declined and why, what was filed as build issues.
+All recorded 2026-08-25.
 
-(to fill last)
+- **SPEC §11.2 B18**: the vocabulary expands to the whole slate, ruled by the reader at the checkpoint with three qualifiers (every hue a theme key, the default theme is the showcase, everything documented). Re-checked and held on the way: the green/red role rule (sparkline gradient ships cyan), the no-column rule, `Ansi16` as default depth (strengthened: COLORTERM absence proves nothing), I1 (events, not polls; lookups, not per-frame math). Parked, not declined: styled underlines, until a fact wants the channel.
+- **SPEC §5.3 correction**: #316's coverage sentence measured one font and was quoted as rendering truth; font fallback is default-on across the 2026 matrix and both local terminals draw the overlay. The ink mark stays; the vocabulary reopens.
+- **SPEC §10 Windows-bullet amendment**: "detection never returns octants" was a font fact; the four self-rendering engines make it a table row, which #324 builds.
+- **SPEC §0** (process): how to read the document; rulings are reasons plus dates; research starts from the world. Paired with the take-next amendments (world-first on research rows; refusals cited quoted, dated, checked).
+- **Builds filed**: [#320](https://github.com/breferrari/vigia/issues/320) theme foundation, [#321](https://github.com/breferrari/vigia/issues/321) delta washes, [#322](https://github.com/breferrari/vigia/issues/322) gradients + band, [#323](https://github.com/breferrari/vigia/issues/323) chrome, [#324](https://github.com/breferrari/vigia/issues/324) glyph table rungs, [#325](https://github.com/breferrari/vigia/issues/325) adaptive theme, [#326](https://github.com/breferrari/vigia/issues/326) OSC 8. Sequence: #320 first, the rest in payoff order.
+- **Stale premises in the issue itself**, recorded so the next reader does not reprice them: "braille for sub-cell density against one glyph per sample" predated #159's braille rung, and "half and quarter blocks" are superseded by native octants.
+
+Status: **complete.** This file is the research record; the rulings live in SPEC.md and the work in the issues above.
