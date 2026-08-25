@@ -20,7 +20,7 @@ use vigia::{
     Chrome, Depth, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Mode, Position, Row, Scale, Theme,
     View, render,
 };
-use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
+use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// Buckets a sparkline draws on the panes this file renders at.
 ///
@@ -60,6 +60,8 @@ fn chrome() -> Chrome {
         hovered: None,
         scrolling: None,
         worktree: "vigia".to_owned(),
+        staged: None,
+        elsewhere: 0,
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -89,6 +91,7 @@ fn three_kinds() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -96,6 +99,7 @@ fn three_kinds() -> View {
         rows_above: 0,
         rows: vec![
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "src/a.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -432,6 +436,7 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         // Read by a reader, so none of these may be colour 8.
         chrome,
         chrome_dim,
+        staged,
         path,
         path_live,
         path_cold,
@@ -511,6 +516,12 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
     let readable = [
         ("chrome", chrome),
         ("chrome_dim", chrome_dim),
+        // **A run separator's word and a staged row's gutter mark, and both are
+        // read** ([#313](https://github.com/breferrari/vigia/issues/313)). The bar
+        // is a glyph rather than prose, but it is the only thing on a row that
+        // says which comparison the row belongs to, so a palette that put it on
+        // the background would take the distinction off the screen entirely.
+        ("staged", staged),
         ("path", path),
         ("path_live", path_live),
         ("path_cold", path_cold),
@@ -678,12 +689,14 @@ fn graded_heat() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
         total_rows: 0,
         rows_above: 0,
         rows: vec![Row::file(FileEntry {
+            origin: Origin::Unstaged,
             path: "src/a.rs".to_owned(),
             from: None,
             kind: 'M',
@@ -806,6 +819,7 @@ fn the_heat_ramp_has_three_stops_where_the_depth_can_draw_them() {
 fn climbing() -> View {
     View {
         rows: vec![Row::file(FileEntry {
+            origin: Origin::Unstaged,
             path: "src/a.rs".to_owned(),
             from: None,
             kind: 'M',

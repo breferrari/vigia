@@ -40,7 +40,9 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Glyphs, Row, Theme, View, body_layout, diff_height, render};
+use vigia::{
+    Action, App, Body, Glyphs, Pointing, Row, Theme, View, body_layout, diff_height, render,
+};
 use vigia_core::{
     FrameStats, HISTORY_PATHS, HISTORY_WINDOW, HighlightStats, Highlighter, History, HistoryStats,
     RETAINED_HUNKS, WatchOptions, Worktree,
@@ -1215,7 +1217,7 @@ fn drive(
         }
 
         if let Some(action) = scripted(frames, body.diff) {
-            let chrome = app.chrome(NAME, None, None, None, None, None);
+            let chrome = app.chrome(NAME, None, Pointing::default(), 0);
             let height = diff_height(area, &chrome, frame.files().len());
             if let Err(e) = app.apply(action, &mut frame, height) {
                 failed += 1;
@@ -1241,8 +1243,8 @@ fn drive(
         // `record_frame` is at the bottom of the loop, where the frame ends.
         let frame_began = Instant::now();
         app.sample_memory();
-        let chrome = app.chrome(NAME, None, None, None, None, None);
-        body = body_layout(area, &chrome, frame.files().len());
+        let chrome = app.chrome(NAME, None, Pointing::default(), 0);
+        body = body_layout(area, &chrome, frame.files().len(), frame.files().len());
         match app.view(&mut frame, &mut highlighter, &history, body) {
             Ok(fresh) => {
                 view = fresh;

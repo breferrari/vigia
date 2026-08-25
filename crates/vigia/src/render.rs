@@ -37,12 +37,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span as TextSpan;
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, SPARK_GROUPS, Span};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
 
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, Region, Regions, Sheet};
 use crate::theme::Theme;
-use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, Row, Scale, View};
+use crate::view::{FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Row, Scale, View};
 
 /// Columns a tab advances to the next multiple of.
 ///
@@ -515,6 +515,44 @@ const MIN_PATH_WIDTH: usize = 12;
 /// quantity that happens to equal the same number, so widening the caret gutter
 /// would silently have moved the kind letter's allowance too.
 const KIND_WIDTH: usize = 2;
+
+/// The glyph marking a staged row, in the gutter left of the kind letter.
+///
+/// **`SPEC.md` §11.2 B17's mark**
+/// ([#313](https://github.com/breferrari/vigia/issues/313)). A light vertical bar
+/// rather than a letter, so contiguous staged rows draw one continuous line and
+/// the run reads as a block rather than as rows that happen to share a column.
+///
+/// **Light rather than heavy**, because it is furniture and the row's content
+/// outranks it: `│` is the same weight the box-drawing rules elsewhere on this
+/// pane use, where `┃` would be the loudest thing in a region full of quiet ones.
+const STAGED_MARK: &str = "│";
+
+/// Columns the staged gutter takes off a row when it is drawn.
+///
+/// **One, and only while both runs are on screen.** With the staged run hidden —
+/// the default — there is nothing to distinguish, so the column does not exist and
+/// not one cell of the pane moves from what it has always been. That is the same
+/// rule `Chrome::masthead` and `Body::rail` follow: an element that costs space is
+/// asked for rather than reserved.
+const GUTTER_WIDTH: usize = 1;
+
+/// Whether a row `room` columns wide can afford the staged gutter.
+///
+/// **The mark gives way before the path does**, which is [`MIN_PATH_WIDTH`]'s rule
+/// applied to one more glance element: a row that spent its file's name on a marker
+/// beside it would be naming nothing. So at I6's floor the gutter is dropped and
+/// the run separators above carry the fact instead, exactly as the caret is dropped
+/// below [`affords_caret`] and the pinned list keeps saying which file the diff is
+/// in by other means.
+///
+/// A predicate over the room a row actually has rather than a width rung, because
+/// this is the only element on the row whose presence is decided per *view* as well
+/// as per pane: the same 80-column pane draws it with the staged run shown and not
+/// without.
+const fn affords_gutter(room: usize) -> bool {
+    room >= ROW_FLOOR + GUTTER_WIDTH
+}
 
 /// The narrowest a file row can be and still name its own file.
 ///
@@ -1331,6 +1369,14 @@ const FACT_SEPARATOR: &str = " · ";
 /// untracked file is an unstaged one too.
 const NOTHING_CHANGED: &str = "no unstaged changes";
 
+/// The same, for a pane showing both runs.
+///
+/// **Names both comparisons, because the reader asked for both.** With `a` on,
+/// `no unstaged changes` would be true and misleading in the same breath: the
+/// reader is looking at a pane that would have shown staged work if there were
+/// any, and the line has to say that it looked.
+const NOTHING_ANYWHERE: &str = "no staged or unstaged changes";
+
 /// The narrowest the text column may get before line numbers are dropped.
 ///
 /// Below this the gutter costs more than it explains, which is the shape of
@@ -1447,6 +1493,27 @@ pub struct Chrome {
     /// answer is exactly the shape I4 forbids, so the shell asks only when the
     /// diff is empty.
     pub branch: Option<String>,
+    /// How many files the **staged** run holds, or `None` when it is not drawn.
+    ///
+    /// `SPEC.md` §11.2 **B17**. `Some(0)` and `None` are deliberately different:
+    /// the first is *the reader asked for the run and it is empty*, which the
+    /// header says out loud because it is the only acknowledgment pressing `a` on
+    /// a worktree with nothing staged can give; the second is *the run is off*, and
+    /// the header says nothing about it at all.
+    pub staged: Option<usize>,
+    /// How many changes the run that is **not** drawn holds.
+    ///
+    /// **Only ever non-zero on a frame that draws the empty state**, and it is what
+    /// turns a blank pane into a signpost:
+    /// `no unstaged changes · 3 staged`. That line is the whole reported defect in
+    /// [#313](https://github.com/breferrari/vigia/issues/313) — an agent that
+    /// stages its own work emptied the pane and nothing said where the work had
+    /// gone.
+    ///
+    /// Zero on every other frame, which is what keeps I4 true: the count costs a
+    /// walk, and it is asked for only where it is drawn. Same rule
+    /// [`Chrome::branch`] follows one field up, for the same reason.
+    pub elsewhere: usize,
     /// Whether the watch is still live.
     ///
     /// Durable, which is why it is here rather than riding [`Chrome::notice`]. A
@@ -1770,11 +1837,24 @@ fn diagnostic_rungs(frame: Option<Duration>, memory: Option<u64>) -> Vec<String>
 ///
 /// One rule where there used to be two: `changed` is a participle with no plural
 /// to inflect, so `1 changed` and `3 changed` need no singular case.
-fn count_of(files: usize) -> String {
-    if files == 0 {
-        String::new()
-    } else {
-        format!("{files} changed")
+fn count_of(files: usize, staged: Option<usize>) -> String {
+    let changed = match files {
+        0 => String::new(),
+        n => format!("{n} changed"),
+    };
+    // **The staged total is a second fact and is owed whenever the run is on**,
+    // including at zero. That zero is the whole acknowledgment a reader gets for
+    // pressing `a` on a worktree with nothing staged: without it the key does
+    // nothing a reader can see, which is the failure `SPEC.md` §11.2 B17 names in
+    // its own first line.
+    //
+    // Joined by [`FACT_SEPARATOR`], whose rule holds here as it does everywhere:
+    // two facts about one subject, and a separator only where both facts exist.
+    // With nothing changed at all there is no first fact to join to, and the empty
+    // state below is what speaks instead.
+    match (changed.is_empty(), staged) {
+        (false, Some(staged)) => format!("{changed}{FACT_SEPARATOR}{staged} staged"),
+        _ => changed,
     }
 }
 
@@ -1825,9 +1905,14 @@ fn count_of(files: usize) -> String {
 /// characters still escape and are left alone deliberately: `U+2800` and
 /// `U+115F` draw a real glyph that happens to be blank, and whether a *font*
 /// inks something is not a question this process can ask.
-fn header_left(worktree: &str, branch: Option<&str>, files: usize) -> Vec<String> {
-    let mut rungs = Vec::with_capacity(3);
-    let count = count_of(files);
+fn header_left(
+    worktree: &str,
+    branch: Option<&str>,
+    files: usize,
+    staged: Option<usize>,
+) -> Vec<String> {
+    let mut rungs = Vec::with_capacity(4);
+    let count = count_of(files, staged);
 
     // **The branch is drawn always since
     // [#158](https://github.com/breferrari/vigia/issues/158)**, where it was the
@@ -1880,6 +1965,14 @@ fn header_left(worktree: &str, branch: Option<&str>, files: usize) -> Vec<String
     if !count.is_empty() {
         rungs.push(join([name, named, Some(&count)]));
     }
+    // **The staged total is the first thing a narrowing header gives up**, one
+    // rung above the count it rides on. It is the most recoverable fact on the
+    // line: the run separators in the list below say the same thing, and the
+    // reader asked for the run and therefore knows it is on. Same ladder rule
+    // §11.1 already applies to the count and the branch, one fact finer.
+    if staged.is_some() && files > 0 {
+        rungs.push(join([name, named, Some(&count_of(files, None))]));
+    }
     if named.is_some() {
         rungs.push(join([name, named, None]));
     }
@@ -1912,8 +2005,35 @@ fn header_left(worktree: &str, branch: Option<&str>, files: usize) -> Vec<String
 ///
 /// A detached HEAD is still not invented anywhere: `HEAD@abc123` would put a
 /// commit id in a monitor that shows no commits.
-fn empty_state() -> String {
-    NOTHING_CHANGED.to_owned()
+fn empty_state(staged: Option<usize>) -> String {
+    match staged {
+        // The run is on and there is nothing in either. One line, both named.
+        Some(_) => NOTHING_ANYWHERE.to_owned(),
+        // **The run is off and the index has work in it: say where the work
+        // went.** This is the whole of what
+        // [#313](https://github.com/breferrari/vigia/issues/313) was reported on —
+        // an agent that stages its own work emptied the pane, and the reader was
+        // left looking at `no unstaged changes` with no way to tell a clean tree
+        // from a fully staged one. A blank pane that names the run holding the
+        // work is a signpost; one that does not is a dead end.
+        //
+        // It costs one walk of the other comparison, on a frame that computes no
+        // diff and reads nothing else, and the walk that answers it is the cheaper
+        // of the two (it touches no file). `crate::Shell` asks only on this frame,
+        // which is the rule `Worktree::branch` already follows and what keeps I4
+        // true: the thing read is the thing drawn.
+        None => NOTHING_CHANGED.to_owned(),
+    }
+}
+
+/// [`empty_state`], plus where the work went when this run is empty and the other
+/// is not.
+fn empty_state_with(staged: Option<usize>, elsewhere: usize) -> String {
+    let line = empty_state(staged);
+    match (staged, elsewhere) {
+        (None, n) if n > 0 => format!("{line}{FACT_SEPARATOR}{n} staged"),
+        _ => line,
+    }
 }
 
 /// One file heading's parts, gathered so [`Painter::file_row`] takes a shape
@@ -1927,6 +2047,17 @@ fn empty_state() -> String {
 /// type stays what a *file* looks like, and [`Painter::file_row`] stays one
 /// drawer with one degradation ladder to gate.
 struct Heading<'r> {
+    /// Which run this row is in, or `None` where no gutter column exists.
+    ///
+    /// **Three states rather than a `bool`, because two facts are being carried
+    /// and they are not the same one.** `None` says the *view* draws no gutter,
+    /// which is every pane with one run on it; `Some(Unstaged)` says the column
+    /// exists and this row leaves it blank; `Some(Staged)` says it exists and this
+    /// row fills it. Collapsed to `is_staged`, an unstaged row in a grouped view
+    /// and any row in an ungrouped one would be indistinguishable, and the path
+    /// would start one column further left on the unstaged run than on the staged
+    /// one — every row of the map sliding sideways at the run boundary.
+    origin: Option<Origin>,
     kind: char,
     path: &'r str,
     from: Option<&'r str>,
@@ -1938,8 +2069,9 @@ struct Heading<'r> {
 
 impl<'r> Heading<'r> {
     /// Borrow a heading from the entry either region holds.
-    fn of(entry: &'r FileEntry) -> Self {
+    fn of(entry: &'r FileEntry, grouped: bool) -> Self {
         Self {
+            origin: grouped.then_some(entry.origin),
             kind: entry.kind,
             path: &entry.path,
             from: entry.from.as_deref(),
@@ -3414,7 +3546,13 @@ impl Body {
     ///
     /// Saturating rather than clamped so a one-row terminal asks for nothing
     /// instead of underflowing.
-    pub fn split(area: Rect, footer_rows: u16, files: usize, chrome: &Chrome) -> Self {
+    pub fn split(
+        area: Rect,
+        footer_rows: u16,
+        files: usize,
+        list_rows: usize,
+        chrome: &Chrome,
+    ) -> Self {
         let masthead = chrome.masthead;
         let body = usize::from(area.height).saturating_sub(1 + usize::from(footer_rows));
 
@@ -3452,7 +3590,14 @@ impl Body {
         // taken out of what remained would be present on a tall pane and absent on
         // a short one at the same file count.
         let affordable = body.saturating_sub(LEAD_ROWS + usize::from(MIN_BODY) + 1);
-        let list = files.min(list_cap(area.height)).min(affordable);
+        // **`list_rows` rather than `files`, since
+        // [#313](https://github.com/breferrari/vigia/issues/313)**: a grouped list
+        // draws a separator per run, and a region sized from the files alone is
+        // short by exactly those rows and drops the tail of the last run. See
+        // [`crate::view::list_rows_wanted`], which is where the two are reconciled.
+        // Every other use of `files` in this function is about whether there is a
+        // list *at all*, which the separators cannot change.
+        let list = list_rows.min(list_cap(area.height)).min(affordable);
         if list == 0 {
             return Self::diff_only(body);
         }
@@ -3933,9 +4078,9 @@ impl Body {
 /// what a caller about to *paint* already has. [`render`] takes
 /// [`Body::split`] directly with the plan it made anyway; everything else comes
 /// through here. See [`Body::split`] for the ruling the arithmetic encodes.
-pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
+pub fn body_layout(area: Rect, chrome: &Chrome, files: usize, list_rows: usize) -> Body {
     let footer = Footer::plan(area, chrome, files).height();
-    let mut body = Body::split(area, footer, files, chrome);
+    let mut body = Body::split(area, footer, files, list_rows, chrome);
     // **Attached rather than split**, which is [`Body::sheet_pages`]' own
     // docblock: the sheet is not a region and takes no row from one, so it has no
     // place in the split that divides the body between them. It is here because
@@ -3971,7 +4116,7 @@ pub fn body_layout(area: Rect, chrome: &Chrome, files: usize) -> Body {
 /// to say about the file list — and a name that quietly means one region is
 /// worse than one that says which.
 pub fn diff_height(area: Rect, chrome: &Chrome, files: usize) -> usize {
-    body_layout(area, chrome, files).diff
+    body_layout(area, chrome, files, files).diff
 }
 
 /// What one paint cost, in the term that decides whether it followed the pane.
@@ -4033,7 +4178,8 @@ pub fn regions(area: Rect, chrome: &Chrome, view: &View) -> Regions {
         return Regions::default();
     }
     let footer = Footer::plan(area, chrome, view.files);
-    let body = Body::split(area, footer.height(), view.files, chrome).clamped_to(view.list.len());
+    let body = Body::split(area, footer.height(), view.files, view.list.len(), chrome)
+        .clamped_to(view.list.len());
     // **The same geometry the painter draws into**, asked for by name rather than
     // rebuilt here ([#251](https://github.com/breferrari/vigia/issues/251)). This
     // was two offsets computed from `Body` a second time, which kept the pointer
@@ -4111,7 +4257,8 @@ pub fn render(
     // view, and `clamped_to` below is what makes that case draw honestly rather
     // than announcing files the view does not hold.
     let footer = Footer::plan(area, chrome, view.files);
-    let body = Body::split(area, footer.height(), view.files, chrome).clamped_to(view.list.len());
+    let body = Body::split(area, footer.height(), view.files, view.list.len(), chrome)
+        .clamped_to(view.list.len());
     let margins = margins_of(area.width);
 
     let mut painter = Painter {
@@ -4134,6 +4281,7 @@ pub fn render(
         inset: margins.0,
         trailing: margins.1,
         paint: PaintStats::default(),
+        empty: empty_state_with(chrome.staged, chrome.elsewhere),
         pressed: chrome.pressed,
         gripped: chrome.gripped,
         hovered: chrome.hovered,
@@ -4327,7 +4475,7 @@ struct Gesture {
 /// prerequisite: this array ran `q` first and `?` last while `sheet_plan` dropped
 /// *from the top down*, so reordering for sections alone would have kept `q` at
 /// the floor and dropped `f` and `m`, inverting §11.1's own rule.
-const KEYBOARD: [Gesture; 13] = [
+const KEYBOARD: [Gesture; 14] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -4386,6 +4534,15 @@ const KEYBOARD: [Gesture; 13] = [
         keys: ["s", "s"],
         verb: ["one file, or the whole diff", "one file only"],
     },
+    // **Both cells sit inside the field maxima this table already had**, for the
+    // reason B16's row above states: the wide verb field is 28 on `next /
+    // previous changed file` and the tight one is 19 on the mouse group's `a row,
+    // held repeats`, where these are 26 and 14. B17's row costs height and nothing
+    // else, so no width rung moves and no pane loses a gesture to it.
+    Gesture {
+        keys: ["a", "a"],
+        verb: ["show or hide staged changes", "staged changes"],
+    },
     Gesture {
         keys: ["?", "?"],
         verb: ["this sheet", "this sheet"],
@@ -4414,10 +4571,18 @@ const KEYBOARD: [Gesture; 13] = [
 /// names a region a reader may not know exists, and `?` is this sheet, which is
 /// how everything above it is found at all.
 ///
-/// **`r` and `s` are unguessable gestures too, and both are given up before those
-/// three** ([#295](https://github.com/breferrari/vigia/issues/295),
-/// [#297](https://github.com/breferrari/vigia/issues/297)), which is why they sit
-/// out of the reader's order here at ranks eight and nine.
+/// **`r`, `s` and `a` are unguessable gestures too, and all three are given up
+/// before those three** ([#295](https://github.com/breferrari/vigia/issues/295),
+/// [#297](https://github.com/breferrari/vigia/issues/297),
+/// [#313](https://github.com/breferrari/vigia/issues/313)), which is why they sit
+/// out of the reader's order here at ranks eight, nine and ten.
+///
+/// **`a` last of the three, and the reason is what it costs to lose.** `r` needs
+/// 134 columns to do anything at all and `s` rearranges rows already on screen; `a`
+/// changes what the pane is *comparing*, so a reader who cannot find it cannot see
+/// staged work at all, which is the whole defect #313 was opened on. It is
+/// therefore the last of the family to go and the first of them a reader meets in
+/// the `view` section's own order.
 ///
 /// **The reason first written for `r` was false, and the correction is worth more
 /// than the rank.** It said `r` cannot fire on the pane dropping it. No drawable
@@ -4437,7 +4602,7 @@ const KEYBOARD: [Gesture; 13] = [
 /// A rung that drops `from` rows drops the **set** `DROP_ORDER[..from]`, so what
 /// it draws is no longer a suffix of the table. [`kept_keyboard`] is the one
 /// place that is resolved, and both the measurement and the drawer read it.
-const DROP_ORDER: [usize; KEYBOARD.len()] = [12, 0, 1, 2, 3, 4, 5, 6, 9, 10, 7, 8, 11];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [13, 0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 7, 8, 12];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 ///
@@ -4599,7 +4764,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 11 },
+        rows: Rows::Keyboard { from: 7, to: 12 },
     },
     Section {
         label: "mouse",
@@ -4607,7 +4772,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 11, to: 13 },
+        rows: Rows::Keyboard { from: 12, to: 14 },
     },
 ];
 
@@ -5515,6 +5680,20 @@ struct Painter<'a> {
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(Grabbed, isize)>,
+    /// The body's empty-state line, resolved before anything is drawn.
+    ///
+    /// **Built here rather than in [`Painter::body`]**, which is where every other
+    /// drawer would reach for `chrome` and cannot: `body` is handed a [`View`] and
+    /// the two facts this line needs — whether the staged run is on, and how many
+    /// changes the run that is *not* drawn holds — are the chrome's. Resolving it
+    /// beside `pressed` and `hovered` is the same rule those follow: a fact decided
+    /// once for the whole screen is copied onto the painter, so no drawer can reach
+    /// back and answer it differently.
+    ///
+    /// A `String` per frame, on the one frame a pane draws no diff at all. Every
+    /// other frame builds it and never looks at it, which is one small allocation
+    /// against a frame that is about to walk a screenful of hunks.
+    empty: String,
 }
 
 impl Painter<'_> {
@@ -5863,7 +6042,12 @@ impl Painter<'_> {
         // subject now, so they are drawn as one.
         self.status_line(
             area,
-            &header_left(&chrome.worktree, chrome.branch.as_deref(), view.files),
+            &header_left(
+                &chrome.worktree,
+                chrome.branch.as_deref(),
+                view.files,
+                chrome.staged,
+            ),
             self.theme.chrome,
             right,
             right_style,
@@ -6314,10 +6498,37 @@ impl Painter<'_> {
         // `render` contracts that any area is legal, and an origin near the top
         // of the range is the one part of that contract nothing on screen would
         // ever exercise.
-        let origin = area.x.saturating_add(self.inset).saturating_add(gutter);
+        let origin_x = area.x.saturating_add(self.inset).saturating_add(gutter);
 
-        for (offset, entry) in view.list.iter().take(shown).enumerate() {
+        // **The file index is walked rather than added to the offset**, and that
+        // is [#313](https://github.com/breferrari/vigia/issues/313): with run
+        // separators in the window a drawn row and a file are no longer the same
+        // ordinal, so `list_top + offset` names the wrong file from the first
+        // separator onwards — and it names it *silently*, putting the caret on a
+        // neighbour. `View::list` is built from `list_plan` in file order starting
+        // at `list_top`, so counting the file rows as they are drawn is the same
+        // resolution read forwards.
+        let mut file = view.list_top;
+        for (offset, row) in view.list.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
+            let entry = match row {
+                ListRow::Group { origin, count } => {
+                    self.group_row(
+                        Rect {
+                            y,
+                            height: 1,
+                            x: origin_x,
+                            width: inner,
+                        },
+                        *origin,
+                        *count,
+                    );
+                    continue;
+                }
+                ListRow::File(entry) => entry,
+            };
+            let at = file;
+            file += 1;
             // Saturating, because `list_top` is not bounded by the file count:
             // a pane too short for a region hands the reader's request back
             // untouched, so `View::collect` can legitimately report `usize::MAX`
@@ -6327,7 +6538,7 @@ impl Painter<'_> {
             // and the weight is handed down rather than re-derived by the drawer.
             // That also ties the weight to [`affords_caret`] for free: `caret` is
             // false below it and neither mark is drawn.
-            let current = caret && view.list_top.saturating_add(offset) == view.top.file;
+            let current = caret && at == view.top.file;
             if current {
                 self.put(left, y, CARET, CARET_WIDTH, self.theme.pulse);
             }
@@ -6351,10 +6562,10 @@ impl Painter<'_> {
                     // **The pane's inset plus whatever the caret could not take
                     // out of it**, which is the stream's own origin exactly
                     // whenever `gutter` is zero.
-                    x: origin,
+                    x: origin_x,
                     width: inner,
                 },
-                &Heading::of(entry),
+                &Heading::of(entry, view.grouped),
                 view.scale,
                 &columns,
                 current,
@@ -6365,6 +6576,84 @@ impl Painter<'_> {
                 // the layout that happens to be drawn.
                 true,
             );
+        }
+    }
+
+    /// One run's separator: `──  staged  2 ─────────`.
+    ///
+    /// **What makes two comparisons on one map readable as two**, `SPEC.md` §11.2
+    /// **B17** ([#313](https://github.com/breferrari/vigia/issues/313)). The reader
+    /// asked for both lists in the same space, and a run is a run because something
+    /// says where it starts.
+    ///
+    /// **A rule with a word in it, and B11 does not reach it.** That ruling refused
+    /// folding the *diff's heading* into the border line **between the regions**,
+    /// on the ground that a heading is a whole `Painter::file_row` carrying six
+    /// elements on one degradation ladder — so either the elements go, and a list
+    /// row stops being one, or the rule becomes a glance row with dashes on the
+    /// ends. Neither branch is this: this is one word and a count, inside a region,
+    /// between two files, and it draws no element at all.
+    ///
+    /// **The word takes the run's own colour and the rule stays furniture**, which
+    /// is one statement said twice rather than two: the label and the gutter mark
+    /// under it are the same claim, so a staged run's word is `Theme::staged` and
+    /// its bar is `Theme::staged`, and a reader who has learned either has learned
+    /// both. The unstaged run's word takes `Theme::chrome`, the colour every other
+    /// name on this pane is drawn in, because *unstaged* is the ordinary state and
+    /// a second accent would be a second thing to learn.
+    ///
+    /// **Three rungs, and they drop in the order §11.1 rules for a ladder made of
+    /// items**: the count goes first, because the header already carries both
+    /// totals; then the leading dashes, so the word starts at the region's edge;
+    /// then the trailing rule, leaving the word alone. The word itself is never
+    /// abbreviated — half a word is a *reading* task on a surface built to avoid
+    /// one, which is §5.3's own rule and the reason a hint is dropped whole.
+    /// [`list_plan`](crate::view::list_plan) is what decides whether the row exists
+    /// at all, and it declines to draw a separator with no room for a file under
+    /// it.
+    fn group_row(&mut self, area: Rect, origin: Origin, count: usize) {
+        let room = usize::from(area.width);
+        let ink = match origin {
+            Origin::Staged => self.theme.staged,
+            Origin::Unstaged => self.theme.chrome,
+        };
+        let word = origin.label();
+        if room < width_of(word) {
+            return;
+        }
+
+        // Widest first, and every rung is built rather than measured twice: the
+        // leading rule is what places the word, so the two cannot disagree about
+        // where it starts.
+        let lead = "\u{2500}\u{2500}  ";
+        let tally = format!("  {count} ");
+        let (lead, tally) = if width_of(lead) + width_of(word) + width_of(&tally) <= room {
+            (lead, tally)
+        } else if width_of(lead) + width_of(word) < room {
+            (lead, String::new())
+        } else {
+            ("", String::new())
+        };
+
+        let mut at = area.x;
+        if !lead.is_empty() {
+            at = self.put(at, area.y, lead, room, self.theme.chrome_dim);
+        }
+        let used = usize::from(at - area.x);
+        at = self.put(at, area.y, word, room - used, ink);
+        let used = usize::from(at - area.x);
+        if !tally.is_empty() {
+            at = self.put(at, area.y, &tally, room - used, self.theme.chrome_dim);
+        }
+
+        // The trailing rule takes whatever is left, which is what makes the row
+        // read as a rule with a word on it rather than as a word with two dashes
+        // in front. Nothing is drawn where nothing is left.
+        let used = usize::from(at - area.x);
+        let rest = room - used;
+        if rest > 0 {
+            let fill = "\u{2500}".repeat(rest);
+            self.put(at, area.y, &fill, rest, self.theme.chrome_dim);
         }
     }
 
@@ -7026,7 +7315,7 @@ impl Painter<'_> {
             self.put_marked(
                 glyphs.x,
                 glyphs.y,
-                &empty_state(),
+                &self.empty.clone(),
                 usize::from(glyphs.width),
                 self.theme.chrome_dim,
             );
@@ -7069,7 +7358,7 @@ impl Painter<'_> {
                         width: inner,
                         ..area
                     },
-                    &Heading::of(entry),
+                    &Heading::of(entry, view.grouped),
                     view.scale,
                     &columns,
                     // **A literal, which is the whole reason this is a
@@ -7420,9 +7709,33 @@ impl Painter<'_> {
         past(&mut right, width_of(columns.pulse));
 
         let mut room = usize::from(right.width);
+        let mut at = area.x;
+
+        // **The gutter, before the letter and inside the same slot discipline as
+        // everything else on this row**: the column is taken whether or not this
+        // particular row fills it, so a run boundary does not slide every path
+        // beside it one cell sideways. `Columns::plan` reserves the glance slots
+        // for the same reason and #77's ruling is the same ruling.
+        //
+        // Dropped whole below [`affords_gutter`] rather than squeezed, because
+        // half a mark is not a quieter mark, it is a different glyph.
+        if heading.origin.is_some() && affords_gutter(room) {
+            let mark = match heading.origin {
+                Some(Origin::Staged) => STAGED_MARK,
+                // The column exists and this row has nothing to put in it. A
+                // space rather than nothing at all: `put` is what advances `at`,
+                // so writing the blank is what keeps the two runs' paths in one
+                // column.
+                _ => " ",
+            };
+            let x = self.put(at, area.y, mark, room, self.theme.staged);
+            room = room.saturating_sub(usize::from(x - at));
+            at = x;
+        }
+
         let letter = format!("{} ", heading.kind);
-        let x = self.put(area.x, area.y, &letter, room, self.theme.kind);
-        room = room.saturating_sub(usize::from(x - area.x));
+        let x = self.put(at, area.y, &letter, room, self.theme.kind);
+        room = room.saturating_sub(usize::from(x - at));
 
         // Which file it *was* is the whole content of a rename, so it is part of
         // the label rather than something to reveal on a keypress.
@@ -8015,6 +8328,7 @@ mod tests {
         let mut painter = Painter {
             buf: &mut buf,
             theme: &theme,
+            empty: String::new(),
             glyphs: Glyphs::default(),
             gutter: 0,
             inset: 0,
@@ -8384,11 +8698,15 @@ mod sheet_tables {
         //
         // **Why outside the keep-set and in this order**
         // ([#295](https://github.com/breferrari/vigia/issues/295),
-        // [#297](https://github.com/breferrari/vigia/issues/297)): `f`, `m`, `?`,
-        // `r` and `s` are five gestures a reader cannot guess at and `SHEET_KEEP`
-        // keeps three, so two have to go first. `r` goes before `s` because it is
-        // the only one of the five that does nothing at all below 134 columns,
-        // and the rungs that reach this depth are narrow by definition.
+        // [#297](https://github.com/breferrari/vigia/issues/297),
+        // [#313](https://github.com/breferrari/vigia/issues/313)): `f`, `m`, `?`,
+        // `r`, `s` and `a` are six gestures a reader cannot guess at and
+        // `SHEET_KEEP` keeps three, so three have to go first. `r` goes before `s`
+        // because it is the only one of the six that does nothing at all below 134
+        // columns, and the rungs that reach this depth are narrow by definition;
+        // `a` goes last of the three because losing it is the only one of the
+        // three that costs a reader a *comparison* rather than an arrangement of
+        // rows they can already see.
         //
         // **This claim is about the tables and not about any pane**, which is the
         // correction the audit forced. The rank that would drop `r` is `from >= 9`
@@ -8397,21 +8715,21 @@ mod sheet_tables {
         // kept. What the reorder buys is that the untouched order would have
         // dropped `f`, which `sheet_tables`' own keep-set assertion forbids.
         //
-        // **Both, in order, rather than only the last**, because a single cell
-        // says nothing about the one beside it: the version of this that asserted
-        // `r` alone would have gone green with `s` ranked anywhere above it,
-        // including above `q`.
-        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 2..]
+        // **All three, in order, rather than only the last**, because a single
+        // cell says nothing about the one beside it: the version of this that
+        // asserted `r` alone would have gone green with `s` ranked anywhere above
+        // it, including above `q`.
+        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 3..]
             .iter()
-            .take(2)
+            .take(3)
             .map(|&row| KEYBOARD[row].keys[0])
             .collect();
         assert_eq!(
             outside,
-            ["r", "s"],
+            ["r", "s", "a"],
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail and then the pin, so a pane at the floor is spending it on a \
-             gesture that could have fired there"
+             rail, then the pin, then the staged run, so a pane at the floor is \
+             spending it on a gesture that could have fired there"
         );
     }
 

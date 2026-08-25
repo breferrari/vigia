@@ -28,10 +28,10 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 use vigia::{
-    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, Mode, Position,
-    Regions, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
+    Body, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HINT_SEPARATOR, HeatBucket, ListRow, Mode,
+    Position, Regions, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{HISTORY_BUCKETS, LineKind, Recency};
+use vigia_core::{HISTORY_BUCKETS, LineKind, Origin, Recency};
 
 /// The mark meaning "this continues past the right edge".
 const CONTINUES: char = '›';
@@ -558,6 +558,8 @@ fn chrome() -> Chrome {
         // this `None`. That is not tidiness: it is what a real frame carries,
         // because a detached head names no branch anywhere, which is the one
         // case that draws none since #158.
+        staged: None,
+        elsewhere: 0,
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -627,6 +629,8 @@ fn on_a_branch() -> Chrome {
         pressed: None,
         gripped: None,
         scrolling: None,
+        staged: None,
+        elsewhere: 0,
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -647,6 +651,7 @@ fn every_row_kind() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -654,6 +659,7 @@ fn every_row_kind() -> View {
         rows_above: 0,
         rows: vec![
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "crates/vigia-core/src/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -676,6 +682,7 @@ fn every_row_kind() -> View {
             ),
             line(LineKind::Added, 260, "        for change in self.walk() {"),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -686,6 +693,7 @@ fn every_row_kind() -> View {
             }),
             Row::Note("binary"),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -709,6 +717,7 @@ fn awkward() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -716,6 +725,7 @@ fn awkward() -> View {
         rows_above: 0,
         rows: vec![
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "crates/vigia-core/src/very/deeply/nested/module/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -739,6 +749,7 @@ fn empty() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -778,8 +789,9 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: (0..listed)
-            .map(|i| entry(&format!("src/f{i}.rs")))
+            .map(|i| ListRow::from(entry(&format!("src/f{i}.rs"))))
             .collect(),
         list_top: 0,
         current_span: 0,
@@ -802,6 +814,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
 /// row of the right *shape* at every width.
 fn entry(path: &str) -> FileEntry {
     FileEntry {
+        origin: Origin::Unstaged,
         path: path.to_owned(),
         from: None,
         kind: 'M',
@@ -849,6 +862,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
     // shape. A matrix of single-digit counts exercises one column-width class
     // and reads as though it covered them all.
     let many = View {
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -965,6 +979,7 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         (
             "readouts at a hundred files",
             View {
+                grouped: false,
                 list: Vec::new(),
                 list_top: 0,
                 files: 100,
@@ -1029,6 +1044,7 @@ fn glancing() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -1036,6 +1052,7 @@ fn glancing() -> View {
         rows_above: 0,
         rows: vec![
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "crates/vigia-core/src/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1047,6 +1064,7 @@ fn glancing() -> View {
                 heat: ENDS_CHANGED,
             }),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "crates/vigia/src/render.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1058,6 +1076,7 @@ fn glancing() -> View {
                 heat: ENDS_CHANGED,
             }),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -1244,8 +1263,13 @@ fn the_header_never_takes_a_second_line() {
                     // does: the unclamped split answers what the *pane* affords,
                     // and a view with no entries draws B3's sentence rather than
                     // a masthead over blank rows.
-                    let body = body_layout(Rect::new(0, 0, width, height), &chrome, view.files)
-                        .clamped_to(view.list.len());
+                    let body = body_layout(
+                        Rect::new(0, 0, width, height),
+                        &chrome,
+                        view.files,
+                        view.files,
+                    )
+                    .clamped_to(view.list.len());
                     let starts = list_top(&body);
                     assert_eq!(
                         first, starts,
@@ -1642,7 +1666,8 @@ fn the_body_tiles_the_pane_with_no_gap_and_no_overlap() {
             // comparing two different screens, and this gate said so on its first
             // run at 1x8, where the pane affords a list row and the fixture's view
             // carries none.
-            let body = body_layout(area, &chrome, view.files).clamped_to(view.list.len());
+            let body =
+                body_layout(area, &chrome, view.files, view.files).clamped_to(view.list.len());
             let areas = body.areas(area);
             let drawn: Vec<(&str, Rect)> = [
                 ("band", areas.band),
@@ -2374,7 +2399,7 @@ fn the_body_gets_exactly_the_rows_the_caller_was_promised() {
                     // the renderer a view that carries files but no list would
                     // make this compare a promise against a screen that never
                     // ships, and it would pass while the two regions disagreed.
-                    let split = body_layout(area, &chrome, files);
+                    let split = body_layout(area, &chrome, files, files);
                     let promised = split.diff;
                     let view = numbered(promised + 3, files, split.list);
                     let rows = rows_at(width, height, &view, &chrome);
@@ -2421,6 +2446,7 @@ fn the_footer_takes_a_second_line_only_when_one_line_cannot_hold_both() {
         body_rows(&body_layout(
             Rect::new(0, 0, width, tall),
             chrome,
+            view.files,
             view.files,
         ))
     };
@@ -2806,6 +2832,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2948,6 +2975,7 @@ fn a_clipped_content_line_says_it_continues() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -3247,7 +3275,13 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
         // is the settled `LIST_SETTLED`, so clamping would only turn this into "at
         // least six". The cap is a share of the pane since #160, and 24 is the
         // height at which that share is the settled number.
-        let listed = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files).list;
+        let listed = body_layout(
+            Rect::new(0, 0, width, tall),
+            &chrome,
+            view.files,
+            view.files,
+        )
+        .list;
         assert_eq!(
             listed, FILES,
             "at {width} columns the layout affords {listed} list rows, so this \
@@ -3260,8 +3294,13 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
         // the list starts would be a second copy of the body split agreeing
         // with itself, and the band's own baseline draws `_`, so reading its
         // row as a list row fails with a message about the wrong thing.
-        let split = body_layout(Rect::new(0, 0, width, tall), &chrome, view.files)
-            .clamped_to(view.list.len());
+        let split = body_layout(
+            Rect::new(0, 0, width, tall),
+            &chrome,
+            view.files,
+            view.files,
+        )
+        .clamped_to(view.list.len());
         let first = list_top(&split);
         let rows = rows_at(width, tall, &view, &chrome);
         for (offset, row) in rows.iter().skip(first).take(listed).enumerate() {
@@ -3289,7 +3328,10 @@ fn the_caret_column_draws_a_mark_and_never_a_rank() {
                 // `view.list[offset]`. It does **not** catch a row drawing another
                 // file's letter, because every entry this fixture builds carries
                 // the same one.
-                let kind = view.list[offset].kind;
+                let kind = view.list[offset]
+                    .entry()
+                    .expect("this fixture has one run, so every list row is a file")
+                    .kind;
                 assert!(
                     glyph == kind,
                     "at {width} columns list row {offset} opens with {glyph:?} \
@@ -3672,7 +3714,7 @@ fn a_bonus_hint_rung_never_buys_itself_a_footer_row() {
     let view = every_row_kind();
     let tall = 24u16;
     let rows = |width: u16, chrome: &Chrome| {
-        let split = body_layout(Rect::new(0, 0, width, tall), chrome, view.files);
+        let split = body_layout(Rect::new(0, 0, width, tall), chrome, view.files, view.files);
         usize::from(tall) - 1 - body_rows(&split)
     };
 
@@ -3879,14 +3921,16 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     // Ten files with three rows shown, so a bar is drawn; and three with three
     // shown, so one is not.
     let with_bar = View {
-        list: entries.clone(),
+        grouped: false,
+        list: entries.iter().cloned().map(ListRow::from).collect(),
         list_top: 0,
         top: Position { file: 1, row: 0 },
         files: 10,
         ..every_row_kind()
     };
     let without_bar = View {
-        list: entries,
+        grouped: false,
+        list: entries.into_iter().map(ListRow::from).collect(),
         list_top: 0,
         top: Position { file: 1, row: 0 },
         files: 3,
@@ -3903,7 +3947,8 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         // decided from the same split. Hardcoding row one read the band's own
         // baseline as a list row once the masthead existed.
         let first = |files: usize| {
-            let split = body_layout(Rect::new(0, 0, width, 24), &chrome(), files).clamped_to(3);
+            let split =
+                body_layout(Rect::new(0, 0, width, 24), &chrome(), files, files).clamped_to(3);
             list_top(&split)
         };
         let (barred_at, bare_at) = (first(10), first(3));
@@ -3978,7 +4023,7 @@ fn a_list_shorter_than_its_region_gives_the_rows_to_the_diff() {
 
     // Ten changed files, so the layout affords a full six-row region, but a view
     // carrying only two entries.
-    let afforded = body_layout(Rect::new(0, 0, width, tall), &chrome, 10);
+    let afforded = body_layout(Rect::new(0, 0, width, tall), &chrome, 10, 10);
     assert!(
         afforded.list > 2,
         "the fixture does not under-fill the region: it affords {} rows",
@@ -4426,7 +4471,8 @@ fn overlong(rows: usize) -> View {
     View {
         landed: false,
         recorded: 0,
-        list: vec![entry("src/f.rs")],
+        grouped: false,
+        list: vec![entry("src/f.rs").into()],
         list_top: 0,
         current_span: rows,
         total_rows: rows,
@@ -4538,10 +4584,11 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
 /// representative screen.
 fn pinned_and_streamed() -> View {
     View {
+        grouped: false,
         list: vec![
-            entry("crates/vigia-core/src/frame.rs"),
-            entry("src/engine/watch.rs"),
-            entry("Cargo.toml"),
+            entry("crates/vigia-core/src/frame.rs").into(),
+            entry("src/engine/watch.rs").into(),
+            entry("Cargo.toml").into(),
         ],
         list_top: 0,
         top: Position { file: 0, row: 0 },
@@ -4607,8 +4654,13 @@ fn list_top(split: &Body) -> usize {
 /// of the body split agreeing with itself. What the gates below assert is the
 /// **column**, which the layout has no opinion about at all.
 fn region_rows(width: u16, height: u16, view: &View, chrome: &Chrome) -> Option<(usize, usize)> {
-    let split =
-        body_layout(Rect::new(0, 0, width, height), chrome, view.files).clamped_to(view.list.len());
+    let split = body_layout(
+        Rect::new(0, 0, width, height),
+        chrome,
+        view.files,
+        view.files,
+    )
+    .clamped_to(view.list.len());
     if split.list == 0 || !split.rule {
         return None;
     }
@@ -4914,8 +4966,13 @@ fn the_body_opens_with_one_blank_row_under_the_header() {
     for (view, drawable) in [(pinned_and_streamed(), true), (empty(), false)] {
         for height in 2..=40u16 {
             for width in [40u16, 64, 80, 120] {
-                let split = body_layout(Rect::new(0, 0, width, height), &chrome, view.files)
-                    .clamped_to(view.list.len());
+                let split = body_layout(
+                    Rect::new(0, 0, width, height),
+                    &chrome,
+                    view.files,
+                    view.files,
+                )
+                .clamped_to(view.list.len());
                 if split.list > 0 {
                     assert!(
                         drawable,
@@ -4998,7 +5055,8 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
     for height in 2..=40u16 {
         for width in [40u16, 64, 80, 120] {
             let area = Rect::new(0, 0, width, height);
-            let shown = body_layout(area, &with, view.files).clamped_to(view.list.len());
+            let shown =
+                body_layout(area, &with, view.files, view.files).clamped_to(view.list.len());
             if shown.graph == 0 {
                 continue;
             }
@@ -5023,7 +5081,8 @@ fn the_lead_row_is_the_mastheads_air_when_a_band_is_drawn() {
             // `hiding_the_masthead_gives_its_rows_to_the_diff` holds in
             // `tests/render.rs`; what is only here is that the separator survives
             // the toggle at every pane that can draw a band at all.
-            let hidden = body_layout(area, &without, view.files).clamped_to(view.list.len());
+            let hidden =
+                body_layout(area, &without, view.files, view.files).clamped_to(view.list.len());
             assert_eq!(
                 hidden.lead, shown.lead,
                 "at {width}x{height} turning the masthead off took the header's \
@@ -5305,6 +5364,7 @@ fn widening_never_takes_the_window_away_at_any_rung() {
 fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
     View {
         rows: vec![Row::file(FileEntry {
+            origin: Origin::Unstaged,
             path: "a.rs".to_owned(),
             from: None,
             kind: 'M',
@@ -5891,7 +5951,12 @@ fn both_rules_reach_both_edges_of_the_pane() {
         .filter(|(_, row)| row.as_str() == bar)
         .map(|(at, _)| at)
         .collect();
-    let split = body_layout(Rect::new(0, 0, narrow, 24), &following(), view.files);
+    let split = body_layout(
+        Rect::new(0, 0, narrow, 24),
+        &following(),
+        view.files,
+        view.files,
+    );
     let text_rows = stacked.len() - 1 - body_rows(&split) - FOOTER_RULE_ROWS;
     assert_eq!(
         text_rows, 2,
@@ -5926,6 +5991,7 @@ fn a_pane_too_short_for_a_body_keeps_no_rule_over_its_footer() {
         let body = body_rows(&body_layout(
             Rect::new(0, 0, width, height),
             &chrome(),
+            view.files,
             view.files,
         ));
         assert!(

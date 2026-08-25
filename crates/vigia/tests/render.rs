@@ -33,10 +33,32 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use vigia::{
-    Chrome, FileEntry, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, Mode, Position, Region,
-    Row, Scale, Theme, View, body_layout, diff_height, regions, render,
+    Chrome, FileEntry, Glyphs, Grabbed, HEAT_BUCKETS, HeatBucket, Hovered, ListRow, Mode, Position,
+    Region, Row, Scale, Theme, View, body_layout, diff_height, regions, render,
 };
-use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Recency, Span};
+use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, Span};
+
+/// Every file the pinned list draws, skipping the run separators.
+///
+/// **The list stopped being one file per row in
+/// [#313](https://github.com/breferrari/vigia/issues/313)**, so a test that wants
+/// the files has to say so. `ListRow::entry` makes that a filter rather than an
+/// unwrap nobody would notice going wrong.
+fn listed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
+    view.list.iter().filter_map(ListRow::entry)
+}
+
+/// The `n`th drawn list row's entry, mutably, for a fixture that edits one.
+///
+/// Panics on a separator rather than skipping it: every fixture that reaches for
+/// this has one run, so a separator here means the fixture stopped being what the
+/// test thinks it is.
+fn listed_mut(view: &mut View, at: usize) -> &mut FileEntry {
+    match &mut view.list[at] {
+        ListRow::File(entry) => entry,
+        ListRow::Group { .. } => panic!("list row {at} is a run separator, not a file"),
+    }
+}
 
 /// Buckets a sparkline draws on the panes this file renders at.
 ///
@@ -263,6 +285,26 @@ fn screen(width: u16, height: u16, view: &View, chrome: &Chrome) -> TestBackend 
 /// constant nothing here tests. It also keeps the forty-column body pictures on
 /// a one-line footer, so they show the widest body rather than I6's two-line
 /// one. The follow state gets its own snapshots instead, below.
+/// Every row of a drawn screen as a `String`.
+///
+/// The assertions below are about *where* a glyph is and what stands beside it, so
+/// they read rows rather than snapshots: a snapshot says the whole screen changed
+/// and this says which column moved.
+fn text_rows(drawn: &ratatui::backend::TestBackend, width: u16, height: u16) -> Vec<String> {
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| {
+                    drawn
+                        .buffer()
+                        .cell((x, y))
+                        .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn chrome() -> Chrome {
     Chrome {
         pressed: None,
@@ -273,6 +315,8 @@ fn chrome() -> Chrome {
         // `None` because these views have a diff in them, and only the empty
         // state names a branch. A populated frame never asks, which is I4 and
         // which `lib.rs`'s `branch_for` gates.
+        staged: None,
+        elsewhere: 0,
         branch: None,
         mode: Mode::Watching,
         notice: None,
@@ -307,6 +351,8 @@ fn empty_chrome() -> Chrome {
         pressed: None,
         gripped: None,
         scrolling: None,
+        staged: None,
+        elsewhere: 0,
         branch: Some("main".to_owned()),
         ..chrome()
     }
@@ -356,6 +402,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -428,6 +475,7 @@ fn column_of(backend: &TestBackend, y: u16, needle: &str) -> u16 {
 /// One changed file, as the pinned list carries it.
 fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
     FileEntry {
+        origin: Origin::Unstaged,
         path: path.to_owned(),
         from: None,
         kind: 'M',
@@ -453,6 +501,7 @@ fn one_file() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -643,6 +692,7 @@ fn nothing_changed() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -882,6 +932,7 @@ fn the_header_never_lets_the_mode_word_take_the_count_as_its_object() {
 /// build a window out of these.
 fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
     FileEntry {
+        origin: Origin::Unstaged,
         path: path.to_owned(),
         from: None,
         kind: 'M',
@@ -904,10 +955,11 @@ fn ragged_counts() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: vec![
-            listed("src/engine/watch.rs", 139, 131),
-            listed("src/render/frame.rs", 42, 7),
-            listed("Cargo.toml", 2, 0),
+            listed("src/engine/watch.rs", 139, 131).into(),
+            listed("src/render/frame.rs", 42, 7).into(),
+            listed("Cargo.toml", 2, 0).into(),
         ],
         list_top: 0,
         current_span: 400,
@@ -1028,9 +1080,7 @@ fn streamed_files(view: &View) -> impl Iterator<Item = &FileEntry> {
 /// is here because three gates need it now and a second copy would check the
 /// first copy rather than the fixture.
 fn guard_sigil_free_paths(view: &View) {
-    for path in view
-        .list
-        .iter()
+    for path in listed_files(view)
         .chain(streamed_files(view))
         .map(|entry| &entry.path)
     {
@@ -1097,8 +1147,7 @@ fn the_counters_take_the_pictures_green_and_red() {
         .iter()
         .copied()
         .zip(
-            view.list
-                .iter()
+            listed_files(&view)
                 .map(|entry| entry.churn.expect("the fixture gives every list row churn")),
         )
         .chain(
@@ -1194,9 +1243,7 @@ fn a_zero_counter_stays_grey_because_it_restates_no_change() {
     // Guard the fixture: without a zero in it this is a test about a row that
     // removes something, and it would pass against a renderer with no rule at
     // all. Read off the view rather than off the screen, for the same reason.
-    let zeroed: Vec<u16> = view
-        .list
-        .iter()
+    let zeroed: Vec<u16> = listed_files(&view)
         .enumerate()
         .filter(|(_, entry)| entry.churn.is_some_and(|(_, removed)| removed == 0))
         .map(|(index, _)| index as u16 + LIST_TOP)
@@ -1258,9 +1305,7 @@ fn the_glance_columns_agree_down_the_list() {
     // Guard the fixture first. If every row's counts were the same width, right
     // packing and columns would draw identically and this test would pass
     // against the defect it exists to catch.
-    let widths: Vec<usize> = view
-        .list
-        .iter()
+    let widths: Vec<usize> = listed_files(&view)
         .map(|e| {
             let (a, r) = e.churn.expect("the fixture gives every row churn");
             format!("+{a} -{r}").chars().count()
@@ -1410,7 +1455,7 @@ fn a_row_missing_a_glance_element_keeps_its_column() {
     // for its sigils: `glance_columns` reads any digit as a counts cell, so a
     // path carrying one would be classified as content and the comparison would
     // be over the wrong columns.
-    for path in ragged_counts().list.iter().map(|entry| entry.path.clone()) {
+    for path in listed_files(&ragged_counts()).map(|entry| entry.path.clone()) {
         assert!(
             !path.contains(|c: char| c.is_ascii_digit()),
             "the fixture path {path:?} carries a digit, which `glance_columns` \
@@ -1420,8 +1465,8 @@ fn a_row_missing_a_glance_element_keeps_its_column() {
 
     let full = ragged_counts();
     let mut gapped = ragged_counts();
-    gapped.list[1].spark = [0; HISTORY_BUCKETS];
-    gapped.list[2].heat = [HeatBucket::default(); HEAT_BUCKETS];
+    listed_mut(&mut gapped, 1).spark = [0; HISTORY_BUCKETS];
+    listed_mut(&mut gapped, 2).heat = [HeatBucket::default(); HEAT_BUCKETS];
 
     let before = glance_columns(&screen(80, 10, &full, &chrome()));
     let after = glance_columns(&screen(80, 10, &gapped, &chrome()));
@@ -1532,17 +1577,19 @@ fn scrolling_the_list_does_not_move_the_columns() {
     // four columns wider than anything in the other.
     let mut view = ragged_counts();
     view.list = vec![
-        listed("src/small.rs", 1, 1),
-        listed("src/also-small.rs", 2, 0),
-        listed("src/huge.rs", 1500, 1500),
+        listed("src/small.rs", 1, 1).into(),
+        listed("src/also-small.rs", 2, 0).into(),
+        listed("src/huge.rs", 1500, 1500).into(),
     ];
     view.files = 3;
 
     let narrow = View {
+        grouped: false,
         list: view.list[..2].to_vec(),
         ..view.clone()
     };
     let wide = View {
+        grouped: false,
         list: view.list[1..].to_vec(),
         list_top: 1,
         ..view.clone()
@@ -1551,8 +1598,8 @@ fn scrolling_the_list_does_not_move_the_columns() {
     // Non-vacuity: the two windows really do disagree about how wide a raw count
     // is, or this compares two identical screens.
     assert_ne!(
-        narrow.list.iter().filter_map(|e| e.churn).max(),
-        wide.list.iter().filter_map(|e| e.churn).max(),
+        listed_files(&narrow).filter_map(|e| e.churn).max(),
+        listed_files(&wide).filter_map(|e| e.churn).max(),
         "both windows hold the same widest count, so neither layout is under \
          pressure and this proves nothing"
     );
@@ -1599,7 +1646,12 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
         .map(|n| listed(&format!("src/file{n}.rs"), 42, 7))
         .collect();
     let view_of = |files: usize| View {
-        list: entries[..files.min(entries.len())].to_vec(),
+        grouped: false,
+        list: entries[..files.min(entries.len())]
+            .iter()
+            .cloned()
+            .map(ListRow::from)
+            .collect(),
         rows: entries[..files.min(entries.len())]
             .iter()
             .cloned()
@@ -1692,7 +1744,7 @@ fn a_pulse_does_not_move_the_columns() {
     // the design from a test comment would have learned the opposite each time.
     let quiet = ragged_counts();
     let mut pulsing = ragged_counts();
-    pulsing.list[0].recency = Recency::Pulse;
+    listed_mut(&mut pulsing, 0).recency = Recency::Pulse;
 
     let before = glance_columns(&screen(80, 10, &quiet, &chrome()));
     let drawn = screen(80, 10, &pulsing, &chrome());
@@ -2064,6 +2116,7 @@ fn a_file_with_no_line_diff_says_why() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2071,6 +2124,7 @@ fn a_file_with_no_line_diff_says_why() {
         rows_above: 0,
         rows: vec![
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "assets/banner.jpg".to_owned(),
                 from: None,
                 kind: 'M',
@@ -2081,6 +2135,7 @@ fn a_file_with_no_line_diff_says_why() {
             }),
             Row::Note("binary"),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "src/merge.rs".to_owned(),
                 from: None,
                 kind: 'U',
@@ -2091,6 +2146,7 @@ fn a_file_with_no_line_diff_says_why() {
             }),
             Row::Note("unresolved conflict"),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "crates/vigia/src/shell.rs".to_owned(),
                 from: Some("crates/vigia/src/main.rs".to_owned()),
                 kind: 'R',
@@ -2117,6 +2173,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2147,6 +2204,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2431,6 +2489,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2467,6 +2526,7 @@ fn a_double_width_character_is_never_cut_in_half() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2524,6 +2584,7 @@ fn the_gutter_gives_way_before_the_text_does() {
     let view = View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -2597,6 +2658,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
     // Values at the type's limit rather than at a plausible one, because the
     // point is the arithmetic and not the plausibility.
     let saturated = FileEntry {
+        origin: Origin::Unstaged,
         path: "src/generated.rs".to_owned(),
         from: None,
         kind: 'M',
@@ -2611,7 +2673,8 @@ fn hostile_content_never_panics_at_any_pane_size() {
     let view = View {
         landed: false,
         recorded: 0,
-        list: vec![saturated.clone(), listed("a.rs", 0, 0)],
+        grouped: false,
+        list: vec![saturated.clone().into(), listed("a.rs", 0, 0).into()],
         list_top: 0,
         current_span: 400,
         total_rows: 400,
@@ -2650,6 +2713,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
     // the path less room: the pair stopped fitting at 107 columns where it used
     // to stop at 60.
     let renamed = FileEntry {
+        origin: Origin::Unstaged,
         path: "crates/vigia/src/shell.rs".to_owned(),
         from: Some("crates/vigia/src/main.rs".to_owned()),
         kind: 'R',
@@ -2659,7 +2723,8 @@ fn a_rename_never_names_only_the_file_it_came_from() {
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     let view = View {
-        list: vec![renamed.clone()],
+        grouped: false,
+        list: vec![renamed.clone().into()],
         rows: vec![Row::file(renamed)],
         files: 1,
         ..ragged_counts()
@@ -2739,7 +2804,8 @@ fn a_counts_cell_never_rounds_a_change_to_nothing() {
     let mut added_at = Vec::new();
     for (lines, want) in BOUNDARIES {
         let view = View {
-            list: vec![listed("src/f.rs", lines, 0)],
+            grouped: false,
+            list: vec![listed("src/f.rs", lines, 0).into()],
             files: 1,
             ..ragged_counts()
         };
@@ -3051,6 +3117,7 @@ fn glancing() -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         current_span: 0,
@@ -3058,6 +3125,7 @@ fn glancing() -> View {
         rows_above: 0,
         rows: vec![
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "src/engine/watch.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -3072,6 +3140,7 @@ fn glancing() -> View {
                 heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
             }),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "src/render/frame.rs".to_owned(),
                 from: None,
                 kind: 'M',
@@ -3083,6 +3152,7 @@ fn glancing() -> View {
                 heat: heat(&[(3, 2, 1)]),
             }),
             Row::file(FileEntry {
+                origin: Origin::Unstaged,
                 path: "Cargo.toml".to_owned(),
                 from: None,
                 kind: 'M',
@@ -3820,10 +3890,11 @@ fn two_regions_at(current: usize, row: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: vec![
-            entry("src/engine/change.rs", 8, 2),
-            entry("src/engine/watch.rs", 42, 7),
-            entry("src/render/frame.rs", 11, 3),
+            entry("src/engine/change.rs", 8, 2).into(),
+            entry("src/engine/watch.rs", 42, 7).into(),
+            entry("src/render/frame.rs", 11, 3).into(),
         ],
         list_top: 0,
         // Tall enough that a scroll inside one file is several rows of bar, which
@@ -4262,8 +4333,9 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
         landed: false,
         recorded: 0,
+        grouped: false,
         list: (0..shown)
-            .map(|i| entry(&format!("src/f{i}.rs"), 1, 0))
+            .map(|i| ListRow::from(entry(&format!("src/f{i}.rs"), 1, 0)))
             .collect(),
         list_top: top,
         current_span: 400,
@@ -5685,7 +5757,8 @@ fn render_never_writes_outside_its_area_over_a_degenerate_view() {
         },
         // A path of wide glyphs, at the caret and bar boundary.
         View {
-            list: vec![entry("src/日本語/テスト.rs", 3, 1)],
+            grouped: false,
+            list: vec![entry("src/日本語/テスト.rs", 3, 1).into()],
             ..a_list_of(9, 1, 0)
         },
     ];
@@ -6554,6 +6627,7 @@ fn a_diff_taller_than_the_pane_keeps_its_line_numbers() {
             Row::file(listed("src/engine/watch.rs", 42, 7)),
             line(LineKind::Added, 258, "    pub fn advance(&mut self) {"),
         ],
+        grouped: false,
         list: Vec::new(),
         files: 1,
         total_rows,
@@ -6609,6 +6683,7 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
             one_file(),
             View {
                 files: 0,
+                grouped: false,
                 list: Vec::new(),
                 rows: Vec::new(),
                 ..one_file()
@@ -6616,9 +6691,10 @@ fn render_clips_to_the_buffer_rather_than_the_area() {
             // A heat strip, a pinned list to put a rule on screen, and enough
             // files to make the list scrollable so the bar is drawn too.
             View {
+                grouped: false,
                 list: vec![
-                    listed("src/engine/watch.rs", 42, 7),
-                    listed("src/render/frame.rs", 11, 3),
+                    listed("src/engine/watch.rs", 42, 7).into(),
+                    listed("src/render/frame.rs", 11, 3).into(),
                 ],
                 rows: vec![Row::file(listed("src/engine/watch.rs", 42, 7))],
                 files: 40,
@@ -6979,8 +7055,13 @@ fn the_band_arrives_once_and_a_taller_pane_never_removes_it() {
     let mut arrived: Option<u16> = None;
 
     for height in 1..=80u16 {
-        let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
-            .clamped_to(view.list.len());
+        let body = body_layout(
+            Rect::new(0, 0, width, height),
+            &chrome(),
+            view.files,
+            view.files,
+        )
+        .clamped_to(view.list.len());
         match (arrived, body.graph > 0) {
             (None, true) => arrived = Some(height),
             (Some(at), false) => panic!(
@@ -7017,7 +7098,7 @@ fn the_band_never_takes_the_diff_below_a_whole_hunk() {
     let width = 80u16;
     for files in [1usize, 3, 6, 30] {
         for height in 1..=80u16 {
-            let body = body_layout(Rect::new(0, 0, width, height), &chrome(), files);
+            let body = body_layout(Rect::new(0, 0, width, height), &chrome(), files, files);
             if body.graph == 0 {
                 continue;
             }
@@ -7046,8 +7127,13 @@ fn an_empty_window_draws_no_band_at_all() {
     let height = 24u16;
     let view = a_list_of(3, 3, 0);
     let backend = screen(width, height, &view, &chrome());
-    let body = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files)
-        .clamped_to(view.list.len());
+    let body = body_layout(
+        Rect::new(0, 0, width, height),
+        &chrome(),
+        view.files,
+        view.files,
+    )
+    .clamped_to(view.list.len());
     assert!(body.graph > 0, "the fixture reserved no band");
 
     // Asked of the layout rather than counted, which is this branch's own
@@ -7080,13 +7166,19 @@ fn hiding_the_masthead_gives_its_rows_to_the_diff() {
     let width = 80u16;
     let height = 24u16;
     let view = a_list_of(3, 3, 0);
-    let shown = body_layout(Rect::new(0, 0, width, height), &chrome(), view.files);
+    let shown = body_layout(
+        Rect::new(0, 0, width, height),
+        &chrome(),
+        view.files,
+        view.files,
+    );
     let hidden = body_layout(
         Rect::new(0, 0, width, height),
         &Chrome {
             masthead: false,
             ..chrome()
         },
+        view.files,
         view.files,
     );
 
@@ -7140,6 +7232,8 @@ fn a_nameless_worktree_on_a_branch_draws_no_leading_separator() {
     for worktree in ["", " ", "\u{200b}", "\u{7}"] {
         let chrome = Chrome {
             worktree: worktree.to_owned(),
+            staged: None,
+            elsewhere: 0,
             branch: Some("main".to_owned()),
             ..chrome()
         };
@@ -7173,6 +7267,8 @@ fn a_populated_worktree_names_its_branch_in_the_header() {
     let width = 80u16;
     let view = a_list_of(3, 3, 0);
     let chrome = Chrome {
+        staged: None,
+        elsewhere: 0,
         branch: Some("feature/band".to_owned()),
         ..chrome()
     };
@@ -7185,4 +7281,316 @@ fn a_populated_worktree_names_its_branch_in_the_header() {
         header.contains("vigia"),
         "the branch arrived and the worktree name left: {header:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The staged run: `SPEC.md` §11.2 **B17**.
+// ---------------------------------------------------------------------------
+
+/// A view holding both runs, which is what `a` produces.
+///
+/// Two unstaged files and two staged ones, the second of which shares a path with
+/// the first unstaged file: that is the case the union exists for, and it is the
+/// one a single `MM` row could not draw.
+fn both_runs() -> View {
+    let staged = |path: &str, added: u32, removed: u32| {
+        let mut entry = listed(path, added, removed);
+        entry.origin = Origin::Staged;
+        entry
+    };
+    View {
+        grouped: true,
+        // Built the way `list_plan` builds one, separators included, because that
+        // is what the region actually draws. `tests/list.rs` is what holds the
+        // plan itself; this fixture is the picture of its output.
+        list: vec![
+            ListRow::Group {
+                origin: Origin::Unstaged,
+                count: 2,
+            },
+            listed("src/render.rs", 4, 1).into(),
+            listed("src/frame.rs", 11, 3).into(),
+            ListRow::Group {
+                origin: Origin::Staged,
+                count: 2,
+            },
+            staged("src/render.rs", 42, 7).into(),
+            staged("tests/staged.rs", 64, 0).into(),
+        ],
+        list_top: 0,
+        files: 4,
+        rows: vec![
+            Row::file(listed("src/render.rs", 4, 1)),
+            Row::file(staged("tests/staged.rs", 64, 0)),
+        ],
+        ..nothing_changed()
+    }
+}
+
+/// The mark, and it is the whole of what tells one run from the other on a row.
+///
+/// **Position rather than presence**: the gutter column exists on *every* row of a
+/// grouped view, so a run boundary does not slide the paths beside it one cell
+/// sideways. What differs is what stands in it.
+#[test]
+fn a_staged_row_draws_the_gutter_and_an_unstaged_row_draws_none() {
+    let drawn = screen(80, 12, &both_runs(), &chrome());
+    let rows: Vec<String> = (0..12)
+        .map(|y| {
+            (0..80)
+                .map(|x| {
+                    drawn
+                        .buffer()
+                        .cell((x, y))
+                        .map_or(' ', |c| c.symbol().chars().next().unwrap_or(' '))
+                })
+                .collect()
+        })
+        .collect();
+
+    let staged_rows: Vec<&String> = rows
+        .iter()
+        .filter(|row| row.contains("tests/staged.rs"))
+        .collect();
+    assert!(
+        !staged_rows.is_empty(),
+        "the fixture drew no staged row at all, so this asserts nothing:\n{}",
+        rows.join("\n")
+    );
+    for row in &staged_rows {
+        assert!(
+            row.contains('│'),
+            "a staged row carries no gutter mark, so nothing on it says which \
+             comparison it is:\n{row}"
+        );
+    }
+
+    // And an unstaged row leaves the column blank rather than filling it with
+    // something else: two marks would be two things to learn for one fact.
+    let unstaged: Vec<&String> = rows
+        .iter()
+        .filter(|row| row.contains("src/frame.rs"))
+        .collect();
+    for row in &unstaged {
+        assert!(
+            !row.contains('│'),
+            "an unstaged row carries the staged gutter mark:\n{row}"
+        );
+    }
+}
+
+/// **The gutter takes the staged colour and never the diff's own green.**
+///
+/// They are the same hue by design — git paints a staged path green and this
+/// borrows that — and they are different *roles*, so a theme must be free to move
+/// one without the other. What keeps them from collapsing is that the bar is drawn
+/// from `Theme::staged` rather than from `Theme::added`, and a palette that made
+/// them one key would look identical today and be one edit from a row where the
+/// mark and the counters say the same thing about different facts.
+#[test]
+fn the_gutter_takes_the_staged_colour_and_never_the_diffs_green() {
+    let theme = Theme::default();
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 12)).expect("terminal");
+    let view = both_runs();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &chrome(),
+            );
+        })
+        .expect("draw");
+    let buf = terminal.backend().buffer().clone();
+
+    let mut found = 0;
+    for y in 0..12u16 {
+        for x in 0..80u16 {
+            let Some(cell) = buf.cell((x, y)) else {
+                continue;
+            };
+            if cell.symbol() != "│" {
+                continue;
+            }
+            found += 1;
+            assert_eq!(
+                cell.style().fg,
+                theme.staged.fg,
+                "the gutter mark at {x},{y} is not drawn from Theme::staged"
+            );
+        }
+    }
+    assert!(
+        found > 0,
+        "no gutter mark reached the screen, so nothing was asserted"
+    );
+}
+
+/// A pane with one run draws no gutter column at all.
+///
+/// **The default view does not move one cell**, which is what makes the toggle a
+/// thing a reader asks for rather than a column everyone pays for. Asserted
+/// against the very same fixture with `grouped` cleared, so the only difference
+/// between the two screens is the flag.
+#[test]
+fn one_run_spends_no_column_on_a_gutter_it_would_never_fill() {
+    let mut ungrouped = both_runs();
+    ungrouped.grouped = false;
+    ungrouped.list.retain(|row| {
+        row.entry()
+            .is_some_and(|entry| entry.origin == Origin::Unstaged)
+    });
+    ungrouped.files = 2;
+
+    let grouped = text_rows(&screen(80, 12, &both_runs(), &chrome()), 80, 12);
+    let plain = text_rows(&screen(80, 12, &ungrouped, &chrome()), 80, 12);
+
+    let path_at = |rows: &[String]| {
+        rows.iter()
+            .find(|row| row.contains("src/frame.rs"))
+            .map(|row| row.find("src/frame.rs").expect("just matched"))
+    };
+    let (with, without) = (path_at(&grouped), path_at(&plain));
+    assert!(
+        with.is_some() && without.is_some(),
+        "the fixture lost its row"
+    );
+    assert_eq!(
+        with.map(|at| at - 1),
+        without,
+        "the gutter costs the path exactly one column when it is drawn and none \
+         when it is not"
+    );
+}
+
+/// The header names both runs, and the staged half is owed even at zero.
+#[test]
+fn the_header_counts_both_runs() {
+    let with = Chrome {
+        staged: Some(2),
+        ..chrome()
+    };
+    let rows = text_rows(&screen(120, 12, &both_runs(), &with), 120, 12);
+    assert!(
+        rows[0].contains("4 changed") && rows[0].contains("2 staged"),
+        "the header does not carry both totals: {:?}",
+        rows[0]
+    );
+
+    // **Zero is drawn**, because it is the only acknowledgment pressing `a` on a
+    // worktree with nothing staged can give. A key that does nothing a reader can
+    // see is the defect B17 is named for, one layer down.
+    let empty = Chrome {
+        staged: Some(0),
+        ..chrome()
+    };
+    let rows = text_rows(&screen(120, 12, &both_runs(), &empty), 120, 12);
+    assert!(
+        rows[0].contains("0 staged"),
+        "the header drops a staged total of zero, so `a` is a key that says \
+         nothing on the tree where saying something matters most: {:?}",
+        rows[0]
+    );
+
+    // And with the run off there is no second fact at all.
+    let rows = text_rows(&screen(120, 12, &both_runs(), &chrome()), 120, 12);
+    assert!(
+        !rows[0].contains("staged"),
+        "the header names the staged run on a pane that is not drawing it: {:?}",
+        rows[0]
+    );
+}
+
+/// **The blank pane says where the work went**, which is the whole of #313's
+/// report: an agent that stages its own work emptied the pane, and
+/// `no unstaged changes` reads the same on a clean tree and on a fully staged one.
+#[test]
+fn an_empty_view_says_where_the_work_went() {
+    let signposted = Chrome {
+        elsewhere: 3,
+        ..empty_chrome()
+    };
+    let rows = text_rows(&screen(80, 6, &nothing_changed(), &signposted), 80, 6);
+    assert!(
+        rows[1].contains("no unstaged changes") && rows[1].contains("3 staged"),
+        "the empty state does not say where the work went: {:?}",
+        rows[1]
+    );
+}
+
+/// And it says only what is true: a genuinely clean tree gains no second fact.
+///
+/// Without this the row above is satisfied by printing `0 staged` on every empty
+/// pane, which is a number where there was silence.
+#[test]
+fn an_empty_view_with_nothing_anywhere_says_only_that() {
+    let rows = text_rows(&screen(80, 6, &nothing_changed(), &empty_chrome()), 80, 6);
+    // **`trim` and an equality, not a `contains`.** `"no unstaged changes"` has
+    // `"staged changes"` inside it, so the obvious negative assertion is satisfied
+    // by the very line it is supposed to permit — the substring trap this
+    // repository already has a recorded lesson about, on a word that invites it.
+    assert_eq!(
+        rows[1].trim(),
+        "no unstaged changes",
+        "a clean tree's empty state grew a second fact"
+    );
+
+    // With the run **on** and nothing anywhere, both comparisons are named,
+    // because the reader asked about both and the line has to say it looked.
+    let both = Chrome {
+        staged: Some(0),
+        ..empty_chrome()
+    };
+    let rows = text_rows(&screen(80, 6, &nothing_changed(), &both), 80, 6);
+    assert!(
+        rows[1].contains("no staged or unstaged changes"),
+        "with both runs drawn the empty state names only one of them: {:?}",
+        rows[1]
+    );
+}
+
+#[test]
+fn the_staged_run_at_eighty_columns() {
+    insta::assert_snapshot!(screen(
+        80,
+        12,
+        &both_runs(),
+        &Chrome {
+            staged: Some(2),
+            ..chrome()
+        }
+    ));
+}
+
+#[test]
+fn the_staged_run_at_a_hundred_and_twenty_columns() {
+    insta::assert_snapshot!(screen(
+        120,
+        12,
+        &both_runs(),
+        &Chrome {
+            staged: Some(2),
+            ..chrome()
+        }
+    ));
+}
+
+#[test]
+fn the_staged_run_at_forty_columns() {
+    // I6's floor, where the gutter gives way before the path does and the run
+    // separators are what still carry the fact.
+    insta::assert_snapshot!(screen(
+        40,
+        12,
+        &both_runs(),
+        &Chrome {
+            staged: Some(2),
+            ..chrome()
+        }
+    ));
 }

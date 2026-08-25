@@ -1,0 +1,16 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(40, 12, &both_runs(), &Chrome { staged: Some(2), ..chrome() })"
+---
+"vigia · 4 changed · 2 staged    watching"
+"                                        "
+" ──  unstaged  2 ─────────────────────  "
+"▸ M src/render.rs   ■■■■■■    +4    -1  "
+"  M src/frame.rs    ■■■■■■   +11    -3  "
+" ──  staged  2 ───────────────────────  "
+" │M src/render.rs   ■■■■■■   +42    -7  "
+"────────────────────────────────────────"
+" M src/render.rs    ■■■■■■    +4    -1  "
+"│M …sts/staged.rs   ■■■■■■   +64    -0  "
+"────────────────────────────────────────"
+"q quit · f follow · ? keys           1/4"

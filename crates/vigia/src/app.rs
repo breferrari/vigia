@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use vigia_core::{Frame, Highlighter, History, Result, Samples};
 
-use crate::input::{Action, Grabbed, Hovered};
+use crate::input::{Action, Pointing};
 use crate::memory;
 use crate::render::{Body, Chrome, Mode};
 use crate::view::{Position, View, Viewport, rows_in};
@@ -116,6 +116,29 @@ pub struct App {
     /// Off by default, which is the derived answer and also the ruled one: a
     /// reader who has pressed nothing gets the diff the tool has always drawn.
     single: bool,
+    /// Whether the reader has asked for the staged run beside the unstaged one.
+    ///
+    /// `SPEC.md` §11.2 **B17**, from `a`
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)). Off by default:
+    /// a reader who has pressed nothing gets the comparison this tool has always
+    /// drawn, and which way the toggle *starts* is still
+    /// [#50](https://github.com/breferrari/vigia/issues/50)'s open question on
+    /// [#306](https://github.com/breferrari/vigia/issues/306)'s file.
+    ///
+    /// **Held here and mirrored into the frame rather than read back from it.**
+    /// The frame owns what it walks, and this owns what was *asked for*, which is
+    /// the same split `Chrome::rail` and `Body::rail` already draw one region
+    /// over. They cannot drift: `App::apply` is the only writer and it sets both
+    /// in one arm.
+    staged: bool,
+    /// How many files the staged run held on the last collect.
+    ///
+    /// **Recorded rather than re-walked**, for the reason every other number here
+    /// is: `Frame::advance` has already reported both runs, so this is a pass over
+    /// a `Vec` the shell already holds. It is the *staged* total, where
+    /// [`View::files`] is both runs together, and the header draws them as two
+    /// facts because they answer two questions.
+    staged_files: usize,
     /// Which page of the gestures sheet is drawn, and `None` when it is not.
     ///
     /// **Retained here rather than lived for one frame, and that is the whole
@@ -299,6 +322,11 @@ impl Default for App {
             // Derived, and B16's ruling as well: an unpressed shell scrolls the
             // whole changed set, which is every version of this tool so far.
             single: false,
+            // Derived, and B17's ruling as well: an unpressed shell draws the
+            // working tree against the index, which is what §11.1's opening
+            // contract has always said and what #50 has not yet reopened.
+            staged: false,
+            staged_files: 0,
             // Derived, and for once trivially so: nobody has pressed `?`.
             sheet: None,
             sheet_pages: 1,
@@ -484,6 +512,15 @@ impl App {
         self.notice = None;
     }
 
+    /// Whether the reader has asked for the staged run.
+    ///
+    /// Read by the loop to decide whether the empty state has another run to
+    /// count, and by nothing else: with the run on, an empty frame means both
+    /// comparisons are empty and there is nowhere for the work to have gone.
+    pub fn staged(&self) -> bool {
+        self.staged
+    }
+
     /// The chrome for this frame.
     ///
     /// `branch` is a parameter rather than a field because it is not this type's
@@ -500,13 +537,27 @@ impl App {
         &self,
         worktree: &str,
         branch: Option<&str>,
-        pressed: Option<(u16, u16)>,
-        gripped: Option<Grabbed>,
-        hovered: Option<Hovered>,
-        scrolling: Option<(Grabbed, isize)>,
+        pointing: Pointing,
+        elsewhere: usize,
     ) -> Chrome {
+        let Pointing {
+            pressed,
+            gripped,
+            hovered,
+            scrolling,
+        } = pointing;
         Chrome {
             pressed,
+            // `Some` whenever the reader has asked for the run, **including at
+            // zero**: that zero is the only acknowledgment pressing `a` on a
+            // worktree with nothing staged can give, and a key that does nothing
+            // a reader can see is the failure B17 names in its own first line.
+            // Counted from the frame's own changed set rather than walked again:
+            // `App::view` records it, so this is a field read. The count the
+            // *header* wants is the staged one alone, where `View::files` is both
+            // runs together.
+            staged: self.staged.then_some(self.staged_files),
+            elsewhere,
             gripped,
             hovered,
             scrolling,
@@ -723,6 +774,25 @@ impl App {
             // any screen at all the second on-and-off pair is. `SPEC.md` §11.2
             // B16 says so out loud and `tests/single.rs` holds both halves.
             Action::ToggleSingle => self.single = !self.single,
+            // **The one toggle that changes what the frame *walks*.** The other
+            // three rearrange rows the frame already holds; this one adds a second
+            // status walk and a second set of diffs, so the frame is told rather
+            // than the shell remembering on its own. `Frame::show_staged` drops
+            // both caches when the answer actually moves and is a no-op when it
+            // does not, so calling it here rather than once a frame costs nothing
+            // and keeps one owner of the fact.
+            //
+            // **And the position goes to the top**, which is the deviation from
+            // the three toggles above and is deliberate. They keep the reader's
+            // row because the row still names the same file afterwards; here the
+            // changed set itself grows or shrinks underneath the position, so
+            // holding a row number would land the reader in a different file with
+            // no gesture of theirs to explain it. `SPEC.md` §11.2 B17.
+            Action::ToggleStaged => {
+                self.staged = !self.staged;
+                frame.show_staged(self.staged);
+                self.position = Position::default();
+            }
             // **No jump and no move at all**, which is one better than the
             // masthead: that toggle resizes the diff's region, and this one draws
             // over rows the diff keeps. Nothing about the viewport changes, so a
@@ -807,9 +877,28 @@ impl App {
             // was written for exactly that, which is how the rationale above it
             // was found to be the wrong one.
             Action::ListRow(offset) => {
+                // **Resolved through the list's own plan, not by adding the offset
+                // to the window's first file**
+                // ([#313](https://github.com/breferrari/vigia/issues/313)). Those
+                // are the same number only while every drawn row is a file, and
+                // since B17 a grouped window opens each run with a separator. Added
+                // blind, a click or a digit past the first separator names the file
+                // *before* the one under the pointer, and it does it silently:
+                // there is a file at that index, the jump lands, and the only sign
+                // is that the reader ends up somewhere they did not point at.
+                //
+                // `None` is a separator, and a click on one does nothing at all
+                // rather than resolving to a neighbour. That is the same answer a
+                // digit naming no drawn row already gets, and it is the right one:
+                // a separator is chrome, and chrome that teleported the diff would
+                // be an affordance nothing announced.
                 let offset = usize::from(offset);
-                let file = self.list_top.saturating_add(offset);
-                if offset < self.list_rows && file < frame.files().len() {
+                if offset >= self.list_rows {
+                    return Ok(true);
+                }
+                if let Some(file) =
+                    crate::view::file_at(frame.files(), self.list_top, self.list_rows, offset)
+                {
                     self.jump_to(file);
                 }
             }
@@ -1280,6 +1369,18 @@ impl App {
         // again, on a frame no tick armed. Reachable by opening the sheet, which
         // moves no viewport and whose own ruling says a reader who opens it and
         // closes it sees the screen they left.
+        // **The staged total, from the changed set the frame already holds.**
+        // A pass over a `Vec`, so no read, no `stat` and no diff: `Frame::advance`
+        // has already reported both runs and this is the header asking which half
+        // is which. Recorded here rather than in the chrome because this is the one
+        // call every frame makes with the frame in hand, and because the chrome is
+        // built twice per paint — once before the layout and once after — where a
+        // count taken there would be a walk taken twice.
+        self.staged_files = frame
+            .files()
+            .iter()
+            .filter(|change| change.origin == vigia_core::Origin::Staged)
+            .count();
         let owed = self.landing && self.still_the_followed_file(frame);
         // **Recorded here because this is the one call every frame makes with the
         // pane's own layout in hand.** `?` advancing needs to know which page is
@@ -1401,6 +1502,10 @@ mod tests {
     //! repository, no terminal and no fixture.
 
     use super::*;
+    // Named here rather than at the top of the file: since the four pointer facts
+    // travel as one [`Pointing`], the module itself has no use for either type and
+    // this is the only place that spells a mark out.
+    use crate::input::{Grabbed, Hovered};
 
     #[test]
     fn the_chrome_carries_every_gesture_mark_it_is_handed() {
@@ -1420,10 +1525,13 @@ mod tests {
         let chrome = app.chrome(
             "fixture",
             None,
-            Some((79, 5)),
-            Some(Grabbed::Diff),
-            Some(Hovered::Button(79, 19)),
-            Some((Grabbed::List, -1)),
+            Pointing {
+                pressed: Some((79, 5)),
+                gripped: Some(Grabbed::Diff),
+                hovered: Some(Hovered::Button(79, 19)),
+                scrolling: Some((Grabbed::List, -1)),
+            },
+            0,
         );
 
         assert_eq!(chrome.pressed, Some((79, 5)), "the pressed cell");
@@ -1447,13 +1555,13 @@ mod tests {
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
         assert_eq!(
-            app.chrome("fixture", None, None, None, None, None).mode,
+            app.chrome("fixture", None, Pointing::default(), 0).mode,
             Mode::Watching
         );
 
         app.watch_lost();
         assert_eq!(
-            app.chrome("fixture", None, None, None, None, None).mode,
+            app.chrome("fixture", None, Pointing::default(), 0).mode,
             Mode::Lost
         );
 
@@ -1466,7 +1574,7 @@ mod tests {
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(
-            app.chrome("fixture", None, None, None, None, None).mode,
+            app.chrome("fixture", None, Pointing::default(), 0).mode,
             Mode::Lost
         );
     }
@@ -1478,13 +1586,13 @@ mod tests {
         // that nothing invents one when there is none.
         let app = App::new();
         assert_eq!(
-            app.chrome("fixture", Some("main"), None, None, None, None)
+            app.chrome("fixture", Some("main"), Pointing::default(), 0)
                 .branch
                 .as_deref(),
             Some("main")
         );
         assert_eq!(
-            app.chrome("fixture", None, None, None, None, None).branch,
+            app.chrome("fixture", None, Pointing::default(), 0).branch,
             None
         );
     }

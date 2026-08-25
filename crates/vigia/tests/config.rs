@@ -18,7 +18,7 @@
 //! nothing here can leak into another binary.
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Config, ConfigError, body_layout, config, diff_height};
+use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
 
 /// A home directory holding a config file, or holding none.
 ///
@@ -90,7 +90,7 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 /// It takes no area because `App::chrome` is width-independent; the first draft
 /// took one and ignored it, which read as a sweep and was not.
 fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
 }
 
@@ -441,16 +441,16 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
         rail: true,
         ..Config::default()
     });
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     assert!(chrome.rail, "the file's request did not reach the chrome");
 
-    let narrow = body_layout(Rect::new(0, 0, 100, 30), &chrome, 6);
+    let narrow = body_layout(Rect::new(0, 0, 100, 30), &chrome, 6, 6);
     assert!(
         !narrow.rail,
         "a hundred-column pane drew a rail, so the arrival width is not being read"
     );
 
-    let wide = body_layout(Rect::new(0, 0, 160, 30), &chrome, 6);
+    let wide = body_layout(Rect::new(0, 0, 160, 30), &chrome, 6, 6);
     assert!(
         wide.rail,
         "the request did not survive the narrow pane, so widening asks again"
@@ -511,7 +511,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // `App::configured` left all 945 tests green.
     let body = diff_height(
         Rect::new(0, 0, 80, 24),
-        &configured.chrome("fixture", None, None, None, None, None),
+        &configured.chrome("fixture", None, Pointing::default(), 0),
         6,
     );
     for app in [&mut configured, &mut pressed] {

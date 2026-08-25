@@ -345,6 +345,20 @@ palette! {
 
     /// The letter naming what happened to a file.
     kind,
+    /// The gutter bar and the run label that mark a **staged** change.
+    ///
+    /// **Green, because that is git's own vocabulary for staged**: `git status`
+    /// paints a staged path green and an unstaged one red, so a reader who has
+    /// used git has already learned this. It is `SPEC.md` §5.3's green amendment
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)), and what keeps it
+    /// from colliding with the diff's own green is *where* it is drawn: the bar
+    /// lives in the gutter left of the kind letter and never on a content row, so
+    /// it is never beside a `+` sigil or a `+42` counter.
+    ///
+    /// One key for both marks on purpose. The bar on a row and the word in the
+    /// run's separator are the same statement said twice, so a theme that moved
+    /// one and not the other would be saying it two ways.
+    staged,
     /// A hunk's `@@` header.
     hunk,
     /// Line numbers.
@@ -678,6 +692,7 @@ impl Theme {
             heat_mixed_warm: fg(Color::Yellow),
             heat_mixed_hot: fg(Color::LightYellow),
             kind: fg(Color::Yellow),
+            staged: fg(Color::Green),
             hunk: fg(Color::Blue),
             // Same rule as `chrome_dim`, and the same two reports.
             gutter: fg(Color::Gray),
@@ -862,6 +877,9 @@ impl Theme {
             heat_mixed_warm: rgb(0xe3, 0xb3, 0x41),
             heat_mixed_hot: rgb(0xf2, 0xcc, 0x60),
             kind: rgb(0xe3, 0xb3, 0x41),
+            // The dark palette's own green, which `added` also takes: one hue for
+            // the idea of *this is in*, spent in two places that never share a row.
+            staged: rgb(0x3f, 0xb9, 0x50),
             hunk: rgb(0x58, 0xa6, 0xff),
             gutter: rgb(0x7d, 0x85, 0x90),
             added: rgb(0x3f, 0xb9, 0x50),
@@ -1008,6 +1026,7 @@ impl Theme {
             heat_mixed_warm: rgb(0xbf, 0x87, 0x00),
             heat_mixed_hot: rgb(0x7d, 0x4e, 0x00),
             kind: rgb(0xbf, 0x87, 0x00),
+            staged: rgb(0x1a, 0x7f, 0x37),
             hunk: rgb(0x05, 0x50, 0xae),
             gutter: rgb(0x81, 0x8b, 0x98),
             added: rgb(0x1a, 0x7f, 0x37),

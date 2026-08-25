@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Position, Row, body_layout,
+    Action, App, Body, HEAT_BUCKETS, HeatBucket, LIST_SETTLED, Pointing, Position, Row, body_layout,
 };
 use vigia_core::{FrameStats, HighlightStats, Highlighter, History, Recency};
 
@@ -130,7 +130,8 @@ const RAIL_WIDTH: u16 = 160;
 fn layout_on(width: u16, height: u16) -> Body {
     body_layout(
         Rect::new(0, 0, width, height),
-        &railed(App::new().chrome("fixture", None, None, None, None, None)),
+        &railed(App::new().chrome("fixture", None, Pointing::default(), 0)),
+        FILES,
         FILES,
     )
 }

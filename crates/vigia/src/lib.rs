@@ -106,9 +106,9 @@ pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
-    Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
-    WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
-    settled,
+    Action, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet,
+    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience,
+    scroll_mark, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -117,8 +117,8 @@ pub use render::{
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, Scale, View, Viewport, block_rows,
-    diff_rows, rows_in, rows_of, span_in,
+    FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
+    block_rows, diff_rows, file_at, list_plan, list_rows_wanted, rows_in, rows_of, span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -458,6 +458,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         glyphs,
         name: short_name(worktree.workdir()),
         branch: None,
+        elsewhere: 0,
         screen: View::default(),
         regions: Regions::default(),
         held: None,
@@ -1112,6 +1113,17 @@ struct Shell {
     /// rather than a populated frame, which is the only case that draws no
     /// branch anywhere.
     branch: Option<String>,
+    /// How many changes the run this pane is **not** drawing holds.
+    ///
+    /// Zero on every frame but the one that draws the empty state, which is what
+    /// keeps I4 true for the walk behind it: a count costs a status walk, and it
+    /// is spent only where it is drawn. Same rule [`Shell::branch`] follows one
+    /// field up.
+    ///
+    /// **What it buys is the difference between a clean tree and a fully staged
+    /// one**, which `no unstaged changes` says nothing about and which is the
+    /// whole of [#313](https://github.com/breferrari/vigia/issues/313)'s report.
+    elsewhere: usize,
     /// The last view collected successfully.
     ///
     /// Painted again when collecting a new one fails, which is why it is kept at
@@ -1255,16 +1267,28 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
+            self.pointing(),
+            self.elsewhere,
         );
         let area = self.area()?;
         Ok(diff_height(area, &chrome, files))
     }
 
     /// The cell a step button is being held on, for the frame that draws it lit.
+    /// What the pointer is doing this frame, as the one value the chrome takes.
+    ///
+    /// Gathered here rather than at each call site because the chrome is built
+    /// twice per paint and a second spelling of this list is a second chance to
+    /// transpose two `Option`s that compile either way.
+    fn pointing(&self) -> Pointing {
+        Pointing {
+            pressed: self.pressed(),
+            gripped: self.gripped(),
+            hovered: self.hovered(),
+            scrolling: self.scrolling,
+        }
+    }
+
     fn pressed(&self) -> Option<(u16, u16)> {
         self.held.map(Held::at)
     }
@@ -1544,6 +1568,31 @@ impl Shell {
         // exactly the screen that exists to orient a reader.
         self.branch = worktree.branch();
 
+        // **And on a frame with nothing to draw, where the work went.**
+        // [#313](https://github.com/breferrari/vigia/issues/313) was reported as
+        // an agent that stages its own work emptying the pane: `no unstaged
+        // changes` is true of a clean tree and of a fully staged one alike, and
+        // the reader had no way to tell them apart. Counting the other run turns
+        // that line into `no unstaged changes · 3 staged`.
+        //
+        // **Guarded by the frame's own file count, which is the whole of I4 for
+        // this read** — the same rule the branch above is now *satisfied* by
+        // rather than guarded by, applied to a read that genuinely is conditional.
+        // A frame with a diff on it never asks. A frame without one has no diff to
+        // compute and reads nothing else, and the walk it pays for is the cheaper
+        // of the two: the staged comparison touches no file at all, measured at
+        // 430us against 2.15ms on a 200-file fixture.
+        //
+        // Asked only while the staged run is **off**, because with it on the pane
+        // already holds both comparisons and an empty frame means both are empty.
+        // A failed walk is not worth a notice: it costs the reader a hint on one
+        // frame, and saying so on the footer would push a real notice off it.
+        self.elsewhere = if frame.files().is_empty() && !self.app.staged() {
+            worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
+        } else {
+            0
+        };
+
         // The chrome is built before the layout, not after, because the footer
         // takes a second line at narrow widths and `body_layout` has to know
         // whether this frame is one of those. `frame.files().len()` is the same
@@ -1553,12 +1602,15 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
+            self.pointing(),
+            self.elsewhere,
         );
-        let body = body_layout(self.area()?, &chrome, frame.files().len());
+        let body = body_layout(
+            self.area()?,
+            &chrome,
+            frame.files().len(),
+            view::list_rows_wanted(frame.files()),
+        );
         match self
             .app
             .view(frame, &mut self.highlighter, &self.history, body)
@@ -1591,10 +1643,8 @@ impl Shell {
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
+            self.pointing(),
+            self.elsewhere,
         );
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach

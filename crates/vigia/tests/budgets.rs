@@ -35,7 +35,8 @@ use std::time::{Duration, Instant};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
+    Action, App, Body, Glyphs, PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout,
+    render,
 };
 use vigia_core::{
     CHECKPOINT_STRIDE, Frame, HISTORY_PATHS, HISTORY_SAMPLE, Highlighter, History, LineKind,
@@ -163,7 +164,8 @@ fn layout(app: &App, files: usize) -> Body {
 fn layout_of(app: &App, pane: Rect, files: usize) -> Body {
     body_layout(
         pane,
-        &app.chrome("fixture", None, None, None, None, None),
+        &app.chrome("fixture", None, Pointing::default(), 0),
+        files,
         files,
     )
 }
@@ -227,7 +229,7 @@ fn frame_body(
     screen: Body,
 ) {
     app.sample_memory();
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     let view = app.view(frame, highlighter, history, screen).expect("view");
     // **The pane comes from the buffer being painted rather than from
     // [`area`]** ([#252](https://github.com/breferrari/vigia/issues/252)). The two
@@ -408,7 +410,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
         );
     }
 
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     assert!(
         chrome.frame.is_some(),
         "the timed frame never recorded what it cost, so every wall-clock gate \
@@ -856,7 +858,7 @@ fn frame_budget_on(
         // where the hint bar's `q quit` scored on every frame.
         let laid = vigia::regions(
             pane,
-            &app.chrome("fixture", None, None, None, None, None),
+            &app.chrome("fixture", None, Pointing::default(), 0),
             &app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view"),
         );
@@ -1854,7 +1856,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
             app.view(&mut frame, &mut highlighter, &history, screen)
                 .expect("view")
         });
-        let chrome = app.chrome("fixture", None, None, None, None, None);
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0);
         let (painted, paint, paint_cpu) = timed_cpu(|| {
             render(
                 &mut buf,
@@ -2379,7 +2381,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
     let screen = layout_of(&app, pane, FILES);
     app.apply(vigia::Action::ToggleSheet, &mut frame, screen.diff)
         .expect("toggle the sheet");
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     let laid = vigia::regions(pane, &chrome, &{
         let mut highlighter = Highlighter::eager();
         let history = History::new();
@@ -2412,7 +2414,7 @@ fn sheet_size_on(name: &str, pane: Rect) -> (u16, u16) {
 fn a_frame_under_the_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-sheet-shape", SHEET_PANE),
-        (104, 16),
+        (104, 17),
         "the {}x{} pane does not draw the two-column rung, so this gate is not \
          timing the shape it is named for",
         SHEET_PANE.width,
@@ -2460,7 +2462,7 @@ const ROOMY_PANE: Rect = Rect {
 fn a_frame_under_the_roomy_sheet_holds_the_frame_budget() {
     assert_eq!(
         sheet_size_on("shell-i9-roomy-shape", ROOMY_PANE),
-        (68, 33),
+        (68, 34),
         "the {}x{} pane does not draw the roomy rung, so this gate is not timing \
          the shape it is named for",
         ROOMY_PANE.width,

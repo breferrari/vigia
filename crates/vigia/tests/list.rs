@@ -35,9 +35,10 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, LIST_SETTLED, Position, View, Viewport, body_layout, regions,
+    Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, View, Viewport, body_layout,
+    regions,
 };
-use vigia_core::{Highlighter, History};
+use vigia_core::{Highlighter, History, Origin};
 
 use support::{Scratch, materialise};
 
@@ -84,7 +85,7 @@ const MANY: usize = 500;
 const DEEP: u16 = 50;
 
 fn chrome(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None, None, None, None, None)
+    app.chrome("fixture", None, Pointing::default(), 0)
 }
 
 /// The same, with the rail asked for.
@@ -104,7 +105,12 @@ fn railed(app: &App) -> vigia::Chrome {
 }
 
 fn split(width: u16, height: u16, files: usize) -> Body {
-    body_layout(Rect::new(0, 0, width, height), &chrome(&App::new()), files)
+    body_layout(
+        Rect::new(0, 0, width, height),
+        &chrome(&App::new()),
+        files,
+        files,
+    )
 }
 
 /// Each region reports its **own** bar's column, not the pane's.
@@ -153,7 +159,7 @@ fn each_region_reports_its_own_bar_column() {
     // is the only screen this gate is about.
     let area = Rect::new(0, 0, 100, 20);
     let chrome = chrome(&app);
-    let body = body_layout(area, &chrome, frame.files().len());
+    let body = body_layout(area, &chrome, frame.files().len(), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
@@ -329,7 +335,7 @@ fn a_taller_pane_never_costs_the_band_its_rows() {
     let mut saw_it_arrive = false;
 
     for height in 1..=TALLEST {
-        let body = body_layout(Rect::new(0, 0, WIDE, height), &raised, MANY);
+        let body = body_layout(Rect::new(0, 0, WIDE, height), &raised, MANY, MANY);
         let band = body.graph > 0;
 
         if band && !had_a_band {
@@ -427,9 +433,9 @@ fn a_notice_does_not_change_the_list_height() {
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);
-                let without = body_layout(area, &quiet, files);
+                let without = body_layout(area, &quiet, files, files);
                 saw_rail |= without.rail;
-                let with = body_layout(area, &noisy, files);
+                let with = body_layout(area, &noisy, files, files);
                 assert_eq!(
                     without, with,
                     "at {width}x{height} over {files} files a notice changed the \
@@ -709,7 +715,8 @@ fn the_region_at_fifty_files() {
         let area = ratatui::layout::Rect::new(0, 0, 80, 24);
         let body = body_layout(
             area,
-            &app.chrome("vigia", None, None, None, None, None),
+            &app.chrome("vigia", None, Pointing::default(), 0),
+            FILES,
             FILES,
         );
         let view = app
@@ -718,7 +725,7 @@ fn the_region_at_fifty_files() {
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let theme = Theme::default();
-        let chrome = app.chrome("vigia", None, None, None, None, None);
+        let chrome = app.chrome("vigia", None, Pointing::default(), 0);
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -814,7 +821,7 @@ fn the_two_regions_tile_the_body_exactly() {
                 // arm rather than sweeping the stacked shape five times. Since
                 // #295 the default chrome never draws one.
                 let chrome = railed(&App::new());
-                let full = body_layout(area, &chrome, files);
+                let full = body_layout(area, &chrome, files, files);
                 saw_rail |= full.rail;
 
                 for have in 0..=LIST_SETTLED + 2 {
@@ -1488,5 +1495,185 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
         "`{past}` moved the diff to a file the list is not drawing, with {} rows \
          on screen",
         body.list
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The two runs, and what a drawn row addresses: `SPEC.md` §11.2 **B17**.
+// ---------------------------------------------------------------------------
+
+/// A changed set with two runs in it, built by real `git`.
+fn two_runs(name: &str) -> support::Scratch {
+    let scratch = support::Scratch::new(name);
+    for i in 0..6 {
+        scratch.write(&format!("src/f{i}.rs"), "one\ntwo\nthree\n");
+    }
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    // Three staged, three left on disk.
+    for i in 0..3 {
+        scratch.write(&format!("src/f{i}.rs"), "one\nSTAGED\nthree\n");
+    }
+    scratch.git(&["add", "src/f0.rs", "src/f1.rs", "src/f2.rs"]);
+    for i in 3..6 {
+        scratch.write(&format!("src/f{i}.rs"), "one\nUNSTAGED\nthree\n");
+    }
+    scratch
+}
+
+/// **A separator opens each run, and a window scrolled into the middle of one
+/// still opens with that run's own label.**
+///
+/// Without the second half the rows at the top of a scrolled window are
+/// unattributed: a reader who scrolled would be looking at files with nothing on
+/// screen saying which comparison they belong to, which is worse than the label
+/// costing a row.
+#[test]
+fn each_run_opens_with_its_own_separator_wherever_the_window_starts() {
+    let scratch = two_runs("list-runs");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+    assert_eq!(files.len(), 6, "the fixture holds three files in each run");
+
+    // From the top: the unstaged run's label, its files, then the staged run's.
+    let plan = vigia::list_plan(files, 0, 8);
+    assert_eq!(
+        plan[0],
+        vigia::Slot::Group {
+            origin: Origin::Unstaged,
+            count: 3
+        },
+        "the window does not open with the run it is showing"
+    );
+    assert_eq!(
+        plan[4],
+        vigia::Slot::Group {
+            origin: Origin::Staged,
+            count: 3
+        },
+        "the second run gains no separator of its own: {plan:?}"
+    );
+
+    // Scrolled so the window starts inside the staged run: it still opens with
+    // that run's label, and the count is the run's **total** rather than what is
+    // visible, so the number answers *how much is there*.
+    let plan = vigia::list_plan(files, 4, 3);
+    assert_eq!(
+        plan[0],
+        vigia::Slot::Group {
+            origin: Origin::Staged,
+            count: 3
+        },
+        "a window opened mid-run draws unattributed rows: {plan:?}"
+    );
+}
+
+/// **One run draws no separators at all**, which is what keeps the default pane
+/// exactly what it has always been.
+#[test]
+fn a_single_run_spends_no_row_on_a_label_that_says_nothing() {
+    let scratch = two_runs("list-one-run");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    // Staged hidden: one run.
+    frame.advance().expect("advance");
+    let plan = vigia::list_plan(frame.files(), 0, 8);
+    assert!(
+        plan.iter().all(|slot| matches!(slot, vigia::Slot::File(_))),
+        "a one-run list drew a separator, so the default pane pays for a \
+         distinction it is not making: {plan:?}"
+    );
+}
+
+/// **A separator with no room for a file under it is not drawn.**
+///
+/// It would be a label naming a run the window cannot show: a row of the map spent
+/// saying nothing about the map.
+#[test]
+fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
+    let scratch = two_runs("list-tight");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    // Four rows from the top: label, three files — and the staged label would be
+    // the fifth, so it does not appear.
+    let plan = vigia::list_plan(frame.files(), 0, 4);
+    assert_eq!(plan.len(), 4);
+    assert!(
+        matches!(plan[3], vigia::Slot::File(_)),
+        "the window ends on a label naming a run it cannot show: {plan:?}"
+    );
+}
+
+/// **A digit and a click address a *file*, and never the separator above it.**
+///
+/// The defect this closes is silent: added blind to the window's first file, an
+/// offset past a separator names the file *before* the one under the pointer, the
+/// jump lands, and nothing on screen says the reader went somewhere they did not
+/// point at.
+#[test]
+fn a_drawn_row_addresses_the_file_under_it_and_a_separator_addresses_nothing() {
+    let scratch = two_runs("list-address");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    // Rows: 0 label, 1..3 unstaged, 4 label, 5..7 staged.
+    let at = |row| vigia::file_at(files, 0, 8, row);
+    assert_eq!(at(0), None, "the unstaged run's label addresses a file");
+    assert_eq!(at(1), Some(0));
+    assert_eq!(at(3), Some(2));
+    assert_eq!(at(4), None, "the staged run's label addresses a file");
+    assert_eq!(
+        at(5),
+        Some(3),
+        "the first staged row addresses the file before it, which is the \
+         off-by-one a separator introduces and nothing on screen would show"
+    );
+    assert_eq!(at(7), Some(5));
+    assert_eq!(at(8), None, "a row past the window addresses a file");
+
+    // And the naive arithmetic really does disagree, or this asserts nothing.
+    assert_ne!(
+        at(5),
+        Some(5),
+        "list_top + offset happens to be right here, so this fixture cannot see \
+         the defect it exists for"
+    );
+}
+
+/// The region asks for the rows it will draw, separators included.
+///
+/// Measured on the first grouped snapshot taken: a view sized from its files alone
+/// spent two of its rows on separators and drew the staged run's heading with
+/// **none of its files** under it — the run the reader pressed `a` for, announced
+/// and then empty.
+#[test]
+fn the_list_asks_for_the_rows_its_separators_will_take() {
+    let scratch = two_runs("list-rows-wanted");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+
+    frame.advance().expect("advance");
+    assert_eq!(
+        vigia::list_rows_wanted(frame.files()),
+        frame.files().len(),
+        "a one-run list asks for more rows than it has files"
+    );
+
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert_eq!(
+        vigia::list_rows_wanted(frame.files()),
+        frame.files().len() + 2,
+        "a grouped list asks for its files alone, so the region is two rows short \
+         and the last run loses its tail"
     );
 }

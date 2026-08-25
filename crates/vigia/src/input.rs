@@ -531,6 +531,30 @@ impl Regions {
 /// say the mark is always a cell, which is the thing that is about to stop being
 /// true.
 ///
+/// What the pointer is doing this frame, as one value.
+///
+/// **Four facts that always travel together**, and bundling them is the same
+/// ruling `View::take_file`'s `Changed` records one crate over: they are decided
+/// once per turn by the loop, every one of them is `None` on almost every frame,
+/// and passed separately they take `App::chrome` past the argument count clippy is
+/// willing to read — which is a real signal here rather than a lint to silence,
+/// since the alternative is seven `None`s at a call site where transposing two of
+/// them compiles.
+///
+/// `Default` is the common case: nothing pressed, nothing dragged, nothing hovered
+/// and nothing scrolling.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pointing {
+    /// The cell a step button is being held down on.
+    pub pressed: Option<(u16, u16)>,
+    /// Which region's bar is being dragged.
+    pub gripped: Option<Grabbed>,
+    /// What the pointer is resting on, when it is on something a click acts on.
+    pub hovered: Option<Hovered>,
+    /// Which bar the keys are scrolling, and which way.
+    pub scrolling: Option<(Grabbed, isize)>,
+}
+
 /// **This is view state and never an [`Action`]**, which is §11.1's ruling and
 /// the reason `action_for` never learns about it: the mark says where a pointer
 /// is, it is not a thing a reader asked for, and B4 stands because no key means
@@ -784,6 +808,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleMasthead
         | Action::ToggleRail
         | Action::ToggleSingle
+        | Action::ToggleStaged
         | Action::ToggleSheet
         | Action::CloseSheet
         | Action::Redraw
@@ -1130,6 +1155,29 @@ pub enum Action {
     /// reason [`Action::ToggleRail`] is not: it expresses no opinion about where
     /// the viewport should be.
     ToggleSingle,
+    /// Show the staged run beside the unstaged one, or stop showing it.
+    ///
+    /// `SPEC.md` §11.2 **B17**, from `a`
+    /// ([#313](https://github.com/breferrari/vigia/issues/313)). `a` for *all*:
+    /// with it on the pane holds everything uncommitted, and the issue's own key
+    /// note names it for exactly this case — `i` for *index* was the proposal
+    /// while the toggle was expected to swap one comparison for the other, and it
+    /// adds rather than swaps.
+    ///
+    /// **Unlike every other toggle here, this one changes what is *walked* rather
+    /// than what is drawn.** `Action::ToggleMasthead`, `Action::ToggleRail` and
+    /// `Action::ToggleSingle` all rearrange rows the frame already holds; this
+    /// adds a second status walk and a second set of diffs, so it goes through
+    /// `vigia_core::Frame::show_staged` rather than living in the shell's own
+    /// state alone.
+    ///
+    /// **It moves the viewport, and that is deliberate.** The other three keep the
+    /// reader's row, because the row still names the same file afterwards. Here the
+    /// changed set itself grows or shrinks underneath the position, so the row a
+    /// reader was on is not the row they would be on; `App::apply` sends the
+    /// position to the top, which is the answer `Action::Top` already gives for
+    /// *the map you were reading is not the map any more*.
+    ToggleStaged,
     /// Draw the gestures sheet, advance it a page, or stop drawing it.
     ///
     /// `SPEC.md` §11.2's B12 ruling, from `?` or from a click on the sheet's own
@@ -1259,6 +1307,7 @@ impl Action {
             | Self::ToggleMasthead
             | Self::ToggleRail
             | Self::ToggleSingle
+            | Self::ToggleStaged
             | Self::ToggleSheet
             | Self::CloseSheet
             | Self::Redraw
@@ -1326,6 +1375,7 @@ impl Action {
             // asked to see one file, which is the pairing the ruling is most
             // useful in: follow chooses the file, the pin keeps the diff on it.
             | Self::ToggleSingle
+            | Self::ToggleStaged
             // And the sheet moves nothing at all: it composites over rows that
             // are already drawn, so it does not even resize a region. B12.
             | Self::ToggleSheet
@@ -1407,6 +1457,7 @@ impl Action {
             | Self::ToggleMasthead
             | Self::ToggleRail
             | Self::ToggleSingle
+            | Self::ToggleStaged
             | Self::ToggleSheet
             | Self::CloseSheet => false,
         }
@@ -1570,6 +1621,7 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         // and `r`: the keys that change what the body is made of rather than
         // where in it the reader is. B16.
         KeyCode::Char('s') => Some(Action::ToggleSingle),
+        KeyCode::Char('a') => Some(Action::ToggleStaged),
         // **`?` and nothing else**, which is `SPEC.md` §11.2's B12: `btop`,
         // `bottom` and `rtop` all open help on it, it was unbound here, and `h`
         // is refused because it is a vi motion everywhere else on a pane with no

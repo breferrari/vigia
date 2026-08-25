@@ -24,7 +24,7 @@
 mod support;
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Body, Position, View, Viewport, diff_height};
+use vigia::{Action, App, Body, Pointing, Position, View, Viewport, diff_height};
 use vigia_core::{Highlighter, History};
 
 use support::{Scratch, materialise};
@@ -38,7 +38,7 @@ const SPAN: usize = 4;
 fn body() -> usize {
     diff_height(
         Rect::new(0, 0, 80, 24),
-        &App::new().chrome("fixture", None, None, None, None, None),
+        &App::new().chrome("fixture", None, Pointing::default(), 0),
         FILES,
     )
 }

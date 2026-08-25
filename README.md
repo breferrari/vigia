@@ -231,6 +231,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `m` | show or hide the masthead |
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
+| `a` | show or hide staged changes |
 | `?` | **all of this, on screen**, a page at a time where the pane is small |
 | `q` `Esc` `Ctrl+C` | quit |
 

@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Glyphs, Row, Theme, body_layout, render};
+use vigia::{App, Body, Glyphs, Pointing, Row, Theme, body_layout, render};
 use vigia_core::{Highlighter, History, Worktree};
 
 use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_delta};
@@ -121,8 +121,8 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let mut app = App::new();
     let history = History::new();
 
-    let chrome = app.chrome("fixture", None, None, None, None, None);
-    let body = body_layout(area(), &chrome, frame.files().len());
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
     let theme = Theme::default();
     let mut buf = Buffer::empty(area());
 
@@ -155,7 +155,7 @@ fn cold_start(root: &std::path::Path) -> FirstPaint {
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     render(&mut buf, area(), &view, &theme, Glyphs::default(), &chrome);
     let second = began.elapsed();
     let parsed_second = highlight_delta(before, highlighter.stats()).lines;
@@ -417,8 +417,8 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
     let mut app = App::new();
     let history = History::new();
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, None, None, None, None);
-    let body = body_layout(area(), &chrome, frame.files().len());
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let body = body_layout(area(), &chrome, frame.files().len(), frame.files().len());
     let mut buf = Buffer::empty(area());
 
     let mut draw = |app: &mut App, highlighter: &mut Highlighter| {
