@@ -203,10 +203,7 @@ pub fn list_plan(files: &[vigia_core::FileChange], top: usize, rows: usize) -> V
 /// condition [`list_plan`] groups on and is resolved the same way, so the request
 /// and the plan cannot disagree about how many rows a window needs.
 pub fn list_rows_wanted(files: &[vigia_core::FileChange]) -> usize {
-    let mut runs = files.iter().map(|change| change.origin);
-    let first = runs.next();
-    let grouped = first.is_some() && runs.any(|origin| Some(origin) != first);
-    files.len() + if grouped { 2 } else { 0 }
+    files.len() + if Runs::of(files).grouped() { 2 } else { 0 }
 }
 
 /// How many files each run holds, counted once.
@@ -384,7 +381,7 @@ pub fn following_top(
     top_showing(files, runs, current, rows)
 }
 
-/// The file a drawn list row addresses, or `None` for a separator./// The file a drawn list row addresses, or `None` for a separator.
+/// The file a drawn list row addresses, or `None` for a separator.
 ///
 /// **The one place a row becomes a file**, read by the click handler and by the
 /// digit jumps alike. Both used to add the offset to the window's first *file*,
@@ -1437,13 +1434,13 @@ impl View {
     /// How many **files** the pinned list is showing, which is not how many rows
     /// it drew.
     ///
-    /// **The list's scrollbar is measured in files at both ends** — its position is
-    /// a file index and its total is the changed-file count — so the span between
-    /// them has to be one too. `View::list.len()` is the row count, and since
-    /// [#313](https://github.com/breferrari/vigia/issues/313) a grouped window
-    /// spends one or two of those on separators: passed as the span it claimed the
-    /// window showed more files than it does, and the thumb drew longer than the
-    /// travel the drag actually has.
+    /// **Not the bar's span**, which is [`View::list_span`]: this is what *this*
+    /// window shows and that is a property of the position, so a bar drawn from it
+    /// changes length as a reader scrolls. It was the bar's span for one round of
+    /// #313's audit and the correction is recorded there.
+    ///
+    /// What it is for is asking a drawn screen what it drew, which is what the
+    /// gates in `tests/list.rs` want and what nothing in the renderer does.
     pub fn listed_files(&self) -> usize {
         self.list.iter().filter_map(ListRow::entry).count()
     }
@@ -1504,12 +1501,19 @@ impl View {
         // who asks for the staged run and has nothing staged gets the pane they
         // already had rather than a column and a label saying nothing. The header
         // is what acknowledges the keypress in that case.
-        let mut runs = frame.files().iter().map(|change| change.origin);
-        let first = runs.next();
-        let grouped = first.is_some() && runs.any(|origin| Some(origin) != first);
+        let grouped = Runs::of(frame.files()).grouped();
         let mut view = Self {
             grouped,
-            list_span: 0,
+            // **Initialised to "nothing to scroll" rather than to zero**, so every
+            // path out of this function leaves a span a scrollbar can be asked
+            // about. `take_list` returns before it computes one on a pane with no
+            // list region, and `collect` returns before *it* on an empty worktree;
+            // a leftover zero reads as "this window shows none of the list", which
+            // is `scrollable` saying yes. Nothing draws a bar there today, but only
+            // because `bar_for`'s own `rows >= MIN_TRACK` guard happens to catch
+            // it first, and a field that is safe by a guard somewhere else is the
+            // shape this module keeps finding.
+            list_span: files.max(1),
             // Bounded by the screen, not by the diff. The cap keeps a caller
             // asking for an absurd height from allocating for it up front.
             rows: Vec::with_capacity(height.min(64)),
@@ -2014,7 +2018,10 @@ impl View {
         let ceiling = last_top(frame.files(), rows);
         // A screenful in files, taken from the ceiling so the bar's travel is the
         // drag's travel. See [`View::list_span`].
-        self.list_span = self.files.saturating_sub(ceiling).max(1);
+        // `last_top` never exceeds `files - 1`, so the subtraction is at least one
+        // and needs no floor; `take_list` is not reached with an empty changed set
+        // because `collect` returns before it.
+        self.list_span = self.files - ceiling;
         let mut top = self.list_top.min(ceiling);
         if follows {
             // And snapped onto the current file, but **only** when the window is

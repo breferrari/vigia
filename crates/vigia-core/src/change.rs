@@ -12,7 +12,7 @@
 /// row, key a cache or count a run reads this rather than re-deriving it from the
 /// walk that produced it, which is a thing only [`crate::Frame::advance`] is in a
 /// position to know.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Origin {
     /// The working tree against the index. The pane's default, and the thesis:
     /// it is what the agent in the other pane just wrote.

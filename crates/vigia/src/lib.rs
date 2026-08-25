@@ -1643,11 +1643,6 @@ impl Shell {
         // already holds both comparisons and an empty frame means both are empty.
         // A failed walk is not worth a notice: it costs the reader a hint on one
         // frame, and saying so on the footer would push a real notice off it.
-        self.elsewhere = if frame.files().is_empty() && !self.app.staged() {
-            worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
-        } else {
-            0
-        };
 
         // The chrome is built before the layout, not after, because the footer
         // takes a second line at narrow widths and `body_layout` has to know
@@ -1674,6 +1669,33 @@ impl Shell {
             Ok(view) => self.screen = view,
             Err(e) => self.app.warn(e.to_string()),
         }
+
+        // **Decided from the screen that will be drawn, not from the frame**, and
+        // the difference is a failed collect. `Shell::screen` keeps the previous
+        // view when a collect fails, so a frame whose walk succeeded and whose
+        // collect did not draws *last* frame's rows — and asked of `frame` this
+        // would say "there are files, so no signpost" over an empty state that is
+        // still on screen, taking the `· 3 staged` off the one line that explains
+        // it. That is exactly the split [#158](https://github.com/breferrari/vigia/issues/158)
+        // removed for the branch name, restated for this field, and it is why the
+        // read sits below the collect rather than above it.
+        //
+        // **The rule that put it here is unchanged and is now satisfied rather
+        // than guarded**: a count costs a status walk, and this is a walk the
+        // frame is going to draw. A screen with a diff on it never asks. One
+        // without has no diff to compute and reads nothing else, and the walk it
+        // pays for is the cheaper of the two — the staged comparison touches no
+        // file at all, measured at 430us against 2.15ms on a 200-file fixture.
+        //
+        // Asked only while the staged run is **off**, because with it on the pane
+        // already holds both comparisons and an empty screen means both are empty.
+        // A failed walk is not worth a notice: it costs the reader a hint on one
+        // frame, and saying so on the footer would push a real notice off it.
+        self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
+            worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
+        } else {
+            0
+        };
 
         // Rebuilt so a notice raised by the collect above reaches this frame
         // rather than the next one. Safe to differ from the chrome the height

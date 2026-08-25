@@ -679,22 +679,38 @@ pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     }
 }
 
-/// The mode of a tree-index change's own entry.
+/// Whether either side of a tree-index change is a **gitlink**.
 ///
-/// **The destination's, except on a deletion, where the destination is nothing and
-/// the mode is the tree side's.** That asymmetry is `gix`'s rather than a choice
-/// here, and it is harmless for the one question asked of it: a gitlink is a
-/// gitlink on whichever side it exists, so the caller's test is right either way.
+/// **Both sides, and the first version of this asked only the destination.** A
+/// submodule's recorded commit is an index entry whose id names a *commit*, so a
+/// change with a gitlink on either end has an id `blob` cannot read — and a
+/// submodule *replaced by a real file* is a `Modification` whose destination is an
+/// ordinary blob and whose **source** is the commit. Asked one-sidedly it passed
+/// the guard, reached the read, returned `MissingBlob`, and `View::collect`
+/// propagates: the collect fails, the shell keeps the previous screen, and the
+/// pane freezes. That is the same symptom the sparse-index arm exists to stop,
+/// arriving by the door the first fix left open.
 ///
-/// A function rather than a match at the call site because the four variants spell
-/// the same field four ways, and the arms are what a reader has to check.
-fn staged_mode(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<gix::index::entry::Mode> {
+/// A function rather than a match at the call site because the variants spell
+/// their modes under five different field names, and the arms are what a reader
+/// has to check.
+fn touches_gitlink(change: &gix::diff::index::ChangeRef<'_, '_>) -> bool {
     use gix::diff::index::ChangeRef;
+    let commit = |mode: &gix::index::entry::Mode| *mode == gix::index::entry::Mode::COMMIT;
     match change {
-        ChangeRef::Addition { entry_mode, .. }
-        | ChangeRef::Deletion { entry_mode, .. }
-        | ChangeRef::Modification { entry_mode, .. }
-        | ChangeRef::Rewrite { entry_mode, .. } => Some(*entry_mode),
+        ChangeRef::Addition { entry_mode, .. } | ChangeRef::Deletion { entry_mode, .. } => {
+            commit(entry_mode)
+        }
+        ChangeRef::Modification {
+            previous_entry_mode,
+            entry_mode,
+            ..
+        } => commit(previous_entry_mode) || commit(entry_mode),
+        ChangeRef::Rewrite {
+            source_entry_mode,
+            entry_mode,
+            ..
+        } => commit(source_entry_mode) || commit(entry_mode),
     }
 }
 
@@ -720,16 +736,15 @@ fn staged_mode(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<gix::inde
 fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileChange> {
     use gix::diff::index::ChangeRef;
 
-    // **A gitlink is dropped, and the docblock above promised this before the code
-    // did.** A submodule's recorded commit is an ordinary index entry whose id
-    // names a *commit*, so both sides of its "diff" are commits and there is no
-    // content to compare; `blob` refuses them safely now, but a refusal is an
+    // **A gitlink is dropped, on either side.** A submodule's recorded commit is an
+    // ordinary index entry whose id names a *commit*, so there is no content to
+    // compare; `blob` refuses them safely now, but a refusal is an
     // `Err`, and `View::collect` propagates one — so the collect failed, the shell
     // kept the previous screen, and the pane froze exactly the way the sparse index
     // made it freeze. Found by an adversarial pass reading the arms against the
     // paragraph above them, which is the "promised and absent" shape rather than a
     // wrong branch.
-    if staged_mode(change).is_some_and(|mode| mode == gix::index::entry::Mode::COMMIT) {
+    if touches_gitlink(change) {
         return None;
     }
 

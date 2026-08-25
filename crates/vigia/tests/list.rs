@@ -1931,7 +1931,7 @@ fn follow_marks_the_current_file_at_every_window_it_chooses() {
     for height in 12..=24u16 {
         for current in 0..frame.files().len() {
             let mut app = App::new();
-            let body = split(80, height, frame.files().len());
+            let body = split_for(80, height, &frame);
             // Put the diff inside `current`, the way a digit does, then collect
             // and ask whether that file is on the map the list drew.
             app.apply(Action::File(current as isize), &mut frame, 40)
@@ -2166,98 +2166,23 @@ fn the_lists_bar_is_measured_in_files_at_both_ends() {
     );
 }
 
-/// **The drawn thumb agrees with the travel the drag has**, which is the half of
-/// the units fix a reader can see.
+/// **The thumb keeps its length as the window scrolls.**
 ///
-/// `View::listed_files` being right is not the claim: `render` has to pass it. A
-/// gate on the helper alone left a mutation putting the row count back at the call
-/// site alive, and that mutation is the defect — the thumb drew longer than the
-/// track's travel, so the pointer reached the bottom of a bar that said it was
-/// already there.
+/// That is the reader-visible half of the units fix, and it is the only form of it
+/// a gate can hold without restating the renderer's arithmetic. A span taken from
+/// *what this window shows* varies with where the window starts — a window opening
+/// on a run boundary spends one separator and one inside a run spends two — so the
+/// thumb grew and shrank under the pointer as the list moved. A screenful is a
+/// property of the list, not of the position.
 ///
-/// Read off the painted buffer rather than computed, because computing it from the
-/// same numbers `render` uses would be the renderer agreeing with itself.
+/// **Read off the painted buffer at every reachable top**, because computing the
+/// length from the same numbers `render` uses would be the renderer agreeing with
+/// itself. The non-vacuity check is what makes it bite: at least one top must be a
+/// top where the two candidate spans genuinely differ, or the sweep compares a
+/// number with itself.
 #[test]
-fn the_lists_thumb_is_no_longer_than_the_files_it_covers() {
-    let scratch = support::Scratch::large_diff("list-thumb-units", 24, 6);
-    let worktree = scratch.worktree();
-    // Stage half of them, so both runs are populated and the list is scrollable.
-    let staged: Vec<String> = (0..12).map(|i| format!("src/mod_{i}.rs")).collect();
-    let mut args: Vec<&str> = vec!["add"];
-    args.extend(staged.iter().map(String::as_str));
-    scratch.git(&args);
-
-    let mut frame = worktree.frame();
-    frame.show_staged(true);
-    frame.advance().expect("advance");
-
-    let mut app = App::new();
-    let mut highlighter = Highlighter::eager();
-    let history = History::new();
-    let at = Rect::new(0, 0, 80, 30);
-    let chrome = chrome(&app);
-    let body = body_layout(
-        at,
-        &chrome,
-        frame.files().len(),
-        vigia::list_rows_wanted(frame.files()),
-    );
-    let view = app
-        .view(&mut frame, &mut highlighter, &history, body)
-        .expect("collect");
-
-    let told = regions(at, &chrome, &view);
-    let bar = told.list.bar.expect("the list is scrollable at this size");
-
-    let mut buf = ratatui::buffer::Buffer::empty(at);
-    vigia::render(
-        &mut buf,
-        at,
-        &view,
-        &vigia::Theme::default(),
-        Glyphs::default(),
-        &chrome,
-    );
-    let thumb = (told.list.top..told.list.top + told.list.rows)
-        .filter(|y| buf[(bar, *y)].symbol() == "█")
-        .count();
-
-    assert!(thumb > 0, "no thumb was drawn, so this asserts nothing");
-    assert!(
-        view.listed_files() < view.list.len(),
-        "the fixture drew no separator, so the two units are the same number here"
-    );
-
-    // The thumb covers what is on screen out of what there is. Measured against
-    // the **files** the window shows: with the row count it draws longer, which is
-    // the mutation this gate exists to kill.
-    let track = usize::from(told.list.rows);
-    let want = (view.listed_files() * track).div_ceil(view.files);
-    assert!(
-        thumb <= want,
-        "the thumb is {thumb} rows of a {track}-row track where the window shows \
-         {} of {} files, which is at most {want}: the bar is reporting rows as \
-         files and claims travel the list does not have",
-        view.listed_files(),
-        view.files
-    );
-}
-
-/// **A drag round-trips: drop the thumb somewhere and it is still there.**
-///
-/// The bar's travel and the drag's travel have to be one quantity. They were three
-/// at one point — the thumb drawn from a row count, the drag scaled against
-/// `last_top`, and the row count itself varying with where the window happened to
-/// start, because a window opening on a run boundary spends one separator and one
-/// inside a run spends two. The thumb then changed length mid-drag and walked away
-/// from where the reader dropped it.
-///
-/// **Stated as a round-trip rather than as an arithmetic**, because that is the
-/// thing a reader can see and the only form that cannot be satisfied by two wrong
-/// numbers agreeing with each other.
-#[test]
-fn dropping_the_lists_thumb_leaves_it_where_it_was_dropped() {
-    let scratch = support::Scratch::large_diff("list-drag-roundtrip", 24, 6);
+fn the_lists_thumb_keeps_its_length_as_the_window_moves() {
+    let scratch = support::Scratch::large_diff("list-thumb-constant", 24, 6);
     let worktree = scratch.worktree();
     let staged: Vec<String> = (0..12).map(|i| format!("src/mod_{i}.rs")).collect();
     let mut args: Vec<&str> = vec!["add"];
@@ -2282,33 +2207,60 @@ fn dropping_the_lists_thumb_leaves_it_where_it_was_dropped() {
     app.view(&mut frame, &mut highlighter, &history, body)
         .expect("prime the row count");
 
-    // Every position the track can express, dropped and then read back.
-    for step in 0..=8u32 {
-        let at_track = step * (vigia::TRACK_SCALE / 8);
-        app.apply(Action::ListTo(at_track), &mut frame, 40)
-            .expect("apply");
-        let first = app
+    let mut lengths: Vec<(usize, usize)> = Vec::new();
+    let mut differed = 0usize;
+    for step in 0..12 {
+        for _ in 0..2 {
+            app.apply(Action::ScrollList(1), &mut frame, 40)
+                .expect("apply");
+        }
+        let view = app
             .view(&mut frame, &mut highlighter, &history, body)
-            .expect("collect")
-            .list_top;
+            .expect("collect");
+        let told = regions(at, &chrome, &view);
+        let Some(bar) = told.list.bar else { continue };
 
-        // Land on the same track position again. A stable bar puts the window
-        // back where it already is; a bar whose travel disagrees with the drag's
-        // walks.
-        app.apply(Action::ListTo(at_track), &mut frame, 40)
-            .expect("apply");
-        let again = app
-            .view(&mut frame, &mut highlighter, &history, body)
-            .expect("collect")
-            .list_top;
+        let mut buf = ratatui::buffer::Buffer::empty(at);
+        vigia::render(
+            &mut buf,
+            at,
+            &view,
+            &vigia::Theme::default(),
+            Glyphs::default(),
+            &chrome,
+        );
+        let thumb = (told.list.top..told.list.top + told.list.rows)
+            .filter(|y| buf[(bar, *y)].symbol() == "█")
+            .count();
+        if thumb > 0 {
+            lengths.push((view.list_top, thumb));
+        }
+        // The two candidate spans really are different numbers at this position,
+        // or the sweep is comparing one quantity with itself.
+        if view.listed_files() != view.list_span {
+            differed += 1;
+        }
+        let _ = step;
+    }
 
+    assert!(
+        lengths.len() > 2,
+        "the sweep measured {} thumbs, which is too few to say the length is \
+         constant",
+        lengths.len()
+    );
+    assert!(
+        differed > 0,
+        "no window in the sweep told a screenful from what that window shows, so \
+         this fixture cannot see the two being confused"
+    );
+    let first = lengths[0].1;
+    for (top, thumb) in &lengths {
         assert_eq!(
-            first,
-            again,
-            "dropping the thumb at {at_track}/{} put the window at {first} and \
-             then at {again}, so the bar's travel and the drag's are not one \
-             quantity",
-            vigia::TRACK_SCALE
+            *thumb, first,
+            "the thumb is {thumb} rows with the window at file {top} and {first} \
+             rows elsewhere, so it changes length as the reader scrolls: \
+             {lengths:?}"
         );
     }
 }
@@ -2357,5 +2309,109 @@ fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
         separated > 0,
         "no height told a screenful from the region's row count, so this gate \
          cannot see the two being confused"
+    );
+}
+
+/// **Every frame leaves a screenful a scrollbar can be asked about**, including
+/// the two that return before one is computed.
+///
+/// `take_list` returns early on a pane with no list region and `View::collect`
+/// returns early on an empty worktree, so a span left at its initial value is what
+/// those frames hand the bar. Zero reads as *this window shows none of the list*,
+/// which is `scrollable` answering yes; nothing draws a bar on either frame today,
+/// and only because `bar_for`'s own track-height guard catches it first. A field
+/// that is safe because of a guard somewhere else is the shape this module keeps
+/// finding, so the value is right at the source instead.
+#[test]
+fn a_frame_with_no_list_still_reports_a_screenful_that_scrolls_nothing() {
+    let scratch = two_runs("list-span-early-returns");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // A pane too short for a list region at all.
+    let body = split_for(80, 7, &frame);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+    assert!(
+        view.list.is_empty(),
+        "the fixture drew a list, so this is the wrong pane"
+    );
+    assert!(
+        view.list_span >= view.files,
+        "a pane with no list region reports a screenful of {} against {} files, \
+         which is a bar claiming there is somewhere to scroll",
+        view.list_span,
+        view.files
+    );
+
+    // And an empty worktree, which returns even earlier.
+    let clean = support::Scratch::new("list-span-clean");
+    clean.write("a.txt", "one\n");
+    clean.git(&["add", "-A"]);
+    clean.git(&["commit", "-m", "init"]);
+    let worktree = clean.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(frame.files().is_empty(), "the fixture is not clean");
+    let body = split_for(80, 20, &frame);
+    let view = App::new()
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+    assert!(
+        view.list_span >= 1,
+        "an empty worktree reports a screenful of zero"
+    );
+}
+
+/// **A drag on the list's track reaches the last file when both runs are drawn.**
+///
+/// `Action::ListTo` clamps through the same ceiling `browse` does, and until this
+/// existed nothing said so on a grouped list: the drag gate in this file uses an
+/// ungrouped fixture, so reverting the travel to `files - list_rows` stayed green.
+/// `browse` cannot rescue it either, because it only ever takes the *smaller* of
+/// the two bounds.
+#[test]
+fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
+    let scratch = two_runs("list-drag-grouped");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let last = frame.files().len() - 1;
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let body = split_for(80, 16, &frame);
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("prime the row count");
+
+    // The bottom of the track, which is what a reader dragging the thumb all the
+    // way down produces.
+    app.apply(Action::ListTo(vigia::TRACK_SCALE), &mut frame, 40)
+        .expect("apply");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+        .iter()
+        .filter_map(|slot| match slot {
+            vigia::Slot::File(at) => Some(*at),
+            vigia::Slot::Group { .. } => None,
+        })
+        .collect();
+    assert!(
+        drawn.contains(&last),
+        "a drag to the bottom of the track drew {drawn:?} from top {}, so the \
+         last file of the staged run cannot be reached with the pointer",
+        view.list_top
     );
 }

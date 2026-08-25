@@ -1426,8 +1426,13 @@ impl Action {
             // A page steps by a screenful and a half page by half of one, and a
             // drag on the diff's bar maps the track onto everything *but* the
             // last screenful, so all three need to know how tall one is.
-            // `ListTo` does not: the list's travel is its own row count, which
-            // the app already holds.
+            // `ListTo` does not: the list's travel is a question about the *list*
+            // rather than about the diff's height, and `App` answers it from the
+            // changed set and its own row count. It stopped being the row count
+            // outright in [#313](https://github.com/breferrari/vigia/issues/313),
+            // where a grouped list gained separators and the travel became
+            // `view::last_top`; what has not changed is that this arm needs no
+            // height passed to it.
             //
             // **`Bottom` joined them with `SPEC.md` §11.2 B16**
             // ([#297](https://github.com/breferrari/vigia/issues/297)), and this

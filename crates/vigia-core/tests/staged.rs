@@ -668,6 +668,34 @@ fn a_staged_gitlink_reports_a_state_rather_than_panicking() {
         );
     }
 
+    // **And the same when the submodule is replaced by a real file**, which is the
+    // case a one-sided guard lets through: the destination is an ordinary blob and
+    // the *source* is the commit, so a guard that asks only about the destination
+    // passes it to a read that must then refuse it. Same freeze, by the door the
+    // first fix left open.
+    // **Committed first**, so `HEAD` really holds the gitlink and the staged change
+    // is a modification *from* it. Without that the tree has no `sub` at all and
+    // the change is an ordinary addition, which is the case a one-sided guard
+    // already handles: the fixture would pass while proving nothing.
+    scratch.git(&["commit", "-m", "the submodule"]);
+    scratch.git(&["rm", "-f", "--cached", "sub"]);
+    std::fs::remove_dir_all(scratch.path_of("sub")).ok();
+    scratch.write("sub", "a real file where the submodule was\n");
+    scratch.git(&["add", "sub"]);
+
+    let mut swapped = worktree.frame();
+    swapped.show_staged(true);
+    swapped.advance().expect("advance");
+    for at in 0..swapped.files().len() {
+        let path = swapped.files()[at].path.clone();
+        let origin = swapped.files()[at].origin;
+        assert!(
+            swapped.diff(at).is_ok(),
+            "{origin:?} {path} cannot be diffed after the submodule became a \
+             file, so a collect over this worktree fails and the pane freezes"
+        );
+    }
+
     // And the submodule is not in the run at all, which is the shape of the fix:
     // a gitlink has no content to compare, so it is dropped at the walk rather
     // than carried to a read that must then refuse it.
