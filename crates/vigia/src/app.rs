@@ -866,7 +866,34 @@ impl App {
             // comment below, and an earlier draft of this one contradicted it.
             Action::Bottom => {
                 if let Some(file) = self.pinned_file(frame) {
-                    self.anchored = false;
+                    // **`true`, unlike every other jump on this map, and it is
+                    // what makes the resting row survive a stale height.**
+                    // `anchored` means *reached by scrolling*, and it licenses
+                    // `View::collect`'s back-up: a screen that came out short
+                    // rests its last row on the bottom. `G` under a pin is asking
+                    // for exactly that. It is not a claim about what belongs on
+                    // the **top** row, which is what a jump is and why `jump_to`
+                    // clears this.
+                    //
+                    // Without it the arm is sized against a chrome its own side
+                    // effect invalidates. `Shell::diff_rows_for` builds the chrome
+                    // *before* `apply` runs; `Bottom` is a manual scroll, so
+                    // `apply` then turns follow off; and `Footer::plan` sizes its
+                    // rungs from `Chrome::following`, where `follow ▶  N/M` is
+                    // thirteen columns and `N/M` is three. On a pane narrow enough
+                    // for that to decide between a one-line and a two-line footer,
+                    // the region the frame actually draws is a row taller than the
+                    // one this subtracted, the file's last row rests one line
+                    // above the bottom, and `App::view` writes the same position
+                    // back every frame: [#57](https://github.com/breferrari/vigia/issues/57)'s
+                    // symptom, on the arm written to avoid it.
+                    //
+                    // The alternative is computing the height after `apply`, which
+                    // cannot work: `apply` is what needs it. Letting the walk
+                    // correct a short screen is the mechanism that already exists
+                    // for exactly this, and it costs nothing when the height was
+                    // right, because a full screen is not short.
+                    self.anchored = true;
                     // **The resting row rather than the file's height, and the
                     // difference is a whole batch of keystrokes.** `View::collect`
                     // clamps an overrun to the last screenful either way, so

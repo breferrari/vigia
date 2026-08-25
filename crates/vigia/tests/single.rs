@@ -1163,3 +1163,96 @@ fn a_page_and_a_half_page_clamp_at_the_pinned_files_ends() {
         );
     }
 }
+
+#[test]
+fn a_pinned_end_key_rests_on_the_bottom_at_every_width() {
+    // **The height `G` subtracts is measured before `apply` runs, and `apply`
+    // changes it.** `Shell::diff_rows_for` builds a `Chrome` to size the body,
+    // then `App::apply` turns follow off because `Bottom` is a manual scroll, and
+    // `Footer::plan` sizes its rungs from `Chrome::following`: `follow ▶  N/M` is
+    // thirteen columns against `N/M`'s three. On a pane narrow enough for that to
+    // decide between a one-line and a two-line footer, the region drawn is taller
+    // than the region `span - height` was taken against, so the file's last row
+    // rests above the bottom with a blank under it.
+    //
+    // **And it persists**, which is what makes it worth a sweep rather than a
+    // note: `App::view` writes the resolved position back every frame, so the
+    // screen stays wrong until the reader scrolls. That is
+    // [#57](https://github.com/breferrari/vigia/issues/57)'s symptom on the arm
+    // written to avoid it.
+    //
+    // Swept rather than pinned at the one width that flips, because which width
+    // that is falls out of the footer's own ladder and would be a number this
+    // gate had to keep in step with `Footer::plan`. What is asserted is the
+    // property at every width the sweep covers: after `G`, a pinned file taller
+    // than the body fills it.
+    let scratch = fixture("shell-single-rest");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let mut narrow = 0;
+    for width in 30..=90u16 {
+        let at = Rect::new(0, 0, width, 24);
+        let mut app = App::new();
+        // Following, which is the shipped default and the whole of the
+        // staleness: `App::new` engages it and `Bottom` is what turns it off.
+        assert!(app.following(), "the fixture is not following");
+        // **Pinned and moved without a manual scroll**, which is the whole setup:
+        // `Action::File` would have reached the file and disengaged follow on the
+        // way, so the chrome sized below would already have been the one `Bottom`
+        // produces and the staleness could not arise. `s` is not a manual scroll
+        // and a follow is a request to be moved, so both leave follow engaged.
+        app.apply(Action::ToggleSingle, &mut frame, 0)
+            .expect("apply");
+        let target = frame.files()[PINNED].path.clone();
+        assert!(
+            app.follow(&target, &frame),
+            "the follow did not move the pin"
+        );
+        assert!(
+            app.following(),
+            "the setup disengaged follow before `G` could"
+        );
+
+        // Exactly what the shell does: size the body from the chrome as it
+        // stands, apply, then lay out and draw from the chrome as it ends up.
+        let before = app.chrome("fixture", None, None, None, None, None);
+        let height = body_layout(at, &before, FILES).diff;
+        app.apply(Action::Bottom, &mut frame, height)
+            .expect("apply");
+
+        let after = app.chrome("fixture", None, None, None, None, None);
+        let laid = body_layout(at, &after, FILES);
+        if laid.diff != height {
+            narrow += 1;
+        }
+        if laid.diff == 0 || laid.diff >= SPAN {
+            continue;
+        }
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, laid)
+            .expect("view");
+        assert_eq!(
+            view.rows.len(),
+            laid.diff,
+            "at {width} columns the pinned end key left {} of {} rows drawn, so \
+             the file's last row is not on the bottom",
+            view.rows.len(),
+            laid.diff
+        );
+        assert_eq!(
+            files_on(&view),
+            vec![PINNED],
+            "at {width} columns the end key left the pinned file"
+        );
+    }
+
+    assert!(
+        narrow > 0,
+        "no width in the sweep changed its body height when follow went off, so \
+         this gate never reaches the case it is named for"
+    );
+}
