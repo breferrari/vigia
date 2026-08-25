@@ -695,7 +695,7 @@ wrong instead of three answers that can drift.
 `only_the_action_that_reads_the_height_is_given_one` is the gate written for a
 wrongly classified height, and its own docblock said *"every action, so a new
 variant reaches this list by failing to be in it"*. Nothing made that true: it was
-a plain array naming nine of eighteen variants, and one of the nine it omitted was
+a plain array naming eight of eighteen variants, and one of the ten it omitted was
 `DiffTo`, which is the second wrong height this branch found. **That is how
 `Bottom` shipped misclassified in the first place**, and it is the exact shape
 this file calls worse than no claim at all, in a gate whose subject is that shape.
@@ -803,3 +803,40 @@ The practical form of that, for anyone changing this area: when a behaviour move
 grep for the places that state the rule it obeyed, not only the places that
 implement it. On this branch the implementation sites were always one and the
 statement sites were always two or three.
+
+## B16 — round six: the clamp that only worked for readers who had scrolled
+
+Round six found one behavioural defect, and it is the last of the family: **the
+pin's clamp was gated on a flag the pin did not set.**
+
+`View::collect`'s back-up rests a short screen's last row on the bottom, and it
+fires only for `anchored || landed_inside`, because a position a *jump* placed is
+a claim about the top row and must not be moved off it. `Action::ToggleSingle` is
+not a manual scroll, so it inherited whatever set the position, and `App::diff_to`
+sets `anchored` **false**. So a reader who dragged the diff's bar into the middle
+of a tall file and then pressed `s` got a short screen with trailing blanks, which
+jumped upward on their next `j`.
+
+**Three places said the opposite**, including this ruling's own §11.2 text: *"a
+screen straddling two files comes to rest on the pinned file's last screenful"*.
+The claim was true, but only for a reader who had arrived by scrolling, and every
+straddle in `tests/single.rs` was reached with `Action::Scroll`, which anchors. A
+suite that reaches one state four ways, all of them the same way, cannot see the
+fifth.
+
+`ToggleSingle` anchors on the way in now, which is the same argument
+`Action::Bottom`'s arm already makes: a pin is a claim about what the diff may
+**reach**, not about what belongs on the top row, so when the position it inherits
+overruns the pinned file the pager's answer is the right one. Only on the way in;
+unpinning restores no claim of its own.
+
+**And the gate that sold the pin's one cheap property was vacuous.**
+`a_pinned_frame_counts_no_height_at_all` asserted `measured == 0` on a second
+frame over a tick whose spans the first frame had already proved, and an
+*unpinned* second frame reports zero too, which the gate immediately above it
+asserts by name. The stated control measured the first frame rather than the
+counterfactual. The pinned half has a freshly advanced frame of its own now, with
+its spans unproven, so the zero means what the ruling says it means.
+
+Both are the same shape as everything else this audit found: **a claim that was
+true for the cases anyone had tried.**

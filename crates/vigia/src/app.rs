@@ -677,13 +677,45 @@ impl App {
             // last screenful with its final row on the bottom, which is what a
             // pager does and what the reader was already looking at most of.
             //
+            // **The back-up is gated on `anchored`, which is why this arm sets
+            // it.** That was left to whatever placed the position until #297's
+            // sixth audit round, and it made this paragraph true only for a
+            // reader who had arrived by scrolling: after a drag on the diff's
+            // bar, which sets `anchored` false, the pinned screen came out short.
+            //
             // The cost is stated rather than hidden: a position that needed
             // clamping is **rewritten**, so pressing `s` twice from a screen
             // straddling two files does not restore the straddle. From every
             // screen already inside one file it is exactly identity, and from
             // any screen at all the second on-and-off pair is. `SPEC.md` §11.2
             // B16 says so out loud and `tests/single.rs` holds both halves.
-            Action::ToggleSingle => self.single = !self.single,
+            Action::ToggleSingle => {
+                self.single = !self.single;
+                // **Anchored on the way in, for `Action::Bottom`'s reason one arm
+                // down.** The clamp this arm relies on is `View::collect`'s
+                // back-up, and that back-up is gated on `anchored || landed_inside`:
+                // it fires for a position the reader *scrolled* to and stays quiet
+                // for one a jump placed, because a jump is a claim about the top
+                // row. A pin is neither. It is a claim about what the diff may
+                // reach, and when the position it inherits overruns the pinned
+                // file the answer is a pager's: rest the last row on the bottom.
+                //
+                // Left as found, the arm was right only for a reader who arrived
+                // by scrolling. `Action::ToggleSingle` is not a manual scroll, so
+                // it inherits whatever set the position, and `App::diff_to` sets
+                // `anchored` **false**: drag the diff's bar into the middle of a
+                // tall file, press `s`, and the pinned screen came out short with
+                // trailing blanks and jumped upward on the next `j`. Three places
+                // said otherwise, including `SPEC.md` §11.2 B16, and every
+                // straddle in `tests/single.rs` was reached with `Action::Scroll`,
+                // which anchors.
+                //
+                // Only on the way **in**. Unpinning restores no claim of its own,
+                // so it leaves the flag where it found it.
+                if self.single {
+                    self.anchored = true;
+                }
+            }
             // **No jump and no move at all**, which is one better than the
             // masthead: that toggle resizes the diff's region, and this one draws
             // over rows the diff keeps. Nothing about the viewport changes, so a

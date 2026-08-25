@@ -1677,14 +1677,30 @@ fn a_pinned_frame_counts_no_height_at_all() {
         "the unpinned frame drew a bar scaled against nothing"
     );
 
+    // **A frame of its own, with its spans unproven, and the first version of
+    // this gate did not have one.** `FrameStats::measured` counts the source
+    // `fill_span` falls through to, so once the walk above has proved every span
+    // a *second* frame reports zero whether or not anything is pinned: the gate
+    // one above this asserts exactly that of an idle redraw. The control up there
+    // measures the first frame, not the counterfactual, so the headline assertion
+    // was true of the unpinned path too and proved nothing.
+    //
+    // A second fixture rather than a second `advance` on the first, because an
+    // advance would also renumber the changed set the position was resolved
+    // against, and that is a different subject.
+    let pinned_scratch = Scratch::large_diff("shell-reads-pinned-own", FILES, LINES);
+    let pinned_worktree = pinned_scratch.worktree();
+    let mut pinned_frame = pinned_worktree.frame();
+    pinned_frame.advance().expect("advance");
+
     let mut app = App::new();
-    app.apply(Action::ToggleSingle, &mut frame, 1)
+    app.apply(Action::ToggleSingle, &mut pinned_frame, 1)
         .expect("apply");
-    let before = frame.stats();
+    let before = pinned_frame.stats();
     let pinned = app
-        .view(&mut frame, &mut highlighter, &history, layout())
+        .view(&mut pinned_frame, &mut highlighter, &history, layout())
         .expect("view");
-    let cost = delta(before, frame.stats());
+    let cost = delta(before, pinned_frame.stats());
 
     assert_eq!(
         cost.measured, 0,

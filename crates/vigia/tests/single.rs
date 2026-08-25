@@ -1371,3 +1371,79 @@ fn a_landing_owed_to_follow_resolves_inside_the_pinned_file() {
         "the frame after a landed pin left the pinned file"
     );
 }
+
+#[test]
+fn a_straddle_reached_by_a_drag_pins_to_the_bottom_too() {
+    // **Every straddle in this file until now was reached with `Action::Scroll`,
+    // and that hid a real defect.** `View::collect`'s back-up is gated on
+    // `anchored || landed_inside`: it fires for a position a reader *scrolled* to
+    // and stays quiet for one a jump placed. `Action::ToggleSingle` is not a
+    // manual scroll, so it inherits whatever set the position, and `App::diff_to`
+    // sets `anchored` **false**.
+    //
+    // So a reader who dragged the diff's bar into the middle of a tall file and
+    // then pressed `s` got a short screen with trailing blanks, which jumped
+    // upward on the next `j`. `SPEC.md` §11.2 B16 said the opposite in as many
+    // words, and no gate could see it because every gate arrived by scrolling.
+    //
+    // The gate is the drag, not the scroll, and that is the whole of it.
+    let scratch = fixture("shell-single-drag-pin");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+
+    // Unpinned, dragged to the middle of the whole diff, which lands inside a
+    // file rather than on a heading and leaves `anchored` false.
+    app.apply(Action::DiffTo(TRACK_SCALE / 2), &mut frame, body())
+        .expect("apply");
+    let straddle = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert!(
+        straddle.top.row > 0,
+        "the drag landed on a heading, so the pin below has nothing to clamp"
+    );
+    assert_eq!(
+        straddle.rows.len(),
+        body(),
+        "the unpinned drag already drew a short screen, so this gate would pass \
+         against a pin that did nothing"
+    );
+
+    let file = straddle.top.file;
+    app.apply(Action::ToggleSingle, &mut frame, body())
+        .expect("apply");
+    let view = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+
+    assert_eq!(
+        files_on(&view),
+        vec![file],
+        "the pin after a drag reached another file"
+    );
+    assert_eq!(
+        view.rows.len(),
+        body(),
+        "the pin after a drag left {} of {} rows drawn, so the file's last row is \
+         not on the bottom and the screen has blanks under it",
+        view.rows.len(),
+        body()
+    );
+    assert_eq!(
+        view.top,
+        Position {
+            file,
+            row: SPAN - body(),
+        },
+        "the pin after a drag did not rest the file's last row on the bottom"
+    );
+
+    // And the next frame does not move, which is what the reader would have seen
+    // as a jump upward on their first `j`.
+    let settled = draw(&mut app, &mut frame, &mut highlighter, &history, split());
+    assert_eq!(
+        (settled.top, settled.rows.len()),
+        (view.top, view.rows.len()),
+        "the frame after a dragged pin moved with no input"
+    );
+}

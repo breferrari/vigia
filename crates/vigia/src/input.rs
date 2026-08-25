@@ -1233,7 +1233,10 @@ impl Action {
             // for a *subject*, not a position: a screen straddling two files
             // comes to rest on the pinned file's last screenful because that is
             // the nearest legal answer to the position the reader already had,
-            // which is the same resolution a diff shrinking under them gets.
+            // which is the same resolution a diff shrinking under them gets. (The
+            // arm that anchors on the way in is what makes that hold from a
+            // position a *drag* placed as well as one a scroll did; see
+            // `App::apply`.)
             // Calling it a manual scroll would disengage follow for a reader who
             // asked to see one file, which is the pairing the ruling is most
             // useful in: follow chooses the file, the pin keeps the diff on it.
