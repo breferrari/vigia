@@ -1476,9 +1476,14 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// too many.** Compiling is forced; being *exercised* is not. [`ALL_ACTIONS`] is a
 /// hand-maintained array, so a variant can be classified in [`reach_of`], given an
 /// arm here, and still reach neither gate if nobody adds it there. That is one
-/// unenforced step, named rather than papered over, and
-/// `the_action_table_covers_every_variant` pins the array's length so missing it is
-/// at least loud.
+/// unenforced step, named rather than papered over.
+///
+/// **Round 2 claimed a length pin made missing it loud and round 3 showed it did
+/// not**: comparing the array's length against a literal compares two things the
+/// same edit would touch. What `the_action_table_covers_every_variant` checks now
+/// is the array against the **sweep**, which is derived, so a variant bound to a
+/// key cannot be left out of it. A variant reachable only by pointer still can be,
+/// and that is the residue.
 fn mouse_phrases() -> Vec<&'static str> {
     let mut phrases: Vec<&'static str> = Vec::new();
 
@@ -1553,24 +1558,36 @@ fn the_action_table_covers_every_variant() {
     // reachable must actually have been produced by the sweep, and a mismatch means
     // either the space is too narrow or the table is wrong. Both want fixing and
     // neither is silent.
-    // **The array's length, pinned, because it is the one step nothing forces.**
-    // `reach_of` and `mouse_phrases` are exhaustive matches, so a new `Action`
-    // cannot compile until it is classified and given a phrase. Neither reaches
-    // `ALL_ACTIONS`, which is data: a variant added to the type and to both matches
-    // but not to the array compiles clean and is exercised by nothing. Bumping this
-    // number is the reminder, and round 2 of this row's audit found the docblock
-    // claiming that gap was closed.
-    assert_eq!(
-        ALL_ACTIONS.len(),
-        18,
-        "`Action` gained or lost a variant and `ALL_ACTIONS` was not updated with \
-         it, so both gates walk a set that is no longer the type"
-    );
-
     let produced: Vec<Action> = bound_keys()
         .into_iter()
         .filter_map(|(event, _)| action_for(&Event::Key(event), Regions::default()))
         .collect();
+
+    // **Every action the sweep found must be in the array**, which is the half of
+    // `ALL_ACTIONS`' upkeep that can be checked against something other than
+    // itself. `produced` is derived from `action_for`, so a variant bound to a key
+    // and left out of the array reddens here.
+    //
+    // **Round 2 put a length pin here instead and round 3 showed it proved
+    // nothing**: `ALL_ACTIONS.len() == 18` compares a hand-maintained array against
+    // a hand-maintained literal, both of which the same edit would have to touch,
+    // so it passes in exactly the scenario its own comment described. Deleted
+    // rather than kept as reassurance.
+    //
+    // **What remains unenforced is narrower and is stated rather than papered
+    // over**: a variant reachable only by *pointer*, classified and given a phrase
+    // but never added to the array, still reaches no gate. No sweep produces it,
+    // because the mouse side has none, which is `mouse_phrases`' own recorded
+    // limit.
+    for action in &produced {
+        assert!(
+            ALL_ACTIONS
+                .iter()
+                .any(|known| std::mem::discriminant(known) == std::mem::discriminant(action)),
+            "`action_for` binds a key to {action:?} and `ALL_ACTIONS` does not \
+             carry that variant, so both gates walk a set that is no longer the type"
+        );
+    }
 
     for action in ALL_ACTIONS {
         let wanted = matches!(reach_of(&action), Reach::Keyboard | Reach::Both);
@@ -2983,12 +3000,21 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // row's audit read the two together. It took the one-column rung at
             // `(12, 1, 56, 21)`, and twenty gestures no longer fit one column in a
             // twenty-five-row pane, so it takes the two-column rung at
-            // `(5, 4, 71, 16)`. It still carries odd slack and still tests the
-            // halving, on the **height** axis: the body less sixteen is nine, so
-            // the margins split four and five. The width slack is 81 less 71, which
-            // is ten and splits evenly, so this case exercises one axis rather than
-            // two. Round 2 of this row's audit caught a first spelling of this
-            // comment claiming both.
+            // `(5, 4, 71, 16)`.
+            //
+            // **What this case demonstrates is no longer written here, and the
+            // reason is worth more than the claim was.** Three spellings of this
+            // comment in three rounds each asserted a slack arithmetic, and each
+            // was wrong: two axes, then the height axis at nine splitting four and
+            // five. The pinned tuple does not settle it, because a one-row and a
+            // two-row footer both produce `top: 4` from this pane, so the height
+            // slack is six or seven and no number here can say which without a
+            // measurement nobody took. The width slack is ten and splits evenly at
+            // five, which the tuple does show.
+            //
+            // So the case is kept for the rung it now covers and the list is read
+            // as a set, which is what the paragraph above already said and what
+            // three attempts at a per-case story failed to improve on.
             (81, 25, (5, 4, 71, 16)),
             // The whole table in one column reaches this width since #286, so
             // where this used to be a dropping rung of thirteen rows it is the
