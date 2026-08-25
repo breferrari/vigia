@@ -311,21 +311,6 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
 | 🪟 **View** | `~/.config/vigia/config` → everything off |
 
-### 🪟 The pane you want, every time
-
-`m`, `r` and `s` change what the body is made of, and all three start off. If you always want one of them, say so once:
-
-```sh
-# ~/.config/vigia/config
-masthead = on     # the churn band at the top
-rail     = on     # the file list beside the diff, from 134 columns
-single   = on     # one file at a time
-```
-
-Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
-
-**`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
-
 ```sh
 VIGIA_THEME=ansi     # default: the sixteen names, inherited from your scheme
 VIGIA_THEME=dark     # the picture above, in 24-bit colour
@@ -428,6 +413,21 @@ set -ga terminal-overrides ",*:Tc"
 </details>
 
 ---
+
+### 🪟 The pane you want, every time
+
+`m`, `r` and `s` change what the body is made of, and all three start off. If you always want one of them, say so once:
+
+```sh
+# ~/.config/vigia/config
+masthead = on     # the churn band at the top
+rail     = on     # the file list beside the diff, from 134 columns
+single   = on     # one file at a time
+```
+
+Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.
+
+**`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
 
 ## 🧱 Built with
 
