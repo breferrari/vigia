@@ -226,6 +226,8 @@ When the issue is labelled `decision`:
 
 ## 2. Load the why before touching code
 
+**Except on a research or look-and-feel row, where the world comes first.** Reading the rulings before surveying anchors the survey to what was already decided, and a session that starts from the spec proposes what the spec already permits, which is how a document recording yesterday's ceiling becomes tomorrow's. It happened on #318: the first read of the field was filtered through three rulings before any survey ran, and the reader had to say *"the specs hold us down too much"* before the aperture opened. On those rows: survey the world, form the outside view, then diff it against the record and reconcile. `SPEC.md` §0 states the same rule from the document's side.
+
 **Read the repo first.** The issue carries acceptance criteria, `SPEC.md` carries the contract, and — unusually for a repo — a great deal of the *reasoning* is here too: §10's open questions carry their measurements, the invariant callouts explain why they split, and the commit messages argue rather than announce. Most "why did we do it this way" questions are answered inside the checkout.
 
 Then reach outside it, through the `vigil` MCP server, for the three things the repo deliberately does **not** hold:
@@ -282,6 +284,8 @@ That is not a licence to spend the headroom carelessly, and it is not an argumen
 **And do not run a measurement whose only possible use is to justify a no.** Measuring to find out is the most valuable thing in this repo's history: counting instead of building took a fixture from 442.71ms to 8.76ms, and it was found by someone checking a premise rather than defending one. Measuring to build a case against a feature a reader has asked for is the same activity pointed backwards, it costs real time and attention, and it produces a number that was never going to change the answer. If you already know what you want the measurement to show, you are not measuring.
 
 **Refusals deserve more scrutiny than builds, not less, and the reason is asymmetry.** A bad build is loud: tests fail, gates redden, someone reports it within the hour. A bad refusal is silent. Nothing breaks, no gate fires, the feature simply does not exist and no one can see the hole where it should be. So the failure mode that survives longest in a well-gated repo is precisely the one the gates cannot reach, and every instrument in this skill points at code that was written rather than at code that was refused.
+
+**A refusal cited in a plan is quoted, dated, and marked checked or not.** The plan names the refusal's reason in its own words, the date it was ruled, and whether this session re-checked the reason against the world. A refusal relayed without those three is not evidence, and the fidelity gate should read it as an unnamed premise.
 
 **The burden sits on the reason, not on the person asking for the thing.** "It is written down" is not an argument, and neither is "we ruled on this." Both are pointers to an argument, and the argument is what gets checked. When a reader asks for something the record refuses, the first move is to go and re-read *why* it was refused, not to relay the refusal.
 
