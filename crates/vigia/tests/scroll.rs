@@ -823,8 +823,9 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // **Every variant, and the list is exhaustive by construction rather than by
     // a comment saying so.** This read *"every action, so a new variant reaches
     // this list by failing to be in it"* and nothing made that true: it was a
-    // plain array naming eight of eighteen, and `Action::DiffTo` — the second
-    // wrong height this branch found — was one of the ten it omitted. A claim of
+    // plain array naming eight of the seventeen variants that existed then, and
+    // `Action::DiffTo` — the second wrong height this branch found — was one of
+    // the nine it omitted. A claim of
     // coverage that nothing enforces is the shape `RULINGS.md` calls worse than
     // no claim at all, and it is how `Bottom` shipped misclassified in the first
     // place.

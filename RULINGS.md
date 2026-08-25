@@ -695,7 +695,8 @@ wrong instead of three answers that can drift.
 `only_the_action_that_reads_the_height_is_given_one` is the gate written for a
 wrongly classified height, and its own docblock said *"every action, so a new
 variant reaches this list by failing to be in it"*. Nothing made that true: it was
-a plain array naming eight of eighteen variants, and one of the ten it omitted was
+a plain array naming eight of the seventeen variants that existed then, and one
+of the nine it omitted was
 `DiffTo`, which is the second wrong height this branch found. **That is how
 `Bottom` shipped misclassified in the first place**, and it is the exact shape
 this file calls worse than no claim at all, in a gate whose subject is that shape.

@@ -1651,7 +1651,10 @@ fn a_pinned_frame_counts_no_height_at_all() {
     // proves nothing on its own, since a fixture whose files are all diffed
     // already counts nothing either way. So the same fixture is measured unpinned
     // first, and that number has to be non-zero before the pinned one means
-    // anything. Deliberately un-`settle`d for the reason
+    // anything. **The same *shape* rather than the same repository**: the
+    // pinned half builds a fixture of its own thirty lines down, because a
+    // second view over a tick whose spans the first proved reports zero either
+    // way. Deliberately un-`settle`d for the reason
     // `a_tick_recounts_the_height_and_a_redraw_does_not` gives one gate up.
     let scratch = Scratch::large_diff("shell-reads-pinned", FILES, LINES);
     let worktree = scratch.worktree();

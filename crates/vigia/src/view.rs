@@ -1428,8 +1428,25 @@ impl View {
             //
             // `first` rather than a second `if single`, for the reason the
             // binding above gives: this is the same range's other end.
+            // **`single` is the pin's own licence, and it is a term here rather
+            // than a flag the pin writes.** The back-up is what rests a short
+            // screen's last row on the bottom, and a pinned position that
+            // overruns its file wants exactly that; `anchored` alone gave it only
+            // to a reader who had scrolled, so pressing `s` after a drag on the
+            // diff's bar left a short screen with blanks under it.
+            //
+            // Writing `anchored` from the pin was the other way to fix it and it
+            // leaked: the flag outlives the pin, so a jump onto a short tail
+            // followed by `s` and `s` left an **unpinned** frame anchored and
+            // backed the reader up out of the file the jump was for. A term costs
+            // nothing and cannot outlive anything.
+            //
+            // **It is excluded on a pinned jump for free.** Every pin-side jump
+            // resolves to row zero of the pinned file, which is exactly the floor
+            // below, so `top != floor` is false and the guard stays quiet: the
+            // file `n`, `p`, a digit or a click asked for keeps the top row.
             let landed_inside = view.landed && view.top.row > 0;
-            let short = (anchored || landed_inside)
+            let short = (anchored || landed_inside || single)
                 && view.rows.len() < height
                 && view.top
                     != Position {
