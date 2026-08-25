@@ -90,23 +90,34 @@ pub struct Config {
 ///
 /// **It is not a compile-time guarantee and an earlier docblock claimed it was.**
 /// [`Config::set`] matches on a `&str` with a fallback arm, so a fourth field on
-/// [`Config`] compiles perfectly well with no key and no entry here. What ties the
-/// two together is `tests/config.rs::every_key_is_a_field_and_every_field_is_a_key`,
-/// which sets every key in this list and compares the result against a **struct
-/// literal naming every field** — and a literal is where a new field does stop the
-/// build. That is a gate rather than the type system, and saying so is the
-/// difference between a check and a claim that suppresses one.
+/// [`Config`] compiles perfectly well with no key and no entry here. Two things
+/// tie them instead, and the first draft had only the weaker one:
+///
+/// - **A key here that [`Config::set`] does not take is an error at parse time**,
+///   because [`parse`] reads that function's return rather than discarding it.
+///   Without that, adding a name here and forgetting the arm gave a file whose key
+///   parsed and did nothing.
+/// - **A field with no key here is caught by
+///   `tests/config.rs::every_key_is_a_field_and_every_field_is_a_key`**, which
+///   sets every key in this list and compares against a **struct literal naming
+///   every field** — and a literal is where a new field does stop the build.
+///
+/// That is a gate and a runtime check rather than the type system, and saying so
+/// is the difference between a check and a claim that suppresses one.
 pub const KEYS: [&str; 3] = ["masthead", "rail", "single"];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
     ///
-    /// **The fallback arm is unreachable from [`parse`] and is not a guarantee.**
-    /// This `match` is on a `&str`, so it proves nothing about [`Config`]'s
-    /// fields; an earlier docblock claimed it was exhaustive the way
+    /// **The fallback arm is reachable and its `bool` is read.** This `match` is
+    /// on a `&str`, so it proves nothing about [`Config`]'s fields; an earlier
+    /// docblock claimed it was exhaustive the way
     /// [`crate::input::Action::needs_height`] is, and that comparison was wrong,
-    /// because that one matches an **enum**. What keeps this and [`KEYS`] in step
-    /// is the gate named there.
+    /// because that one matches an **enum**. A later one called this arm
+    /// unreachable, which was also wrong: [`KEYS`] and this function are two
+    /// lists, and two lists drift. [`parse`] refuses the key when this returns
+    /// `false`, so a name in one and not the other is an error a reader sees
+    /// rather than a setting that quietly does nothing.
     fn set(&mut self, key: &str, on: bool) -> bool {
         match key {
             "masthead" => self.masthead = on,
@@ -153,7 +164,12 @@ pub enum ConfigError {
         /// What they wrote.
         value: String,
     },
-    /// A key with nothing after its `=`.
+    /// A key with nothing after its `=`, or nothing but a comment.
+    ///
+    /// `rail = # oops` is this rather than a value of `#`: no value in this file
+    /// begins with a `#`, so a comment there means the reader wrote no value. The
+    /// theme file answers differently because a colour does begin with one; see
+    /// [`parse`].
     MissingValue {
         /// 1-based.
         line: usize,
@@ -226,15 +242,21 @@ impl std::error::Error for ConfigError {}
 /// single   = off
 /// ```
 ///
-/// **The theme file's grammar, and the same three traps handled the same way.** A
-/// byte order mark is stripped, because U+FEFF is `Cf` rather than `White_Space`
-/// and survives every trim, landing inside the first key: a file saved by Notepad
-/// would otherwise stop the shell with an error naming an invisible byte. A
-/// comment is recognised on the trimmed *line* for a blank-or-comment line, and
-/// stripped from the *value* token-wise so `rail = on # from 134` works. And an
-/// unknown key is **refused rather than ignored**, because a silently dropped key
-/// is a setting that does nothing, and "it was discarded" is the one explanation a
-/// reader cannot arrive at by looking at their screen.
+/// **The theme file's grammar, with one deliberate divergence.** A byte order mark
+/// is stripped, because U+FEFF is `Cf` rather than `White_Space` and survives
+/// every trim, landing inside the first key: a file saved by Notepad would
+/// otherwise stop the shell with an error naming an invisible byte. A comment is
+/// recognised on the trimmed *line* for a blank-or-comment line, and stripped from
+/// the *value* so `rail = on # from 134` works. And an unknown key is **refused
+/// rather than ignored**, because a silently dropped key is a setting that does
+/// nothing, and "it was discarded" is the one explanation a reader cannot arrive
+/// at by looking at their screen.
+///
+/// **The divergence is a value that is nothing but a comment.** `theme::words_of`
+/// keeps a bare `#` as a token, because a theme value legitimately begins with one
+/// and `added = #3fb950` has to parse. No value here begins with `#`, so
+/// `rail = # oops` is a key with nothing after its `=` rather than a key whose
+/// value is `#`, and it reports [`ConfigError::MissingValue`] accordingly.
 pub fn parse(source: &str) -> Result<Config, ConfigError> {
     let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
 
@@ -310,11 +332,19 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             }
         };
 
-        // Unreachable: `KEYS` admitted this key above. Kept as a `bool` rather
-        // than a panic because an unreachable branch that returns is cheaper to
-        // read than one that aborts, and the gate named on `KEYS` is what makes
-        // it unreachable rather than this line.
-        config.set(key, on);
+        // **The return is read, and discarding it was the hole round one left.**
+        // The check above admits a key by [`KEYS`]; this applies it by
+        // [`Config::set`]; and until the `bool` was read, a name in the first and
+        // not the second parsed to `Ok` and set nothing. A key that did nothing,
+        // silently, is exactly what refusing unknown keys exists to prevent, so
+        // the drift produced the failure the whole grammar is designed against.
+        // `theme::parse` has always read its own `set` for this reason.
+        if !config.set(key, on) {
+            return Err(ConfigError::UnknownKey {
+                line,
+                key: key.to_owned(),
+            });
+        }
         seen.push((key.to_owned(), line));
     }
 

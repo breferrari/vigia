@@ -1944,8 +1944,18 @@ mod tests {
         // in. Adding it here costs one line and covers the whole family, so the
         // next input added is a failing assertion rather than a hand check
         // somebody remembers to repeat.
+        // **`frame.advance()` is in the list too**, and leaving it out was the
+        // block's own claim about itself being wider than the block: its comment
+        // in `run` makes exactly this promise, that a repository failing on its
+        // first walk reports on a terminal the reader can still see.
+        //
+        // `Worktree::discover(` appears twice in the shipped source, and the
+        // second is inside `spawn_watch` *after* the takeover, so `find` returning
+        // the first is what this wants: a moved call cannot hide behind a later
+        // occurrence, only behind an earlier one, and there is none.
         for reader in [
             "Worktree::discover(",
+            "frame.advance()",
             "theme::from_env(",
             "Glyphs::detect(",
             "config::from_env(",

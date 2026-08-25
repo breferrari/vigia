@@ -98,6 +98,27 @@ fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
 fn each_key_sets_the_state_the_pane_starts_in() {
     // One key at a time, so a parser that set the wrong field would be caught by
     // the two it should not have touched rather than only by the one it should.
+    // **One key at a time through `App::configured` as well as through `parse`.**
+    // The parse half alone left the `Config` to `App` mapping untested per field:
+    // transposing `masthead` and `single` in `App::configured` killed nothing,
+    // because every other gate builds all-three-true or all-false and the one that
+    // does not reads only `rail`.
+    for (key, chrome) in [
+        ("masthead", (true, false, true, None)),
+        ("rail", (false, true, true, None)),
+        // `single` is not on the chrome, so its row asserts the two that are stay
+        // off: a mapping that sent it to `masthead` shows up there.
+        ("single", (false, false, true, None)),
+    ] {
+        let home = home_with(&format!("app-{key}"), Some(&format!("{key} = on\n")));
+        let config = config::from_env(home_env(&home)).expect("a config");
+        assert_eq!(
+            chrome_of(&App::configured(config)),
+            chrome,
+            "{key} = on reached the wrong field of the shell"
+        );
+    }
+
     for (key, want) in [
         (
             "masthead",
@@ -540,10 +561,20 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
         "setting every key in KEYS did not set every field, so the two have drifted"
     );
 
-    // And each one alone is accepted, so a key present in `KEYS` but missing from
-    // `Config::set` cannot hide behind the others.
+    // **And each one alone has to *change* something, which `is_ok` did not
+    // say.** A name in `KEYS` with no arm in `Config::set` used to parse to
+    // `Ok(Config::default())`: the key existed, the file was accepted, and the
+    // setting did nothing. The comparison above cannot see it either, because an
+    // extra dead key leaves the all-true result unchanged. `assert_ne` against the
+    // default is what makes the drift red.
     for key in vigia::config::KEYS {
-        config::parse(&format!("{key} = on\n"))
+        let got = config::parse(&format!("{key} = on\n"))
             .unwrap_or_else(|why| panic!("KEYS names {key:?} and parse refuses it: {why}"));
+        assert_ne!(
+            got,
+            Config::default(),
+            "{key:?} is in KEYS and setting it changed nothing, so KEYS and \
+             Config::set have drifted"
+        );
     }
 }
