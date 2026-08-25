@@ -12,7 +12,22 @@ What the best-looking terminal tools actually do, read from their sources and sc
 
 ### 1.1 OpenCode
 
-(to fill: stack, gradients, theming, borders, spacing)
+Surveyed 2026-08-25 from shallow clones of `anomalyco/opencode` (formerly `sst/opencode`, GitHub 301s to the new org) at `ac1c048e` and `sst/opentui`.
+
+**Stack.** OpenTUI + SolidJS on Bun with a native Zig rendering core (their in-house framework; Bubble Tea was abandoned in the 1.0 rewrite for performance). Flexbox layout, high-level renderables including a `Diff` widget, `Markdown`, `Code`, `ScrollBox`.
+
+**Gradients.** No declarative gradient prop; everything is per-cell RGB/alpha interpolation in app code:
+
+- The prompt's "Knight Rider" scanner: per-character colour per frame, gradient derived from **one** accent colour (head alpha 1.0, a 1.15x bloom step, then exponential alpha decay `0.65^i`); inactive cells same hue at alpha 0.2, so it is background-independent.
+- A pulsing radial gradient behind the logo: three expanding cosine rings lerping panel colour toward primary per cell, **pre-rendered into ~138 cached frames** blitted with `.set()`, clamped to 30fps while animating. Checks `capabilities.rgb` and swaps full-block/half-block rendering.
+- `tint(base, overlay, alpha)`: one linear per-channel lerp used for every soft colour in the UI, including diff backgrounds generated as `tint(bg, green, 0.22)` dark / `0.14` light.
+- Real per-cell alpha compositing in the Zig buffer: dialogs float on a translucent black scrim (alpha 150).
+
+**Theme system.** 52 tokens including **4 background layers** and **12 diff tokens** (per-side line bg, word-highlight, sign, line-number bg); 33 JSON themes; tokens can reference other tokens, take raw ANSI indices, or `{dark, light}` pairs. Mode comes from the terminal: OSC 11 luminance classification, DECRQM mode 2031 for live colour-scheme-change notifications, and a synthetic **"system" theme built from the terminal's own 16-colour palette + fg/bg** with a transparent true background. Everything RGBA end to end; capabilities probed (`rgb`, `sync`, `hyperlinks`, kitty keyboard, sixel...), not assumed.
+
+**Visual signature.** Almost borderless: depth from the four stacked background layers; the accent is a single heavy left rule `┃` (an `EmptyBorder` with only the left edge), rounded borders only on errors; dialogs are borderless panels on the alpha scrim; toasts pin top-right with heavy rules in the variant colour. Spacing rhythm `padding 2/1`, `gap 1-2`. **Zero Nerd Font glyphs** (grep over the TUI source finds no PUA codepoints): iconography is plain Unicode (`✓ • ⋯`, braille spinner, half/full blocks). The logo is a half-block pixel font with a baked drop-shadow (`tint(background, fg, 0.25)` behind `▀`). Animations are gated by one toggle, fade-ins are 160ms smoothstep, and the flashy gradient runs inside one dialog, not ambiently.
+
+**Most vigia-relevant ideas.** (1) The terminal-derived system theme (palette + OSC 10/11, diff washes tinted from the terminal's own green/red, transparent background) makes a tool look native everywhere without shipping 33 themes. (2) Live dark/light re-resolution as a runtime event, which matters for a monitor that outlives a daytime theme flip. (3) Alpha/lerp-first colour math instead of hardcoded dims. (4) The 12-token diff vocabulary. (5) Animation with a budget conscience: frame caches, fps clamp, one global toggle, mode 2026 sync detection.
 
 ### 1.2 btop
 
@@ -37,7 +52,35 @@ At 256 colours the same 101 steps are quantised through the 6x6x6 cube (`round(c
 
 ### 1.3 The wider field
 
-(to fill: Charm ecosystem, lazygit, gitui, delta, yazi, eza, superfile, helix, zellij, starship, television, posting, and whatever the search surfaces as 2025-2026 state of the art)
+Surveyed 2026-08-25 against shallow clones (delta, crush, lazygit, gitui, helix, yazi, eza, superfile, television, zellij, starship, lipgloss, glamour, bubbletea, posting, ratatui) plus cited PRs and docs. Organised by technique.
+
+**Diff presentation, the section that matters most here.**
+
+- **delta** is the canonical beautiful diff, and its formula is exact: syntax-highlighted foreground over a **low-chroma full-width background wash**, with a hotter same-hue wash for word-level emphasis. The constants (`src/color.rs:156-186`): dark minus `#3f0001`, minus-emph `#901011`, plus `#002800`, plus-emph `#006000`; light minus `#ffe0e0`/`#ffc0c0`, plus `#d0ffd0`/`#a0efa0`; each with 256-colour fallbacks (52/124/22/28). Word-level emphasis tokenises with `\w+` and only pairs lines whose edit distance is under `--max-line-distance 0.6`, which is why highlights never smear across unrelated lines. File headers underlined, hunk headers boxed, `⋮` as the line-number gutter separator.
+- **crush** (Charm's AI TUI) modernises the same formula with a **two-tone gutter**: insert gutter bg `#293229`, code bg `#303a30` (dark), so the line-number column is a slightly darker shade of the same wash, structuring two columns with no border. Chroma syntax re-rendered over the wash, cached per (content + bg) hash.
+- **lazygit** outsources diff beauty to delta via the pager config; **gitui** is the plain-foreground baseline that looks dated beside them.
+- **helix** marks VCS changes with a one-column sub-cell ribbon: `▍` (U+258D) for add/modify, `▔` (U+2594) for deletions.
+
+**Gradients and colour.** lipgloss v2 has first-class `Blend1D/Blend2D` interpolating in **CIELAB** (via go-colorful), which is why Charm gradients do not go muddy in the middle; crush applies them per grapheme cluster (logo, `▶▶▶▶` queue pills, a `╱`-textured field behind the wordmark). starship fakes gradients by stepping Powerline segment backgrounds. yazi ships per-icon hex foregrounds and `reversed = true` for the hovered row.
+
+**Adaptive theming is the defining 2025-2026 trend.** delta auto-detects light/dark via OSC 10/11 (`terminal-colorsaurus`). yazi queries OSC 11 **and** `CSI ? 996 n`, subscribes to change notifications with mode 2031, falls back to Rec.709 luma > 0.6. lipgloss v2 made background query explicit (`BackgroundColor(in,out)` + `LightDark`); bubbletea v2 delivers it as a message. Everyone ships paired dark/light styles.
+
+**Nerd Font icons.** lazygit: opt-in (`nerdFontsVersion`), ~790 lines of per-extension icons with hex colours. yazi: on by default, theme-driven, vendored from nvim-web-devicons, with conditional rules. eza: `--icons=auto` only when stdout is a tty. superfile: one `nerdfont` bool swapping the whole table for ASCII. Field consensus: **icons are opt-in or theme-driven, never required, and every serious tool has a clean glyphless mode.**
+
+**Chrome fashion.** Rounded corners are the 2025 default (lazygit default `rounded` with focus as border *colour*; television `Rounded` with `None` per panel; superfile `╭╮╰╯`; zellij themes carry `rounded_corners`). lipgloss adds half-block borders that read as a solid slab, plus a compositing Canvas/Layer system. The counter-current is borderless: yazi's single `│` separators, crush's padding-and-wash structure, posting's translucent Textual layers (`background: $surface 50%`). Powerline `` U+E0B0 is the status-bar separator everywhere.
+
+**Sub-cell graphics and new Unicode.** **ratatui now ships `Marker::Sextant` (2x3) and `Marker::Octant` (2x4, U+1CD00) in the canvas module** (PR ratatui#2235), joining braille and half blocks: octants are braille-resolution but densely packed, real area fills with no dot gaps. helix's eighth-block gutter above. chafa has drawn with wedges and sextants since 1.8.0 (what yazi uses for no-graphics preview). Real pixel graphics: yazi has seven adapter drivers (kitty old/new, iTerm2, sixel, ueberzug++, chafa) probed by behaviour (DA1 attr 4, kitty query id 31, XTVERSION); zellij re-renders sixel and kitty graphics inside panes.
+
+**OSC 8 hyperlinks.** delta `--hyperlinks` wraps commits, files and line numbers (templatable to `vscode://file/{path}:{line}`); eza `--hyperlink`. In ratatui this was long impossible because the buffer diff splits per cell; **ratatui 0.30.1 added `CellDiffOption::ForcedWidth`**, the hook `tui-link` and OpenAI's Codex CLI (itself ratatui+crossterm) use to emit OSC 8 with honest diff widths.
+
+**Motion.** crush runs a 20fps spinner with staggered character birth and prerendered static frames; Charm's `harmonica` is a spring-physics easing library; Textual animates via its CSS. Everyone gates animation behind a toggle.
+
+**The one-paragraph synthesis.** The field's diff state of the art is delta's formula (syntax fg + low-chroma wash + hotter emph wash, light/dark by OSC query, not flag), modernised by crush's two-tone gutter. Chrome is rounded-or-borderless with focus as border colour; icons are theme-driven with a mandatory clean fallback; density comes from eighth-blocks and now octants, which ratatui already ships; OSC 8 on file names is the newest table-stakes nicety.
+
+## 1.9 Premises settled against the code
+
+- **Truecolour already reaches every terminal that advertises it.** `Depth::from_env` (`crates/vigia/src/colour.rs:137`) treats `COLORTERM=truecolor|24bit` as "the strongest positive signal", on top of a terminal table. The `Ansi16` default bites only where nothing says anything: ssh (forwards `TERM`, not `COLORTERM`) and multiplexers. So a truecolour-first look is not gated on a policy change; it is gated on nothing for most local terminals, and the ssh/tmux story is the part that needs a ladder, which exists.
+- **The glyph ladder's "detection never returns octants" is a statement about fonts, not about terminals.** foot and ghostty rasterise octants and sextants themselves (section 3.2), so a `Glyphs` detection table keyed on terminal, exactly like the one `Depth` already uses, can return them where the terminal self-renders. The mechanism the spec said was impossible for glyphs ("no terminal reports which glyphs its font carries") was never needed for these ranges, because the font is not consulted.
 
 ## 2. Technique inventory
 
