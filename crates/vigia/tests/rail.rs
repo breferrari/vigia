@@ -56,15 +56,15 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Position, Regions, Row,
-    Theme, View, action_for, body_layout, regions, render,
+    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing, Position,
+    Regions, Row, Theme, View, action_for, body_layout, regions, render,
 };
 
 /// A key event, spelled once.
 fn press(code: KeyCode) -> Event {
     Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
-use vigia_core::Recency;
+use vigia_core::{Origin, Recency};
 
 /// The block one heat slice is drawn as, restated rather than imported.
 ///
@@ -154,13 +154,14 @@ fn chrome() -> Chrome {
 
 /// A shell that has not asked, which is what ships.
 fn stacked_chrome() -> Chrome {
-    App::new().chrome("fixture", None, None, None, None, None)
+    App::new().chrome("fixture", None, Pointing::default(), 0)
 }
 
 /// A file with a full history and a full heat strip, so every glance element has
 /// something to draw and a rung is readable off the screen.
 fn entry(path: &str) -> FileEntry {
     FileEntry {
+        origin: Origin::Unstaged,
         path: path.to_owned(),
         from: None,
         kind: 'M',
@@ -199,7 +200,13 @@ const LONG: &str = "crates/vigia-core/src/engine/incremental/watch.rs";
 /// rail those are the same row of the pane.
 fn beside() -> View {
     View {
-        list: vec![entry(LONG), entry("Cargo.toml"), entry("src/main.rs")],
+        list_span: 3,
+        grouped: false,
+        list: vec![
+            entry(LONG).into(),
+            entry("Cargo.toml").into(),
+            entry("src/main.rs").into(),
+        ],
         list_top: 0,
         files: 3,
         top: Position { file: 0, row: 0 },
@@ -229,6 +236,8 @@ fn beside() -> View {
 /// zeroed it and the gate's own non-vacuity guard caught it.
 fn streamed() -> View {
     View {
+        list_span: 0,
+        grouped: false,
         list: Vec::new(),
         list_top: 0,
         top: Position { file: 0, row: 0 },
@@ -358,7 +367,7 @@ fn rungs_at(width: u16, view: &View, glyphs: Glyphs) -> (Rung, Rung) {
 /// The first width at which a pane draws a rail, found rather than restated.
 fn first_rail() -> u16 {
     (1..=WIDEST)
-        .find(|width| body_layout(Rect::new(0, 0, *width, TALL), &chrome(), 3).rail)
+        .find(|width| body_layout(Rect::new(0, 0, *width, TALL), &chrome(), 3, 3).rail)
         .expect("no width in the sweep draws a rail")
 }
 
@@ -445,8 +454,20 @@ fn widening_into_the_rail_takes_no_glance_element_away() {
     let mut last: Option<(u16, (Rung, Rung))> = None;
 
     for width in 100..=WIDEST {
-        saw_rail |= body_layout(Rect::new(0, 0, width, TALL), &chrome(), view.files).rail;
-        saw_stacked |= !body_layout(Rect::new(0, 0, width, TALL), &chrome(), view.files).rail;
+        saw_rail |= body_layout(
+            Rect::new(0, 0, width, TALL),
+            &chrome(),
+            view.files,
+            view.files,
+        )
+        .rail;
+        saw_stacked |= !body_layout(
+            Rect::new(0, 0, width, TALL),
+            &chrome(),
+            view.files,
+            view.files,
+        )
+        .rail;
         let now = rungs(width, &view);
         if let Some((below, was)) = last {
             for (region, (was, now)) in [("list", (was.0, now.0)), ("diff", (was.1, now.1))] {
@@ -480,7 +501,7 @@ fn the_two_regions_are_two_regions() {
     let view = beside();
     let width = first_rail();
     let area = Rect::new(0, 0, width, TALL);
-    let body = body_layout(area, &chrome(), view.files).clamped_to(view.list.len());
+    let body = body_layout(area, &chrome(), view.files, view.files).clamped_to(view.list.len());
     assert!(body.rail, "the first rail width did not draw a rail");
 
     let areas = body.areas(area);
@@ -525,7 +546,9 @@ fn the_two_regions_are_two_regions() {
     // Now overflow both, and the two bars are in different columns for the first
     // time in this program's history.
     let mut crowded = view.clone();
-    crowded.list = (0..200).map(|at| entry(&format!("src/f{at}.rs"))).collect();
+    crowded.list = (0..200)
+        .map(|at| ListRow::from(entry(&format!("src/f{at}.rs"))))
+        .collect();
     crowded.files = 200;
     crowded.total_rows = 5_000;
     let told = regions(area, &chrome(), &crowded);
@@ -563,7 +586,7 @@ fn the_rail_keeps_a_path_and_not_just_a_filename() {
 
     for width in first_rail()..=WIDEST {
         let area = Rect::new(0, 0, width, TALL);
-        let body = body_layout(area, &chrome(), view.files);
+        let body = body_layout(area, &chrome(), view.files, view.files);
         assert!(body.rail, "the sweep left the rail at {width} columns");
         let told = regions(area, &chrome(), &view);
         let buf = drawn(width, TALL, &view);
@@ -636,7 +659,7 @@ fn the_rail_never_reaches_the_widths_the_picture_and_i6_pin() {
     let view = beside();
     for width in [40u16, 80, PICTURED_PANE, arrives - 1] {
         let area = Rect::new(0, 0, width, TALL);
-        let body = body_layout(area, &chrome(), view.files).clamped_to(view.list.len());
+        let body = body_layout(area, &chrome(), view.files, view.files).clamped_to(view.list.len());
         let areas = body.areas(area);
         assert!(
             !body.rail,
@@ -783,8 +806,9 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
         };
         for files in [0usize, 1, 2, 3, 5, 6, 7, 12, 40, 200, 5000] {
             for height in 1..=200u16 {
-                let stacked = body_layout(Rect::new(0, 0, arrives - 1, height), &chrome, files);
-                let rail = body_layout(Rect::new(0, 0, arrives, height), &chrome, files);
+                let stacked =
+                    body_layout(Rect::new(0, 0, arrives - 1, height), &chrome, files, files);
+                let rail = body_layout(Rect::new(0, 0, arrives, height), &chrome, files, files);
                 assert!(
                     !stacked.rail,
                     "the width below the arrival already draws a rail at {height} rows"
@@ -864,7 +888,7 @@ fn crossing_into_the_rail_never_costs_the_diff_a_row() {
     for height in 1..=48u16 {
         let mut previous: Option<(u16, usize)> = None;
         for width in arrives..=WIDEST {
-            let body = body_layout(Rect::new(0, 0, width, height), &bare, 40);
+            let body = body_layout(Rect::new(0, 0, width, height), &bare, 40, 40);
             if let Some((below, was)) = previous {
                 assert!(
                     body.diff >= was,
@@ -908,7 +932,7 @@ fn the_rail_is_monotone_in_pane_height() {
 
     let mut previous = 0usize;
     for height in 1..=80u16 {
-        let body = body_layout(Rect::new(0, 0, width, height), &bare, files);
+        let body = body_layout(Rect::new(0, 0, width, height), &bare, files, files);
         assert!(
             body.list >= previous,
             "with no masthead, a pane grown to {height} rows drew {} files where \
@@ -926,7 +950,7 @@ fn the_rail_is_monotone_in_pane_height() {
     let (mut previous, mut falls) = (0usize, 0usize);
     let mut band_rows = 0usize;
     for height in 1..=80u16 {
-        let body = body_layout(Rect::new(0, 0, width, height), &shown, files);
+        let body = body_layout(Rect::new(0, 0, width, height), &shown, files, files);
         if body.list < previous {
             falls += 1;
             let took = body.graph + body.air;
@@ -993,7 +1017,7 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
     let mut previous: Option<(u16, u16, u16)> = None;
     for width in first_rail()..=PAST_THE_CLIMB {
         let area = Rect::new(0, 0, width, TALL);
-        let areas = body_layout(area, &chrome(), view.files)
+        let areas = body_layout(area, &chrome(), view.files, view.files)
             .clamped_to(view.list.len())
             .areas(area);
         if let Some((below, rail, diff)) = previous {
@@ -1052,7 +1076,7 @@ fn the_rail_grows_with_the_pane_and_keeps_the_pictured_complement() {
 fn a_stale_view_shortens_the_rail_and_moves_nothing_else() {
     let width = first_rail();
     let area = Rect::new(0, 0, width, TALL);
-    let full = body_layout(area, &chrome(), 500);
+    let full = body_layout(area, &chrome(), 500, 500);
     assert!(full.rail, "the fixture pane does not draw a rail");
     assert!(
         full.list > 3,
@@ -1305,7 +1329,7 @@ fn the_rail_is_off_until_the_reader_asks_for_it() {
     for width in 1..=WIDEST {
         let at = Rect::new(0, 0, width, TALL);
         assert!(
-            !body_layout(at, &stacked_chrome(), files).rail,
+            !body_layout(at, &stacked_chrome(), files, files).rail,
             "a {width} column pane drew a rail nobody asked for"
         );
     }
@@ -1334,10 +1358,10 @@ fn r_asks_for_the_rail_and_r_puts_it_back() {
 
     let wide = Rect::new(0, 0, 160, TALL);
     let railed =
-        |app: &App| body_layout(wide, &app.chrome("f", None, None, None, None, None), 3).rail;
+        |app: &App| body_layout(wide, &app.chrome("f", None, Pointing::default(), 0), 3, 3).rail;
     assert!(!railed(&app), "a fresh shell drew a rail");
 
-    let height = body_layout(wide, &app.chrome("f", None, None, None, None, None), 3).diff;
+    let height = body_layout(wide, &app.chrome("f", None, Pointing::default(), 0), 3, 3).diff;
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
     assert!(railed(&app), "`r` did not put the list beside the diff");
@@ -1363,8 +1387,8 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
     for width in 1..arrives {
         let at = Rect::new(0, 0, width, TALL);
         assert_eq!(
-            body_layout(at, &stacked_chrome(), 3),
-            body_layout(at, &chrome(), 3),
+            body_layout(at, &stacked_chrome(), 3, 3),
+            body_layout(at, &chrome(), 3, 3),
             "a {width} column pane laid out differently for a rail it cannot draw"
         );
     }
@@ -1373,7 +1397,7 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
     // that would be lost by clearing the flag instead of ignoring it, and it is
     // driven through an `App` rather than through a chrome built railed.
     //
-    // The first spelling of this asserted `body_layout(.., &chrome(), ..).rail` at
+    // The first spelling of this asserted `body_layout(.., &chrome(), .., ..).rail` at
     // `arrives` and `arrives - 1`, which is the predicate `first_rail` is *defined
     // by*: neither assert could fail. What it has to test is the **state**, so a
     // mutation that cleared `App::rail` on a resize would be caught.
@@ -1383,7 +1407,7 @@ fn r_below_the_arrival_width_changes_nothing_and_eats_no_gesture() {
     repo::materialise(&mut frame);
     let mut app = App::new();
     let wide = Rect::new(0, 0, arrives, TALL);
-    let of = |app: &App, at| body_layout(at, &app.chrome("f", None, None, None, None, None), 3);
+    let of = |app: &App, at| body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3);
 
     let height = of(&app, wide).diff;
     app.apply(Action::ToggleRail, &mut frame, height)
@@ -1435,13 +1459,13 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     let mut highlighter = vigia_core::Highlighter::eager();
     let history = vigia_core::History::new();
 
-    let height = body_layout(at, &app.chrome("f", None, None, None, None, None), 3).diff;
+    let height = body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3).diff;
     app.apply(Action::Scroll(30), &mut frame, height)
         .expect("scroll");
 
     let mut top_row = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> String {
-        let chrome = app.chrome("f", None, None, None, None, None);
-        let body = body_layout(at, &chrome, 3);
+        let chrome = app.chrome("f", None, Pointing::default(), 0);
+        let body = body_layout(at, &chrome, 3, 3);
         let view = app
             .view(frame, &mut highlighter, &history, body)
             .expect("view");
@@ -1470,7 +1494,7 @@ fn asking_for_the_rail_keeps_the_row_the_diff_was_on() {
     // because the two rows are then identical and a string is trivially a prefix
     // of itself. Found by mutation.
     assert!(
-        body_layout(at, &app.chrome("f", None, None, None, None, None), 3).rail,
+        body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3).rail,
         "the toggle did not reach the layout, so the comparison below is between \
          two stacked frames"
     );
@@ -1509,8 +1533,8 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     let at = Rect::new(0, 0, 160, TALL);
 
     let mut shape = |app: &mut App, frame: &mut vigia_core::Frame<'_>| -> (u16, u16) {
-        let chrome = app.chrome("f", None, None, None, None, None);
-        let body = body_layout(at, &chrome, 3);
+        let chrome = app.chrome("f", None, Pointing::default(), 0);
+        let body = body_layout(at, &chrome, 3, 3);
         let view = app
             .view(frame, &mut highlighter, &history, body)
             .expect("view");
@@ -1521,7 +1545,7 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
     };
 
     let stacked = shape(&mut app, &mut frame);
-    let height = body_layout(at, &app.chrome("f", None, None, None, None, None), 3).diff;
+    let height = body_layout(at, &app.chrome("f", None, Pointing::default(), 0), 3, 3).diff;
     app.apply(Action::ToggleRail, &mut frame, height)
         .expect("toggle");
     let beside = shape(&mut app, &mut frame);
@@ -1540,5 +1564,75 @@ fn r_reaches_the_painted_screen_and_not_only_the_layout() {
         stacked.1, at.width,
         "the stacked list is not the full pane wide, so the comparison above is \
          between two rails"
+    );
+}
+
+/// **The rail draws both runs whole, and it was the layout the row-budget fix
+/// missed.**
+///
+/// `Body::split` takes a list *row* budget since
+/// [#313](https://github.com/breferrari/vigia/issues/313), because a grouped list
+/// draws a separator per run and a region sized from its files alone is short by
+/// exactly those rows. The stacked branch was given it and `Body::beside` was not,
+/// so #313's own headline defect stayed live in one of the two shapes this tool
+/// draws: the staged run was announced and its tail was not there.
+///
+/// Nothing in this file had ever called `show_staged`, which is why a round of
+/// auditing did not reach it.
+#[test]
+fn a_rail_draws_the_tail_of_the_staged_run() {
+    let scratch = repo::Scratch::large_diff("rail-staged-tail", 6, 8);
+    let worktree = scratch.worktree();
+    // Three staged, three left on disk.
+    scratch.git(&["add", "src/mod_0.rs", "src/mod_1.rs", "src/mod_2.rs"]);
+
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert_eq!(frame.files().len(), 6, "the fixture holds both runs");
+
+    let mut app = App::new();
+    app.apply(Action::ToggleRail, &mut frame, 0).expect("apply");
+    let mut highlighter = vigia_core::Highlighter::eager();
+    let history = vigia_core::History::new();
+
+    // Wide enough for the rail and tall enough for every file plus both labels.
+    let at = Rect::new(0, 0, 200, 30);
+    let chrome = Chrome {
+        rail: true,
+        staged: Some(3),
+        ..App::new().chrome("fixture", None, Pointing::default(), 0)
+    };
+    let body = body_layout(
+        at,
+        &chrome,
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    );
+    assert!(
+        body.rail,
+        "the pane did not take the rail, so this proves nothing"
+    );
+
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+        .iter()
+        .filter_map(|slot| match slot {
+            vigia::Slot::File(at) => Some(*at),
+            vigia::Slot::Group { .. } => None,
+        })
+        .collect();
+    assert!(
+        drawn.contains(&5),
+        "the rail drew {drawn:?} and the last staged file is not among them, so \
+         the run is announced with its tail missing"
+    );
+    assert_eq!(
+        view.listed_files(),
+        6,
+        "the rail is short of the changed set by the rows its separators took"
     );
 }

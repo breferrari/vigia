@@ -21,17 +21,23 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+/// The shell's own screen-reading selectors, under a second name because this
+/// file's `support` is `vigia-core`'s repository fixture. `tests/rail.rs` carries
+/// the same pair the other way round.
+#[path = "support/mod.rs"]
+mod screen;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use vigia::{
-    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Row, Theme, View,
+    Action, App, Chrome, FileEntry, Glyphs, HEAT_BUCKETS, HeatBucket, Pointing, Row, Theme, View,
     body_layout, render,
 };
 
 use vigia_core::{
     Churn, HISTORY_BUCKETS, HISTORY_SAMPLE, HISTORY_SAMPLES, HISTORY_WINDOW, Highlighter, History,
-    Recency,
+    Origin, Recency,
 };
 
 use support::{Scratch, materialise};
@@ -87,7 +93,7 @@ fn area() -> Rect {
 }
 
 fn chrome(app: &App) -> Chrome {
-    app.chrome("fixture", None, None, None, None, None)
+    app.chrome("fixture", None, Pointing::default(), 0)
 }
 
 #[test]
@@ -104,7 +110,7 @@ fn the_shipped_shell_starts_with_the_band_hidden() {
     // And the default reaches the **layout**, which is the half a boolean cannot
     // prove: the rows are the cost, and a default that never got as far as
     // `Body::split` would leave them reserved and blank.
-    let hidden = body_layout(area(), &shipped, FILES);
+    let hidden = body_layout(area(), &shipped, FILES, FILES);
     assert_eq!(
         (hidden.graph, hidden.air),
         (0, 0),
@@ -120,6 +126,7 @@ fn the_shipped_shell_starts_with_the_band_hidden() {
             masthead: true,
             ..shipped
         },
+        FILES,
         FILES,
     );
     assert!(
@@ -145,7 +152,7 @@ fn m_shows_the_band_and_hides_it_again() {
     // gate deliberately hands it the real number anyway rather than a zero:
     // an arm that grew a dependency on either should be caught by the gate that
     // presses the key, not by the next reader.
-    let height = body_layout(area(), &chrome(&app), FILES).diff;
+    let height = body_layout(area(), &chrome(&app), FILES, FILES).diff;
 
     assert!(!chrome(&app).masthead, "the shell did not start hidden");
 
@@ -167,7 +174,7 @@ fn m_shows_the_band_and_hides_it_again() {
         // Through the layout as well as through the flag, and on **every** press
         // rather than at the end: a toggle that flipped a boolean the split had
         // stopped reading would satisfy a flag-only gate on all four.
-        let body = body_layout(area(), &now, FILES);
+        let body = body_layout(area(), &now, FILES, FILES);
         assert_eq!(
             body.graph > 0,
             shown,
@@ -195,13 +202,13 @@ fn the_branch_stays_on_a_pane_with_no_masthead() {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let drawn = app.chrome("fixture", Some(BRANCH), None, None, None, None);
+    let drawn = app.chrome("fixture", Some(BRANCH), Pointing::default(), 0);
     assert!(
         !drawn.masthead,
         "the fixture asked for a masthead, so this proves nothing about a pane without one"
     );
 
-    let body = body_layout(area(), &drawn, FILES);
+    let body = body_layout(area(), &drawn, FILES, FILES);
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
@@ -236,6 +243,7 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
     // in `tests/render.rs` and `tests/legibility.rs` are empty in the same
     // fields for the same reason.
     let entry = FileEntry {
+        origin: Origin::Unstaged,
         path: "crates/vigia/src/render.rs".to_owned(),
         from: None,
         kind: 'M',
@@ -245,7 +253,9 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     View {
-        list: vec![entry.clone()],
+        list_span: 1,
+        grouped: false,
+        list: vec![entry.clone().into()],
         rows: vec![Row::file(entry)],
         files: 1,
         worktree_churn: Churn(series),
@@ -274,7 +284,7 @@ fn band_at(width: u16, series: [u32; HISTORY_SAMPLES], glyphs: Glyphs) -> Vec<St
         ..chrome(&App::new())
     };
     let area = Rect::new(0, 0, width, TALL);
-    let body = body_layout(area, &shown, 1);
+    let body = body_layout(area, &shown, 1, 1);
     assert!(
         body.graph > 0,
         "the fixture drew no band at {width} columns, so the gate would prove \
@@ -332,7 +342,11 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
         ..chrome(&App::new())
     };
     assert!(
-        !banded(BURSTY).list[0].path.contains(TRACK),
+        !screen::listed_files(&banded(BURSTY))
+            .next()
+            .expect("the fixture lists a file")
+            .path
+            .contains(TRACK),
         "the fixture's path carries an underscore, which this gate counts as a \
          sparkline bucket"
     );
@@ -341,7 +355,7 @@ fn the_band_is_never_coarser_than_a_drawn_sparkline_bucket() {
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
         for width in 40u16..=200 {
             let area = Rect::new(0, 0, width, TALL);
-            let body = body_layout(area, &shown, 1);
+            let body = body_layout(area, &shown, 1, 1);
             if body.graph == 0 {
                 continue;
             }
@@ -1157,7 +1171,7 @@ fn the_bands_yardstick_does_not_lurch_when_the_pane_resizes() {
             let mut compared = 0usize;
             for width in 36u16..=200 {
                 let area = Rect::new(0, 0, width, TALL);
-                if body_layout(area, &shown, 1).graph == 0 {
+                if body_layout(area, &shown, 1, 1).graph == 0 {
                     continue;
                 }
                 // The band's own span, read off the axis row, which is solid since

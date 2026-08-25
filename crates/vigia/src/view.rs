@@ -27,8 +27,8 @@
 //! assembled by hand is the only version of one a snapshot test can reach.
 
 use vigia_core::{
-    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Pass,
-    Recency, Result, SPARK_GROUPS, Span,
+    ChangeKind, FileDiff, Frame, HISTORY_BUCKETS, Highlighter, History, Hunk, LineKind, Origin,
+    Pass, Recency, Result, SPARK_GROUPS, Span,
 };
 
 /// One changed file, as everything a row about it needs to be drawn.
@@ -43,6 +43,12 @@ use vigia_core::{
 pub struct FileEntry {
     /// Repository-relative path.
     pub path: String,
+    /// Which run this row belongs to.
+    ///
+    /// **What the green gutter bar is drawn from**, `SPEC.md` §11.2 **B17**. It is
+    /// on the *entry* rather than looked up beside it because one path can be in
+    /// both runs at once, so the path is not enough to say which row this is.
+    pub origin: Origin,
     /// Where the content came from, for a rename or a copy.
     pub from: Option<String>,
     /// One letter naming what happened.
@@ -72,6 +78,344 @@ pub struct FileEntry {
     /// All zeroes when there is nothing to place: a binary file, a removal,
     /// a conflict.
     pub heat: [HeatBucket; HEAT_BUCKETS],
+}
+
+/// One row of the pinned list's window.
+///
+/// **The list stopped being one file per row in
+/// [#313](https://github.com/breferrari/vigia/issues/313)**, where it gained the
+/// run separators that make two comparisons on one map readable as two.
+///
+/// Everything downstream that turns a *row* into a *file* — a click, a digit, the
+/// caret — has to skip the separators, and it has to skip exactly the ones the
+/// painter drew. [`list_plan`] is the single resolution both read, which is
+/// `kept_keyboard`'s rule one region over: a plan taken twice is a plan that can
+/// disagree with itself, and here the two copies would be a list whose digits
+/// address rows the painter put somewhere else.
+///
+/// **The stream has no separator of its own, and that is a ruling.** The obvious
+/// symmetry is one there too, and it was in #313's plan. It is refused on contact
+/// with what a stream row *is*: every row there is a row in the height arithmetic
+/// [`span_of`], [`block_of`], [`gap_rows`], [`landing_of`] and
+/// [`vigia_core::Frame::height`] all share, and that arithmetic is what the diff's
+/// scrollbar, the scroll clamp and I4's counting bound are computed from. A label
+/// row there would be a change to the scroll model, bought to say a second time
+/// what every heading already says with its gutter mark. So the two regions divide
+/// it: **the map names the runs, and every row marks its own.**
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListRow {
+    /// A run's separator: `──  staged  2 ─────`.
+    Group {
+        /// Which run begins here.
+        origin: Origin,
+        /// How many files that run holds **in total**, not how many are visible.
+        ///
+        /// A window showing two of seven staged files says `7`, so the number
+        /// answers *how much is there* rather than restating what is on screen.
+        count: usize,
+    },
+    /// A changed file.
+    ///
+    /// **Boxed, for the reason [`Row::File`] is**: a `FileEntry` is past 256 bytes
+    /// since [#234](https://github.com/breferrari/vigia/issues/234), every variant
+    /// of an enum is as large as its largest, and a separator carries two words.
+    /// Unboxed, a `Vec<ListRow>` pays a file's worth of bytes for every label in
+    /// it. [`ListRow::entry`] and the `From` below are why almost nothing has to
+    /// spell the box.
+    File(Box<FileEntry>),
+}
+
+impl ListRow {
+    /// The file this row draws, or `None` for a run separator.
+    ///
+    /// **Every caller that reads the list wants this**, and it is here so that
+    /// none of them has to spell the match: a `if let` per call site is a place a
+    /// separator can be quietly treated as a missing file rather than as a row of
+    /// a different kind.
+    pub fn entry(&self) -> Option<&FileEntry> {
+        match self {
+            Self::File(entry) => Some(entry),
+            Self::Group { .. } => None,
+        }
+    }
+}
+
+impl From<FileEntry> for ListRow {
+    fn from(entry: FileEntry) -> Self {
+        Self::File(Box::new(entry))
+    }
+}
+
+/// One row of the plan, before any file has been diffed.
+///
+/// [`Slot::File`] carries an index into `Frame::files` rather than an entry,
+/// because the two callers want different things from it: the painter needs a
+/// drawn [`FileEntry`] and the input layer needs only the index, and building an
+/// entry costs a whole [`heat_of`] walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slot {
+    /// A run's separator.
+    Group {
+        /// Which run begins here.
+        origin: Origin,
+        /// How many files that run holds in total.
+        count: usize,
+    },
+    /// The file at this index in `Frame::files`.
+    File(usize),
+}
+
+/// The rows the pinned list draws for a window of `rows` starting at file `top`.
+///
+/// **Separators are drawn only when both runs have files in them**, which is the
+/// ruling rather than an economy. With the staged run hidden — the default — there
+/// is one run and a label naming it says nothing the header does not, so the list
+/// is exactly what it has always been and not one cell moves. With the run shown
+/// but one side empty the same holds: there is nothing to separate.
+///
+/// **A window scrolled into the middle of a run opens with that run's label wherever
+/// it has a row to spare for one.** Without it the rows at the top of the window are unattributed, which
+/// is worse than the label costing a row: a reader who scrolled would be looking
+/// at files with no idea which comparison they belong to. So the first row of any
+/// grouped window is a separator.
+///
+/// The window is `rows` **drawn rows**, separators included, so a region deep
+/// enough for six files shows fewer of them once it is paying for two labels.
+/// That is `SPEC.md` §5.3's *richness is the reward of space* in the direction it
+/// actually runs: the reader asked for a second run and the map costs what the
+/// second run costs.
+pub fn list_plan(files: &[vigia_core::FileChange], top: usize, rows: usize) -> Vec<Slot> {
+    plan_with(files, Runs::of(files), top, rows)
+}
+
+/// Rows the pinned list wants, which is its files **plus its separators**.
+///
+/// **Not the file count since
+/// [#313](https://github.com/breferrari/vigia/issues/313)**, and the difference is
+/// load bearing rather than tidy: the region is sized from what it asks for, so a
+/// grouped list sized from its files alone is two rows short and drops the *tail*
+/// of the last run. Measured on the first grouped snapshot taken: a four-file view
+/// asked for four rows, spent two of them on separators, and drew both unstaged
+/// files, the staged run's heading, and **none of the staged files** — the run the
+/// reader pressed `a` for, announced and then empty.
+///
+/// The two separators are drawn whenever both runs have files, which is the same
+/// condition [`list_plan`] groups on and is resolved the same way, so the request
+/// and the plan cannot disagree about how many rows a window needs.
+pub fn list_rows_wanted(files: &[vigia_core::FileChange]) -> usize {
+    files.len() + if Runs::of(files).grouped() { 2 } else { 0 }
+}
+
+/// How many files each run holds, counted once.
+///
+/// **Extracted so the plan is not `O(files)` per call**, which is what made a
+/// search over tops quadratic on the frame path: a plan draws at most `rows`
+/// things and the only reason it walked the whole changed set was to count the
+/// runs. Both searches below count once and plan many times.
+#[derive(Debug, Clone, Copy)]
+struct Runs {
+    unstaged: usize,
+    staged: usize,
+}
+
+impl Runs {
+    /// **Counted by scanning, because a slice does not carry the boundary.**
+    /// `Frame::staged_at` is the same number for free where a caller has the
+    /// frame, and [`Runs::at`] is that door; this one exists for the public
+    /// entry points that take a slice and for tests that build one by hand.
+    fn of(files: &[vigia_core::FileChange]) -> Self {
+        let staged = files
+            .iter()
+            .filter(|change| change.origin == Origin::Staged)
+            .count();
+        Self {
+            unstaged: files.len() - staged,
+            staged,
+        }
+    }
+
+    /// The runs, from the boundary [`vigia_core::Frame::advance`] recorded.
+    fn at(files: &[vigia_core::FileChange], staged_at: usize) -> Self {
+        Self {
+            unstaged: staged_at,
+            staged: files.len() - staged_at,
+        }
+    }
+
+    /// Whether the list draws run separators at all.
+    fn grouped(self) -> bool {
+        self.unstaged > 0 && self.staged > 0
+    }
+
+    fn count(self, origin: Origin) -> usize {
+        match origin {
+            Origin::Unstaged => self.unstaged,
+            Origin::Staged => self.staged,
+        }
+    }
+}
+
+/// [`list_plan`], with the run counts already taken.
+///
+/// **The one arithmetic**, so nothing below can compute a window's shape a second
+/// way and come to disagree with what the painter draws — which is precisely the
+/// class of defect this whole family of functions exists to close.
+fn plan_with(files: &[vigia_core::FileChange], runs: Runs, top: usize, rows: usize) -> Vec<Slot> {
+    let mut plan = Vec::with_capacity(rows);
+    if rows == 0 || top >= files.len() {
+        return plan;
+    }
+    let grouped = runs.grouped();
+
+    let mut run: Option<Origin> = None;
+    for (index, change) in files.iter().enumerate().skip(top) {
+        if plan.len() == rows {
+            break;
+        }
+        // **A separator is drawn only where a file can follow it**, which is what
+        // the `+ 1` says: a label naming a run the window has no room to show is a
+        // row of the map spent saying nothing about the map. At one row the list
+        // therefore draws a *file* and no label at all, which is the same rule the
+        // staged gutter follows below its own floor — the mark gives way before
+        // the content does. Written as a pop after the fact it emptied a one-row
+        // list completely, because the only row it had was the label it then took
+        // back.
+        if grouped && run != Some(change.origin) && plan.len() + 1 < rows {
+            plan.push(Slot::Group {
+                origin: change.origin,
+                count: runs.count(change.origin),
+            });
+            run = Some(change.origin);
+        } else if grouped {
+            // The label was skipped for want of room; the run is still entered, or
+            // the next file would try for a label of its own.
+            run = Some(change.origin);
+        }
+        plan.push(Slot::File(index));
+    }
+    plan
+}
+
+/// Whether a window of `rows` drawn rows starting at `top` draws `file`.
+///
+/// **One predicate, two callers**, and it is the question both searches below are
+/// actually asking: [`top_showing`] walks tops until it stops being true, and
+/// [`following_top`] asks it once about the window it already has. Written twice
+/// it was also written two ways, the second collecting a `Vec` of every drawn
+/// index to ask about one of them.
+fn draws_file(
+    files: &[vigia_core::FileChange],
+    runs: Runs,
+    top: usize,
+    rows: usize,
+    file: usize,
+) -> bool {
+    plan_with(files, runs, top, rows)
+        .iter()
+        .any(|slot| matches!(slot, Slot::File(at) if *at == file))
+}
+
+/// The **smallest** top a window of `rows` drawn rows can start at and still draw
+/// `file`.
+///
+/// **Smallest, and the first version of this returned the largest**, which is a
+/// bound that never binds: the largest top showing any file is that file's own
+/// index, trivially, so the clamp built on it let the window scroll past the end
+/// and leave the last file alone above a region of blanks. The gate missed it by
+/// asserting only that the answer *shows* the file, which the wrong answer does.
+///
+/// **Searched from `file` downward and bounded by `rows`**, because a window of
+/// `rows` rows can never draw more than `rows` files, so nothing further back can
+/// reach it. That keeps this `O(rows^2)` against a changed set of any size, where
+/// walking every index and planning `O(files)` each time was `O(files^2)` on the
+/// frame path.
+fn top_showing(files: &[vigia_core::FileChange], runs: Runs, file: usize, rows: usize) -> usize {
+    if rows == 0 || files.is_empty() {
+        return 0;
+    }
+    let file = file.min(files.len() - 1);
+    let draws = |top: usize| draws_file(files, runs, top, rows, file);
+    let floor = file.saturating_sub(rows);
+    let mut best = file;
+    for top in (floor..file).rev() {
+        if !draws(top) {
+            break;
+        }
+        best = top;
+    }
+    best
+}
+
+/// The last top a window of `rows` drawn rows can start at and still show the
+/// last file, which is the **tightest** such top rather than the largest.
+///
+/// **`files - rows` is the answer only while every drawn row is a file**, and a
+/// grouped window spends one or two of them on separators. Clamped that way the
+/// window stops short and the tail of the staged run cannot be reached at all —
+/// silently, because nothing on screen says the map has an end it will not show.
+///
+/// **And it is the *tightest* such top**, so the window is still pulled back the
+/// way `take_list` has always pulled it back: the last file rests on the bottom
+/// row rather than leaving blanks under it, which matters most when the changed
+/// set shrinks under a stale position (an agent committing, resetting or switching
+/// branch, which is the ordinary event on the pane this tool is for).
+pub fn last_top(files: &[vigia_core::FileChange], rows: usize) -> usize {
+    if files.is_empty() {
+        return 0;
+    }
+    top_showing(files, Runs::of(files), files.len() - 1, rows)
+}
+
+/// The window a list following the diff should show, given where the diff is.
+///
+/// **Minimal movement, which is `take_list`'s own rule**: the window is held while
+/// the current file is inside it and pushed by exactly the overshoot when it
+/// leaves, so scrolling from the start walks the caret down the rows before the
+/// list moves under it.
+///
+/// **What this replaces is `current + 1 - rows`**, which subtracts a count of
+/// *drawn rows* from a *file index*. They are the same number only while every row
+/// is a file: once a window can hold a separator the arithmetic lands short, the
+/// list scrolls, and the file the diff is inside is not among the rows it drew —
+/// so the caret marking that file is simply absent, on exactly the frames a reader
+/// is watching it move.
+pub fn following_top(
+    files: &[vigia_core::FileChange],
+    from: usize,
+    current: usize,
+    rows: usize,
+) -> usize {
+    if files.is_empty() || rows == 0 {
+        return 0;
+    }
+    let runs = Runs::of(files);
+    if draws_file(files, runs, from, rows, current) {
+        return from;
+    }
+    if current < from {
+        // Off the top: the window starts on it.
+        return current;
+    }
+    // Off the bottom: the smallest window that reaches it, so it lands on the
+    // last row rather than the first and the rows above it stay on screen.
+    top_showing(files, runs, current, rows)
+}
+
+/// The file a drawn list row addresses, or `None` for a separator.
+///
+/// **The one place a row becomes a file**, read by the click handler and by the
+/// digit jumps alike. Both used to add the offset to the window's first *file*,
+/// which is the same number only while every row is a file.
+pub fn file_at(
+    files: &[vigia_core::FileChange],
+    top: usize,
+    rows: usize,
+    row: usize,
+) -> Option<usize> {
+    match list_plan(files, top, rows).get(row) {
+        Some(Slot::File(index)) => Some(*index),
+        _ => None,
+    }
 }
 
 /// What a row of the body is.
@@ -521,7 +865,37 @@ pub struct View {
     /// how `SPEC.md` §11.1 keeps the list inside I4: one `Frame::diff` per row
     /// drawn, and under I2a a file that did not change is a `stat` and a cache
     /// hit that reads no bytes. Empty when the pane is too short for a region.
-    pub list: Vec<FileEntry>,
+    ///
+    /// **Not one file per row since
+    /// [#313](https://github.com/breferrari/vigia/issues/313)**: a window showing
+    /// both runs opens each with a separator. [`list_plan`] is what decides, and
+    /// it is what a caller turning a row back into a file must resolve through.
+    pub list: Vec<ListRow>,
+    /// How many files the pinned list's scrollbar treats as one screenful.
+    ///
+    /// **The complement of the window's ceiling**, so the bar's travel
+    /// (`files - span`) is exactly the travel `Action::ListTo` scales the track
+    /// onto, and the two cannot disagree about where the bottom is.
+    ///
+    /// **Not the row count and not what this window happens to show**, which were
+    /// the two previous answers and were each wrong in their own way. The row
+    /// count over-reports, because a grouped window spends rows on separators. What
+    /// *this* window shows varies with where it starts — a window opening on a run
+    /// boundary spends one separator and one inside a run spends two — so the thumb
+    /// changed length mid-drag and walked away from where the reader dropped it.
+    ///
+    /// A screenful is a property of the list, not of the position, which is what
+    /// makes this constant across a scroll and what makes a drag round-trip.
+    pub list_span: usize,
+    /// Whether this frame shows both runs, and therefore draws the gutter column.
+    ///
+    /// **A fact about the frame rather than about any row**, which is why it is
+    /// here and not on [`FileEntry`]: the column has to be taken on *every* row or
+    /// the two runs' paths start in different places and the map slides sideways
+    /// at the boundary. It is the same quantity [`list_plan`] groups on, resolved
+    /// once so the list's separators and the stream's gutters cannot disagree
+    /// about whether there are two runs.
+    pub grouped: bool,
     /// Which file the pinned list starts at, once the request was resolved
     /// against the files that exist and against where the diff is.
     ///
@@ -913,6 +1287,8 @@ pub fn diff_rows(frame: &mut Frame) -> Result<usize> {
 /// clippy is willing to read.
 struct Changed<'f> {
     kind: &'f ChangeKind,
+    /// Which run this file is in, for the row's gutter mark.
+    origin: Origin,
     diff: &'f FileDiff,
     index: usize,
     /// Whether a blank closes this file's block, which is every file but the
@@ -946,9 +1322,10 @@ struct Changed<'f> {
 /// The two `history` lookups are hash probes against a store fed from the watch:
 /// no read, no `stat` and no diff, which is why the glance elements cost the
 /// frame nothing that `tests/reads.rs` can see.
-fn entry_of(kind: &ChangeKind, diff: &FileDiff, history: &History) -> FileEntry {
+fn entry_of(kind: &ChangeKind, origin: Origin, diff: &FileDiff, history: &History) -> FileEntry {
     FileEntry {
         path: diff.path.clone(),
+        origin,
         from: source_of(kind).map(str::to_owned),
         kind: letter(kind),
         churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
@@ -1074,6 +1451,20 @@ impl View {
         }
     }
 
+    /// How many **files** the pinned list is showing, which is not how many rows
+    /// it drew.
+    ///
+    /// **Not the bar's span**, which is [`View::list_span`]: this is what *this*
+    /// window shows and that is a property of the position, so a bar drawn from it
+    /// changes length as a reader scrolls. It was the bar's span for one round of
+    /// #313's audit and the correction is recorded there.
+    ///
+    /// What it is for is asking a drawn screen what it drew, which is what the
+    /// gates in `tests/list.rs` want and what nothing in the renderer does.
+    pub fn listed_files(&self) -> usize {
+        self.list.iter().filter_map(ListRow::entry).count()
+    }
+
     /// Collect the rows visible from `position`, and no others.
     ///
     /// `height` is the body's height in rows. Zero is legal and gives an empty
@@ -1126,7 +1517,27 @@ impl View {
         let original = highlighter;
         let mut highlighter = original.pass();
         let files = frame.files().len();
+        // Resolved from the changed set rather than from the toggle, so a reader
+        // who asks for the staged run and has nothing staged gets the pane they
+        // already had rather than a column and a label saying nothing. The header
+        // is what acknowledges the keypress in that case.
+        //
+        // **From the boundary the walk recorded**, which is a subtraction where a
+        // filter over the changed set would be a pass: `Frame::advance`
+        // concatenates the runs and knows where they part.
+        let grouped = Runs::at(frame.files(), frame.staged_at()).grouped();
         let mut view = Self {
+            grouped,
+            // **Initialised to "nothing to scroll" rather than to zero**, so every
+            // path out of this function leaves a span a scrollbar can be asked
+            // about. `take_list` returns before it computes one on a pane with no
+            // list region, and `collect` returns before *it* on an empty worktree;
+            // a leftover zero reads as "this window shows none of the list", which
+            // is `scrollable` saying yes. Nothing draws a bar there today, but only
+            // because `bar_for`'s own `rows >= MIN_TRACK` guard happens to catch
+            // it first, and a field that is safe by a guard somewhere else is the
+            // shape this module keeps finding.
+            list_span: files.max(1),
             // Bounded by the screen, not by the diff. The cap keeps a caller
             // asking for an absurd height from allocating for it up front.
             rows: Vec::with_capacity(height.min(64)),
@@ -1327,6 +1738,7 @@ impl View {
                 view.take_file(
                     Changed {
                         kind: &change.kind,
+                        origin: change.origin,
                         diff,
                         index,
                         closes: gap_rows(index, stop) > 0,
@@ -1623,7 +2035,18 @@ impl View {
         // Always pulled back so the last file can rest on the bottom row rather
         // than leaving blanks a reader would read as "no more files". That is
         // validity, and holds however the window got there.
-        let mut top = self.list_top.min(self.files.saturating_sub(rows));
+        // **The furthest start that still reaches the last file, which is not
+        // `files - rows` once a window can hold rows that are not files**
+        // ([#313](https://github.com/breferrari/vigia/issues/313)). See
+        // [`last_top`].
+        let ceiling = last_top(frame.files(), rows);
+        // A screenful in files, taken from the ceiling so the bar's travel is the
+        // drag's travel. See [`View::list_span`].
+        // `last_top` never exceeds `files - 1`, so the subtraction is at least one
+        // and needs no floor; `take_list` is not reached with an empty changed set
+        // because `collect` returns before it.
+        self.list_span = self.files - ceiling;
+        let mut top = self.list_top.min(ceiling);
         if follows {
             // And snapped onto the current file, but **only** when the window is
             // the diff's to move. A reader who browsed away with `J` keeps their
@@ -1670,17 +2093,23 @@ impl View {
             // Still **not navigable**, which is §11.2 B4: the caret cannot be
             // moved on its own, nothing is selected, and no key changes meaning.
             // What travels is a marker, not a cursor.
-            let current = self.top.file;
-            if current < top {
-                top = current;
-            } else if current >= top + rows {
-                top = current + 1 - rows;
-            }
-            top = top.min(self.files.saturating_sub(rows));
+            // **Resolved through the plan rather than by arithmetic on `rows`**,
+            // which is [`following_top`]'s own docblock: `current + 1 - rows`
+            // subtracts drawn rows from a file index and lands short the moment a
+            // window can hold a separator, leaving the caret's own file off the map
+            // it just computed.
+            top = following_top(frame.files(), top, self.top.file, rows).min(ceiling);
         }
         self.list_top = top;
 
-        for index in top..(top + rows).min(self.files) {
+        for slot in list_plan(frame.files(), top, rows) {
+            let index = match slot {
+                Slot::Group { origin, count } => {
+                    self.list.push(ListRow::Group { origin, count });
+                    continue;
+                }
+                Slot::File(index) => index,
+            };
             self.read += 1;
             // **Searched from the back.** The walk's restart keeps `drawn` (see
             // there for why that is right), and the second walk starts earlier,
@@ -1690,11 +2119,11 @@ impl View {
             // the current file is never in. Taking the newest is what keeps the
             // two regions from disagreeing about one file for one frame.
             match drawn.iter().rev().find(|(at, _)| *at == index) {
-                Some((_, entry)) => self.list.push(entry.clone()),
+                Some((_, entry)) => self.list.push(ListRow::from(entry.clone())),
                 None => {
                     let (change, diff) = frame.diff(index)?;
-                    let entry = entry_of(&change.kind, diff, history);
-                    self.list.push(entry);
+                    let entry = entry_of(&change.kind, change.origin, diff, history);
+                    self.list.push(ListRow::from(entry));
                 }
             }
         }
@@ -1799,6 +2228,7 @@ impl View {
     ) {
         let Changed {
             kind,
+            origin,
             diff,
             index,
             closes,
@@ -1834,13 +2264,13 @@ impl View {
         // first file this places: every earlier file was skipped whole without
         // reaching here, and every later one draws its heading.
         if n >= skip {
-            let entry = entry_of(kind, diff, history);
+            let entry = entry_of(kind, origin, diff, history);
             drawn.push((index, entry.clone()));
             self.rows.push(Row::file(entry));
         } else if listed {
             self.recorded += 1;
             // Moved rather than cloned, because there is no row to draw it in.
-            drawn.push((index, entry_of(kind, diff, history)));
+            drawn.push((index, entry_of(kind, origin, diff, history)));
         }
         n += 1;
 

@@ -35,9 +35,10 @@ mod support;
 
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, LIST_SETTLED, Position, View, Viewport, body_layout, regions,
+    Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, View, Viewport, body_layout,
+    regions,
 };
-use vigia_core::{Highlighter, History};
+use vigia_core::{Highlighter, History, Origin};
 
 use support::{Scratch, materialise};
 
@@ -84,7 +85,7 @@ const MANY: usize = 500;
 const DEEP: u16 = 50;
 
 fn chrome(app: &App) -> vigia::Chrome {
-    app.chrome("fixture", None, None, None, None, None)
+    app.chrome("fixture", None, Pointing::default(), 0)
 }
 
 /// The same, with the rail asked for.
@@ -104,7 +105,29 @@ fn railed(app: &App) -> vigia::Chrome {
 }
 
 fn split(width: u16, height: u16, files: usize) -> Body {
-    body_layout(Rect::new(0, 0, width, height), &chrome(&App::new()), files)
+    body_layout(
+        Rect::new(0, 0, width, height),
+        &chrome(&App::new()),
+        files,
+        files,
+    )
+}
+
+/// [`split`], sized the way the shell sizes a region for **this** changed set.
+///
+/// **`split` passes the file count for both of `body_layout`'s inputs**, which is
+/// the pre-#313 shape and is right only while every drawn row is a file. Every
+/// grouped test in this file sized its region that way, which is why two layout
+/// defects survived a round of auditing: the region was two rows short of what the
+/// shell would have given it, so the tests agreed with a bug rather than with the
+/// product.
+fn split_for(width: u16, height: u16, frame: &vigia_core::Frame) -> Body {
+    body_layout(
+        Rect::new(0, 0, width, height),
+        &chrome(&App::new()),
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    )
 }
 
 /// Each region reports its **own** bar's column, not the pane's.
@@ -153,7 +176,7 @@ fn each_region_reports_its_own_bar_column() {
     // is the only screen this gate is about.
     let area = Rect::new(0, 0, 100, 20);
     let chrome = chrome(&app);
-    let body = body_layout(area, &chrome, frame.files().len());
+    let body = body_layout(area, &chrome, frame.files().len(), frame.files().len());
     let view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
@@ -329,7 +352,7 @@ fn a_taller_pane_never_costs_the_band_its_rows() {
     let mut saw_it_arrive = false;
 
     for height in 1..=TALLEST {
-        let body = body_layout(Rect::new(0, 0, WIDE, height), &raised, MANY);
+        let body = body_layout(Rect::new(0, 0, WIDE, height), &raised, MANY, MANY);
         let band = body.graph > 0;
 
         if band && !had_a_band {
@@ -427,9 +450,9 @@ fn a_notice_does_not_change_the_list_height() {
         for width in [40u16, WIDE, 120, 140, 200] {
             for files in [1usize, 3, 100] {
                 let area = Rect::new(0, 0, width, height);
-                let without = body_layout(area, &quiet, files);
+                let without = body_layout(area, &quiet, files, files);
                 saw_rail |= without.rail;
-                let with = body_layout(area, &noisy, files);
+                let with = body_layout(area, &noisy, files, files);
                 assert_eq!(
                     without, with,
                     "at {width}x{height} over {files} files a notice changed the \
@@ -709,7 +732,8 @@ fn the_region_at_fifty_files() {
         let area = ratatui::layout::Rect::new(0, 0, 80, 24);
         let body = body_layout(
             area,
-            &app.chrome("vigia", None, None, None, None, None),
+            &app.chrome("vigia", None, Pointing::default(), 0),
+            FILES,
             FILES,
         );
         let view = app
@@ -718,7 +742,7 @@ fn the_region_at_fifty_files() {
 
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let theme = Theme::default();
-        let chrome = app.chrome("vigia", None, None, None, None, None);
+        let chrome = app.chrome("vigia", None, Pointing::default(), 0);
         terminal
             .draw(|f| {
                 let area = f.area();
@@ -814,7 +838,7 @@ fn the_two_regions_tile_the_body_exactly() {
                 // arm rather than sweeping the stacked shape five times. Since
                 // #295 the default chrome never draws one.
                 let chrome = railed(&App::new());
-                let full = body_layout(area, &chrome, files);
+                let full = body_layout(area, &chrome, files, files);
                 saw_rail |= full.rail;
 
                 for have in 0..=LIST_SETTLED + 2 {
@@ -1488,5 +1512,906 @@ fn a_digit_past_the_drawn_window_is_a_no_op() {
         "`{past}` moved the diff to a file the list is not drawing, with {} rows \
          on screen",
         body.list
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The two runs, and what a drawn row addresses: `SPEC.md` §11.2 **B17**.
+// ---------------------------------------------------------------------------
+
+/// A changed set with two runs in it, built by real `git`.
+fn two_runs(name: &str) -> support::Scratch {
+    let scratch = support::Scratch::new(name);
+    for i in 0..6 {
+        scratch.write(&format!("src/f{i}.rs"), "one\ntwo\nthree\n");
+    }
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    // Three staged, three left on disk.
+    for i in 0..3 {
+        scratch.write(&format!("src/f{i}.rs"), "one\nSTAGED\nthree\n");
+    }
+    scratch.git(&["add", "src/f0.rs", "src/f1.rs", "src/f2.rs"]);
+    for i in 3..6 {
+        scratch.write(&format!("src/f{i}.rs"), "one\nUNSTAGED\nthree\n");
+    }
+    scratch
+}
+
+/// **A separator opens each run, and a window scrolled into the middle of one
+/// still opens with that run's own label.**
+///
+/// Without the second half the rows at the top of a scrolled window are
+/// unattributed: a reader who scrolled would be looking at files with nothing on
+/// screen saying which comparison they belong to, which is worse than the label
+/// costing a row.
+#[test]
+fn each_run_opens_with_its_own_separator_wherever_the_window_starts() {
+    let scratch = two_runs("list-runs");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+    assert_eq!(files.len(), 6, "the fixture holds three files in each run");
+
+    // From the top: the unstaged run's label, its files, then the staged run's.
+    let plan = vigia::list_plan(files, 0, 8);
+    assert_eq!(
+        plan[0],
+        vigia::Slot::Group {
+            origin: Origin::Unstaged,
+            count: 3
+        },
+        "the window does not open with the run it is showing"
+    );
+    assert_eq!(
+        plan[4],
+        vigia::Slot::Group {
+            origin: Origin::Staged,
+            count: 3
+        },
+        "the second run gains no separator of its own: {plan:?}"
+    );
+
+    // Scrolled so the window starts inside the staged run: it still opens with
+    // that run's label, and the count is the run's **total** rather than what is
+    // visible, so the number answers *how much is there*.
+    let plan = vigia::list_plan(files, 4, 3);
+    assert_eq!(
+        plan[0],
+        vigia::Slot::Group {
+            origin: Origin::Staged,
+            count: 3
+        },
+        "a window opened mid-run draws unattributed rows: {plan:?}"
+    );
+}
+
+/// **One run draws no separators at all**, which is what keeps the default pane
+/// exactly what it has always been.
+#[test]
+fn a_single_run_spends_no_row_on_a_label_that_says_nothing() {
+    let scratch = two_runs("list-one-run");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    // Staged hidden: one run.
+    frame.advance().expect("advance");
+    let plan = vigia::list_plan(frame.files(), 0, 8);
+    assert!(
+        plan.iter().all(|slot| matches!(slot, vigia::Slot::File(_))),
+        "a one-run list drew a separator, so the default pane pays for a \
+         distinction it is not making: {plan:?}"
+    );
+}
+
+/// **A separator with no room for a file under it is not drawn.**
+///
+/// It would be a label naming a run the window cannot show: a row of the map spent
+/// saying nothing about the map.
+#[test]
+fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
+    let scratch = two_runs("list-tight");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    // Four rows from the top: label, three files — and the staged label would be
+    // the fifth, so it does not appear.
+    let plan = vigia::list_plan(frame.files(), 0, 4);
+    assert_eq!(plan.len(), 4);
+    assert!(
+        matches!(plan[3], vigia::Slot::File(_)),
+        "the window ends on a label naming a run it cannot show: {plan:?}"
+    );
+}
+
+/// **A digit and a click address a *file*, and never the separator above it.**
+///
+/// The defect this closes is silent: added blind to the window's first file, an
+/// offset past a separator names the file *before* the one under the pointer, the
+/// jump lands, and nothing on screen says the reader went somewhere they did not
+/// point at.
+#[test]
+fn a_drawn_row_addresses_the_file_under_it_and_a_separator_addresses_nothing() {
+    let scratch = two_runs("list-address");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    // Rows: 0 label, 1..3 unstaged, 4 label, 5..7 staged.
+    let at = |row| vigia::file_at(files, 0, 8, row);
+    assert_eq!(at(0), None, "the unstaged run's label addresses a file");
+    assert_eq!(at(1), Some(0));
+    assert_eq!(at(3), Some(2));
+    assert_eq!(at(4), None, "the staged run's label addresses a file");
+    assert_eq!(
+        at(5),
+        Some(3),
+        "the first staged row addresses the file before it, which is the \
+         off-by-one a separator introduces and nothing on screen would show"
+    );
+    assert_eq!(at(7), Some(5));
+    assert_eq!(at(8), None, "a row past the window addresses a file");
+
+    // And the naive arithmetic really does disagree, or this asserts nothing.
+    assert_ne!(
+        at(5),
+        Some(5),
+        "list_top + offset happens to be right here, so this fixture cannot see \
+         the defect it exists for"
+    );
+}
+
+/// The region asks for the rows it will draw, separators included.
+///
+/// Measured on the first grouped snapshot taken: a view sized from its files alone
+/// spent two of its rows on separators and drew the staged run's heading with
+/// **none of its files** under it — the run the reader pressed `a` for, announced
+/// and then empty.
+#[test]
+fn the_list_asks_for_the_rows_its_separators_will_take() {
+    let scratch = two_runs("list-rows-wanted");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+
+    frame.advance().expect("advance");
+    assert_eq!(
+        vigia::list_rows_wanted(frame.files()),
+        frame.files().len(),
+        "a one-run list asks for more rows than it has files"
+    );
+
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    assert_eq!(
+        vigia::list_rows_wanted(frame.files()),
+        frame.files().len() + 2,
+        "a grouped list asks for its files alone, so the region is two rows short \
+         and the last run loses its tail"
+    );
+}
+
+/// **Pressing `a` shows the staged run on that frame, not on the next write.**
+///
+/// The defect this closes reached a live pane: `Action::ToggleStaged` told the
+/// frame what to walk and nothing re-walked, because `Frame::advance` runs on a
+/// **tick** and a keypress is not one. So the reader pressed the key, the header
+/// said `0 staged` over a worktree with two staged files, and the pane went on
+/// showing exactly what it showed before — until something happened to be written,
+/// which on a tree an agent has finished with may be never.
+///
+/// That is the failure `SPEC.md` §11.2 B17 is named for, one layer down: a key
+/// that does nothing a reader can see. The three toggles beside it need no advance
+/// because they rearrange rows the frame already holds; this one changes what the
+/// frame *contains*.
+#[test]
+fn asking_for_the_staged_run_fills_it_on_the_same_frame() {
+    let scratch = two_runs("list-toggle-advances");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        3,
+        "the fixture opens with the unstaged run alone"
+    );
+
+    let mut app = App::new();
+    app.apply(Action::ToggleStaged, &mut frame, 20)
+        .expect("apply");
+
+    assert_eq!(
+        frame.files().len(),
+        6,
+        "the staged run is empty on the frame the reader asked for it, so `a` \
+         draws nothing until something else happens to be written"
+    );
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.origin == Origin::Staged),
+        "the frame grew rows that are not the staged run"
+    );
+
+    // And pressing it again puts the pane back on the same frame, rather than
+    // leaving the run on screen until the next write.
+    app.apply(Action::ToggleStaged, &mut frame, 20)
+        .expect("apply");
+    assert_eq!(
+        frame.files().len(),
+        3,
+        "the staged run is still drawn after the reader asked for it to go"
+    );
+}
+
+/// **Every file in the list is reachable when both runs are drawn.**
+///
+/// The window's top was clamped to `files - rows`, which compares a count of
+/// *files* against a count of *drawn rows*. A grouped window spends one or two of
+/// those rows on separators, so the clamp stops the window one or two files short
+/// and the tail of the staged run cannot be scrolled to at all — silently, since
+/// nothing on screen says the map has an end it will not show.
+#[test]
+fn the_last_file_is_reachable_when_the_list_is_grouped() {
+    let scratch = two_runs("list-tail-reachable");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files().len();
+    assert_eq!(files, 6);
+
+    // A window shorter than the changed set, so the clamp is what decides where
+    // it can stop.
+    for rows in 3..=files {
+        let ceiling = vigia::last_top(frame.files(), rows);
+        let reached: Vec<usize> = vigia::list_plan(frame.files(), ceiling, rows)
+            .iter()
+            .filter_map(|slot| match slot {
+                vigia::Slot::File(at) => Some(*at),
+                vigia::Slot::Group { .. } => None,
+            })
+            .collect();
+        assert!(
+            reached.contains(&(files - 1)),
+            "a window of {rows} rows clamped to its furthest top ({ceiling}) \
+             cannot reach the last file: it draws {reached:?}"
+        );
+
+        // **And the old arithmetic really does fall short here**, or this fixture
+        // cannot see the defect it exists for. The naive clamp compares a count of
+        // files against a count of drawn rows, and the separators are the
+        // difference.
+        let naive = files.saturating_sub(rows);
+        let naive_reach: Vec<usize> = vigia::list_plan(frame.files(), naive, rows)
+            .iter()
+            .filter_map(|slot| match slot {
+                vigia::Slot::File(at) => Some(*at),
+                vigia::Slot::Group { .. } => None,
+            })
+            .collect();
+        if !naive_reach.contains(&(files - 1)) {
+            assert!(
+                ceiling > naive,
+                "the naive clamp misses the last file at {rows} rows and the \
+                 rule agrees with it anyway"
+            );
+        }
+    }
+
+    // Non-vacuity over the sweep: at least one width has to be a width the naive
+    // clamp gets wrong, or the loop above compared two identical answers.
+    let short = 3;
+    assert!(
+        vigia::last_top(frame.files(), short) > files.saturating_sub(short),
+        "no window in this fixture separates the two clamps, so the gate proves \
+         nothing"
+    );
+}
+
+/// **The height a scroll step is measured in is the height the paint lays out.**
+///
+/// `diff_height` and the paint path both split the body, and they have to agree or
+/// a page-down steps by more rows than the diff has. They took the same inputs
+/// until the list's row budget stopped being its file count: `diff_height` went on
+/// passing `files` for both, so with the staged run drawn it computed a diff up to
+/// two rows taller than the one the reader is looking at.
+#[test]
+fn the_scroll_step_is_measured_in_the_height_the_paint_uses() {
+    let scratch = two_runs("list-diff-height");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let chrome = vigia::Chrome {
+        staged: Some(3),
+        ..vigia::App::new().chrome("fixture", None, vigia::Pointing::default(), 0)
+    };
+    // Both derived from the changed set the way `Shell::diff_rows_for` and
+    // `Shell::paint` derive them, which is what the two seams now do by
+    // construction: each is handed the slice rather than a pair of numbers.
+    let files = frame.files();
+    let (count, wanted) = (files.len(), vigia::list_rows_wanted(files));
+
+    let mut separated = 0usize;
+    for height in 10..=30u16 {
+        let at = Rect::new(0, 0, 80, height);
+        let stepped = vigia::diff_height(at, &chrome, count, wanted);
+        let laid = body_layout(at, &chrome, count, wanted).diff;
+        assert_eq!(
+            stepped, laid,
+            "at 80x{height} a scroll step is measured in {stepped} rows where the \
+             paint lays out {laid}"
+        );
+
+        // **And the two inputs are not interchangeable, which is the finding.**
+        // `diff_height` took one number and passed it for both until B17 gave the
+        // list a row budget its file count no longer equals. Counting the heights
+        // where the old form disagrees is what stops this gate from being the
+        // identity it would otherwise be: `diff_height` *is* `body_layout(..).diff`,
+        // so comparing them with the same arguments asserts nothing at all.
+        if vigia::diff_height(at, &chrome, count, count) != laid {
+            separated += 1;
+        }
+    }
+
+    assert!(
+        separated > 0,
+        "no height in the sweep tells the two inputs apart, so this fixture \
+         cannot see a caller that passes the file count for both"
+    );
+}
+
+/// **`last_top` is the *tightest* ceiling, not merely a top that works.**
+///
+/// The first version returned the **largest** top from which the last file is
+/// drawn, which for any window is the last file's own index: trivially true, and a
+/// ceiling that never binds. The window could then scroll past the end and leave
+/// blank rows under the last file, which is the thing the clamp exists to prevent
+/// and which its own docblock claims it does.
+///
+/// **The gate that missed it asserted only that the ceiling shows the last file**,
+/// satisfied vacuously by the wrong answer. Naming the row *below* is what makes
+/// it a bound rather than an example.
+#[test]
+fn the_lists_ceiling_is_the_tightest_top_that_still_shows_the_last_file() {
+    let scratch = two_runs("list-tight-ceiling");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+    let last = files.len() - 1;
+
+    let draws = |top: usize, rows: usize| {
+        vigia::list_plan(files, top, rows)
+            .iter()
+            .any(|slot| matches!(slot, vigia::Slot::File(at) if *at == last))
+    };
+
+    for rows in 2..=files.len() + 2 {
+        let ceiling = vigia::last_top(files, rows);
+        assert!(
+            draws(ceiling, rows),
+            "the ceiling for {rows} rows does not show the last file"
+        );
+        assert!(
+            ceiling == 0 || !draws(ceiling - 1, rows),
+            "the ceiling for {rows} rows is {ceiling}, and {} shows the last file \
+             too, so it is an example rather than a bound and the window can \
+             scroll past the end",
+            ceiling - 1
+        );
+    }
+}
+
+/// **Follow keeps the caret's own file inside the window it computes.**
+///
+/// The window's forward push was `current + 1 - rows`, which subtracts a count of
+/// **drawn rows** from a **file index**. Once a window can hold rows that are not
+/// files the two are different units, and the arithmetic lands short: the list
+/// scrolls, the file the diff is inside is not among the rows it drew, and the
+/// caret marking that file simply is not there.
+#[test]
+fn follow_marks_the_current_file_at_every_window_it_chooses() {
+    let scratch = two_runs("list-follow-caret");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    for height in 12..=24u16 {
+        for current in 0..frame.files().len() {
+            let mut app = App::new();
+            let body = split_for(80, height, &frame);
+            // Put the diff inside `current`, the way a digit does, then collect
+            // and ask whether that file is on the map the list drew.
+            app.apply(Action::File(current as isize), &mut frame, 40)
+                .expect("apply");
+            for _ in 0..current {
+                app.apply(Action::File(1), &mut frame, 40).expect("apply");
+            }
+            let view = app
+                .view(&mut frame, &mut highlighter, &history, body)
+                .expect("collect");
+            if view.list.is_empty() {
+                continue;
+            }
+            let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+                .iter()
+                .filter_map(|slot| match slot {
+                    vigia::Slot::File(at) => Some(*at),
+                    vigia::Slot::Group { .. } => None,
+                })
+                .collect();
+            assert!(
+                drawn.contains(&view.top.file),
+                "at 80x{height} with the diff inside file {} the list drew \
+                 {drawn:?} from top {}, so the caret's own file is not on the map",
+                view.top.file,
+                view.list_top
+            );
+        }
+    }
+}
+
+/// **`J` reaches the end of a grouped list.**
+///
+/// `browse` clamps with `files - list_rows`, which is the naive bound the ceiling
+/// replaced — and `take_list` only takes the smaller of the two, so it cannot
+/// raise one that is already too low. A reader scrolling the map with `J` stopped
+/// one or two files short of the end with nothing saying so.
+#[test]
+fn browsing_reaches_the_bottom_of_a_grouped_list() {
+    let scratch = two_runs("list-browse-tail");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let last = frame.files().len() - 1;
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let body = split_for(80, 16, &frame);
+    // Prime `list_rows`, then scroll the map to its end and past it.
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+    for _ in 0..20 {
+        app.apply(Action::ScrollList(1), &mut frame, 40)
+            .expect("apply");
+    }
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+        .iter()
+        .filter_map(|slot| match slot {
+            vigia::Slot::File(at) => Some(*at),
+            vigia::Slot::Group { .. } => None,
+        })
+        .collect();
+    assert!(
+        drawn.contains(&last),
+        "`J` held to the end drew {drawn:?} from top {}, so the last file of the \
+         staged run cannot be reached at all",
+        view.list_top
+    );
+}
+
+/// **A window with one row draws a file, not a label with nothing under it.**
+///
+/// A separator is only worth a row where a file can follow it: a label naming a
+/// run the window has no room to show is a row of the map spent saying nothing
+/// about the map. Written as a pop after the fact — emit the label, then take it
+/// back when no file fits — a one-row grouped list came out **empty**, because the
+/// only row it had was the label it then retracted. The region drew nothing at all
+/// while `Body::split` had given it a row.
+///
+/// It is the gutter's rule one element over, and the caret's: the mark gives way
+/// before the content does.
+#[test]
+fn a_one_row_list_draws_a_file_rather_than_a_label() {
+    let scratch = two_runs("list-one-row");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    for top in 0..files.len() {
+        let plan = vigia::list_plan(files, top, 1);
+        assert_eq!(
+            plan.len(),
+            1,
+            "a one-row list from top {top} drew {} rows",
+            plan.len()
+        );
+        assert!(
+            matches!(plan[0], vigia::Slot::File(at) if at == top),
+            "a one-row list from top {top} spent its only row on a label: \
+             {plan:?}"
+        );
+    }
+
+    // And two rows is where a label first earns its keep: one for it, one for the
+    // file under it.
+    let plan = vigia::list_plan(files, 0, 2);
+    assert!(
+        matches!(plan[0], vigia::Slot::Group { .. }) && matches!(plan[1], vigia::Slot::File(0)),
+        "two rows do not buy a label and the file beneath it: {plan:?}"
+    );
+}
+
+/// **The plan's files run contiguously from `top`, which is what lets the painter
+/// count rather than ask.**
+///
+/// `Painter::list` walks `view.list` and increments a file index per drawn file,
+/// starting at `view.list_top`. That is only correct while the plan's files are
+/// `top`, `top + 1`, … with nothing skipped — and it is a coupling that prose
+/// alone holds, between a function in `view.rs` and a loop in `render.rs` that
+/// never calls it. If the plan ever grew a gap, every row below it would draw the
+/// caret and the hover mark against the wrong file, silently.
+///
+/// Swept over every `(top, rows)` the fixture can produce, on a grouped list,
+/// because separators are the only thing that has ever made the two counts differ.
+#[test]
+fn the_plans_files_run_contiguously_from_the_top_it_was_given() {
+    let scratch = two_runs("list-contiguous");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    let mut saw_a_separator = false;
+    for top in 0..files.len() {
+        for rows in 1..=files.len() + 3 {
+            let plan = vigia::list_plan(files, top, rows);
+            saw_a_separator |= plan
+                .iter()
+                .any(|slot| matches!(slot, vigia::Slot::Group { .. }));
+            let drawn: Vec<usize> = plan
+                .iter()
+                .filter_map(|slot| match slot {
+                    vigia::Slot::File(at) => Some(*at),
+                    vigia::Slot::Group { .. } => None,
+                })
+                .collect();
+            let want: Vec<usize> = (top..top + drawn.len()).collect();
+            assert_eq!(
+                drawn, want,
+                "the plan from top {top} with {rows} rows drew {drawn:?}, which is \
+                 not a run starting at {top}: the painter counts files as it draws \
+                 them and would mark the wrong one"
+            );
+            assert!(
+                plan.len() <= rows,
+                "the plan from top {top} drew {} rows where the region has {rows}",
+                plan.len()
+            );
+        }
+    }
+    assert!(
+        saw_a_separator,
+        "the sweep drew no separator at all, so it never exercised the only thing \
+         that can make the two counts differ"
+    );
+}
+
+/// **The list's scrollbar and its drag agree about how far the window can go.**
+///
+/// All three terms of that bar are files: the position is a file index, the total
+/// is the changed set, and the span has to be one too. Handed the *row* count it
+/// over-reported how much of the list was on screen, so the thumb drew longer than
+/// the travel `Action::ListTo` maps the track onto — the pointer reached the
+/// bottom of a thumb that said it was already there.
+#[test]
+fn the_lists_bar_is_measured_in_files_at_both_ends() {
+    let scratch = two_runs("list-bar-units");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let body = split_for(80, 16, &frame);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    assert!(
+        view.list
+            .iter()
+            .any(|row| matches!(row, vigia::ListRow::Group { .. })),
+        "the fixture drew no separator, so the row count and the file count are \
+         the same number and this asserts nothing"
+    );
+    assert_eq!(
+        view.listed_files(),
+        view.list
+            .iter()
+            .filter(|row| matches!(row, vigia::ListRow::File(_)))
+            .count(),
+        "the span counts something other than the files on screen"
+    );
+    assert!(
+        view.listed_files() < view.list.len(),
+        "a grouped window spends no row on a separator, so the two units cannot \
+         be told apart here"
+    );
+
+    // And the span never claims more of the list than there is travel for: the
+    // window can start at `last_top` at the furthest, so what it shows plus what
+    // it can still scroll past has to reach the whole changed set.
+    let ceiling = vigia::last_top(frame.files(), view.listed_files().max(1));
+    assert!(
+        ceiling + view.listed_files() >= view.files,
+        "the window shows {} files and can start no later than {ceiling}, which \
+         together do not reach the {} the tree has: the bar would report travel \
+         the list does not have",
+        view.listed_files(),
+        view.files
+    );
+}
+
+/// **The thumb keeps its length as the window scrolls.**
+///
+/// That is the reader-visible half of the units fix, and it is the only form of it
+/// a gate can hold without restating the renderer's arithmetic. A span taken from
+/// *what this window shows* varies with where the window starts — a window opening
+/// on a run boundary spends one separator and one inside a run spends two — so the
+/// thumb grew and shrank under the pointer as the list moved. A screenful is a
+/// property of the list, not of the position.
+///
+/// **Read off the painted buffer at every reachable top**, because computing the
+/// length from the same numbers `render` uses would be the renderer agreeing with
+/// itself. The non-vacuity check is what makes it bite: at least one top must be a
+/// top where the two candidate spans genuinely differ, or the sweep compares a
+/// number with itself.
+#[test]
+fn the_lists_thumb_keeps_its_length_as_the_window_moves() {
+    let scratch = support::Scratch::large_diff("list-thumb-constant", 24, 6);
+    let worktree = scratch.worktree();
+    let staged: Vec<String> = (0..12).map(|i| format!("src/mod_{i}.rs")).collect();
+    let mut args: Vec<&str> = vec!["add"];
+    args.extend(staged.iter().map(String::as_str));
+    scratch.git(&args);
+
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 80, 30);
+    let chrome = chrome(&app);
+    let body = body_layout(
+        at,
+        &chrome,
+        frame.files().len(),
+        vigia::list_rows_wanted(frame.files()),
+    );
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("prime the row count");
+
+    let mut lengths: Vec<(usize, usize)> = Vec::new();
+    let mut differed = 0usize;
+    for step in 0..12 {
+        for _ in 0..2 {
+            app.apply(Action::ScrollList(1), &mut frame, 40)
+                .expect("apply");
+        }
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("collect");
+        let told = regions(at, &chrome, &view);
+        let Some(bar) = told.list.bar else { continue };
+
+        let mut buf = ratatui::buffer::Buffer::empty(at);
+        vigia::render(
+            &mut buf,
+            at,
+            &view,
+            &vigia::Theme::default(),
+            Glyphs::default(),
+            &chrome,
+        );
+        let thumb = (told.list.top..told.list.top + told.list.rows)
+            .filter(|y| buf[(bar, *y)].symbol() == "█")
+            .count();
+        if thumb > 0 {
+            lengths.push((view.list_top, thumb));
+        }
+        // The two candidate spans really are different numbers at this position,
+        // or the sweep is comparing one quantity with itself.
+        if view.listed_files() != view.list_span {
+            differed += 1;
+        }
+        let _ = step;
+    }
+
+    assert!(
+        lengths.len() > 2,
+        "the sweep measured {} thumbs, which is too few to say the length is \
+         constant",
+        lengths.len()
+    );
+    assert!(
+        differed > 0,
+        "no window in the sweep told a screenful from what that window shows, so \
+         this fixture cannot see the two being confused"
+    );
+    let first = lengths[0].1;
+    for (top, thumb) in &lengths {
+        assert_eq!(
+            *thumb, first,
+            "the thumb is {thumb} rows with the window at file {top} and {first} \
+             rows elsewhere, so it changes length as the reader scrolls: \
+             {lengths:?}"
+        );
+    }
+}
+
+/// **A screenful is the complement of the ceiling**, which is the definition the
+/// bar, the drag and the clamp all read.
+///
+/// Pinned because three call sites depend on it and none of them can see the
+/// others: a mutation putting the *row* count back was invisible to every
+/// behavioural gate in the suite, because the two differ by the separator count
+/// and a short track rounds that away.
+#[test]
+fn a_screenful_of_list_is_what_the_window_can_never_scroll_past() {
+    let scratch = two_runs("list-span-definition");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut separated = 0usize;
+    for height in 12..=26u16 {
+        let body = split_for(80, height, &frame);
+        let view = app
+            .view(&mut frame, &mut highlighter, &history, body)
+            .expect("collect");
+        if view.list.is_empty() {
+            continue;
+        }
+        let ceiling = vigia::last_top(frame.files(), body.list);
+        assert_eq!(
+            view.list_span,
+            view.files.saturating_sub(ceiling).max(1),
+            "at 80x{height} the bar reports a screenful of {} where the window \
+             can never start past {ceiling} of {}",
+            view.list_span,
+            view.files
+        );
+        if view.list_span != body.list {
+            separated += 1;
+        }
+    }
+    assert!(
+        separated > 0,
+        "no height told a screenful from the region's row count, so this gate \
+         cannot see the two being confused"
+    );
+}
+
+/// **Every frame leaves a screenful a scrollbar can be asked about**, including
+/// the two that return before one is computed.
+///
+/// `take_list` returns early on a pane with no list region and `View::collect`
+/// returns early on an empty worktree, so a span left at its initial value is what
+/// those frames hand the bar. Zero reads as *this window shows none of the list*,
+/// which is `scrollable` answering yes; nothing draws a bar on either frame today,
+/// and only because `bar_for`'s own track-height guard catches it first. A field
+/// that is safe because of a guard somewhere else is the shape this module keeps
+/// finding, so the value is right at the source instead.
+#[test]
+fn a_frame_with_no_list_still_reports_a_screenful_that_scrolls_nothing() {
+    let scratch = two_runs("list-span-early-returns");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    // A pane too short for a list region at all.
+    let body = split_for(80, 7, &frame);
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+    assert!(
+        view.list.is_empty(),
+        "the fixture drew a list, so this is the wrong pane"
+    );
+    assert!(
+        view.list_span >= view.files,
+        "a pane with no list region reports a screenful of {} against {} files, \
+         which is a bar claiming there is somewhere to scroll",
+        view.list_span,
+        view.files
+    );
+
+    // And an empty worktree, which returns even earlier.
+    let clean = support::Scratch::new("list-span-clean");
+    clean.write("a.txt", "one\n");
+    clean.git(&["add", "-A"]);
+    clean.git(&["commit", "-m", "init"]);
+    let worktree = clean.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(frame.files().is_empty(), "the fixture is not clean");
+    let body = split_for(80, 20, &frame);
+    let view = App::new()
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+    assert!(
+        view.list_span >= 1,
+        "an empty worktree reports a screenful of zero"
+    );
+}
+
+/// **A drag on the list's track reaches the last file when both runs are drawn.**
+///
+/// `Action::ListTo` clamps through the same ceiling `browse` does, and until this
+/// existed nothing said so on a grouped list: the drag gate in this file uses an
+/// ungrouped fixture, so reverting the travel to `files - list_rows` stayed green.
+/// `browse` cannot rescue it either, because it only ever takes the *smaller* of
+/// the two bounds.
+#[test]
+fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
+    let scratch = two_runs("list-drag-grouped");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let last = frame.files().len() - 1;
+
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let body = split_for(80, 16, &frame);
+    app.view(&mut frame, &mut highlighter, &history, body)
+        .expect("prime the row count");
+
+    // The bottom of the track, which is what a reader dragging the thumb all the
+    // way down produces.
+    app.apply(Action::ListTo(vigia::TRACK_SCALE), &mut frame, 40)
+        .expect("apply");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("collect");
+
+    let drawn: Vec<usize> = vigia::list_plan(frame.files(), view.list_top, view.list.len())
+        .iter()
+        .filter_map(|slot| match slot {
+            vigia::Slot::File(at) => Some(*at),
+            vigia::Slot::Group { .. } => None,
+        })
+        .collect();
+    assert!(
+        drawn.contains(&last),
+        "a drag to the bottom of the track drew {drawn:?} from top {}, so the \
+         last file of the staged run cannot be reached with the pointer",
+        view.list_top
     );
 }

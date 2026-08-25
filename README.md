@@ -28,7 +28,7 @@ An agent edits **fast**, **wide**, and while you are reading something else. The
 |---|---|
 | 🤖 **Built for the pane beside the agent** | Zero input required. It follows the newest change and scrolls to it on its own |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle, under 5% memory drift over 24 hours |
-| 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging, no modes |
+| 🎯 **The diff, and nothing else** | No branches, no commits, no stash list, no staging *actions*, no modes |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
 
 > [!NOTE]
@@ -105,6 +105,8 @@ The list is **pinned**, so the signals stay on screen while you read the diff un
 
 Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
 
+Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row carries a green bar down its left edge so the two never blur together. It exists because an agent that stages its own work used to empty the pane: `vigia` shows the working tree against the index, so a fully staged worktree had nothing to show and said so, which reads exactly like a clean one. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane now says where the work went: `no unstaged changes · 3 staged`.
+
 Every file gets the same row in both regions:
 
 | | | Answers |
@@ -113,6 +115,7 @@ Every file gets the same row in both regions:
 | `M` | **kind** | modified, added, deleted, renamed |
 | `src/…` | **path** | which file. How brightly it is drawn is how recently it changed |
 | `●` | **pulse** | ⚡ it changed on the newest tick |
+| `│` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
 | `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
 | `__▁▂▆█` | **sparkline** | ⏱️ **when** it changed, over the last two minutes |
 | `+42 -7` | **counters** | 📊 **how much**, in lines |
@@ -231,6 +234,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `m` | show or hide the masthead |
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
+| `a` | show or hide staged changes |
 | `?` | **all of this, on screen**, a page at a time where the pane is small |
 | `q` `Esc` `Ctrl+C` | quit |
 
@@ -263,7 +267,7 @@ The blank above the band is the row the header keeps between itself and the list
 
 The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
 
-It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and names the branch it found nothing on.
+It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. `a` adds what is *staged* beside it, as a second run, so an agent that stages its own work does not empty the pane. With nothing to show it says so, and says where the work went if it went to the index.
 
 </details>
 
@@ -353,7 +357,7 @@ Every key the shell draws with:
 |---|---|
 | Chrome | `chrome` `chrome_dim` |
 | Scrollbars | `bar` `bar_track` `bar_active` `bar_hover` |
-| File rows | `path` `path_live` `path_cold` `path_hover` `pulse` `kind` |
+| File rows | `path` `path_live` `path_cold` `path_hover` `pulse` `kind` `staged` |
 | Sparkline | `spark` `spark_warm` `spark_hot` `spark_track` |
 | Heat strip | `heat_track`, and `heat_added` `heat_removed` `heat_mixed` each with a `_warm` and `_hot` twin |
 | Diff | `hunk` `gutter` `added` `removed` `context` `note` `alert` |
@@ -415,13 +419,14 @@ set -ga terminal-overrides ",*:Tc"
 
 ### 🪟 The pane you want, every time
 
-`m`, `r` and `s` change what the body is made of, and all three start off. If you always want one of them, say so once:
+`m`, `r`, `s` and `a` change what the body is made of, and all four start off. If you always want one of them, say so once:
 
 ```sh
 # ~/.config/vigia/config
 masthead = on     # the churn band at the top
 rail     = on     # the file list beside the diff, from 134 columns
 single   = on     # one file at a time
+staged   = on     # what is staged, beside what is not
 ```
 
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.

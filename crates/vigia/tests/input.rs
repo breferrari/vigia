@@ -2362,3 +2362,63 @@ fn the_arrows_under_modifiers_do_not_reach_the_list() {
         );
     }
 }
+
+/// `a` asks for the staged run, and nothing else does.
+///
+/// `SPEC.md` §11.2 **B17** ([#313](https://github.com/breferrari/vigia/issues/313)).
+/// The second half is the one worth having: a binding that also fired on some
+/// other key would be a gesture a reader triggers without asking for it, and this
+/// one changes what the pane is *comparing* rather than how it is arranged.
+#[test]
+fn a_asks_for_the_staged_run_and_no_other_key_does() {
+    assert_eq!(
+        action_for(&press(KeyCode::Char('a')), Regions::default()),
+        Some(Action::ToggleStaged)
+    );
+
+    // Every other letter the map binds, plus the neighbours on the keyboard a
+    // reader's finger lands on by mistake.
+    for other in "bcdefghijklmnopqrstuvwxyzADGJKQS".chars() {
+        assert_ne!(
+            action_for(&press(KeyCode::Char(other)), Regions::default()),
+            Some(Action::ToggleStaged),
+            "{other:?} also asks for the staged run"
+        );
+    }
+
+    // **`Ctrl+A` is not this gesture**, because `Ctrl` is claimed by the way out
+    // and a comparison change behind a chord nothing teaches would be worse than
+    // an unbound key.
+    assert_ne!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('a')),
+            Regions::default()
+        ),
+        Some(Action::ToggleStaged),
+        "Ctrl+a asks for the staged run, and Ctrl is the quit chord's"
+    );
+
+    // **`Alt+a` *is* this gesture, and that is pre-existing rather than B17's.**
+    // The map filters `Ctrl` in an arm of its own and lets every other modifier
+    // fall through to the letter, so `Alt+s`, `Alt+m` and `Alt+r` reach their
+    // toggles too. Asserted rather than left silent, so that a future decision to
+    // filter `Alt` reddens here and is taken for the whole map at once instead of
+    // for whichever key somebody happened to be looking at.
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::ALT, KeyCode::Char('a')),
+            Regions::default()
+        ),
+        Some(Action::ToggleStaged),
+        "Alt+a stopped reaching the toggle"
+    );
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::ALT, KeyCode::Char('s')),
+            Regions::default()
+        ),
+        Some(Action::ToggleSingle),
+        "the Alt fall-through is not uniform across the map, so B17's key is a \
+         special case rather than an instance of what was already there"
+    );
+}

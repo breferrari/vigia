@@ -106,9 +106,9 @@ pub use colour::{DEPTH_VAR, Depth, DepthError};
 pub use config::{CONFIG_FILE, Config, ConfigError};
 pub use glyphs::{GLYPHS_VAR, Glyphs, GlyphsError};
 pub use input::{
-    Action, Grabbed, Held, Hovered, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet, TRACK_SCALE,
-    WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience, scroll_mark,
-    settled,
+    Action, Grabbed, Held, Hovered, Pointing, Region, Regions, STEP_DELAY, STEP_REPEAT, Sheet,
+    TRACK_SCALE, WHEEL_ROWS, action_for, drag_action, hover_after, hover_repainted, patience,
+    scroll_mark, settled,
 };
 pub use render::{
     Areas, Band, Body, Chrome, HINT_SEPARATOR, Heat, LIST_SETTLED, Mode, PaintStats, body_layout,
@@ -117,8 +117,9 @@ pub use render::{
 pub use terminal::{Screen, Session};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use view::{
-    FileEntry, HEAT_BUCKETS, HeatBucket, Position, Row, Scale, View, Viewport, block_rows,
-    diff_rows, rows_in, rows_of, span_in,
+    FileEntry, HEAT_BUCKETS, HeatBucket, ListRow, Position, Row, Scale, Slot, View, Viewport,
+    block_rows, diff_rows, file_at, last_top, list_plan, list_rows_wanted, rows_in, rows_of,
+    span_in,
 };
 
 use std::ffi::{OsStr, OsString};
@@ -357,14 +358,36 @@ fn request_for_one(arg: &OsStr) -> Request {
     }
 }
 
+/// Tell a frame what the shell's view defaults ask it to walk.
+///
+/// **One line, and it is a seam rather than a convenience.** `App` holds what was
+/// *asked for* and `Frame` holds what is *walked*, which is the same split
+/// `Chrome::rail` and `Body::rail` draw one region over, and everything that sets
+/// the first has to set the second. Written twice they drifted immediately: the
+/// keypress was wired and the file was not, so `staged = on` set a flag nothing
+/// acted on.
+///
+/// **This is the startup half.** `Action::ToggleStaged` sets both in one arm of
+/// `App::apply`, where the frame is already in hand and the pairing is one
+/// statement; naming it there too would mean handing `apply` a borrow of the `App`
+/// it is already mutating. Two call sites, one rule, and the rule is stated here
+/// because this is the one a reader will not think to look for.
+///
+/// **Takes the [`Config`] rather than an [`App`]**, which is the whole of what it
+/// needs: building an `App` to read one bool and then building the real one three
+/// lines later said the seam was about the shell when it is about the file.
+///
+/// `pub` and `doc(hidden)` for `tests/config.rs`, which drives the startup path
+/// without a terminal.
+#[doc(hidden)]
+pub fn arm_frame(frame: &mut vigia_core::Frame, config: crate::Config) {
+    frame.show_staged(config.staged);
+}
+
 /// Watch the working tree at `path` and draw it until the reader quits.
 pub fn run(path: &Path) -> Result<(), Failure> {
     let worktree = Worktree::discover(path)?;
     let mut frame = worktree.frame();
-
-    // Before the screen is taken, so a repository that fails on its first walk
-    // reports on a terminal the reader can still see.
-    frame.advance()?;
 
     // Same rule, same reason, one input over: a `VIGIA_THEME` that names nothing
     // or a file that does not parse has to be said on a terminal the reader can
@@ -398,6 +421,25 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Read once, before the screen is taken, so the frame path never asks the
     // filesystem what the reader prefers. Absent is not an error; unreadable is.
     let config = config::from_env(|key| std::env::var(key).ok())?;
+
+    // **The view defaults reach the frame before its first walk, not just the
+    // shell** ([#313](https://github.com/breferrari/vigia/issues/313)). Three of
+    // the four keys decide how rows the frame already holds are arranged, so
+    // setting them on `App` is all they need. `staged` decides what the frame
+    // *walks*, so a reader whose file says `staged = on` has to be honoured here
+    // or the key sets a flag nothing acts on and the opening pane is the one they
+    // were trying to change. Same defect `Action::ToggleStaged` had against the
+    // keypress, on the path that has no keypress to trigger it.
+    //
+    // **Which is why the first walk moved below the config read.** It used to run
+    // three lines after `Worktree::discover`, before this file had been looked at,
+    // so no amount of telling the frame afterwards could have reached it without
+    // walking twice. The rule that put it early is untouched and is why it is
+    // still above `Session::enter`: a repository that fails on its first walk
+    // reports on a terminal the reader can still see, and so does a config file
+    // that does not parse. The two now happen in the order they are needed in.
+    arm_frame(&mut frame, config);
+    frame.advance()?;
 
     // Inert until something sends: it costs nothing, wakes nobody, and I1 never
     // sees it. Built here because the handler on it is armed on the next line,
@@ -458,6 +500,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         glyphs,
         name: short_name(worktree.workdir()),
         branch: None,
+        elsewhere: 0,
         screen: View::default(),
         regions: Regions::default(),
         held: None,
@@ -636,7 +679,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             // No test drives this loop, so what protects it is that there is now
             // one function every site calls rather than three answers that can
             // drift apart.
-            let height = shell.diff_rows_for(step, frame.files().len())?;
+            let height = shell.diff_rows_for(step, frame.files())?;
             match shell.app.apply(step, &mut frame, height) {
                 Ok(true) => {}
                 Ok(false) => break 'awake,
@@ -774,7 +817,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                             // ([#297](https://github.com/breferrari/vigia/issues/297)'s
                             // audit): the pinned arm inherits the same parameter,
                             // so fixing it here fixes both.
-                            let height = shell.diff_rows_for(drag, frame.files().len())?;
+                            let height = shell.diff_rows_for(drag, frame.files())?;
                             match shell.app.apply(drag, &mut frame, height) {
                                 Ok(true) => continue,
                                 Ok(false) => break 'awake,
@@ -828,7 +871,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     // which is right rather than merely cheap: it feeds
                     // `diff_height` alone, and neither the branch nor the mode can
                     // change how many rows the footer takes. See `Footer::plan`.
-                    let height = shell.diff_rows_for(action, frame.files().len())?;
+                    let height = shell.diff_rows_for(action, frame.files())?;
                     shell.note_scroll(action, Instant::now());
                     match shell.app.apply(action, &mut frame, height) {
                         Ok(true) => {}
@@ -1112,6 +1155,17 @@ struct Shell {
     /// rather than a populated frame, which is the only case that draws no
     /// branch anywhere.
     branch: Option<String>,
+    /// How many changes the run this pane is **not** drawing holds.
+    ///
+    /// Zero on every frame but the one that draws the empty state, which is what
+    /// keeps I4 true for the walk behind it: a count costs a status walk, and it
+    /// is spent only where it is drawn. Same rule [`Shell::branch`] follows one
+    /// field up.
+    ///
+    /// **What it buys is the difference between a clean tree and a fully staged
+    /// one**, which `no unstaged changes` says nothing about and which is the
+    /// whole of [#313](https://github.com/breferrari/vigia/issues/313)'s report.
+    elsewhere: usize,
     /// The last view collected successfully.
     ///
     /// Painted again when collecting a new one fails, which is why it is kept at
@@ -1248,23 +1302,53 @@ impl Shell {
     /// the terminal-size syscall and the `Chrome` this builds. **Four rather than
     /// three since `Action::Bottom` joined them**, which is B16's doing: pinned,
     /// `G` rests a file's last row on the bottom, and *the bottom* is a height.
-    fn diff_rows_for(&mut self, action: Action, files: usize) -> Result<usize, Failure> {
+    ///
+    /// **Takes the changed set rather than its length**, since
+    /// [#313](https://github.com/breferrari/vigia/issues/313). The body's split
+    /// needs two numbers now — how many files the footer counts, and how many
+    /// *rows* the list wants once its run separators are in — and they are equal
+    /// only while one comparison is drawn. Passed as a pair at this seam they were
+    /// got wrong immediately: `files` went to both, and a scroll step was measured
+    /// in a diff up to two rows taller than the paint laid out. Handed the slice,
+    /// neither can be supplied without the other.
+    fn diff_rows_for(
+        &mut self,
+        action: Action,
+        files: &[vigia_core::FileChange],
+    ) -> Result<usize, Failure> {
         if !action.needs_height() {
             return Ok(0);
         }
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
+            self.pointing(),
+            self.elsewhere,
         );
         let area = self.area()?;
-        Ok(diff_height(area, &chrome, files))
+        Ok(diff_height(
+            area,
+            &chrome,
+            files.len(),
+            view::list_rows_wanted(files),
+        ))
     }
 
     /// The cell a step button is being held on, for the frame that draws it lit.
+    /// What the pointer is doing this frame, as the one value the chrome takes.
+    ///
+    /// Gathered here rather than at each call site because the chrome is built
+    /// twice per paint and a second spelling of this list is a second chance to
+    /// transpose two `Option`s that compile either way.
+    fn pointing(&self) -> Pointing {
+        Pointing {
+            pressed: self.pressed(),
+            gripped: self.gripped(),
+            hovered: self.hovered(),
+            scrolling: self.scrolling,
+        }
+    }
+
     fn pressed(&self) -> Option<(u16, u16)> {
         self.held.map(Held::at)
     }
@@ -1553,12 +1637,15 @@ impl Shell {
         let chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
+            self.pointing(),
+            self.elsewhere,
         );
-        let body = body_layout(self.area()?, &chrome, frame.files().len());
+        let body = body_layout(
+            self.area()?,
+            &chrome,
+            frame.files().len(),
+            view::list_rows_wanted(frame.files()),
+        );
         match self
             .app
             .view(frame, &mut self.highlighter, &self.history, body)
@@ -1566,6 +1653,40 @@ impl Shell {
             Ok(view) => self.screen = view,
             Err(e) => self.app.warn(e.to_string()),
         }
+
+        // **On a frame with nothing to draw, where the work went.**
+        // [#313](https://github.com/breferrari/vigia/issues/313) was reported as an
+        // agent that stages its own work emptying the pane: `no unstaged changes`
+        // is true of a clean tree and of a fully staged one alike, and the reader
+        // had no way to tell them apart. Counting the other run turns that line
+        // into `no unstaged changes · 3 staged`.
+        //
+        // **Decided from the screen that will be drawn, not from the frame**, and
+        // the difference is a failed collect. `Shell::screen` keeps the previous
+        // view when a collect fails, so a frame whose walk succeeded and whose
+        // collect did not draws *last* frame's rows — and asked of `frame` this
+        // would say "there are files, so no signpost" over an empty state that is
+        // still on screen, taking the `· 3 staged` off the one line that explains
+        // it. That is exactly the split [#158](https://github.com/breferrari/vigia/issues/158)
+        // removed for the branch name, restated for this field, and it is why the
+        // read sits below the collect rather than above it.
+        //
+        // **The rule that put it here is unchanged and is now satisfied rather
+        // than guarded**: a count costs a status walk, and this is a walk the
+        // frame is going to draw. A screen with a diff on it never asks. One
+        // without has no diff to compute and reads nothing else, and the walk it
+        // pays for is the cheaper of the two — the staged comparison touches no
+        // file at all, measured at 430us against 2.15ms on a 200-file fixture.
+        //
+        // Asked only while the staged run is **off**, because with it on the pane
+        // already holds both comparisons and an empty screen means both are empty.
+        // A failed walk is not worth a notice: it costs the reader a hint on one
+        // frame, and saying so on the footer would push a real notice off it.
+        self.elsewhere = if self.screen.files == 0 && !self.app.staged() {
+            worktree.count_of(vigia_core::Origin::Staged).unwrap_or(0)
+        } else {
+            0
+        };
 
         // Rebuilt so a notice raised by the collect above reaches this frame
         // rather than the next one. Safe to differ from the chrome the height
@@ -1591,10 +1712,8 @@ impl Shell {
         let mut chrome = self.app.chrome(
             &self.name,
             self.branch.as_deref(),
-            self.pressed(),
-            self.gripped(),
-            self.hovered(),
-            self.scrolling,
+            self.pointing(),
+            self.elsewhere,
         );
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach

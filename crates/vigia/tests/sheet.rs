@@ -27,14 +27,39 @@ use ratatui::crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use vigia::{
-    Action, App, Chrome, Glyphs, Grabbed, Hovered, Regions, Sheet, Theme, action_for, body_layout,
-    regions, render,
+    Action, App, Chrome, Glyphs, Grabbed, Hovered, Pointing, Regions, Sheet, Theme, action_for,
+    body_layout, regions, render,
 };
 use vigia_core::{Frame, Highlighter, History};
 
 use support::{Scratch, materialise};
 
 const WIDE: u16 = 80;
+
+/// The pane height at which the sheet draws every gesture on one page.
+///
+/// **Derived rather than chosen, and it moves when the table does.** It was a `26`
+/// written at six call sites, which is a threshold two dozen expressions agreed
+/// about by hand — the shape `SPEC.md` §7 keeps finding. Adding B17's `a` row in
+/// [#313](https://github.com/breferrari/vigia/issues/313) made every one of them
+/// wrong at once, and each failed with a different message about a different
+/// gesture rather than with "the table got taller".
+///
+/// **It is the pane height rather than a sheet height**, and the two differ by
+/// more than the sheet's own chrome: the sheet is centred over a pane that also
+/// carries a header, a footer and its own margins, and which rung the ladder picks
+/// depends on the width as well. So this is calibrated rather than computed —
+/// `the_whole_table_fits_on_one_page_at_the_calibrated_height` is the gate that
+/// says it still means what it says, and it fails loudly if a future row makes
+/// this number stale rather than leaving six other gates to fail obscurely.
+///
+/// **Was 26 with thirteen keyboard gestures**, and every added gesture moves it by
+/// one row: B17's `a` ([#313](https://github.com/breferrari/vigia/issues/313)) is
+/// what took it to 27.
+const WHOLE_TABLE: u16 = 27;
+
+/// Keyboard gestures the sheet's table holds, as a reader counts them on screen.
+const KEYBOARD_ROWS: u16 = 14;
 const TALL: u16 = 24;
 const FILES: usize = 3;
 
@@ -62,7 +87,7 @@ fn area() -> Rect {
 }
 
 fn chrome(app: &App) -> Chrome {
-    app.chrome("fixture", Some("main"), None, None, None, None)
+    app.chrome("fixture", Some("main"), Pointing::default(), 0)
 }
 
 fn press(code: KeyCode) -> Event {
@@ -99,7 +124,7 @@ fn toggle(app: &mut App, frame: &mut Frame<'_>) {
 /// the assertion below with it, so a `?` that asked the shell to quit would have
 /// been read as a `?` that opened a sheet.
 fn toggle_at(app: &mut App, frame: &mut Frame<'_>, at: Rect) {
-    let height = body_layout(at, &chrome(app), FILES).diff;
+    let height = body_layout(at, &chrome(app), FILES, FILES).diff;
     assert!(
         app.apply(Action::ToggleSheet, frame, height)
             .expect("toggle"),
@@ -132,7 +157,7 @@ fn paint_with(
     theme: &Theme,
 ) -> (Buffer, Regions) {
     let chrome = chrome(app);
-    let body = body_layout(at, &chrome, FILES);
+    let body = body_layout(at, &chrome, FILES, FILES);
     let view = app
         .view(frame, highlighter, history, body)
         .expect("collect a view");
@@ -856,8 +881,16 @@ fn drawn_close(
     history: &History,
     hovered: Option<Hovered>,
 ) -> (char, ratatui::style::Style) {
-    let chrome = app.chrome("fixture", Some("main"), None, None, hovered, None);
-    let body = body_layout(area(), &chrome, FILES);
+    let chrome = app.chrome(
+        "fixture",
+        Some("main"),
+        Pointing {
+            hovered,
+            ..Pointing::default()
+        },
+        0,
+    );
+    let body = body_layout(area(), &chrome, FILES, FILES);
     let view = app
         .view(frame, highlighter, history, body)
         .expect("collect a view");
@@ -979,7 +1012,7 @@ fn the_sheet_degrades_on_both_axes_and_has_a_floor() {
     // two-column rung, whose *tight* spelling draws `q  Esc` where this gate looks
     // for `Ctrl+C`. Nothing had dropped a rung; the pane had changed which one it
     // was on.
-    let wide_at = Rect::new(0, 0, WIDE, 26);
+    let wide_at = Rect::new(0, 0, WIDE, WHOLE_TABLE);
     toggle_at(&mut app, &mut frame, wide_at);
 
     let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, wide_at);
@@ -1054,7 +1087,7 @@ fn every_mouse_gesture_the_pane_answers_is_named_on_the_sheet() {
     let history = History::new();
     // The pane its sibling uses, and for the same reason: one column, no section
     // headings, the whole table on one page.
-    let at = Rect::new(0, 0, WIDE, 26);
+    let at = Rect::new(0, 0, WIDE, WHOLE_TABLE);
 
     toggle_at(&mut app, &mut frame, at);
     let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
@@ -1186,7 +1219,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
     // by substring luck rather than because the sheet named the gesture. A cell has
     // to land on one row of one rung, and both are legitimate spellings of it.
     let mut rows: Vec<String> = Vec::new();
-    for (w, h) in [(WIDE, 26u16), (43u16, 25u16)] {
+    for (w, h) in [(WIDE, WHOLE_TABLE), (43u16, WHOLE_TABLE - 1)] {
         let at = Rect::new(0, 0, w, h);
         let mut app = App::new();
         toggle_at(&mut app, &mut frame, at);
@@ -1246,7 +1279,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 ///
 /// The payloads are arbitrary. Both callers compare discriminants or ask
 /// [`reach_of`], and neither reads a value.
-const ALL_ACTIONS: [Action; 18] = [
+const ALL_ACTIONS: [Action; 19] = [
     Action::Quit,
     Action::Scroll(1),
     Action::ScrollList(1),
@@ -1259,6 +1292,7 @@ const ALL_ACTIONS: [Action; 18] = [
     Action::ToggleMasthead,
     Action::ToggleRail,
     Action::ToggleSingle,
+    Action::ToggleStaged,
     Action::ToggleSheet,
     Action::CloseSheet,
     Action::ListTo(0),
@@ -1303,6 +1337,8 @@ fn reach_of(action: &Action) -> Reach {
     match action {
         // The way out, and `q`, `Esc`, `Ctrl+C`, `Ctrl+D` are all keys.
         Action::Quit => Reach::Keyboard,
+        // `a`, and the sheet's own row for it. No mouse gesture reaches it.
+        Action::ToggleStaged => Reach::Keyboard,
         // `j`/`k`/arrows, and the wheel and the step buttons.
         Action::Scroll(_) => Reach::Both,
         // `J`/`K`/`Shift`+arrows, and the list's own bar.
@@ -1512,6 +1548,7 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::ToggleFollow
             | Action::ToggleMasthead
             | Action::ToggleRail
+            | Action::ToggleStaged
             | Action::ToggleSingle
             | Action::ToggleSheet
             | Action::Redraw => Vec::new(),
@@ -1622,7 +1659,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
     let mut app = App::new();
     let mut highlighter = Highlighter::eager();
     let history = History::new();
-    let at = Rect::new(0, 0, WIDE, 26);
+    let at = Rect::new(0, 0, WIDE, WHOLE_TABLE);
 
     toggle_at(&mut app, &mut frame, at);
     let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
@@ -1755,7 +1792,7 @@ fn every_key_the_map_binds_is_named_on_the_sheet() {
 /// the ladder gives it up first. Several gates walk this against drawn rows, so
 /// the order is load-bearing rather than decorative. The count is not spelled
 /// out, for the reason [`LADDER_WIDTHS`]' own docblock gives.
-const GESTURES: [&str; 20] = [
+const GESTURES: [&str; 21] = [
     "scroll a row",
     "Space  PgDn",
     "half a page",
@@ -1767,6 +1804,9 @@ const GESTURES: [&str; 20] = [
     "churn band",
     "left rail",
     "one file",
+    // B17's row ([#313](https://github.com/breferrari/vigia/issues/313)), between
+    // `s` and `?` because that is where the reader's own order puts it.
+    "staged changes",
     "this sheet",
     "quit",
     "wheel",
@@ -1833,7 +1873,7 @@ fn no_gesture_token_hides_inside_another() {
     // one row is correct there and says nothing about hiding. Where a row is one
     // gesture, a second token on it can only be a collision. 80 by 26 draws the
     // wide one column and 43 by 25 the tight one, so both spellings are read.
-    for (w, h) in [(WIDE, 26u16), (43u16, 25u16)] {
+    for (w, h) in [(WIDE, WHOLE_TABLE), (43u16, WHOLE_TABLE - 1)] {
         let at = Rect::new(0, 0, w, h);
         let mut app = App::new();
         toggle_at(&mut app, &mut frame, at);
@@ -2037,8 +2077,8 @@ fn the_sheet_spends_width_before_it_spends_gestures() {
         let (count, sheet) = read_sheet(&buf, &laid);
         assert_eq!(
             sheet.lines().count(),
-            23,
-            "a tall pane stopped drawing the twenty-three-row one-column sheet:\n{sheet}"
+            24,
+            "a tall pane stopped drawing the twenty-four-row one-column sheet:\n{sheet}"
         );
         assert!(
             !sheet.contains("keyboard"),
@@ -2381,12 +2421,12 @@ fn roomy_shape() -> Vec<RoomyRow> {
     for (label, tokens) in [
         ("moving", &GESTURES[0..3]),
         ("files", &GESTURES[3..7]),
-        // Four since #297: `r` and `s` join `f` and `m` in `view`, which is the
-        // section for the things that change what the body is made of.
-        ("view", &GESTURES[7..11]),
+        // Five since B17: `r`, `s` and `a` join `f` and `m` in `view`, which is
+        // the section for the things that change what the body is made of.
+        ("view", &GESTURES[7..12]),
         // Seven since #288: the close control and the hover mark.
-        ("mouse", &GESTURES[13..20]),
-        ("leaving", &GESTURES[11..13]),
+        ("mouse", &GESTURES[14..21]),
+        ("leaving", &GESTURES[12..14]),
     ] {
         rows.push(RoomyRow::Heading(label));
         rows.extend(tokens.iter().map(|t| RoomyRow::Gesture(t)));
@@ -2420,7 +2460,7 @@ fn the_roomy_rung_is_the_size_the_ruling_states() {
         );
         assert_eq!(
             (sheet.width, sheet.height),
-            (68u16, 33u16),
+            (68u16, 34u16),
             "the roomy rung is not the size SPEC.md §11.1 states:\n{drawn}"
         );
         assert_eq!(
@@ -2489,8 +2529,8 @@ fn the_roomy_rung_arrives_at_the_height_the_ruling_states() {
     });
     assert_eq!(
         arrival,
-        Some(36),
-        "the roomy rung does not arrive at the pane height a body of thirty-three \
+        Some(37),
+        "the roomy rung does not arrive at the pane height a body of thirty-four \
          rows implies on this fixture"
     );
 }
@@ -2512,8 +2552,8 @@ fn the_roomy_rung_places_its_cells_where_the_plan_says() {
         let rows: Vec<Vec<char>> = sheet.lines().map(|r| r.chars().collect()).collect();
         assert_eq!(
             rows.len(),
-            33,
-            "the roomy rung is not thirty-three rows tall:\n{sheet}"
+            34,
+            "the roomy rung is not thirty-four rows tall:\n{sheet}"
         );
 
         // Interior rows only: the title bar and the bottom border are the frame's.
@@ -2700,19 +2740,17 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
     // sees, and the two are not the same claim: a drawer free to iterate the
     // table backwards would satisfy every assertion over the constants.
     //
-    // The reader's end: the full one-column rung draws the thirteen keyboard rows in
+    // The reader's end: the full one-column rung draws every keyboard row in
     // the order Mock A reads them, `q` last. The ladder's end: at the floor, the
     // three rows left are `f`, `m` and `?`, and `q` is not among them. Conflate
     // the two orders again and the second fails, because dropping from the top of
     // the reader's order keeps `q`.
     sweep!("sheet-orders", |paint| {
-        // 80 by 26 since #288, for the reason `every_key_the_map_binds_is_named_on_the_sheet`
-        // gives: twenty gestures need two more rows of body to stay in one column.
-        let at = Rect::new(0, 0, 80, 26);
+        let at = Rect::new(0, 0, WIDE, WHOLE_TABLE);
         let (buf, laid) = paint(at);
         let (_, sheet) = read_sheet(&buf, &laid);
         let rows: Vec<&str> = sheet.lines().collect();
-        for (n, token) in GESTURES.iter().take(13).enumerate() {
+        for (n, token) in GESTURES.iter().take(KEYBOARD_ROWS as usize).enumerate() {
             assert!(
                 rows[n + 1].contains(token),
                 "row {} of the one-column rung does not carry {token:?}, so the \
@@ -2753,6 +2791,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
                 "churn band",
                 "left rail",
                 "one file",
+                "staged changes",
                 "this sheet",
             ],
         ),
@@ -2768,6 +2807,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
                 "churn band",
                 "left rail",
                 "one file",
+                "staged changes",
                 "this sheet",
             ],
         ),
@@ -2787,6 +2827,7 @@ fn the_display_order_is_the_readers_and_the_narrow_floor_keeps_the_unguessable()
                 "churn band",
                 "left rail",
                 "one file",
+                "staged changes",
                 "this sheet",
                 "quit",
             ],
@@ -2846,11 +2887,11 @@ fn the_two_column_rung_is_the_size_the_ruling_states() {
     // failure that reads as "the size changed" while the size is fine. The
     // `contains("keyboard")` guard above each assertion is what says which of the
     // two happened.
-    let wide = Rect::new(0, 0, 120, 22);
-    let tight = Rect::new(0, 0, 80, 19);
+    let wide = Rect::new(0, 0, 120, 23);
+    let tight = Rect::new(0, 0, 80, 20);
 
     sweep!("sheet-dimensions", |paint| {
-        for (at, want, spelling) in [(wide, (104u16, 16u16), "wide"), (tight, (71, 16), "tight")] {
+        for (at, want, spelling) in [(wide, (104u16, 17u16), "wide"), (tight, (71, 17), "tight")] {
             let (buf, laid) = paint(at);
             let sheet = laid.sheet.expect("the pane draws no sheet at all");
             let (_, drawn) = read_sheet(&buf, &laid);
@@ -2969,12 +3010,12 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
     // four were checked by hand against `margins_of` and the plan's own halving.
     sweep!("sheet-origin", |paint| {
         for (w, h, want) in [
-            (120u16, 30u16, (32u16, 3u16, 56u16, 23u16)),
+            (120u16, 30u16, (32u16, 2u16, 56u16, 24u16)),
             // The roomy rung, which #285 put at the head of the ladder. A pane
             // this tall took the nineteen-row sheet at (22, 10, 56, 19) before it
             // existed, and the row it lost to air it had spare.
-            (100, 40, (16, 3, 68, 33)),
-            (120, 21, (8, 2, 104, 16)),
+            (100, 40, (16, 2, 68, 34)),
+            (120, 21, (8, 1, 104, 17)),
             // The tight two-column rung, five columns narrower since #286
             // shortened two tight mouse verbs and a row taller with each key added
             // since: `r` (#295) and `s` (#297). **The pane is 80x19 rather than
@@ -2983,7 +3024,7 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // one, still centred, still asserting a rect. The odd column of slack
             // it gained is what makes this case test the halving as well as the
             // width.
-            (80, 19, (4, 1, 71, 16)),
+            (80, 20, (4, 1, 71, 17)),
             // Odd slack, which the first three above lack on both axes: halving
             // the slack the other way (`div_ceil`) or taking the trailing margin
             // instead of the leading one reproduces every one of them and misses
@@ -2993,9 +3034,9 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // **This pane changed rung with [#288](https://github.com/breferrari/vigia/issues/288)**,
             // and the comment here described the old one until round 1 of that
             // row's audit read the two together. It took the one-column rung at
-            // `(12, 1, 56, 21)`, and twenty gestures no longer fit one column in a
-            // twenty-five-row pane, so it takes the two-column rung at
-            // `(5, 4, 71, 16)`.
+            // `(12, 1, 56, 21)`, and twenty-one gestures no longer fit one column
+            // in a twenty-five-row pane, so it takes the two-column rung at
+            // `(5, 3, 71, 17)`.
             //
             // **What this case demonstrates is no longer written here, and the
             // reason is worth more than the claim was.** Three spellings of this
@@ -3010,7 +3051,7 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // So the case is kept for the rung it now covers and the list is read
             // as a set, which is what the paragraph above already said and what
             // three attempts at a per-case story failed to improve on.
-            (81, 25, (5, 4, 71, 16)),
+            (81, 25, (5, 3, 71, 17)),
             // The whole table in one column reaches this width since #286, so
             // where this used to be a dropping rung of thirteen rows it is the
             // twenty-one-row sheet.
@@ -3027,7 +3068,7 @@ fn the_sheet_is_centred_and_clears_the_footer_at_every_rung() {
             // `Ctrl+C`, `PgUp`, `Home`, `End` and the shifted arrows at a width
             // that fits them. Every count, every frame and every other origin is
             // identical.
-            (58, 30, (1, 3, 56, 23)),
+            (58, 30, (1, 2, 56, 24)),
         ] {
             let at = Rect::new(0, 0, w, h);
             let (_, laid) = paint(at);
@@ -3053,8 +3094,8 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
     // Columns are stated as literals rather than derived, because a gate that
     // computed them from the layout would agree with it by construction.
     for (w, h, cols, label, spelling) in [
-        (120u16, 22u16, [2usize, 26, 56, 77], 56usize, "wide"),
-        (80, 19, [2, 15, 35, 50], 35, "tight"),
+        (120u16, 23u16, [2usize, 26, 56, 77], 56usize, "wide"),
+        (80, 20, [2, 15, 35, 50], 35, "tight"),
     ] {
         sweep!("sheet-columns", |paint| {
             let at = Rect::new(0, 0, w, h);
@@ -3123,13 +3164,14 @@ fn the_two_column_rung_places_its_cells_where_the_plan_says() {
             // table order and is restated here rather than imported, so this
             // cannot agree with the renderer by construction.
             for (n, token) in GESTURES.iter().enumerate() {
-                // Thirteen since #297, and the number is the keyboard group's
+                // Fourteen since B17, and the number is the keyboard group's
                 // own length rather than a constant that happens to match it: the
                 // split is where `GESTURES` stops being keyboard rows.
-                let (col, row) = if n < 13 {
+                let split = KEYBOARD_ROWS as usize;
+                let (col, row) = if n < split {
                     (cols[0], 2 + n)
                 } else {
-                    (cols[2], 2 + (n - 13))
+                    (cols[2], 2 + (n - split))
                 };
                 let text: String = rows[row][col..].iter().collect();
                 assert!(
@@ -3181,34 +3223,36 @@ fn the_height_ladder_pages_rather_than_dropping_and_fills_every_page_it_can() {
     // the way up, with the single flat step at nineteen rows where the row it
     // buys is the mouse group's heading rather than a gesture.
     let expected = [
-        (8u16, 3usize, 7usize),
+        (8u16, 3usize, 8usize),
         (9, 4, 6),
         (10, 5, 5),
         (11, 6, 4),
-        (12, 7, 3),
+        (12, 7, 4),
         (13, 8, 3),
         (14, 9, 3),
         (15, 10, 3),
         (16, 11, 2),
         (17, 12, 2),
         (18, 13, 2),
-        // The flat step, one row later again since #297 gave the keyboard group a
-        // thirteenth row: this is the height at which the row the body buys is the
-        // mouse group's **heading**, which costs a row and names no gesture. It
-        // was 17 before #295 and 18 before #297, and it moves with the table
+        (19, 14, 2),
+        // The flat step, one row later again since B17 gave the keyboard group a
+        // fourteenth row ([#313](https://github.com/breferrari/vigia/issues/313)):
+        // this is the height at which the row the body buys is the mouse group's
+        // **heading**, which costs a row and names no gesture. It was 17 before
+        // #295, 18 before #297 and 19 before this, and it moves with the table
         // rather than being a property of the ladder.
-        (19, 13, 2),
         (20, 14, 2),
         (21, 15, 2),
         (22, 16, 2),
         (23, 17, 2),
-        // The whole table in one column, which is the rung above the paged ones
-        // and unchanged by #286: a pane that fits everything pages not at all.
         (24, 18, 2),
         (25, 19, 2),
-        // Twenty-six since #288, twenty-four before it: the two rows the mouse
-        // group gained are two more rows of body before one page holds them all.
-        (26, GESTURES.len(), 1),
+        (26, 20, 2),
+        // **The whole table in one column, at twenty-seven since B17**, twenty-six
+        // since #288 and twenty-four before that. Every gesture added to the table
+        // is one more row of body before a single page holds them all, which is
+        // what this last row measures and why it is [`WHOLE_TABLE`]'s own number.
+        (WHOLE_TABLE, GESTURES.len(), 1),
     ];
 
     let scratch = Scratch::large_diff("sheet-paging", FILES, 40);
@@ -3437,12 +3481,14 @@ fn the_one_column_rung_places_its_cells_where_the_plan_says() {
     for (w, h, keys_at, verb_at, first_key, mouse_from) in [
         // `j` rather than `q` since #285: the reader's order starts at `moving`
         // and `q` is the row the ladder gives up first, at the bottom of the table.
-        // **The mouse heading is row fourteen since #297**, thirteen since #295,
-        // twelve before: it is one past the keyboard group's last row, and the
-        // number moves with the table by one every time a key is added.
-        // 80 by 26 since #288: at twenty-four this pane takes the two-column rung.
-        (80u16, 26u16, 2usize, 26usize, 'j', Some(14usize)),
-        (120, 30, 2, 26, 'j', Some(14)),
+        // **The mouse heading is row fifteen since B17**, fourteen since #297,
+        // thirteen since #295, twelve before: it is one past the keyboard group's
+        // last row, and the number moves with the table by one every time a key is
+        // added.
+        // 80 by 27 since B17 and 26 since #288: below that this pane takes the
+        // two-column rung instead.
+        (80u16, WHOLE_TABLE, 2usize, 26usize, 'j', Some(15usize)),
+        (120, 30, 2, 26, 'j', Some(15)),
         // A **paged** rung since #286, so its first row is the table's first
         // again: the height ladder no longer drops rows, it splits them, and page
         // one starts where the reader's order does. The fields are the whole
@@ -3533,7 +3579,7 @@ fn the_two_column_rung_swallows_what_lands_on_it() {
     let history = History::new();
     let at = Rect::new(0, 0, 120, 21);
 
-    let height = body_layout(at, &chrome(&app), FILES).diff;
+    let height = body_layout(at, &chrome(&app), FILES, FILES).diff;
     assert!(
         app.apply(Action::ToggleSheet, &mut frame, height)
             .expect("toggle"),
@@ -3596,7 +3642,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
-    let height = body_layout(ROOMY_PANE, &chrome(&app), FILES).diff;
+    let height = body_layout(ROOMY_PANE, &chrome(&app), FILES, FILES).diff;
     assert!(
         app.apply(Action::ToggleSheet, &mut frame, height)
             .expect("toggle"),
@@ -3607,7 +3653,7 @@ fn the_roomy_rung_swallows_what_lands_on_it() {
     let sheet = laid.sheet.expect("the roomy pane draws no sheet");
     assert_eq!(
         (sheet.width, sheet.height),
-        (68, 33),
+        (68, 34),
         "this gate is not looking at the roomy rung"
     );
 
@@ -3864,8 +3910,8 @@ fn paging_closes_after_the_last_page_and_never_before() {
     // A pane of seven pages and a pane of one, so both ends of the ladder are
     // here.
     for (at, pages) in [
-        (Rect::new(0, 0, 50, 8), 7usize),
-        (Rect::new(0, 0, 80, 24), 1),
+        (Rect::new(0, 0, 50, 8), 8usize),
+        (Rect::new(0, 0, WIDE, WHOLE_TABLE), 1),
     ] {
         let mut app = App::new();
         let _ = paint(&mut app, &mut frame, &mut highlighter, &history, at);
@@ -3991,10 +4037,10 @@ fn the_counter_names_what_the_pane_reaches() {
     for (at, want) in [
         (
             Rect::new(0, 0, 50, 8),
-            vec!["1-3 of 20", "4-6 of 20", "7-9 of 20"],
+            vec!["1-3 of 21", "4-6 of 21", "7-9 of 21"],
         ),
-        (Rect::new(0, 0, 32, 40), vec!["1-10 of 20"]),
-        (Rect::new(0, 0, 30, 40), vec!["1-6 of 20"]),
+        (Rect::new(0, 0, 32, 40), vec!["1-11 of 21"]),
+        (Rect::new(0, 0, 30, 40), vec!["1-7 of 21"]),
     ] {
         let walked = walk_the_pages(&mut frame, &mut highlighter, &history, at);
         for (n, spelling) in want.iter().enumerate() {
@@ -4174,7 +4220,7 @@ fn a_resize_clamps_the_page_rather_than_closing_the_sheet() {
     let (count, drawn) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&drawn).unwrap_or_default().trim(),
-        "18-20 of 20",
+        "18-21 of 21",
         "the clamped page is not the pane's last one:\n{drawn}"
     );
     assert!(count > 0, "the clamped page draws nothing:\n{drawn}");
@@ -4238,7 +4284,7 @@ fn two_presses_in_one_wake_reach_page_two() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "4-6 of 20",
+        "4-6 of 21",
         "the batched second press did not land on page two:\n{sheet}"
     );
 }
@@ -4275,7 +4321,7 @@ fn the_close_control_closes_from_any_page() {
 
     let close = action_for(&click(sheet.close.0, sheet.close.1), laid)
         .expect("the close control published no action");
-    let height = body_layout(at, &chrome(&app), FILES).diff;
+    let height = body_layout(at, &chrome(&app), FILES, FILES).diff;
     app.apply(close, &mut frame, height).expect("close");
     assert_eq!(
         chrome(&app).sheet,
@@ -4317,18 +4363,21 @@ fn the_counter_is_right_where_a_page_spans_the_mouse_heading() {
     assert_eq!(
         spellings,
         [
-            "1-3 of 20",
-            "4-6 of 20",
-            "7-9 of 20",
-            "10-12 of 20",
+            "1-3 of 21",
+            "4-6 of 21",
+            "7-9 of 21",
+            "10-12 of 21",
             // The heading costs this page a row and no ordinal, so it names two
             // gestures where every page above it names three.
-            "13-14 of 20",
-            "15-17 of 20",
-            // And the eighteenth gesture is alone on a page of its own, which is
-            // the tail a paged rung leaves rather than a defect: #297's row made
-            // the table one longer than six pages of three can hold.
-            "18-20 of 20",
+            "13-14 of 21",
+            "15-17 of 21",
+            "18-20 of 21",
+            // And the twenty-first gesture is alone on a page of its own, which is
+            // the tail a paged rung leaves rather than a defect: B17's row
+            // ([#313](https://github.com/breferrari/vigia/issues/313)) made the
+            // table one longer than seven pages of three can hold, exactly as
+            // #297's did one page earlier.
+            "21 of 21",
         ],
         "the ordinals do not step over the mouse group's heading"
     );
@@ -4380,7 +4429,7 @@ fn a_resize_clamps_rather_than_wrapping() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "18-20 of 20",
+        "18-21 of 21",
         "the resize wrapped the page instead of clamping it:\n{sheet}"
     );
     assert_eq!(
@@ -4504,7 +4553,7 @@ fn a_pane_dragged_below_the_floor_and_back_keeps_its_page() {
     let (_, sheet) = read_sheet(&buf, &laid);
     assert_eq!(
         counter_of(&sheet).unwrap_or_default().trim(),
-        "10-12 of 20",
+        "10-12 of 21",
         "the pane came back on a different page:\n{sheet}"
     );
 }
@@ -4542,7 +4591,7 @@ fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
     // 80 by 26 since #288: twenty gestures no longer fit one column in a
     // twenty-four-row pane, so that size takes the two-column rung and its tight
     // spelling, which is not what this gate is about.
-    let drawn = page_one(&mut frame, Rect::new(0, 0, 80, 26));
+    let drawn = page_one(&mut frame, Rect::new(0, 0, WIDE, WHOLE_TABLE));
     assert!(
         drawn.contains("n  →  /  p  ←"),
         "the wide spelling does not name the arrows beside `n` and `p`:\n{drawn}"

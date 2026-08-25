@@ -23,7 +23,9 @@ mod support;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Glyphs, Position, Row, Scale, Theme, View, Viewport, body_layout, render};
+use vigia::{
+    App, Body, Glyphs, Pointing, Position, Row, Scale, Theme, View, Viewport, body_layout, render,
+};
 use vigia_core::{Highlighter, History, LineKind};
 
 use support::Scratch;
@@ -439,7 +441,8 @@ fn a_real_repository_draws() {
     // picture of a screen nobody gets.
     let split = body_layout(
         area,
-        &app.chrome("fixture", None, None, None, None, None),
+        &app.chrome("fixture", None, Pointing::default(), 0),
+        frame.files().len(),
         frame.files().len(),
     );
     let view = app
@@ -456,7 +459,7 @@ fn a_real_repository_draws() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     terminal
         .draw(|f| {
             let area = f.area();
@@ -552,7 +555,8 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     let area = Rect::new(0, 0, 80, 12);
     let split = body_layout(
         area,
-        &app.chrome("fixture", None, None, None, None, None),
+        &app.chrome("fixture", None, Pointing::default(), 0),
+        frame.files().len(),
         frame.files().len(),
     );
     let view = app
@@ -582,7 +586,7 @@ fn a_recorded_tick_reaches_the_drawn_sparkline() {
     );
 
     let theme = Theme::default();
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     terminal
         .draw(|f| {
             let drawn = f.area();
@@ -683,8 +687,8 @@ fn every_rung_draws_from_the_stores_own_figures() {
         let mut app = App::new();
         let mut terminal = Terminal::new(TestBackend::new(pane, 12)).expect("terminal");
         let area = Rect::new(0, 0, pane, 12);
-        let chrome = app.chrome("fixture", None, None, None, None, None);
-        let split = body_layout(area, &chrome, frame.files().len());
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+        let split = body_layout(area, &chrome, frame.files().len(), frame.files().len());
         let view = app
             .view(&mut frame, &mut highlighter, &history, split)
             .expect("view");

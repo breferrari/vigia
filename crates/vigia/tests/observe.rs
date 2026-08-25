@@ -72,7 +72,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{App, Body, Glyphs, Theme, View, body_layout, regions, render};
+use vigia::{App, Body, Glyphs, Pointing, Theme, View, body_layout, regions, render};
 use vigia_core::{
     ChangeKind, FrameStats, HISTORY_PATHS, HighlightStats, Highlighter, History, HistoryStats,
     WARM_FILES, WatchOptions, WatchStats, Worktree,
@@ -914,8 +914,13 @@ impl Pane<'_> {
         self.branch = worktree.branch();
         let chrome = self
             .app
-            .chrome(&self.name, self.branch.as_deref(), None, None, None, None);
-        self.body = body_layout(self.area, &chrome, self.frame.files().len());
+            .chrome(&self.name, self.branch.as_deref(), Pointing::default(), 0);
+        self.body = body_layout(
+            self.area,
+            &chrome,
+            self.frame.files().len(),
+            self.frame.files().len(),
+        );
         match self.app.view(
             &mut self.frame,
             &mut self.highlighter,
@@ -933,7 +938,7 @@ impl Pane<'_> {
         }
         let chrome = self
             .app
-            .chrome(&self.name, self.branch.as_deref(), None, None, None, None);
+            .chrome(&self.name, self.branch.as_deref(), Pointing::default(), 0);
         let _regions = regions(self.area, &chrome, &self.view);
         render(
             &mut self.buffer,
@@ -949,7 +954,7 @@ impl Pane<'_> {
     /// see it.
     fn readout(&self) -> Option<Duration> {
         self.app
-            .chrome(&self.name, self.branch.as_deref(), None, None, None, None)
+            .chrome(&self.name, self.branch.as_deref(), Pointing::default(), 0)
             .frame
     }
 }

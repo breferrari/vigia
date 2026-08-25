@@ -67,7 +67,7 @@ use std::time::SystemTime;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use vigia::{Action, App, Glyphs, PaintStats, Theme, body_layout, render};
+use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
 use support::{Scratch, made_link};
@@ -521,8 +521,13 @@ impl Rig<'_> {
     /// those mid-sequence. `budgets.rs` hoists its own because nothing in its loop
     /// changes either term.
     fn paint(&mut self) -> usize {
-        let chrome = self.app.chrome("fixture", None, None, None, None, None);
-        let body = body_layout(area(), &chrome, self.frame.files().len());
+        let chrome = self.app.chrome("fixture", None, Pointing::default(), 0);
+        let body = body_layout(
+            area(),
+            &chrome,
+            self.frame.files().len(),
+            self.frame.files().len(),
+        );
         let view = self
             .app
             .view(&mut self.frame, &mut self.highlighter, &self.history, body)

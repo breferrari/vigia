@@ -52,7 +52,7 @@ mod timing;
 mod watch;
 mod worktree;
 
-pub use change::{ChangeKind, FileChange};
+pub use change::{ChangeKind, FileChange, Origin};
 pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
 pub use highlight::{
@@ -61,7 +61,7 @@ pub use highlight::{
 };
 pub use history::{
     Churn, HISTORY_BUCKET, HISTORY_BUCKETS, HISTORY_PATHS, HISTORY_SAMPLE, HISTORY_SAMPLES,
-    HISTORY_WINDOW, History, HistoryStats, Recency, SPARK_GROUPS, scale_of,
+    HISTORY_WINDOW, History, HistoryStats, PULSE_SAMPLES, Recency, SPARK_GROUPS, scale_of,
 };
 pub use hunk::{CONTEXT, FileDiff, FileSpan, Hunk, Line, LineKind};
 pub use timing::{FrameTiming, Samples};

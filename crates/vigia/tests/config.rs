@@ -18,7 +18,7 @@
 //! nothing here can leak into another binary.
 
 use ratatui::layout::Rect;
-use vigia::{Action, App, Config, ConfigError, body_layout, config, diff_height};
+use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
 
 /// A home directory holding a config file, or holding none.
 ///
@@ -90,7 +90,7 @@ fn no_file_is_not_an_error_and_is_todays_pane() {
 /// It takes no area because `App::chrome` is width-independent; the first draft
 /// took one and ignored it, which read as a sweep and was not.
 fn chrome_of(app: &App) -> (bool, bool, bool, Option<usize>) {
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     (chrome.masthead, chrome.rail, chrome.following, chrome.sheet)
 }
 
@@ -154,7 +154,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         Config {
             masthead: true,
             rail: true,
-            single: true
+            single: true,
+            staged: false,
         }
     );
 
@@ -177,6 +178,7 @@ fn the_key_still_toggles_from_the_configured_state() {
         masthead: true,
         rail: true,
         single: true,
+        staged: false,
     };
     let mut app = App::configured(config);
 
@@ -341,7 +343,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
         Config {
             masthead: true,
             rail: false,
-            single: true
+            single: true,
+            staged: false,
         }
     );
 
@@ -441,16 +444,16 @@ fn a_railed_default_below_the_arrival_width_keeps_the_request() {
         rail: true,
         ..Config::default()
     });
-    let chrome = app.chrome("fixture", None, None, None, None, None);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
     assert!(chrome.rail, "the file's request did not reach the chrome");
 
-    let narrow = body_layout(Rect::new(0, 0, 100, 30), &chrome, 6);
+    let narrow = body_layout(Rect::new(0, 0, 100, 30), &chrome, 6, 6);
     assert!(
         !narrow.rail,
         "a hundred-column pane drew a rail, so the arrival width is not being read"
     );
 
-    let wide = body_layout(Rect::new(0, 0, 160, 30), &chrome, 6);
+    let wide = body_layout(Rect::new(0, 0, 160, 30), &chrome, 6, 6);
     assert!(
         wide.rail,
         "the request did not survive the narrow pane, so widening asks again"
@@ -485,6 +488,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         masthead: true,
         rail: true,
         single: true,
+        staged: true,
     });
 
     // **Non-vacuity first**, which every sibling has and this gate did not: two
@@ -511,7 +515,8 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
     // `App::configured` left all 945 tests green.
     let body = diff_height(
         Rect::new(0, 0, 80, 24),
-        &configured.chrome("fixture", None, None, None, None, None),
+        &configured.chrome("fixture", None, Pointing::default(), 0),
+        6,
         6,
     );
     for app in [&mut configured, &mut pressed] {
@@ -557,6 +562,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             masthead: true,
             rail: true,
             single: true,
+            staged: true,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
     );
@@ -577,4 +583,70 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
              Config::set have drifted"
         );
     }
+}
+
+/// **`staged = on` in the file reaches the frame, not just the shell.**
+///
+/// The other three keys decide how rows the frame already holds are *arranged*,
+/// so setting them on `App` is the whole of what they need. `staged` decides what
+/// the frame **walks**, and `vigia_core::Frame::show_staged` is what tells it —
+/// so a shell configured from a file has to say so before its first advance or
+/// the key sets a flag nothing acts on and the reader sees the pane they were
+/// trying to change.
+///
+/// It is the same defect `Action::ToggleStaged` had against the keypress, on the
+/// path that has no keypress to trigger it, which is why it is worth a gate of its
+/// own rather than an assertion inside one: nothing about the toggle's own test
+/// reaches this.
+#[test]
+fn a_configured_staged_run_is_walked_on_the_first_frame() {
+    let scratch = support::Scratch::new("config-staged");
+    scratch.write("src/a.rs", "one\ntwo\n");
+    scratch.write("src/b.rs", "alpha\n");
+    scratch.git(&["add", "-A"]);
+    scratch.git(&["commit", "-m", "init"]);
+    scratch.write("src/a.rs", "one\nSTAGED\n");
+    scratch.git(&["add", "src/a.rs"]);
+    scratch.write("src/b.rs", "alpha\nUNSTAGED\n");
+
+    let worktree = scratch.worktree();
+
+    // What `main` does for a reader whose file says `staged = on`.
+    let config = Config {
+        staged: true,
+        ..Config::default()
+    };
+    // Both halves of what `run` does for a reader whose file says `staged = on`:
+    // the shell takes the config and so does the frame.
+    let app = App::configured(config);
+    assert!(app.staged(), "the shell did not take the setting");
+    let mut frame = worktree.frame();
+    vigia::arm_frame(&mut frame, config);
+    frame.advance().expect("advance");
+
+    assert!(
+        frame
+            .files()
+            .iter()
+            .any(|change| change.origin == vigia_core::Origin::Staged),
+        "a shell configured with `staged = on` walked one comparison, so the key \
+         sets a flag nothing acts on"
+    );
+
+    // And the default is untouched: a reader with no file gets one run.
+    let plain = App::configured(Config::default());
+    assert!(
+        !plain.staged(),
+        "a shell with no file took the setting anyway"
+    );
+    let mut frame = worktree.frame();
+    vigia::arm_frame(&mut frame, Config::default());
+    frame.advance().expect("advance");
+    assert!(
+        frame
+            .files()
+            .iter()
+            .all(|change| change.origin == vigia_core::Origin::Unstaged),
+        "a shell with no config file drew the staged run anyway"
+    );
 }

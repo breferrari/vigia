@@ -276,6 +276,57 @@ pub const HISTORY_SAMPLES: usize = 120;
 pub const HISTORY_SAMPLE: Duration =
     Duration::from_nanos(HISTORY_WINDOW.as_nanos() as u64 / HISTORY_SAMPLES as u64);
 
+/// Samples at the newest end of a track that keep [`Recency::Pulse`] on it.
+///
+/// **Two, and the first version of this was one by accident rather than by
+/// ruling.** The mark expires when the write's own sample has been rolled out of
+/// the newest slot, so with a single sample its lifetime is *whatever was left of
+/// the second the write landed in* — a fixed grid, an arbitrary arrival, and
+/// therefore a uniform draw over `(0, HISTORY_SAMPLE]`. Measured across the grid:
+/// a write at +0ms pulsed for 1s, at +500ms for 500ms, at +990ms for **10ms**, at
+/// +999ms for **5ms**. Reported from a live pane on 2026-08-25 as the dot no
+/// longer showing up, which is exactly what a coin-toss lifetime looks like from
+/// the outside, and it is a regression from
+/// [#279](https://github.com/breferrari/vigia/issues/279) giving the window a
+/// clock of its own — before that the window rolled only on a tick, so the mark
+/// survived until the next write.
+///
+/// **Two samples buys a floor without buying a clock**, which is the whole reason
+/// this is a sample count rather than a duration. The obvious fix is to stamp the
+/// write and expire the mark a fixed time later, and it costs a **wake**: the
+/// expiry would fall between two sample boundaries, so I1's *at most one wake per
+/// `HISTORY_SAMPLE`* stops being true and an invariant with a measurement behind
+/// it gets amended for a decoration. Keeping the mark for the newest two samples
+/// instead needs no new wake, no new clock and no new state: the roll that was
+/// already going to happen is still the only thing that retires it. The lifetime
+/// becomes `[HISTORY_SAMPLE, PULSE_SAMPLES x HISTORY_SAMPLE]`, closed at both ends,
+/// so the **worst** case is now
+/// what the best case used to be.
+///
+/// **It is still bounded, which is the half that matters to §5.3.** A mark with no
+/// ceiling is the frozen clock [#243](https://github.com/breferrari/vigia/issues/243)
+/// removed and the pulse decay before it; one with no floor is the mark nobody
+/// catches. `crates/vigia-core/tests/history.rs::a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`
+/// gates both ends, across every corner of the grid including the two that
+/// measured 10ms and 5ms.
+///
+/// One to three seconds is also where the terminal's own transient marks sit:
+/// `tmux`'s `display-time` defaults to 750ms and its `display-panes-time` to 1s,
+/// and vim's `matchtime` to 500ms. This lands inside that band rather than being
+/// chosen from taste.
+pub const PULSE_SAMPLES: usize = 2;
+
+// **A slice of the newest samples has to fit inside the window it slices**, and
+// `recency` indexes with a subtraction: past `HISTORY_SAMPLES` that underflows and
+// panics on the frame path, where a monitor that panics is the worst failure this
+// product has. A `const` block is the instrument this repository already reaches
+// for when a claim no test can fail is a wish, and it stops the build rather than
+// a suite.
+const _: () = assert!(
+    PULSE_SAMPLES >= 1 && PULSE_SAMPLES <= HISTORY_SAMPLES,
+    "PULSE_SAMPLES must name at least one sample and no more than the window holds"
+);
+
 /// How many samples one source bucket is the sum of.
 ///
 /// **Exact, and asserted at compile time rather than by a test**, because a test
@@ -1269,9 +1320,25 @@ impl History {
         match self.tracks.get(path) {
             // `self.tick` is zero until something is recorded and no track can
             // exist before then, so this never reads a pulse out of an empty
-            // store. `Track::bump` floors a write at one, so a non-zero newest
-            // sample is exactly "written since the last boundary".
-            Some(track) if track.tick == self.tick && track.samples[HISTORY_SAMPLES - 1] > 0 => {
+            // store. `Track::bump` floors a write at one, so a non-zero sample in
+            // the newest [`PULSE_SAMPLES`] is exactly "written within the last
+            // sample or the one before it".
+            //
+            // **Both terms are load bearing and they retire the mark for
+            // different reasons.** The samples are the *clock*: the roll that was
+            // already happening walks the write out of the newest end and the mark
+            // goes with it, which is what stops it freezing. The ordinal is
+            // *which* file: only the most recent burst's paths pulse, so two saves
+            // a second apart never both carry the mark, however wide the sample
+            // window over them is. Widening the first without keeping the second
+            // would put the mark on every file written in the last two seconds,
+            // and *newest* is the whole of what it says.
+            Some(track)
+                if track.tick == self.tick
+                    && track.samples[HISTORY_SAMPLES - PULSE_SAMPLES..]
+                        .iter()
+                        .any(|&count| count > 0) =>
+            {
                 Recency::Pulse
             }
             Some(_) => Recency::Live,

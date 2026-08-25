@@ -33,7 +33,8 @@ mod support;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Chrome, Glyphs, PaintStats, Row, Theme, View, WHEEL_ROWS, body_layout, render,
+    Action, App, Chrome, Glyphs, PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout,
+    render,
 };
 use vigia_core::{Highlighter, History};
 
@@ -80,8 +81,8 @@ fn painted(name: &str, ext: &str, width: u16, height: u16) -> Painted {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let area = Rect::new(0, 0, width, height);
-    let chrome = app.chrome("fixture", None, None, None, None, None);
-    let screen = body_layout(area, &chrome, FILES);
+    let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+    let screen = body_layout(area, &chrome, FILES, FILES);
     let rows = screen.diff;
     let view = app
         .view(&mut frame, &mut highlighter, &history, screen)
@@ -369,7 +370,7 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
         files: 1,
         ..View::default()
     };
-    let chrome = App::new().chrome("fixture", None, None, None, None, None);
+    let chrome = App::new().chrome("fixture", None, Pointing::default(), 0);
     let mut buf = Buffer::empty(area);
     let stats = render(
         &mut buf,
@@ -433,7 +434,7 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
         gripped: None,
         scrolling: None,
         worktree: "fixture".to_owned(),
-        ..App::new().chrome("fixture", None, None, None, None, None)
+        ..App::new().chrome("fixture", None, Pointing::default(), 0)
     };
     let mut buf = Buffer::empty(area);
     render(
@@ -494,8 +495,8 @@ fn a_gesture_costs_one_screenful_however_many_events_it_arrived_as() {
         let mut app = App::past_first_paint();
         let mut highlighter = Highlighter::eager();
         let history = History::new();
-        let chrome = app.chrome("fixture", None, None, None, None, None);
-        let screen = body_layout(area, &chrome, BURST_FILES);
+        let chrome = app.chrome("fixture", None, Pointing::default(), 0);
+        let screen = body_layout(area, &chrome, BURST_FILES, BURST_FILES);
         let rows = screen.diff;
         let mut buf = Buffer::empty(area);
         let mut total = PaintStats::default();
