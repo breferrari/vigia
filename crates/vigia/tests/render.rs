@@ -7640,3 +7640,40 @@ fn the_staged_run_at_forty_columns() {
         }
     ));
 }
+
+/// **The body's split is the same whatever the staged facts say.**
+///
+/// `Shell::paint` builds a `Chrome` twice: one before `body_layout`, which carries
+/// the *previous* frame's `elsewhere`, and one after the collect that carries this
+/// frame's. The second is what is drawn, so the two fields reach the screen
+/// correctly — and the first being stale is safe only for as long as nothing in
+/// the layout reads them.
+///
+/// A layout that did would take its rows from last frame's answer, silently, and
+/// only on the frames where the count changed. Swept over every width and height a
+/// pane can plausibly be, so the claim is about the function rather than about one
+/// size.
+#[test]
+fn the_layout_is_the_same_whatever_the_staged_facts_say() {
+    let view = both_runs();
+    let plain = chrome();
+    let told = Chrome {
+        staged: Some(7),
+        elsewhere: 4,
+        ..chrome()
+    };
+
+    for width in [40u16, 60, 80, 120, 200] {
+        for height in 4..=40u16 {
+            let at = ratatui::layout::Rect::new(0, 0, width, height);
+            let a = body_layout(at, &plain, view.files, view.list.len());
+            let b = body_layout(at, &told, view.files, view.list.len());
+            assert_eq!(
+                a, b,
+                "at {width}x{height} the body splits differently once the chrome \
+                 carries a staged count, so the layout is reading a field that is \
+                 one frame stale when it is asked"
+            );
+        }
+    }
+}

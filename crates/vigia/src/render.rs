@@ -1513,6 +1513,16 @@ pub struct Chrome {
     /// Zero on every other frame, which is what keeps I4 true: the count costs a
     /// walk, and it is asked for only where it is drawn. Same rule
     /// [`Chrome::branch`] follows one field up, for the same reason.
+    ///
+    /// **Nothing in the layout may read this, nor [`Chrome::staged`], and that is a
+    /// rule rather than an observation.** `Shell::paint` builds a chrome twice: one
+    /// before `body_layout`, carrying the *previous* frame's count, and one after
+    /// the collect that has this frame's. The second is what is drawn, so both
+    /// fields reach the screen correctly and the first is stale by construction.
+    /// A layout that consulted either would take its rows from last frame's
+    /// answer, silently and only on the frames where the count changed.
+    /// `tests/render.rs::the_layout_is_the_same_whatever_the_staged_facts_say` is
+    /// what fails if one starts to.
     pub elsewhere: usize,
     /// Whether the watch is still live.
     ///
