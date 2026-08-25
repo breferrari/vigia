@@ -424,7 +424,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
+| ✅ | Nothing shows staged files, so an agent that stages its own work empties the pane | [#313](https://github.com/breferrari/vigia/issues/313) |
 | ✅ | The list becomes a left rail on its own, and it should be a toggle the reader asks for | [#295](https://github.com/breferrari/vigia/issues/295) |
 | ✅ | The selector has no arrow key, and the arrows the reader tried scroll the list instead | [#296](https://github.com/breferrari/vigia/issues/296) |
 | ✅ | Nothing pins the pane to one file, so reading a file means scrolling past its end into the next | [#297](https://github.com/breferrari/vigia/issues/297) |
