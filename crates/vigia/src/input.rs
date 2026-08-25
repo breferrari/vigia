@@ -337,7 +337,66 @@ impl Regions {
     /// about where a button is, which is the defect
     /// [#166](https://github.com/breferrari/vigia/issues/166) found two
     /// expressions of and reduced to one.
+    ///
+    /// **The sheet is not geometry the other two could hold for it, and that is
+    /// what [#298](https://github.com/breferrari/vigia/issues/298) found.**
+    /// `SPEC.md` §11.1 rules that a gesture landing on the sheet does nothing at
+    /// all, and two of the three callers honoured it on their own: [`action_for`]
+    /// returns before it reaches here, and [`Regions::hover_at`] answers the close
+    /// control and nothing else. **The loop's arming site went through neither**,
+    /// so a press on a step button the sheet was covering armed a [`Held`] and the
+    /// repeat then scrolled a region the reader could not see, every
+    /// [`STEP_REPEAT`] until the button came up. Measured over widths 30 to 140
+    /// against heights 8 to 40: **85** covered cells answered a step, at the four
+    /// widths 30, 32, 35 and 38, which are the panes narrow enough for a centred
+    /// sheet to reach a bar's own column.
+    ///
+    /// So the guard is **here** rather than at that site, which is #166's rule
+    /// applied to the same function a second time: three callers reading one
+    /// expression of *where a press acts* cannot come to disagree about it, where
+    /// a fourth copy in `run` is exactly how this one did. [`Regions::grab_at`] is
+    /// the loop's **other** direct question and carries the same guard for the same
+    /// reason; guarding one and not the other is how the class recurs, and it is
+    /// what this ruling's own first draft did. [`Regions::hover_at`]'s
+    /// own sheet branch stays, because it answers [`Hovered::Button`] for the close
+    /// control where this answers `None` for every cell of the sheet including
+    /// that one: a mark is not a press, and the control is dismissed through
+    /// [`action_for`] rather than held.
+    ///
+    /// It also settles the ladder one element over. `Chrome::pressed` is
+    /// [`Held::at`], so with nothing on the sheet able to arm a hold, the close
+    /// control's pressed weight is unreachable, which is what #298 rules it
+    /// down to two rungs on. `crates/vigia/tests/sheet.rs::nothing_can_press_the_close_control`
+    /// is that half.
+    ///
+    /// **Not *by construction*, and two drafts of this claimed more than they
+    /// could carry.** The first said the guard makes it so, which would need
+    /// `Regions` to always describe the sheet the reader is looking at: it does not,
+    /// because `Shell::regions` is written once per painted frame, so every event in
+    /// one drained batch reads the same pre-batch snapshot and a `?` and a press
+    /// that coalesce test the press against a sheet that was not yet open. That
+    /// bypasses this guard and [`action_for`]'s alike, is older and wider than #298,
+    /// and is tracked as
+    /// [#307](https://github.com/breferrari/vigia/issues/307). The second appealed
+    /// to the sweep instead, and a sweep cannot reach it either: it compares a
+    /// pane's close cell against **that same pane's** bars, where a hold armed on a
+    /// genuine bar cell survives a resize ([`Held::ends`] has no arm for one) and
+    /// the next paint recomputes `plan.close` at the new size.
+    ///
+    /// **What is airtight is the mechanism, and it needs neither.** The control
+    /// answers a press with [`Action::CloseSheet`], so the sheet is gone before the
+    /// next paint and there is no frame in which that cell is drawn *and* pressed.
+    /// `Painter::sheet` accordingly no longer asks: the comparison against
+    /// `Chrome::pressed` is deleted rather than merely unreachable, so even the
+    /// resize case above has no live reader.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
+        // **Before the columns, because the sheet is drawn over them.** The order
+        // is [`Regions::hover_at`]'s own and for the same reason: the sheet
+        // swallows what lands on it rather than passing it down, so a cell it
+        // covers is not a button however the bars are laid out underneath.
+        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+            return None;
+        }
         if self.list.bar == Some(column)
             && let Some(rows) = self.list.button(row)
         {
@@ -355,7 +414,33 @@ impl Regions {
     /// is already answered by [`Regions::step_at`]; what this reports is the
     /// gesture that *continues*, so the loop knows to keep routing motion to this
     /// region however far the pointer travels afterwards.
+    ///
+    /// **The sheet guard is [`Regions::step_at`]'s and arrived with it**
+    /// ([#298](https://github.com/breferrari/vigia/issues/298)). These two are the
+    /// only geometry the loop asks `Regions` for directly, outside [`action_for`],
+    /// and guarding one and not the other is how the class recurs rather than
+    /// closes: the first draft of that fix did exactly that, and this method was
+    /// left holding the identical shape.
+    ///
+    /// **It is the worse of the two, which is why it is not merely symmetry.** A
+    /// hold repeats a bounded step every [`STEP_REPEAT`]; a grab hands the whole
+    /// gesture to [`drag_action`], which ignores the column by design so a reader
+    /// pulling a one-column bar does not lose it, so the next motion relocates a
+    /// region the sheet is covering to wherever the pointer went. The sheet is
+    /// centred on both axes, so wherever it reaches a bar's column it covers the
+    /// **track** rows between the buttons as well, which are more cells than the
+    /// buttons themselves.
+    ///
+    /// A grab that began before `?` was pressed is already ended by
+    /// [`Grabbed::ends`], which ends on any key, so this closes the remaining half
+    /// rather than half of a half.
     pub fn grab_at(self, column: u16, row: u16) -> Option<Grabbed> {
+        // **The sheet first, for [`Regions::step_at`]'s reason and in the same
+        // words**: it is drawn over the bars, and it swallows what lands on it
+        // rather than passing it down.
+        if self.sheet.is_some_and(|sheet| sheet.covers(column, row)) {
+            return None;
+        }
         if self.list.bar == Some(column) && self.list.along(row).is_some() {
             return Some(Grabbed::List);
         }

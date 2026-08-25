@@ -6669,20 +6669,37 @@ impl Painter<'_> {
         top.push_str("   ┐");
         self.put(area.x, area.y, &top, width, frame);
         // **The control takes a hover rung, which is what says it is clickable.**
-        // B10's ladder, and the same three weights the step buttons use one element
-        // over: chrome at rest, [`Theme::bar_hover`] under the pointer, and
-        // [`Theme::bar_active`] while it is being pressed. A close control that
-        // never brightened was a glyph a reader had to guess at, reported from use
-        // with the wash defect above.
-        let pressed = self.pressed == Some(plan.close);
+        // B10's ladder, minus its top rung: chrome at rest and [`Theme::bar_hover`]
+        // under the pointer. A close control that never brightened was a glyph a
+        // reader had to guess at, reported from use with the wash defect above.
+        //
+        // **Two rungs where the step buttons take three, ruled by
+        // [#298](https://github.com/breferrari/vigia/issues/298).** This drew
+        // [`Theme::bar_active`] on `self.pressed == Some(plan.close)` and nothing
+        // ever produced that state, so the arm was unreachable while its own comment
+        // and `SPEC.md` §11.1 both described a ladder of three. Two independent
+        // reasons, and the second is the one that makes it a ruling rather than a
+        // deletion:
+        //
+        // - `Chrome::pressed` is a held step button's cell, and the close control is
+        //   never one. Swept over widths 30 to 140 against heights 8 to 40: zero
+        //   panes put it on a bar's column.
+        // - **The control dismisses on `Down`.** `input::mouse_action` answers a
+        //   press with [`crate::Action::CloseSheet`], so the sheet is gone before the
+        //   next paint and there is no frame in which this cell is both drawn and
+        //   pressed. B10's third rung describes a gesture that is *under way* on an
+        //   element still on screen, which is why a step button needs it: pressing
+        //   *up* at the top of a diff moves no row, and the lit cell is the only
+        //   thing that can answer. An element that removes itself on the press has
+        //   no such interval to describe.
+        //
+        // Building the rung anyway would mean firing on `Up` instead, which costs
+        // dismissal latency on the sheet's only pointer escape and adds a
+        // press-here-release-elsewhere case, for a weight visible for milliseconds.
+        // The general ladder is untouched: `SPEC.md` §11.1's *"a click is always
+        // brighter than a hover"* is about the bar, which keeps all three.
         let hovered = self.hovered == Some(Hovered::Button(plan.close.0, plan.close.1));
-        let control = if pressed {
-            self.theme.bar_active
-        } else if hovered {
-            self.theme.bar_hover
-        } else {
-            lit
-        };
+        let control = if hovered { self.theme.bar_hover } else { lit };
         self.put(
             plan.close.0,
             plan.close.1,
