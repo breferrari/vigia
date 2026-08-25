@@ -154,7 +154,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
         Config {
             masthead: true,
             rail: true,
-            single: true
+            single: true,
+            staged: false,
         }
     );
 
@@ -177,6 +178,7 @@ fn the_key_still_toggles_from_the_configured_state() {
         masthead: true,
         rail: true,
         single: true,
+        staged: false,
     };
     let mut app = App::configured(config);
 
@@ -341,7 +343,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
         Config {
             masthead: true,
             rail: false,
-            single: true
+            single: true,
+            staged: false,
         }
     );
 
@@ -485,6 +488,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         masthead: true,
         rail: true,
         single: true,
+        staged: true,
     });
 
     // **Non-vacuity first**, which every sibling has and this gate did not: two
@@ -558,6 +562,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             masthead: true,
             rail: true,
             single: true,
+            staged: true,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
     );

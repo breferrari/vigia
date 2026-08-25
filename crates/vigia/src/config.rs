@@ -2,7 +2,7 @@
 //!
 //! `SPEC.md` §11.2 **B6**, amended 2026-08-25 by
 //! [#306](https://github.com/breferrari/vigia/issues/306). Three keys, in a file
-//! beside the theme: `masthead`, `rail` and `single`, the toggles that decide what
+//! beside the theme: `masthead`, `rail`, `single` and `staged`, the toggles that decide what
 //! the body is made of. All three are off without a file, which is every version
 //! of this tool before the amendment, so a reader who has written nothing sees
 //! exactly what they saw yesterday.
@@ -63,7 +63,7 @@ pub const CONFIG_FILE: &str = ".config/vigia/config";
 /// makes the amendment additive: the file is a way to say something, never a
 /// requirement to say it.
 ///
-/// Three fields rather than a map, because the set is closed by a ruling and a
+/// Four fields rather than a map, because the set is closed by a ruling and a
 /// map would let [`parse`] accept a key nothing reads.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Config {
@@ -79,6 +79,20 @@ pub struct Config {
     pub rail: bool,
     /// Pin the diff to one file. `s`.
     pub single: bool,
+    /// Draw the staged run beside the unstaged one. `a`.
+    ///
+    /// **§11.2 B17** ([#313](https://github.com/breferrari/vigia/issues/313)), and
+    /// it is here because this file's set is *defined* as the gestures sheet's
+    /// `view` section less `follow`: the section gained a fourth row, so leaving
+    /// this out would have made that rule false rather than merely leaving a key
+    /// unavailable.
+    ///
+    /// **It answers nothing that [#50](https://github.com/breferrari/vigia/issues/50)
+    /// asks.** That row is still open and still on a week of real use: it decides
+    /// which way the toggle *ships*, and the shipped default is unchanged and off.
+    /// This lets a reader who has already decided for themselves stop pressing `a`
+    /// every session, which is what every key in this file does.
+    pub staged: bool,
 }
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
@@ -104,7 +118,7 @@ pub struct Config {
 ///
 /// That is a gate and a runtime check rather than the type system, and saying so
 /// is the difference between a check and a claim that suppresses one.
-pub const KEYS: [&str; 3] = ["masthead", "rail", "single"];
+pub const KEYS: [&str; 4] = ["masthead", "rail", "single", "staged"];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -128,6 +142,7 @@ impl Config {
             "masthead" => self.masthead = on,
             "rail" => self.rail = on,
             "single" => self.single = on,
+            "staged" => self.staged = on,
             _ => return false,
         }
         true
@@ -245,6 +260,7 @@ impl std::error::Error for ConfigError {}
 /// masthead = on
 /// rail     = on    # from 134 columns
 /// single   = off
+/// staged   = on    # both runs, every session
 /// ```
 ///
 /// **The theme file's grammar, with three deliberate divergences**, all of them

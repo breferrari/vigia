@@ -389,6 +389,7 @@ impl App {
             masthead: config.masthead,
             rail: config.rail,
             single: config.single,
+            staged: config.staged,
             ..Self::new()
         }
     }
