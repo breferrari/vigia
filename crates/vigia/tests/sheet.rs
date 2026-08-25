@@ -561,6 +561,7 @@ fn over_sheets(
     let mut highlighter = Highlighter::eager();
     let history = History::new();
 
+    let panes = widths.clone().count() * heights.len();
     let mut drew = 0usize;
     for width in widths {
         for &height in heights {
@@ -575,6 +576,23 @@ fn over_sheets(
             check(width, height, laid, sheet);
         }
     }
+    // **Bounded above as well as returned**, because every caller's floor is a
+    // `>` and a `>` is blind upwards: a mutation that counted a pane twice, or
+    // counted the ones that drew no sheet, makes every floor pass more easily.
+    // Both directions matter here since `drew` is the only thing standing between
+    // a sweep and a grid it has stopped covering. Named by the mutation round that
+    // predicted it survives.
+    // **Strictly fewer, not merely no more.** `<=` is satisfied by a count that
+    // includes the panes which drew nothing, which is exactly the mutation round 2
+    // predicted would survive and did: `drew` moved above the `continue` still
+    // fits `<= panes`, and every caller's floor is a `>` that more only helps.
+    // Some pane in every grid swept here draws no sheet, since B13's floor refuses
+    // one below thirty columns, so `<` is both true and load-bearing.
+    assert!(
+        drew < panes,
+        "the sweep counted {drew} sheets over {panes} panes, so it is counting \
+         panes that drew none and the floors below it mean nothing"
+    );
     drew
 }
 
@@ -688,7 +706,6 @@ fn nothing_can_press_the_close_control() {
     // The drawn ladder is `the_close_control_brightens_under_the_pointer`'s; this is
     // the half no drawing test can reach, which is the producer-versus-decider split
     // #298 names.
-    let mut checked = 0usize;
     let drew = over_sheets(
         "sheet-close-press",
         30..=140,
@@ -708,7 +725,6 @@ fn nothing_can_press_the_close_control() {
                 Some(Action::CloseSheet),
                 "on a {width} by {height} pane the close control stopped dismissing"
             );
-            checked += 1;
         },
     );
 
@@ -719,9 +735,15 @@ fn nothing_can_press_the_close_control() {
     // regression that cut coverage to a quarter, which is the shape the sibling
     // sweep's own `guarded` counter exists to refuse. Three quarters is a bound the
     // ladder has room to move under without tripping.
+    //
+    // **Counted by `over_sheets` rather than here**, which is round 2's own
+    // correction: a second counter incremented once per `check` call is equal to
+    // `drew` by construction, so the assertion comparing them could not fail, and
+    // deleting it left `drew` unread and the lint job red where a plain `cargo
+    // test` stayed green.
     assert!(
-        checked * 4 > 444 * 3,
-        "only {checked} of 444 panes drew a sheet, so this sweep has stopped \
+        drew * 4 > 444 * 3,
+        "only {drew} of 444 panes drew a sheet, so this sweep has stopped \
          covering the ladder rather than proving anything about it"
     );
 }

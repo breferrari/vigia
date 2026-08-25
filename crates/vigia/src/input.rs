@@ -369,17 +369,26 @@ impl Regions {
     /// down to two rungs on. `crates/vigia/tests/sheet.rs::nothing_can_press_the_close_control`
     /// is that half.
     ///
-    /// **Not *by construction*, and a draft of this said so.** That would need
-    /// `Regions` to always describe the sheet the reader is looking at, and it does
-    /// not: `Shell::regions` is written once per painted frame, so every event in
-    /// one drained batch reads the same pre-batch snapshot. A `?` and a press that
-    /// coalesce therefore test the press against a sheet that was not yet open,
-    /// which bypasses this guard and [`action_for`]'s alike. That is older and
-    /// wider than #298, it reaches the swallow rule as a whole rather than these
-    /// two methods, and it is tracked separately. What still makes the weight
-    /// unreachable is the measurement: over every pane from 30 to 140 columns by 8
-    /// to 40 rows, the close control's own cell is a bar's cell **zero** times, so
-    /// there is no pane on which a stale snapshot could name it either.
+    /// **Not *by construction*, and two drafts of this claimed more than they
+    /// could carry.** The first said the guard makes it so, which would need
+    /// `Regions` to always describe the sheet the reader is looking at: it does not,
+    /// because `Shell::regions` is written once per painted frame, so every event in
+    /// one drained batch reads the same pre-batch snapshot and a `?` and a press
+    /// that coalesce test the press against a sheet that was not yet open. That
+    /// bypasses this guard and [`action_for`]'s alike, is older and wider than #298,
+    /// and is tracked as
+    /// [#307](https://github.com/breferrari/vigia/issues/307). The second appealed
+    /// to the sweep instead, and a sweep cannot reach it either: it compares a
+    /// pane's close cell against **that same pane's** bars, where a hold armed on a
+    /// genuine bar cell survives a resize ([`Held::ends`] has no arm for one) and
+    /// the next paint recomputes `plan.close` at the new size.
+    ///
+    /// **What is airtight is the mechanism, and it needs neither.** The control
+    /// answers a press with [`Action::CloseSheet`], so the sheet is gone before the
+    /// next paint and there is no frame in which that cell is drawn *and* pressed.
+    /// `Painter::sheet` accordingly no longer asks: the comparison against
+    /// `Chrome::pressed` is deleted rather than merely unreachable, so even the
+    /// resize case above has no live reader.
     pub fn step_at(self, column: u16, row: u16) -> Option<Action> {
         // **Before the columns, because the sheet is drawn over them.** The order
         // is [`Regions::hover_at`]'s own and for the same reason: the sheet

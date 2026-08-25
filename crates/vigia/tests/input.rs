@@ -1433,6 +1433,19 @@ fn a_track_the_sheet_covers_grabs_nothing() {
          drag moves a region the reader cannot see"
     );
 
+    // **The rectangle's own edges, which nothing else probes.** The two guards rest
+    // entirely on `Sheet::covers`, and a mutation of either bound from `<` to `<=`
+    // over-refuses by a row or a column with every sweep still green: the sweeps
+    // walk `cells_of`, whose range carries the same bound, so they move together and
+    // neither notices. Named by round 2's mutation battery as a predicted survivor.
+    let box_of = covered.sheet.expect("a sheet");
+    assert!(box_of.covers(70, 10), "the first cell the sheet occupies");
+    assert!(box_of.covers(79, 13), "the last cell the sheet occupies");
+    assert!(!box_of.covers(80, 13), "one past the last column is not the sheet's");
+    assert!(!box_of.covers(79, 14), "one past the last row is not the sheet's");
+    assert!(!box_of.covers(69, 10), "one before the first column is not the sheet's");
+    assert!(!box_of.covers(79, 9), "one before the first row is not the sheet's");
+
     // And a track row the sheet does not reach still answers, so the guard is
     // bounded by the sheet rather than switched on by its presence.
     assert!(
@@ -1446,10 +1459,17 @@ fn a_track_the_sheet_covers_grabs_nothing() {
          on the sheet existing rather than on the cell it covers"
     );
 
-    // **The close control is not an exception here either**, and it is asserted by
-    // name for the reason its twin is one gate up: it is the one cell of the sheet a
-    // click acts on, so a reader of the guard will ask. It dismisses through
-    // `action_for`, and it must take hold of no bar.
+    // **The close control is not an exception here either**, and it is spelled out
+    // because it is the one cell of the sheet a click acts on, so a reader of the
+    // guard will ask.
+    //
+    // **What it proves is weaker than its first comment claimed, and saying so is
+    // the point.** `Sheet::covers` is a rectangle test that never reads `close`, and
+    // the guard calls only `covers`, so this refuses because the cell is *covered*
+    // and not because it is the control. No fixture can separate the two: `close` is
+    // inside its own sheet's rect by construction. It is kept as the case a reader
+    // will look for rather than as a discriminating test, and the sibling gate above
+    // has the same shape for the same reason.
     let over_close = Regions {
         sheet: Some(Sheet {
             left: 70,
