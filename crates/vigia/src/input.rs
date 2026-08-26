@@ -811,6 +811,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleStaged
         | Action::ToggleSheet
         | Action::CloseSheet
+        | Action::Escape
         | Action::Redraw
         | Action::Quit => return None,
     };
@@ -1219,6 +1220,24 @@ pub enum Action {
     ///
     /// It is the sheet's only pointer escape, and the pointer has no `?`.
     CloseSheet,
+    /// Leave the frontmost thing: the gestures sheet if one is up, and the
+    /// program if none is. `Esc`.
+    ///
+    /// **One key, one meaning, and the state is resolved where state lives**
+    /// ([#340](https://github.com/breferrari/vigia/issues/340)). `SPEC.md`
+    /// §11.2 B12 rules that no key changes meaning while the sheet is up, and
+    /// [`key_action`] is handed no shell state so that the rule is structural
+    /// rather than remembered. Both survive: this action *is* one meaning, the
+    /// one every terminal program gives `Esc`, and which thing is frontmost is
+    /// a question only [`crate::App`] can answer. `q` is untouched and still
+    /// quits from anywhere, which is what a reader who wants out of the
+    /// program presses.
+    ///
+    /// It was `Quit` outright until #340, reported from a real pane: a reader
+    /// pressed `Esc` to put the help away and the monitor exited. That is the
+    /// worst shape a mistake can take here, because the sheet is the surface a
+    /// reader opens precisely when they are unsure what a key does.
+    Escape,
     /// Put the pinned list's window at this fraction of the changed set.
     ///
     /// From dragging or clicking the list's own scrollbar. A fraction over
@@ -1310,6 +1329,7 @@ impl Action {
             | Self::ToggleStaged
             | Self::ToggleSheet
             | Self::CloseSheet
+            | Self::Escape
             | Self::Redraw
             | Self::Quit => self,
         }
@@ -1351,6 +1371,7 @@ impl Action {
             // following what an agent is writing is the monitor behaviour, and
             // the two would fight if one disengaged the other. `SPEC.md` §11.1.
             Self::Quit
+            | Self::Escape
             | Self::Redraw
             | Self::ToggleFollow
             // Showing or hiding the masthead resizes the diff's region and does
@@ -1457,6 +1478,7 @@ impl Action {
             // A toggle changes the region's height; it does not need to be
             // told one to decide what it means.
             Self::Quit
+            | Self::Escape
             | Self::Redraw
             | Self::ToggleFollow
             | Self::ToggleMasthead
@@ -1538,7 +1560,8 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
     }
 
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
+        KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::Esc => Some(Action::Escape),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::Scroll(1)),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::Scroll(-1)),
         // Shift is the modifier because the alternatives are all taken or

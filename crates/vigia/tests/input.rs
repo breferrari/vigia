@@ -42,13 +42,12 @@ fn wheel(kind: MouseEventKind) -> Event {
 
 #[test]
 fn every_way_out_is_a_way_out() {
-    // Three, because three habits exist. `q` is the pager reflex, `Esc` is the
-    // dialog reflex, and Ctrl-C is what a reader does when they have decided the
-    // program is not listening. In raw mode Ctrl-C is not a signal at all, it is
-    // an ordinary key event, so if this map drops it nothing else catches it.
+    // `q` is the pager reflex and Ctrl-C is what a reader does when they have
+    // decided the program is not listening. In raw mode Ctrl-C is not a signal
+    // at all, it is an ordinary key event, so if this map drops it nothing
+    // else catches it.
     for event in [
         press(KeyCode::Char('q')),
-        press(KeyCode::Esc),
         with(KeyModifiers::CONTROL, KeyCode::Char('c')),
         with(KeyModifiers::CONTROL, KeyCode::Char('d')),
     ] {
@@ -59,6 +58,19 @@ fn every_way_out_is_a_way_out() {
              alternate screen"
         );
     }
+
+    // **`Esc` is the dialog reflex, and a dialog reflex dismisses the dialog**
+    // ([#340](https://github.com/breferrari/vigia/issues/340)). It mapped to
+    // `Quit` here until a reader pressed it to put the gestures sheet away and
+    // the monitor exited. It is still a way out, and `App` decides out of
+    // *what*: the sheet if one is up, the program if none is. This function is
+    // handed no state and still maps one key to one action, which is what
+    // `SPEC.md` §11.2 B12 asks of it.
+    assert_eq!(
+        action_for(&press(KeyCode::Esc), Regions::default()),
+        Some(Action::Escape),
+        "Esc no longer asks to leave the frontmost thing"
+    );
 }
 
 #[test]

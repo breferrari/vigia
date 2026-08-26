@@ -748,7 +748,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 /// so an added arm with the next tag is **not** in the driven set and the gate is
 /// red until it is driven; and forgetting to bump this number is caught by that
 /// same comparison the moment two variants share a tag or one is skipped.
-const VARIANTS: usize = 18;
+const VARIANTS: usize = 19;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 ///
@@ -783,6 +783,7 @@ fn tag(action: Action) -> usize {
         Action::ListRow(_) => 15,
         Action::DiffTo(_) => 16,
         Action::Redraw => 17,
+        Action::Escape => 18,
     }
 }
 
@@ -839,6 +840,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
     // one cannot be skipped.
     let actions = [
         Action::Quit,
+        Action::Escape,
         Action::Scroll(SPAN as isize * 3),
         Action::Scroll(-(SPAN as isize)),
         Action::ScrollList(1),

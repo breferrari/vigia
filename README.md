@@ -101,8 +101,6 @@ cargo install --git https://github.com/breferrari/vigia vigia
    status  │  q quit · f follow · ? keys   3.1ms frame   25MiB  follow ▶  1/3
 ```
 
-The header's facts sit in **pills**, one to a fact, so the worktree, the branch and the count read as three things rather than one run-on line.
-
 The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 134 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 134 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is what ships at every width.
 
 Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
@@ -245,8 +243,8 @@ The blank above the band is the row the header keeps between itself and the list
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
-| `?` | **all of this, on screen**, a page at a time where the pane is small |
-| `q` `Esc` `Ctrl+C` | quit |
+| `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
+| `q` `Ctrl+C` | quit |
 
 </td><td valign="top" width="50%">
 
@@ -471,11 +469,11 @@ Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and i
 
 <br>
 
-**It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header and the pills its facts sit in, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, and the status bar.
+**It is a mockup, not a screenshot**, and `VIGIA_THEME=dark` is what draws it. All of it draws today: the header, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, and the status bar.
 
 **The picture is a specification here, not decoration.** `SPEC.md` §5.1 rules that where the mockup answers a question the spec left open, the mockup *is* the answer, so every disagreement between it and the binary is either a bug or a departure somebody wrote down. **One is left**: the header reads the worktree's name rather than `vigia`, because a title bar spends six of forty columns telling you which program you started, and what you cannot tell by looking is which tree.
 
-Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them. **Two more came forward in August 2026**: the header's facts wear their pills, and the sparklines are drawn in the cyan the binary has used since the ramp landed rather than the green they were first mocked in, which is the ruling that green already means *added* two rows down.
+Everything else that disagreed was the picture being behind, and it has been brought forward: the status bar's hints, the position beside the follow marker, the branch, the caret standing on the pane's own edge, the diff's heading drawing the same row as the list above it, and the row's right-hand order, which now places the pulse, heat strip, sparkline and counters where the binary places them. **One more came forward in August 2026**: the sparklines are drawn in the cyan the binary has used since the ramp landed rather than the green they were first mocked in, which is the ruling that green already means *added* two rows down.
 
 </details>
 

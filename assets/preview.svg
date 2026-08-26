@@ -16,14 +16,6 @@
   <g clip-path="url(#win)">
     <!-- title bar -->
     <rect x="8" y="8" width="884" height="46" fill="#161b22"/>
-    <!-- #323: the header's facts wear pills, the loud one on the first
-         segment and the quiet one on the rest, with the separators left on the
-         bar between them. Drawn before the text so the words sit on top, and
-         only at truecolour: the depth ladder drops these backgrounds with
-         every other one, which is why this is the `dark` picture. -->
-    <rect x="94" y="16" width="58" height="30" rx="6" fill="#173042"/>
-    <rect x="160" y="16" width="51" height="30" rx="6" fill="#21262d"/>
-    <rect x="220" y="16" width="92" height="30" rx="6" fill="#21262d"/>
     <circle cx="34" cy="31" r="6" fill="#f85149"/>
     <circle cx="54" cy="31" r="6" fill="#e3b341"/>
     <circle cx="74" cy="31" r="6" fill="#3fb950"/>

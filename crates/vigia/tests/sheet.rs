@@ -206,14 +206,19 @@ fn the_shell_starts_with_no_sheet_and_question_mark_is_what_opens_one() {
         Some(Action::ToggleSheet),
         "`?` is not bound to the sheet"
     );
-    // **`Esc` is still Quit**, which is B12's one refusal and the reason it gave:
-    // teaching `Esc` to dismiss would put it one keystroke from ending the
-    // program. A gate rather than a comment, because this is the arm a later
-    // reader is likeliest to 'improve'.
+    // **`Esc` asks to leave the frontmost thing, and B12's refusal was
+    // reversed by its own reason** ([#340](https://github.com/breferrari/vigia/issues/340)).
+    // That refusal said teaching `Esc` to dismiss *"would put it one keystroke
+    // from ending the program"*, and keeping it as Quit is what actually did:
+    // a reader pressed `Esc` to put this sheet away and the monitor exited,
+    // which is the worst place for that to happen, because the sheet is the
+    // surface somebody opens precisely when they are unsure what a key does.
+    // The rule B12 was protecting is untouched: `key_action` is still handed
+    // no state, and this is still one key with one meaning.
     assert_eq!(
         action_for(&press(KeyCode::Esc), Regions::default()),
-        Some(Action::Quit),
-        "`Esc` stopped quitting, so the sheet has taught the wrong reflex"
+        Some(Action::Escape),
+        "`Esc` no longer asks to leave the frontmost thing"
     );
 
     let scratch = Scratch::large_diff("sheet-open", FILES, 40);
@@ -1280,8 +1285,9 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 ///
 /// The payloads are arbitrary. Both callers compare discriminants or ask
 /// [`reach_of`], and neither reads a value.
-const ALL_ACTIONS: [Action; 19] = [
+const ALL_ACTIONS: [Action; 20] = [
     Action::Quit,
+    Action::Escape,
     Action::Scroll(1),
     Action::ScrollList(1),
     Action::Page(1),
@@ -1336,8 +1342,11 @@ enum Reach {
 /// arms below are the whole of `Action`, and adding a variant reddens the build.
 fn reach_of(action: &Action) -> Reach {
     match action {
-        // The way out, and `q`, `Esc`, `Ctrl+C`, `Ctrl+D` are all keys.
+        // The way out, and `q`, `Ctrl+C`, `Ctrl+D` are all keys.
         Action::Quit => Reach::Keyboard,
+        // `Esc`, which leaves the sheet if one is up and the program if none
+        // is. A key, and the sheet's `leaving` group names it.
+        Action::Escape => Reach::Keyboard,
         // `a`, and the sheet's own row for it. No mouse gesture reaches it.
         Action::ToggleStaged => Reach::Keyboard,
         // `j`/`k`/arrows, and the wheel and the step buttons.
@@ -1552,6 +1561,7 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::ToggleStaged
             | Action::ToggleSingle
             | Action::ToggleSheet
+            | Action::Escape
             | Action::Redraw => Vec::new(),
         });
     }
@@ -2479,7 +2489,7 @@ fn the_roomy_rung_is_the_size_the_ruling_states() {
         // written as the prefix both spellings share, so nothing else here can
         // see it. These three phrases exist only at the wide spelling.
         for wide in [
-            "q  Esc  Ctrl+C  Ctrl+D",
+            "q  Ctrl+C  Ctrl+D",
             "first / last changed file",
             "scroll the pinned file list",
         ] {
@@ -4610,4 +4620,42 @@ fn the_arrows_are_named_at_the_wide_spelling_and_not_the_tight_one() {
         "the tight spelling names the arrows, which takes the keyboard-only rung \
          from 35 columns to 37 and costs panes of 35 and 36 their gestures:\n{drawn}"
     );
+}
+
+/// `Esc` closes the sheet when one is up and quits when none is, which is the
+/// half of [#340](https://github.com/breferrari/vigia/issues/340) a keymap gate
+/// cannot see: `input::key_action` answers the same action either way, and
+/// which thing is frontmost is `App`'s question.
+#[test]
+fn escape_puts_the_sheet_away_before_it_puts_the_program_away() {
+    let scratch = Scratch::large_diff("sheet-escape", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let height = 20;
+
+    app.apply(Action::ToggleSheet, &mut frame, height)
+        .expect("open the sheet");
+    assert!(chrome(&app).sheet.is_some(), "the fixture opened no sheet");
+
+    // With a sheet up, `Esc` takes the sheet and leaves the program running.
+    let running = app
+        .apply(Action::Escape, &mut frame, height)
+        .expect("escape from the sheet");
+    assert!(
+        running,
+        "`Esc` ended the program while the gestures sheet was open"
+    );
+    assert!(
+        chrome(&app).sheet.is_none(),
+        "`Esc` left the sheet up, so it dismissed nothing"
+    );
+
+    // With none up, it is still the way out: a reader who has learned `Esc`
+    // does not have to learn a second key to leave.
+    let running = app
+        .apply(Action::Escape, &mut frame, height)
+        .expect("escape from the pane");
+    assert!(!running, "`Esc` no longer leaves the program");
 }
