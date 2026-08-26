@@ -1990,6 +1990,13 @@ fn the_readme_states_the_grammar_count_the_dump_holds() {
 }
 
 /// Drives the judgement `ci complete` runs, with fabricated leg results.
+///
+/// Unix only, and the test below is scoped to match. The script is POSIX shell
+/// run by a job whose `runs-on` is `ubuntu-latest`, so Windows never executes
+/// it; driving it there through Git Bash failed on the extended-length path
+/// `canonicalize` returns. `the_ci_workflow_runs_the_script_the_gate_proves`
+/// pins that `runs-on` on every platform, so this scoping cannot go stale.
+#[cfg(unix)]
 fn ci_complete(draft: &str, legs: &[&str]) -> bool {
     let script = repo_root().join(".github/scripts/ci-complete.sh");
     std::process::Command::new("sh")
@@ -2004,10 +2011,13 @@ fn ci_complete(draft: &str, legs: &[&str]) -> bool {
 
 /// A draft's skipped legs are not a failure, and everything else still is.
 ///
+/// See [`ci_complete`] for why this is Unix only.
+///
 /// The judgement was inline in the workflow and judged a draft's skips as
 /// failure, so the required check went red on every push to a draft. The cases
 /// below are the ones that distinguish "nothing ran because it is a draft" from
 /// "something did not run", which is the whole of what this gate has to know.
+#[cfg(unix)]
 #[test]
 fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
     const OK: [&str; 5] = ["success"; 5];
@@ -2072,4 +2082,21 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
             "ci.yml does not pass {arg} to the script, so that leg is judged by nothing"
         );
     }
+
+    // The gate that drives the script is Unix only, which is sound exactly
+    // while the job stays on a Unix runner. Asserted here because this test
+    // runs on every platform and that one does not.
+    let (_, after) = ci
+        .split_once("  ci-complete:")
+        .expect("ci.yml declares the ci-complete job");
+    let runs_on = after
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("runs-on:"))
+        .map(str::trim)
+        .expect("ci-complete declares a runner");
+    assert_eq!(
+        runs_on, "ubuntu-latest",
+        "ci-complete moved to {runs_on:?}, so the Unix-only gate over its script \
+         no longer covers where it runs"
+    );
 }
