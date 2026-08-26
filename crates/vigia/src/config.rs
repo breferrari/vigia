@@ -93,6 +93,18 @@ pub struct Config {
     /// This lets a reader who has already decided for themselves stop pressing `a`
     /// every session, which is what every key in this file does.
     pub staged: bool,
+    /// Draw a file-type icon before every listed path. No gesture; config only.
+    ///
+    /// **The first key here with no key on the keyboard, and that is a
+    /// deliberate amendment to this set's definition** (`SPEC.md` §11.2 B18,
+    /// [#323](https://github.com/breferrari/vigia/issues/323)). The set used to
+    /// be *the gestures sheet's view section less `follow`*; it is now that,
+    /// plus the appearance keys B18 added, because an appearance preference is
+    /// exactly what a config file is for and exactly what a session gesture is
+    /// not: nobody re-decides their icons per pane. Off by default, and off is
+    /// byte-identical to every version before it, which `tests/render.rs`
+    /// holds as a buffer comparison.
+    pub icons: bool,
 }
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
@@ -118,7 +130,7 @@ pub struct Config {
 ///
 /// That is a gate and a runtime check rather than the type system, and saying so
 /// is the difference between a check and a claim that suppresses one.
-pub const KEYS: [&str; 4] = ["masthead", "rail", "single", "staged"];
+pub const KEYS: [&str; 5] = ["masthead", "rail", "single", "staged", "icons"];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -143,6 +155,7 @@ impl Config {
             "rail" => self.rail = on,
             "single" => self.single = on,
             "staged" => self.staged = on,
+            "icons" => self.icons = on,
             _ => return false,
         }
         true

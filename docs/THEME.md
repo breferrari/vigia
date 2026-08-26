@@ -37,6 +37,8 @@ What follows groups the keys by surface. The docblocks in `crates/vigia/src/them
 |---|---|
 | `chrome` | the header and footer lines |
 | `chrome_dim` | secondary chrome text: key hints, the follow marker, readouts, and the chrome rows' background |
+| `chip` | the pill behind a chrome segment: the header's branch and count, the footer's readouts; truecolour only |
+| `chip_accent` | the louder pill: the header's worktree name, the footer's state |
 | `note` | a stand-in for content there is no diff for: binary, conflict |
 | `alert` | something went wrong and the reader should know |
 

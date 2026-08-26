@@ -1611,6 +1611,9 @@ pub struct Chrome {
     /// no row is spent. It is read by the painter last and by [`regions`] so a
     /// pointer can be told it is over one.
     pub sheet: Option<usize>,
+    /// Whether listed paths carry a file-type icon, from the config file's
+    /// `icons` key ([#323](https://github.com/breferrari/vigia/issues/323)).
+    pub icons: bool,
     /// What recent frames cost, which `SPEC.md` §5.1 rules is their p99.
     ///
     /// `None` on the very first paint, when no frame has completed to have a
@@ -4288,6 +4291,7 @@ pub fn render(
         hovered: chrome.hovered,
         scrolling: chrome.scrolling,
         spark_ramp: theme.spark_ramp(),
+        icons: chrome.icons,
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -5695,6 +5699,8 @@ struct Painter<'a> {
     /// [`Theme::spark_ramp`], computed once per paint: `None` below truecolour
     /// and on palettes whose stops are not RGB, which is the whole ladder.
     spark_ramp: Option<[Color; 8]>,
+    /// [`Chrome::icons`]: whether a listed path carries its type's glyph.
+    icons: bool,
 }
 
 impl Painter<'_> {
@@ -5997,6 +6003,68 @@ impl Painter<'_> {
         self.put_marked(text.x, text.y, rung, room, style);
     }
 
+    /// Paint the pills behind a status line's ` · `-separated segments.
+    ///
+    /// `SPEC.md` §11.2 B18 ([#323](https://github.com/breferrari/vigia/issues/323)),
+    /// crush's pill shape from the #318 survey: a background run per segment,
+    /// the separator's own `·` left on the pane between them, its flanking
+    /// spaces absorbed into the pills either side so the seams are seamless.
+    /// **No text moves and no ladder is consulted**: the pills are painted over
+    /// the cells the rung already occupies, so every width rung draws exactly
+    /// the words it drew before, and below truecolour the backgrounds are gone
+    /// and this is a no-op by the same resolve that blanks every wash.
+    ///
+    /// The first segment takes the louder pill: the worktree name is the one
+    /// fact a reader glances for.
+    fn chip_row(&mut self, area: Rect, drawn: &str) {
+        if self.theme.chip.bg.is_none() && self.theme.chip_accent.bg.is_none() {
+            return;
+        }
+        let text = self.text_area(area);
+        let mut x = text.x;
+        let mut first = true;
+        for segment in drawn.split(" · ") {
+            let width = width_of(segment) as u16;
+            let end = x
+                .saturating_add(width)
+                .min(text.x.saturating_add(text.width));
+            if x >= end {
+                break;
+            }
+            let pill = if first {
+                self.theme.chip_accent
+            } else {
+                self.theme.chip
+            };
+            // One cell of padding either side where the separator's spaces
+            // are, clamped to the text area, so a pill breathes without a
+            // character being added anywhere.
+            let from = x.saturating_sub(1).max(text.x);
+            let to = end.saturating_add(1).min(text.x.saturating_add(text.width));
+            for cell in from..to {
+                if let Some(cell) = self.buf.cell_mut((cell, area.y)) {
+                    cell.set_style(pill);
+                }
+            }
+            first = false;
+            // Past this segment and the ` · ` that follows it.
+            x = end.saturating_add(3);
+        }
+    }
+
+    /// One pill over a column span, for the footer's readouts and state.
+    fn chip_span(&mut self, row: Rect, from: u16, to: u16, pill: Style) {
+        if pill.bg.is_none() {
+            return;
+        }
+        let edge = row.x.saturating_add(row.width).min(self.buf.area.right());
+        for x in from.min(edge)..to.min(edge) {
+            if let Some(cell) = self.buf.cell_mut((x, row.y)) {
+                cell.set_style(pill);
+            }
+        }
+    }
+
     fn header(&mut self, area: Rect, view: &View, chrome: &Chrome) {
         // The worktree name leads the left, which is the one place the layout
         // departs from `assets/preview.svg` on purpose: a title bar reading
@@ -6041,18 +6109,21 @@ impl Painter<'_> {
         // reader would be told, in colour, that these are separate claims, which
         // is the seam #67 exists to remove. They are one clause about one
         // subject now, so they are drawn as one.
-        self.status_line(
-            area,
-            &header_left(
-                &chrome.worktree,
-                chrome.branch.as_deref(),
-                view.files,
-                chrome.staged,
-            ),
-            self.theme.chrome,
-            right,
-            right_style,
+        let rungs = header_left(
+            &chrome.worktree,
+            chrome.branch.as_deref(),
+            view.files,
+            chrome.staged,
         );
+        self.status_line(area, &rungs, self.theme.chrome, right, right_style);
+        // The pills, over the rung `status_line` just placed: recomputed with
+        // the same inputs and the same picker, so the two cannot disagree
+        // about which words are on the row.
+        let text = self.text_area(area);
+        let room =
+            usize::from(text.width).saturating_sub(width_of(right).min(usize::from(text.width)));
+        let drawn = widest_fitting_or_last(&rungs, room).to_owned();
+        self.chip_row(area, &drawn);
     }
 
     /// The footer, on the bottom one or two rows of `area`.
@@ -6131,11 +6202,40 @@ impl Painter<'_> {
             );
             // The inset row for the reason `placed` uses one: the walk is bounded
             // by its `row`'s right edge, and the text's edge is not the pane's.
-            self.tint_readouts(Rect { y: upper.y, ..text }, placed, readouts);
+            let row = Rect { y: upper.y, ..text };
+            self.footer_chips(row, placed, readouts, &right);
+            self.tint_readouts(row, placed, readouts);
             self.status_line(bottom, &[footer.left], style, "", self.theme.chrome_dim);
         } else {
             self.status_line(bottom, &[footer.left], style, &right, self.theme.chrome_dim);
+            self.footer_chips(text, placed, readouts, &right);
             self.tint_readouts(text, placed, readouts);
+        }
+    }
+
+    /// The footer's two pills: the readouts in the quiet one, the state in the
+    /// loud one (#323). Painted before [`Painter::tint_readouts`], whose
+    /// foreground tints then land on the pill the way every run lands on a
+    /// wash; below truecolour both backgrounds are gone and nothing here
+    /// writes a cell.
+    fn footer_chips(&mut self, row: Rect, placed: u16, readouts: usize, right: &str) {
+        if readouts > 0 {
+            self.chip_span(
+                row,
+                placed.saturating_sub(1),
+                placed.saturating_add(readouts as u16),
+                self.theme.chip,
+            );
+        }
+        let total = width_of(right) as u16;
+        let state = total.saturating_sub(readouts as u16);
+        if state > 0 {
+            self.chip_span(
+                row,
+                placed.saturating_add(readouts as u16).saturating_add(1),
+                placed.saturating_add(total),
+                self.theme.chip_accent,
+            );
         }
     }
 
@@ -7030,18 +7130,47 @@ impl Painter<'_> {
         // the property B12 chose the sheet for and #286 had to keep: a say-so that
         // took a row would take it from the gestures it is apologising for.
         let counter = plan.shape.shown().map(sheet_counter).unwrap_or_default();
+        // **The corners follow the glyph rung, and the splice goes with them**
+        // (`SPEC.md` §11.2 B18, [#323](https://github.com/breferrari/vigia/issues/323)).
+        // At the dense rungs the box is rounded and the title is spliced into
+        // the border btop's way, `╭┐ gestures ┌`, so the frame visually opens
+        // around the words; the Block rung keeps the square corners and the
+        // inline title it always drew, because `╭` sits outside CP437 and that
+        // rung is the one whose console cannot draw an arc, which is §10's
+        // per-glyph discipline. **Both spellings cost the same sixteen fixed
+        // cells plus the counter**, so no width floor and no geometry gate
+        // moves; the arithmetic below is the old line's with the same total.
+        let rounded = !matches!(self.glyphs, Glyphs::Block);
         let mut top = String::with_capacity(width * 3);
-        top.push('┌');
-        top.push_str(SHEET_TITLE);
-        top.push_str(&counter);
-        // Corner, title, counter, dashes, then the three cells the control sits in
-        // and the closing corner. The rule cannot go negative because
-        // `sheet_floor` charges `sheet_counter_floor` on every rung.
-        for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + width_of(&counter) + 5) {
-            top.push(RULE);
+        if rounded {
+            top.push('╭');
+            top.push('┐');
+            top.push_str(" gestures ");
+            top.push_str(&counter);
+            top.push('┌');
+            for _ in 0..width.saturating_sub(13 + width_of(&counter) + 4) {
+                top.push(RULE);
+            }
+            top.push_str("   ╮");
+        } else {
+            top.push('┌');
+            top.push_str(SHEET_TITLE);
+            top.push_str(&counter);
+            // Corner, title, counter, dashes, then the three cells the control
+            // sits in and the closing corner. The rule cannot go negative
+            // because `sheet_floor` charges `sheet_counter_floor` on every rung.
+            for _ in 0..width.saturating_sub(width_of(SHEET_TITLE) + width_of(&counter) + 5) {
+                top.push(RULE);
+            }
+            top.push_str("   ┐");
         }
-        top.push_str("   ┐");
         self.put(area.x, area.y, &top, width, frame);
+        if rounded {
+            // The spliced word in the chrome's own weight, over the border's
+            // reserved gap: the splice is what makes the title read as a label
+            // on the box rather than a break in it.
+            self.put(area.x + 2, area.y, " gestures ", 10, lit);
+        }
         // **The control takes a hover rung, which is what says it is clickable.**
         // B10's ladder, minus its top rung: chrome at rest and [`Theme::bar_hover`]
         // under the pointer. A close control that never brightened was a glyph a
@@ -7095,11 +7224,11 @@ impl Painter<'_> {
         }
 
         let mut bottom = String::with_capacity(width * 3);
-        bottom.push('└');
+        bottom.push(if rounded { '╰' } else { '└' });
         for _ in 0..width.saturating_sub(2) {
             bottom.push(RULE);
         }
-        bottom.push('┘');
+        bottom.push(if rounded { '╯' } else { '┘' });
         self.put(area.x, area.y + area.height - 1, &bottom, width, frame);
     }
 
@@ -7849,6 +7978,19 @@ impl Painter<'_> {
         } else {
             ink
         };
+        // The type's glyph, in the row's own ink so it dims with its file, and
+        // only where the reader turned it on: off is byte-identical output,
+        // which the gate holds as a buffer comparison. Every row gets one when
+        // any does, [`crate::icons`]'s docblock carries why, and the two cells
+        // come out of the path's room the way the rename arrow's do.
+        let x = if self.icons {
+            let mark = format!("{} ", crate::icons::icon_of(heading.path));
+            let next = self.put(x, area.y, &mark, room, ink);
+            room = room.saturating_sub(usize::from(next - x));
+            next
+        } else {
+            x
+        };
         self.put(x, area.y, &elide_head(label, room), room, ink);
     }
 
@@ -8499,6 +8641,7 @@ mod tests {
             hovered,
             scrolling,
             spark_ramp: None,
+            icons: false,
         };
         // Scrollable by a wide margin, so both bars draw a thumb well short of
         // their track and the arrows exist to be read.

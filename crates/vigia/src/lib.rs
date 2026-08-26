@@ -83,12 +83,13 @@ mod colour;
 /// them if it can name them.
 pub mod config;
 mod glyphs;
-mod input;
 /// Public where its seven siblings are private, and for one reason: `soak.rs` is
 /// an integration test, so it can only reach what the crate exports, and I3's
 /// harness needs the same reader the shell uses. Two implementations of "read
 /// this process's RSS" that could disagree is exactly what one of them existing
 /// is meant to prevent.
+pub mod icons;
+mod input;
 pub mod memory;
 mod render;
 mod signal;

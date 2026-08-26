@@ -69,6 +69,7 @@ fn chrome() -> Chrome {
         masthead: true,
         rail: false,
         sheet: None,
+        icons: false,
         frame: None,
         memory: None,
     }
@@ -388,10 +389,13 @@ fn a_context_row_is_never_washed() {
         );
     }
 
-    // And nothing below the diff either. A wash is a property of one row; a wash
-    // that reached the blank rows or the footer would be a rectangle, which is
-    // what an inherited `Rect` height produced before this gate could see it.
-    for row in CONTEXT_BELOW + 1..12 {
+    // And nothing below the diff either. A wash is a property of one row; a
+    // wash that reached the blank rows would be a rectangle, which is what an
+    // inherited `Rect` height produced before this gate could see it. The
+    // sweep stops short of the footer since #323: its chip pills are chrome
+    // backgrounds with their own gates, not washes, and a diff signal never
+    // reaches that row in the first place.
+    for row in CONTEXT_BELOW + 1..11 {
         assert!(
             backgrounds(&backend, row).iter().all(Option::is_none),
             "row {row}, below the whole diff, was washed"
@@ -475,11 +479,15 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
 
         // Exempt: backgrounds by contract, and unset on this palette anyway.
         // The word patch and the gutter tone exist only where the wash does,
-        // and `ansi` draws no wash at any depth.
+        // and `ansi` draws no wash at any depth. The chips are the same
+        // contract one row up: pills are backgrounds, and this palette draws
+        // flat chrome.
         added_word: _,
         removed_word: _,
         added_gutter: _,
         removed_gutter: _,
+        chip: _,
+        chip_accent: _,
 
         // Exempt: marks and fills, none of them text, none of them colour 8.
         pulse: _,
