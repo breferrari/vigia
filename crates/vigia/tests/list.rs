@@ -2585,17 +2585,36 @@ fn the_mark_reaches_the_drawn_pane_after_the_ink_has_drained() {
         Glyphs::default(),
         &chrome,
     );
-    let drawn: String = (0..area.height)
+    let rows: Vec<String> = (0..area.height)
         .map(|y| {
             (0..area.width)
                 .map(|x| buf[(x, y)].symbol())
                 .collect::<String>()
         })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect();
+    let drawn = rows.join("\n");
 
+    // **On the written file's own row, not anywhere on the pane.** The first
+    // spelling asked whether a `●` reached the screen at all, which a mark on the
+    // wrong row satisfies just as well: the fixture has three files and only one
+    // of them was written.
+    let name = path.rsplit('/').next().expect("a file name");
+    let row = rows
+        .iter()
+        .find(|row| row.contains(name))
+        .unwrap_or_else(|| panic!("the written file is not drawn at all:\n{drawn}"));
     assert!(
-        drawn.contains('●'),
-        "ten seconds after the only write, no row on the pane carries the mark:\n{drawn}"
+        row.contains('●'),
+        "ten seconds after the only write, its own row carries no mark: {row:?}"
     );
+    // **Every marked row names the written file**, which is the claim rather than
+    // "exactly one row": `SPEC.md` §11.1 draws a file through one `Painter::file_row`
+    // in both regions, so the file the diff is inside is marked in the map and on
+    // its own heading. Counting rows would have made that design a failure.
+    for marked in rows.iter().filter(|row| row.contains('●')) {
+        assert!(
+            marked.contains(name),
+            "a row that is not the written file carries the mark: {marked:?}"
+        );
+    }
 }

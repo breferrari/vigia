@@ -1676,3 +1676,35 @@ fn every_file_a_burst_names_carries_the_newest_mark() {
         "a path nothing is tracked for carries the mark"
     );
 }
+
+/// And the mark's real bound is I10's, which is not eternity.
+///
+/// **The correction to the sentence the row was written from**
+/// ([#345](https://github.com/breferrari/vigia/issues/345)). *"Until another
+/// write arrives"* is what a reader means and not quite the whole rule: the mark
+/// is a property of a tracked path, and I10 retires a track two ways. This gates
+/// the one a quiet worktree reaches, so the sticky mark is bounded rather than
+/// frozen, which is the difference §5.3 turns on.
+#[test]
+fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
+    let start = base();
+    let mut history = History::starting_at(start);
+    let wrote = start + Duration::from_millis(1);
+    history.record(["src/a.rs"], wrote);
+    assert!(
+        history.newest("src/a.rs"),
+        "the write carries no mark to lose"
+    );
+
+    // Past the window, rolled the way the shell rolls it and never writing again.
+    let mut now = wrote;
+    while now.duration_since(wrote) <= HISTORY_WINDOW + Duration::from_secs(2) {
+        now += Duration::from_millis(50);
+        history.record_sized([], now);
+    }
+    assert!(
+        !history.newest("src/a.rs"),
+        "the mark outlived the window it is drawn from, which is the frozen clock \
+         a bounded history exists to refuse"
+    );
+}
