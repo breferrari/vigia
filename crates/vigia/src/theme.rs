@@ -565,6 +565,46 @@ impl Theme {
         self.band(band, self.spark, self.spark_warm, self.spark_hot)
     }
 
+    /// The sparkline stops interpolated into an eight-step ramp, or `None`
+    /// where interpolation is meaningless.
+    ///
+    /// btop's mechanism, adopted by `SPEC.md` §11.2 B18
+    /// ([#322](https://github.com/breferrari/vigia/issues/322)): linear RGB
+    /// between the stops a palette already declares, `spark` to `spark_warm`
+    /// over the lower half, `spark_warm` to `spark_hot` over the upper, so the
+    /// three keys a reader can move are still the whole of the vocabulary and
+    /// the ramp is derived, never authored.
+    ///
+    /// **The depth ladder gates this by construction.** A theme resolved at
+    /// truecolour holds `Rgb` stops and interpolates; resolved lower it holds
+    /// indexed or named colours, which have no line between them to walk, so
+    /// this returns `None` and the caller draws the three stops it always
+    /// drew. No second ladder, no flag.
+    pub fn spark_ramp(&self) -> Option<[Color; 8]> {
+        let rgb = |style: Style| match style.fg {
+            Some(Color::Rgb(r, g, b)) => Some((r, g, b)),
+            _ => None,
+        };
+        let low = rgb(self.spark)?;
+        let warm = rgb(self.spark_warm)?;
+        let hot = rgb(self.spark_hot)?;
+        let lerp = |a: (u8, u8, u8), b: (u8, u8, u8), t: f32| {
+            let channel = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+            Color::Rgb(channel(a.0, b.0), channel(a.1, b.1), channel(a.2, b.2))
+        };
+        let mut out = [Color::Reset; 8];
+        for (at, slot) in out.iter_mut().enumerate() {
+            // Stops at 0, 4 and 7: the warm key sits where Band::of's middle
+            // third sits on the eight-level height ramp.
+            *slot = if at <= 4 {
+                lerp(low, warm, at as f32 / 4.0)
+            } else {
+                lerp(warm, hot, (at - 4) as f32 / 3.0)
+            };
+        }
+        Some(out)
+    }
+
     /// One rung of a three-stop ramp.
     ///
     /// Written once and called four times rather than twelve match arms, so a

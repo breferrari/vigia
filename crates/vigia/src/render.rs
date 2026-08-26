@@ -2918,7 +2918,7 @@ enum Bucket {
     /// *two* buckets, so nothing may read a single bucket's height back out of
     /// it. That is the same rule the paragraphs above give the [`Band`], now
     /// true of the character as well.
-    Written(char, Band),
+    Written(char, Band, u8),
 }
 
 impl Bucket {
@@ -2932,10 +2932,20 @@ impl Bucket {
     /// 2x4 cell, where the baseline row is the track. [`Glyphs::glyph`] is total
     /// over both, so level zero is the track at whichever rung is drawing and
     /// this arm needs no rung of its own to ask about.
-    fn drawn(self, theme: &Theme, glyphs: Glyphs) -> (char, Style) {
+    fn drawn(self, theme: &Theme, glyphs: Glyphs, ramp: Option<&[Color; 8]>) -> (char, Style) {
         match self {
             Self::Empty => (glyphs.glyph(0, 0), theme.spark_track),
-            Self::Written(glyph, band) => (glyph, theme.spark_at(band)),
+            // With a ramp, the stop picks the ink and the band's style keeps
+            // any modifier a theme set; without one, the three stops draw what
+            // they always drew (#322, and the ladder note on
+            // [`Theme::spark_ramp`]).
+            Self::Written(glyph, band, stop) => {
+                let mut style = theme.spark_at(band);
+                if let Some(ramp) = ramp {
+                    style = style.fg(ramp[usize::from(stop).min(7)]);
+                }
+                (glyph, style)
+            }
         }
     }
 }
@@ -3085,7 +3095,11 @@ fn spark_of(
         // colour then say one thing at one scale, where two denominators would
         // let a row read tall and cool at once.
         let band = Band::of(busiest, yardstick);
-        *cell = Bucket::Written(glyphs.glyph(level(left), level(right)), band);
+        // The ramp stop, from the same figure the heights and the band are
+        // scaled from, quantised through the same rounding rule so one write
+        // never lands on the ramp's floor colour.
+        let stop = (level_to(busiest, yardstick, 8).max(1) - 1) as u8;
+        *cell = Bucket::Written(glyphs.glyph(level(left), level(right)), band, stop);
     }
     drawn
 }
@@ -4273,6 +4287,7 @@ pub fn render(
         gripped: chrome.gripped,
         hovered: chrome.hovered,
         scrolling: chrome.scrolling,
+        spark_ramp: theme.spark_ramp(),
     };
 
     painter.header(Rect { height: 1, ..area }, view, chrome);
@@ -5677,6 +5692,9 @@ struct Painter<'a> {
     /// Which bar the keys are scrolling and which way, from
     /// [`Chrome::scrolling`].
     scrolling: Option<(Grabbed, isize)>,
+    /// [`Theme::spark_ramp`], computed once per paint: `None` below truecolour
+    /// and on palettes whose stops are not RGB, which is the whole ladder.
+    spark_ramp: Option<[Color; 8]>,
 }
 
 impl Painter<'_> {
@@ -6372,7 +6390,21 @@ impl Painter<'_> {
                 }
                 let glyph = rung.glyph(low, high);
                 let x = left_edge.saturating_add(cell as u16);
-                self.bar_cell(x, y, glyph, self.theme.spark_at(band));
+                // Multi-row graphs colour per row against the vertical axis,
+                // btop's own rule (#322): the baseline draws the quiet stop and
+                // the top row the hot one, one style per row, so the graph
+                // reads hotter as it climbs while costing one lookup. Without a
+                // ramp the column's band draws as it always did.
+                let ink = match self.spark_ramp.as_ref() {
+                    Some(ramp) => {
+                        let top = rows.saturating_sub(1).max(1);
+                        self.theme
+                            .spark_at(band)
+                            .fg(ramp[(row * 7 / top).min(7)])
+                    }
+                    None => self.theme.spark_at(band),
+                };
+                self.bar_cell(x, y, glyph, ink);
             }
         }
     }
@@ -7643,7 +7675,7 @@ impl Painter<'_> {
             let x = right.x + right.width.saturating_sub(take as u16);
             for (offset, bucket) in strip[filled - take..filled].iter().enumerate() {
                 // Both out of the one value, which is [`Bucket`]'s whole reason.
-                let (glyph, style) = bucket.drawn(self.theme, self.glyphs);
+                let (glyph, style) = bucket.drawn(self.theme, self.glyphs, self.spark_ramp.as_ref());
                 // `set_char` rather than an `encode_utf8` into a local buffer,
                 // which is what `Cell::set_char` does internally: the heat strip
                 // below can hoist its encode out of the loop because every slice
@@ -8467,6 +8499,7 @@ mod tests {
             gripped,
             hovered,
             scrolling,
+            spark_ramp: None,
         };
         // Scrollable by a wide margin, so both bars draw a thumb well short of
         // their track and the arrows exist to be read.
