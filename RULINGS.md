@@ -1007,5 +1007,9 @@ the **display** height, which is exactly the units bug that shape predicts. With
 wrapping off the two numbers are equal and nothing can see it; with wrapping on
 the top lands too far back and the last rows of the diff fall off the bottom, so
 the end of the diff becomes unreachable by the gesture that exists to reach it.
-`crates/vigia/tests/scroll.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap`
-is what fails when it comes back.
+`crates/vigia/tests/wrap.rs::the_bottom_of_the_diff_is_reachable_when_lines_wrap`
+is what fails when it comes back, and
+`the_wrapped_bottom_survives_the_frame_after_the_gesture` beside it is what
+fails when the clamp holds for one frame and not for the next: the first draft
+of the fix fired on the frame the gesture produced and on no frame after it, so
+the end of the diff was visible until anything repainted.

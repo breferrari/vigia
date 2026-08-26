@@ -1855,6 +1855,9 @@ impl View {
         // that clamp the same way are fixed where they are, by measuring a
         // screenful in the rows a screen actually draws: see `App::screenful`.
         let mut at_bottom = false;
+        // Whether the last file the walk touched was drawn to the end of its
+        // block. See the assignment for what it is for.
+        let mut consumed = false;
         // At most one restart, whichever of the two reasons below triggered it.
         // `last_screenful` resolves to a position that can fill the body whenever
         // the diff has the rows for it, so a second pass is never the answer to a
@@ -1971,6 +1974,15 @@ impl View {
                     view.current_span = span;
                 }
 
+                // **Whether this file's block was drawn to its end**, which is
+                // the half of *at the bottom* the walk's own index cannot say:
+                // `index` is incremented whether `take_file` ran out of block or
+                // ran out of window, so `index >= stop` means the walk **reached**
+                // the last file and not that it consumed it. Recorded as a
+                // subtraction over the rows this call pushed, which is the only
+                // thing that tells the two apart.
+                let before = view.rows.len();
+                let asked = skip.min(span);
                 view.take_file(
                     Changed {
                         kind: &change.kind,
@@ -1990,6 +2002,7 @@ impl View {
                     height,
                     &mut drawn,
                 );
+                consumed = view.rows.len() - before == span - asked;
                 skip = 0;
                 index += 1;
             }
@@ -2150,6 +2163,30 @@ impl View {
             at_bottom = true;
         }
 
+        // **And the clamp has to be re-derived, not remembered**
+        // ([#272](https://github.com/breferrari/vigia/issues/272), found by the
+        // second audit round against the first round's own fix). The two
+        // assignments above fire on the frame a reader reaches the end and on no
+        // frame after it: `last_screenful` stores a position from which the next
+        // walk collects exactly `height` logical rows, so nothing overshoots,
+        // nothing is short, and the frame after the gesture cut the tail off the
+        // bottom again. A tick, an ageing wake or a press of `?` was enough to
+        // scroll the reader silently back off the end they had just reached.
+        //
+        // The walk knows on every frame, and three terms are needed. It reached
+        // the last file it could, **and** it drew that file's block to the end
+        // rather than filling the window part-way through it, **and** the reader
+        // is somewhere they scrolled or pinned rather than somewhere a jump put
+        // them. The third is [`Self::short`]'s own guard a hundred lines up, in
+        // its own words: a jump to a file is a claim about what belongs on the
+        // **top** row, and a file whose wrapped content overruns the pane still
+        // has rows below the fold for the reader to scroll to. Without it, `1`
+        // through `6` on the last file drew its ending and hid its heading, and
+        // the heading could not be scrolled back to because the position was
+        // already row zero.
+        let at_bottom =
+            at_bottom || (index >= stop && consumed && (anchored || single || view.top.row > 0));
+
         // **Here, and after the walk, because this is the first point at which
         // the rows exist and nothing more will be read.**
         // ([#272](https://github.com/breferrari/vigia/issues/272).) It reads no
@@ -2157,9 +2194,13 @@ impl View {
         // row count, so the `height` logical rows the walk already collected are
         // always enough to fill `height` display rows, and I4 never sees this.
         //
-        // Before [`Self::take_list`] rather than after it, because the front trim
-        // can move [`Self::top`] and the caret is drawn from where the diff
-        // actually landed.
+        // Before [`Self::take_list`] rather than after it, because the list is
+        // planned against the rows this leaves and the gutter it records. **It is
+        // no longer because the trim moves [`Self::top`]**, which is what this
+        // said until the second audit round read it against the code: the trim
+        // stopped moving anything stored when it became a display offset, and a
+        // sentence describing the mechanism that shipped the trap is the sentence
+        // a later session would restore it from.
         view.wrap_rows(width, wrap, height, at_bottom);
 
         // **After the walk, because only the walk knows where the diff landed.**

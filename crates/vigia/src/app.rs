@@ -1162,16 +1162,20 @@ impl App {
                     let span = crate::view::span_in(frame, file)?;
                     self.position = Position {
                         file,
-                        // **A screenful rather than the region's height**
-                        // ([#272](https://github.com/breferrari/vigia/issues/272)).
-                        // This read `span.saturating_sub(height)`, a count of the
-                        // file's own rows less a count of the terminal's, which
-                        // are the same number only while nothing wraps: with `w`
-                        // on it rested the top too early and the pinned file's
-                        // last lines could not be reached by the gesture that
-                        // names its end. [`Self::screenful`] is `height` exactly
-                        // while `w` is off, so this is unchanged there.
-                        row: span.saturating_sub(self.screenful(height)),
+                        // **Unchanged by B19, and that is a finding rather than
+                        // an oversight** ([#272](https://github.com/breferrari/vigia/issues/272)).
+                        // `span` is a count of the file's own rows and `height` a
+                        // count of the terminal's, which are the same number only
+                        // while nothing wraps, so this lands short with `w` on. A
+                        // branch asking for a row past the end was written, and
+                        // mutation then showed it changed nothing: `View::collect`
+                        // derives *at the bottom* from the walk having drawn the
+                        // block to its end, which is exactly this case, and rests
+                        // the last row on the last row whatever this arithmetic
+                        // said. Two answers to one question is what this repo has
+                        // been bitten by, so the walk keeps it and this stays the
+                        // subtraction it has always been.
+                        row: span.saturating_sub(height),
                     };
                 } else {
                     self.jump_to(frame.files().len().saturating_sub(1));
@@ -1655,16 +1659,25 @@ impl App {
     /// the only one measured in display rows. Everywhere else the mapping is
     /// unchanged.
     fn dragged_to(&self, at: u32, total: usize, height: usize) -> usize {
-        // **Only where lines wrap, because only there is the estimate wrong.**
-        // With `w` off a screenful is exactly `height` rows of the diff and the
-        // mapping below is the one every version before B19 took, byte for byte.
-        // Routing that case through the walk's clamp would land the same row by a
-        // longer road and change what `App::position` holds between a drag and
-        // the frame that answers it, which `tests/scroll.rs` reads directly.
+        // **Only the far end is special, and the rest of the track is the
+        // thumb's own arithmetic** ([#272](https://github.com/breferrari/vigia/issues/272),
+        // corrected by the second audit round). The first draft measured the
+        // whole track in drawn rows, which is a *different* travel from the one
+        // the thumb is drawn against: the painter draws it from the region's
+        // height over the diff's rows, so a drag measured in drawn rows landed
+        // below the thumb everywhere but the ends. A readout and the gesture
+        // performed on it are one contract, and this repo has already been
+        // corrected once on exactly that.
+        //
+        // The far end stays special because it means something the arithmetic
+        // cannot express: *the end of the diff*, which only the walk can place in
+        // display rows. With `w` off it is not special at all, so a drag is what
+        // it was in every version before B19, byte for byte, and with `w` on
+        // every point of the track but that one is measured the same way too.
         if self.wrap && at >= crate::input::TRACK_SCALE {
             return total;
         }
-        scaled(at, total.saturating_sub(self.screenful(height)))
+        scaled(at, total.saturating_sub(height))
     }
 
     /// Rows of the **diff** one screenful holds, which is not `height` when
@@ -1675,7 +1688,16 @@ impl App {
     /// [`Self::shown`] for why the number cannot be derived at the stepping site.
     fn screenful(&self, height: usize) -> usize {
         if self.wrap && self.shown > 0 {
-            self.shown
+            // **Clamped by the pane this step is being taken in.** `shown` is the
+            // last frame's and `height` is this batch's, and the two are measured
+            // at different moments: `lib.rs` drains a batch and paints once at the
+            // end of it, so a resize and a `Space` arriving together give a fresh
+            // height against a stale count. A fifty-row pane dragged to twelve
+            // would otherwise step forty-nine rows through a body of twelve and
+            // walk over what nobody saw. It can only ever be too large, because a
+            // screen of `height` display rows never holds more than `height` rows
+            // of the diff.
+            self.shown.min(height)
         } else {
             height
         }

@@ -1086,3 +1086,226 @@ fn a_page_step_skips_no_line_when_lines_wrap() {
          step with wrapping on walked over content nobody saw"
     );
 }
+
+#[test]
+fn the_wrapped_bottom_survives_the_frame_after_the_gesture() {
+    // **The gate every other one in this file was missing, and it catches the
+    // same defect three ways.**
+    //
+    // A monitor repaints without being touched: a filesystem event, an ageing
+    // wake, a pointer crossing the pane. So a screen that is only correct on the
+    // frame a gesture produced is not correct at all, and every gate here drew
+    // **once** after its gesture, which is exactly the frame that cannot see it.
+    //
+    // The defect: the bottom clamp fires on the frame a reader reaches the end
+    // and stores a position from which the next walk collects exactly a
+    // screenful, so nothing overshoots, nothing is short, and the second frame
+    // dropped the tail off the bottom again. The reader saw the last line, did
+    // nothing, and watched it go.
+    //
+    // Driven three ways because the three gestures reach the end by three
+    // different roads: the scroll clamp, the pinned `G`, and a drag to the far
+    // end of the bar.
+    for way in ["scroll", "pinned G", "drag"] {
+        let scratch = tall(&format!("shell-wrap-steady-{}", way.replace(' ', "-")), 40);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        materialise(&mut frame);
+        let mut highlighter = Highlighter::eager();
+        let history = History::new();
+        let mut app = wrapped(&mut frame);
+        let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+        drawn(&mut app, &mut frame, &mut highlighter, &history);
+
+        match way {
+            "scroll" => {
+                app.apply(Action::Scroll(10_000), &mut frame, height)
+                    .expect("apply");
+            }
+            "pinned G" => {
+                app.apply(Action::ToggleSingle, &mut frame, height)
+                    .expect("apply");
+                drawn(&mut app, &mut frame, &mut highlighter, &history);
+                app.apply(Action::Bottom, &mut frame, height)
+                    .expect("apply");
+            }
+            _ => {
+                app.apply(Action::DiffTo(TRACK_SCALE), &mut frame, height)
+                    .expect("apply");
+            }
+        }
+
+        let (_, landing) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+        assert!(
+            landing.iter().any(|row| row.contains(TAIL)),
+            "{way} did not reach the end of the diff at all:\n{}",
+            landing.join("\n")
+        );
+
+        // **No gesture between the two frames**, which is the whole of it: this is
+        // the repaint a monitor does on its own.
+        let (_, settled) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+        assert!(
+            settled.iter().any(|row| row.contains(TAIL)),
+            "after {way} the end of the diff was drawn once and gone on the next \
+             repaint, so a reader who touches nothing loses it:\n{}",
+            settled.join("\n")
+        );
+    }
+}
+
+#[test]
+fn a_press_of_w_at_the_bottom_keeps_the_last_line_on_screen() {
+    // **The mode changing under a reader who is resting at the end.** Wrapping
+    // means fewer of the diff's rows fit, so the clamp has to give the difference
+    // back; without that the last line a reader was looking at scrolls off the
+    // bottom on the keystroke that was supposed to show them more of it.
+    //
+    // `w_toggles_wrapping_and_leaves_the_thumb_where_it_was` presses `w` from row
+    // zero, where there is nothing to trim, so it holds for a narrower reason
+    // than its name and cannot see this.
+    let scratch = tall("shell-wrap-press-at-bottom", 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = App::new();
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+    app.apply(Action::Scroll(10_000), &mut frame, height)
+        .expect("apply");
+    let (_, before) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert!(
+        before.iter().any(|row| row.contains(TAIL)),
+        "the unwrapped pane is not at the end of the diff, so pressing `w` here \
+         says nothing"
+    );
+
+    app.apply(Action::ToggleWrap, &mut frame, height)
+        .expect("apply");
+    let (_, after) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert!(
+        after.iter().any(|row| row.contains(TAIL)),
+        "pressing `w` at the end of the diff scrolled the last line off the \
+         bottom:\n{}",
+        after.join("\n")
+    );
+}
+
+#[test]
+fn the_bar_is_drawn_from_the_travel_a_drag_is_resolved_against() {
+    // **A readout and the gesture performed on it are one contract**, which this
+    // project has been corrected on once already: a bar drawn from one quantity
+    // and dragged against another agrees at the two ends and comes apart in the
+    // middle, so a gate that checks only the ends passes against the defect.
+    //
+    // The first draft of `App::dragged_to` measured the track in the rows a frame
+    // *drew*, while the painter goes on drawing the thumb from the region's
+    // height. Pressing inside the thumb's own body then sent it to the bottom of
+    // the track from under the pointer.
+    //
+    // Asserted at the **middle** of the track, and as a round trip: where the
+    // thumb is drawn after a drag has to be where the drag was aimed.
+    let scratch = tall("shell-wrap-bar-contract", 60);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+    drawn(&mut app, &mut frame, &mut highlighter, &history);
+
+    let middle = TRACK_SCALE / 2;
+    app.apply(Action::DiffTo(middle), &mut frame, height)
+        .expect("apply");
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, split(&app))
+        .expect("view");
+
+    assert!(
+        view.total_rows > 0,
+        "the frame measured no total, so there is no bar to be dragged"
+    );
+    // Where the thumb sits, in the same units the painter draws it in: rows above
+    // over the diff's own rows.
+    let travel = view.total_rows.saturating_sub(height);
+    let want = travel / 2;
+    assert!(
+        view.rows_above.abs_diff(want) <= 1,
+        "a drag to the middle of the track resolved to row {} where the thumb is \
+         drawn at {want} of a travel of {travel}, so the bar and the drag are two \
+         different arithmetics",
+        view.rows_above
+    );
+}
+
+#[test]
+fn a_page_step_after_a_resize_is_bounded_by_the_pane_it_lands_in() {
+    // **A screenful measured on the departing screen, spent in the arriving
+    // one.** `App::shown` is what the last frame drew and `height` is this
+    // batch's: `lib.rs` drains a batch of events and paints once at the end of
+    // it, so a resize and a `Space` arriving together give a fresh height against
+    // a stale count. Dragged from fifty rows to twelve, the step would otherwise
+    // be measured in the fifty-row screen and walk over everything the twelve-row
+    // one could have shown.
+    //
+    // Asserted as *the step is no larger than the pane it lands in*, which is the
+    // claim, rather than as an exact row, which would restate the arithmetic.
+    let scratch = tall("shell-wrap-resize-page", 80);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    let tall_pane = Rect::new(0, 0, 80, 50);
+    let short_pane = Rect::new(0, 0, 80, 12);
+    let mut app = App::new();
+    let tall_body = diff_height(tall_pane, &chrome_of(&app), 1, 1);
+    app.apply(Action::ToggleWrap, &mut frame, tall_body)
+        .expect("apply");
+
+    // One frame on the tall pane, which is what leaves a large `shown` behind.
+    // **And it is the last frame before the step**, which is the whole case: a
+    // frame drawn on the small pane first would refresh the count and the gate
+    // would be measuring a state the defect cannot reach. Mutation caught that:
+    // with a small-pane frame in between, removing the clamp survived.
+    let chrome = chrome_of(&app);
+    let before = app
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            body_layout(tall_pane, &chrome, 1, 1),
+        )
+        .expect("view")
+        .top;
+
+    // Then the pane shrinks and a page is asked for, with no frame between.
+    let short_body = diff_height(short_pane, &chrome_of(&app), 1, 1);
+    app.apply(Action::Page(1), &mut frame, short_body)
+        .expect("apply");
+    let after = app
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            body_layout(short_pane, &chrome_of(&app), 1, 1),
+        )
+        .expect("view")
+        .top;
+
+    let stepped = after.row.saturating_sub(before.row);
+    assert!(
+        stepped > 0,
+        "the page step moved nothing, so this measures no step at all"
+    );
+    assert!(
+        stepped <= short_body,
+        "a page on a {short_body}-row body stepped {stepped} rows of the diff, \
+         so the step was measured in the pane the reader has left"
+    );
+}

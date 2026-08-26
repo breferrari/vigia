@@ -8642,12 +8642,13 @@ pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
         .iter()
         .filter_map(|row| match row {
             Row::Line { number, .. } => Some(*number),
-            // **A continuation carries no number and must not be counted**
-            // ([#272](https://github.com/breferrari/vigia/issues/272)), which is a
-            // decision rather than a wildcard sweeping it up: the blank where its
-            // number would be is what says the row is not a new line, so a
-            // `Row::Wrap` that ever carried one would widen the gutter for a
-            // number nobody draws.
+            // **A continuation carries no number**, named rather than swept up by
+            // the arm below ([#272](https://github.com/breferrari/vigia/issues/272)).
+            // It adds no protection today and is not pretending to: both arms
+            // answer `None` and deleting this one changes nothing. What it does is
+            // put the variant in front of the next reader of this function, whose
+            // question will be whether a continuation's absent line number counts
+            // towards the width reserved for line numbers. It does not.
             Row::Wrap { .. } => None,
             _ => None,
         })
@@ -8732,9 +8733,14 @@ struct Printed {
     /// differ exactly where it matters: a run that ends flush with the pane is
     /// indistinguishable by width from one that was cut there.
     clipped: bool,
-    /// Byte offset after the last character that left the walk **inside** `room`.
+    /// Byte offset after the last character that left the walk **inside** `room`,
+    /// or the source's length where the source ran out first.
     ///
-    /// Equal to the source's length when nothing was left over. **What
+    /// The two differ on a straddling glyph at the very end of a line: the walk
+    /// reaches `text.len()` with `column` past `room`, and this reports the length
+    /// rather than the last fitting byte. [`split_at`] refuses that case on its
+    /// own (there is nothing below to draw), so the distinction costs nothing and
+    /// is stated because the first line alone reads as a promise it does not keep. **What
     /// [`split_at`] reads**, and it is on this struct rather than recomputed by a
     /// second walk because the two would then be two spellings of one rule: the
     /// row count is taken from where the split lands and the pane is drawn from
