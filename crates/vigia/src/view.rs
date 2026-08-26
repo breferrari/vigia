@@ -272,24 +272,33 @@ fn plan_with(files: &[vigia_core::FileChange], runs: Runs, top: usize, rows: usi
         if plan.len() == rows {
             break;
         }
-        // **A separator is drawn only where a file can follow it**, which is what
-        // the `+ 1` says: a label naming a run the window has no room to show is a
-        // row of the map spent saying nothing about the map. At one row the list
-        // therefore draws a *file* and no label at all, which is the same rule the
-        // caret follows below `affords_caret`: furniture gives way before the
-        // content does. Written as a pop after the fact it emptied a one-row
-        // list completely, because the only row it had was the label it then took
-        // back.
-        if grouped && run != Some(change.origin) && plan.len() + 1 < rows {
+        // **A run's label is drawn before any of its files, without exception.**
+        //
+        // This used to be the opposite rule: furniture gave way before content
+        // did, so a window with room for one more thing spent it on the file and
+        // dropped the label. That is what put a *staged* file on the last row
+        // under a heading that said `unstaged` (reported from a real worktree,
+        // 2026-08-26). The two outcomes are not comparable, which is why the
+        // reader overruled it. A list one row shorter is merely smaller, and the
+        // rail already says there is more to come; a file under the wrong run's
+        // heading is the list asserting something false about where the reader's
+        // change lives, and no amount of room saved buys that back.
+        //
+        // The degenerate case the old rule was guarding is still handled, just
+        // in the other direction: a one-row grouped window now draws the label
+        // and no file, which says less than it could but nothing untrue.
+        if grouped && run != Some(change.origin) {
+            if plan.len() == rows {
+                break;
+            }
             plan.push(Slot::Group {
                 origin: change.origin,
                 count: runs.count(change.origin),
             });
             run = Some(change.origin);
-        } else if grouped {
-            // The label was skipped for want of room; the run is still entered, or
-            // the next file would try for a label of its own.
-            run = Some(change.origin);
+        }
+        if plan.len() == rows {
+            break;
         }
         plan.push(Slot::File(index));
     }
