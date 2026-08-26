@@ -2127,3 +2127,51 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
          no longer covers where it runs"
     );
 }
+
+/// What each document is allowed to weigh, in bytes.
+///
+/// These are ratchets. Lower one when a pass removes prose; never raise one.
+/// Raising it is the move that has no natural stopping point, which is how the
+/// contract reached half a megabyte with the rule that was supposed to prevent
+/// it already written down.
+///
+/// The targets these are walking toward: 90_000 for the spec, 40_000 each for
+/// the roadmap and the ledger. The spec's is set by it staying read-before-code
+/// for everyone, which makes it the contributor on-ramp and not a barrier routed
+/// around. 90_000 rather than something rounder because a floor of roughly
+/// 72_000 is forced by structures that cannot move: §3's invariant table, whose
+/// row shape `preflight.sh` greps; the ruling lead-ins themselves; and §7, which
+/// has no lead-in structure to lean on.
+const WRITTEN_LAYER_BUDGET: [(&str, usize); 3] = [
+    ("SPEC.md", 582_202),
+    ("ROADMAP.md", 298_185),
+    ("RULINGS.md", 106_735),
+];
+
+/// Each document weighs no more than its budget.
+///
+/// A structural gate rather than a timed one: an exact count, no slack, running
+/// in debug so it holds on every `cargo test --workspace` rather than only on
+/// the release legs.
+#[test]
+fn the_written_layer_stays_under_its_budget() {
+    let root = repo_root();
+    let mut over = Vec::new();
+
+    for (name, ceiling) in WRITTEN_LAYER_BUDGET {
+        let bytes = read(&root.join(name)).len();
+        if bytes > ceiling {
+            over.push(format!(
+                "  {name}: {bytes} bytes against a ceiling of {ceiling}"
+            ));
+        }
+    }
+
+    assert!(
+        over.is_empty(),
+        "the written layer grew past its budget:\n{}\n\nLower the ceiling when prose \
+         comes out. Raising it to fit what was added is the move this gate exists to \
+         refuse.",
+        over.join("\n")
+    );
+}
