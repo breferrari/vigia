@@ -16,6 +16,14 @@
   <g clip-path="url(#win)">
     <!-- title bar -->
     <rect x="8" y="8" width="884" height="46" fill="#161b22"/>
+    <!-- #323: the header's facts wear pills, the loud one on the first
+         segment and the quiet one on the rest, with the separators left on the
+         bar between them. Drawn before the text so the words sit on top, and
+         only at truecolour: the depth ladder drops these backgrounds with
+         every other one, which is why this is the `dark` picture. -->
+    <rect x="94" y="16" width="58" height="30" rx="6" fill="#173042"/>
+    <rect x="160" y="16" width="51" height="30" rx="6" fill="#21262d"/>
+    <rect x="220" y="16" width="92" height="30" rx="6" fill="#21262d"/>
     <circle cx="34" cy="31" r="6" fill="#f85149"/>
     <circle cx="54" cy="31" r="6" fill="#e3b341"/>
     <circle cx="74" cy="31" r="6" fill="#3fb950"/>
@@ -59,14 +67,14 @@
         <rect x="696.5" y="82" width="7" height="8" rx="2" fill="#21262d"/>
       </g>
       <g>
-        <rect x="712.7" y="86" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
-        <rect x="720.8" y="82" width="7" height="8" rx="1.5" fill="#2a8f4f"/>
-        <rect x="728.9" y="76" width="7" height="14" rx="1.5" fill="#3fb950"/>
-        <rect x="737.0" y="70" width="7" height="20" rx="1.5" fill="#56d364"/>
-        <rect x="745.1" y="66" width="7" height="24" rx="1.5" fill="#7ee787"/>
-        <rect x="753.2" y="74" width="7" height="16" rx="1.5" fill="#3fb950"/>
-        <rect x="761.3" y="82" width="7" height="8" rx="1.5" fill="#2a8f4f"/>
-        <rect x="769.4" y="86" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
+        <rect x="712.7" y="86" width="7" height="4" rx="1.5" fill="#39c5cf"/>
+        <rect x="720.8" y="82" width="7" height="8" rx="1.5" fill="#5cd7df"/>
+        <rect x="728.9" y="76" width="7" height="14" rx="1.5" fill="#7ae9f0"/>
+        <rect x="737.0" y="70" width="7" height="20" rx="1.5" fill="#8aecf2"/>
+        <rect x="745.1" y="66" width="7" height="24" rx="1.5" fill="#a8f2f7"/>
+        <rect x="753.2" y="74" width="7" height="16" rx="1.5" fill="#7ae9f0"/>
+        <rect x="761.3" y="82" width="7" height="8" rx="1.5" fill="#5cd7df"/>
+        <rect x="769.4" y="86" width="7" height="4" rx="1.5" fill="#39c5cf"/>
       </g>
       <text class="m grn" x="826.1" y="92" text-anchor="end">+42</text>
       <text class="m red" x="874.7" y="92" text-anchor="end">&#8722;7</text>
@@ -88,14 +96,14 @@
         <rect x="696.5" y="114" width="7" height="8" rx="2" fill="#21262d"/>
       </g>
       <g>
-        <rect x="712.7" y="120" width="7" height="2" rx="1.5" fill="#1f6f3f"/>
-        <rect x="720.8" y="116" width="7" height="6" rx="1.5" fill="#2a8f4f"/>
-        <rect x="728.9" y="112" width="7" height="10" rx="1.5" fill="#3fb950"/>
-        <rect x="737.0" y="116" width="7" height="6" rx="1.5" fill="#2a8f4f"/>
-        <rect x="745.1" y="118" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
-        <rect x="753.2" y="120" width="7" height="2" rx="1.5" fill="#1f6f3f"/>
-        <rect x="761.3" y="120" width="7" height="2" rx="1.5" fill="#1f6f3f"/>
-        <rect x="769.4" y="120" width="7" height="2" rx="1.5" fill="#1f6f3f"/>
+        <rect x="712.7" y="120" width="7" height="2" rx="1.5" fill="#39c5cf"/>
+        <rect x="720.8" y="116" width="7" height="6" rx="1.5" fill="#5cd7df"/>
+        <rect x="728.9" y="112" width="7" height="10" rx="1.5" fill="#7ae9f0"/>
+        <rect x="737.0" y="116" width="7" height="6" rx="1.5" fill="#5cd7df"/>
+        <rect x="745.1" y="118" width="7" height="4" rx="1.5" fill="#39c5cf"/>
+        <rect x="753.2" y="120" width="7" height="2" rx="1.5" fill="#39c5cf"/>
+        <rect x="761.3" y="120" width="7" height="2" rx="1.5" fill="#39c5cf"/>
+        <rect x="769.4" y="120" width="7" height="2" rx="1.5" fill="#39c5cf"/>
       </g>
       <text class="m grn" x="826.1" y="124" text-anchor="end">+11</text>
       <text class="m red" x="874.7" y="124" text-anchor="end">&#8722;3</text>
@@ -174,14 +182,14 @@
         <rect x="696.5" y="192" width="7" height="8" rx="2" fill="#21262d"/>
       </g>
       <g>
-        <rect x="712.7" y="196" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
-        <rect x="720.8" y="192" width="7" height="8" rx="1.5" fill="#2a8f4f"/>
-        <rect x="728.9" y="186" width="7" height="14" rx="1.5" fill="#3fb950"/>
-        <rect x="737.0" y="180" width="7" height="20" rx="1.5" fill="#56d364"/>
-        <rect x="745.1" y="176" width="7" height="24" rx="1.5" fill="#7ee787"/>
-        <rect x="753.2" y="184" width="7" height="16" rx="1.5" fill="#3fb950"/>
-        <rect x="761.3" y="192" width="7" height="8" rx="1.5" fill="#2a8f4f"/>
-        <rect x="769.4" y="196" width="7" height="4" rx="1.5" fill="#1f6f3f"/>
+        <rect x="712.7" y="196" width="7" height="4" rx="1.5" fill="#39c5cf"/>
+        <rect x="720.8" y="192" width="7" height="8" rx="1.5" fill="#5cd7df"/>
+        <rect x="728.9" y="186" width="7" height="14" rx="1.5" fill="#7ae9f0"/>
+        <rect x="737.0" y="180" width="7" height="20" rx="1.5" fill="#8aecf2"/>
+        <rect x="745.1" y="176" width="7" height="24" rx="1.5" fill="#a8f2f7"/>
+        <rect x="753.2" y="184" width="7" height="16" rx="1.5" fill="#7ae9f0"/>
+        <rect x="761.3" y="192" width="7" height="8" rx="1.5" fill="#5cd7df"/>
+        <rect x="769.4" y="196" width="7" height="4" rx="1.5" fill="#39c5cf"/>
       </g>
       <text class="m grn" x="826.1" y="202" text-anchor="end">+42</text>
       <text class="m red" x="874.7" y="202" text-anchor="end">&#8722;7</text>
