@@ -480,7 +480,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The columns left of the diff's scrollbar read as neither wash nor track | [#214](https://github.com/breferrari/vigia/issues/214) |
 | ✅ | The row wash has no left bar, and the reason it was refused expired with #119 | [#218](https://github.com/breferrari/vigia/issues/218) |
 | ⬜ | Text cannot be selected or copied, because the shell holds the mouse | [#177](https://github.com/breferrari/vigia/issues/177) |
-| ⬜ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
+| ✅ | A long line cannot be read to its end, and the ruling against wrapping was made without a toggle in it | [#272](https://github.com/breferrari/vigia/issues/272) |
+| ⬜ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
 | ✅ | The pointer's mark is the loudest weight in the list, and the file the diff is inside has none | [#193](https://github.com/breferrari/vigia/issues/193) |
 | ✅ | The scrollbar cuts a one-column hole through every washed row | [#239](https://github.com/breferrari/vigia/issues/239) |
 | ⬜ | A wide pane repeats the band's samples rather than resolving them | [#241](https://github.com/breferrari/vigia/issues/241) |
@@ -496,6 +497,8 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | A system palette built from the terminal's own colours | [#333](https://github.com/breferrari/vigia/issues/333) |
 | ✅ | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
 | ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
+
+**[#272](https://github.com/breferrari/vigia/issues/272) shipped 2026-08-26, and the ruling it produced was reversed the same day by the reader.** `w` wraps a content line onto the row below, off on launch, `wrap = on` in `~/.config/vigia/config`, and named on the gestures sheet. The ruling is `SPEC.md` §11.2 **B19**. **It shipped capped at two rows for one day and the cap was nobody's decision**: a session read `delta --wrap-max-lines`' default and wrote it in as settled. At eighty columns that showed two thirds of a long line, which is the defect the row was opened on. It wraps as far as the pane allows now. The work under it was a units split: a row of the diff and a row of the terminal stopped being the same number, and five sites went on comparing one against the other. Five audit rounds found them one at a time.
 
 **[#313](https://github.com/breferrari/vigia/issues/313) was the next row to take and shipped 2026-08-25.** The pane could not see staged files at all, because `SPEC.md` §11.1's opening contract was the working tree against the index, so an agent that staged its own work emptied it. `a` now draws the staged run beside the unstaged one as two labelled runs, with the staged rows marked; the ruling is §11.2 **B17**, and the second half the issue left open (how to tell one from the other on screen) was ruled by the reader as a union rather than a swap. The default is unchanged and off, so [#50](https://github.com/breferrari/vigia/issues/50) is narrowed rather than answered.
 
