@@ -4,7 +4,7 @@ Research dossier for [#318](https://github.com/breferrari/vigia/issues/318). Thi
 
 The mandate, from the reader: lightweight and fast stays, but the ambition ceiling comes off. It is 2026 and this is a CLI; cutting-edge and cool is possible. Spec rulings are dated evidence with checkable reasons, not walls. Survey broadly and be thorough.
 
-Status: **complete, 2026-08-25.** Section 5 carries the rulings; SPEC.md §11.2 B18 is the authority.
+Status: **complete, 2026-08-25.** Section 5 carries the rulings; SPEC.md §11.2 B18 is the authority. As the builds land, their captures join `assets/`: `321-washes.png` is #321's delta-formula diff, `322-gradients.png` is #322's Oklab-ramped sparklines and band over it, both captured headless from a tmux pane.
 
 ## 1. Survey of the world
 
