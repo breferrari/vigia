@@ -23,6 +23,13 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+// **The screen selectors, under a second name.** `support` is already bound to
+// `vigia-core`'s fixture module above, and this file needs both: a repository to
+// drive and a cell walk to read the pane back with. See `screen::rows_of` for why
+// that walk is shared rather than written here.
+#[path = "support/mod.rs"]
+mod screen;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
@@ -110,15 +117,15 @@ fn drawn(
         &chrome,
     );
     let laid_regions = regions(PANE, &chrome, &view);
-    let rows = (laid_regions.diff.top..laid_regions.diff.top + laid_regions.diff.rows)
-        .map(|row| {
-            let mut text = String::new();
-            for col in 0..PANE.width {
-                text.push_str(buf[(col, row)].symbol());
-            }
-            text.trim_end().to_owned()
-        })
-        .collect();
+    let rows = screen::rows_of(
+        &buf,
+        Rect::new(
+            0,
+            laid_regions.diff.top,
+            PANE.width,
+            laid_regions.diff.rows as u16,
+        ),
+    );
     (view, rows)
 }
 

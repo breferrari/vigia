@@ -2475,6 +2475,17 @@ impl View {
         let cost = |at: usize| 1 + usize::from(splits[at].is_some());
         let total: usize = (0..splits.len()).map(cost).sum();
 
+        // **Nothing on this screen wraps, so nothing below it has anything to
+        // do.** The ordinary screenful of an ordinary diff, and it is worth an
+        // early return rather than falling through: the walk below rebuilds the
+        // row vector unconditionally, so without this a reader with `w` on paid
+        // one `Vec<Row>` allocation and one deallocation on every frame that
+        // draws no long line. The `!wrap` and `content == 0` arms above are the
+        // same shape and this is the third of them.
+        if total == splits.len() {
+            return false;
+        }
+
         // **The bottom clamp, in the units it now has to be in.**
         //
         // [`Self::last_screenful`] and `collect`'s overshoot branch both rest the
@@ -2508,22 +2519,21 @@ impl View {
             }
         }
 
-        // Where the trim leaves the reader, in the units a `Position` is in. A
-        // [`Row::Gap`] is a block's last row ([#165](https://github.com/breferrari/vigia/issues/165)),
-        // so passing one is what moves the viewport into the next file.
         let was = self.top.file;
-        for row in &self.rows[..from] {
-            if matches!(row, Row::Gap) {
-                self.top.file += 1;
-                self.top.row = 0;
-            } else {
-                self.top.row += 1;
-            }
-        }
-
         let mut out: Vec<Row> = Vec::with_capacity(height);
         for (at, row) in self.rows.drain(..).enumerate() {
             if at < from {
+                // **Where the trim leaves the reader, in the units a `Position`
+                // is in**, folded into the walk that discards the rows rather
+                // than taken as a pass of its own. A [`Row::Gap`] is a block's
+                // last row ([#165](https://github.com/breferrari/vigia/issues/165)),
+                // so passing one is what moves the viewport into the next file.
+                if matches!(row, Row::Gap) {
+                    self.top.file += 1;
+                    self.top.row = 0;
+                } else {
+                    self.top.row += 1;
+                }
                 continue;
             }
             if out.len() >= height {

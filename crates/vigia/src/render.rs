@@ -107,7 +107,7 @@ const CONTINUES: &str = "›";
 /// keeps the signal and the glyph adds the one fact this row has to carry.
 ///
 /// **It needs no rung**, for the reason [`CONTINUES`] and [`ELIDED`] need none.
-const WRAPPED: &str = "↳";
+const WRAPPED: char = '↳';
 
 /// The footer's left-hand side when there is nothing wrong, widest rung first.
 ///
@@ -3480,6 +3480,15 @@ pub struct Body {
     /// agent's edit lengthening a file would reflow every wrapped row on screen.
     /// The honest cost is that on a pane with no bar a wrapped line breaks up to
     /// [`BAR_WIDTH`] columns early, and a stable break is worth two columns.
+    ///
+    /// **The road not taken, recorded so the next reader does not re-derive it.**
+    /// [`crate::App::view`]'s only caller holds the pane's `Rect` when it builds
+    /// this, so passing that `Rect` down and calling [`Body::areas`] there would
+    /// keep this type row-only and need no field at all. It is refused on churn
+    /// rather than on design: `App::view` has 132 call sites across the test
+    /// suite, and a parameter added to all of them to avoid one field is a worse
+    /// trade than the field. If this seam is ever revisited, that is the deeper
+    /// form.
     pub diff_width: usize,
     /// Pages the gestures sheet takes on this pane, `Some(0)` on a pane too small
     /// to draw one, and **`None` when nothing measured it**.
@@ -3962,7 +3971,16 @@ impl Body {
             list,
             rule,
             diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
-            diff_width: 0,
+            // **Carried, for [`Body::sheet_pages`]' reason two fields down**, and
+            // it was `0` for one commit ([#272](https://github.com/breferrari/vigia/issues/272)).
+            // A clamp re-divides rows and never moves a column, so the width
+            // [`Body::split`] measured is still this pane's. Zeroing it here was
+            // not merely stale: `render` always clamps, so the width reaching its
+            // own `debug_assert!` was `0` on every stacked pane, which satisfies
+            // that assertion's *nobody measured* arm and made the one check over
+            // this field vacuous in the ordinary case. The shape §7 keeps finding,
+            // introduced by the change that added the check.
+            diff_width: self.diff_width,
             rail: false,
             // **Carried, unlike the two constructors above.** A clamp re-divides
             // the rows this body already has and does not re-measure the pane, so
@@ -8377,9 +8395,9 @@ impl Painter<'_> {
         indent: usize,
     ) {
         let (diff, sigil) = match kind {
-            LineKind::Added => (self.theme.added, "+"),
-            LineKind::Removed => (self.theme.removed, "-"),
-            LineKind::Context => (self.theme.context, " "),
+            LineKind::Added => (self.theme.added, '+'),
+            LineKind::Removed => (self.theme.removed, '-'),
+            LineKind::Context => (self.theme.context, ' '),
         };
         // **`None` is a continuation, and it changes exactly two cells**
         // ([#272](https://github.com/breferrari/vigia/issues/272)): the sigil
@@ -8488,7 +8506,7 @@ impl Painter<'_> {
         // `.min` arm is unchanged and still has room: two fixed runs plus at most
         // `room - 2` content runs is `room`.
         let mut runs = Vec::with_capacity((spans.len() + 3).min(room + 2));
-        runs.push((sigil.to_owned(), sigil_style));
+        runs.push((sigil.to_string(), sigil_style));
 
         // **The gap `assets/preview.svg` has drawn since before any of this
         // existed** ([#164](https://github.com/breferrari/vigia/issues/164)).
@@ -8813,6 +8831,21 @@ pub(crate) fn indent_of(text: &str, content: usize) -> usize {
     column.min(content / 2)
 }
 
+/// Write `times` copies of `c` into the walk's output, where there is one.
+///
+/// **Named because the guard is what varies and the payload is not**
+/// ([#272](https://github.com/breferrari/vigia/issues/272)). Every arm of
+/// [`walk_printable`]'s match ends in the same `if let Some(out)`, and four
+/// copies of a conditional is four chances for one of them to stop being
+/// conditional: an arm that pushed unguarded would allocate on the measuring
+/// path, which is the one thing [`split_at`] exists to avoid, and nothing drawn
+/// would change.
+fn emit(out: &mut Option<String>, c: char, times: usize) {
+    if let Some(out) = out.as_mut() {
+        out.extend(std::iter::repeat_n(c, times));
+    }
+}
+
 /// [`printable`] and [`split_at`] as one walk, with the string made optional.
 ///
 /// **One function because the two questions are one rule.** What the painter
@@ -8893,28 +8926,20 @@ fn walk_printable(text: &str, column: &mut usize, room: usize, out: Option<Strin
             '\u{fe0f}' => {}
             '\t' => {
                 let stop = TAB_STOP - (*column % TAB_STOP);
-                if let Some(out) = out.as_mut() {
-                    out.extend(std::iter::repeat_n(' ', stop));
-                }
+                emit(&mut out, ' ', stop);
                 *column += stop;
             }
             c if c.is_control() => {
-                if let Some(out) = out.as_mut() {
-                    out.push(UNPRINTABLE);
-                }
+                emit(&mut out, UNPRINTABLE, 1);
                 *column += 1;
             }
             c if c.is_ascii() => {
-                if let Some(out) = out.as_mut() {
-                    out.push(c);
-                }
+                emit(&mut out, c, 1);
                 *column += 1;
                 (cluster, cluster_width) = (i, 1);
             }
             c => {
-                if let Some(out) = out.as_mut() {
-                    out.push(c);
-                }
+                emit(&mut out, c, 1);
                 // Only the non-ASCII tail pays for a width lookup, which keeps
                 // the common line off the measuring path entirely.
                 let end = i + c.len_utf8();
