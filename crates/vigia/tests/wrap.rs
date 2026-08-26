@@ -1356,16 +1356,51 @@ fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
         view.rows.len()
     );
 
-    for gesture in [Action::Scroll(1), Action::Scroll(-1)] {
-        app.apply(gesture, &mut frame, height).expect("apply");
-        let (view, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
-        assert!(
-            matches!(view.rows.first(), Some(Row::File(_))),
-            "a diff shorter than the pane in its own rows lost its heading off \
-             the top, and there is nothing above to scroll back to:\n{}",
-            rows.join("\n")
-        );
-    }
+    // **Down one, then back.** Scrolling down is *supposed* to take the heading
+    // off the top; the defect was that it could not be brought back, because the
+    // walk restarted to its own floor and trimmed from the front, where `k` at
+    // row zero moves nothing. So the claim is the return, not the departure.
+    app.apply(Action::Scroll(1), &mut frame, height)
+        .expect("apply");
+    let (down, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        down.top.row, 1,
+        "one `j` did not move the top, so the return below proves nothing"
+    );
+
+    app.apply(Action::Scroll(-1), &mut frame, height)
+        .expect("apply");
+    let (back, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        back.top.row, 0,
+        "`k` did not come back to the top of the diff"
+    );
+    assert!(
+        matches!(back.rows.first(), Some(Row::File(_))),
+        "the reader came back to the top of the diff and the heading was still \
+         trimmed off it, with nothing above to scroll to:\n{}",
+        rows.join("\n")
+    );
+
+    // **And the overshoot road to the same floor**, which the two gestures above
+    // do not take. Scrolling far past the end of a diff this short overshoots the
+    // last file rather than running the walk short, and that path restarts through
+    // `last_screenful` too: it is the second of the two places that can land the
+    // reader on the walk's own floor with more display rows than the pane holds.
+    app.apply(Action::Scroll(10_000), &mut frame, height)
+        .expect("apply");
+    let (over, rows) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        over.top.row, 0,
+        "a diff shorter than the pane in its own rows did not clamp back to its \
+         own top"
+    );
+    assert!(
+        matches!(over.rows.first(), Some(Row::File(_))),
+        "scrolling past the end of a diff shorter than the pane trimmed its \
+         heading off the top, and there is nothing above to scroll to:\n{}",
+        rows.join("\n")
+    );
 }
 
 #[test]
@@ -1431,14 +1466,25 @@ fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
             continue;
         }
         served += 1;
-        // The landing put the viewport on a `@@` header, and that header is what
-        // the reader is meant to be looking at. A trim would put a content row of
-        // the hunk above it on the top row instead.
+        // **I5's promise is that the change is drawn, not that a particular row
+        // is on top**, which is #257's own ruling and the reason a landing that
+        // runs short is allowed to be superseded by the back-up that fills the
+        // pane. So the assertion is the promise: a frame that served a landing
+        // draws the change it landed for.
+        // **A changed line, either side of it.** The oracle was the added
+        // lines' own text at first, and that is not the change: a hunk draws its
+        // removals before its additions, so a pane resting on the removed side is
+        // showing the reader exactly what the agent did and the gate called it a
+        // failure. I5 says the viewport goes to what changed, not to the half of
+        // it that is green.
         assert!(
-            matches!(view.rows.first(), Some(Row::Hunk { .. })),
-            "at {rows} rows a served landing was trimmed off its own row: the top \
-             is {:?}",
-            view.rows.first()
+            view.rows.iter().any(|row| matches!(
+                row,
+                Row::Line { kind, .. } | Row::Wrap { kind, .. }
+                    if *kind != vigia_core::LineKind::Context
+            )),
+            "at {rows} rows a served landing drew no changed line at all, so the \
+             frame that exists to show what just changed does not show it"
         );
     }
     assert!(
