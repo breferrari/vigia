@@ -7,11 +7,14 @@
 # skips as failure turns the required check red on every push to a draft.
 #
 # Usage: ci-complete.sh <draft> <result>...
-#   draft   "true" when the event is a draft pull request
+#   draft   "true" for a draft pull request. Empty on a push, where the event
+#           carries no pull request at all, and anything but "true" means the
+#           legs were expected to run.
 #   result  one leg's result, in workflow order
 set -eu
 
-draft="${1:?draft flag}"
+[ "$#" -ge 1 ] || { echo "::error::no arguments were passed"; exit 1; }
+draft="$1"
 shift
 
 [ "$#" -gt 0 ] || { echo "::error::no leg results were passed"; exit 1; }
