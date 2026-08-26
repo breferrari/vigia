@@ -2025,6 +2025,13 @@ fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
     const OK: [&str; 5] = ["success"; 5];
 
     assert!(ci_complete("false", &OK), "a full green run has to pass");
+    // A push carries no pull request, so the workflow passes an empty draft
+    // flag. Reading that as "not a draft" is the whole of it, and reading it as
+    // an error turned every push to `main` red.
+    assert!(
+        ci_complete("", &OK),
+        "a push has no pull request and its draft flag is empty, which is not an error"
+    );
     assert!(
         ci_complete("true", &["skipped"; 5]),
         "a draft skips every leg by design and the matrix runs on ready_for_review"
@@ -2056,6 +2063,16 @@ fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
             ["success", "cancelled", "success", "success", "success"],
             "a cancelled leg never reported and is not a pass",
         ),
+        (
+            "",
+            ["skipped", "skipped", "skipped", "skipped", "skipped"],
+            "a push is never a draft, so legs that all skipped on one did not run and should have",
+        ),
+        (
+            "",
+            ["success", "failure", "success", "success", "success"],
+            "a failing leg on a push fails the gate like any other",
+        ),
     ] {
         assert!(!ci_complete(draft, &legs), "{why}");
     }
@@ -2076,6 +2093,14 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
     assert!(
         ci.contains(".github/scripts/ci-complete.sh"),
         "ci.yml does not run ci-complete.sh, so its judgement is gated in a test and unused in CI"
+    );
+    // The gate above drives the script with whatever a test passes. This pins
+    // the shape production actually sends, which is where it broke: on a push
+    // the expression below expands to nothing at all.
+    assert!(
+        ci.contains("github.event.pull_request.draft }}'"),
+        "ci.yml does not pass the draft expression to the script, so the gate's draft \
+         cases are testing an argument production never sends"
     );
     for leg in ["lint", "test", "benches", "pure-rust", "musl"] {
         let arg = format!("needs.{leg}.result");
