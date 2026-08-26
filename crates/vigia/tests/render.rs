@@ -8144,3 +8144,224 @@ fn nothing_claims_columns_the_sheet_is_drawn_over() {
         }
     }
 }
+
+/// The continuation mark says *this line has more than the pane can show*, so
+/// it may only ever sit against content that reached it
+/// ([#340](https://github.com/breferrari/vigia/issues/340), reported from a
+/// real pane: *"the arrow on the right showing there's more to the line than
+/// what's been displayed is going off as I scroll"*, with the mark floating
+/// out past the end of short lines).
+///
+/// A property over many line shapes rather than one fixture: the report is
+/// "sometimes", and the shapes that break an invariant like this are the ones
+/// nobody thinks to write down. Driven through `Terminal` so the two-buffer
+/// diff is in the path, and scrolled, because that is the reported trigger.
+#[test]
+fn a_continuation_mark_only_sits_against_content_that_reached_it() {
+    let theme = vigia::Theme::dark();
+    let shown = chrome();
+    let width = 60u16;
+    let mut terminal = Terminal::new(TestBackend::new(width, 14)).expect("terminal");
+
+    // Lengths either side of the pane's own width, plus multibyte content: a
+    // VS16 emoji, an em dash, and a wide CJK character, because each measures
+    // differently from its byte length.
+    let bodies: Vec<String> = (0..40)
+        .map(|i| {
+            let filler = "x".repeat(i * 3 % 90);
+            match i % 4 {
+                0 => format!("plain {filler}"),
+                1 => format!("warn \u{26a0}\u{fe0f} {filler}"),
+                2 => format!("dash \u{2014} {filler}"),
+                _ => format!("wide \u{5e83}\u{5e83} {filler}"),
+            }
+        })
+        .collect();
+
+    let mut marks: Vec<(usize, u16, usize, String)> = Vec::new();
+    for start in 0..bodies.len().saturating_sub(5) {
+        let rows: Vec<Row> = std::iter::once(file("src/a.rs", 42, 7))
+            .chain(std::iter::once(Row::Hunk {
+                old_start: 1,
+                old_lines: 5,
+                new_start: 1,
+                new_lines: 5,
+            }))
+            .chain(
+                bodies[start..start + 5]
+                    .iter()
+                    .enumerate()
+                    .map(|(n, body)| {
+                        // Real spans, chunked on character boundaries the way a
+                        // grammar emits them: the mark is decided while walking
+                        // spans, so a fixture with none never reaches the code
+                        // that decides it.
+                        let mut spans = Vec::new();
+                        let mut taken = 0usize;
+                        for (at, ch) in body.char_indices() {
+                            if at >= taken + 7 {
+                                spans.push(Span {
+                                    len: at - taken,
+                                    class: Class::Plain,
+                                });
+                                taken = at;
+                            }
+                            let _ = ch;
+                        }
+                        if taken < body.len() {
+                            spans.push(Span {
+                                len: body.len() - taken,
+                                class: Class::Keyword,
+                            });
+                        }
+                        Row::Line {
+                            kind: LineKind::Added,
+                            number: n as u32 + 1,
+                            text: body.clone(),
+                            spans,
+                            emph: Vec::new(),
+                        }
+                    }),
+            )
+            .collect();
+        let view = View {
+            rows,
+            files: 1,
+            ..two_regions(1)
+        };
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(
+                    f.buffer_mut(),
+                    area,
+                    &view,
+                    &theme,
+                    Glyphs::default(),
+                    &shown,
+                );
+            })
+            .expect("draw");
+        let backend = terminal.backend().clone();
+
+        for y in 0..14u16 {
+            let text = row_text(&backend, y);
+            let Some(at) = text.find('\u{203a}') else {
+                continue;
+            };
+            let before: String = text[..at].chars().rev().take(2).collect();
+            assert!(
+                !before.starts_with(' '),
+                "at scroll {start}, row {y} shows a continuation mark with blank \
+                 space before it, so it survived a line that no longer needs \
+                 one:\n{text:?}"
+            );
+
+            // The reported symptom is the mark *moving*: every content row is
+            // clipped at the same column, so every mark a frame draws has to
+            // land in that one column. A mark that sits anywhere else has been
+            // pushed by something earlier on its row, which is what a reader
+            // sees as the arrow wandering out of line while they scroll.
+            marks.push((start, y, text[..at].chars().count(), text.clone()));
+        }
+    }
+
+    let first = marks.first().map_or(0, |(_, _, at, _)| *at);
+    assert!(
+        marks.len() > 20,
+        "the loop drew {} marks, too few to be testing the invariant",
+        marks.len()
+    );
+    if let Some((start, y, at, text)) = marks.iter().find(|(_, _, at, _)| *at != first) {
+        panic!(
+            "continuation marks do not share a column: row {y} at scroll {start} \
+             puts one at column {at} where every earlier mark used {first}, so \
+             the mark drifts as the reader scrolls:\n{text:?}"
+        );
+    }
+}
+
+/// **No emoji presentation selector reaches the buffer.**
+///
+/// Reported against a real worktree on 2026-08-26: a file drew correctly until
+/// the line holding a warning emoji scrolled into view, and from there every
+/// row of that file broke. Spaces went missing (`row yet` drew as `rownyet`)
+/// and the continuation mark doubled.
+///
+/// The cause is in `ratatui-core` 0.1.2, not here. `U+FE0F` makes the
+/// character before it a two-column emoji, and `ratatui` claims a second cell
+/// for the pair. Its buffer diff has a dedicated path for that second cell
+/// which emits it whenever its symbol changed, without moving the cursor
+/// first, on the assumption that the terminal has not advanced past it. A
+/// terminal that drew the emoji two columns wide *has* advanced past it, so
+/// the write lands one column late and pushes the rest of the row right.
+///
+/// Confirmed on the wire rather than by reading: the bytes vigia emitted
+/// carried a bare style reset and a space directly after the emoji with no
+/// cursor move between them, and the row overflowed by exactly one column.
+///
+/// **The buffer is the only seam that can hold this.** `TestBackend` records
+/// cells and never replays the diff against a terminal that advances a cursor,
+/// so a rendered-row assertion draws the row *correctly* under the defect and
+/// proves nothing. What the fix actually guarantees, and what this pins, is
+/// that the selector never reaches a cell, which is what keeps `ratatui` off
+/// the broken path.
+#[test]
+fn no_emoji_presentation_selector_reaches_the_buffer() {
+    let theme = vigia::Theme::dark();
+    let shown = chrome();
+    let mut terminal = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+
+    let body = "  ? `\u{26a0}\u{fe0f} **Gym cashback**: no row yet in [[x]]";
+    let rows = vec![
+        file("a.ts", 1, 0),
+        Row::Hunk {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 1,
+        },
+        Row::Line {
+            kind: LineKind::Added,
+            number: 47,
+            text: body.to_string(),
+            spans: Vec::new(),
+            emph: Vec::new(),
+        },
+    ];
+    let view = View {
+        rows,
+        files: 1,
+        ..two_regions(1)
+    };
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &shown,
+            );
+        })
+        .expect("draw");
+    let backend = terminal.backend().clone();
+
+    let all: Vec<String> = (0..14u16).map(|y| row_text(&backend, y)).collect();
+    let drawn = all
+        .iter()
+        .find(|text| text.contains("Gym"))
+        .unwrap_or_else(|| panic!("the emoji row was never drawn:\n{all:#?}"));
+    assert!(
+        !drawn.contains('\u{fe0f}'),
+        "a presentation selector reached the buffer, so `ratatui` claims a \
+         second cell for the pair and its diff writes that cell without \
+         moving the cursor, shifting every column after it:\n{drawn:?}"
+    );
+    assert!(
+        drawn.contains('\u{26a0}'),
+        "the selector was dropped and took its glyph with it:\n{drawn:?}"
+    );
+}

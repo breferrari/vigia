@@ -2008,19 +2008,22 @@ fn browsing_reaches_the_bottom_of_a_grouped_list() {
     );
 }
 
-/// **A window with one row draws a file, not a label with nothing under it.**
+/// **A one-row grouped window draws the run's label, not an unlabelled file.**
 ///
-/// A separator is only worth a row where a file can follow it: a label naming a
-/// run the window has no room to show is a row of the map spent saying nothing
-/// about the map. Written as a pop after the fact — emit the label, then take it
-/// back when no file fits — a one-row grouped list came out **empty**, because the
-/// only row it had was the label it then retracted. The region drew nothing at all
-/// while `Body::split` had given it a row.
+/// This test used to assert the opposite, on the rule that furniture gives way
+/// before content does. The reader overruled that on 2026-08-26 after a real
+/// worktree drew a *staged* file on the last row beneath a heading that said
+/// `unstaged`: the saved row is not worth the list stating the wrong run for a
+/// change. See `no_file_is_ever_planned_without_its_own_runs_label`, which is
+/// the general form; this one pins the narrowest case, where the whole window
+/// is the label.
 ///
-/// It is the gutter's rule one element over, and the caret's: the mark gives way
-/// before the content does.
+/// The original defect this test was written for is still closed, and that is
+/// the part to preserve: a one-row grouped list must not come out **empty**.
+/// The label is pushed and kept, never emitted and retracted, so the region
+/// always draws the row `Body::split` gave it.
 #[test]
-fn a_one_row_list_draws_a_file_rather_than_a_label() {
+fn a_one_row_list_draws_its_runs_label() {
     let scratch = two_runs("list-one-row");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -2037,9 +2040,10 @@ fn a_one_row_list_draws_a_file_rather_than_a_label() {
             plan.len()
         );
         assert!(
-            matches!(plan[0], vigia::Slot::File(at) if at == top),
-            "a one-row list from top {top} spent its only row on a label: \
-             {plan:?}"
+            matches!(plan[0], vigia::Slot::Group { .. }),
+            "a one-row list from top {top} drew a file with no run label above \
+             it, which files the change under whatever heading happens to be \
+             on screen: {plan:?}"
         );
     }
 
@@ -2414,4 +2418,56 @@ fn dragging_a_grouped_list_to_the_bottom_reaches_the_last_file() {
          last file of the staged run cannot be reached with the pointer",
         view.list_top
     );
+}
+
+/// **A file is never drawn without the label of the run it belongs to.**
+///
+/// Reported from a real worktree on 2026-08-26: the window's last row held a
+/// *staged* file while the only label above it said `unstaged`, so the list
+/// stated something false about where that change lived. The cause was the
+/// old rule that furniture gives way before content does, which dropped the
+/// run label whenever the window had room for one more thing and spent it on
+/// the file instead.
+///
+/// The reader overruled it, and the reason is that the two outcomes are not
+/// comparable. A list one row shorter is merely smaller, and the rail already
+/// says there is more; a file sitting under the wrong run's heading is the
+/// list asserting the wrong thing about the reader's index. So the label now
+/// comes first and the file follows only if a row is left.
+///
+/// Swept over every `(top, rows)` the fixture reaches, because the defect only
+/// appears where a run boundary meets the bottom edge of the window.
+#[test]
+fn no_file_is_ever_planned_without_its_own_runs_label() {
+    let scratch = two_runs("list-labelled");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let files = frame.files();
+
+    let mut saw_a_boundary = false;
+    for top in 0..files.len() {
+        for rows in 1..=files.len() + 3 {
+            let plan = vigia::list_plan(files, top, rows);
+            let mut labelled: Option<vigia_core::Origin> = None;
+            for slot in &plan {
+                match slot {
+                    vigia::Slot::Group { origin, .. } => labelled = Some(*origin),
+                    vigia::Slot::File(at) => {
+                        let origin = files[*at].origin;
+                        saw_a_boundary |= labelled.is_some();
+                        assert_eq!(
+                            labelled,
+                            Some(origin),
+                            "at top {top} with {rows} rows, file {at} is {origin:?} \
+                             but the label above it says {labelled:?}, so the list \
+                             files the change under the wrong run:\n{plan:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(saw_a_boundary, "the sweep never drew a label at all");
 }
