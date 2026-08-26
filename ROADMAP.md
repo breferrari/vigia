@@ -485,6 +485,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The pointer's mark is the loudest weight in the list, and the file the diff is inside has none | [#193](https://github.com/breferrari/vigia/issues/193) |
 | ✅ | The scrollbar cuts a one-column hole through every washed row | [#239](https://github.com/breferrari/vigia/issues/239) |
 | ⬜ | A wide pane repeats the band's samples rather than resolving them | [#241](https://github.com/breferrari/vigia/issues/241) |
+| ⬜ | The pulse leaves the last edited file after a second, and it used to stay | [#345](https://github.com/breferrari/vigia/issues/345) |
 | ✅ | The glance elements draw spikes where the picture draws a wave | [#242](https://github.com/breferrari/vigia/issues/242) |
 | ✅ | The pane draws with a fraction of the vocabulary its own font guarantees | [#318](https://github.com/breferrari/vigia/issues/318) |
 | ✅ | Every hue is a theme key, and the default theme is the showcase | [#320](https://github.com/breferrari/vigia/issues/320) |
