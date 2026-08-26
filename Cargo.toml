@@ -49,7 +49,7 @@ vigia-core = { path = "crates/vigia-core", version = "0.31.0" }
 # `default-features = false` is deliberate. gix's defaults pull in credentials,
 # mailmap, blame, worktree-archive and worktree-mutation, none of which a
 # read-only monitor uses, and all of which cost startup against I7.
-gix = { version = "0.86", default-features = false, features = [
+gix = { version = "0.87", default-features = false, features = [
     "status",
     "max-performance-safe",
     "sha1",
