@@ -88,6 +88,8 @@ pub struct App {
     masthead: bool,
     /// Whether listed paths carry a file-type icon. Config only; no gesture.
     icons: bool,
+    /// Whether listed paths are OSC 8 hyperlinks. Config only; on by default.
+    links: bool,
     /// Whether the reader has asked for the pinned list beside the diff.
     ///
     /// **A request rather than a layout**, and the distinction is the one
@@ -331,6 +333,11 @@ impl Default for App {
             // Derived: an unpressed, unconfigured shell draws no icons, and off
             // is byte-identical to every version before the key existed.
             icons: false,
+            // On, which is `Config`'s own hand-written default and the one
+            // field of this pane whose absence-of-a-file state is not "off":
+            // OSC 8 degrades silently, so the link costs a reader nothing
+            // anywhere it is not understood (#326).
+            links: true,
             staged_files: 0,
             // Derived, and for once trivially so: nobody has pressed `?`.
             sheet: None,
@@ -396,6 +403,7 @@ impl App {
             single: config.single,
             staged: config.staged,
             icons: config.icons,
+            links: config.links,
             ..Self::new()
         }
     }
@@ -546,6 +554,7 @@ impl App {
         branch: Option<&str>,
         pointing: Pointing,
         elsewhere: usize,
+        root: &str,
     ) -> Chrome {
         let Pointing {
             pressed,
@@ -576,6 +585,8 @@ impl App {
             masthead: self.masthead,
             rail: self.rail,
             icons: self.icons,
+            links: self.links,
+            root: root.to_owned(),
             sheet: self.sheet,
             // `None` until a frame has completed, which is the honest first
             // paint: there is no p99 of nothing. The status bar simply has no
@@ -1576,6 +1587,7 @@ mod tests {
                 scrolling: Some((Grabbed::List, -1)),
             },
             0,
+            "",
         );
 
         assert_eq!(chrome.pressed, Some((79, 5)), "the pressed cell");
@@ -1599,13 +1611,13 @@ mod tests {
         // beside it would let this pass while the chrome dropped the field.
         let mut app = App::new();
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0).mode,
+            app.chrome("fixture", None, Pointing::default(), 0, "").mode,
             Mode::Watching
         );
 
         app.watch_lost();
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0).mode,
+            app.chrome("fixture", None, Pointing::default(), 0, "").mode,
             Mode::Lost
         );
 
@@ -1618,7 +1630,7 @@ mod tests {
         app.clear_notice();
         app.warn("a file vanished between being named and being read");
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0).mode,
+            app.chrome("fixture", None, Pointing::default(), 0, "").mode,
             Mode::Lost
         );
     }
@@ -1630,13 +1642,14 @@ mod tests {
         // that nothing invents one when there is none.
         let app = App::new();
         assert_eq!(
-            app.chrome("fixture", Some("main"), Pointing::default(), 0)
+            app.chrome("fixture", Some("main"), Pointing::default(), 0, "")
                 .branch
                 .as_deref(),
             Some("main")
         );
         assert_eq!(
-            app.chrome("fixture", None, Pointing::default(), 0).branch,
+            app.chrome("fixture", None, Pointing::default(), 0, "")
+                .branch,
             None
         );
     }

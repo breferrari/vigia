@@ -912,9 +912,13 @@ impl Pane<'_> {
         // branch*; the header names it always, so the guard's premise went and
         // the wrapper with it.
         self.branch = worktree.branch();
-        let chrome = self
-            .app
-            .chrome(&self.name, self.branch.as_deref(), Pointing::default(), 0);
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            Pointing::default(),
+            0,
+            "",
+        );
         self.body = body_layout(
             self.area,
             &chrome,
@@ -936,9 +940,13 @@ impl Pane<'_> {
                 self.app.warn(e.to_string());
             }
         }
-        let chrome = self
-            .app
-            .chrome(&self.name, self.branch.as_deref(), Pointing::default(), 0);
+        let chrome = self.app.chrome(
+            &self.name,
+            self.branch.as_deref(),
+            Pointing::default(),
+            0,
+            "",
+        );
         let _regions = regions(self.area, &chrome, &self.view);
         render(
             &mut self.buffer,
@@ -954,7 +962,13 @@ impl Pane<'_> {
     /// see it.
     fn readout(&self) -> Option<Duration> {
         self.app
-            .chrome(&self.name, self.branch.as_deref(), Pointing::default(), 0)
+            .chrome(
+                &self.name,
+                self.branch.as_deref(),
+                Pointing::default(),
+                0,
+                "",
+            )
             .frame
     }
 }

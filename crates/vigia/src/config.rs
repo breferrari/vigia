@@ -65,7 +65,7 @@ pub const CONFIG_FILE: &str = ".config/vigia/config";
 ///
 /// Four fields rather than a map, because the set is closed by a ruling and a
 /// map would let [`parse`] accept a key nothing reads.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
     /// Draw the churn band at the top. `m`.
     pub masthead: bool,
@@ -105,6 +105,34 @@ pub struct Config {
     /// byte-identical to every version before it, which `tests/render.rs`
     /// holds as a buffer comparison.
     pub icons: bool,
+    /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
+    ///
+    /// **The first key whose default is on**, and the reasoning is B18's
+    /// ([#326](https://github.com/breferrari/vigia/issues/326)): the 2026
+    /// support matrix shows OSC 8 degrading silently everywhere it is not
+    /// understood, so there is nothing to protect a reader from and the key
+    /// exists to turn a nicety off, not to discover it. That inverts this
+    /// struct's `Default`, which is now written by hand and says so.
+    pub links: bool,
+}
+
+/// Every toggle off and the links on, which is the shipped pane.
+///
+/// **Hand-written because `links` inverted the rule** the derive encoded: the
+/// derived `Default` was "everything off equals the pane every version drew",
+/// and `links` defaults on for its own field's reason. `App::new` and this must
+/// stay one answer; `tests/config.rs` pins the pair.
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            masthead: false,
+            rail: false,
+            single: false,
+            staged: false,
+            icons: false,
+            links: true,
+        }
+    }
 }
 
 /// Every key this file accepts, in the order the gestures sheet lists them.
@@ -130,7 +158,7 @@ pub struct Config {
 ///
 /// That is a gate and a runtime check rather than the type system, and saying so
 /// is the difference between a check and a claim that suppresses one.
-pub const KEYS: [&str; 5] = ["masthead", "rail", "single", "staged", "icons"];
+pub const KEYS: [&str; 6] = ["masthead", "rail", "single", "staged", "icons", "links"];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -156,6 +184,7 @@ impl Config {
             "single" => self.single = on,
             "staged" => self.staged = on,
             "icons" => self.icons = on,
+            "links" => self.links = on,
             _ => return false,
         }
         true
