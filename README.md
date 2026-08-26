@@ -317,7 +317,7 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 | 🪟 **View** | `~/.config/vigia/config` → everything off |
 
 ```sh
-VIGIA_THEME=ansi     # default: the sixteen names, inherited from your scheme
+VIGIA_THEME=ansi     # the fallback: the sixteen names, inherited from your scheme
 VIGIA_THEME=dark     # the picture above, in 24-bit colour
 VIGIA_THEME=light    # the same design for a light terminal
 VIGIA_THEME=~/themes/mine
@@ -353,7 +353,7 @@ A value is `[colour] [on colour] [modifiers]`:
 
 Every key is documented in **[docs/THEME.md](docs/THEME.md)**, one row per key, grouped by surface. That file is the reference, and `crates/vigia/tests/theme_docs.rs` holds it against the code in both directions, so a key cannot land undocumented and a documented key cannot quietly stop existing. The short shape: `_warm` and `_hot` twins are the intensity rungs (a sparkline column and a heat slice both ramp through three levels, one mechanism), `bar_active` is a bar being dragged, and `bar_hover` and `path_hover` are the marks under the pointer.
 
-**`ansi` is the default and draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. The cost is the wash, which is why the three-line file above exists: keep `ansi` for the sixteen names your scheme already defines, and add the two backgrounds it declines to guess. Pick your own if your pane is lighter or darker. The only rule is that they stay far enough from your background to read as bands, and far enough from each other that an addition never looks like a removal.
+**With no theme named, `vigia` asks your terminal its background at startup and picks `dark` or `light` from the answer.** A terminal that stays silent (ssh, some multiplexers) gets `ansi` instead, and **`ansi` draws no row wash at any depth**, deliberately. A wash has to assume a background and that palette assumes none: every colour in it is a *name*, so it resolves to whatever your terminal scheme says and `vigia` matches the pane beside it instead of arguing with it. The cost is the wash, which is why the three-line file above exists: keep `ansi` for the sixteen names your scheme already defines, and add the two backgrounds it declines to guess. Pick your own if your pane is lighter or darker. The only rule is that they stay far enough from your background to read as bands, and far enough from each other that an addition never looks like a removal.
 
 </details>
 
