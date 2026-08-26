@@ -2494,7 +2494,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vigia"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "insta",
  "libc",
@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-core"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "criterion",
  "gix",
