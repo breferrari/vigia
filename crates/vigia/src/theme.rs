@@ -588,9 +588,19 @@ impl Theme {
         let low = rgb(self.spark)?;
         let warm = rgb(self.spark_warm)?;
         let hot = rgb(self.spark_hot)?;
+        // Interpolated in Oklab rather than raw RGB, which is what keeps a
+        // wide-hue ramp from sagging into grey-olive in the middle: a straight
+        // RGB line between a cyan and a red passes through mud, a perceptual
+        // line does not. lipgloss v2 blends in CIELAB for exactly this reason
+        // (#318 research, section 1.3); Oklab is the same idea with a cheaper,
+        // newer fit, and the difference is invisible on narrow ramps like the
+        // built-ins' while rescuing the wide ones a reader's own theme can ask
+        // for.
         let lerp = |a: (u8, u8, u8), b: (u8, u8, u8), t: f32| {
-            let channel = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
-            Color::Rgb(channel(a.0, b.0), channel(a.1, b.1), channel(a.2, b.2))
+            let (la, aa, ba) = oklab_of(a);
+            let (lb, ab, bb) = oklab_of(b);
+            let mix = |x: f32, y: f32| x + (y - x) * t;
+            rgb_of(mix(la, lb), mix(aa, ab), mix(ba, bb))
         };
         let mut out = [Color::Reset; 8];
         for (at, slot) in out.iter_mut().enumerate() {
@@ -1139,6 +1149,52 @@ impl Theme {
             comment: rgb(0x59, 0x63, 0x6e),
         }
     }
+}
+
+/// sRGB bytes to Oklab, through linear light.
+///
+/// Bjorn Ottosson's constants, verbatim; the fit is public domain and tiny,
+/// which is why this is written here rather than bought as a dependency
+/// `SPEC.md` does not name.
+fn oklab_of((r, g, b): (u8, u8, u8)) -> (f32, f32, f32) {
+    let linear = |c: u8| {
+        let c = c as f32 / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (linear(r), linear(g), linear(b));
+    let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+    (
+        0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s,
+        1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s,
+        0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s,
+    )
+}
+
+/// Oklab back to sRGB bytes, clamped into gamut.
+fn rgb_of(l: f32, a: f32, b: f32) -> Color {
+    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
+    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
+    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
+    let (l_, m_, s_) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+    let r = 4.076_741_7 * l_ - 3.307_711_6 * m_ + 0.230_969_94 * s_;
+    let g = -1.268_438 * l_ + 2.609_757_4 * m_ - 0.341_319_38 * s_;
+    let b = -0.004_196_086_3 * l_ - 0.703_418_6 * m_ + 1.707_614_7 * s_;
+    let byte = |c: f32| {
+        let c = c.clamp(0.0, 1.0);
+        let c = if c <= 0.003_130_8 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
+        (c * 255.0).round() as u8
+    };
+    Color::Rgb(byte(r), byte(g), byte(b))
 }
 
 impl Default for Theme {

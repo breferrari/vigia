@@ -1537,9 +1537,19 @@ fn the_band_climbs_the_ramp_toward_the_top() {
     };
     let area = Rect::new(0, 0, WIDE, TALL);
     let body = body_layout(area, &shown, 1, 1);
-    assert!(body.graph > 1, "the fixture band is one row, so nothing climbs");
+    assert!(
+        body.graph > 1,
+        "the fixture band is one row, so nothing climbs"
+    );
     let mut buf = Buffer::empty(area);
-    render(&mut buf, area, &banded(QUARTERED), &theme, Glyphs::default(), &shown);
+    render(
+        &mut buf,
+        area,
+        &banded(QUARTERED),
+        &theme,
+        Glyphs::default(),
+        &shown,
+    );
 
     let top = 1 + body.lead as u16;
     let base = top + body.graph as u16 - 1;

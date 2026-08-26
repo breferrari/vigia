@@ -893,9 +893,7 @@ fn a_taller_sparkline_bucket_is_drawn_hotter() {
                 None => stops.iter().position(|(_, style)| style.fg == fg),
             }
             .unwrap_or_else(|| {
-                panic!(
-                    "the bucket at rung {rung} is drawn in {fg:?}, which is no stop of the ramp"
-                )
+                panic!("the bucket at rung {rung} is drawn in {fg:?}, which is no stop of the ramp")
             });
             (rung, rank)
         })
@@ -1980,7 +1978,11 @@ fn the_spark_ramp_interpolates_only_where_stops_are_rgb() {
     let ramp = dark
         .spark_ramp()
         .expect("a truecolour palette must interpolate");
-    assert_eq!(Some(ramp[0]), dark.spark.fg, "the ramp's floor is not `spark`");
+    assert_eq!(
+        Some(ramp[0]),
+        dark.spark.fg,
+        "the ramp's floor is not `spark`"
+    );
     assert_eq!(
         Some(ramp[4]),
         dark.spark_warm.fg,
@@ -1997,7 +1999,10 @@ fn the_spark_ramp_interpolates_only_where_stops_are_rgb() {
         "a 256-resolved palette interpolated indexed colours"
     );
     assert!(
-        Theme::ansi().resolve(Depth::Truecolor).spark_ramp().is_none(),
+        Theme::ansi()
+            .resolve(Depth::Truecolor)
+            .spark_ramp()
+            .is_none(),
         "`ansi` interpolated named colours"
     );
 }

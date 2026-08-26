@@ -6398,9 +6398,7 @@ impl Painter<'_> {
                 let ink = match self.spark_ramp.as_ref() {
                     Some(ramp) => {
                         let top = rows.saturating_sub(1).max(1);
-                        self.theme
-                            .spark_at(band)
-                            .fg(ramp[(row * 7 / top).min(7)])
+                        self.theme.spark_at(band).fg(ramp[(row * 7 / top).min(7)])
                     }
                     None => self.theme.spark_at(band),
                 };
@@ -7675,7 +7673,8 @@ impl Painter<'_> {
             let x = right.x + right.width.saturating_sub(take as u16);
             for (offset, bucket) in strip[filled - take..filled].iter().enumerate() {
                 // Both out of the one value, which is [`Bucket`]'s whole reason.
-                let (glyph, style) = bucket.drawn(self.theme, self.glyphs, self.spark_ramp.as_ref());
+                let (glyph, style) =
+                    bucket.drawn(self.theme, self.glyphs, self.spark_ramp.as_ref());
                 // `set_char` rather than an `encode_utf8` into a local buffer,
                 // which is what `Cell::set_char` does internally: the heat strip
                 // below can hoist its encode out of the loop because every slice
