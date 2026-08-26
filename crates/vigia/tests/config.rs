@@ -156,6 +156,7 @@ fn each_key_sets_the_state_the_pane_starts_in() {
             rail: true,
             single: true,
             staged: false,
+            wrap: false,
             icons: false,
             // Untouched by the file, so the hand-written default holds: on.
             links: true,
@@ -182,6 +183,7 @@ fn the_key_still_toggles_from_the_configured_state() {
         rail: true,
         single: true,
         staged: false,
+        wrap: false,
         icons: false,
         links: false,
     };
@@ -350,6 +352,7 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
             rail: false,
             single: true,
             staged: false,
+            wrap: false,
             icons: false,
             // Untouched by the file, so the hand-written default holds: on.
             links: true,
@@ -498,6 +501,7 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         single: true,
         staged: true,
         links: false,
+        wrap: false,
         icons: false,
     });
 
@@ -574,6 +578,7 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             single: true,
             staged: true,
             links: true,
+            wrap: true,
             icons: true,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"

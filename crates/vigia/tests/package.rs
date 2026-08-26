@@ -55,10 +55,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 /// is that a number living only in prose drifted by a factor of four. Fixing
 /// that with a number living only in a test would have been the same mistake
 /// with a smaller radius.
-const ESCAPING_FILES: usize = 19;
+const ESCAPING_FILES: usize = 20;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "nineteen";
+const ESCAPING_FILES_SPELLED: &str = "twenty";
 
 /// The repository root, two levels above this package.
 ///
@@ -153,7 +153,9 @@ fn escaping_tests() -> Vec<String> {
     // `single.rs` the seventeenth, and [#309](https://github.com/breferrari/vigia/issues/309)
     // making `config.rs` the eighteenth, and 2026-08-25 when
     // [#320](https://github.com/breferrari/vigia/issues/320) made `theme_docs.rs`
-    // the nineteenth. The whole point is that a count in prose
+    // the nineteenth, and 2026-08-26 when
+    // [#272](https://github.com/breferrari/vigia/issues/272) made `wrap.rs` the
+    // twentieth. The whole point is that a count in prose
     // cannot notice a new test, and a floor is a count that cannot notice one
     // either.
     //

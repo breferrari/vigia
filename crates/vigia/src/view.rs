@@ -513,6 +513,46 @@ pub enum Row {
         /// diff computed before this field existed.
         emph: Vec<std::ops::Range<u32>>,
     },
+    /// The tail of a [`Row::Line`] that did not fit, on the row below it.
+    ///
+    /// **`SPEC.md` §11.2 B19**, from `w`
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). It exists only
+    /// while wrapping is on, it always follows the [`Row::Line`] it belongs to,
+    /// and there is never more than one: the cap is two display rows, which is
+    /// `delta --wrap-max-lines`' own default and is what bounds the reflow §11.1
+    /// refused to permit unbounded.
+    ///
+    /// **A row of its own rather than a flag on [`Row::Line`]**, and that is the
+    /// whole of why the row arithmetic did not have to change. Every guard in
+    /// [`View::take_file`] and [`View::collect`] is `self.rows.len() < height`,
+    /// so a continuation that *is* a row makes `rows` a count of **display** rows
+    /// with no site restated. A flag would have left `rows.len()` counting
+    /// logical rows and made every one of those guards a units bug of exactly
+    /// the kind this project has already paid for once.
+    ///
+    /// **It carries the tail already sliced, and its [`Row::Line`] carries only
+    /// the head.** [`View::wrap_rows`] decides the split once, so the painter
+    /// draws what the row says instead of re-deriving a boundary that could
+    /// disagree with the one the row count was taken from. It is also what
+    /// suppresses the `›` on the head for free: a pre-sliced head does not clip,
+    /// so nothing marks it, and `›` goes on meaning *rightward* only.
+    Wrap {
+        /// The kind of the line this continues, for the wash, the bar and the
+        /// ink on the continuation mark.
+        kind: LineKind,
+        /// The tail, from the split to the end of the line. Still the whole
+        /// tail: past the cap it is the painter that clips it and marks it,
+        /// which is `SPEC.md` §11.1's clipping rule reaching the lower row.
+        text: String,
+        /// [`Row::Line::spans`], re-based onto `text`.
+        spans: Vec<Span>,
+        /// [`Row::Line::emph`], re-based onto `text` and clipped to it.
+        emph: Vec<std::ops::Range<u32>>,
+        /// Columns of leading blank before the tail, so nested code keeps its
+        /// block shape: Neovim's `'breakindent'`, capped at half the content
+        /// width. [`indent_of`] is the rule.
+        indent: usize,
+    },
     /// Why a file has no lines under it.
     Note(&'static str),
     /// The blank row that closes a file's block.
@@ -779,6 +819,29 @@ pub struct Viewport {
     pub anchored: bool,
     /// Rows the diff region has, from [`crate::render::Body::diff`].
     pub diff_rows: usize,
+    /// Columns the diff region's **glyphs** have, from
+    /// [`crate::render::Body::diff`] less the inset and any scrollbar.
+    ///
+    /// **The one geometry this function needs and did not used to**
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Every row was
+    /// built without reference to how wide the pane was, because clipping is the
+    /// painter's and clipping changes no row count. Wrapping does, so the width
+    /// has to arrive here.
+    ///
+    /// Zero is legal and means *do not wrap*: it is what a caller that has not
+    /// been told the width passes, and it produces the rows every version before
+    /// this one produced.
+    pub width: usize,
+    /// Whether a content line too wide for the pane continues on the row below.
+    ///
+    /// `SPEC.md` §11.2 **B19**, from `w`
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off on launch.
+    ///
+    /// A flag beside [`Self::single`] rather than something this function could
+    /// work out, for the plainest of the reasons those fields give: it is a
+    /// reader's standing request, and nothing about a position says whether one
+    /// was made.
+    pub wrap: bool,
     /// First file the pinned list shows, before resolving.
     pub list_top: usize,
     /// Rows the pinned list has, from [`crate::render::Body::list`]. Zero on a
@@ -889,6 +952,8 @@ impl Default for Viewport {
             position: Position::default(),
             anchored: false,
             diff_rows: 0,
+            width: 0,
+            wrap: false,
             list_top: 0,
             list_rows: 0,
             list_follows: false,
@@ -904,7 +969,39 @@ impl Default for Viewport {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
     /// The rows to draw, top to bottom.
+    ///
+    /// **Display rows since [#272](https://github.com/breferrari/vigia/issues/272)**,
+    /// where they were logical rows and the two were one number. A wrapped
+    /// content line is a [`Row::Line`] carrying its head and a [`Row::Wrap`]
+    /// carrying its tail, so this length is what the terminal draws and the
+    /// diff's own row count is what [`crate::rows_of`] and its twins still
+    /// report. `SPEC.md` §11.2 **B19** is the ruling and says why the scrollbar
+    /// stayed on the second of those.
     pub rows: Vec<Row>,
+    /// Digits reserved for line numbers on every content row, or zero for none.
+    ///
+    /// **Decided where the rows are decided, and carried rather than
+    /// re-derived** ([#272](https://github.com/breferrari/vigia/issues/272)).
+    /// [`crate::render::gutter_width`] used to be the painter's alone, which was
+    /// safe while nothing else needed it. Wrapping needs it *before* the painter
+    /// runs, because the width left for text is what decides whether a line
+    /// wraps at all, and the row set the painter would size it from is the one
+    /// wrapping has already truncated. Two derivations over two different row
+    /// sets is a pane whose text bound and whose gutter disagree by a column.
+    ///
+    /// So [`View::wrap_rows`] takes it once, over the rows the walk reached, and
+    /// the painter reads it. With wrapping off that is byte-identical to what the
+    /// painter used to compute for itself, which `tests/render.rs` holds as a
+    /// buffer comparison.
+    ///
+    /// **`None` is *nobody decided*, and the painter then decides for itself**,
+    /// which is every version of this before
+    /// [#272](https://github.com/breferrari/vigia/issues/272) and is what a
+    /// [`Viewport`] carrying no width produces. It is a third state rather than a
+    /// zero because zero is a legal answer: it is what a pane too narrow for line
+    /// numbers gets, and a field that could not tell the two apart would make a
+    /// hand-built view claim a decision it never took.
+    pub gutter: Option<usize>,
     /// The pinned file list, top to bottom, at most `Viewport::list_rows` long.
     ///
     /// Bounded by the region and never by the changed set, which is the whole of
@@ -1139,6 +1236,69 @@ fn span_of(kind: &ChangeKind, diff: &FileDiff) -> usize {
 /// [`landing_of`] walks to a hunk's header row with it. All three want the same
 /// number by the same route, unlike [`span_of`] and [`rows_of`], which are twins
 /// precisely because their routes differ.
+/// Split a line's syntax runs at a byte offset, for a wrapped row.
+///
+/// [`vigia_core::Span`] carries a length rather than a range, so the runs are a
+/// tiling read forward from zero, and the run the cut lands inside becomes two.
+/// The alternative, handing the whole list to both rows and letting the painter
+/// offset it, was refused for the reason [`Row::Wrap`] carries its tail already
+/// sliced: one decision, taken where the row count is taken.
+///
+/// A cut past the end leaves the tail empty, which is legal and draws nothing:
+/// an empty span list and an uncovered tail already reach the screen identically
+/// ([`Row::Line::spans`]).
+fn split_spans(spans: &[Span], at: usize) -> (Vec<Span>, Vec<Span>) {
+    let mut head = Vec::with_capacity(spans.len());
+    let mut tail = Vec::with_capacity(spans.len());
+    let mut pos = 0usize;
+    for span in spans {
+        let end = pos + span.len;
+        if end <= at {
+            head.push(*span);
+        } else if pos >= at {
+            tail.push(*span);
+        } else {
+            head.push(Span {
+                len: at - pos,
+                class: span.class,
+            });
+            tail.push(Span {
+                len: end - at,
+                class: span.class,
+            });
+        }
+        pos = end;
+    }
+    (head, tail)
+}
+
+/// Split a line's word-emphasis ranges at a byte offset, for a wrapped row.
+///
+/// The tail's ranges are re-based onto the tail, because that is what the tail
+/// row's `text` is: a range left in the whole line's coordinates would paint the
+/// hot background somewhere else entirely, and `Painter::push_split` has no way
+/// to know which of the two rows it is drawing.
+///
+/// A range straddling the cut becomes two, one on each side, which is what keeps
+/// a word that wraps looking like one word.
+fn split_emph(
+    emph: &[std::ops::Range<u32>],
+    at: usize,
+) -> (Vec<std::ops::Range<u32>>, Vec<std::ops::Range<u32>>) {
+    let cut = at as u32;
+    let mut head = Vec::with_capacity(emph.len());
+    let mut tail = Vec::with_capacity(emph.len());
+    for range in emph {
+        if range.start < cut {
+            head.push(range.start..range.end.min(cut));
+        }
+        if range.end > cut {
+            tail.push(range.start.max(cut) - cut..range.end - cut);
+        }
+    }
+    (head, tail)
+}
+
 fn hunk_span(hunk: &Hunk) -> usize {
     1 + hunk.lines.len()
 }
@@ -1550,6 +1710,8 @@ impl View {
             position,
             anchored,
             diff_rows: height,
+            width,
+            wrap,
             list_top,
             list_rows,
             list_follows,
@@ -1596,6 +1758,7 @@ impl View {
             // start where they were asked to, so a frame with no room to draw
             // reports the request back unchanged and a caller keeps its place.
             list_top,
+            gutter: None,
             current_span: 0,
             total_rows: 0,
             rows_above: 0,
@@ -1670,6 +1833,21 @@ impl View {
         let mut index = view.top.file;
         let mut skip = position.row;
         let mut placed = false;
+        // **Whether the position this walk settled on is the diff's *bottom*,
+        // rather than somewhere in the middle of it.**
+        //
+        // Set by the three places that rest the diff's last row on the last row
+        // of the pane, and read by nothing but [`Self::wrap_rows`]. It is a
+        // units question and it did not exist before
+        // [#272](https://github.com/breferrari/vigia/issues/272): all three
+        // compare a **logical** span against `height`, which is a count of
+        // **display** rows, and while the two were one number that was exact. It
+        // still is with wrapping off. With wrapping on the clamp lands too far
+        // back, the expansion below has more rows than the pane can hold, and
+        // dropping them off the bottom the way every other frame does would make
+        // the end of the diff unreachable by the gesture that exists to reach it.
+        // So this one case trims from the front instead. See `wrap_rows`.
+        let mut at_bottom = false;
         // At most one restart, whichever of the two reasons below triggered it.
         // `last_screenful` resolves to a position that can fill the body whenever
         // the diff has the rows for it, so a second pass is never the answer to a
@@ -1756,6 +1934,7 @@ impl View {
                         // gesture.
                         if span >= height {
                             skip = span - height;
+                            at_bottom = true;
                         } else {
                             // That file cannot fill the screen by itself, so the
                             // top is in a file further back and this walk has no
@@ -1961,6 +2140,26 @@ impl View {
             index = view.top.file;
             skip = view.top.row;
             placed = true;
+            at_bottom = true;
+        }
+
+        // **Here, and after the walk, because this is the first point at which
+        // the rows exist and nothing more will be read.**
+        // ([#272](https://github.com/breferrari/vigia/issues/272).) It reads no
+        // file and asks the frame for nothing: wrapping only ever *grows* the
+        // row count, so the `height` logical rows the walk already collected are
+        // always enough to fill `height` display rows, and I4 never sees this.
+        //
+        // Before [`Self::take_list`] rather than after it, because the front trim
+        // can move [`Self::top`] and the caret is drawn from where the diff
+        // actually landed.
+        let trimmed = view.wrap_rows(width, wrap, height, at_bottom);
+        if trimmed {
+            // The trim crossed into a later file, so the block the viewport is
+            // inside is a different block. Re-read through the span cache, which
+            // is a `stat` against a height this tick has already proved rather
+            // than a second `Frame::diff` of the file an agent is writing.
+            view.current_span = block_rows(frame, view.top.file)?;
         }
 
         // **After the walk, because only the walk knows where the diff landed.**
@@ -2222,6 +2421,166 @@ impl View {
     /// doubles and not work that does. It lasts one frame either way, because
     /// the caller stores the resolved position back and the next frame starts on
     /// the file it draws.
+    /// Turn logical rows into display rows, and record the gutter they were
+    /// measured against.
+    ///
+    /// **`SPEC.md` §11.2 B19**, from `w`
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Returns whether
+    /// the trim below moved the viewport into a **different file**, which is the
+    /// one thing the caller has to repair with the frame still in hand.
+    ///
+    /// **It reads nothing and asks the frame for nothing**, which is what keeps
+    /// I4 exactly where it was. Wrapping only ever *grows* the row count, so the
+    /// `height` logical rows [`View::collect`]'s walk already collected are
+    /// always enough to fill `height` display rows, and this never needs a file
+    /// the walk did not reach.
+    ///
+    /// **The gutter is taken here rather than by the painter**, and over the rows
+    /// the walk reached rather than over the ones that survive. The circularity
+    /// is why: the width left for text decides which lines wrap, wrapping decides
+    /// which rows survive, and [`crate::render::gutter_width`] sizes itself from
+    /// the largest line number among the rows. Taking it once, before the
+    /// expansion, breaks the loop at the only point where the answer is a
+    /// property of the walk rather than of the wrap. With wrapping off it is
+    /// byte-identical to what the painter used to compute for itself.
+    ///
+    /// **A line whose tail will not fit is drawn whole instead**, clipped and
+    /// marked `›` exactly as it is today. That is the honest answer at the last
+    /// row of the pane: a pre-sliced head with its continuation off screen would
+    /// read as a complete line, which is the one thing §11.1's marking rule
+    /// exists to prevent.
+    fn wrap_rows(&mut self, width: usize, wrap: bool, height: usize, at_bottom: bool) -> bool {
+        // **Only where a width was passed**, so a caller that named none leaves
+        // the decision where it has always been. See [`View::gutter`].
+        self.gutter = (width > 0).then(|| crate::render::gutter_width(&self.rows, width));
+        if !wrap || width == 0 || height == 0 || self.rows.is_empty() {
+            return false;
+        }
+        let content = crate::render::content_width(self.gutter.unwrap_or(0), width);
+        if content == 0 {
+            return false;
+        }
+
+        // Where each logical row breaks, if it does. Taken once: the trim below
+        // reads it backwards and the expansion reads it forwards, and a second
+        // walk is a second chance to disagree.
+        let splits: Vec<Option<usize>> = self
+            .rows
+            .iter()
+            .map(|row| match row {
+                Row::Line { text, .. } => crate::render::split_at(text, content),
+                _ => None,
+            })
+            .collect();
+        let cost = |at: usize| 1 + usize::from(splits[at].is_some());
+        let total: usize = (0..splits.len()).map(cost).sum();
+
+        // **The bottom clamp, in the units it now has to be in.**
+        //
+        // [`Self::last_screenful`] and `collect`'s overshoot branch both rest the
+        // diff's last **logical** row on the pane's last **display** row, by
+        // comparing a logical span against `height`. That was exact while the two
+        // were one number. With wrapping on it places the top too far back, and
+        // dropping the excess off the bottom the way every other frame does would
+        // put the end of the diff out of reach of the gesture that exists to
+        // reach it.
+        //
+        // So this one case trims from the **front**: the smallest number of
+        // leading logical rows whose removal lets the rest fit. Removing one costs
+        // one row or two, so the last removal can overshoot by exactly one and
+        // leave a blank at the bottom, which §11.1 rules the diff does not end
+        // with. `unwrapped` is that case and it is the same rule as the last row
+        // of an ordinary screen: keep the row, draw it whole, let it clip and say
+        // so.
+        let mut from = 0usize;
+        let mut unwrapped = false;
+        if at_bottom && total > height {
+            let mut tail = 0usize;
+            let mut at = splits.len();
+            while at > 0 && tail + cost(at - 1) <= height {
+                at -= 1;
+                tail += cost(at);
+            }
+            from = at;
+            if tail < height && from > 0 {
+                from -= 1;
+                unwrapped = true;
+            }
+        }
+
+        // Where the trim leaves the reader, in the units a `Position` is in. A
+        // [`Row::Gap`] is a block's last row ([#165](https://github.com/breferrari/vigia/issues/165)),
+        // so passing one is what moves the viewport into the next file.
+        let was = self.top.file;
+        for row in &self.rows[..from] {
+            if matches!(row, Row::Gap) {
+                self.top.file += 1;
+                self.top.row = 0;
+            } else {
+                self.top.row += 1;
+            }
+        }
+
+        let mut out: Vec<Row> = Vec::with_capacity(height);
+        for (at, row) in self.rows.drain(..).enumerate() {
+            if at < from {
+                continue;
+            }
+            if out.len() >= height {
+                break;
+            }
+            let Row::Line {
+                kind,
+                number,
+                text,
+                spans,
+                emph,
+            } = row
+            else {
+                out.push(row);
+                continue;
+            };
+            // Two rows or none. `out.len() + 2 <= height` is the last row of the
+            // pane, and `at == from && unwrapped` is the first, which the trim
+            // above chose deliberately.
+            let split = splits[at]
+                .filter(|_| !(at == from && unwrapped))
+                .filter(|_| out.len() + 2 <= height);
+            let Some(cut) = split else {
+                out.push(Row::Line {
+                    kind,
+                    number,
+                    text,
+                    spans,
+                    emph,
+                });
+                continue;
+            };
+            let indent = crate::render::indent_of(&text, content);
+            let (head_spans, tail_spans) = split_spans(&spans, cut);
+            let (head_emph, tail_emph) = split_emph(&emph, cut);
+            let tail = text[cut..].to_owned();
+            let mut head = text;
+            head.truncate(cut);
+            out.push(Row::Line {
+                kind,
+                number,
+                text: head,
+                spans: head_spans,
+                emph: head_emph,
+            });
+            out.push(Row::Wrap {
+                kind,
+                text: tail,
+                spans: tail_spans,
+                emph: tail_emph,
+                indent,
+            });
+        }
+        self.rows = out;
+        self.top.file != was
+    }
+
     fn last_screenful(
         frame: &mut Frame,
         first: usize,

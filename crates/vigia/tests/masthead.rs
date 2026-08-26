@@ -258,6 +258,7 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
         list: vec![entry.clone().into()],
         rows: vec![Row::file(entry)],
         files: 1,
+        gutter: None,
         worktree_churn: Churn(series),
         ..View::default()
     }

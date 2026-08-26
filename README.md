@@ -243,6 +243,7 @@ The blank above the band is the row the header keeps between itself and the list
 | `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
 | `a` | show or hide staged changes |
+| `w` | wrap a long line onto the row below, or clip it |
 | `?` `Esc` | **all of this, on screen**, a page at a time where the pane is small. `Esc` puts it away |
 | `q` `Ctrl+C` | quit |
 
@@ -414,7 +415,7 @@ set -ga terminal-overrides ",*:Tc"
 
 ### 🪟 The pane you want, every time
 
-`m`, `r`, `s` and `a` change what the body is made of, and all four start off. If you always want one of them, say so once:
+`m`, `r`, `s`, `a` and `w` change what the body is made of, and all five start off. If you always want one of them, say so once:
 
 ```sh
 # ~/.config/vigia/config
@@ -422,6 +423,7 @@ masthead = on     # the churn band at the top
 rail     = on     # the file list beside the diff, from 134 columns
 single   = on     # one file at a time
 staged   = on     # what is staged, beside what is not
+wrap     = on     # a long line continues on the row below
 icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
 links    = off    # paths are clickable file:// links; this is the off switch
 ```

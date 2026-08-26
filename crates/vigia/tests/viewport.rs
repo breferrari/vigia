@@ -274,6 +274,8 @@ fn a_backed_up_body_holds_the_rows_its_own_position_names() {
             Viewport {
                 position: drawn.top,
                 anchored: false,
+                wrap: false,
+                width: 0,
                 diff_rows: height,
                 ..Viewport::default()
             },

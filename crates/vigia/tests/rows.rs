@@ -357,6 +357,8 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
             // tail would be comparing a different window from the one the offset
             // names.
             anchored: false,
+            wrap: false,
+            width: 0,
             diff_rows: ALL_ROWS,
             ..Viewport::default()
         },
@@ -385,6 +387,8 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
                     row: offset,
                 },
                 anchored: false,
+                wrap: false,
+                width: 0,
                 diff_rows: height,
                 ..Viewport::default()
             },
@@ -814,6 +818,8 @@ fn a_files_block_ends_in_a_blank_row() {
         Viewport {
             position: Position { file: 0, row: 0 },
             anchored: false,
+            wrap: false,
+            width: 0,
             diff_rows: ALL_ROWS,
             ..Viewport::default()
         },

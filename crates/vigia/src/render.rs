@@ -88,6 +88,27 @@ const ELIDED: char = '…';
 /// reader never has to work out which end they are missing.
 const CONTINUES: &str = "›";
 
+/// What a wrapped content line's continuation draws in the sigil column.
+///
+/// **`SPEC.md` §11.2 B19**, from `w`
+/// ([#272](https://github.com/breferrari/vigia/issues/272)). [`CONTINUES`] says
+/// *rightward* and this says *downward*, which is the second axis the marking
+/// rule gained rather than a reversal of it: content still marks its edge.
+///
+/// **Not the sigil repeated, and not a blank column.** A continuation blanks its
+/// line number, which is `bat`'s own signal and is the cheap half of saying so.
+/// It is not enough on its own, because [`gutter_width`] drops the gutter
+/// entirely below [`MIN_TEXT_WIDTH`]'s floor and that is exactly the narrow pane
+/// this gesture exists for: at forty columns a continuation carrying a repeated
+/// `-` and no number reads as a **second removed line**. Blanking the column
+/// instead is refused for the opposite reason, since §5.1 rules the sigil column
+/// **is** the diff signal at any depth or on any palette that cannot wash the
+/// row, which `tests/colour.rs` gates. Drawn in the row's diff ink, the column
+/// keeps the signal and the glyph adds the one fact this row has to carry.
+///
+/// **It needs no rung**, for the reason [`CONTINUES`] and [`ELIDED`] need none.
+const WRAPPED: &str = "↳";
+
 /// The footer's left-hand side when there is nothing wrong, widest rung first.
 ///
 /// **Each rung is the one above it minus whole hints**, and nothing is reworded
@@ -3440,6 +3461,26 @@ pub struct Body {
     /// In this shape [`Body::rule`] is always false and [`Body::list`] and
     /// [`Body::diff`] are the same rows read in two columns.
     pub rail: bool,
+    /// Columns the diff's content is laid out against, the scrollbar's charged
+    /// whether or not one is drawn.
+    ///
+    /// **A width on a type whose docblock says it is rows, and the exception is
+    /// [#272](https://github.com/breferrari/vigia/issues/272)'s.** [`Body::rail`]
+    /// above says this type stays row counts because [`Body::areas`] can
+    /// recompute a column from the pane it is handed. That holds for every
+    /// consumer inside this module and fails for the one outside it:
+    /// [`crate::App::view`] has to know how wide a content row is *before*
+    /// [`View::collect`] runs, because wrapping decides how many rows there are,
+    /// and it is handed a `Body` and no pane.
+    ///
+    /// **Charged the bar unconditionally, which is [`Painter::body`]'s own ruling
+    /// on the gutter applied to the same question.** The stream's bar appears when
+    /// the diff outgrows the pane, so measuring against what is left after one is
+    /// drawn would make where a line breaks a function of *the diff's height*: an
+    /// agent's edit lengthening a file would reflow every wrapped row on screen.
+    /// The honest cost is that on a pane with no bar a wrapped line breaks up to
+    /// [`BAR_WIDTH`] columns early, and a stable break is worth two columns.
+    pub diff_width: usize,
     /// Pages the gestures sheet takes on this pane, `Some(0)` on a pane too small
     /// to draw one, and **`None` when nothing measured it**.
     ///
@@ -3494,6 +3535,7 @@ impl Body {
             // `Bar::region` makes over its own pairing: a `Body` claiming a shape
             // it does not have is a bug with no symptom until something divides by
             // it.
+            diff_width: 0,
             rail: false,
             // Attached by `body_layout`, which is the only caller that has the
             // pane. A `Body` built for a diff walk has no sheet to count.
@@ -3539,6 +3581,25 @@ impl Body {
     /// Saturating rather than clamped so a one-row terminal asks for nothing
     /// instead of underflowing.
     pub fn split(
+        area: Rect,
+        footer_rows: u16,
+        files: usize,
+        list_rows: usize,
+        chrome: &Chrome,
+    ) -> Self {
+        let mut body = Self::split_rows(area, footer_rows, files, list_rows, chrome);
+        // **Here rather than in each of `split_rows`' four exits**, and after them
+        // rather than inside, because the width is a function of the *shape* the
+        // split chose and of the pane, and both are known once it has chosen.
+        // [`Body::clamped_to`] moves rows between regions and never moves a
+        // column, so it leaves this alone; `render`'s own `debug_assert_eq!`
+        // against `areas.diff` is what says so if that ever stops being true.
+        body.diff_width = usize::from(planning_width(body.areas(area).diff.width, area.width, 0));
+        body
+    }
+
+    /// [`Body::split`]'s row arithmetic, which is all of it but the one width.
+    fn split_rows(
         area: Rect,
         footer_rows: u16,
         files: usize,
@@ -3632,6 +3693,7 @@ impl Body {
             list,
             rule: true,
             diff: after - graph - air,
+            diff_width: 0,
             rail: false,
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
@@ -3770,6 +3832,7 @@ impl Body {
             // as where it happens.
             rule: false,
             diff: rows,
+            diff_width: 0,
             rail: true,
             // Attached by `body_layout`, which is the only caller with the pane.
             sheet_pages: None,
@@ -3899,6 +3962,7 @@ impl Body {
             list,
             rule,
             diff: self.rows() - (lead + graph + air + list + usize::from(rule)),
+            diff_width: 0,
             rail: false,
             // **Carried, unlike the two constructors above.** A clamp re-divides
             // the rows this body already has and does not re-measure the pane, so
@@ -4412,6 +4476,18 @@ pub fn render(
         // short for a bar, and `with_bar` draws nothing when told a whole of
         // zero.
         let full = region;
+        // **Zero is *nobody measured*, which is a hand-built [`Body`] in a test**
+        // and not a real pane: [`Body::split`] fills the field for every shape it
+        // returns, and a pane whose diff has no columns draws no content to wrap.
+        // Everywhere else the two derivations have to be the same number, or the
+        // rows were counted against one width and are being drawn against another.
+        debug_assert!(
+            body.diff_width == 0
+                || body.diff_width == usize::from(planning_width(full.width, area.width, 0)),
+            "the rows were wrapped against {} columns and this region lays out with {}",
+            body.diff_width,
+            planning_width(full.width, area.width, 0)
+        );
         let (region, bar) =
             painter.with_bar(region, diff_bars, body.diff as u64, view.total_rows as u64);
         // **The wash spans the region's whole width, the bar's own column
@@ -4512,7 +4588,7 @@ struct Gesture {
 /// prerequisite: this array ran `q` first and `?` last while `sheet_plan` dropped
 /// *from the top down*, so reordering for sections alone would have kept `q` at
 /// the floor and dropped `f` and `m`, inverting §11.1's own rule.
-const KEYBOARD: [Gesture; 14] = [
+const KEYBOARD: [Gesture; 15] = [
     Gesture {
         keys: ["j  k  ↓  ↑", "j  k  ↓  ↑"],
         verb: ["scroll a row", "scroll a row"],
@@ -4581,6 +4657,10 @@ const KEYBOARD: [Gesture; 14] = [
         verb: ["show or hide staged changes", "staged changes"],
     },
     Gesture {
+        keys: ["w", "w"],
+        verb: ["wrap a long line, or clip it", "wrap long lines"],
+    },
+    Gesture {
         keys: ["?  Esc", "?  Esc"],
         verb: ["this sheet", "this sheet"],
     },
@@ -4647,7 +4727,7 @@ const KEYBOARD: [Gesture; 14] = [
 /// A rung that drops `from` rows drops the **set** `DROP_ORDER[..from]`, so what
 /// it draws is no longer a suffix of the table. [`kept_keyboard`] is the one
 /// place that is resolved, and both the measurement and the drawer read it.
-const DROP_ORDER: [usize; KEYBOARD.len()] = [13, 0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 7, 8, 12];
+const DROP_ORDER: [usize; KEYBOARD.len()] = [14, 0, 1, 2, 3, 4, 5, 6, 9, 10, 12, 11, 7, 8, 13];
 
 /// The keyboard rows a rung with `from` dropped still draws, in display order.
 ///
@@ -4809,7 +4889,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "view",
-        rows: Rows::Keyboard { from: 7, to: 12 },
+        rows: Rows::Keyboard { from: 7, to: 13 },
     },
     Section {
         label: "mouse",
@@ -4817,7 +4897,7 @@ const SECTIONS: [Section; 5] = [
     },
     Section {
         label: "leaving",
-        rows: Rows::Keyboard { from: 12, to: 14 },
+        rows: Rows::Keyboard { from: 13, to: 15 },
     },
 ];
 
@@ -7546,7 +7626,27 @@ impl Painter<'_> {
         // the pane height took the whole gutter off every content row: not a
         // reflow but an all-or-nothing disappearance, on the tick an agent's
         // edit made the diff long.
-        self.gutter = gutter_width(view, usize::from(inner));
+        // **The painter reads the gutter where one was decided, and takes it
+        // where none was**
+        // ([#272](https://github.com/breferrari/vigia/issues/272)). The wrap
+        // decision is taken against this number before these rows exist, so a
+        // second derivation here is a pane whose text bound and whose gutter come
+        // apart by a column. `None` is a view nobody wrapped, which is a
+        // hand-built one and a caller that named no width, and there the answer
+        // is this function's as it always was.
+        self.gutter = view
+            .gutter
+            .unwrap_or_else(|| gutter_width(&view.rows, usize::from(inner)));
+        // **And the two are allowed to differ, which is the ruling rather than a
+        // gap.** `View::wrap_rows` sizes the gutter from *the rows the walk
+        // reached*; wrapping then pushes some of them off the bottom, so what is
+        // drawn is a prefix of what was measured and its largest line number can
+        // be smaller. Sizing it from the survivors instead is not available: the
+        // width left for text is what decides which rows survive. The stable half
+        // is the one that matters, and it is the one the rows were split against.
+        //
+        // With wrapping off the two are equal at every pane, which is what the
+        // whole suite drawing byte-identical screens says.
         for (offset, row) in view.rows.iter().take(shown).enumerate() {
             let y = area.y + offset as u16;
             match row {
@@ -7656,10 +7756,46 @@ impl Painter<'_> {
                             width: glyphs.width,
                         },
                         *kind,
-                        *number,
+                        Some(*number),
                         text,
                         spans,
                         emph,
+                        0,
+                    );
+                }
+                // **The same drawer, told it has no number**, which is what keeps
+                // the wash, the left bar, the two-tone gutter, the word patch and
+                // the degradation ladder one rule rather than two
+                // ([#272](https://github.com/breferrari/vigia/issues/272)). A
+                // second drawer for a continuation is exactly the shape §11.1
+                // refuses one region over, where the list and the stream draw a
+                // heading through one function so the two cannot disagree.
+                Row::Wrap {
+                    kind,
+                    text,
+                    spans,
+                    emph,
+                    indent,
+                } => {
+                    self.line_row(
+                        Rect {
+                            y,
+                            height: 1,
+                            width: washed,
+                            ..area
+                        },
+                        Rect {
+                            y,
+                            height: 1,
+                            x: glyphs.x,
+                            width: glyphs.width,
+                        },
+                        *kind,
+                        None,
+                        text,
+                        spans,
+                        emph,
+                        *indent,
                     );
                 }
             }
@@ -8234,16 +8370,23 @@ impl Painter<'_> {
         area: Rect,
         glyphs: Rect,
         kind: LineKind,
-        number: u32,
+        number: Option<u32>,
         text: &str,
         spans: &[Span],
         emph: &[std::ops::Range<u32>],
+        indent: usize,
     ) {
         let (diff, sigil) = match kind {
-            LineKind::Added => (self.theme.added, '+'),
-            LineKind::Removed => (self.theme.removed, '-'),
-            LineKind::Context => (self.theme.context, ' '),
+            LineKind::Added => (self.theme.added, "+"),
+            LineKind::Removed => (self.theme.removed, "-"),
+            LineKind::Context => (self.theme.context, " "),
         };
+        // **`None` is a continuation, and it changes exactly two cells**
+        // ([#272](https://github.com/breferrari/vigia/issues/272)): the sigil
+        // becomes [`WRAPPED`] and the gutter goes blank. Everything else on this
+        // row is the row it continues, which is the point: a wrapped removal that
+        // stopped being washed halfway down would read as ending early.
+        let sigil = if number.is_some() { sigil } else { WRAPPED };
 
         let (wash, bar) = match kind {
             LineKind::Added => self.theme.row(true),
@@ -8302,7 +8445,14 @@ impl Painter<'_> {
         let mut room = usize::from(glyphs.width);
         if self.gutter > 0 {
             let gutter = self.gutter;
-            let numbered = format!("{number:>gutter$} ");
+            // A continuation has no number, and the blank where one would be is
+            // `bat --style=numbers`' own signal that this row is not a new line.
+            // Drawn rather than skipped, because the tone below is a background
+            // and a background needs cells to land on.
+            let numbered = match number {
+                Some(number) => format!("{number:>gutter$} "),
+                None => " ".repeat(gutter + 1),
+            };
             // crush's two-tone gutter (`SPEC.md` §11.2 B18, #321): on a changed
             // row the number cells take a tone one step off the wash, so the
             // gutter reads as a column with no border spent. A background
@@ -8338,7 +8488,7 @@ impl Painter<'_> {
         // `.min` arm is unchanged and still has room: two fixed runs plus at most
         // `room - 2` content runs is `room`.
         let mut runs = Vec::with_capacity((spans.len() + 3).min(room + 2));
-        runs.push((sigil.to_string(), sigil_style));
+        runs.push((sigil.to_owned(), sigil_style));
 
         // **The gap `assets/preview.svg` has drawn since before any of this
         // existed** ([#164](https://github.com/breferrari/vigia/issues/164)).
@@ -8416,7 +8566,18 @@ impl Painter<'_> {
             LineKind::Context => None,
         }
         .map(|word| (word, emph));
-        let clipped = self.content_runs(&mut runs, text, spans, content, emphasis);
+        // **Neovim's `'breakindent'`, paid out of the tail's own budget**
+        // ([#272](https://github.com/breferrari/vigia/issues/272)). Pushed as a
+        // run rather than folded into the text so the column counter
+        // [`Painter::content_runs`] keeps stays the tail's own: a tab in the tail
+        // then aligns to where the tail starts, which is the only origin a
+        // continuation has. [`indent_of`] caps it at half the content so a deeply
+        // indented line cannot buy a second row with nothing on it.
+        let indent = indent.min(content);
+        if indent > 0 {
+            runs.push((" ".repeat(indent), Style::new()));
+        }
+        let clipped = self.content_runs(&mut runs, text, spans, content - indent, emphasis);
         self.paint.rows += 1;
 
         // Content is the one thing that can neither break nor elide: wrapping it
@@ -8449,9 +8610,17 @@ fn span(start: u32, lines: u32) -> String {
 ///
 /// Sized from the largest number actually on screen rather than from the file,
 /// so the gutter does not widen for content nobody can see.
-fn gutter_width(view: &View, width: usize) -> usize {
-    let largest = view
-        .rows
+///
+/// **Called by [`crate::view::View::wrap_rows`] rather than by the painter since
+/// [#272](https://github.com/breferrari/vigia/issues/272)**, and it takes rows
+/// rather than a `View` for that reason: wrapping needs the text bound *before*
+/// the painter exists, because the width left for text is what decides whether a
+/// line wraps, and by the time the painter runs the row set has already been
+/// truncated by that decision. The answer is carried on
+/// [`crate::view::View::gutter`] so the two cannot be taken over two different
+/// row sets and disagree by a column.
+pub(crate) fn gutter_width(rows: &[Row], width: usize) -> usize {
+    let largest = rows
         .iter()
         .filter_map(|row| match row {
             Row::Line { number, .. } => Some(*number),
@@ -8472,6 +8641,18 @@ fn gutter_width(view: &View, width: usize) -> usize {
     } else {
         0
     }
+}
+
+/// Columns a content row has for its text, once the gutter and the sigil are paid.
+///
+/// **The same expression [`Painter::line_row`] reaches in two steps**, named
+/// because [#272](https://github.com/breferrari/vigia/issues/272) gave it a
+/// second caller outside this module: the wrap decision is taken against exactly
+/// this bound, and a second spelling of it is a pane whose rows were counted
+/// against one width and drawn against another. `line_row`'s `debug_assert_eq!`
+/// is what holds the two together.
+pub(crate) fn content_width(gutter: usize, width: usize) -> usize {
+    width.saturating_sub(line_origin(gutter))
 }
 
 /// Keep the tail of `text`, marking the loss, when it will not fit.
@@ -8526,6 +8707,14 @@ struct Printed {
     /// differ exactly where it matters: a run that ends flush with the pane is
     /// indistinguishable by width from one that was cut there.
     clipped: bool,
+    /// Byte offset into the source where the walk stopped.
+    ///
+    /// Equal to the source's length when nothing was left over. **What
+    /// [`split_at`] reads**, and it is on this struct rather than recomputed by a
+    /// second walk because the two would then be two spellings of one rule: the
+    /// row count is taken from where the split lands and the pane is drawn from
+    /// where the walk stops, and those have to be the same byte.
+    at: usize,
 }
 
 /// Make one line of file content safe to write into terminal cells.
@@ -8561,10 +8750,83 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
     // Sized from what will be kept rather than from what was offered. Four bytes
     // a column is the widest UTF-8 encoding, and a tab can expand past the end
     // by at most one stop.
-    let mut out = String::with_capacity(
+    let out = String::with_capacity(
         text.len()
             .min(room.saturating_mul(4).saturating_add(TAB_STOP)),
     );
+    walk_printable(text, column, room, Some(out))
+}
+
+/// Where a line has to break to fit `room` columns, or `None` when it fits.
+///
+/// **The row model's half of the wrap**
+/// ([#272](https://github.com/breferrari/vigia/issues/272)), and it is
+/// [`printable`]'s own walk with the string thrown away rather than a second
+/// measurement of the same thing. `SPEC.md` §11.2 B19 is the ruling; what makes
+/// this the shape rather than a `width_of` comparison is tabs, control
+/// characters and grapheme clusters, all three of which move a column by
+/// something other than one per `char` and all three of which the painter
+/// already resolves here.
+///
+/// **A byte offset rather than a column**, because what the caller does with it
+/// is slice: [`crate::view::View::wrap_rows`] cuts the row's text there and
+/// hands the head and the tail to two rows, so the painter never re-derives a
+/// boundary that could disagree with the one the rows were counted from.
+///
+/// `None` for a line that ends flush with the pane as well as for a short one:
+/// there is nothing below to draw, so nothing wraps. Also `None` when the walk
+/// stopped at the very last byte, for the same reason.
+pub(crate) fn split_at(text: &str, room: usize) -> Option<usize> {
+    let mut column = 0usize;
+    let walked = walk_printable(text, &mut column, room, None);
+    (walked.clipped && walked.at > 0 && walked.at < text.len()).then_some(walked.at)
+}
+
+/// Columns a wrapped line's continuation stands in by, so a block keeps its shape.
+///
+/// Neovim's `'breakindent'`: *"Every wrapped line will continue visually
+/// indented (same amount of space as the beginning of that line), thus
+/// preserving horizontal blocks of text."* It matters more here than in a pager
+/// because [#164](https://github.com/breferrari/vigia/issues/164) already ruled a
+/// content row's origin uniform down the block, and an unindented continuation
+/// would break the shape of exactly the nested code this tool is pointed at.
+///
+/// **Capped at half the content width**, which is what stops a deeply indented
+/// line buying a second row with nothing on it: at forty columns a twenty-space
+/// indent would leave four columns of tail, and four columns of tail is not a
+/// route to the end of anything. The cap is the tail's floor rather than a
+/// preference, and
+/// `tests/legibility.rs::a_wrapped_continuation_keeps_the_text_its_floor` is what
+/// holds it.
+///
+/// Tabs count what they expand to, from the line's own origin, because that is
+/// what [`printable`] draws.
+pub(crate) fn indent_of(text: &str, content: usize) -> usize {
+    let mut column = 0usize;
+    for c in text.chars() {
+        match c {
+            '\t' => column += TAB_STOP - (column % TAB_STOP),
+            ' ' => column += 1,
+            _ => break,
+        }
+    }
+    column.min(content / 2)
+}
+
+/// [`printable`] and [`split_at`] as one walk, with the string made optional.
+///
+/// **One function because the two questions are one rule.** What the painter
+/// draws and where the row model breaks the line have to be the same byte, and
+/// two walks over the same characters are two chances to answer differently: a
+/// tab stop, a control character or a grapheme cluster resolved one way here and
+/// another way there is a row whose count and whose pixels disagree, which is
+/// invisible from either side.
+fn walk_printable(text: &str, column: &mut usize, room: usize, out: Option<String>) -> Printed {
+    // `None` is [`split_at`] asking where the break falls, and it must stay
+    // `None` all the way down rather than becoming an empty `String`: an empty
+    // one allocates the moment anything is pushed into it, and this runs once per
+    // drawn content row per frame.
+    let mut out = out;
     // The character bound, in the same terms as the column one so the two can be
     // read together.
     let walk = room
@@ -8593,9 +8855,10 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
             // Stopped with source left over, which is the caller's signal to
             // mark the row and stop asking the rest of the spans for anything.
             return Printed {
-                text: out,
+                text: out.unwrap_or_default(),
                 examined,
                 clipped: true,
+                at: i,
             };
         }
         examined += 1;
@@ -8630,20 +8893,28 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
             '\u{fe0f}' => {}
             '\t' => {
                 let stop = TAB_STOP - (*column % TAB_STOP);
-                out.extend(std::iter::repeat_n(' ', stop));
+                if let Some(out) = out.as_mut() {
+                    out.extend(std::iter::repeat_n(' ', stop));
+                }
                 *column += stop;
             }
             c if c.is_control() => {
-                out.push(UNPRINTABLE);
+                if let Some(out) = out.as_mut() {
+                    out.push(UNPRINTABLE);
+                }
                 *column += 1;
             }
             c if c.is_ascii() => {
-                out.push(c);
+                if let Some(out) = out.as_mut() {
+                    out.push(c);
+                }
                 *column += 1;
                 (cluster, cluster_width) = (i, 1);
             }
             c => {
-                out.push(c);
+                if let Some(out) = out.as_mut() {
+                    out.push(c);
+                }
                 // Only the non-ASCII tail pays for a width lookup, which keeps
                 // the common line off the measuring path entirely.
                 let end = i + c.len_utf8();
@@ -8663,7 +8934,8 @@ fn printable(text: &str, column: &mut usize, room: usize) -> Printed {
         }
     }
     Printed {
-        text: out,
+        text: out.unwrap_or_default(),
+        at: text.len(),
         // The source ran out rather than the room, so the only way this row
         // still overflows is a two-column glyph that straddled the last cell.
         clipped: *column > room,
@@ -9108,14 +9380,15 @@ mod sheet_tables {
         // **Why outside the keep-set and in this order**
         // ([#295](https://github.com/breferrari/vigia/issues/295),
         // [#297](https://github.com/breferrari/vigia/issues/297),
-        // [#313](https://github.com/breferrari/vigia/issues/313)): `f`, `m`, `?`,
-        // `r`, `s` and `a` are six gestures a reader cannot guess at and
-        // `SHEET_KEEP` keeps three, so three have to go first. `r` goes before `s`
-        // because it is the only one of the six that does nothing at all below 134
-        // columns, and the rungs that reach this depth are narrow by definition;
-        // `a` goes last of the three because losing it is the only one of the
-        // three that costs a reader a *comparison* rather than an arrangement of
-        // rows they can already see.
+        // [#313](https://github.com/breferrari/vigia/issues/313),
+        // [#272](https://github.com/breferrari/vigia/issues/272)): `f`, `m`, `?`,
+        // `r`, `s`, `w` and `a` are seven gestures a reader cannot guess at and
+        // `SHEET_KEEP` keeps three, so four have to go first. `r` goes before `s`
+        // because it is the only one of the seven that does nothing at all below
+        // 134 columns, and the rungs that reach this depth are narrow by
+        // definition; `w` goes with `s` because both rearrange rows a reader can
+        // already see; `a` goes last of the four because losing it is the only one
+        // that costs a reader a *comparison* rather than an arrangement.
         //
         // **This claim is about the tables and not about any pane**, which is the
         // correction the audit forced. The rank that would drop `r` is `from >= 9`
@@ -9124,21 +9397,26 @@ mod sheet_tables {
         // kept. What the reorder buys is that the untouched order would have
         // dropped `f`, which `sheet_tables`' own keep-set assertion forbids.
         //
-        // **All three, in order, rather than only the last**, because a single
+        // **All four, in order, rather than only the last**, because a single
         // cell says nothing about the one beside it: the version of this that
         // asserted `r` alone would have gone green with `s` ranked anywhere above
-        // it, including above `q`.
-        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - 3..]
+        // it, including above `q`. **And the window is `EXPECTED.len()` rather
+        // than a repeated literal**, which is [#272](https://github.com/breferrari/vigia/issues/272)'s
+        // own correction: it was a hand-written `3` in two places, and adding `w`
+        // between `s` and `a` slid `r` out of a window that went on being three
+        // wide, so the gate reddened by *losing* the row it was written to pin
+        // rather than by that row moving.
+        const EXPECTED: [&str; 4] = ["r", "s", "w", "a"];
+        let outside: Vec<&str> = DROP_ORDER[DROP_ORDER.len() - SHEET_KEEP - EXPECTED.len()..]
             .iter()
-            .take(3)
+            .take(EXPECTED.len())
             .map(|&row| KEYBOARD[row].keys[0])
             .collect();
         assert_eq!(
-            outside,
-            ["r", "s", "a"],
+            outside, EXPECTED,
             "the rows given up before the keep-set are {outside:?} rather than the \
-             rail, then the pin, then the staged run, so a pane at the floor is \
-             spending it on a gesture that could have fired there"
+             rail, then the pin, then the wrap, then the staged run, so a pane at \
+             the floor is spending it on a gesture that could have fired there"
         );
     }
 

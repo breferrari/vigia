@@ -120,6 +120,20 @@ pub struct App {
     /// Off by default, which is the derived answer and also the ruled one: a
     /// reader who has pressed nothing gets the diff the tool has always drawn.
     single: bool,
+    /// Whether a content line too wide for the pane continues on the row below.
+    ///
+    /// `SPEC.md` §11.2 **B19**, from `w`
+    /// ([#272](https://github.com/breferrari/vigia/issues/272)). Off by default,
+    /// and that is a ruling rather than the derived answer: every neighbour that
+    /// wraps is given the whole terminal and this one is built for half of it, so
+    /// the mode with a price is the one asked for
+    /// ([#204](https://github.com/breferrari/vigia/issues/204)'s reasoning about
+    /// the masthead, applied to the same reader).
+    ///
+    /// **Like [`Self::single`] and unlike [`Self::rail`] there is no pane that
+    /// cannot honour it**, so this is a request and an answer at once: a pane too
+    /// narrow to wrap is a pane too narrow to draw a diff on at all.
+    wrap: bool,
     /// Whether the reader has asked for the staged run beside the unstaged one.
     ///
     /// `SPEC.md` §11.2 **B17**, from `a`
@@ -330,6 +344,11 @@ impl Default for App {
             // working tree against the index, which is what §11.1's opening
             // contract has always said and what #50 has not yet reopened.
             staged: false,
+            // Derived, and B19's ruling as well: an unpressed shell clips a long
+            // line and marks it, which is what §11.1 has always said, and the
+            // reader who wants the other mode asks for it once per session or
+            // once in `~/.config/vigia/config`.
+            wrap: false,
             // Derived: an unpressed, unconfigured shell draws no icons, and off
             // is byte-identical to every version before the key existed.
             icons: false,
@@ -401,6 +420,7 @@ impl App {
             masthead: config.masthead,
             rail: config.rail,
             single: config.single,
+            wrap: config.wrap,
             staged: config.staged,
             icons: config.icons,
             links: config.links,
@@ -803,6 +823,12 @@ impl App {
             // any screen at all the second on-and-off pair is. `SPEC.md` §11.2
             // B16 says so out loud and `tests/single.rs` holds both halves.
             Action::ToggleSingle => self.single = !self.single,
+            // **Nothing else moves.** The position is a logical row and stays
+            // one, so a reader who presses `w` is looking at the same line of the
+            // same file from the same row, drawn over more of the pane. That is
+            // `SPEC.md` §11.2 B19's own claim about the scrollbar restated where
+            // a reader can feel it.
+            Action::ToggleWrap => self.wrap = !self.wrap,
             // **The one toggle that changes what the frame *walks*.** The other
             // three rearrange rows the frame already holds; this one adds a second
             // status walk and a second set of diffs, so the frame is told rather
@@ -1509,6 +1535,13 @@ impl App {
                 // file it is inside, so the walk is where a pin can be enforced
                 // without asking the frame anything twice.
                 single: self.single,
+                // **From the layout rather than from this method's idea of the
+                // pane**, which is the reason `body` is a parameter at all: the
+                // width a row is laid out against decides where a line breaks,
+                // and a second derivation of it here is a pane whose rows were
+                // counted against one width and drawn against another.
+                width: body.diff_width,
+                wrap: self.wrap,
                 // Read before the advance below, so the first frame through
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].

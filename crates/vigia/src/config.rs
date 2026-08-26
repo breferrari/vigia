@@ -2,7 +2,7 @@
 //!
 //! `SPEC.md` §11.2 **B6**, amended 2026-08-25 by
 //! [#306](https://github.com/breferrari/vigia/issues/306). Three keys, in a file
-//! beside the theme: `masthead`, `rail`, `single` and `staged`, the toggles that decide what
+//! beside the theme: `masthead`, `rail`, `single`, `staged` and `wrap`, the toggles that decide what
 //! the body is made of. All three are off without a file, which is every version
 //! of this tool before the amendment, so a reader who has written nothing sees
 //! exactly what they saw yesterday.
@@ -93,6 +93,17 @@ pub struct Config {
     /// This lets a reader who has already decided for themselves stop pressing `a`
     /// every session, which is what every key in this file does.
     pub staged: bool,
+    /// Wrap a content line too wide for the pane onto the row below. `w`.
+    ///
+    /// **§11.2 B19** ([#272](https://github.com/breferrari/vigia/issues/272)), and
+    /// it is here for the reason [`Self::staged`] is: this file's set is
+    /// *defined* as the gestures sheet's `view` section less `follow`, plus the
+    /// appearance keys B18 added, so a section that gains a row and a file that
+    /// does not would make that definition false rather than merely leave a key
+    /// unavailable.
+    ///
+    /// Off by default, which is both the derived answer and the ruled one.
+    pub wrap: bool,
     /// Draw a file-type icon before every listed path. No gesture; config only.
     ///
     /// **The first key here with no key on the keyboard, and that is a
@@ -129,6 +140,7 @@ impl Default for Config {
             rail: false,
             single: false,
             staged: false,
+            wrap: false,
             icons: false,
             links: true,
         }
@@ -158,7 +170,9 @@ impl Default for Config {
 ///
 /// That is a gate and a runtime check rather than the type system, and saying so
 /// is the difference between a check and a claim that suppresses one.
-pub const KEYS: [&str; 6] = ["masthead", "rail", "single", "staged", "icons", "links"];
+pub const KEYS: [&str; 7] = [
+    "masthead", "rail", "single", "staged", "wrap", "icons", "links",
+];
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -183,6 +197,7 @@ impl Config {
             "rail" => self.rail = on,
             "single" => self.single = on,
             "staged" => self.staged = on,
+            "wrap" => self.wrap = on,
             "icons" => self.icons = on,
             "links" => self.links = on,
             _ => return false,

@@ -425,6 +425,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -535,6 +536,7 @@ fn one_file() -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -703,6 +705,7 @@ fn nothing_changed() -> View {
         top: Position::default(),
         read: 0,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -971,6 +974,7 @@ fn ragged_counts() -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::spread(12),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -2165,6 +2169,7 @@ fn a_file_with_no_line_diff_says_why() {
         top: Position::default(),
         read: 3,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(60, 8, &view, &chrome()));
@@ -2194,6 +2199,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
     insta::assert_snapshot!(screen(40, 4, &view, &chrome()));
@@ -2232,6 +2238,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
     let rendered = format!("{}", screen(40, 6, &view, &chrome()));
@@ -2512,6 +2519,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
     let backend = screen(60, 5, &view, &chrome());
@@ -2550,6 +2558,7 @@ fn a_double_width_character_is_never_cut_in_half() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
 
@@ -2605,6 +2614,7 @@ fn the_gutter_gives_way_before_the_text_does() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
 
@@ -2695,6 +2705,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(u32::MAX),
+        gutter: None,
         worktree_churn: Default::default(),
     };
 
@@ -3180,6 +3191,7 @@ fn glancing() -> View {
         top: Position::default(),
         read: 3,
         scale: Scale::spread(12),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -3932,6 +3944,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
         top: Position { file: current, row },
         read: 4,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -4372,6 +4385,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
         top: Position::default(),
         read: 2,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }

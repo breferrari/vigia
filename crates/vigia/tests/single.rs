@@ -661,6 +661,8 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
             row: SPAN - 2,
         },
         anchored: true,
+        wrap: false,
+        width: 0,
         diff_rows: body(),
         measured: true,
         ..Viewport::default()

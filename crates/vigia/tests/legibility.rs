@@ -712,6 +712,7 @@ fn every_row_kind() -> View {
         top: Position::default(),
         read: 3,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -747,6 +748,7 @@ fn awkward() -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -767,6 +769,7 @@ fn empty() -> View {
         top: Position::default(),
         read: 0,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -812,6 +815,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -1122,6 +1126,7 @@ fn glancing() -> View {
         top: Position::default(),
         read: 3,
         scale: Scale::spread(12),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
@@ -2884,6 +2889,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
     let long_name = Chrome {
@@ -3020,6 +3026,7 @@ fn a_clipped_content_line_says_it_continues() {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     };
 
@@ -4524,6 +4531,7 @@ fn overlong(rows: usize) -> View {
         top: Position::default(),
         read: 1,
         scale: Scale::flat(0),
+        gutter: None,
         worktree_churn: Default::default(),
     }
 }
