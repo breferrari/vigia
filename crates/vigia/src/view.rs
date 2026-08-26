@@ -1394,7 +1394,7 @@ fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> u
 /// Ties keep the earlier hunk, because a reader scrolls forward more readily
 /// than back. A note block ([`note_for`]) and a file with no hunks have nothing
 /// to land on and stay on their heading.
-fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: usize) -> usize {
+fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: Option<usize>) -> usize {
     if note_for(kind, diff).is_some() {
         return 0;
     }
@@ -1407,12 +1407,16 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: usize)
     // two are the same number until a line wraps, and a `content` of zero is a
     // caller that is not wrapping, where every line is one row and they stay
     // equal for the life of the walk.
-    let rows_of_line = |text: &str| {
-        if content == 0 {
-            1
-        } else {
-            1 + crate::render::breaks_of(text, content, height).len()
-        }
+    // **`None` is *not wrapping*, and it is a state of its own rather than a
+    // content of zero** ([#272](https://github.com/breferrari/vigia/issues/272)).
+    // The floor below is `width` less the widest gutter a `u32` line number can
+    // need, which is thirteen columns, so on a very narrow diff region the
+    // subtraction saturates and a zero meaning *this pane has no room* would have
+    // been read as *nothing wraps here*. Those are opposite answers, and the
+    // second one serves a landing whose change is below the fold.
+    let rows_of_line = |text: &str| match content {
+        Some(content) if content > 0 => 1 + crate::render::breaks_of(text, content, height).len(),
+        _ => 1,
     };
 
     let mut row = 1;
@@ -1444,11 +1448,22 @@ fn landing_of(kind: &ChangeKind, diff: &FileDiff, height: usize, content: usize)
                     .sum::<usize>();
         }
         row += hunk_span(hunk);
-        seen += 1 + hunk
-            .lines
-            .iter()
-            .map(|line| rows_of_line(&line.text))
-            .sum::<usize>();
+        // **The exact count stops once it has passed the pane**, which bounds the
+        // text this walks to roughly one screenful rather than to the file. Past
+        // `height` the two tests below need only the offsets *within* the busiest
+        // hunk, which are still exact, and an absolute already over the pane
+        // stays over it however it grows: the logical count is a lower bound on
+        // the display one, so the saturation cannot make a change look nearer
+        // than it is.
+        seen += if seen < height {
+            1 + hunk
+                .lines
+                .iter()
+                .map(|line| rows_of_line(&line.text))
+                .sum::<usize>()
+        } else {
+            1 + hunk.lines.len()
+        };
     }
 
     // **Two questions, and a landing has to answer both.** `height` is the diff
@@ -1901,11 +1916,7 @@ impl View {
         // can hold, so this is the floor across every file, and a floor
         // over-states the wrapping rather than under-stating it. Zero when `w` is
         // off, which is the caller saying *nothing wraps*.
-        let landing_content = if wrap && width > 0 {
-            crate::render::content_width(10, width)
-        } else {
-            0
-        };
+        let landing_content = (wrap && width > 0).then(|| crate::render::content_width(10, width));
         let mut at_bottom = false;
         // Whether the last file the walk touched was drawn to the end of its
         // block. See the assignment for what it is for.
@@ -2176,7 +2187,7 @@ impl View {
                 // pays for it: this walks every collected row and the three
                 // conditions above are field reads. It is bounded by the window
                 // either way, and ordering it is free.
-                && view.display_rows(width, wrap) < height
+                && view.display_rows(width, wrap, height) < height
                 && view.top
                     != Position {
                         file: first,
@@ -2546,7 +2557,7 @@ impl View {
     /// `self.rows.len()` when nothing wraps, which is every pane with `w` off and
     /// every caller that named no width, so the guard that reads this is the
     /// guard it has always been there.
-    fn display_rows(&self, width: usize, wrap: bool) -> usize {
+    fn display_rows(&self, width: usize, wrap: bool, height: usize) -> usize {
         if !wrap || width == 0 {
             return self.rows.len();
         }
@@ -2558,9 +2569,16 @@ impl View {
         self.rows
             .iter()
             .map(|row| match row {
-                Row::Line { text, .. } => {
-                    1 + usize::from(crate::render::split_at(text, content).is_some())
-                }
+                // **`breaks_of`, not `split_at`**, and it was the second for one
+                // commit ([#272](https://github.com/breferrari/vigia/issues/272)).
+                // Removing the wrap cap moved `wrap_rows` and `landing_of` onto
+                // the uncapped walk and left this one counting at most two rows a
+                // line, so a screen of three-row lines read as short, backed the
+                // walk up every frame, and undid a `j` as fast as a reader could
+                // press it. The docblock above said "the same arithmetic
+                // `wrap_rows` does" throughout, which is the drift this project
+                // treats as worse than no comment at all.
+                Row::Line { text, .. } => 1 + crate::render::breaks_of(text, content, height).len(),
                 _ => 1,
             })
             .sum()
@@ -3281,7 +3299,7 @@ mod tests {
     #[test]
     fn the_busiest_hunk_is_where_a_tall_file_lands() {
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), 8, 0),
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, None),
             10,
             "the landing is not the second hunk's header row"
         );
@@ -3303,6 +3321,36 @@ mod tests {
     }
 
     #[test]
+    fn a_content_of_nothing_is_not_a_content_of_one() {
+        // **The floor `View::collect` hands this can saturate to zero**, because
+        // it is the pane's width less the widest gutter a `u32` line number can
+        // need, which is thirteen columns. Zero there means *this pane has no room
+        // for text at all*, and the reading that matters is that it is **not** the
+        // same as a content of one: one column of room wraps every line into as
+        // many rows as it has characters, which would decline every landing on the
+        // narrowest panes.
+        //
+        // Driven here rather than through a pane because the pane floor may put a
+        // thirteen-column diff region out of reach: the arithmetic is wrong
+        // either way, and this is the instrument that can say so.
+        // **The wide fixture, because the shared one carries no text**: every line
+        // of `three_hunks` is empty, so it wraps identically at any width and
+        // cannot tell a content of nothing from a content of one.
+        let none = landing_of(&ChangeKind::Modified, &three_hunks_wide(), 8, None);
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &three_hunks_wide(), 8, Some(0)),
+            none,
+            "a pane with no room for text was read as a pane one column wide"
+        );
+        assert_ne!(
+            landing_of(&ChangeKind::Modified, &three_hunks_wide(), 8, Some(1)),
+            none,
+            "a content of one column gave the same answer as no wrapping at all, \
+             so this comparison cannot tell the two apart"
+        );
+    }
+
+    #[test]
     fn a_wrapped_pane_follows_only_a_change_it_can_show() {
         // **The budget is measured, not halved**, which is what removing the wrap
         // cap forced: with a cap of two rows a change at logical offset `d` sat at
@@ -3318,13 +3366,13 @@ mod tests {
         // A file whose lines do not wrap is followed exactly as it is unwrapped.
         // The halving failed this, and it is the common case: `w` is global, so a
         // reader with it on is in this state for every file that fits.
-        let plain = landing_of(&ChangeKind::Modified, &three_hunks(), 8, 0);
+        let plain = landing_of(&ChangeKind::Modified, &three_hunks(), 8, None);
         assert!(
             plain > 0,
             "the fixture declines even unwrapped, so this compares two refusals"
         );
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), 8, 200),
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, Some(200)),
             plain,
             "a file whose lines all fit was followed differently with wrapping on"
         );
@@ -3333,7 +3381,7 @@ mod tests {
         // so a landing the same height honoured is withdrawn once it cannot be
         // guaranteed drawn.
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks_wide(), 8, 20),
+            landing_of(&ChangeKind::Modified, &three_hunks_wide(), 8, Some(20)),
             0,
             "a pane that cannot guarantee the change is drawn from the landing \
              moved the reader off the heading anyway"
@@ -3348,13 +3396,13 @@ mod tests {
         // heading already.
         let tall = 24;
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &three_hunks(), tall, 0),
+            landing_of(&ChangeKind::Modified, &three_hunks(), tall, None),
             0,
             "the fixture draws its change from the heading at {tall} rows, so the \
              wrapped answer below is not a comparison"
         );
         assert!(
-            landing_of(&ChangeKind::Modified, &three_hunks_wide(), tall, 20) > 0,
+            landing_of(&ChangeKind::Modified, &three_hunks_wide(), tall, Some(20)) > 0,
             "a change drawn from the heading unwrapped is below the fold once \
              every line takes three rows, and the pane did not move to it"
         );
@@ -3369,7 +3417,7 @@ mod tests {
         let tall_and_quiet = diff(400, vec![hunk(10, &kinds(40, 1)), hunk(200, &kinds(6, 9))]);
 
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &tall_and_quiet, 8, 0),
+            landing_of(&ChangeKind::Modified, &tall_and_quiet, 8, None),
             43,
             "the landing followed the tallest hunk rather than the busiest"
         );
@@ -3392,7 +3440,7 @@ mod tests {
             ],
         );
 
-        assert_eq!(landing_of(&ChangeKind::Modified, &even, 8, 0), 9);
+        assert_eq!(landing_of(&ChangeKind::Modified, &even, 8, None), 9);
     }
 
     #[test]
@@ -3407,8 +3455,8 @@ mod tests {
         // seventeen-row one does not.
         let file = three_hunks();
 
-        assert_eq!(landing_of(&ChangeKind::Modified, &file, 18, 0), 0);
-        assert_eq!(landing_of(&ChangeKind::Modified, &file, 17, 0), 10);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 18, None), 0);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 17, None), 10);
     }
 
     #[test]
@@ -3424,7 +3472,7 @@ mod tests {
 
         for height in 11..=17 {
             assert_eq!(
-                landing_of(&ChangeKind::Modified, &file, height, 0),
+                landing_of(&ChangeKind::Modified, &file, height, None),
                 10,
                 "a {height}-row region draws the busiest hunk's header and none \
                  of what it changed, and the heading was kept anyway"
@@ -3448,7 +3496,7 @@ mod tests {
 
         for height in 1..=7 {
             assert_eq!(
-                landing_of(&ChangeKind::Modified, &file, height, 0),
+                landing_of(&ChangeKind::Modified, &file, height, None),
                 0,
                 "a {height}-row region cannot draw the change from the landing, \
                  so the landing costs the heading and buys nothing"
@@ -3456,7 +3504,7 @@ mod tests {
         }
         // And one row further up it is worth it again: the header and its six
         // context lines fit in seven, so the eighth row is the first removal.
-        assert_eq!(landing_of(&ChangeKind::Modified, &file, 8, 0), 10);
+        assert_eq!(landing_of(&ChangeKind::Modified, &file, 8, None), 10);
     }
 
     #[test]
@@ -3475,12 +3523,12 @@ mod tests {
         // pins the edge itself rather than a point to one side of it, which is
         // what every other case in this battery does.
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &file, 14, 0),
+            landing_of(&ChangeKind::Modified, &file, 14, None),
             10,
             "the busiest hunk is nine additions and the landing went elsewhere"
         );
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &file, 15, 0),
+            landing_of(&ChangeKind::Modified, &file, 15, None),
             0,
             "the ninth addition is drawn from the heading and the heading was \
              spent anyway"
@@ -3498,21 +3546,27 @@ mod tests {
         // the early return was doing nothing the test could see and deleting it
         // left the suite green. `three_hunks` lands on row 10 from an eight-row
         // region.
-        assert_eq!(landing_of(&ChangeKind::Modified, &three_hunks(), 8, 0), 10);
+        assert_eq!(
+            landing_of(&ChangeKind::Modified, &three_hunks(), 8, None),
+            10
+        );
 
-        assert_eq!(landing_of(&ChangeKind::Conflict, &three_hunks(), 8, 0), 0);
+        assert_eq!(
+            landing_of(&ChangeKind::Conflict, &three_hunks(), 8, None),
+            0
+        );
         // A real binary diff carries no hunks either, so it reaches the same
         // answer by the ordinary route. Pinned so that stays true.
         let mut binary = three_hunks();
         binary.binary = true;
         binary.hunks.clear();
-        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 8, 0), 0);
+        assert_eq!(landing_of(&ChangeKind::Modified, &binary, 8, None), 0);
     }
 
     #[test]
     fn a_file_with_no_hunks_has_nowhere_to_land() {
         assert_eq!(
-            landing_of(&ChangeKind::Modified, &diff(400, Vec::new()), 1, 0),
+            landing_of(&ChangeKind::Modified, &diff(400, Vec::new()), 1, None),
             0
         );
     }

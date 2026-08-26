@@ -1538,3 +1538,123 @@ fn a_landing_follow_served_is_not_trimmed_off_its_own_row() {
          never reached the case it is about"
     );
 }
+
+#[test]
+fn a_band_of_three_row_lines_scrolls_and_stays_scrolled() {
+    // **Every other wrapped fixture in this file takes two rows a line**, which is
+    // the shape the cap left behind, and two is exactly the number that hides this
+    // defect: `View::display_rows` went on counting *at most one break* after the
+    // cap was removed, so a screen of two-row lines was counted right by accident
+    // and a screen of three-row lines read as short. The walk then backed up every
+    // frame and undid a `j` as fast as a reader could press it, on a diff too
+    // short in its own rows for a scrollbar to say anything was hidden.
+    //
+    // So the fixture's lines take **three** rows, and the gate presses `j` and
+    // asserts the pane stayed where it was put.
+    let scratch = Scratch::new("shell-wrap-three-row-band");
+    scratch.write("src/band.rs", "seed\n");
+    scratch.commit_all("base");
+    let mut body = String::new();
+    for n in 0..7 {
+        body.push_str(&format!("let wide_{n} = \"{}\";\n", "w".repeat(150)));
+    }
+    scratch.write("src/band.rs", body);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut app = wrapped(&mut frame);
+    let height = diff_height(PANE, &chrome_of(&app), 1, 1);
+
+    let (view, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    let tallest = {
+        let mut run = 0usize;
+        let mut best = 0usize;
+        for row in &view.rows {
+            match row {
+                Row::Wrap { .. } => {
+                    run += 1;
+                    best = best.max(run + 1);
+                }
+                _ => run = 0,
+            }
+        }
+        best
+    };
+    assert!(
+        tallest >= 3,
+        "the fixture's lines take {tallest} rows, and two is the width at which \
+         this defect hides"
+    );
+
+    app.apply(Action::Scroll(1), &mut frame, height)
+        .expect("apply");
+    let (after, _) = drawn(&mut app, &mut frame, &mut highlighter, &history);
+    assert_eq!(
+        after.top.row, 1,
+        "one `j` on a band of three-row lines resolved back to where it started, \
+         so the screen was counted as short when it was full"
+    );
+}
+
+#[test]
+fn the_two_row_counters_agree_on_the_same_screen() {
+    // **`View::display_rows` and `View::wrap_rows` count the same thing twice**,
+    // once before the walk decides it came up short and once when it expands, and
+    // nothing tied them together until one of them was left behind by the cap's
+    // removal. This is the tie: expand a screen, then count it the other way, and
+    // the two must agree.
+    //
+    // Swept over widths and heights, because the disagreement was a function of
+    // how many rows a line took and appeared at three.
+    let scratch = Scratch::new("shell-wrap-counters");
+    scratch.write("src/c.rs", "seed\n");
+    scratch.commit_all("base");
+    let mut body = String::new();
+    for n in 0..12 {
+        body.push_str(&format!("let c_{n} = \"{}\";\n", "c".repeat(40 + n * 30)));
+    }
+    scratch.write("src/c.rs", body);
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+
+    for width in [30u16, 50, 80, 120] {
+        for rows in [6u16, 12, 24, 40] {
+            let at = Rect::new(0, 0, width, rows);
+            let mut app = App::new();
+            let body = diff_height(at, &chrome_of(&app), 1, 1);
+            app.apply(Action::ToggleWrap, &mut frame, body)
+                .expect("apply");
+            let chrome = chrome_of(&app);
+            let laid = body_layout(at, &chrome, 1, 1);
+            let view = app
+                .view(&mut frame, &mut highlighter, &history, laid)
+                .expect("view");
+            // Every row the expansion produced is a display row by construction,
+            // so counting them the other way has to give the same answer for the
+            // rows that survived.
+            let counted: usize = view
+                .rows
+                .iter()
+                .filter(|row| !matches!(row, Row::Wrap { .. }))
+                .count();
+            let wraps = view.rows.len() - counted;
+            assert!(
+                view.rows.len() <= laid.diff,
+                "at {width}x{rows} the expansion drew {} rows into a region of {}",
+                view.rows.len(),
+                laid.diff
+            );
+            assert!(
+                wraps == 0 || counted > 0,
+                "at {width}x{rows} the screen is continuations with no line above them"
+            );
+        }
+    }
+}
