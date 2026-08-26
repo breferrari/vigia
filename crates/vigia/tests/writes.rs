@@ -70,7 +70,7 @@ use ratatui::layout::Rect;
 use vigia::{Action, App, Glyphs, PaintStats, Pointing, Theme, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, WARM_FILES, WatchOptions, Worktree};
 
-use support::{Scratch, made_link};
+use support::{Scratch, made_link, settle_tree};
 
 /// Small on purpose. This gate counts filesystem entries rather than
 /// milliseconds, so the hundred-file fixture the budget gates share would buy it
@@ -578,6 +578,10 @@ fn the_monitor_writes_nothing_while_it_runs() {
     // which is why nothing here watches for it.
     let linked = made_link(&scratch, "src/mod_0.rs", "link_to_mod_0.rs");
 
+    // The fixture's own git writes must have landed before the window opens,
+    // or the tail of the commit lands inside it and reads as a write by the
+    // monitor.
+    settle_tree(&root);
     let before = snapshot(&root);
     if linked {
         assert!(
@@ -654,6 +658,10 @@ fn the_snapshot_sees_a_write_that_does_happen() {
     let scratch = Scratch::large_diff("writes-detected", FILES, LINES);
     let root = scratch.root().to_path_buf();
 
+    // The fixture's own git writes must have landed before the window opens,
+    // or the tail of the commit lands inside it and reads as a write by the
+    // monitor.
+    settle_tree(&root);
     let before = snapshot(&root);
 
     // **A different length, deliberately.** Two writes of the same length inside

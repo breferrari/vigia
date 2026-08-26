@@ -740,6 +740,59 @@ pub struct Scratch {
     path: PathBuf,
 }
 
+/// Wait until nothing under `root` is still moving.
+///
+/// The owning form is [`Scratch::settled`]; this one is for a measurement that
+/// already holds a path rather than the fixture.
+pub fn settle_tree(root: &Path) {
+    const STILL_FOR: Duration = Duration::from_millis(40);
+    const GIVE_UP_AFTER: Duration = Duration::from_secs(10);
+
+    let deadline = Instant::now() + GIVE_UP_AFTER;
+    let mut last = tree_fingerprint(root);
+    loop {
+        std::thread::sleep(STILL_FOR);
+        let now = tree_fingerprint(root);
+        if now == last {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the fixture at {} was still changing after {GIVE_UP_AFTER:?}, so nothing \
+             measured against it would be measuring the test",
+            root.display()
+        );
+        last = now;
+    }
+}
+
+/// Every entry under `root` with the two facts a write moves.
+///
+/// Read errors are folded into the reading rather than raised: an entry can
+/// vanish between the walk and the stat while git is renaming, and that is
+/// exactly the motion being waited out.
+fn tree_fingerprint(root: &Path) -> Vec<(PathBuf, u64, Option<std::time::SystemTime>)> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                pending.push(path.clone());
+            }
+            found.push((path, meta.len(), meta.modified().ok()));
+        }
+    }
+    found.sort();
+    found
+}
+
 impl Scratch {
     /// Create an initialised repository with deterministic config.
     pub fn new(name: &str) -> Self {
@@ -1169,6 +1222,25 @@ impl Scratch {
     pub fn commit_all(&self, message: &str) {
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", message]);
+    }
+
+    /// Wait until nothing under the fixture is still moving.
+    ///
+    /// `git commit` returns before the filesystem is done with it: objects are
+    /// written to a temp name and renamed, and the entry that held the temp
+    /// disappears afterwards. A test that starts measuring on the next line
+    /// opens its window over a tree still settling and then attributes what it
+    /// sees to the thing it was testing. The gap is too small to observe on an
+    /// idle machine and is not on a loaded runner.
+    ///
+    /// Two consecutive identical readings, because one reading proves only that
+    /// a moment existed. Panics rather than giving up quietly: a fixture that
+    /// never settles is a broken fixture, and measuring it anyway is the defect
+    /// this exists to prevent.
+    #[must_use]
+    pub fn settled(self) -> Self {
+        settle_tree(self.root());
+        self
     }
 
     /// Open the working tree through the crate under test.
