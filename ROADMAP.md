@@ -495,6 +495,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser | [#332](https://github.com/breferrari/vigia/issues/332) |
 | ⬜ | A system palette built from the terminal's own colours | [#333](https://github.com/breferrari/vigia/issues/333) |
 | ✅ | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
+| ✅ | The pane shows what is no longer there, and `Esc` quits from the help sheet | [#340](https://github.com/breferrari/vigia/issues/340) |
 
 **[#313](https://github.com/breferrari/vigia/issues/313) was the next row to take and shipped 2026-08-25.** The pane could not see staged files at all, because `SPEC.md` §11.1's opening contract was the working tree against the index, so an agent that staged its own work emptied it. `a` now draws the staged run beside the unstaged one as two labelled runs, with the staged rows marked; the ruling is §11.2 **B17**, and the second half the issue left open (how to tell one from the other on screen) was ruled by the reader as a union rather than a swap. The default is unchanged and off, so [#50](https://github.com/breferrari/vigia/issues/50) is narrowed rather than answered.
 
