@@ -65,9 +65,20 @@ pub struct FileEntry {
     /// All zeroes for a file `vigia` has not seen change, which is the
     /// ordinary case for a worktree that was already dirty at startup.
     pub spark: [u32; HISTORY_BUCKETS],
-    /// How recently this file changed, which is what dims a settled row and
-    /// what puts the pulse on one that just moved.
+    /// How recently this file changed, which is what dims a settled row.
+    ///
+    /// **It stopped deciding the `●` in [#345](https://github.com/breferrari/vigia/issues/345)**,
+    /// and the two questions are named apart now: this one is *how brightly*, and
+    /// [`FileEntry::newest`] is *which file was written last*. One value answering
+    /// both is what retired a mark nobody meant to retire.
     pub recency: Recency,
+    /// Whether the newest burst named this file, which is what carries the `●`.
+    ///
+    /// [`vigia_core::History::newest`] holds the reasoning. The short version is
+    /// that a reader watching an agent reads this mark as *the file it just
+    /// touched*, so it stays until another write arrives rather than expiring
+    /// with the ink that drew it.
+    pub newest: bool,
     /// Where in this file the change is, as counts per slice of its length.
     ///
     /// The finest resolution the strip is ever drawn at. A renderer with
@@ -1596,6 +1607,7 @@ fn entry_of(kind: &ChangeKind, origin: Origin, diff: &FileDiff, history: &Histor
         churn: (note_for(kind, diff).is_none()).then_some((diff.added, diff.removed)),
         spark: history.level(&diff.path).unwrap_or([0; HISTORY_BUCKETS]),
         recency: history.recency(&diff.path),
+        newest: history.newest(&diff.path),
         heat: heat_of(diff),
     }
 }

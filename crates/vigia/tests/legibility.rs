@@ -658,6 +658,7 @@ fn every_row_kind() -> View {
                 churn: Some((3, 1)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Hunk {
@@ -681,6 +682,7 @@ fn every_row_kind() -> View {
                 churn: None,
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Note("binary"),
@@ -692,6 +694,7 @@ fn every_row_kind() -> View {
                 churn: Some((0, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],
@@ -726,6 +729,7 @@ fn awkward() -> View {
                 churn: Some((12, 3)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
@@ -820,6 +824,7 @@ fn entry(path: &str) -> FileEntry {
         churn: Some((1, 0)),
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
+        newest: false,
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     }
 }
@@ -1084,6 +1089,7 @@ fn glancing() -> View {
                     1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 11, 11, 12, 12,
                 ],
                 recency: Recency::Pulse,
+                newest: true,
                 heat: ENDS_CHANGED,
             }),
             Row::file(FileEntry {
@@ -1096,6 +1102,7 @@ fn glancing() -> View {
                     1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1,
                 ],
                 recency: Recency::Live,
+                newest: false,
                 heat: ENDS_CHANGED,
             }),
             Row::file(FileEntry {
@@ -1106,6 +1113,7 @@ fn glancing() -> View {
                 churn: Some((2, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],
@@ -5455,6 +5463,7 @@ fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
             churn: Some((1, 0)),
             spark,
             recency: Recency::Live,
+            newest: false,
             heat: ENDS_CHANGED,
         })],
         ..glancing()

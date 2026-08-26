@@ -481,6 +481,7 @@ fn entry(path: &str, added: u32, removed: u32) -> FileEntry {
         churn: Some((added, removed)),
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
+        newest: false,
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     }
 }
@@ -944,6 +945,7 @@ fn listed(path: &str, added: u32, removed: u32) -> FileEntry {
             0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 5, 5, 8, 8, 5, 5, 9, 9, 12, 12,
         ],
         recency: Recency::Cold,
+        newest: false,
         heat: heat(&[(0, 9, 0), (5, 3, 4), (11, 0, 6)]),
     }
 }
@@ -1738,6 +1740,39 @@ fn a_changed_file_appearing_does_not_move_the_glance_columns() {
 }
 
 #[test]
+fn the_mark_follows_the_newest_write_and_not_the_rows_brightness() {
+    // **The wiring gate for [#345](https://github.com/breferrari/vigia/issues/345)**,
+    // and the one the fix cannot be made without. `History` now answers *which
+    // file was written last* separately from *how brightly to draw it*, and the
+    // painter has to read the first. Nothing else here can see that: every other
+    // pulse gate sets both fields together, so a painter that went on reading the
+    // brightness would satisfy all of them. Mutation found exactly that.
+    //
+    // The two cases are the two the split creates, and each is impossible under
+    // the old rule: a row that is no longer bright but *is* the last file
+    // written, and a row that is bright and is *not*.
+    let mut settled = ragged_counts();
+    listed_mut(&mut settled, 0).recency = Recency::Live;
+    listed_mut(&mut settled, 0).newest = true;
+    let row = row_text(&screen(80, 10, &settled, &chrome()), LIST_TOP);
+    assert!(
+        row.contains('●'),
+        "the last written file lost its mark once its ink had drained, which is \
+         the report this row was opened on: {row:?}"
+    );
+
+    let mut bright = ragged_counts();
+    listed_mut(&mut bright, 0).recency = Recency::Pulse;
+    listed_mut(&mut bright, 0).newest = false;
+    let row = row_text(&screen(80, 10, &bright, &chrome()), LIST_TOP);
+    assert!(
+        !row.contains('●'),
+        "a row that is not the newest write carries the mark anyway, so the \
+         painter is still reading it out of the brightness: {row:?}"
+    );
+}
+
+#[test]
 fn a_pulse_does_not_move_the_columns() {
     // **The pulse has a reserved slot, and that is the mechanism being
     // asserted.** It is reserved on every row of the region whether or not any
@@ -1752,7 +1787,12 @@ fn a_pulse_does_not_move_the_columns() {
     // the design from a test comment would have learned the opposite each time.
     let quiet = ragged_counts();
     let mut pulsing = ragged_counts();
+    // **The mark is its own field since [#345](https://github.com/breferrari/vigia/issues/345)**,
+    // because the ink and the dot answer different questions. Setting the recency
+    // alone no longer draws one, which is the whole of that change: a row can be
+    // at full brightness and not be the file the newest burst named.
     listed_mut(&mut pulsing, 0).recency = Recency::Pulse;
+    listed_mut(&mut pulsing, 0).newest = true;
 
     let before = glance_columns(&screen(80, 10, &quiet, &chrome()));
     let drawn = screen(80, 10, &pulsing, &chrome());
@@ -2140,6 +2180,7 @@ fn a_file_with_no_line_diff_says_why() {
                 churn: None,
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Note("binary"),
@@ -2151,6 +2192,7 @@ fn a_file_with_no_line_diff_says_why() {
                 churn: None,
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Note("unresolved conflict"),
@@ -2162,6 +2204,7 @@ fn a_file_with_no_line_diff_says_why() {
                 churn: Some((0, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],
@@ -2685,6 +2728,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
         churn: Some((u32::MAX, u32::MAX)),
         spark: [u32::MAX; HISTORY_BUCKETS],
         recency: Recency::Pulse,
+        newest: true,
         heat: [HeatBucket {
             added: u16::MAX,
             removed: u16::MAX,
@@ -2742,6 +2786,7 @@ fn a_rename_never_names_only_the_file_it_came_from() {
         churn: Some((0, 0)),
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
+        newest: false,
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     let view = View {
@@ -3159,6 +3204,7 @@ fn glancing() -> View {
                     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 5, 5, 8, 8, 5, 5, 9, 9, 12, 12,
                 ],
                 recency: Recency::Pulse,
+                newest: true,
                 // Additions at the head, a mixed slice in the middle, removals
                 // at the tail. One row carrying all three kinds plus the track,
                 // which is what the colour gate below reads.
@@ -3174,6 +3220,7 @@ fn glancing() -> View {
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 ],
                 recency: Recency::Live,
+                newest: false,
                 heat: heat(&[(3, 2, 1)]),
             }),
             Row::file(FileEntry {
@@ -3184,6 +3231,7 @@ fn glancing() -> View {
                 churn: Some((2, 0)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
         ],

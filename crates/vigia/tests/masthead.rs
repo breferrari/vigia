@@ -250,6 +250,7 @@ fn banded(series: [u32; HISTORY_SAMPLES]) -> View {
         churn: None,
         spark: [0; HISTORY_BUCKETS],
         recency: Recency::Cold,
+        newest: false,
         heat: [HeatBucket::default(); HEAT_BUCKETS],
     };
     View {

@@ -111,6 +111,7 @@ fn three_kinds() -> View {
                 churn: Some((2, 1)),
                 spark: [0; HISTORY_BUCKETS],
                 recency: Recency::Cold,
+                newest: false,
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
             Row::Hunk {
@@ -721,6 +722,7 @@ fn graded_heat() -> View {
             churn: Some((25, 0)),
             spark: [0; HISTORY_BUCKETS],
             recency: Recency::Cold,
+            newest: false,
             heat,
         })],
         files: 1,
@@ -847,6 +849,7 @@ fn climbing() -> View {
                 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 5, 7, 7, 9, 9, 12, 12,
             ],
             recency: Recency::Cold,
+            newest: false,
             heat: [HeatBucket::default(); HEAT_BUCKETS],
         })],
         files: 1,

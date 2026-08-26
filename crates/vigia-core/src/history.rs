@@ -376,7 +376,13 @@ pub const HISTORY_PATHS: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Recency {
     /// Named by the most recent tick **and** holding ink in the newest sample.
-    /// Drawn brightest, and the only rung that carries the `●` mark.
+    /// Drawn brightest.
+    ///
+    /// **It stopped carrying the `●` on 2026-08-26**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)). This rung is how
+    /// brightly a row is drawn; [`History::newest`] is which file was written
+    /// last, and one value answering both is what quietly retired a mark the
+    /// reader relied on.
     ///
     /// Both halves, since [#243](https://github.com/breferrari/vigia/issues/243).
     /// The ordinal alone only advances when a burst names something, so on a
@@ -1292,6 +1298,40 @@ impl History {
     /// constraint met by construction rather than by discipline.
     pub fn level(&self, path: &str) -> Option<[u32; HISTORY_BUCKETS]> {
         self.tracks.get(path).map(Track::levelled)
+    }
+
+    /// Whether the newest burst named this path, which is what the `●` marks.
+    ///
+    /// **The ordinal alone, and that is the whole of the fix**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)). [`Self::recency`]
+    /// answers *how brightly to draw this row* and this answers *which file was
+    /// written last*, and those are two questions that one value used to answer
+    /// at once.
+    ///
+    /// **They were separated because joining them lost a mark nobody meant to
+    /// retire.** Until 2026-08-22 a pulse was this predicate and nothing else, so
+    /// the dot sat on the last edited file until another write arrived, which is
+    /// what a reader watching an agent actually reads it for. `b80a1d5` added a
+    /// second term to `recency` while ageing the churn window, on the complaint
+    /// that "a file written two minutes ago drew at full brightness beside a band
+    /// that had almost drained". That complaint is about **brightness** and it is
+    /// a fair one; the mark came along because one enum decided both, and the dot
+    /// then expired after a second or so of quiet. Reported from the pane
+    /// 2026-08-26, four days later, by the only reader there is.
+    ///
+    /// **Several files in one burst all answer true**, which is what *named by the
+    /// newest tick* means. Narrowing it to one would be a second ruling about
+    /// which of a simultaneous set is the real one, and it is deliberately not
+    /// made here.
+    ///
+    /// `false` for a path nothing is tracked for, which is the ordinary state of a
+    /// worktree that was already dirty when `vigia` started.
+    pub fn newest(&self, path: &str) -> bool {
+        // `self.tick` is zero until something is recorded and no track can exist
+        // before then, so this never reads a mark out of an empty store.
+        self.tracks
+            .get(path)
+            .is_some_and(|track| track.tick == self.tick)
     }
 
     /// Which rung of the recency ladder this path is on.

@@ -2063,6 +2063,13 @@ struct Heading<'r> {
     churn: Option<(u32, u32)>,
     spark: &'r [u32; HISTORY_BUCKETS],
     recency: Recency,
+    /// Whether the newest burst named this file, which is what carries the `●`.
+    ///
+    /// **Its own field rather than read off `recency`**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)): the ink and the
+    /// mark answer different questions, and while one value answered both, ageing
+    /// the row's brightness silently took the mark with it.
+    newest: bool,
     heat: &'r [HeatBucket; HEAT_BUCKETS],
 }
 
@@ -2077,6 +2084,7 @@ impl<'r> Heading<'r> {
             churn: entry.churn,
             spark: &entry.spark,
             recency: entry.recency,
+            newest: entry.newest,
             heat: &entry.heat,
         }
     }
@@ -8053,7 +8061,7 @@ impl Painter<'_> {
         past(&mut right, columns.heat);
         // Into its reserved slot like everything else, so a file starting or
         // stopping to pulse moves nothing.
-        if heading.recency == Recency::Pulse && !columns.pulse.is_empty() {
+        if heading.newest && !columns.pulse.is_empty() {
             let width = width_of(columns.pulse) as u16;
             self.put_right(
                 Rect {
