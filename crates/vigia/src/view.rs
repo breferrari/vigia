@@ -531,15 +531,17 @@ pub enum Row {
     /// paragraph said it had.** It claimed `rows` became a count of display rows
     /// "with no site restated", which is false as built: [`View::wrap_rows`] runs
     /// *after* the walk, so every guard inside the walk still counts the diff's
-    /// own rows, and four separate sites went on comparing those against a count
-    /// of the terminal's. Three audit rounds found them one at a time: `App`'s
-    /// pinned `G`, its drag on the diff's bar, its page steps, [`landing_of`], and
-    /// `collect`'s own `short` test. The sentence is kept in its corrected form
+    /// own rows, and **five** separate sites went on comparing those against a
+    /// count of the terminal's. Three audit rounds found them one at a time:
+    /// `App`'s pinned `G`, its drag on the diff's bar, its page steps,
+    /// [`landing_of`], and `collect`'s own `short` test. (This sentence said
+    /// *four* and then listed five, which is the defect it is about, committed
+    /// inside the correction that exists to prevent it.) The sentence is kept in its corrected form
     /// rather than deleted, because a confident wrong claim about which sites are
     /// safe is precisely what stops the next reader checking them.
     ///
-    /// **It carries the tail already sliced, and its [`Row::Line`] carries only
-    /// the head.** [`View::wrap_rows`] decides the split once, so the painter
+    /// **It carries its piece already sliced, and its [`Row::Line`] carries only
+    /// the first.** [`View::wrap_rows`] decides the breaks once, so the painter
     /// draws what the row says instead of re-deriving a boundary that could
     /// disagree with the one the row count was taken from. It is also what
     /// suppresses the `›` on the head for free: a pre-sliced head does not clip,
@@ -2533,48 +2535,6 @@ impl View {
         Ok(())
     }
 
-    /// Where the viewport starts so the diff's **last row rests at the bottom**.
-    ///
-    /// Walks back from the file before `stop` until it has `height` rows behind
-    /// it, stopping at `first`. That reads only the files the screen is about to draw, so I4 is
-    /// untouched: it is bounded by the window exactly like everything else here,
-    /// and the `frame.diff` calls it makes are the same ones the walk above is
-    /// about to make, which under I2a are cache hits rather than reads.
-    ///
-    /// **The range is the caller's rather than the frame's, and that is
-    /// `SPEC.md` §11.2 B16.** Unpinned it is `0..files`, which is what this
-    /// walked before the pin existed. Pinned it is the one file, so *the last
-    /// row* means the pinned file's and the top it falls back to is that file's
-    /// heading rather than the diff's first. A bound taken from
-    /// `frame.files().len()` here would have been a second answer to *what is
-    /// this frame showing*, disagreeing with the walk above on exactly the
-    /// frames that ran short.
-    ///
-    /// **Half open, matching the walk's own bound**, so the caller passes the
-    /// pair it already holds. An inclusive `last` made the caller write
-    /// `stop - 1` and this body write `last + 1` back, which is a round trip
-    /// through an off-by-one at the one boundary in this file where an
-    /// off-by-one draws a plausible screen.
-    ///
-    /// **Not what `Action::Bottom` does**, and the difference is the whole
-    /// reason this is affordable. `G` goes to the last *file* from its top,
-    /// because finding the diff's last row from the *start* would mean adding up
-    /// every file's height, which is the read I4 forbids. Backing off from an
-    /// end already in hand costs a screenful.
-    ///
-    /// A diff shorter than the screen resolves to the top, which is the honest
-    /// answer: the blank rows under it are the ones the diff does not have. So
-    /// does a pinned file shorter than the screen, for the same reason and with
-    /// `first` deciding which top that is.
-    ///
-    /// **It counts its own reads, so an overshoot frame reports roughly twice
-    /// the files it draws**, and that is accurate rather than sloppy:
-    /// [`View::read`] is "files this viewport asked the frame for", and this asks
-    /// for the same files the walk above is about to ask for again. Under I2a
-    /// the second ask is a cache hit that reads no bytes, so it is a count that
-    /// doubles and not work that does. It lasts one frame either way, because
-    /// the caller stores the resolved position back and the next frame starts on
-    /// the file it draws.
     /// How many rows of the terminal the rows this walk has collected would take.
     ///
     /// **The same arithmetic [`Self::wrap_rows`] does, asked before the walk
@@ -2819,6 +2779,48 @@ impl View {
         self.rows = out;
     }
 
+    /// Where the viewport starts so the diff's **last row rests at the bottom**.
+    ///
+    /// Walks back from the file before `stop` until it has `height` rows behind
+    /// it, stopping at `first`. That reads only the files the screen is about to draw, so I4 is
+    /// untouched: it is bounded by the window exactly like everything else here,
+    /// and the `frame.diff` calls it makes are the same ones the walk above is
+    /// about to make, which under I2a are cache hits rather than reads.
+    ///
+    /// **The range is the caller's rather than the frame's, and that is
+    /// `SPEC.md` §11.2 B16.** Unpinned it is `0..files`, which is what this
+    /// walked before the pin existed. Pinned it is the one file, so *the last
+    /// row* means the pinned file's and the top it falls back to is that file's
+    /// heading rather than the diff's first. A bound taken from
+    /// `frame.files().len()` here would have been a second answer to *what is
+    /// this frame showing*, disagreeing with the walk above on exactly the
+    /// frames that ran short.
+    ///
+    /// **Half open, matching the walk's own bound**, so the caller passes the
+    /// pair it already holds. An inclusive `last` made the caller write
+    /// `stop - 1` and this body write `last + 1` back, which is a round trip
+    /// through an off-by-one at the one boundary in this file where an
+    /// off-by-one draws a plausible screen.
+    ///
+    /// **Not what `Action::Bottom` does**, and the difference is the whole
+    /// reason this is affordable. `G` goes to the last *file* from its top,
+    /// because finding the diff's last row from the *start* would mean adding up
+    /// every file's height, which is the read I4 forbids. Backing off from an
+    /// end already in hand costs a screenful.
+    ///
+    /// A diff shorter than the screen resolves to the top, which is the honest
+    /// answer: the blank rows under it are the ones the diff does not have. So
+    /// does a pinned file shorter than the screen, for the same reason and with
+    /// `first` deciding which top that is.
+    ///
+    /// **It counts its own reads, so an overshoot frame reports roughly twice
+    /// the files it draws**, and that is accurate rather than sloppy:
+    /// [`View::read`] is "files this viewport asked the frame for", and this asks
+    /// for the same files the walk above is about to ask for again. Under I2a
+    /// the second ask is a cache hit that reads no bytes, so it is a count that
+    /// doubles and not work that does. It lasts one frame either way, because
+    /// the caller stores the resolved position back and the next frame starts on
+    /// the file it draws.
     fn last_screenful(
         frame: &mut Frame,
         first: usize,
