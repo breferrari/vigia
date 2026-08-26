@@ -1988,3 +1988,88 @@ fn the_readme_states_the_grammar_count_the_dump_holds() {
          Whichever moved, they have to move together"
     );
 }
+
+/// Drives the judgement `ci complete` runs, with fabricated leg results.
+fn ci_complete(draft: &str, legs: &[&str]) -> bool {
+    let script = repo_root().join(".github/scripts/ci-complete.sh");
+    std::process::Command::new("sh")
+        .arg(&script)
+        .arg(draft)
+        .args(legs)
+        .output()
+        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()))
+        .status
+        .success()
+}
+
+/// A draft's skipped legs are not a failure, and everything else still is.
+///
+/// The judgement was inline in the workflow and judged a draft's skips as
+/// failure, so the required check went red on every push to a draft. The cases
+/// below are the ones that distinguish "nothing ran because it is a draft" from
+/// "something did not run", which is the whole of what this gate has to know.
+#[test]
+fn ci_complete_passes_a_draft_that_skipped_everything_and_nothing_else() {
+    const OK: [&str; 5] = ["success"; 5];
+
+    assert!(ci_complete("false", &OK), "a full green run has to pass");
+    assert!(
+        ci_complete("true", &["skipped"; 5]),
+        "a draft skips every leg by design and the matrix runs on ready_for_review"
+    );
+
+    for (draft, legs, why) in [
+        (
+            "false",
+            ["success", "skipped", "success", "success", "success"],
+            "a leg that skipped on a ready PR is the absent matrix this gate exists for",
+        ),
+        (
+            "true",
+            ["skipped", "success", "skipped", "skipped", "skipped"],
+            "a draft that ran some legs and skipped others is a partial run",
+        ),
+        (
+            "false",
+            ["success", "failure", "success", "success", "success"],
+            "a failing leg fails the gate",
+        ),
+        (
+            "true",
+            ["skipped", "failure", "skipped", "skipped", "skipped"],
+            "a draft cannot launder a failing leg through its skips",
+        ),
+        (
+            "false",
+            ["success", "cancelled", "success", "success", "success"],
+            "a cancelled leg never reported and is not a pass",
+        ),
+    ] {
+        assert!(!ci_complete(draft, &legs), "{why}");
+    }
+
+    assert!(
+        !ci_complete("false", &[]),
+        "no results at all means the workflow stopped passing them, not that every leg passed"
+    );
+}
+
+/// The workflow calls the script the gate above proves.
+///
+/// Without this the script could be correct and unreached, which is the same
+/// shape as the defect it replaced.
+#[test]
+fn the_ci_workflow_runs_the_script_the_gate_proves() {
+    let ci = read(&repo_root().join(".github/workflows/ci.yml"));
+    assert!(
+        ci.contains(".github/scripts/ci-complete.sh"),
+        "ci.yml does not run ci-complete.sh, so its judgement is gated in a test and unused in CI"
+    );
+    for leg in ["lint", "test", "benches", "pure-rust", "musl"] {
+        let arg = format!("needs.{leg}.result");
+        assert!(
+            ci.contains(&arg),
+            "ci.yml does not pass {arg} to the script, so that leg is judged by nothing"
+        );
+    }
+}
