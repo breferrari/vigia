@@ -1583,3 +1583,128 @@ fn a_newer_burst_takes_the_pulse_from_an_older_one_inside_the_same_sample() {
     assert_eq!(history.recency("src/b.rs"), Recency::Pulse);
     assert_eq!(history.recency("src/a.rs"), Recency::Live);
 }
+
+/// `SPEC.md` §11.1's `●`: the file the newest burst named, until another arrives.
+///
+/// **Reported from the pane 2026-08-26** ([#345](https://github.com/breferrari/vigia/issues/345)):
+/// the mark did not stay long enough, and it used to never go away. Both halves
+/// of that were true. It was the ordinal alone until 2026-08-22, when ageing the
+/// churn window gave `History::recency` a second term and the mark went with the
+/// ink, on a complaint that was about **brightness** rather than about the mark.
+///
+/// The two questions are separate now, and this gate is the one that keeps them
+/// separate: it asserts the mark **survives** exactly where
+/// `a_pulse_lasts_long_enough_to_be_seen_wherever_in_the_sample_it_landed`
+/// asserts the ink expires. Neither can be satisfied by the other.
+#[test]
+fn the_newest_mark_stays_on_the_last_written_file_until_another_is_written() {
+    let start = base();
+    let mut history = History::starting_at(start);
+    let wrote = start + Duration::from_millis(1);
+    history.record(["src/a.rs"], wrote);
+    assert!(
+        history.newest("src/a.rs"),
+        "a write does not carry the mark at all"
+    );
+
+    // **Ten seconds of quiet, rolled the way `Shell::draw` rolls it.** The number
+    // is written from the ruling rather than from `PULSE_SAMPLES`: a gate stated
+    // in terms of the constant it pins moves with it, which `RULINGS.md` records
+    // this very mark having been caught by once. What a reader means by "it stays"
+    // is measured in seconds of watching an agent, not in samples.
+    let mut now = wrote;
+    for _ in 0..2_000u32 {
+        now += Duration::from_millis(5);
+        history.record_sized([], now);
+    }
+    assert!(
+        now.duration_since(wrote) >= Duration::from_secs(10),
+        "the quiet was shorter than the ten seconds this gate is about"
+    );
+    assert!(
+        history.newest("src/a.rs"),
+        "the mark left the last written file after {:?} of quiet, and nothing had \
+         been written since",
+        now.duration_since(wrote)
+    );
+
+    // **And the ink is gone by then, which is what says the two are separate.**
+    // A build that answered the mark out of `recency` would fail here rather than
+    // above, and a build that never expired the ink would fail here too.
+    assert_ne!(
+        history.recency("src/a.rs"),
+        Recency::Pulse,
+        "the row is still drawn at full brightness after ten seconds of quiet, so \
+         the mark and the ink have been rejoined"
+    );
+
+    // A second write takes the mark and the first file loses it.
+    let later = now + Duration::from_millis(5);
+    history.record(["src/b.rs"], later);
+    assert!(
+        history.newest("src/b.rs"),
+        "a later write did not take the mark"
+    );
+    assert!(
+        !history.newest("src/a.rs"),
+        "the earlier file kept the mark after a later write took it"
+    );
+}
+
+/// Every file one burst names carries the mark, which is what *newest* means.
+///
+/// **Deliberately not narrowed to one file** ([#345](https://github.com/breferrari/vigia/issues/345)).
+/// A formatter, a branch switch or a multi-file agent edit writes several paths
+/// in one tick, and choosing which of them is "the" last edited one would be a
+/// second ruling with no basis in what happened. Recorded as a gate so the next
+/// reader finds a decision rather than an omission.
+#[test]
+fn every_file_a_burst_names_carries_the_newest_mark() {
+    let start = base();
+    let mut history = History::starting_at(start);
+    let wrote = start + Duration::from_millis(1);
+    history.record(["src/a.rs", "src/b.rs", "src/c.rs"], wrote);
+
+    for path in ["src/a.rs", "src/b.rs", "src/c.rs"] {
+        assert!(
+            history.newest(path),
+            "{path} was in the burst and carries no mark"
+        );
+    }
+    assert!(
+        !history.newest("src/never.rs"),
+        "a path nothing is tracked for carries the mark"
+    );
+}
+
+/// And the mark's real bound is I10's, which is not eternity.
+///
+/// **The correction to the sentence the row was written from**
+/// ([#345](https://github.com/breferrari/vigia/issues/345)). *"Until another
+/// write arrives"* is what a reader means and not quite the whole rule: the mark
+/// is a property of a tracked path, and I10 retires a track two ways. This gates
+/// the one a quiet worktree reaches, so the sticky mark is bounded rather than
+/// frozen, which is the difference §5.3 turns on.
+#[test]
+fn the_newest_mark_goes_when_the_window_it_lives_in_does() {
+    let start = base();
+    let mut history = History::starting_at(start);
+    let wrote = start + Duration::from_millis(1);
+    history.record(["src/a.rs"], wrote);
+    assert!(
+        history.newest("src/a.rs"),
+        "the write carries no mark to lose"
+    );
+
+    // Past the window, rolled the way the shell rolls it and never writing again.
+    let mut now = wrote;
+    while now.duration_since(wrote) <= HISTORY_WINDOW + Duration::from_secs(2) {
+        now += Duration::from_millis(50);
+        history.record_sized([], now);
+    }
+    assert!(
+        !history.newest("src/a.rs"),
+        "the mark outlived the window it is drawn from, which is the frozen clock \
+         a bounded history exists to refuse"
+    );
+}

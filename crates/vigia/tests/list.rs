@@ -33,10 +33,11 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::{
-    Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, View, Viewport, body_layout,
-    regions,
+    Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Theme, View, Viewport,
+    body_layout, regions, render,
 };
 use vigia_core::{Highlighter, History, Origin};
 
@@ -2530,4 +2531,90 @@ fn an_entirely_staged_list_announces_itself() {
         files.len() + 1,
         "the list asks for a row count that does not include its one heading"
     );
+}
+
+/// The `●` survives the ink that drew it, all the way to the screen.
+///
+/// **The wiring gate for [#345](https://github.com/breferrari/vigia/issues/345)**,
+/// and the third one that row needed. `vigia-core` proves `History::newest`
+/// outlives `History::recency`, and `tests/render.rs` proves the painter reads
+/// the right field, and **neither of them proves the two are joined**: a build
+/// that filled `FileEntry::newest` from the recency again would satisfy both and
+/// fail a reader. Mutation found exactly that, which is the shape this project's
+/// record calls a gate modelling the function rather than the program.
+///
+/// So this one drives the real path: a real worktree, a real `History` rolled
+/// forward the way the shell rolls it, `App::view` building the entry, and the
+/// drawn pane read back.
+#[test]
+fn the_mark_reaches_the_drawn_pane_after_the_ink_has_drained() {
+    let scratch = Scratch::large_diff("list-newest-mark", 3, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+
+    // A write, then ten seconds of quiet rolled in the steps `Shell::draw` uses.
+    // The number is the ruling's rather than `PULSE_SAMPLES`', for the reason the
+    // core's own gate gives: a gate written in terms of the constant it pins moves
+    // with it.
+    let path = frame.files()[0].path.clone();
+    let start = std::time::Instant::now();
+    let mut history = History::starting_at(start);
+    let wrote = start + std::time::Duration::from_millis(1);
+    history.record([path.as_str()], wrote);
+    let mut now = wrote;
+    for _ in 0..2_000u32 {
+        now += std::time::Duration::from_millis(5);
+        history.record_sized([], now);
+    }
+
+    let area = Rect::new(0, 0, 100, 20);
+    let chrome = chrome(&app);
+    let body = body_layout(area, &chrome, frame.files().len(), frame.files().len());
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    let mut buf = Buffer::empty(area);
+    render(
+        &mut buf,
+        area,
+        &view,
+        &Theme::default(),
+        Glyphs::default(),
+        &chrome,
+    );
+    let rows: Vec<String> = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect();
+    let drawn = rows.join("\n");
+
+    // **On the written file's own row, not anywhere on the pane.** The first
+    // spelling asked whether a `●` reached the screen at all, which a mark on the
+    // wrong row satisfies just as well: the fixture has three files and only one
+    // of them was written.
+    let name = path.rsplit('/').next().expect("a file name");
+    let row = rows
+        .iter()
+        .find(|row| row.contains(name))
+        .unwrap_or_else(|| panic!("the written file is not drawn at all:\n{drawn}"));
+    assert!(
+        row.contains('●'),
+        "ten seconds after the only write, its own row carries no mark: {row:?}"
+    );
+    // **Every marked row names the written file**, which is the claim rather than
+    // "exactly one row": `SPEC.md` §11.1 draws a file through one `Painter::file_row`
+    // in both regions, so the file the diff is inside is marked in the map and on
+    // its own heading. Counting rows would have made that design a failure.
+    for marked in rows.iter().filter(|row| row.contains('●')) {
+        assert!(
+            marked.contains(name),
+            "a row that is not the written file carries the mark: {marked:?}"
+        );
+    }
 }

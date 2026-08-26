@@ -60,13 +60,22 @@
 //! ordinal alone could not, because it only advances when a burst names
 //! something, so a quiet window left every pulse lit.
 //!
-//! ## One mechanism, not three
+//! ## One clock, and a second question asked of it
 //!
 //! §5.1 rules that the dimmed row and the pulse are one
 //! mechanism, because specifying them separately would produce two decay clocks
-//! that disagree on screen. They are three rungs of [`Recency`], read from one
-//! store through one lookup, and [`Recency::Cold`] is not a fourth rule: it is
-//! what I10's own eviction leaves behind.
+//! that disagree on screen. The **clock** is still one: [`Recency`]'s three rungs
+//! are read from this store through one lookup, and [`Recency::Cold`] is not a
+//! fourth rule but what I10's own eviction leaves behind.
+//!
+//! **What the `●` marks is a second predicate over that same store, since
+//! [#345](https://github.com/breferrari/vigia/issues/345)**, and it does not
+//! create the disagreement §5.1 forbids because it is **not a clock at all**.
+//! [`History::newest`] asks *which file did the newest burst name*, which has no
+//! decay to disagree with anything about; the ink keeps the only decay there is.
+//! Joining them is what retired a mark nobody meant to retire: ageing the window
+//! gave the ink a second term and the mark went with it, four days before the
+//! only reader noticed.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -376,7 +385,13 @@ pub const HISTORY_PATHS: usize = 256;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Recency {
     /// Named by the most recent tick **and** holding ink in the newest sample.
-    /// Drawn brightest, and the only rung that carries the `●` mark.
+    /// Drawn brightest.
+    ///
+    /// **It stopped carrying the `●` on 2026-08-26**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)). This rung is how
+    /// brightly a row is drawn; [`History::newest`] is which file was written
+    /// last, and one value answering both is what quietly retired a mark the
+    /// reader relied on.
     ///
     /// Both halves, since [#243](https://github.com/breferrari/vigia/issues/243).
     /// The ordinal alone only advances when a burst names something, so on a
@@ -913,6 +928,19 @@ struct Track {
 }
 
 impl Track {
+    /// Whether this track was named by the burst numbered `tick`.
+    ///
+    /// **One spelling, because two callers ask it for different reasons**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)):
+    /// [`History::newest`] asks it alone and it decides the `●`, and
+    /// [`History::recency`] asks it beside the ink and it decides how brightly
+    /// the row is drawn. A predicate written at each site is the shape this
+    /// project has been bitten by, and here the two sites are three hundred lines
+    /// and two docblocks apart.
+    fn named_by(&self, tick: u64) -> bool {
+        self.tick == tick
+    }
+
     fn new(tick: u64) -> Self {
         Self {
             samples: [0; HISTORY_SAMPLES],
@@ -1294,6 +1322,50 @@ impl History {
         self.tracks.get(path).map(Track::levelled)
     }
 
+    /// Whether the newest burst named this path, which is what the `●` marks.
+    ///
+    /// **The ordinal alone, and that is the whole of the fix**
+    /// ([#345](https://github.com/breferrari/vigia/issues/345)). [`Self::recency`]
+    /// answers *how brightly to draw this row* and this answers *which file was
+    /// written last*, and those are two questions that one value used to answer
+    /// at once.
+    ///
+    /// **They were separated because joining them lost a mark nobody meant to
+    /// retire.** Until 2026-08-22 a pulse was this predicate and nothing else, so
+    /// the dot sat on the last edited file until another write arrived, which is
+    /// what a reader watching an agent actually reads it for. `b80a1d5` added a
+    /// second term to `recency` while ageing the churn window, on the complaint
+    /// that "a file written two minutes ago drew at full brightness beside a band
+    /// that had almost drained". That complaint is about **brightness** and it is
+    /// a fair one; the mark came along because one enum decided both, and the dot
+    /// then expired after a second or so of quiet. Reported from the pane
+    /// 2026-08-26, four days later, by the only reader there is.
+    ///
+    /// **Several files in one burst all answer true**, which is what *named by the
+    /// newest tick* means. Narrowing it to one would be a second ruling about
+    /// which of a simultaneous set is the real one, and it is deliberately not
+    /// made here.
+    ///
+    /// `false` for a path nothing is tracked for, which is the ordinary state of a
+    /// worktree that was already dirty when `vigia` started.
+    ///
+    /// **"Until another write arrives" is the reader's sentence and not quite the
+    /// whole rule**, which is worth the correction because the difference is
+    /// reachable. This answers `false` again when the track itself goes, and
+    /// I10 takes it two ways: the roll drops a path with nothing left inside
+    /// [`HISTORY_WINDOW`], and the cap evicts the least recent past
+    /// [`HISTORY_PATHS`]. So the mark's real bound is the window, not eternity,
+    /// and on a worktree that then goes quiet for two minutes it clears itself.
+    /// That is the honest reading of a *bounded* history and it is what stops
+    /// this being the frozen clock §5.3 refuses.
+    pub fn newest(&self, path: &str) -> bool {
+        // `self.tick` is zero until something is recorded and no track can exist
+        // before then, so this never reads a mark out of an empty store.
+        self.tracks
+            .get(path)
+            .is_some_and(|track| track.named_by(self.tick))
+    }
+
     /// Which rung of the recency ladder this path is on.
     ///
     /// **The newest burst, and only until the window rolls past it**
@@ -1334,7 +1406,7 @@ impl History {
             // would put the mark on every file written in the last two seconds,
             // and *newest* is the whole of what it says.
             Some(track)
-                if track.tick == self.tick
+                if track.named_by(self.tick)
                     && track.samples[HISTORY_SAMPLES - PULSE_SAMPLES..]
                         .iter()
                         .any(|&count| count > 0) =>
