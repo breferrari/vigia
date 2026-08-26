@@ -1016,6 +1016,7 @@ fn every_ruled_format_reaches_a_spread_of_classes() {
                 .map(|text| Line {
                     kind: LineKind::Added,
                     text: (*text).to_owned(),
+                    emph: Vec::new(),
                 })
                 .collect(),
         };

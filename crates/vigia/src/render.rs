@@ -35,7 +35,7 @@ use std::time::Duration;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span as TextSpan;
 use vigia_core::{Class, HISTORY_BUCKETS, LineKind, Origin, Recency, SPARK_GROUPS, Span};
 
@@ -7426,6 +7426,7 @@ impl Painter<'_> {
                     number,
                     text,
                     spans,
+                    emph,
                 } => {
                     // **One row tall, explicitly.** `..area` inherits the body's
                     // whole height, which every other row drawer got away with
@@ -7458,6 +7459,7 @@ impl Painter<'_> {
                         *number,
                         text,
                         spans,
+                        emph,
                     );
                 }
             }
@@ -7835,6 +7837,8 @@ impl Painter<'_> {
         text: &str,
         spans: &[Span],
         content: usize,
+        word: Option<Color>,
+        emph: &[std::ops::Range<u32>],
     ) -> bool {
         let mut column = 0usize;
         let mut at = 0usize;
@@ -7847,11 +7851,21 @@ impl Painter<'_> {
                 // the line is drawn unclassified.
                 break;
             };
+            let start = at;
             at = end;
             if piece.is_empty() {
                 continue;
             }
-            if self.push_run(runs, piece, span.class, &mut column, content) {
+            if self.push_split(
+                runs,
+                text,
+                start..end,
+                span.class,
+                &mut column,
+                content,
+                word,
+                emph,
+            ) {
                 return true;
             }
         }
@@ -7869,7 +7883,74 @@ impl Painter<'_> {
             //
             // Reached only when nothing above returned, so `at` is where the
             // spans genuinely stopped rather than where the pane cut them off.
-            return self.push_run(runs, &text[at..], Class::Plain, &mut column, content);
+            return self.push_split(
+                runs,
+                text,
+                at..text.len(),
+                Class::Plain,
+                &mut column,
+                content,
+                word,
+                emph,
+            );
+        }
+        false
+    }
+
+    /// Push one classified range, cut wherever a word-emphasis range crosses
+    /// it, so the hotter background lands on exactly the bytes the pair diff
+    /// marked and nothing downstream ever learns emphasis exists.
+    ///
+    /// Both boundary sources are character boundaries by construction, the
+    /// spans because [`Painter::content_runs`] already bails on one that is
+    /// not, the emphasis because `vigia_core::emphasis` cuts on
+    /// `char_indices`. The `get` fallbacks below are for the day one of those
+    /// constructions breaks: the row loses its emphasis, never the pane its
+    /// process.
+    #[allow(clippy::too_many_arguments)]
+    fn push_split(
+        &mut self,
+        runs: &mut Vec<(String, Style)>,
+        text: &str,
+        range: std::ops::Range<usize>,
+        class: Class,
+        column: &mut usize,
+        content: usize,
+        word: Option<Color>,
+        emph: &[std::ops::Range<u32>],
+    ) -> bool {
+        let plain = |painter: &mut Self, runs: &mut Vec<(String, Style)>, column: &mut usize| {
+            let piece = text.get(range.start..range.end).unwrap_or_default();
+            painter.push_run(runs, piece, class, column, content, None)
+        };
+        let Some(word) = word.filter(|_| !emph.is_empty()) else {
+            return plain(self, runs, column);
+        };
+        let mut at = range.start;
+        for span in emph {
+            let (from, to) = (span.start as usize, span.end as usize);
+            if to <= at {
+                continue;
+            }
+            if from >= range.end {
+                break;
+            }
+            let from = from.max(at);
+            let to = to.min(range.end);
+            let (Some(before), Some(inside)) = (text.get(at..from), text.get(from..to)) else {
+                return plain(self, runs, column);
+            };
+            if !before.is_empty() && self.push_run(runs, before, class, column, content, None) {
+                return true;
+            }
+            if self.push_run(runs, inside, class, column, content, Some(word)) {
+                return true;
+            }
+            at = to;
+        }
+        if at < range.end {
+            let piece = text.get(at..range.end).unwrap_or_default();
+            return self.push_run(runs, piece, class, column, content, None);
         }
         false
     }
@@ -7882,6 +7963,7 @@ impl Painter<'_> {
         class: Class,
         column: &mut usize,
         content: usize,
+        word: Option<Color>,
     ) -> bool {
         if *column >= content {
             // Room ran out on an earlier run and this one has something to say,
@@ -7890,7 +7972,14 @@ impl Painter<'_> {
         }
         let printed = printable(piece, column, content);
         self.paint.examined += printed.examined;
-        runs.push((printed.text, self.theme.class(class)));
+        let mut style = self.theme.class(class);
+        if let Some(bg) = word {
+            // The word patch: a background over the run, syntax foreground
+            // untouched, so it composes with the row wash exactly as the wash
+            // composes with the pane.
+            style = style.bg(bg);
+        }
+        runs.push((printed.text, style));
         printed.clipped
     }
 
@@ -7920,6 +8009,7 @@ impl Painter<'_> {
     /// Both are absent on a palette that declines them and on a depth that cannot
     /// express them, and then this draws exactly what it drew before #11: the sigil
     /// alone, which is the loss §11.1 records.
+    #[allow(clippy::too_many_arguments)]
     fn line_row(
         &mut self,
         area: Rect,
@@ -7928,6 +8018,7 @@ impl Painter<'_> {
         number: u32,
         text: &str,
         spans: &[Span],
+        emph: &[std::ops::Range<u32>],
     ) {
         let (diff, sigil) = match kind {
             LineKind::Added => (self.theme.added, '+'),
@@ -7993,7 +8084,21 @@ impl Painter<'_> {
         if self.gutter > 0 {
             let gutter = self.gutter;
             let numbered = format!("{number:>gutter$} ");
-            x = self.put(x, area.y, &numbered, room, self.theme.gutter);
+            // crush's two-tone gutter (`SPEC.md` §11.2 B18, #321): on a changed
+            // row the number cells take a tone one step off the wash, so the
+            // gutter reads as a column with no border spent. A background
+            // patch, so it drops out on exactly the rungs the wash does, and a
+            // palette that sets none draws what it always drew.
+            let tone = match kind {
+                LineKind::Added => self.theme.added_gutter,
+                LineKind::Removed => self.theme.removed_gutter,
+                LineKind::Context => Style::new(),
+            };
+            let numbered_style = match tone.bg {
+                Some(_) => self.theme.gutter.patch(tone),
+                None => self.theme.gutter,
+            };
+            x = self.put(x, area.y, &numbered, room, numbered_style);
             room = room.saturating_sub(gutter + 1);
         }
 
@@ -8084,7 +8189,16 @@ impl Painter<'_> {
             "the content bound and the gutter's affordability rule disagree \
              about what a row spends before its first character"
         );
-        let clipped = self.content_runs(&mut runs, text, spans, content);
+        // The word patch's colour, when this row is a paired side. Read off
+        // the resolved theme, so the depth ladder has already decided whether
+        // it survives: below truecolour the background is gone and `word` is
+        // `None` by the same rule that blanked the wash.
+        let word = match kind {
+            LineKind::Added => self.theme.added_word.bg,
+            LineKind::Removed => self.theme.removed_word.bg,
+            LineKind::Context => None,
+        };
+        let clipped = self.content_runs(&mut runs, text, spans, content, word, emph);
         self.paint.rows += 1;
 
         // Content is the one thing that can neither break nor elide: wrapping it

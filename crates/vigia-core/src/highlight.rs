@@ -2085,6 +2085,7 @@ mod tests {
         Line {
             kind,
             text: text.to_owned(),
+            emph: Vec::new(),
         }
     }
 

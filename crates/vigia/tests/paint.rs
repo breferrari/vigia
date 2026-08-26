@@ -366,6 +366,7 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
             number: 1,
             text: zero_width,
             spans: Vec::new(),
+            emph: Vec::new(),
         }],
         files: 1,
         ..View::default()
@@ -425,6 +426,7 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
             number: 1,
             text: "\tab\tcd\tefgh\tij".to_owned(),
             spans: Vec::new(),
+            emph: Vec::new(),
         }],
         files: 1,
         ..View::default()

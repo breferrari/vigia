@@ -96,6 +96,10 @@ What follows groups the keys by surface. The docblocks in `crates/vigia/src/them
 | `context` | an unchanged line shown for orientation |
 | `added_row` | the wash behind an added line; drawn only at truecolour |
 | `removed_row` | the same, behind a removed line |
+| `added_word` | the hotter wash on the bytes of an added line that actually changed, when it pairs with a removal |
+| `removed_word` | the same, inside a removed line |
+| `added_gutter` | the line-number cells of an added line, one tone off the wash (the two-tone gutter) |
+| `removed_gutter` | the same, on a removed line |
 | `added_bar` | the sigil column's cell on an added line, the wash's stand-in below truecolour |
 | `removed_bar` | the same, on a removed line |
 

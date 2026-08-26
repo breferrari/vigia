@@ -196,20 +196,29 @@
       <text class="m faint" x="60" y="238" text-anchor="end">38</text>
       <text class="m" x="88" y="238"><tspan class="kw">fn </tspan><tspan class="fnn">coalesce</tspan><tspan class="fg">(&amp;</tspan><tspan class="kw">mut self</tspan><tspan class="fg">, </tspan><tspan class="var">ev</tspan><tspan class="fg">: </tspan><tspan class="typ">Event</tspan><tspan class="fg">) -&gt; </tspan><tspan class="typ">Option</tspan><tspan class="fg">&lt;</tspan><tspan class="typ">Frame</tspan><tspan class="fg">&gt; {</tspan></text>
 
+      <!-- #321's two-tone gutter: the number cells of a changed row sit one
+           tone off the wash, so the gutter reads as a column with no border
+           spent. No word patch appears in this hunk because it holds no
+           qualifying pair: self.flush() against None is past the pairing
+           bound, so both rows keep the whole-line wash, which is exactly what
+           the shell draws for them. -->
       <rect x="8" y="246" width="884" height="24" fill="#0f2c1c"/>
       <rect x="8" y="246" width="3" height="24" fill="#3fb950"/>
+      <rect x="28" y="246" width="40" height="24" fill="#0a2013"/>
       <text class="m faint" x="60" y="264" text-anchor="end">39</text>
       <text class="m grn" x="72" y="264">+</text>
       <text class="m" x="120.4" y="264"><tspan class="kw">if self</tspan><tspan class="fg">.</tspan><tspan class="var">pending</tspan><tspan class="fg">.</tspan><tspan class="fnn">is_empty</tspan><tspan class="fg">() {</tspan></text>
 
       <rect x="8" y="272" width="884" height="24" fill="#0f2c1c"/>
       <rect x="8" y="272" width="3" height="24" fill="#3fb950"/>
+      <rect x="28" y="272" width="40" height="24" fill="#0a2013"/>
       <text class="m faint" x="60" y="290" text-anchor="end">40</text>
       <text class="m grn" x="72" y="290">+</text>
       <text class="m" x="152.8" y="290"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="var">deadline</tspan><tspan class="fg"> = </tspan><tspan class="typ">Instant</tspan><tspan class="fg">::</tspan><tspan class="fnn">now</tspan><tspan class="fg">() + </tspan><tspan class="con">DEBOUNCE</tspan><tspan class="fg">;</tspan></text>
 
       <rect x="8" y="298" width="884" height="24" fill="#0f2c1c"/>
       <rect x="8" y="298" width="3" height="24" fill="#3fb950"/>
+      <rect x="28" y="298" width="40" height="24" fill="#0a2013"/>
       <text class="m faint" x="60" y="316" text-anchor="end">41</text>
       <text class="m grn" x="72" y="316">+</text>
       <text class="m fg" x="120.4" y="316">}</text>
@@ -219,12 +228,14 @@
 
       <rect x="8" y="350" width="884" height="24" fill="#2d1416"/>
       <rect x="8" y="350" width="3" height="24" fill="#f85149"/>
+      <rect x="28" y="350" width="40" height="24" fill="#1f0d0f"/>
       <text class="m faint" x="60" y="368" text-anchor="end">43</text>
       <text class="m red" x="72" y="368">&#8722;</text>
       <text class="m" x="120.4" y="368"><tspan class="kw">self</tspan><tspan class="fg">.</tspan><tspan class="fnn">flush</tspan><tspan class="fg">()</tspan></text>
 
       <rect x="8" y="376" width="884" height="24" fill="#0f2c1c"/>
       <rect x="8" y="376" width="3" height="24" fill="#3fb950"/>
+      <rect x="28" y="376" width="40" height="24" fill="#0a2013"/>
       <text class="m faint" x="60" y="394" text-anchor="end">44</text>
       <text class="m grn" x="72" y="394">+</text>
       <text class="m kw" x="120.4" y="394">None</text>

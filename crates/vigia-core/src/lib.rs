@@ -42,6 +42,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod change;
+mod emphasis;
 mod error;
 mod filter;
 mod frame;
@@ -53,6 +54,7 @@ mod watch;
 mod worktree;
 
 pub use change::{ChangeKind, FileChange, Origin};
+pub use emphasis::{Emphasis, mark};
 pub use error::{Error, Result};
 pub use frame::{Frame, FrameStats};
 pub use highlight::{

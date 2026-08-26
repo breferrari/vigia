@@ -184,6 +184,7 @@ fn stripped(rows: &[Row]) -> Vec<Row> {
                 number: *number,
                 text: text.clone(),
                 spans: Vec::new(),
+                emph: Vec::new(),
             },
             other => other.clone(),
         })

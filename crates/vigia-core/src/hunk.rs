@@ -32,6 +32,15 @@ pub struct Line {
     /// Invalid UTF-8 is replaced rather than rejected: a monitor that blanks
     /// out because one file is latin-1 has failed at its job.
     pub text: String,
+    /// Byte ranges of `text` that are not shared with this line's partner on
+    /// the other side of the change, per [`crate::emphasis`]. Empty for
+    /// context, for an unpaired changed line, and for a pair too far apart to
+    /// be one; the shell then draws the whole-line wash it always drew.
+    ///
+    /// Meaning rather than styling, which is why it lives here: `SPEC.md`
+    /// §11.1 has the engine emit meanings and the shell colour them, and
+    /// *these bytes are the change inside the change* is a meaning.
+    pub emph: Vec<std::ops::Range<u32>>,
 }
 
 /// A contiguous run of changes plus its surrounding context.
@@ -313,20 +322,33 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
                 lines.push(Line {
                     kind: LineKind::Context,
                     text: line_before(o),
+                    emph: Vec::new(),
                 });
                 o += 1;
             }
-            for i in raw.before.clone() {
+            // One raw hunk is one change block: a removal run followed by the
+            // addition run that replaced it, which is exactly the unit
+            // [`crate::emphasis`] pairs. Marked here, once per computed diff,
+            // so the frame path inherits the ranges for free.
+            let removed_texts: Vec<String> = raw.before.clone().map(&line_before).collect();
+            let added_texts: Vec<String> = raw.after.clone().map(&line_after).collect();
+            let (removed_emph, added_emph) = crate::emphasis::mark(
+                &removed_texts.iter().map(String::as_str).collect::<Vec<_>>(),
+                &added_texts.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
+            for (text, emph) in removed_texts.into_iter().zip(removed_emph) {
                 lines.push(Line {
                     kind: LineKind::Removed,
-                    text: line_before(i),
+                    text,
+                    emph,
                 });
                 removed += 1;
             }
-            for i in raw.after.clone() {
+            for (text, emph) in added_texts.into_iter().zip(added_emph) {
                 lines.push(Line {
                     kind: LineKind::Added,
-                    text: line_after(i),
+                    text,
+                    emph,
                 });
                 added += 1;
             }
@@ -336,6 +358,7 @@ pub(crate) fn compute(path: String, before: &[u8], after: &[u8]) -> FileDiff {
             lines.push(Line {
                 kind: LineKind::Context,
                 text: line_before(o),
+                emph: Vec::new(),
             });
             o += 1;
         }

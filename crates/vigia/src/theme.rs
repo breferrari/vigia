@@ -390,6 +390,24 @@ palette! {
     added_row,
     /// The same, behind a removed line.
     removed_row,
+    /// The hotter wash behind the bytes of an added line that actually changed,
+    /// when the line pairs with a removal ([`vigia_core::Line::emph`]).
+    ///
+    /// delta's formula, adopted by `SPEC.md` §11.2 B18
+    /// ([#321](https://github.com/breferrari/vigia/issues/321)): the word patch
+    /// is the same hue as [`Theme::added_row`], stepped brighter, so the edit
+    /// inside the edit reads as *hotter*, never as a new colour role. A
+    /// background like the wash, so it drops out on the same rungs and a
+    /// palette that draws no wash draws no word patch either.
+    added_word,
+    /// The same, inside a removed line.
+    removed_word,
+    /// The line-number cells of an added line: a tone one step darker than the
+    /// wash, so the gutter reads as a column without spending a border
+    /// (crush's two-tone gutter, same ruling as above).
+    added_gutter,
+    /// The same, on a removed line.
+    removed_gutter,
     /// The pane's leading cell on an added line, which is §5.1's left bar.
     ///
     /// **Background only, and it costs no column**
@@ -713,6 +731,11 @@ impl Theme {
             // Unset, which is what "this palette draws no tint" is spelled as.
             added_row: Style::new(),
             removed_row: Style::new(),
+            // Unset with them: no wash means no word patch and no gutter tone.
+            added_word: Style::new(),
+            removed_word: Style::new(),
+            added_gutter: Style::new(),
+            removed_gutter: Style::new(),
             // **The bar, in names, and it is the one row-level diff signal this
             // palette can carry.** §11.1 records the loss it is fixing: at sixteen
             // colours the signal degrades to the sigil column, because a wash has
@@ -914,6 +937,12 @@ impl Theme {
             // background this palette does not control.
             added_row: Style::new().bg(Color::Rgb(0x1b, 0x3d, 0x29)),
             removed_row: Style::new().bg(Color::Rgb(0x45, 0x22, 0x2a)),
+            // The washes stepped hotter, same hue, roughly delta's line-to-emph
+            // ratio; and stepped darker for the gutter, crush's two-tone.
+            added_word: Style::new().bg(Color::Rgb(0x2e, 0x6b, 0x41)),
+            removed_word: Style::new().bg(Color::Rgb(0x7e, 0x2f, 0x3a)),
+            added_gutter: Style::new().bg(Color::Rgb(0x14, 0x2e, 0x1f)),
+            removed_gutter: Style::new().bg(Color::Rgb(0x33, 0x1a, 0x20)),
             // **Unset, and that is a ruling reversed rather than a gap.** These
             // used to invert the sigil cell: diff hue behind, the row's wash in
             // front, on the argument that the sigil is the one cell that already
@@ -1047,6 +1076,12 @@ impl Theme {
             // lighter, for the reason every ramp in this palette is reversed.
             added_row: Style::new().bg(Color::Rgb(0xc0, 0xf0, 0xcd)),
             removed_row: Style::new().bg(Color::Rgb(0xff, 0xd4, 0xd1)),
+            // Hotter is *more saturated* here, the direction every ramp in this
+            // palette reverses; the gutter steps the same way.
+            added_word: Style::new().bg(Color::Rgb(0x93, 0xe0, 0xab)),
+            removed_word: Style::new().bg(Color::Rgb(0xff, 0xb3, 0xb0)),
+            added_gutter: Style::new().bg(Color::Rgb(0xa9, 0xe4, 0xba)),
+            removed_gutter: Style::new().bg(Color::Rgb(0xf7, 0xbf, 0xc0)),
             // Set, for the reason `dark` gives at length, in this palette's own
             // diff hues rather than the dark one's: a bar is a background on a
             // blank cell, so what it has to clear is the page behind it.
