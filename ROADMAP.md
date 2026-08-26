@@ -486,9 +486,9 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 | ✅ | The pane draws with a fraction of the vocabulary its own font guarantees | [#318](https://github.com/breferrari/vigia/issues/318) |
 | ✅ | Every hue is a theme key, and the default theme is the showcase | [#320](https://github.com/breferrari/vigia/issues/320) |
 | ✅ | The diff learns the delta formula: calm washes, hot words, a two-tone gutter | [#321](https://github.com/breferrari/vigia/issues/321) |
-| 🔨 | The glance ramps become gradients and the band goes with them | [#322](https://github.com/breferrari/vigia/issues/322) |
-| ⬜ | The chrome earns 2026: segmented bars, a spliced sheet title, opt-in icons | [#323](https://github.com/breferrari/vigia/issues/323) |
-| 🔨 | The glyph ladder learns which terminals draw octants natively | [#324](https://github.com/breferrari/vigia/issues/324) |
+| ✅ | The glance ramps become gradients and the band goes with them | [#322](https://github.com/breferrari/vigia/issues/322) |
+| 🔨 | The chrome earns 2026: segmented bars, a spliced sheet title, opt-in icons | [#323](https://github.com/breferrari/vigia/issues/323) |
+| ✅ | The glyph ladder learns which terminals draw octants natively | [#324](https://github.com/breferrari/vigia/issues/324) |
 | ⬜ | The pane takes its colours from the terminal, and follows a theme flip live | [#325](https://github.com/breferrari/vigia/issues/325) |
 | ⬜ | A path is a link: OSC 8 on the list and the headings | [#326](https://github.com/breferrari/vigia/issues/326) |
 
