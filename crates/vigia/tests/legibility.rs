@@ -560,6 +560,7 @@ fn chrome() -> Chrome {
         // because a detached head names no branch anywhere, which is the one
         // case that draws none since #158.
         staged: None,
+        icons: false,
         elsewhere: 0,
         branch: None,
         mode: Mode::Watching,

@@ -308,6 +308,7 @@ fn chrome() -> Chrome {
         // state names a branch. A populated frame never asks, which is I4 and
         // which `lib.rs`'s `branch_for` gates.
         staged: None,
+        icons: false,
         elsewhere: 0,
         branch: None,
         mode: Mode::Watching,
@@ -7830,6 +7831,168 @@ fn the_word_patch_and_gutter_tone_drop_out_below_truecolor() {
             buffer[(x, row)].bg,
             ratatui::style::Color::Reset,
             "column {x} kept a background at a depth whose quantiser drops them all"
+        );
+    }
+}
+
+/// #323: the sheet's corners follow the glyph rung, and the dense rungs splice
+/// the title into the border btop's way. The Block rung keeps the square box
+/// and the inline title, because an arc is outside CP437 and that rung is the
+/// console that cannot draw one.
+#[test]
+fn the_sheets_corners_follow_the_glyph_rung() {
+    let view = emphasised_view();
+    let mut shown = chrome();
+    shown.sheet = Some(0);
+    let theme = vigia::Theme::dark();
+
+    for (glyphs, arc) in [(Glyphs::Braille, true), (Glyphs::Block, false)] {
+        let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                vigia::render(f.buffer_mut(), area, &view, &theme, glyphs, &shown);
+            })
+            .expect("draw");
+        let backend = terminal.backend().clone();
+        let screen: Vec<String> = (0..18u16).map(|y| row_text(&backend, y)).collect();
+        let joined = screen.join("\n");
+        assert!(
+            joined.contains("gestures"),
+            "no sheet drew at all, so nothing here is a gate:\n{joined}"
+        );
+        if arc {
+            assert!(
+                joined.contains('╭') && joined.contains('╯'),
+                "a dense rung drew square corners:\n{joined}"
+            );
+            assert!(
+                joined.contains("┐ gestures"),
+                "the dense rung lost the border splice:\n{joined}"
+            );
+        } else {
+            assert!(
+                !joined.contains('╭') && joined.contains('┌'),
+                "the Block rung drew an arc its console cannot:\n{joined}"
+            );
+            assert!(
+                joined.contains("─ gestures"),
+                "the Block rung lost its inline title:\n{joined}"
+            );
+        }
+    }
+}
+
+/// #323: file-type icons are opt-in, every row gets one when any does, and off
+/// leaves not a single private-use glyph on the screen.
+#[test]
+fn icons_are_opt_in_and_every_row_gets_one() {
+    let view = View {
+        rows: vec![
+            file("src/engine/watch.rs", 42, 7),
+            file("assets/blob.bin", 1, 0),
+        ],
+        files: 2,
+        ..two_regions(2)
+    };
+    let pua =
+        |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c) || ('\u{f0000}'..'\u{ffffe}').contains(&c);
+
+    let off = washed_screen(64, 18, &view, &chrome());
+    for y in 0..18u16 {
+        assert!(
+            !row_text(&off, y).chars().any(pua),
+            "icons are off and row {y} still drew a private-use glyph"
+        );
+    }
+
+    let mut shown = chrome();
+    shown.icons = true;
+    let mut terminal = Terminal::new(TestBackend::new(64, 18)).expect("terminal");
+    let theme = vigia::Theme::dark();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            vigia::render(
+                f.buffer_mut(),
+                area,
+                &view,
+                &theme,
+                Glyphs::default(),
+                &shown,
+            );
+        })
+        .expect("draw");
+    let on = terminal.backend().clone();
+
+    let rows: Vec<(u16, String)> = (0..18u16)
+        .map(|y| (y, row_text(&on, y)))
+        .filter(|(_, t)| t.contains("watch.rs") || t.contains("blob.bin"))
+        .collect();
+    assert!(rows.len() >= 2, "the fixture drew fewer than two file rows");
+    let mut origins = Vec::new();
+    for (y, text) in &rows {
+        let icon_at = text
+            .char_indices()
+            .find(|(_, c)| pua(*c))
+            .map(|(at, _)| at)
+            .unwrap_or_else(|| panic!("row {y} drew no icon with icons on: {text}"));
+        origins.push(icon_at);
+    }
+    assert!(
+        origins.windows(2).all(|pair| pair[0] == pair[1]),
+        "rows put their icons at different columns, so the paths slide: {origins:?}"
+    );
+    // The row the table does not know still gets a mark, the generic one.
+    let unknown = rows
+        .iter()
+        .find(|(_, t)| t.contains("blob.bin"))
+        .expect("fixture");
+    assert!(
+        unknown.1.contains(vigia::icons::GENERIC),
+        "an unknown extension drew something other than the generic mark"
+    );
+}
+
+/// #323: the chrome's pills. The header's first segment wears the loud one,
+/// its later segments the quiet one, the separator dot stays on the pane
+/// between them, and below truecolour there is no pill anywhere, through the
+/// same resolve that drops every background.
+#[test]
+fn the_chrome_wears_pills_at_truecolour_and_none_below() {
+    let view = emphasised_view();
+    let shown = chrome();
+
+    let theme = vigia::Theme::dark().resolve(vigia::Depth::Truecolor);
+    let backend = themed_screen(64, 18, &view, &shown, &theme);
+    let buffer = backend.buffer();
+    let header = row_text(&backend, 0);
+    let at = header.find("vigia").expect("the worktree name is drawn") as u16;
+    assert_eq!(
+        buffer[(at, 0)].bg,
+        theme.chip_accent.bg.expect("dark declares an accent pill"),
+        "the worktree segment does not wear the loud pill"
+    );
+    let dot = header.find(" · ").expect("a separator is drawn") as u16 + 1;
+    let pills = [theme.chip.bg.unwrap(), theme.chip_accent.bg.unwrap()];
+    assert!(
+        !pills.contains(&buffer[(dot, 0)].bg),
+        "the separator dot was swallowed by a pill"
+    );
+    let counted = header.find("changed").expect("the count is drawn") as u16;
+    assert_eq!(
+        buffer[(counted, 0)].bg,
+        theme.chip.bg.expect("dark declares a pill"),
+        "a later segment does not wear the quiet pill"
+    );
+
+    let flat = vigia::Theme::dark().resolve(vigia::Depth::Ansi256);
+    let backend = themed_screen(64, 18, &view, &shown, &flat);
+    let buffer = backend.buffer();
+    for x in 0..64u16 {
+        assert!(
+            !pills.contains(&buffer[(x, 0)].bg),
+            "a pill survived below truecolour at column {x}"
         );
     }
 }

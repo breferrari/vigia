@@ -86,6 +86,8 @@ pub struct App {
     /// [#121](https://github.com/breferrari/vigia/issues/121) and
     /// [#147](https://github.com/breferrari/vigia/issues/147) leave where it is.
     masthead: bool,
+    /// Whether listed paths carry a file-type icon. Config only; no gesture.
+    icons: bool,
     /// Whether the reader has asked for the pinned list beside the diff.
     ///
     /// **A request rather than a layout**, and the distinction is the one
@@ -326,6 +328,9 @@ impl Default for App {
             // working tree against the index, which is what §11.1's opening
             // contract has always said and what #50 has not yet reopened.
             staged: false,
+            // Derived: an unpressed, unconfigured shell draws no icons, and off
+            // is byte-identical to every version before the key existed.
+            icons: false,
             staged_files: 0,
             // Derived, and for once trivially so: nobody has pressed `?`.
             sheet: None,
@@ -390,6 +395,7 @@ impl App {
             rail: config.rail,
             single: config.single,
             staged: config.staged,
+            icons: config.icons,
             ..Self::new()
         }
     }
@@ -569,6 +575,7 @@ impl App {
             following: self.following,
             masthead: self.masthead,
             rail: self.rail,
+            icons: self.icons,
             sheet: self.sheet,
             // `None` until a frame has completed, which is the honest first
             // paint: there is no p99 of nothing. The status bar simply has no

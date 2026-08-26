@@ -922,13 +922,14 @@ mod tests {
         // reader back in raw mode with no message and nothing to report.
         //
         // `main` returns an `ExitCode` for exactly this reason.
-        const SOURCES: [(&str, &str); 13] = [
+        const SOURCES: [(&str, &str); 14] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
             ("app.rs", include_str!("app.rs")),
             ("colour.rs", include_str!("colour.rs")),
             ("config.rs", include_str!("config.rs")),
             ("glyphs.rs", include_str!("glyphs.rs")),
+            ("icons.rs", include_str!("icons.rs")),
             ("input.rs", include_str!("input.rs")),
             ("memory.rs", include_str!("memory.rs")),
             ("render.rs", include_str!("render.rs")),

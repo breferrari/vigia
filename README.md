@@ -414,6 +414,7 @@ masthead = on     # the churn band at the top
 rail     = on     # the file list beside the diff, from 134 columns
 single   = on     # one file at a time
 staged   = on     # what is staged, beside what is not
+icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
 ```
 
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error rather than a shrug. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it.

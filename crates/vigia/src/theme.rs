@@ -127,6 +127,18 @@ palette! {
     /// check. It was not exhaustive when it first named one, and the follow
     /// marker is what it missed.
     chrome_dim,
+    /// The background pill behind a chrome segment: the header's branch and
+    /// count, and the footer's readouts.
+    ///
+    /// `SPEC.md` §11.2 B18 ([#323](https://github.com/breferrari/vigia/issues/323)),
+    /// and the shape is crush's pills from the #318 survey: padded background
+    /// runs, no seam glyphs, the existing `·` separators riding between them.
+    /// A background, so it drops below truecolour with every other one, and a
+    /// palette that leaves it unset draws the flat chrome it always drew,
+    /// which is `ansi`'s standing contract.
+    chip,
+    /// The louder pill: the header's worktree name and the footer's state.
+    chip_accent,
 
     /// A changed file's path, at the recency the reader should read it as.
     ///
@@ -738,6 +750,8 @@ impl Theme {
             // `heat_added` below and for the same reason: sixteen names hold a
             // normal and a bright of each colour and no third, so the middle
             // stop is the normal one and the ramp reads as two.
+            chip: Style::new(),
+            chip_accent: Style::new(),
             spark: fg(Color::Cyan),
             spark_warm: fg(Color::Cyan),
             spark_hot: fg(Color::LightCyan),
@@ -866,6 +880,8 @@ impl Theme {
             // is writing to looks exactly as it did and only the busy buckets
             // gain. Brighter as it climbs, which is this palette's direction for
             // every ramp it has.
+            chip: Style::new().bg(Color::Rgb(0x21, 0x26, 0x2d)),
+            chip_accent: Style::new().bg(Color::Rgb(0x17, 0x30, 0x42)),
             spark: rgb(0x39, 0xc5, 0xcf),
             spark_warm: rgb(0x7a, 0xe9, 0xf0),
             spark_hot: rgb(0xa8, 0xf2, 0xf7),
@@ -1076,6 +1092,8 @@ impl Theme {
             // `the_sparkline_ramp_has_three_stops_where_the_depth_can_draw_them`
             // is what said so. Spread around it instead, and the quiet end
             // lightens.
+            chip: Style::new().bg(Color::Rgb(0xea, 0xee, 0xf2)),
+            chip_accent: Style::new().bg(Color::Rgb(0xd8, 0xe4, 0xf0)),
             spark: rgb(0x5a, 0xa6, 0xae),
             spark_warm: rgb(0x0a, 0x62, 0x6b),
             spark_hot: rgb(0x03, 0x28, 0x2e),
